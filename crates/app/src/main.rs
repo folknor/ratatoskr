@@ -836,8 +836,42 @@ impl App {
             Message::SyncCurrentFolder => self.sync_all_accounts(),
             Message::SyncTick => self.sync_all_accounts(),
             Message::SyncComplete(account_id, result) => {
-                if let Err(ref e) = result {
-                    log::error!("Sync failed for {account_id}: {e}");
+                match result {
+                    Err(ref e) => {
+                        log::error!("Sync failed for {account_id}: {e}");
+                        let lower = e.to_lowercase();
+                        let is_auth_error = lower.contains("401")
+                            || lower.contains("unauthorized")
+                            || lower.contains("token")
+                            || lower.contains("auth")
+                            || lower.contains("expired")
+                            || lower.contains("invalid_grant")
+                            || lower.contains("refresh");
+                        let email = self.email_for_account(&account_id);
+                        if is_auth_error {
+                            self.status_bar.set_warning(
+                                ui::status_bar::AccountWarning {
+                                    account_id: account_id.clone(),
+                                    email,
+                                    kind: ui::status_bar::WarningKind::TokenExpiry,
+                                },
+                            );
+                        } else {
+                            self.status_bar.set_warning(
+                                ui::status_bar::AccountWarning {
+                                    account_id: account_id.clone(),
+                                    email,
+                                    kind: ui::status_bar::WarningKind::ConnectionFailure {
+                                        message: e.clone(),
+                                    },
+                                },
+                            );
+                        }
+                    }
+                    Ok(()) => {
+                        // Sync succeeded — clear any previous warning for this account
+                        self.status_bar.clear_warning(&account_id);
+                    }
                 }
                 // Reload navigation + threads to reflect any changes from sync
                 self.nav_generation += 1;
