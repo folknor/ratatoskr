@@ -1,3 +1,5 @@
+use chrono::Datelike;
+
 use super::super::DbState;
 use super::super::types::{DbCalendar, DbCalendarAttendee, DbCalendarEvent, DbCalendarReminder};
 use crate::db::from_row::FromRow;
@@ -713,8 +715,129 @@ pub fn load_calendar_events_for_view_sync(
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+    let base_events: Vec<CalendarViewEvent> = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    // Expand recurring events into concrete instances.
+    let mut expanded = Vec::with_capacity(base_events.len());
+    for ev in base_events {
+        if let Some(ref rrule) = ev.recurrence_rule {
+            let mut instances = expand_recurrence(&ev, rrule);
+            expanded.append(&mut instances);
+        } else {
+            expanded.push(ev);
+        }
+    }
+    expanded.sort_by_key(|e| e.start_time);
+    Ok(expanded)
+}
+
+/// Expand a recurring event into concrete instances based on its RRULE.
+///
+/// Supports DAILY, WEEKLY, MONTHLY, YEARLY frequencies with INTERVAL
+/// and COUNT/UNTIL. Generates instances for a ~2 year window from the
+/// event's original start time.
+fn expand_recurrence(event: &CalendarViewEvent, rrule_str: &str) -> Vec<CalendarViewEvent> {
+    let rule = rrule_str.strip_prefix("RRULE:").unwrap_or(rrule_str);
+
+    let mut freq = "";
+    let mut interval: i64 = 1;
+    let mut count: Option<usize> = None;
+    let mut until: Option<i64> = None;
+
+    for part in rule.split(';') {
+        if let Some(val) = part.strip_prefix("FREQ=") {
+            freq = val;
+        } else if let Some(val) = part.strip_prefix("INTERVAL=") {
+            interval = val.parse().unwrap_or(1).max(1);
+        } else if let Some(val) = part.strip_prefix("COUNT=") {
+            count = val.parse().ok();
+        } else if let Some(val) = part.strip_prefix("UNTIL=") {
+            // Basic UNTIL parsing: YYYYMMDD or YYYYMMDDTHHMMSSZ
+            until = parse_until_date(val);
+        }
+    }
+
+    let duration = event.end_time - event.start_time;
+    let max_instances = count.unwrap_or(365); // Cap at 365 instances if no COUNT.
+    let window_end = until.unwrap_or(event.start_time + 2 * 365 * 86400);
+
+    let mut instances = vec![event.clone()]; // Include original.
+    let mut current_start = event.start_time;
+    let mut generated = 1usize;
+
+    loop {
+        if generated >= max_instances {
+            break;
+        }
+
+        let next_start = match freq {
+            "DAILY" => current_start + interval * 86400,
+            "WEEKLY" => current_start + interval * 7 * 86400,
+            "MONTHLY" => advance_months(current_start, interval),
+            "YEARLY" => advance_months(current_start, interval * 12),
+            _ => break, // Unknown frequency — don't expand.
+        };
+
+        if next_start > window_end {
+            break;
+        }
+
+        let mut instance = event.clone();
+        instance.id = format!("{}__recur_{generated}", event.id);
+        instance.start_time = next_start;
+        instance.end_time = next_start + duration;
+        instances.push(instance);
+
+        current_start = next_start;
+        generated += 1;
+    }
+
+    instances
+}
+
+/// Advance a Unix timestamp by N months.
+fn advance_months(timestamp: i64, months: i64) -> i64 {
+    use chrono::TimeZone;
+    let Some(dt) = chrono::Local.timestamp_opt(timestamp, 0).single() else {
+        return timestamp + months * 30 * 86400; // Fallback.
+    };
+    let naive = dt.naive_local();
+    let total_months = naive.month() as i64 - 1 + months;
+    let new_month = ((total_months % 12) + 1) as u32;
+    let new_year = naive.year() + (total_months / 12) as i32;
+    let new_day = naive.day().min(days_in_month(new_year, new_month));
+    let Some(new_date) = chrono::NaiveDate::from_ymd_opt(new_year, new_month, new_day) else {
+        return timestamp + months * 30 * 86400;
+    };
+    let new_naive = new_date.and_time(naive.time());
+    chrono::Local.from_local_datetime(&new_naive)
+        .single()
+        .map_or(timestamp + months * 30 * 86400, |dt| dt.timestamp())
+}
+
+/// Days in a given month.
+fn days_in_month(year: i32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 { 29 } else { 28 }
+        }
+        _ => 30,
+    }
+}
+
+/// Parse an UNTIL date string (YYYYMMDD or YYYYMMDDTHHMMSSZ) to Unix timestamp.
+fn parse_until_date(val: &str) -> Option<i64> {
+    let date_part = &val[..val.len().min(8)];
+    let year: i32 = date_part.get(0..4)?.parse().ok()?;
+    let month: u32 = date_part.get(4..6)?.parse().ok()?;
+    let day: u32 = date_part.get(6..8)?.parse().ok()?;
+    let date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
+    let dt = date.and_hms_opt(23, 59, 59)?;
+    Some(dt.and_utc().timestamp())
 }
 
 // ── All-account calendar queries (for unified calendar) ────
