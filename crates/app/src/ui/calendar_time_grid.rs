@@ -209,9 +209,16 @@ fn build_header<'a, M: 'a + Clone>(
         .width(Length::Fill)
         .style(theme::ButtonClass::Ghost.style());
 
+        // Weekend columns narrower when showing 7 days (week view).
+        let col_width = if config.days.len() == 7 && is_weekend(day.date) {
+            Length::FillPortion(2)
+        } else {
+            Length::FillPortion(3)
+        };
+
         header_row = header_row.push(
             container(header_btn)
-                .width(Length::Fill)
+                .width(col_width)
                 .height(TIME_GRID_HEADER_HEIGHT)
                 .style(style_fn),
         );
@@ -331,14 +338,23 @@ fn build_time_grid<'a, M: 'a + Clone>(
     grid_row = grid_row.push(build_hour_labels(config, grid_height));
 
     // Day columns.
+    let num_days = config.days.len();
     for day in &config.days {
-        grid_row = grid_row.push(build_day_column(
-            day,
-            config,
-            grid_height,
-            on_event_click,
-            on_slot_click,
-        ));
+        let col_width = if num_days == 7 && is_weekend(day.date) {
+            Length::FillPortion(2)
+        } else {
+            Length::FillPortion(3)
+        };
+        grid_row = grid_row.push(
+            container(build_day_column(
+                day,
+                config,
+                grid_height,
+                on_event_click,
+                on_slot_click,
+            ))
+            .width(col_width),
+        );
     }
 
     container(grid_row)
@@ -824,4 +840,9 @@ fn contrasting_text_color(bg: iced::Color) -> iced::Color {
     } else {
         iced::Color::WHITE
     }
+}
+
+/// Check if a date falls on a weekend (Saturday or Sunday).
+fn is_weekend(date: NaiveDate) -> bool {
+    matches!(date.weekday(), Weekday::Sat | Weekday::Sun)
 }

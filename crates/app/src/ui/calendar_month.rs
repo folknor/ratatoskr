@@ -133,14 +133,35 @@ pub fn month_view<'a, M: 'a + Clone>(
 ) -> Element<'a, M> {
     let max_events_per_cell = max_visible_events();
 
-    // Header row: day-of-week labels.
-    let header = day_of_week_header(data.week_start);
+    // Header row: week# label + day-of-week labels.
+    let header = day_of_week_header_with_week_num(data.week_start);
 
     // Week rows.
     let mut grid = column![header].spacing(SPACE_0);
 
     for week in &data.weeks {
-        let mut week_row = row![].spacing(SPACE_0);
+        // ISO week number from the first day of the row.
+        let week_num = week.first()
+            .map(|d| d.date.iso_week().week())
+            .unwrap_or(0);
+
+        let week_label = button(
+            container(
+                text(format!("{week_num}"))
+                    .size(TEXT_XS)
+                    .style(theme::TextClass::Tertiary.style()),
+            )
+            .width(Length::Fixed(WEEK_NUM_COL_WIDTH))
+            .height(Length::Fill)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Start)
+            .padding(Padding::from([SPACE_XXS, 0.0])),
+        )
+        .on_press(on_date_click(week[0].date))
+        .padding(0)
+        .style(theme::ButtonClass::Ghost.style());
+
+        let mut week_row = row![week_label].spacing(SPACE_0);
         for day in week {
             let cell = day_cell(
                 day,
@@ -159,9 +180,23 @@ pub fn month_view<'a, M: 'a + Clone>(
         .into()
 }
 
-/// Header row with abbreviated day-of-week labels.
-fn day_of_week_header<'a, M: 'a>(week_start: Weekday) -> Element<'a, M> {
-    let mut header_row = row![].spacing(SPACE_0);
+/// Width of the ISO week number column.
+const WEEK_NUM_COL_WIDTH: f32 = 28.0;
+
+/// Header row with week# column + abbreviated day-of-week labels.
+fn day_of_week_header_with_week_num<'a, M: 'a>(week_start: Weekday) -> Element<'a, M> {
+    // Empty cell for the week number column.
+    let wk_header = container(
+        text("Wk")
+            .size(TEXT_XS)
+            .style(theme::TextClass::Tertiary.style()),
+    )
+    .width(Length::Fixed(WEEK_NUM_COL_WIDTH))
+    .height(CALENDAR_HEADER_HEIGHT)
+    .align_x(Alignment::Center)
+    .align_y(Alignment::Center);
+
+    let mut header_row = row![wk_header].spacing(SPACE_0);
     for i in 0..7 {
         let day = weekday_offset(week_start, i);
         let label = weekday_short(day);
