@@ -142,7 +142,6 @@ impl App {
             ResolveResult::Pending => {
                 self.pending_chord = Some(PendingChord {
                     first: chord,
-                    started: iced::time::Instant::now(),
                 });
                 Task::none()
             }

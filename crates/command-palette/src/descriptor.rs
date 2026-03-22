@@ -15,6 +15,8 @@ pub struct CommandDescriptor {
     pub is_active: Option<fn(&CommandContext) -> bool>,
     pub input_schema: Option<InputSchema>,
     pub keywords: &'static [&'static str],
+    /// Whether this command's effects can be reversed via undo.
+    pub is_undoable: bool,
 }
 
 impl CommandDescriptor {

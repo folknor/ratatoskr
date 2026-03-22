@@ -32,6 +32,10 @@ pub enum ReadingPaneMessage {
     EditContact(String),
     /// Create a calendar event from this message (📅 button).
     CreateEventFromEmail(usize),
+    /// Navigate to the next message in the thread (expand it).
+    NextMessage,
+    /// Navigate to the previous message in the thread (expand it).
+    PrevMessage,
     Noop,
 }
 
@@ -60,6 +64,8 @@ pub struct ReadingPane {
     pub thread_attachments: Vec<ThreadAttachment>,
     pub thread_labels: Vec<ResolvedLabel>,
     pub message_expanded: Vec<bool>,
+    /// Index of the currently focused message (for keyboard navigation).
+    pub focused_message: Option<usize>,
     pub attachments_collapsed: bool,
     pub attachment_collapse_cache: HashMap<String, bool>,
     pub date_display: DateDisplay,
@@ -83,6 +89,7 @@ impl ReadingPane {
             thread_attachments: Vec::new(),
             thread_labels: Vec::new(),
             message_expanded: Vec::new(),
+            focused_message: None,
             attachments_collapsed: false,
             attachment_collapse_cache: HashMap::new(),
             date_display: DateDisplay::RelativeOffset,
@@ -102,6 +109,7 @@ impl ReadingPane {
         self.thread_attachments.clear();
         self.thread_labels.clear();
         self.message_expanded.clear();
+        self.focused_message = None;
         // Restore attachment collapse state from cache
         self.attachments_collapsed = thread
             .map(|t| {
@@ -163,6 +171,14 @@ impl ReadingPane {
 
     fn thread_key(&self) -> Option<String> {
         self.current_thread.as_ref().map(|t| format!("{}:{}", t.account_id, t.id))
+    }
+
+    /// Get the message ID of the currently focused message (for CommandContext).
+    pub fn focused_message_id(&self) -> Option<String> {
+        let idx = self.focused_message?;
+        self.thread_messages
+            .get(idx)
+            .and_then(|m| m.message_id.clone())
     }
 }
 
@@ -228,6 +244,37 @@ impl Component for ReadingPane {
             }
             ReadingPaneMessage::CreateEventFromEmail(index) => {
                 (Task::none(), Some(ReadingPaneEvent::CreateEventFromEmail { message_index: index }))
+            }
+            ReadingPaneMessage::NextMessage => {
+                let len = self.thread_messages.len();
+                if len == 0 {
+                    return (Task::none(), None);
+                }
+                let next = match self.focused_message {
+                    Some(idx) if idx + 1 < len => idx + 1,
+                    Some(_) => return (Task::none(), None),
+                    None => 0,
+                };
+                self.focused_message = Some(next);
+                if let Some(e) = self.message_expanded.get_mut(next) {
+                    *e = true;
+                }
+                (Task::none(), None)
+            }
+            ReadingPaneMessage::PrevMessage => {
+                if self.thread_messages.is_empty() {
+                    return (Task::none(), None);
+                }
+                let prev = match self.focused_message {
+                    Some(idx) if idx > 0 => idx - 1,
+                    Some(_) => return (Task::none(), None),
+                    None => self.thread_messages.len() - 1,
+                };
+                self.focused_message = Some(prev);
+                if let Some(e) = self.message_expanded.get_mut(prev) {
+                    *e = true;
+                }
+                (Task::none(), None)
             }
             ReadingPaneMessage::Noop => (Task::none(), None),
         }

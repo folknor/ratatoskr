@@ -384,7 +384,12 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
         CommandId::NavNext => dispatch_nav_next(app),
         CommandId::NavPrev => dispatch_nav_prev(app),
         CommandId::NavOpen => dispatch_nav_open(app),
-        CommandId::NavMsgNext | CommandId::NavMsgPrev => None,
+        CommandId::NavMsgNext => Some(Message::ReadingPane(
+            crate::ui::reading_pane::ReadingPaneMessage::NextMessage,
+        )),
+        CommandId::NavMsgPrev => Some(Message::ReadingPane(
+            crate::ui::reading_pane::ReadingPaneMessage::PrevMessage,
+        )),
         CommandId::NavGoInbox
         | CommandId::NavGoStarred
         | CommandId::NavGoSent
@@ -459,12 +464,12 @@ fn dispatch_email(id: CommandId) -> Option<Message> {
         CommandId::EmailPin => Some(Message::EmailAction(EmailAction::TogglePin)),
         CommandId::EmailMute => Some(Message::EmailAction(EmailAction::ToggleMute)),
         CommandId::EmailUnsubscribe => Some(Message::EmailAction(EmailAction::Unsubscribe)),
-        // Stubbed — ThreadListMessage::SelectAll / SelectFromHere don't exist yet
         CommandId::EmailSelectAll => Some(Message::ThreadList(
             crate::ui::thread_list::ThreadListMessage::SelectAll,
         )),
-        // Stubbed — SelectFromHere not yet implemented
-        CommandId::EmailSelectFromHere => None,
+        CommandId::EmailSelectFromHere => Some(Message::ThreadList(
+            crate::ui::thread_list::ThreadListMessage::SelectFromHere,
+        )),
         _ => None,
     }
 }
@@ -506,6 +511,7 @@ fn dispatch_other(id: CommandId) -> Option<Message> {
                 ratatoskr_command_palette::CommandContext::default(),
             ),
         )),
+        CommandId::Undo => Some(Message::Undo),
         _ => None,
     }
 }

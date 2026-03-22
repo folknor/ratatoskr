@@ -31,6 +31,25 @@ impl UsageTracker {
     pub fn usage_count(&self, id: CommandId) -> u32 {
         self.counts.get(&id).copied().unwrap_or(0)
     }
+
+    /// Serialize usage counts to a JSON-compatible map.
+    /// Keys are the stable `CommandId::as_str()` identifiers.
+    pub fn to_map(&self) -> HashMap<String, u32> {
+        self.counts
+            .iter()
+            .map(|(id, count)| (id.as_str().to_string(), *count))
+            .collect()
+    }
+
+    /// Load usage counts from a previously serialized map.
+    /// Unknown command IDs are silently skipped.
+    pub fn load_from_map(&mut self, map: &HashMap<String, u32>) {
+        for (key, count) in map {
+            if let Some(id) = CommandId::parse(key) {
+                self.counts.insert(id, *count);
+            }
+        }
+    }
 }
 
 impl Default for UsageTracker {
@@ -315,6 +334,7 @@ fn desc(
         is_active: None,
         input_schema: None,
         keywords: &[],
+        is_undoable: false,
     }
 }
 
@@ -336,6 +356,7 @@ fn desc_kw(
         is_active: None,
         input_schema: None,
         keywords,
+        is_undoable: false,
     }
 }
 
@@ -358,7 +379,13 @@ fn toggle(
         is_active: Some(is_active),
         input_schema: None,
         keywords: &[],
+        is_undoable: false,
     }
+}
+
+fn undoable(mut d: CommandDescriptor) -> CommandDescriptor {
+    d.is_undoable = true;
+    d
 }
 
 fn with_keywords(mut d: CommandDescriptor, keywords: &'static [&'static str]) -> CommandDescriptor {
@@ -384,6 +411,7 @@ fn parameterized(
         is_active: None,
         input_schema: Some(input_schema),
         keywords: &[],
+        is_undoable: false,
     }
 }
 
@@ -461,19 +489,19 @@ fn register_navigation_categories(out: &mut Vec<CommandDescriptor>) {
 }
 
 fn register_email(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc_kw(
+    out.push(undoable(desc_kw(
         CommandId::EmailArchive, "Archive", "Email",
         Some(KeyBinding::key('e')), needs_selection,
         &["done", "file"],
-    ));
-    out.push(desc_kw(
+    )));
+    out.push(undoable(desc_kw(
         CommandId::EmailTrash,
         "Move to Trash",
         "Email",
         Some(KeyBinding::key('#')),
         |ctx| ctx.has_selection() && ctx.thread_in_trash != Some(true),
         &["delete", "remove"],
-    ));
+    )));
     out.push(desc(
         CommandId::EmailPermanentDelete,
         "Permanently Delete",
@@ -481,7 +509,7 @@ fn register_email(out: &mut Vec<CommandDescriptor>) {
         None,
         |ctx| ctx.has_selection() && ctx.thread_in_trash == Some(true),
     ));
-    out.push(toggle(
+    out.push(undoable(toggle(
         CommandId::EmailSpam,
         "Report Spam",
         "Not Spam",
@@ -489,13 +517,13 @@ fn register_email(out: &mut Vec<CommandDescriptor>) {
         Some(KeyBinding::key('!')),
         needs_selection,
         |ctx| ctx.thread_in_spam == Some(true),
-    ));
+    )));
     register_email_toggles(out);
     register_email_other(out);
 }
 
 fn register_email_toggles(out: &mut Vec<CommandDescriptor>) {
-    out.push(with_keywords(
+    out.push(undoable(with_keywords(
         toggle(
             CommandId::EmailMarkRead,
             "Mark as Read",
@@ -506,8 +534,8 @@ fn register_email_toggles(out: &mut Vec<CommandDescriptor>) {
             |ctx| ctx.thread_is_read == Some(true),
         ),
         &["seen"],
-    ));
-    out.push(toggle(
+    )));
+    out.push(undoable(toggle(
         CommandId::EmailStar,
         "Star",
         "Unstar",
@@ -515,8 +543,8 @@ fn register_email_toggles(out: &mut Vec<CommandDescriptor>) {
         Some(KeyBinding::key('s')),
         needs_selection,
         |ctx| ctx.thread_is_starred == Some(true),
-    ));
-    out.push(toggle(
+    )));
+    out.push(undoable(toggle(
         CommandId::EmailPin,
         "Pin",
         "Unpin",
@@ -524,8 +552,8 @@ fn register_email_toggles(out: &mut Vec<CommandDescriptor>) {
         Some(KeyBinding::key('p')),
         needs_selection,
         |ctx| ctx.thread_is_pinned == Some(true),
-    ));
-    out.push(toggle(
+    )));
+    out.push(undoable(toggle(
         CommandId::EmailMute,
         "Mute",
         "Unmute",
@@ -533,7 +561,7 @@ fn register_email_toggles(out: &mut Vec<CommandDescriptor>) {
         Some(KeyBinding::key('m')),
         needs_selection,
         |ctx| ctx.thread_is_muted == Some(true),
-    ));
+    )));
 }
 
 fn register_email_other(out: &mut Vec<CommandDescriptor>) {
@@ -544,7 +572,7 @@ fn register_email_other(out: &mut Vec<CommandDescriptor>) {
         Some(KeyBinding::key('u')),
         needs_single_selection,
     ));
-    out.push(with_keywords(
+    out.push(undoable(with_keywords(
         parameterized(
             CommandId::EmailMoveToFolder,
             "Move to Folder",
@@ -556,8 +584,8 @@ fn register_email_other(out: &mut Vec<CommandDescriptor>) {
             },
         ),
         &["file", "organize"],
-    ));
-    out.push(parameterized(
+    )));
+    out.push(undoable(parameterized(
         CommandId::EmailAddLabel,
         "Add Label",
         "Email",
@@ -566,8 +594,8 @@ fn register_email_other(out: &mut Vec<CommandDescriptor>) {
         InputSchema::Single {
             param: super::input::ParamDef::ListPicker { label: "Label" },
         },
-    ));
-    out.push(parameterized(
+    )));
+    out.push(undoable(parameterized(
         CommandId::EmailRemoveLabel,
         "Remove Label",
         "Email",
@@ -576,8 +604,8 @@ fn register_email_other(out: &mut Vec<CommandDescriptor>) {
         InputSchema::Single {
             param: super::input::ParamDef::ListPicker { label: "Label" },
         },
-    ));
-    out.push(parameterized(
+    )));
+    out.push(undoable(parameterized(
         CommandId::EmailSnooze,
         "Snooze",
         "Email",
@@ -586,7 +614,7 @@ fn register_email_other(out: &mut Vec<CommandDescriptor>) {
         InputSchema::Single {
             param: super::input::ParamDef::DateTime { label: "Snooze until" },
         },
-    ));
+    )));
     out.push(desc(CommandId::EmailSelectAll, "Select All", "Email", Some(KeyBinding::cmd_or_ctrl('a')), always));
     out.push(desc(
         CommandId::EmailSelectFromHere,
@@ -761,6 +789,17 @@ fn register_app(out: &mut Vec<CommandDescriptor>) {
         Some(KeyBinding::cmd_or_ctrl('k')),
         always,
         &["palette", "commands"],
+    ));
+    // Undo: only available when there are tokens in the undo stack.
+    // The app sets `has_undo` on CommandContext (approximated here via always-available;
+    // the app checks the stack before executing).
+    out.push(desc_kw(
+        CommandId::Undo,
+        "Undo",
+        "App",
+        Some(KeyBinding::cmd_or_ctrl('z')),
+        always,
+        &["revert", "undo"],
     ));
 }
 

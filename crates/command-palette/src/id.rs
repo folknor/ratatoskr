@@ -84,6 +84,9 @@ pub enum CommandId {
     AppSyncFolder,
     AppOpenPalette,
 
+    // Undo
+    Undo,
+
     // Smart Folders
     SmartFolderSave,
 }
@@ -153,6 +156,7 @@ const TABLE: &[(CommandId, &str)] = &[
     (CommandId::AppHelp, "app.help"),
     (CommandId::AppSyncFolder, "app.syncFolder"),
     (CommandId::AppOpenPalette, "app.openPalette"),
+    (CommandId::Undo, "app.undo"),
     (CommandId::SmartFolderSave, "smartFolder.save"),
 ];
 
@@ -244,6 +248,7 @@ const ALL_IDS: &[CommandId] = &[
     CommandId::AppHelp,
     CommandId::AppSyncFolder,
     CommandId::AppOpenPalette,
+    CommandId::Undo,
     CommandId::SmartFolderSave,
 ];
 

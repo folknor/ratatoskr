@@ -49,6 +49,7 @@ impl App {
     pub(crate) fn handle_execute_command(&mut self, id: CommandId) -> Task<Message> {
         log::debug!("Executing command: {id:?}");
         self.registry.usage.record_usage(id);
+        self.save_usage_counts();
         match command_dispatch::dispatch_command(id, self) {
             Some(msg) => self.update(msg),
             None => Task::none(),
@@ -62,9 +63,25 @@ impl App {
     ) -> Task<Message> {
         log::debug!("Executing parameterized command: {id:?}");
         self.registry.usage.record_usage(id);
+        self.save_usage_counts();
         match command_dispatch::dispatch_parameterized(id, args) {
             Some(msg) => self.update(msg),
             None => Task::none(),
+        }
+    }
+
+    /// Save usage counts to disk.
+    fn save_usage_counts(&self) {
+        let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
+        let path = data_dir.join("command_usage.json");
+        let map = self.registry.usage.to_map();
+        match serde_json::to_string(&map) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(&path, json) {
+                    log::warn!("Failed to save usage counts: {e}");
+                }
+            }
+            Err(e) => log::warn!("Failed to serialize usage counts: {e}"),
         }
     }
 

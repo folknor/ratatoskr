@@ -66,6 +66,8 @@ pub enum ThreadListMessage {
     RangeSelectThread(usize),
     /// Select all threads (Ctrl+A).
     SelectAll,
+    /// Select from the current thread to the end of the list (Ctrl+Shift+A).
+    SelectFromHere,
     /// Clear multi-selection.
     SelectNone,
     /// The search bar text changed.
@@ -359,6 +361,23 @@ impl Component for ThreadList {
                     return (Task::none(), None);
                 }
                 self.selected_threads = (0..self.threads.len()).collect();
+                let count = self.selected_threads.len();
+                (
+                    Task::none(),
+                    Some(ThreadListEvent::MultiSelectionChanged(count)),
+                )
+            }
+            ThreadListMessage::SelectFromHere => {
+                if self.threads.is_empty() {
+                    return (Task::none(), None);
+                }
+                let start = self
+                    .selected_thread
+                    .or_else(|| self.last_selected_anchor)
+                    .unwrap_or(0);
+                for idx in start..self.threads.len() {
+                    self.selected_threads.insert(idx);
+                }
                 let count = self.selected_threads.len();
                 (
                     Task::none(),

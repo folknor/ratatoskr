@@ -48,7 +48,7 @@ use pop_out::compose::ComposeMode;
 use ui::palette::{Palette, PaletteMessage};
 use ratatoskr_command_palette::{
     BindingTable, Chord, CommandId, CommandRegistry,
-    FocusedRegion, current_platform,
+    FocusedRegion, UndoStack, current_platform,
 };
 use ratatoskr_core::db::queries_extra::navigation::{
     NavigationState, get_navigation_state,
@@ -146,8 +146,6 @@ const DIVIDER_WIDTH: f32 = 2.0;
 /// Pending chord state for two-key sequence bindings.
 struct PendingChord {
     first: Chord,
-    #[allow(dead_code)]
-    started: iced::time::Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -257,6 +255,9 @@ pub enum Message {
     // Signature operations
     SignatureOp(handlers::SignatureResult),
 
+    // Undo
+    Undo,
+
     // GAL (organization directory) cache
     GalRefreshTick,
     GalCacheRefreshed(Result<usize, String>),
@@ -298,6 +299,7 @@ struct App {
     composer_is_open: bool,
     pending_chord: Option<PendingChord>,
     palette: Palette,
+    undo_stack: UndoStack,
 
     // Search state
     search_generation: u64,
@@ -343,11 +345,18 @@ impl App {
         let (main_window_id, open_task) =
             iced::window::open(window.to_window_settings());
 
-        let registry = CommandRegistry::new();
+        let mut registry = CommandRegistry::new();
         let mut binding_table = BindingTable::new(&registry, current_platform());
         let keybindings_path = data_dir.join("keybindings.json");
         if let Err(e) = binding_table.load_overrides_from_file(&keybindings_path) {
             eprintln!("warning: failed to load keybinding overrides: {e}");
+        }
+        // Load persisted usage counts for command ranking
+        let usage_path = data_dir.join("command_usage.json");
+        if let Ok(json) = std::fs::read_to_string(&usage_path) {
+            if let Ok(map) = serde_json::from_str::<std::collections::HashMap<String, u32>>(&json) {
+                registry.usage.load_from_map(&map);
+            }
         }
         let resolver = Arc::new(command_resolver::AppInputResolver::new(Arc::clone(&db)));
 
@@ -409,6 +418,7 @@ impl App {
                 CommandRegistry::new(),
                 resolver,
             ),
+            undo_stack: UndoStack::default(),
             search_generation: 0,
             search_query: UndoableText::new(),
             search_debounce_deadline: None,
@@ -906,6 +916,19 @@ impl App {
             // Sync progress pipeline
             Message::SyncProgress(event) => {
                 self.handle_sync_event(event);
+                Task::none()
+            }
+            Message::Undo => {
+                if let Some(token) = self.undo_stack.pop() {
+                    let desc = token.description();
+                    log::info!("Undo: {desc}");
+                    // The actual compensation action would be dispatched here
+                    // once email actions are wired to providers. For now, log
+                    // the intent. The token carries all state needed to reverse
+                    // the action (account_id, thread_ids, prior state).
+                    self.status_bar
+                        .show_confirmation(format!("Undone: {desc}"));
+                }
                 Task::none()
             }
             Message::GalRefreshTick => {

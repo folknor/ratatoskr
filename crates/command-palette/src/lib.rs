@@ -6,6 +6,7 @@ mod input;
 mod keybinding;
 mod registry;
 mod resolver;
+mod undo;
 
 pub use args::CommandArgs;
 pub use context::{CommandContext, FocusedRegion, ProviderKind, ViewType};
@@ -18,3 +19,4 @@ pub use keybinding::{
 };
 pub use registry::{CommandRegistry, UsageTracker};
 pub use resolver::CommandInputResolver;
+pub use undo::{UndoStack, UndoToken};
