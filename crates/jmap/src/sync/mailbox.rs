@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use jmap_client::mailbox::{MailboxGet, Role};
+use jmap_client::mailbox::{MailboxGet, MailboxRights, Role};
 use jmap_client::email::EmailGet;
 
 use super::super::client::JmapClient;
@@ -10,6 +10,16 @@ use super::SyncCtx;
 // ---------------------------------------------------------------------------
 // Mailbox sync helpers
 // ---------------------------------------------------------------------------
+
+/// A row to be persisted into the `labels` table, including optional rights.
+struct LabelRow {
+    label_id: String,
+    account_id: String,
+    label_name: String,
+    label_type: String,
+    parent_label_id: Option<String>,
+    rights: Option<MailboxRights>,
+}
 
 /// Fetch all mailboxes, persist as labels, return (mailbox_map, mailbox_data).
 pub(crate) async fn sync_mailboxes(
@@ -43,8 +53,8 @@ pub(crate) async fn sync_mailboxes(
         jmap_id_to_label_id.insert(id.to_string(), mapping.label_id);
     }
 
-    // Second pass: build label rows with parent_label_id resolved
-    let mut label_rows: Vec<(String, String, String, String, Option<String>)> = Vec::new();
+    // Second pass: build label rows with parent_label_id resolved + rights
+    let mut label_rows: Vec<LabelRow> = Vec::new();
 
     for mb in &mailboxes {
         let Some(id) = mb.id() else { continue };
@@ -71,29 +81,31 @@ pub(crate) async fn sync_mailboxes(
             .parent_id()
             .and_then(|pid| jmap_id_to_label_id.get(pid))
             .cloned();
-        label_rows.push((
-            mapping.label_id,
-            aid.clone(),
-            mapping.label_name,
-            mapping.label_type.to_string(),
+        label_rows.push(LabelRow {
+            label_id: mapping.label_id,
+            account_id: aid.clone(),
+            label_name: mapping.label_name,
+            label_type: mapping.label_type.to_string(),
             parent_label_id,
-        ));
+            rights: mb.my_rights().cloned(),
+        });
     }
 
     // Also add pseudo-labels
-    label_rows.push((
-        "UNREAD".to_string(),
-        aid.clone(),
-        "Unread".to_string(),
-        "system".to_string(),
-        None,
-    ));
+    label_rows.push(LabelRow {
+        label_id: "UNREAD".to_string(),
+        account_id: aid.clone(),
+        label_name: "Unread".to_string(),
+        label_type: "system".to_string(),
+        parent_label_id: None,
+        rights: None,
+    });
 
     // Persist labels + categories to DB
     let category_rows: Vec<(String, String)> = label_rows
         .iter()
-        .filter(|(_, _, _, lt, _)| lt == "user")
-        .map(|(id, _, name, _, _)| (id.clone(), name.clone()))
+        .filter(|r| r.label_type == "user")
+        .map(|r| (r.label_id.clone(), r.label_name.clone()))
         .collect();
 
     ctx.db
@@ -101,11 +113,21 @@ pub(crate) async fn sync_mailboxes(
             let tx = conn
                 .unchecked_transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
-            for (label_id, account_id, name, label_type, parent_label_id) in &label_rows {
+            for row in &label_rows {
+                let (r_read, r_add, r_remove, r_seen, r_kw, r_child, r_rename, r_del, r_submit) =
+                    rights_to_ints(row.rights.as_ref());
                 tx.execute(
-                    "INSERT OR REPLACE INTO labels (id, account_id, name, type, parent_label_id) \
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    rusqlite::params![label_id, account_id, name, label_type, parent_label_id],
+                    "INSERT OR REPLACE INTO labels \
+                     (id, account_id, name, type, parent_label_id, \
+                      right_read, right_add, right_remove, right_set_seen, \
+                      right_set_keywords, right_create_child, right_rename, \
+                      right_delete, right_submit) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                    rusqlite::params![
+                        row.label_id, row.account_id, row.label_name, row.label_type,
+                        row.parent_label_id,
+                        r_read, r_add, r_remove, r_seen, r_kw, r_child, r_rename, r_del, r_submit,
+                    ],
                 )
                 .map_err(|e| format!("upsert label: {e}"))?;
             }
@@ -277,5 +299,30 @@ pub(crate) fn role_to_str(role: &jmap_client::mailbox::Role) -> &'static str {
         Role::Junk => "junk",
         Role::Important => "important",
         _ => "other",
+    }
+}
+
+/// Convert `MailboxRights` to 9 `Option<i64>` values for SQL parameters.
+#[allow(clippy::type_complexity)]
+fn rights_to_ints(
+    rights: Option<&MailboxRights>,
+) -> (
+    Option<i64>, Option<i64>, Option<i64>,
+    Option<i64>, Option<i64>, Option<i64>,
+    Option<i64>, Option<i64>, Option<i64>,
+) {
+    match rights {
+        Some(r) => (
+            Some(i64::from(r.may_read_items())),
+            Some(i64::from(r.may_add_items())),
+            Some(i64::from(r.may_remove_items())),
+            Some(i64::from(r.may_set_seen())),
+            Some(i64::from(r.may_set_keywords())),
+            Some(i64::from(r.may_create_child())),
+            Some(i64::from(r.may_rename())),
+            Some(i64::from(r.may_delete())),
+            Some(i64::from(r.may_submit())),
+        ),
+        None => (None, None, None, None, None, None, None, None, None),
     }
 }

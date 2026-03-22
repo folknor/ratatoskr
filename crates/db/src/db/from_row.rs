@@ -66,6 +66,28 @@ macro_rules! impl_from_row_munch {
         }
     };
 
+    // ── optbool with rename: `optbool field as "col",` ───────
+    // Reads an `Option<i64>` column and maps to `Option<bool>`.
+    ($sn:ident; $r:ident; [$($out:tt)*];
+     optbool $field:ident as $col:literal, $($rest:tt)*
+    ) => {
+        $crate::impl_from_row_munch! { $sn; $r;
+            [$($out)* $field : ($r.get::<_, Option<i64>>($col)?.map(|v| v != 0)),];
+            $($rest)*
+        }
+    };
+
+    // ── optbool default: `optbool field,` ────────────────────
+    // Reads an `Option<i64>` column and maps to `Option<bool>`.
+    ($sn:ident; $r:ident; [$($out:tt)*];
+     optbool $field:ident, $($rest:tt)*
+    ) => {
+        $crate::impl_from_row_munch! { $sn; $r;
+            [$($out)* $field : ($r.get::<_, Option<i64>>(stringify!($field))?.map(|v| v != 0)),];
+            $($rest)*
+        }
+    };
+
     // ── value expression: `val field = expr,` ───────────────
     ($sn:ident; $r:ident; [$($out:tt)*];
      val $field:ident = $expr:expr, $($rest:tt)*

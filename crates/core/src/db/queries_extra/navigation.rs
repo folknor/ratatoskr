@@ -36,6 +36,31 @@ pub enum LabelSemantics {
     Folder,
 }
 
+/// Mailbox rights for permission gating in the UI.
+///
+/// All fields default to `None` (= unknown / not applicable).
+/// `Some(true)` = permitted, `Some(false)` = denied.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailboxRightsInfo {
+    pub may_read_items: Option<bool>,
+    pub may_add_items: Option<bool>,
+    pub may_remove_items: Option<bool>,
+    pub may_set_seen: Option<bool>,
+    pub may_set_keywords: Option<bool>,
+    pub may_create_child: Option<bool>,
+    pub may_rename: Option<bool>,
+    pub may_delete: Option<bool>,
+    pub may_submit: Option<bool>,
+}
+
+impl MailboxRightsInfo {
+    /// Returns `true` if any right is explicitly set (not all `None`).
+    pub fn is_known(&self) -> bool {
+        self.may_read_items.is_some()
+    }
+}
+
 /// A single item in the sidebar navigation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +76,9 @@ pub struct NavigationFolder {
     pub label_semantics: Option<LabelSemantics>,
     /// Query string for smart folders. `None` for regular labels/folders.
     pub query: Option<String>,
+    /// Mailbox rights from JMAP/IMAP ACL. `None` for non-shared or unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rights: Option<MailboxRightsInfo>,
 }
 
 /// The complete navigation state returned to the frontend.
@@ -164,6 +192,7 @@ fn build_universal_folders(
                 parent_id: None,
                 label_semantics: None,
                 query: None,
+                rights: None,
             }
         })
         .collect();
@@ -202,6 +231,7 @@ fn build_smart_folders(
                 parent_id: None,
                 label_semantics: None,
                 query: Some(sf.query),
+                rights: None,
             }
         })
         .collect())
@@ -245,6 +275,8 @@ fn build_account_labels(
                 .copied()
                 .unwrap_or(0);
 
+            let rights = rights_from_label(&label);
+
             // If parent is a system folder (INBOX, SENT, etc.), treat as
             // root — system folders are rendered in the universal section,
             // not in the label tree. Without this, children of system
@@ -269,6 +301,7 @@ fn build_account_labels(
                 parent_id,
                 label_semantics: Some(semantics.clone()),
                 query: None,
+                rights,
             }
         })
         .collect())
@@ -307,6 +340,7 @@ fn build_all_account_tags(
             parent_id: None,
             label_semantics: Some(LabelSemantics::Tag),
             query: None,
+            rights: None,
         })
     })
     .map_err(|e| e.to_string())?
@@ -365,4 +399,25 @@ fn get_label_unread_counts(
         counts.insert(label_id, count);
     }
     Ok(counts)
+}
+
+/// Extract mailbox rights from a `DbLabel` into a `MailboxRightsInfo`.
+///
+/// Returns `None` if no rights are set (all fields are `None`), meaning
+/// the provider doesn't supply rights data for this label.
+fn rights_from_label(label: &ratatoskr_db::db::types::DbLabel) -> Option<MailboxRightsInfo> {
+    if label.right_read.is_none() {
+        return None;
+    }
+    Some(MailboxRightsInfo {
+        may_read_items: label.right_read,
+        may_add_items: label.right_add,
+        may_remove_items: label.right_remove,
+        may_set_seen: label.right_set_seen,
+        may_set_keywords: label.right_set_keywords,
+        may_create_child: label.right_create_child,
+        may_rename: label.right_rename,
+        may_delete: label.right_delete,
+        may_submit: label.right_submit,
+    })
 }

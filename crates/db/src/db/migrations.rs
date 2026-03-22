@@ -1442,6 +1442,21 @@ static MIGRATIONS: &[Migration] = &[
                 ON jmap_sync_state(account_id, COALESCE(shared_account_id, ''), type);
         "#,
     },
+    Migration {
+        version: 69,
+        description: "Mailbox rights columns on labels (JMAP Sharing Phase 3)",
+        sql: r#"
+            ALTER TABLE labels ADD COLUMN right_read INTEGER;
+            ALTER TABLE labels ADD COLUMN right_add INTEGER;
+            ALTER TABLE labels ADD COLUMN right_remove INTEGER;
+            ALTER TABLE labels ADD COLUMN right_set_seen INTEGER;
+            ALTER TABLE labels ADD COLUMN right_set_keywords INTEGER;
+            ALTER TABLE labels ADD COLUMN right_create_child INTEGER;
+            ALTER TABLE labels ADD COLUMN right_rename INTEGER;
+            ALTER TABLE labels ADD COLUMN right_delete INTEGER;
+            ALTER TABLE labels ADD COLUMN right_submit INTEGER;
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

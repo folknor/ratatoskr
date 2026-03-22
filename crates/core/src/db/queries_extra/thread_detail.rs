@@ -433,6 +433,15 @@ fn query_thread_labels(
             imap_folder_path: None,
             imap_special_use: None,
             parent_label_id: None,
+            right_read: None,
+            right_add: None,
+            right_remove: None,
+            right_set_seen: None,
+            right_set_keywords: None,
+            right_create_child: None,
+            right_rename: None,
+            right_delete: None,
+            right_submit: None,
         };
 
         let (bg, fg) = resolve_label_color(&db_label);

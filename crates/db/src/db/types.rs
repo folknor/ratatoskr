@@ -134,6 +134,17 @@ pub struct DbLabel {
     pub imap_folder_path: Option<String>,
     pub imap_special_use: Option<String>,
     pub parent_label_id: Option<String>,
+    // ── Mailbox rights (JMAP Sharing / IMAP ACL) ────────────
+    // None = unknown/not applicable. Some(true) = permitted, Some(false) = denied.
+    pub right_read: Option<bool>,
+    pub right_add: Option<bool>,
+    pub right_remove: Option<bool>,
+    pub right_set_seen: Option<bool>,
+    pub right_set_keywords: Option<bool>,
+    pub right_create_child: Option<bool>,
+    pub right_rename: Option<bool>,
+    pub right_delete: Option<bool>,
+    pub right_submit: Option<bool>,
 }
 
 // ── Category ─────────────────────────────────────────────────

@@ -88,6 +88,15 @@ impl_from_row!(DbLabel {
     imap_folder_path,
     imap_special_use,
     parent_label_id,
+    optbool right_read,
+    optbool right_add,
+    optbool right_remove,
+    optbool right_set_seen,
+    optbool right_set_keywords,
+    optbool right_create_child,
+    optbool right_rename,
+    optbool right_delete,
+    optbool right_submit,
 });
 
 // ── Category ────────────────────────────────────────────────
