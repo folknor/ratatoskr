@@ -206,6 +206,7 @@ pub enum Message {
     SearchClear,
     FocusSearchBar,
     SearchBlur,
+    SearchHistoryLoaded(Result<Vec<String>, String>),
 
     // Pinned searches
     PinnedSearchesLoaded(Result<Vec<db::PinnedSearch>, String>),
@@ -309,6 +310,9 @@ struct App {
     /// When search is cleared, threads are reloaded from the current
     /// navigation state instead of restoring a stale clone.
     was_in_folder_view: bool,
+
+    // Search history (recent queries from pinned_searches)
+    search_history: Vec<String>,
 
     // Pinned searches
     pinned_searches: Vec<db::PinnedSearch>,
@@ -423,6 +427,7 @@ impl App {
             search_query: UndoableText::new(),
             search_debounce_deadline: None,
             was_in_folder_view: false,
+            search_history: Vec::new(),
             pinned_searches: Vec::new(),
             active_pinned_search: None,
             editing_pinned_search: None,
@@ -792,6 +797,12 @@ impl App {
                 // issuing any focus operation clears the current focus.
                 iced::widget::operation::focus::<Message>("blur-sink".to_string())
             }
+
+            Message::SearchHistoryLoaded(Ok(queries)) => {
+                self.search_history = queries;
+                Task::none()
+            }
+            Message::SearchHistoryLoaded(Err(_)) => Task::none(),
 
             // Pinned searches — delegated to handlers/search.rs
             Message::PinnedSearchesLoaded(result) => self.handle_pinned_searches_loaded(result),

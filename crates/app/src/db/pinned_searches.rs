@@ -291,6 +291,29 @@ impl Db {
         .await
     }
 
+    /// Returns the most recent search queries (up to `limit`) for search history.
+    /// Uses the pinned_searches table which already tracks all executed searches.
+    pub async fn get_recent_search_queries(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        self.with_conn(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT query FROM pinned_searches
+                     ORDER BY updated_at DESC
+                     LIMIT ?1",
+                )
+                .map_err(|e| e.to_string())?;
+
+            stmt.query_map(params![limit as i64], |row| row.get(0))
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<String>, _>>()
+                .map_err(|e| e.to_string())
+        })
+        .await
+    }
+
     /// Deletes all pinned searches. Used for the "Clear all" action.
     pub async fn delete_all_pinned_searches(&self) -> Result<u64, String> {
         self.with_write_conn(move |conn| {

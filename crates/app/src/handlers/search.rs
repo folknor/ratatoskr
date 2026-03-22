@@ -308,15 +308,24 @@ impl App {
                 self.pinned_searches = searches;
                 self.sidebar.pinned_searches.clone_from(&self.pinned_searches);
 
+                let db = Arc::clone(&self.db);
+                let history_task = Task::perform(
+                    async move { db.get_recent_search_queries(10).await },
+                    Message::SearchHistoryLoaded,
+                );
+
                 if !self.expiry_ran {
                     self.expiry_ran = true;
-                    let db = Arc::clone(&self.db);
-                    return Task::perform(
-                        async move { db.expire_stale_pinned_searches(1_209_600).await },
-                        Message::PinnedSearchesExpired,
-                    );
+                    let db2 = Arc::clone(&self.db);
+                    return Task::batch([
+                        history_task,
+                        Task::perform(
+                            async move { db2.expire_stale_pinned_searches(1_209_600).await },
+                            Message::PinnedSearchesExpired,
+                        ),
+                    ]);
                 }
-                Task::none()
+                history_task
             }
             Err(e) => {
                 self.status = format!("Pinned searches error: {e}");
