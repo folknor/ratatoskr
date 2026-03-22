@@ -175,11 +175,14 @@ impl App {
 
     /// Dispatch an async typeahead query based on operator type.
     fn dispatch_typeahead_query(
-        &self,
+        &mut self,
         operator: &str,
         partial: &str,
     ) -> Task<Message> {
         use crate::ui::thread_list::{TypeaheadItem, ThreadListMessage};
+
+        self.thread_list.typeahead.generation += 1;
+        let load_gen = self.thread_list.typeahead.generation;
 
         // Static operators — resolve immediately
         let static_items: Option<Vec<TypeaheadItem>> = match operator {
@@ -233,7 +236,7 @@ impl App {
 
         if let Some(items) = static_items {
             return Task::done(Message::ThreadList(
-                ThreadListMessage::TypeaheadItemsLoaded(items),
+                ThreadListMessage::TypeaheadItemsLoaded(load_gen, items),
             ));
         }
 
@@ -256,9 +259,9 @@ impl App {
                     _ => Ok(Vec::new()),
                 }
             },
-            |result| {
+            move |result| {
                 let items = result.unwrap_or_default();
-                Message::ThreadList(ThreadListMessage::TypeaheadItemsLoaded(items))
+                Message::ThreadList(ThreadListMessage::TypeaheadItemsLoaded(load_gen, items))
             },
         )
     }

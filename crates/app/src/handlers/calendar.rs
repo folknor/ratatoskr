@@ -233,7 +233,11 @@ impl App {
                 self.sidebar.in_calendar_mode = false;
                 open_task.discard()
             }
-            CalendarMessage::EventsLoaded(result) => {
+            CalendarMessage::EventsLoaded(load_generation, result) => {
+                if load_generation != self.calendar.load_generation {
+                    // Stale result from a previous load — discard.
+                    return Task::none();
+                }
                 match result {
                     Ok(events) => {
                         self.calendar.events = events;
@@ -260,7 +264,11 @@ impl App {
                     |_| Message::Calendar(CalendarMessage::EventSaved(Ok(()))),
                 )
             }
-            CalendarMessage::CalendarsLoaded(result) => {
+            CalendarMessage::CalendarsLoaded(load_generation, result) => {
+                if load_generation != self.calendar.load_generation {
+                    // Stale result from a previous load — discard.
+                    return Task::none();
+                }
                 match result {
                     Ok(calendars) => {
                         self.calendar.calendars = calendars;
@@ -404,17 +412,22 @@ impl App {
     }
 
     /// Reload calendar events from DB and rebuild views.
-    pub(crate) fn reload_calendar_events(&self) -> Task<Message> {
+    ///
+    /// Increments the load generation counter so that results from
+    /// previously-dispatched (now stale) loads are discarded.
+    pub(crate) fn reload_calendar_events(&mut self) -> Task<Message> {
+        self.calendar.load_generation = self.calendar.load_generation.wrapping_add(1);
+        let load_generation = self.calendar.load_generation;
         let db = Arc::clone(&self.db);
         let db2 = Arc::clone(&self.db);
         Task::batch([
             Task::perform(
                 async move { db.load_calendar_events_for_view().await },
-                |r| Message::Calendar(CalendarMessage::EventsLoaded(r)),
+                move |r| Message::Calendar(CalendarMessage::EventsLoaded(load_generation, r)),
             ),
             Task::perform(
                 async move { db2.load_calendars_for_sidebar().await },
-                |r| Message::Calendar(CalendarMessage::CalendarsLoaded(r)),
+                move |r| Message::Calendar(CalendarMessage::CalendarsLoaded(load_generation, r)),
             ),
         ])
     }

@@ -43,6 +43,8 @@ pub struct TypeaheadState {
     pub visible: bool,
     pub items: Vec<TypeaheadItem>,
     pub selected: usize,
+    /// Generation counter for stale typeahead result detection.
+    pub generation: u64,
 }
 
 impl Default for TypeaheadState {
@@ -51,6 +53,7 @@ impl Default for TypeaheadState {
             visible: false,
             items: Vec::new(),
             selected: 0,
+            generation: 0,
         }
     }
 }
@@ -92,8 +95,8 @@ pub enum ThreadListMessage {
     AutoAdvance,
     /// Navigate typeahead suggestions up or down.
     TypeaheadNavigate(TypeaheadDirection),
-    /// Typeahead suggestion items loaded from async query.
-    TypeaheadItemsLoaded(Vec<TypeaheadItem>),
+    /// Typeahead suggestion items loaded from async query (carries generation).
+    TypeaheadItemsLoaded(u64, Vec<TypeaheadItem>),
     /// User selected a typeahead suggestion by index.
     TypeaheadSelect(usize),
     /// Dismiss the typeahead dropdown.
@@ -460,7 +463,10 @@ impl Component for ThreadList {
                 }
                 (Task::none(), None)
             }
-            ThreadListMessage::TypeaheadItemsLoaded(items) => {
+            ThreadListMessage::TypeaheadItemsLoaded(load_gen, items) => {
+                if load_gen != self.typeahead.generation {
+                    return (Task::none(), None); // stale
+                }
                 self.typeahead.items = items;
                 self.typeahead.selected = 0;
                 self.typeahead.visible = !self.typeahead.items.is_empty();

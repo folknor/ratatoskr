@@ -221,6 +221,10 @@ pub struct CalendarState {
     pub calendars: Vec<CalendarListEntry>,
     /// Set of dates that have at least one event (for mini-month dots).
     pub dates_with_events: HashSet<NaiveDate>,
+    /// Generation counter for async load staleness detection.
+    /// Incremented before each load dispatch; results carry the generation
+    /// they were dispatched with and are dropped if it no longer matches.
+    pub load_generation: u64,
 }
 
 impl CalendarState {
@@ -256,6 +260,7 @@ impl CalendarState {
             editor_undo_description: UndoableText::new(),
             calendars: Vec::new(),
             dates_with_events: HashSet::new(),
+            load_generation: 0,
         }
     }
 
@@ -448,13 +453,15 @@ pub enum CalendarMessage {
     /// Event detail was loaded from DB after clicking an event.
     EventLoaded(Result<CalendarEventData, String>),
     /// Calendar events loaded from DB for view rendering.
-    EventsLoaded(Result<Vec<calendar_time_grid::TimeGridEvent>, String>),
+    /// The `u64` is the load generation — stale results are discarded.
+    EventsLoaded(u64, Result<Vec<calendar_time_grid::TimeGridEvent>, String>),
     /// Pop out the calendar into a separate window.
     PopOutCalendar,
     /// Toggle visibility of a calendar (checkbox in sidebar).
     ToggleCalendarVisibility(String, bool),
     /// Calendars loaded from DB for sidebar list.
-    CalendarsLoaded(Result<Vec<CalendarListEntry>, String>),
+    /// The `u64` is the load generation — stale results are discarded.
+    CalendarsLoaded(u64, Result<Vec<CalendarListEntry>, String>),
 }
 
 // ── View ───────────────────────────────────────────────

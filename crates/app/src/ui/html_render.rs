@@ -302,11 +302,10 @@ impl<'a> HtmlParser<'a> {
         match tag_name {
             "p" | "div" => self.flush_text(blocks),
             "br" => {
-                if self.in_pre {
-                    self.current_text.push('\n');
-                } else {
-                    self.flush_text(blocks);
-                }
+                // Insert a newline within the current block rather than
+                // flushing to a new paragraph. This preserves mid-paragraph
+                // line breaks common in HTML email.
+                self.current_text.push('\n');
             }
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                 self.flush_text(blocks);
@@ -458,16 +457,102 @@ fn collapse_whitespace(s: &str) -> String {
     result
 }
 
-/// Decode common HTML entities.
+/// Decode HTML entities: named entities, decimal (`&#123;`), and hex (`&#x7B;`).
 fn decode_entities(s: &str) -> String {
-    s.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&nbsp;", " ")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&#x27;", "'")
-        .replace("&apos;", "'")
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch != '&' {
+            result.push(ch);
+            continue;
+        }
+        // Collect entity up to `;` (max 10 chars to avoid runaway)
+        let mut entity = String::new();
+        let mut found_semi = false;
+        for _ in 0..10 {
+            match chars.peek() {
+                Some(&';') => {
+                    chars.next();
+                    found_semi = true;
+                    break;
+                }
+                Some(_) => entity.push(chars.next().expect("peeked")),
+                None => break,
+            }
+        }
+        if !found_semi {
+            // Not a valid entity — emit as literal
+            result.push('&');
+            result.push_str(&entity);
+            continue;
+        }
+        // Decode
+        if let Some(decoded) = decode_named_entity(&entity) {
+            result.push_str(decoded);
+        } else if let Some(stripped) = entity.strip_prefix('#') {
+            let codepoint = if let Some(hex) = stripped.strip_prefix('x').or_else(|| stripped.strip_prefix('X')) {
+                u32::from_str_radix(hex, 16).ok()
+            } else {
+                stripped.parse::<u32>().ok()
+            };
+            match codepoint.and_then(char::from_u32) {
+                Some(c) => result.push(c),
+                None => {
+                    result.push('&');
+                    result.push_str(&entity);
+                    result.push(';');
+                }
+            }
+        } else {
+            result.push('&');
+            result.push_str(&entity);
+            result.push(';');
+        }
+    }
+    result
+}
+
+fn decode_named_entity(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "amp" => "&",
+        "lt" => "<",
+        "gt" => ">",
+        "nbsp" => "\u{00A0}",
+        "quot" => "\"",
+        "apos" => "'",
+        "mdash" => "\u{2014}",
+        "ndash" => "\u{2013}",
+        "hellip" => "\u{2026}",
+        "copy" => "\u{00A9}",
+        "reg" => "\u{00AE}",
+        "trade" => "\u{2122}",
+        "laquo" => "\u{00AB}",
+        "raquo" => "\u{00BB}",
+        "lsquo" => "\u{2018}",
+        "rsquo" => "\u{2019}",
+        "ldquo" => "\u{201C}",
+        "rdquo" => "\u{201D}",
+        "bull" => "\u{2022}",
+        "middot" => "\u{00B7}",
+        "deg" => "\u{00B0}",
+        "times" => "\u{00D7}",
+        "divide" => "\u{00F7}",
+        "euro" => "\u{20AC}",
+        "pound" => "\u{00A3}",
+        "yen" => "\u{00A5}",
+        "cent" => "\u{00A2}",
+        "sect" => "\u{00A7}",
+        "para" => "\u{00B6}",
+        "dagger" => "\u{2020}",
+        "Dagger" => "\u{2021}",
+        "ensp" => "\u{2002}",
+        "emsp" => "\u{2003}",
+        "thinsp" => "\u{2009}",
+        "zwnj" => "\u{200C}",
+        "zwj" => "\u{200D}",
+        _ => return None,
+    })
 }
 
 /// Extract an attribute value from a raw tag string.
