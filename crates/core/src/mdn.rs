@@ -206,12 +206,19 @@ pub async fn mark_mdn_sent_jmap(
     client: &jmap_client::client::Client,
     message_id: &str,
 ) -> Result<(), String> {
+    let account_id = client.default_account_id().to_string();
+    let mut email_set = jmap_client::email::EmailSet::new(&account_id);
+    email_set.update(message_id).keyword("$mdnsent", true);
     let mut request = client.build();
-    let set_req = request.set_email();
-    set_req.update(message_id).keyword("$mdnsent", true);
-    request
-        .send_single::<jmap_client::core::response::EmailSetResponse>()
+    let handle = request
+        .call(email_set)
+        .map_err(|e| format!("JMAP Email/set $mdnsent build: {e}"))?;
+    let mut response = request
+        .send()
         .await
+        .map_err(|e| format!("JMAP Email/set $mdnsent send: {e}"))?;
+    response
+        .get(&handle)
         .map_err(|e| format!("JMAP Email/set $mdnsent: {e}"))?;
     Ok(())
 }

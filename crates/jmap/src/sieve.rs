@@ -132,7 +132,7 @@ pub async fn get_sieve_script(
         .await
         .map_err(|e| format!("Sieve blob download {blob_id}: {e}"))?;
 
-    let content = String::from_utf8(blob_bytes)
+    let content = String::from_utf8(blob_bytes.to_vec())
         .map_err(|e| format!("Sieve script {script_id} content is not valid UTF-8: {e}"))?;
 
     Ok(SieveScript {

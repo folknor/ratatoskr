@@ -64,7 +64,7 @@ pub async fn sync_calendar_list(
         };
 
         let display_name = cal.name().map(String::from);
-        let color = cal.color().and_then(|c| c.map(String::from));
+        let color = cal.color().map(String::from);
         let is_primary = cal.is_default().unwrap_or(false);
 
         let local_id = upsert_calendar(
@@ -726,7 +726,8 @@ fn parse_jscalendar_times(event: &CalendarEvent<Get>) -> (i64, i64, bool) {
 
     let tz = event
         .time_zone()
-        .and_then(|t| t)
+        .as_value()
+        .copied()
         .unwrap_or("UTC");
 
     let start_ts = if is_all_day {
@@ -982,8 +983,8 @@ struct ReminderRow {
 
 /// Extract reminder rows from a JMAP CalendarEvent's alerts.
 fn extract_reminder_rows(event: &CalendarEvent<Get>) -> Vec<ReminderRow> {
-    // alerts returns Option<Option<&Map>> — None = absent, Some(None) = null
-    let Some(Some(alerts)) = event.alerts() else {
+    // alerts returns Field<&Map> — Omitted/Null = no alerts, Value = has alerts
+    let jmap_client::core::field::Field::Value(alerts) = event.alerts() else {
         return Vec::new();
     };
 

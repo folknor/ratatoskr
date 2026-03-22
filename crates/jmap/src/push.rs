@@ -141,15 +141,8 @@ pub async fn start_push(
 
     let ws_url = ws_caps.url().to_string();
 
-    // Extract auth header from the transport's headers
-    let auth_header = inner
-        .transport()
-        .headers()
-        .get(reqwest::header::AUTHORIZATION)
-        .ok_or("No Authorization header on JMAP client")?
-        .to_str()
-        .map_err(|e| format!("Invalid Authorization header: {e}"))?
-        .to_string();
+    // Extract auth header from the client
+    let auth_header = inner.authorization().to_string();
 
     // Load last known push state from DB
     let last_push_state = load_push_state(db, account_id).await?;

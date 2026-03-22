@@ -374,7 +374,7 @@ async fn store_inline_images(ctx: &SyncCtx<'_>, messages: &[ParsedJmapMessage]) 
             match inner.download(&blob_id).await {
                 Ok(data) if data.len() <= MAX_INLINE_SIZE => {
                     let content_hash = hash_bytes(&data);
-                    Some((blob_id, (content_hash, data, mime_type)))
+                    Some((blob_id, (content_hash, data.to_vec(), mime_type)))
                 }
                 Ok(_) => None,
                 Err(error) => {
