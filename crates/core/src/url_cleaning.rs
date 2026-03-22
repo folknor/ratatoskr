@@ -92,6 +92,20 @@ pub fn strip_tracking_params(url: &str) -> String {
     parsed.to_string()
 }
 
+/// Check whether a URL contains any known tracking query parameters.
+///
+/// Returns `true` if the URL has at least one tracking parameter that
+/// would be stripped by [`strip_tracking_params`]. Useful for annotating
+/// links in the UI with a tracking indicator.
+pub fn has_tracking_params(url: &str) -> bool {
+    let Ok(parsed) = Url::parse(url) else {
+        return false;
+    };
+    parsed
+        .query_pairs()
+        .any(|(name, _)| is_tracking_param(&name))
+}
+
 static HREF_RE: LazyLock<Regex> = LazyLock::new(|| {
     // Match href="..." or href='...' (case-insensitive on href).
     // Uses alternation instead of backreference (\2) since the regex crate

@@ -80,7 +80,11 @@ const KNOWN_TRACKER_PATHS: &[&str] = &[
 const TRACKER_SUBDOMAINS: &[&str] = &["open.", "track.", "pixel.", "beacon.", "trk."];
 
 /// Returns `true` if `url` matches a known tracking pixel domain or path.
-fn is_known_tracker(url: &str) -> bool {
+/// Check whether a URL matches a known tracking domain or path pattern.
+///
+/// Used internally for tracking pixel detection, and externally by the
+/// UI to annotate links from known trackers with visual indicators.
+pub fn is_known_tracker(url: &str) -> bool {
     // Normalise for comparison.
     let lower = url.to_ascii_lowercase();
 

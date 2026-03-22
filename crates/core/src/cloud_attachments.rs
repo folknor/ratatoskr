@@ -8,6 +8,28 @@ use serde::{Deserialize, Serialize};
 use crate::db::DbState;
 use crate::graph::client::GraphClient;
 
+/// Maximum attachment size (in bytes) before suggesting cloud upload.
+/// 25 MB is the common limit for most email providers.
+pub const LARGE_ATTACHMENT_THRESHOLD: u64 = 25 * 1024 * 1024;
+
+/// Check whether an account's provider supports cloud attachment uploads.
+///
+/// Only Exchange (Graph → OneDrive) and Gmail (Google Drive) have cloud
+/// upload support. JMAP and IMAP accounts should show a "file too large"
+/// warning when attachments exceed [`LARGE_ATTACHMENT_THRESHOLD`].
+pub fn supports_cloud_upload(provider: &str) -> bool {
+    matches!(provider, "graph" | "gmail")
+}
+
+/// Build a human-readable warning for accounts without cloud upload support.
+pub fn large_attachment_warning(file_name: &str, file_size: u64) -> String {
+    let size_mb = file_size as f64 / (1024.0 * 1024.0);
+    format!(
+        "\"{file_name}\" is {size_mb:.1} MB. This may exceed the provider's attachment \
+         size limit. Consider compressing the file or using an external sharing service."
+    )
+}
+
 /// Cloud storage provider that hosts the linked file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

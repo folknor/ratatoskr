@@ -219,6 +219,136 @@ pub fn sanitize_html_body(html: &str) -> String {
     whitelist_sanitize(&stage2)
 }
 
+/// Sanitize HTML with remote image blocking.
+///
+/// Same three-stage pipeline as [`sanitize_html_body`], plus:
+/// - Remote `<img src="http(s)://...">` tags are replaced with a
+///   placeholder unless the sender is allowlisted.
+/// - `cid:` and `data:` URIs are always preserved (inline attachments).
+/// - AMP-specific elements (`amp-img`, `amp-list`, etc.) are stripped.
+pub fn sanitize_html_body_with_image_policy(
+    html: &str,
+    block_remote_images: bool,
+    sender_is_allowlisted: bool,
+) -> String {
+    if html.is_empty() {
+        return String::new();
+    }
+
+    let stage1 = inline_css(html);
+    let stage2 = strip_dangerous_elements(&stage1);
+
+    let stage2b = strip_amp_elements(&stage2);
+
+    let stage2c = if block_remote_images && !sender_is_allowlisted {
+        strip_remote_images(&stage2b)
+    } else {
+        stage2b
+    };
+
+    whitelist_sanitize(&stage2c)
+}
+
+// ---------------------------------------------------------------------------
+// Remote image stripping
+// ---------------------------------------------------------------------------
+
+/// Replace remote `<img src="http(s)://...">` with a placeholder.
+/// Preserves `cid:` (inline attachments) and `data:` (embedded) URIs.
+fn strip_remote_images(html: &str) -> String {
+    use lol_html::{element, rewrite_str, RewriteStrSettings};
+
+    let settings = RewriteStrSettings {
+        element_content_handlers: vec![element!("img[src]", |el| {
+            if let Some(src) = el.get_attribute("src") {
+                let lower = src.trim().to_ascii_lowercase();
+                if lower.starts_with("http://") || lower.starts_with("https://") {
+                    // Replace with a blocked-image placeholder
+                    el.remove_attribute("src");
+                    el.set_attribute("data-blocked-src", &src)
+                        .unwrap_or_default();
+                    el.set_attribute("alt", "[Remote image blocked]")
+                        .unwrap_or_default();
+                    el.set_attribute("style", "display:inline-block;width:20px;height:20px;background:#ddd;border:1px solid #ccc;")
+                        .unwrap_or_default();
+                }
+                // cid: and data: URIs pass through untouched
+            }
+            Ok(())
+        })],
+        ..RewriteStrSettings::default()
+    };
+
+    match rewrite_str(html, settings) {
+        Ok(result) => result,
+        Err(e) => {
+            log::warn!("Remote image stripping failed: {e}");
+            html.to_string()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AMP HTML stripping
+// ---------------------------------------------------------------------------
+
+/// AMP email elements that should be removed entirely (with content).
+const AMP_REMOVE_TAGS: &[&str] = &[
+    "amp-img",
+    "amp-anim",
+    "amp-carousel",
+    "amp-accordion",
+    "amp-sidebar",
+    "amp-image-lightbox",
+    "amp-fit-text",
+    "amp-layout",
+    "amp-selector",
+    "amp-bind-macro",
+    "amp-list",
+    "amp-form",
+    "amp-mustache",
+    "amp-timeago",
+];
+
+/// Strip AMP-specific elements from HTML.
+///
+/// AMP for Email (`text/x-amp-html`) can execute dynamic content.
+/// We neutralize by stripping all `amp-*` custom elements and removing
+/// the `<html amp4email>` attribute.
+fn strip_amp_elements(html: &str) -> String {
+    use lol_html::{element, rewrite_str, RewriteStrSettings};
+
+    let mut handlers = Vec::new();
+
+    // Remove known AMP elements entirely
+    for &tag in AMP_REMOVE_TAGS {
+        handlers.push(element!(tag, |el| {
+            el.remove();
+            Ok(())
+        }));
+    }
+
+    // Strip amp4email attribute from <html> tag
+    handlers.push(element!("html", |el| {
+        el.remove_attribute("amp4email");
+        el.remove_attribute("⚡4email");
+        Ok(())
+    }));
+
+    let settings = RewriteStrSettings {
+        element_content_handlers: handlers,
+        ..RewriteStrSettings::default()
+    };
+
+    match rewrite_str(html, settings) {
+        Ok(result) => result,
+        Err(e) => {
+            log::warn!("AMP stripping failed: {e}");
+            html.to_string()
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -431,6 +561,73 @@ mod tests {
         assert!(result.contains("<font"));
         assert!(result.contains("Formatted"));
     }
+
+    // ── Remote image blocking tests ────────────────────────
+
+    #[test]
+    fn remote_images_blocked() {
+        let html = r#"<img src="https://tracker.example.com/pixel.gif"><p>Text</p>"#;
+        let result = sanitize_html_body_with_image_policy(html, true, false);
+        assert!(!result.contains("tracker.example.com"));
+        assert!(result.contains("Remote image blocked"));
+        assert!(result.contains("Text"));
+    }
+
+    #[test]
+    fn remote_images_allowed_when_allowlisted() {
+        let html = r#"<img src="https://example.com/photo.jpg"><p>Text</p>"#;
+        let result = sanitize_html_body_with_image_policy(html, true, true);
+        assert!(result.contains("https://example.com/photo.jpg"));
+    }
+
+    #[test]
+    fn cid_images_not_blocked() {
+        let html = r#"<img src="cid:image001@01D1234"><p>Text</p>"#;
+        let result = sanitize_html_body_with_image_policy(html, true, false);
+        assert!(result.contains("cid:"));
+    }
+
+    #[test]
+    fn data_uri_images_not_blocked() {
+        let html = r#"<img src="data:image/png;base64,iVBOR"><p>Text</p>"#;
+        let result = sanitize_html_body_with_image_policy(html, true, false);
+        assert!(result.contains("data:image/png"));
+    }
+
+    #[test]
+    fn remote_images_pass_when_policy_off() {
+        let html = r#"<img src="https://example.com/photo.jpg">"#;
+        let result = sanitize_html_body_with_image_policy(html, false, false);
+        assert!(result.contains("https://example.com/photo.jpg"));
+    }
+
+    // ── AMP blocking tests ──────────────────────────────────
+
+    #[test]
+    fn amp_elements_stripped() {
+        let html = r#"<amp-img src="photo.jpg" width="300" height="200"></amp-img><p>Text</p>"#;
+        let result = sanitize_html_body_with_image_policy(html, false, false);
+        assert!(!result.contains("amp-img"));
+        assert!(result.contains("Text"));
+    }
+
+    #[test]
+    fn amp_carousel_stripped() {
+        let html = r#"<amp-carousel type="slides"><div>Slide 1</div></amp-carousel><p>After</p>"#;
+        let result = sanitize_html_body_with_image_policy(html, false, false);
+        assert!(!result.contains("amp-carousel"));
+        assert!(result.contains("After"));
+    }
+
+    #[test]
+    fn amp4email_attribute_stripped() {
+        let html = r#"<html amp4email><head></head><body><p>Content</p></body></html>"#;
+        let result = sanitize_html_body_with_image_policy(html, false, false);
+        assert!(!result.contains("amp4email"));
+        assert!(result.contains("Content"));
+    }
+
+    // ── Existing tests ──────────────────────────────────────
 
     #[test]
     fn blockquote_preserved() {
