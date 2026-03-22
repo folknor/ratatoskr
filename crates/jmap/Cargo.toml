@@ -30,7 +30,7 @@ ratatoskr-sync = { path = "../sync" }
 # Crate-specific deps
 log = "0.4"
 async-trait = "0.1"
-jmap-client = { version = "0.4", default-features = false, features = ["async"] }
+jmap-client = { git = "https://github.com/folknor/jmap-client", branch = "main", default-features = false, features = ["async"] }
 tokio-tungstenite = { version = "0.29", features = ["native-tls"] }
 futures = "0.3"
 rusqlite.workspace = true

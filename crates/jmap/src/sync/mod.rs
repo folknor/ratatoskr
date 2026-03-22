@@ -298,6 +298,12 @@ pub async fn jmap_delta_sync(
         Err(e) => log::warn!("[JMAP] Contacts delta sync failed for account {account_id}: {e}"),
     }
 
+    // 4. Calendar delta sync
+    match super::calendar_sync::sync_calendars(client, account_id, db).await {
+        Ok(()) => log::debug!("[JMAP] Calendar delta sync complete for account {account_id}"),
+        Err(e) => log::warn!("[JMAP] Calendar delta sync failed for account {account_id}: {e}"),
+    }
+
     log::info!(
         "[JMAP] Delta sync complete for account {account_id}: {} new inbox, {} threads affected",
         new_inbox_ids.len(), affected_thread_ids.len()

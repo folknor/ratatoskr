@@ -52,7 +52,7 @@ zstd = "0.13"
 getrandom = { version = "0.2", features = ["std"] }
 urlencoding = "2"
 uuid = { version = "1", features = ["v4"] }
-jmap-client = { version = "0.4", default-features = false, features = ["async"] }
+jmap-client = { git = "https://github.com/folknor/jmap-client", branch = "main", default-features = false, features = ["async"] }
 tokio-tungstenite = { version = "0.29", features = ["native-tls"] }
 async-trait = "0.1"
 hickory-resolver = { version = "0.25", features = ["tokio"] }
