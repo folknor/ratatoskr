@@ -103,7 +103,7 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **iced_drop for cross-container DnD** — Custom DragState works for list reorder. iced_drop needed for: compose token DnD, label drag-to-file, calendar event dragging, attachment drag zones.
 - [ ] **Read receipts (outgoing)** — MDN support. See `docs/roadmap/tracking-blocking.md`.
 - [ ] **Inline image store eviction UI** — Settings control for store size (128 MB hardcoded).
-- [ ] **Compose auto-save subscription** — `iced::time::every(30s)` for compose windows with draft_dirty set. Infrastructure exists (`DRAFT_AUTO_SAVE_INTERVAL`, `has_dirty_compose_drafts`, `auto_save_compose_drafts`) but subscription not wired in `App::subscription()`.
+
 - [ ] **Provider push notifications** — IMAP IDLE, JMAP push, Graph webhooks, Gmail watch.
 - [ ] **Connect sync orchestrator to IcedProgressReporter** — Reporter and subscription exist, sync pipeline not yet using it. Once connected, also wire `begin_sync_generation`/`prune_stale_sync` for stale progress cleanup.
 - [ ] **Token expiry → status bar warning** — `WarningKind::TokenExpiry` type, UI, and click-to-reauth handler all exist. Missing: auth error detection path that calls `status_bar.set_warning()` with `TokenExpiry` when OAuth refresh fails or tokens expire.

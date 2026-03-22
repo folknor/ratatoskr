@@ -107,6 +107,7 @@ impl Component for Settings {
                             body_editor: RteEditorState::from_html(&sig.body_html),
                             is_default: sig.is_default,
                             is_reply_default: sig.is_reply_default,
+                            dirty: false,
                         });
                         self.overlay = Some(SettingsOverlay::EditSignature {
                             signature_id: Some(sig.id.clone()),
@@ -497,6 +498,7 @@ impl Settings {
                         body_editor: RteEditorState::from_html(&sig.body_html),
                         is_default: sig.is_default,
                         is_reply_default: sig.is_reply_default,
+                        dirty: false,
                     });
                     self.overlay = Some(SettingsOverlay::EditSignature {
                         signature_id: Some(sig.id.clone()),
@@ -513,6 +515,7 @@ impl Settings {
                     body_editor: RteEditorState::new(),
                     is_default: false,
                     is_reply_default: false,
+                    dirty: false,
                 });
                 self.overlay = Some(SettingsOverlay::EditSignature {
                     signature_id: None,
@@ -523,6 +526,7 @@ impl Settings {
             SettingsMessage::SignatureEditorNameChanged(v) => {
                 if let Some(ref mut editor) = self.signature_editor {
                     editor.name.set_text(v);
+                    editor.dirty = true;
                 }
             }
             SettingsMessage::SignatureEditorBodyChanged(_) => {
@@ -532,16 +536,19 @@ impl Settings {
             SettingsMessage::SignatureEditorAction(action) => {
                 if let Some(ref mut editor) = self.signature_editor {
                     editor.body_editor.perform(action);
+                    editor.dirty = true;
                 }
             }
             SettingsMessage::SignatureEditorToggleDefault(v) => {
                 if let Some(ref mut editor) = self.signature_editor {
                     editor.is_default = v;
+                    editor.dirty = true;
                 }
             }
             SettingsMessage::SignatureEditorToggleReplyDefault(v) => {
                 if let Some(ref mut editor) = self.signature_editor {
                     editor.is_reply_default = v;
+                    editor.dirty = true;
                 }
             }
             SettingsMessage::OpenOverlay(overlay) => {
@@ -612,17 +619,20 @@ impl Settings {
             SettingsMessage::GroupEditorNameChanged(v) => {
                 if let Some(ref mut editor) = self.group_editor {
                     editor.name = v;
+                    editor.dirty = true;
                 }
             }
             SettingsMessage::GroupEditorRemoveMember(email) => {
                 if let Some(ref mut editor) = self.group_editor {
                     editor.members.retain(|m| m != &email);
+                    editor.dirty = true;
                 }
             }
             SettingsMessage::GroupEditorAddMember(email) => {
                 if let Some(ref mut editor) = self.group_editor {
                     if !editor.members.contains(&email) {
                         editor.members.push(email);
+                        editor.dirty = true;
                     }
                 }
             }
@@ -860,6 +870,7 @@ impl Settings {
                 name: group.name.clone(),
                 members: Vec::new(), // will be populated from DB via App
                 filter: String::new(),
+                dirty: false,
             });
             self.overlay = Some(SettingsOverlay::EditGroup {
                 group_id: Some(group.id.clone()),
@@ -874,6 +885,7 @@ impl Settings {
             name: String::new(),
             members: Vec::new(),
             filter: String::new(),
+            dirty: false,
         });
         self.overlay = Some(SettingsOverlay::EditGroup { group_id: None });
         self.overlay_anim.go_mut(true, Instant::now());

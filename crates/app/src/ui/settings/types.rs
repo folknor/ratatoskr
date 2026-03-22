@@ -391,6 +391,8 @@ pub struct SignatureEditorState {
     pub body_editor: RteEditorState,
     pub is_default: bool,
     pub is_reply_default: bool,
+    /// Whether fields have been modified since opening the editor.
+    pub dirty: bool,
 }
 
 /// State for signature drag-reorder within a single account section.
@@ -431,6 +433,8 @@ pub struct GroupEditorState {
     pub name: String,
     pub members: Vec<String>,
     pub filter: String,
+    /// Whether fields have been modified since opening the editor.
+    pub dirty: bool,
 }
 
 /// Re-export of `ContactField` from the import crate, used in settings messages.
