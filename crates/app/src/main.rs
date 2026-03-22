@@ -303,6 +303,7 @@ struct App {
     undo_stack: UndoStack,
 
     // Search state
+    search_state: Option<Arc<ratatoskr_core::search::SearchState>>,
     search_generation: u64,
     search_query: UndoableText,
     search_debounce_deadline: Option<iced::time::Instant>,
@@ -423,6 +424,9 @@ impl App {
                 resolver,
             ),
             undo_stack: UndoStack::default(),
+            search_state: ratatoskr_core::search::SearchState::init(data_dir)
+                .map(Arc::new)
+                .ok(),
             search_generation: 0,
             search_query: UndoableText::new(),
             search_debounce_deadline: None,

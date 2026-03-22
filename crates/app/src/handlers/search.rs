@@ -63,10 +63,11 @@ impl App {
         self.search_generation += 1;
         let generation = self.search_generation;
         let db = Arc::clone(&self.db);
+        let ss = self.search_state.clone();
 
         Task::perform(
             async move {
-                let result = execute_search(db, query).await;
+                let result = execute_search(db, ss, query).await;
                 (generation, result)
             },
             |(g, result)| Message::SearchResultsLoaded(g, result),
@@ -160,11 +161,12 @@ impl App {
         self.search_generation += 1;
         let generation = self.search_generation;
         let db = Arc::clone(&self.db);
+        let ss = self.search_state.clone();
 
         let search_query = self.search_query.text().to_string();
         Task::perform(
             async move {
-                let result = execute_search(db, search_query).await;
+                let result = execute_search(db, ss, search_query).await;
                 (generation, result)
             },
             |(g, result)| Message::SearchResultsLoaded(g, result),
@@ -539,26 +541,21 @@ impl App {
 
 /// Execute search off the main thread via spawn_blocking.
 ///
-/// Tries the unified search pipeline (Tantivy + SQL) first. Falls back
-/// to SQL-only via the smart folder parser if no Tantivy index exists,
-/// and to a simple LIKE search for pure free-text without operators.
+/// Uses the provided SearchState (initialized once at boot) for Tantivy.
+/// Falls back to SQL-only if no SearchState is available.
 pub(crate) async fn execute_search(
     db: Arc<db::Db>,
+    search_state: Option<Arc<ratatoskr_core::search::SearchState>>,
     query: String,
 ) -> Result<Vec<Thread>, String> {
     db.with_conn(move |conn| {
-        let data_dir = crate::APP_DATA_DIR.get().ok_or("APP_DATA_DIR not set")?;
-        match ratatoskr_core::search::SearchState::init(data_dir) {
-            Ok(search_state) => {
-                let results = ratatoskr_core::search_pipeline::search(
-                    &query, &search_state, conn,
-                )?;
-                Ok(results.into_iter().map(unified_result_to_thread).collect())
-            }
-            Err(_) => {
-                // Tantivy index not available — fall back to SQL-only
-                execute_search_sql_fallback(conn, &query)
-            }
+        if let Some(ref ss) = search_state {
+            let results = ratatoskr_core::search_pipeline::search(
+                &query, ss, conn,
+            )?;
+            Ok(results.into_iter().map(unified_result_to_thread).collect())
+        } else {
+            execute_search_sql_fallback(conn, &query)
         }
     })
     .await
