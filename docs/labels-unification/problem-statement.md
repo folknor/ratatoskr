@@ -263,42 +263,33 @@ Computed alongside navigation state loading and cached in sidebar state.
 
 ## Migration
 
-### Phase 1: Schema
+### Phase 1: Schema ✅
 
-Add a `label_kind` column to the `labels` table:
+Migration 67 adds `label_kind TEXT NOT NULL DEFAULT 'container'` to `labels`. Backfills `type='user'` rows to `label_kind='tag'`. Creates `label_color_overrides` table.
 
-```sql
-ALTER TABLE labels ADD COLUMN label_kind TEXT NOT NULL DEFAULT 'container';
-```
+### Phase 2: Exchange category sync ✅
 
-Populate for existing rows:
-- Gmail labels with `type = 'system'` → `'container'`
-- Gmail labels with `type = 'user'` → `'tag'`
-- All other provider labels → `'container'` (preserves existing behavior)
+`graph_categories_sync` upserts categories as `label_kind='tag'` labels (prefixed `cat:`). `store_thread_to_db` writes category-backed `thread_labels` entries. Both run alongside legacy `categories`/`message_categories` writes.
 
-Create the `label_color_overrides` table.
+### Phase 3: IMAP/JMAP keyword sync ✅
 
-### Phase 2: Exchange category sync
+IMAP: `FlagChange` now carries `keywords: Vec<String>` extracted from `Flag::Custom`. `apply_flag_changes` writes keywords as `label_kind='tag'` labels (prefixed `kw:`) with `thread_labels` entries.
 
-Modify Exchange sync to write categories as `label_kind = 'tag'` rows in the `labels` table instead of (or in addition to) the `categories` table. Update `thread_labels` instead of `message_categories`.
+JMAP: `sync_keyword_categories` upserts keywords as tag-type labels alongside the legacy categories writes.
 
-### Phase 3: IMAP/JMAP keyword sync
+### Phase 4: Local label dispatch ✅
 
-Modify IMAP sync to write keywords as `label_kind = 'tag'` rows in the `labels` table. Respect `PERMANENTFLAGS` capability.
+`EmailAction::AddLabel`/`RemoveLabel` now perform actual DB operations — `thread_labels` INSERT/DELETE for all selected threads. Local-first (optimistic); provider write-back via sync.
 
-Modify JMAP sync similarly for keywords.
+Note: `apply_category()`/`remove_category()` not yet removed from ProviderOps — deferred until provider client access is available from the app layer for full write-back.
 
-### Phase 4: Unify ProviderOps
+### Phase 5: Sidebar restructure ✅
 
-Remove `apply_category()`/`remove_category()` from ProviderOps. Update `add_tag()`/`remove_tag()` to handle tag-type labels using `label_kind` to select the correct remote operation.
-
-### Phase 5: Sidebar restructure
-
-Update sidebar to implement the four-section structure, using `label_kind` to route labels to section 2 (containers) or section 4 (tags).
+`FolderKind::AccountTag` variant added. `build_account_labels` routes by `label_kind`. New `build_all_account_tags` loads tag-type labels from all accounts with cross-account unread aggregation. Sidebar renders tags in section 4 ("LABELS"), always visible.
 
 ### Phase 6: Deprecate old tables
 
-Once all sync paths write to `labels`/`thread_labels`, drop `categories` and `message_categories` tables in a future migration.
+Deferred. Once all sync paths are verified on the unified system, drop `categories` and `message_categories` tables.
 
 ## Accepted Trade-offs
 

@@ -24,14 +24,15 @@
 
 Features with backend complete but UI or integration work remaining. Each references its roadmap spec.
 
-### Categories — `docs/roadmap/categories.md`
+### Labels Unification — `docs/labels-unification/problem-statement.md`
 
-Backend complete (all 4 providers sync, 25-preset color model, ProviderOps apply/remove). Remaining:
+Phases 1-5 complete (schema, Exchange/IMAP/JMAP sync, local dispatch, sidebar). Remaining:
 
-- [ ] **Category picker UI** — Color palette grid widget exists (`widgets.rs::color_palette_grid`). Need a picker overlay that lists account categories with colors, triggered from reading pane or command palette.
-- [ ] **Category badges on messages/threads** — Display category names with colors on thread list cards and expanded message headers. Data available via `message_categories` join table.
-- [ ] **Apply/Remove Category commands** — `CommandId::EmailAddLabel` and `EmailRemoveLabel` exist but route to label operations. Need parallel `ApplyCategory`/`RemoveCategory` commands, or reuse the label commands with a category-aware resolver.
-- [ ] **IMAP keyword write-back** — `apply_category`/`remove_category` on IMAP provider use `set_keyword_if_supported()` but need verification that write-back survives PERMANENTFLAGS restrictions gracefully.
+- [ ] **Label pills in reading pane** — Display tag-type labels as colored pills on expanded message headers. Data now in `thread_labels` via unified sync.
+- [ ] **Label picker overlay** — Triggered from reading pane or command palette. Lists all available tag-type labels with colors for apply/remove.
+- [ ] **Provider write-back for label operations** — Local apply/remove works (Phase 4). Actual provider API calls (Exchange category set, IMAP STORE +FLAGS, JMAP keyword set) awaits provider client access from app layer.
+- [ ] **Phase 6: Deprecate old tables** — Drop `categories` and `message_categories` tables once all sync paths are verified on the unified system.
+- [ ] **IMAP PERMANENTFLAGS graceful degradation** — Verify keyword write-back survives server restrictions. UI should indicate when an IMAP account doesn't support custom keywords.
 
 ### Tracking Blocking — `docs/roadmap/tracking-blocking.md`
 
