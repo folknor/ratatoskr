@@ -71,8 +71,15 @@ Exchange Graph sync + Autodiscover + sidebar integration done. Remaining:
 - [ ] **Thread loading on selection** — App handler for `SharedMailboxSelected` event to load navigation and threads for the selected shared mailbox.
 - [ ] **Compose identity auto-selection** — When replying from shared mailbox context, auto-set From to shared mailbox address. `send_as_shared_mailbox()` and `send_on_behalf_of()` APIs exist.
 - [ ] **Gmail delegation support** — Blocked (API limitation). Send-As aliases work.
-- [x] **JMAP Sharing support** — In progress (separate implementation). *(2026-03-22)*
 - [ ] **Per-mailbox sync depth config** — Currently hardcoded to 30 days. No per-mailbox setting.
+
+### JMAP Sharing — `docs/roadmap/jmap-sharing.md`
+
+All 6 backend phases complete (discovery, sync, rights, subscription, notifications, identity resolution). Remaining app-crate UI integration:
+
+- [ ] **Rights gating on action buttons** — `NavigationFolder.rights` (`MailboxRightsInfo`) is populated from synced `myRights`. App should check `may_delete`, `may_rename`, `may_submit` etc. before showing action buttons. Especially important for shared/read-only mailboxes where the user lacks write permissions.
+- [ ] **Subscription toggle in sidebar** — `NavigationFolder.is_subscribed` is populated from JMAP `isSubscribed`. App needs a UI toggle (context menu or button) on shared account labels that calls `JmapOps::subscribe_mailbox()` / `unsubscribe_mailbox()`. These accept an optional `jmap_account_id` for shared accounts.
+- [ ] **Compose identity auto-selection from shared mailbox** — `shared_mailbox_sync_state.email_address` is resolved via JMAP Principals (Phase 6). When replying from a shared mailbox context, compose should query `sync_state::get_shared_mailbox_email()` and auto-set From. Also check `may_submit` from the mailbox rights before offering the identity.
 
 ### IMAP CONDSTORE/QRESYNC — `docs/roadmap/imap-condstore-qresync.md`
 
