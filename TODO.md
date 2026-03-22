@@ -42,7 +42,14 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML. Remaining
 - [ ] **Inline image store eviction UI** — Settings control for store size (128 MB hardcoded).
 - [ ] **Compose auto-save subscription** — `iced::time::every(30s)` for compose windows with draft_dirty set. Infrastructure exists (`DRAFT_AUTO_SAVE_INTERVAL`, `has_dirty_compose_drafts`, `auto_save_compose_drafts`) but subscription not wired in `App::subscription()`.
 - [ ] **Provider push notifications** — IMAP IDLE, JMAP push, Graph webhooks, Gmail watch.
-- [ ] **Connect sync orchestrator to IcedProgressReporter** — Reporter and subscription exist, sync pipeline not yet using it.
+- [ ] **Connect sync orchestrator to IcedProgressReporter** — Reporter and subscription exist, sync pipeline not yet using it. Once connected, also wire `begin_sync_generation`/`prune_stale_sync` for stale progress cleanup.
+- [ ] **Token expiry → status bar warning** — `WarningKind::TokenExpiry` type, UI, and click-to-reauth handler all exist. Missing: auth error detection path that calls `status_bar.set_warning()` with `TokenExpiry` when OAuth refresh fails or tokens expire.
+- [ ] **Pop-out HTML rendering** — SimpleHtml/OriginalHtml modes in message view pop-out fall back to plain text. Depends on the DOM-to-widget pipeline (`html_render.rs`) being wired into the pop-out view. Tracked separately in the HTML rendering section above.
+- [ ] **Pop-out Print** — OS print dialog integration for message view and compose pop-out windows. Platform-specific, no iced precedent. Needs investigation.
+- [ ] **Pop-out default rendering mode from settings** — `MessageViewState` hardcodes `RenderingMode::default()` (SimpleHtml). Should load from a system-wide user preference. Needs a settings field + plumbing to pass it into `from_thread_message()` and `from_session_entry()`.
+- [ ] **Signature: draft restoration with signature state** — Draft save does not persist `signature_separator_index` or `active_signature_id`. On draft reopen, signature position in the document is not reconstructed.
+- [ ] **Signature: per-account default dropdown in Account Settings** — Account editor overlay has no signature dropdown for selecting the default signature for an account.
+- [ ] **Signature: edit detection flag** — No dirty/edited tracking in `SignatureEditorState` for confirming unsaved changes on close.
 
 ## Cross-Cutting Architecture Patterns
 
