@@ -52,20 +52,7 @@ pub async fn save_jmap_sync_state(
     state_type: &str,
     state: &str,
 ) -> Result<(), String> {
-    let aid = account_id.to_string();
-    let st = state_type.to_string();
-    let sv = state.to_string();
-
-    db.with_conn(move |conn| {
-        conn.execute(
-            "INSERT OR REPLACE INTO jmap_sync_state (account_id, type, state, updated_at) \
-             VALUES (?1, ?2, ?3, strftime('%s', 'now'))",
-            rusqlite::params![aid, st, sv],
-        )
-        .map_err(|e| format!("save jmap sync state: {e}"))?;
-        Ok(())
-    })
-    .await
+    save_jmap_sync_state_for(db, account_id, None, state_type, state).await
 }
 
 pub async fn load_jmap_sync_state(
@@ -73,13 +60,56 @@ pub async fn load_jmap_sync_state(
     account_id: &str,
     state_type: &str,
 ) -> Result<Option<String>, String> {
+    load_jmap_sync_state_for(db, account_id, None, state_type).await
+}
+
+/// Save JMAP sync state for a specific (possibly shared) account.
+///
+/// `shared_account_id` is `None` for the primary account, `Some(jmap_id)` for
+/// a shared account discovered from the JMAP Session.
+pub async fn save_jmap_sync_state_for(
+    db: &DbState,
+    account_id: &str,
+    shared_account_id: Option<&str>,
+    state_type: &str,
+    state: &str,
+) -> Result<(), String> {
     let aid = account_id.to_string();
+    let said = shared_account_id.map(String::from);
+    let st = state_type.to_string();
+    let sv = state.to_string();
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "INSERT INTO jmap_sync_state (account_id, shared_account_id, type, state, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, strftime('%s', 'now')) \
+             ON CONFLICT(account_id, COALESCE(shared_account_id, ''), type) \
+             DO UPDATE SET state = ?4, updated_at = strftime('%s', 'now')",
+            rusqlite::params![aid, said, st, sv],
+        )
+        .map_err(|e| format!("save jmap sync state: {e}"))?;
+        Ok(())
+    })
+    .await
+}
+
+/// Load JMAP sync state for a specific (possibly shared) account.
+pub async fn load_jmap_sync_state_for(
+    db: &DbState,
+    account_id: &str,
+    shared_account_id: Option<&str>,
+    state_type: &str,
+) -> Result<Option<String>, String> {
+    let aid = account_id.to_string();
+    let said = shared_account_id.map(String::from);
     let st = state_type.to_string();
 
     db.with_conn(move |conn| {
         conn.query_row(
-            "SELECT state FROM jmap_sync_state WHERE account_id = ?1 AND type = ?2",
-            rusqlite::params![aid, st],
+            "SELECT state FROM jmap_sync_state \
+             WHERE account_id = ?1 AND type = ?2 \
+             AND COALESCE(shared_account_id, '') = COALESCE(?3, '')",
+            rusqlite::params![aid, st, said],
             |row| row.get::<_, String>("state"),
         )
         .optional()

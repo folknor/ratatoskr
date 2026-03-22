@@ -14,7 +14,7 @@ use ratatoskr_sync::persistence as sync_persistence;
 // ---------------------------------------------------------------------------
 
 /// Persist parsed messages to DB, body store, and search index.
-pub(super) async fn persist_messages(
+pub(crate) async fn persist_messages(
     ctx: &SyncCtx<'_>,
     messages: &[ParsedJmapMessage],
     _mailbox_data: &[(String, Option<String>, String)],
@@ -62,7 +62,7 @@ pub(super) async fn persist_messages(
 
 /// Delete messages from DB, body store, and search index.
 /// Also updates or removes parent threads as needed.
-pub(super) async fn delete_messages(ctx: &SyncCtx<'_>, message_ids: &[&str]) -> Result<(), String> {
+pub(crate) async fn delete_messages(ctx: &SyncCtx<'_>, message_ids: &[&str]) -> Result<(), String> {
     let aid = ctx.account_id.to_string();
     let ids: Vec<String> = message_ids.iter().map(|s| (*s).to_string()).collect();
 

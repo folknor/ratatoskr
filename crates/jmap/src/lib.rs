@@ -8,4 +8,5 @@ pub mod parse;
 pub mod push;
 pub mod sieve;
 pub mod signatures;
+pub mod shared_mailbox_sync;
 pub mod sync;

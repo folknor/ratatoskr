@@ -1429,6 +1429,19 @@ static MIGRATIONS: &[Migration] = &[
             );
         "#,
     },
+    Migration {
+        version: 68,
+        description: "JMAP shared account sync state support",
+        sql: r#"
+            ALTER TABLE jmap_sync_state ADD COLUMN shared_account_id TEXT;
+
+            -- Rebuild the primary key as a unique index covering the new column.
+            -- SQLite doesn't allow ALTER PRIMARY KEY, so we use a unique index.
+            -- NULL shared_account_id = primary account; non-NULL = shared account.
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_jmap_sync_state_shared
+                ON jmap_sync_state(account_id, COALESCE(shared_account_id, ''), type);
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

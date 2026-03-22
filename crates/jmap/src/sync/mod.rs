@@ -1,5 +1,5 @@
-mod mailbox;
-mod storage;
+pub(crate) mod mailbox;
+pub(crate) mod storage;
 
 use std::collections::{HashMap, HashSet};
 
@@ -47,6 +47,29 @@ pub(crate) struct SyncCtx<'a> {
     pub inline_images: &'a InlineImageStoreState,
     pub search: &'a SearchState,
     pub progress: &'a dyn ProgressReporter,
+    /// Override the JMAP account ID for shared account sync.
+    /// `None` = use `request.default_account_id()` (primary account).
+    /// `Some(id)` = target a shared account from the JMAP Session.
+    pub jmap_account_id: Option<String>,
+}
+
+impl SyncCtx<'_> {
+    /// The JMAP account ID to use in method calls.
+    /// Falls back to `default_account_id()` if no override is set.
+    pub fn target_account_id(&self) -> String {
+        if let Some(ref id) = self.jmap_account_id {
+            id.clone()
+        } else {
+            let inner = self.client.inner();
+            let request = inner.build();
+            request.default_account_id().to_string()
+        }
+    }
+
+    /// The shared account ID for sync state storage, or `None` for primary.
+    pub fn shared_account_id(&self) -> Option<&str> {
+        self.jmap_account_id.as_deref()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -73,6 +96,7 @@ pub async fn jmap_initial_sync(
         inline_images,
         search,
         progress,
+        jmap_account_id: None,
     };
 
     log::info!("[JMAP] Starting initial sync for account {account_id} (days_back={days_back})");
@@ -164,9 +188,21 @@ async fn query_email_page(
     position: usize,
     calculate_total: bool,
 ) -> Result<QueryResponse, String> {
+    query_email_page_for(client, None, since_ts, position, calculate_total).await
+}
+
+pub(crate) async fn query_email_page_for(
+    client: &JmapClient,
+    jmap_account_id: Option<&str>,
+    since_ts: i64,
+    position: usize,
+    calculate_total: bool,
+) -> Result<QueryResponse, String> {
     let inner = client.inner();
     let mut request = inner.build();
-    let account_id = request.default_account_id().to_string();
+    let account_id = jmap_account_id
+        .map(String::from)
+        .unwrap_or_else(|| request.default_account_id().to_string());
     let mut query = email::EmailQuery::new(&account_id);
     query.filter(email::query::Filter::after(since_ts));
     query.sort([email::query::Comparator::received_at()]);
@@ -210,6 +246,7 @@ pub async fn jmap_delta_sync(
         inline_images,
         search,
         progress,
+        jmap_account_id: None,
     };
 
     // Load current sync states
@@ -337,9 +374,20 @@ pub(crate) async fn fetch_email_batch(
     client: &JmapClient,
     ids: &[&str],
 ) -> Result<Vec<jmap_client::email::Email>, String> {
+    fetch_email_batch_for(client, None, ids).await
+}
+
+/// Fetch a batch of emails for a specific JMAP account.
+pub(crate) async fn fetch_email_batch_for(
+    client: &JmapClient,
+    jmap_account_id: Option<&str>,
+    ids: &[&str],
+) -> Result<Vec<jmap_client::email::Email>, String> {
     let inner = client.inner();
     let mut request = inner.build();
-    let account_id = request.default_account_id().to_string();
+    let account_id = jmap_account_id
+        .map(String::from)
+        .unwrap_or_else(|| request.default_account_id().to_string());
     let mut get = email::EmailGet::new(&account_id);
     get.ids(ids.iter().copied());
     get.properties(email_get_properties());
@@ -434,6 +482,36 @@ async fn load_sync_state(
     state_type: &str,
 ) -> Result<Option<String>, String> {
     sync_state::load_jmap_sync_state(db, account_id, state_type).await
+}
+
+/// Save sync state using the context's shared account discriminator.
+pub(crate) async fn save_sync_state_ctx(
+    ctx: &SyncCtx<'_>,
+    state_type: &str,
+    state: &str,
+) -> Result<(), String> {
+    sync_state::save_jmap_sync_state_for(
+        ctx.db,
+        ctx.account_id,
+        ctx.shared_account_id(),
+        state_type,
+        state,
+    )
+    .await
+}
+
+/// Load sync state using the context's shared account discriminator.
+pub(crate) async fn load_sync_state_ctx(
+    ctx: &SyncCtx<'_>,
+    state_type: &str,
+) -> Result<Option<String>, String> {
+    sync_state::load_jmap_sync_state_for(
+        ctx.db,
+        ctx.account_id,
+        ctx.shared_account_id(),
+        state_type,
+    )
+    .await
 }
 
 // ---------------------------------------------------------------------------

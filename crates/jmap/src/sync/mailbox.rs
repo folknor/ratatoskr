@@ -12,7 +12,7 @@ use super::SyncCtx;
 // ---------------------------------------------------------------------------
 
 /// Fetch all mailboxes, persist as labels, return (mailbox_map, mailbox_data).
-pub(super) async fn sync_mailboxes(
+pub(crate) async fn sync_mailboxes(
     ctx: &SyncCtx<'_>,
 ) -> Result<
     (
@@ -21,7 +21,7 @@ pub(super) async fn sync_mailboxes(
     ),
     String,
 > {
-    let mailboxes = fetch_all_mailboxes(ctx.client).await?;
+    let mailboxes = fetch_all_mailboxes_for(ctx.client, ctx.jmap_account_id.as_deref()).await?;
 
     let mut mailbox_map = HashMap::new();
     let mut mailbox_data = Vec::new();
@@ -173,9 +173,18 @@ pub(super) async fn sync_mailbox_changes(
 // ---------------------------------------------------------------------------
 
 pub(super) async fn get_mailbox_state(client: &JmapClient) -> Result<String, String> {
+    get_mailbox_state_for(client, None).await
+}
+
+pub(crate) async fn get_mailbox_state_for(
+    client: &JmapClient,
+    jmap_account_id: Option<&str>,
+) -> Result<String, String> {
     let inner = client.inner();
     let mut request = inner.build();
-    let account_id = request.default_account_id().to_string();
+    let account_id = jmap_account_id
+        .map(String::from)
+        .unwrap_or_else(|| request.default_account_id().to_string());
     let get = MailboxGet::new(&account_id);
     let handle = request
         .call(get)
@@ -192,9 +201,18 @@ pub(super) async fn get_mailbox_state(client: &JmapClient) -> Result<String, Str
 }
 
 pub(super) async fn get_email_state(client: &JmapClient) -> Result<String, String> {
+    get_email_state_for(client, None).await
+}
+
+pub(crate) async fn get_email_state_for(
+    client: &JmapClient,
+    jmap_account_id: Option<&str>,
+) -> Result<String, String> {
     let inner = client.inner();
     let mut request = inner.build();
-    let account_id = request.default_account_id().to_string();
+    let account_id = jmap_account_id
+        .map(String::from)
+        .unwrap_or_else(|| request.default_account_id().to_string());
     let mut get = EmailGet::new(&account_id);
     get.ids(std::iter::empty::<&str>());
     let handle = request
@@ -220,9 +238,19 @@ pub(super) async fn get_email_state(client: &JmapClient) -> Result<String, Strin
 pub async fn fetch_all_mailboxes(
     client: &JmapClient,
 ) -> Result<Vec<jmap_client::mailbox::Mailbox<jmap_client::Get>>, String> {
+    fetch_all_mailboxes_for(client, None).await
+}
+
+/// Fetch all mailboxes for a specific JMAP account.
+pub async fn fetch_all_mailboxes_for(
+    client: &JmapClient,
+    jmap_account_id: Option<&str>,
+) -> Result<Vec<jmap_client::mailbox::Mailbox<jmap_client::Get>>, String> {
     let inner = client.inner();
     let mut request = inner.build();
-    let account_id = request.default_account_id().to_string();
+    let account_id = jmap_account_id
+        .map(String::from)
+        .unwrap_or_else(|| request.default_account_id().to_string());
     let get = MailboxGet::new(&account_id);
     let handle = request
         .call(get)

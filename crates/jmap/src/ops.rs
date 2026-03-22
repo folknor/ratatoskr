@@ -50,6 +50,24 @@ impl ProviderOps for JmapOps {
             ctx.progress,
         )
         .await?;
+
+        // Sync shared JMAP accounts (discovered from Session in initial sync).
+        let shared_results = super::shared_mailbox_sync::sync_all_shared_accounts(
+            &self.client,
+            ctx.account_id,
+            ctx.db,
+            ctx.body_store,
+            ctx.inline_images,
+            ctx.search,
+            ctx.progress,
+        )
+        .await;
+        for (id, result) in &shared_results {
+            if let Err(e) = result {
+                log::warn!("[JMAP] Shared account {id} sync failed during initial: {e}");
+            }
+        }
+
         Ok(SyncResult::default())
     }
 
@@ -69,6 +87,24 @@ impl ProviderOps for JmapOps {
             ctx.progress,
         )
         .await?;
+
+        // Sync shared JMAP accounts after primary delta sync.
+        let shared_results = super::shared_mailbox_sync::sync_all_shared_accounts(
+            &self.client,
+            ctx.account_id,
+            ctx.db,
+            ctx.body_store,
+            ctx.inline_images,
+            ctx.search,
+            ctx.progress,
+        )
+        .await;
+        for (id, sr) in &shared_results {
+            if let Err(e) = sr {
+                log::warn!("[JMAP] Shared account {id} sync failed during delta: {e}");
+            }
+        }
+
         Ok(SyncResult {
             new_inbox_message_ids: result.new_inbox_email_ids,
             affected_thread_ids: result.affected_thread_ids,
