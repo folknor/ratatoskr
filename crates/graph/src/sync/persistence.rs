@@ -126,6 +126,22 @@ fn store_thread_to_db(
                     .map(move |cat| (msg.base.id.as_str(), cat.as_str()))
             }),
     )?;
+
+    // Also add category-backed labels to thread_labels for the unified labels system.
+    let mut seen_cats = std::collections::HashSet::new();
+    for msg in messages {
+        for cat in &msg.categories {
+            if seen_cats.insert(cat.as_str()) {
+                let label_id = format!("cat:{cat}");
+                tx.execute(
+                    "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
+                     VALUES (?1, ?2, ?3)",
+                    rusqlite::params![account_id, thread_id, label_id],
+                )
+                .map_err(|e| format!("insert category thread_label: {e}"))?;
+            }
+        }
+    }
     Ok(())
 }
 
