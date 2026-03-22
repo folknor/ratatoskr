@@ -200,15 +200,21 @@ pub async fn jmap_contacts_initial_sync(
     // Fetch all contact cards (no IDs = return all)
     let inner = client.inner();
     let mut request = inner.build();
-    request.get_contact_card();
-    let response = request
-        .send_get_contact_card()
+    let req_account_id = request.default_account_id().to_string();
+    let get = jmap_client::contact_card::ContactCardGet::new(&req_account_id);
+    let handle = request
+        .call(get)
+        .map_err(|e| format!("ContactCard/get (initial): {e}"))?;
+    let mut response = request
+        .send()
         .await
         .map_err(|e| format!("ContactCard/get (initial): {e}"))?;
+    let mut get_response = response
+        .get(&handle)
+        .map_err(|e| format!("ContactCard/get (initial): {e}"))?;
 
-    let state = response.state().to_string();
-    let mut response = response;
-    let cards = response.take_list();
+    let state = get_response.state().to_string();
+    let cards = get_response.take_list();
 
     log::info!(
         "[JMAP-Contacts] Fetched {} contact cards for account {account_id}",
@@ -364,7 +370,9 @@ pub async fn jmap_contacts_push_update(
 ) -> Result<(), String> {
     let inner = client.inner();
     let mut request = inner.build();
-    let update = request.set_contact_card().update(server_id);
+    let req_account_id = request.default_account_id().to_string();
+    let mut set = jmap_client::contact_card::ContactCardSet::new(&req_account_id);
+    let update = set.update(server_id);
 
     // Build phone property
     if let Some(phone_val) = phone {
@@ -393,9 +401,15 @@ pub async fn jmap_contacts_push_update(
         update.notes(notes_map);
     }
 
-    request
-        .send_set_contact_card()
+    let handle = request
+        .call(set)
+        .map_err(|e| format!("ContactCard/set (update): {e}"))?;
+    let mut response = request
+        .send()
         .await
+        .map_err(|e| format!("ContactCard/set (update): {e}"))?;
+    response
+        .get(&handle)
         .map_err(|e| format!("ContactCard/set (update): {e}"))?;
 
     log::info!("[JMAP-Contacts] Pushed update for contact {server_id}");
@@ -451,14 +465,21 @@ async fn fetch_contact_batch(
 ) -> Result<Vec<jmap_client::contact_card::ContactCard>, String> {
     let inner = client.inner();
     let mut request = inner.build();
-    request.get_contact_card().ids(ids.iter().copied());
-    let response = request
-        .send_get_contact_card()
+    let req_account_id = request.default_account_id().to_string();
+    let mut get = jmap_client::contact_card::ContactCardGet::new(&req_account_id);
+    get.ids(ids.iter().copied());
+    let handle = request
+        .call(get)
+        .map_err(|e| format!("ContactCard/get batch: {e}"))?;
+    let mut response = request
+        .send()
         .await
         .map_err(|e| format!("ContactCard/get batch: {e}"))?;
 
-    let mut response = response;
-    Ok(response.take_list())
+    response
+        .get(&handle)
+        .map(|mut r| r.take_list())
+        .map_err(|e| format!("ContactCard/get batch: {e}"))
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,7 @@
 use sha2::{Digest, Sha256};
 
+use jmap_client::identity::{IdentityGet, IdentitySet};
+
 use ratatoskr_db::db::DbState;
 
 use super::client::JmapClient;
@@ -105,23 +107,26 @@ pub async fn push_signature_to_jmap(
     html: &str,
     text: &str,
 ) -> Result<(), String> {
-    use jmap_client::core::response::IdentitySetResponse;
-
     let inner = client.inner();
     let mut request = inner.build();
-    let set_req = request.set_identity();
-    set_req
-        .update(identity_id)
+    let account_id = request.default_account_id().to_string();
+    let mut set = IdentitySet::new(&account_id);
+    set.update(identity_id)
         .html_signature(html)
         .text_signature(text);
+    let handle = request
+        .call(set)
+        .map_err(|e| format!("Identity/set: {e}"))?;
 
     let mut response = request
-        .send_single::<IdentitySetResponse>()
+        .send()
         .await
         .map_err(|e| format!("Identity/set: {e}"))?;
 
     // Check for per-item errors.
     response
+        .get(&handle)
+        .map_err(|e| format!("Identity/set: {e}"))?
         .updated(identity_id)
         .map_err(|e| format!("Identity/set update {identity_id}: {e}"))?;
 
@@ -144,17 +149,23 @@ struct IdentityRow {
 async fn fetch_all_identities(
     client: &JmapClient,
 ) -> Result<Vec<jmap_client::identity::Identity>, String> {
-    use jmap_client::core::response::IdentityGetResponse;
-
     let inner = client.inner();
     let mut request = inner.build();
-    request.get_identity();
+    let account_id = request.default_account_id().to_string();
+    let get = IdentityGet::new(&account_id);
+    let handle = request
+        .call(get)
+        .map_err(|e| format!("Identity/get: {e}"))?;
     let mut response = request
-        .send_single::<IdentityGetResponse>()
+        .send()
         .await
         .map_err(|e| format!("Identity/get: {e}"))?;
 
-    Ok(response.take_list())
+    let mut get_response = response
+        .get(&handle)
+        .map_err(|e| format!("Identity/get: {e}"))?;
+
+    Ok(get_response.take_list())
 }
 
 /// SHA-256 hex digest of a string.

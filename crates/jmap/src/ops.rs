@@ -1,8 +1,9 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use jmap_client::core::response::{EmailSetResponse, EmailSubmissionSetResponse};
 use jmap_client::core::set::SetObject;
-use jmap_client::email_submission::{Address as SubmissionAddress, UndoStatus};
+use jmap_client::email::EmailSet;
+use jmap_client::email::import::EmailImportRequest;
+use jmap_client::email_submission::{Address as SubmissionAddress, EmailSubmissionSet, UndoStatus};
 use jmap_client::mailbox::Role;
 use jmap_client::Set;
 
@@ -85,17 +86,24 @@ impl ProviderOps for JmapOps {
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
         let mut request = client.build();
-        let set_req = request.set_email();
+        let account_id = request.default_account_id().to_string();
+        let mut email_set = EmailSet::new(&account_id);
         for eid in &email_ids {
-            let update = set_req.update(eid);
+            let update = email_set.update(eid);
             update.mailbox_id(&inbox_id, false);
             if let Some(ref aid) = archive_id {
                 update.mailbox_id(aid, true);
             }
         }
-        request
-            .send_single::<EmailSetResponse>()
+        let handle = request
+            .call(email_set)
+            .map_err(|e| ProviderError::Server(format!("archive: {e}")))?;
+        let mut response = request
+            .send()
             .await
+            .map_err(|e| ProviderError::Server(format!("archive: {e}")))?;
+        response
+            .get(&handle)
             .map_err(|e| ProviderError::Server(format!("archive: {e}")))?;
         Ok(())
     }
@@ -111,17 +119,24 @@ impl ProviderOps for JmapOps {
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
         let mut request = client.build();
-        let set_req = request.set_email();
+        let account_id = request.default_account_id().to_string();
+        let mut email_set = EmailSet::new(&account_id);
         for eid in &email_ids {
-            let update = set_req.update(eid);
+            let update = email_set.update(eid);
             update.mailbox_id(&trash_id, true);
             if let Some(ref iid) = inbox_id {
                 update.mailbox_id(iid, false);
             }
         }
-        request
-            .send_single::<EmailSetResponse>()
+        let handle = request
+            .call(email_set)
+            .map_err(|e| ProviderError::Server(format!("trash: {e}")))?;
+        let mut response = request
+            .send()
             .await
+            .map_err(|e| ProviderError::Server(format!("trash: {e}")))?;
+        response
+            .get(&handle)
             .map_err(|e| ProviderError::Server(format!("trash: {e}")))?;
         Ok(())
     }
@@ -135,12 +150,18 @@ impl ProviderOps for JmapOps {
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
         let mut request = client.build();
-        request
-            .set_email()
-            .destroy(email_ids.iter().map(String::as_str));
-        request
-            .send_single::<EmailSetResponse>()
+        let account_id = request.default_account_id().to_string();
+        let mut email_set = EmailSet::new(&account_id);
+        email_set.destroy(email_ids.iter().map(String::as_str));
+        let handle = request
+            .call(email_set)
+            .map_err(|e| ProviderError::Server(format!("permanent delete: {e}")))?;
+        let mut response = request
+            .send()
             .await
+            .map_err(|e| ProviderError::Server(format!("permanent delete: {e}")))?;
+        response
+            .get(&handle)
             .map_err(|e| ProviderError::Server(format!("permanent delete: {e}")))?;
         Ok(())
     }
@@ -155,13 +176,20 @@ impl ProviderOps for JmapOps {
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
         let mut request = client.build();
-        let set_req = request.set_email();
+        let account_id = request.default_account_id().to_string();
+        let mut email_set = EmailSet::new(&account_id);
         for eid in &email_ids {
-            set_req.update(eid).keyword("$seen", read);
+            email_set.update(eid).keyword("$seen", read);
         }
-        request
-            .send_single::<EmailSetResponse>()
+        let handle = request
+            .call(email_set)
+            .map_err(|e| ProviderError::Server(format!("mark read: {e}")))?;
+        let mut response = request
+            .send()
             .await
+            .map_err(|e| ProviderError::Server(format!("mark read: {e}")))?;
+        response
+            .get(&handle)
             .map_err(|e| ProviderError::Server(format!("mark read: {e}")))?;
         Ok(())
     }
@@ -176,13 +204,20 @@ impl ProviderOps for JmapOps {
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
         let mut request = client.build();
-        let set_req = request.set_email();
+        let account_id = request.default_account_id().to_string();
+        let mut email_set = EmailSet::new(&account_id);
         for eid in &email_ids {
-            set_req.update(eid).keyword("$flagged", starred);
+            email_set.update(eid).keyword("$flagged", starred);
         }
-        request
-            .send_single::<EmailSetResponse>()
+        let handle = request
+            .call(email_set)
+            .map_err(|e| ProviderError::Server(format!("star: {e}")))?;
+        let mut response = request
+            .send()
             .await
+            .map_err(|e| ProviderError::Server(format!("star: {e}")))?;
+        response
+            .get(&handle)
             .map_err(|e| ProviderError::Server(format!("star: {e}")))?;
         Ok(())
     }
@@ -205,23 +240,30 @@ impl ProviderOps for JmapOps {
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
         let mut request = client.build();
-        let set_req = request.set_email();
+        let account_id = request.default_account_id().to_string();
+        let mut email_set = EmailSet::new(&account_id);
         for eid in &email_ids {
             if is_spam {
-                set_req
+                email_set
                     .update(eid)
                     .mailbox_id(&junk_id, true)
                     .mailbox_id(&inbox_id, false);
             } else {
-                set_req
+                email_set
                     .update(eid)
                     .mailbox_id(&inbox_id, true)
                     .mailbox_id(&junk_id, false);
             }
         }
-        request
-            .send_single::<EmailSetResponse>()
+        let handle = request
+            .call(email_set)
+            .map_err(|e| ProviderError::Server(format!("spam: {e}")))?;
+        let mut response = request
+            .send()
             .await
+            .map_err(|e| ProviderError::Server(format!("spam: {e}")))?;
+        response
+            .get(&handle)
             .map_err(|e| ProviderError::Server(format!("spam: {e}")))?;
         Ok(())
     }
@@ -237,13 +279,20 @@ impl ProviderOps for JmapOps {
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
         let mut request = client.build();
-        let set_req = request.set_email();
+        let account_id = request.default_account_id().to_string();
+        let mut email_set = EmailSet::new(&account_id);
         for eid in &email_ids {
-            set_req.update(eid).mailbox_ids([target_id.as_str()]);
+            email_set.update(eid).mailbox_ids([target_id.as_str()]);
         }
-        request
-            .send_single::<EmailSetResponse>()
+        let handle = request
+            .call(email_set)
+            .map_err(|e| ProviderError::Server(format!("move to folder: {e}")))?;
+        let mut response = request
+            .send()
             .await
+            .map_err(|e| ProviderError::Server(format!("move to folder: {e}")))?;
+        response
+            .get(&handle)
             .map_err(|e| ProviderError::Server(format!("move to folder: {e}")))?;
         Ok(())
     }
@@ -259,13 +308,20 @@ impl ProviderOps for JmapOps {
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
         let mut request = client.build();
-        let set_req = request.set_email();
+        let account_id = request.default_account_id().to_string();
+        let mut email_set = EmailSet::new(&account_id);
         for eid in &email_ids {
-            set_req.update(eid).mailbox_id(&mailbox_id, true);
+            email_set.update(eid).mailbox_id(&mailbox_id, true);
         }
-        request
-            .send_single::<EmailSetResponse>()
+        let handle = request
+            .call(email_set)
+            .map_err(|e| ProviderError::Server(format!("add tag: {e}")))?;
+        let mut response = request
+            .send()
             .await
+            .map_err(|e| ProviderError::Server(format!("add tag: {e}")))?;
+        response
+            .get(&handle)
             .map_err(|e| ProviderError::Server(format!("add tag: {e}")))?;
         Ok(())
     }
@@ -281,13 +337,20 @@ impl ProviderOps for JmapOps {
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
         let mut request = client.build();
-        let set_req = request.set_email();
+        let account_id = request.default_account_id().to_string();
+        let mut email_set = EmailSet::new(&account_id);
         for eid in &email_ids {
-            set_req.update(eid).mailbox_id(&mailbox_id, false);
+            email_set.update(eid).mailbox_id(&mailbox_id, false);
         }
-        request
-            .send_single::<EmailSetResponse>()
+        let handle = request
+            .call(email_set)
+            .map_err(|e| ProviderError::Server(format!("remove tag: {e}")))?;
+        let mut response = request
+            .send()
             .await
+            .map_err(|e| ProviderError::Server(format!("remove tag: {e}")))?;
+        response
+            .get(&handle)
             .map_err(|e| ProviderError::Server(format!("remove tag: {e}")))?;
         Ok(())
     }
@@ -301,11 +364,18 @@ impl ProviderOps for JmapOps {
         self.client.ensure_valid_token().await?;
         let client = self.client.inner();
         let mut request = client.build();
-        let set_req = request.set_email();
-        set_req.update(message_id).keyword(category_name, true);
-        request
-            .send_single::<EmailSetResponse>()
+        let account_id = request.default_account_id().to_string();
+        let mut email_set = EmailSet::new(&account_id);
+        email_set.update(message_id).keyword(category_name, true);
+        let handle = request
+            .call(email_set)
+            .map_err(|e| ProviderError::Server(format!("apply category: {e}")))?;
+        let mut response = request
+            .send()
             .await
+            .map_err(|e| ProviderError::Server(format!("apply category: {e}")))?;
+        response
+            .get(&handle)
             .map_err(|e| ProviderError::Server(format!("apply category: {e}")))?;
         Ok(())
     }
@@ -319,11 +389,18 @@ impl ProviderOps for JmapOps {
         self.client.ensure_valid_token().await?;
         let client = self.client.inner();
         let mut request = client.build();
-        let set_req = request.set_email();
-        set_req.update(message_id).keyword(category_name, false);
-        request
-            .send_single::<EmailSetResponse>()
+        let account_id = request.default_account_id().to_string();
+        let mut email_set = EmailSet::new(&account_id);
+        email_set.update(message_id).keyword(category_name, false);
+        let handle = request
+            .call(email_set)
+            .map_err(|e| ProviderError::Server(format!("remove category: {e}")))?;
+        let mut response = request
+            .send()
             .await
+            .map_err(|e| ProviderError::Server(format!("remove category: {e}")))?;
+        response
+            .get(&handle)
             .map_err(|e| ProviderError::Server(format!("remove category: {e}")))?;
         Ok(())
     }
@@ -357,35 +434,40 @@ impl ProviderOps for JmapOps {
         // The import creates the email with $seen keyword. The submission sends it,
         // and onSuccessUpdateEmail atomically clears $draft when the submission succeeds.
         let mut request = client.build();
+        let account_id = request.default_account_id().to_string();
 
-        let import_create_id = request
-            .import_email()
+        let mut import = EmailImportRequest::new(&account_id);
+        let import_create_id = import
             .email(&blob_id)
             .mailbox_ids(Vec::<String>::new())
             .keywords(["$seen"])
             .create_id();
+        let import_handle = request
+            .call(import)
+            .map_err(|e| ProviderError::Server(format!("JMAP import call: {e}")))?;
 
-        let sub_request = request.set_email_submission();
-        let sub_create_id = sub_request
+        let mut sub_set = EmailSubmissionSet::new(&account_id);
+        let sub_create_id = sub_set
             .create()
             .email_id(format!("#{import_create_id}"))
             .identity_id(&identity_id)
             .create_id()
             .ok_or_else(|| ProviderError::Client("submission create_id".to_string()))?;
-        sub_request
+        sub_set
             .arguments()
             .on_success_update_email(&sub_create_id)
             .keyword("$draft", false);
+        let _sub_handle = request
+            .call(sub_set)
+            .map_err(|e| ProviderError::Server(format!("JMAP submission call: {e}")))?;
 
-        let mut import_response = request
+        let mut response = request
             .send()
             .await
-            .map_err(|e| ProviderError::Server(format!("JMAP batch send: {e}")))?
-            .unwrap_method_responses()
-            .into_iter()
-            .next()
-            .ok_or_else(|| ProviderError::Server("No response from JMAP batch".to_string()))?
-            .unwrap_import_email()
+            .map_err(|e| ProviderError::Server(format!("JMAP batch send: {e}")))?;
+
+        let mut import_response = response
+            .get(&import_handle)
             .map_err(|e| ProviderError::Server(format!("Email/import response: {e}")))?;
 
         let email_id = import_response
@@ -679,21 +761,29 @@ pub async fn schedule_send_jmap(
 
     // --- Create the EmailSubmission ----------------------------------------
     let mut request = inner.build();
-    let sub_req = request.set_email_submission();
-    let create_id = sub_req
+    let account_id = request.default_account_id().to_string();
+    let mut sub_set = EmailSubmissionSet::new(&account_id);
+    let create_id = sub_set
         .create()
         .email_id(email_id)
         .identity_id(identity_id)
         .envelope(mail_from, rcpt_to)
         .create_id()
         .ok_or("Failed to obtain submission create ID")?;
+    let handle = request
+        .call(sub_set)
+        .map_err(|e| format!("EmailSubmission/set (schedule): {e}"))?;
 
     let mut response = request
-        .send_single::<EmailSubmissionSetResponse>()
+        .send()
         .await
         .map_err(|e| format!("EmailSubmission/set (schedule): {e}"))?;
 
-    let mut submission = response
+    let mut set_response = response
+        .get(&handle)
+        .map_err(|e| format!("EmailSubmission/set (schedule): {e}"))?;
+
+    let mut submission = set_response
         .created(&create_id)
         .map_err(|e| format!("EmailSubmission create failed: {e}"))?;
 
@@ -713,17 +803,23 @@ pub async fn cancel_scheduled_send_jmap(
     let inner = client.inner();
 
     let mut request = inner.build();
-    request
-        .set_email_submission()
+    let account_id = request.default_account_id().to_string();
+    let mut sub_set = EmailSubmissionSet::new(&account_id);
+    sub_set
         .update(submission_id)
         .undo_status(UndoStatus::Canceled);
+    let handle = request
+        .call(sub_set)
+        .map_err(|e| format!("EmailSubmission/set (cancel): {e}"))?;
 
     let mut response = request
-        .send_single::<EmailSubmissionSetResponse>()
+        .send()
         .await
         .map_err(|e| format!("EmailSubmission/set (cancel): {e}"))?;
 
     response
+        .get(&handle)
+        .map_err(|e| format!("EmailSubmission/set (cancel): {e}"))?
         .updated(submission_id)
         .map_err(|e| format!("EmailSubmission cancel failed: {e}"))?;
 

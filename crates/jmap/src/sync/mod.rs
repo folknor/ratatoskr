@@ -163,15 +163,22 @@ async fn query_email_page(
 ) -> Result<QueryResponse, String> {
     let inner = client.inner();
     let mut request = inner.build();
-    let query_request = request.query_email();
-    query_request.filter(email::query::Filter::after(since_ts));
-    query_request.sort([email::query::Comparator::received_at()]);
-    query_request.position(i32::try_from(position).unwrap_or(i32::MAX));
-    query_request.limit(BATCH_SIZE);
-    query_request.calculate_total(calculate_total);
-    request
-        .send_single::<QueryResponse>()
+    let account_id = request.default_account_id().to_string();
+    let mut query = email::EmailQuery::new(&account_id);
+    query.filter(email::query::Filter::after(since_ts));
+    query.sort([email::query::Comparator::received_at()]);
+    query.position(i32::try_from(position).unwrap_or(i32::MAX));
+    query.limit(BATCH_SIZE);
+    query.calculate_total(calculate_total);
+    let handle = request
+        .call(query)
+        .map_err(|e| format!("Email/query: {e}"))?;
+    let mut response = request
+        .send()
         .await
+        .map_err(|e| format!("Email/query: {e}"))?;
+    response
+        .get(&handle)
         .map_err(|e| format!("Email/query: {e}"))
 }
 
@@ -324,26 +331,27 @@ pub(crate) async fn fetch_email_batch(
     client: &JmapClient,
     ids: &[&str],
 ) -> Result<Vec<jmap_client::email::Email>, String> {
-    // Use request builder to specify all needed properties + body values
     let inner = client.inner();
     let mut request = inner.build();
-    let get_req = request.get_email();
-    get_req.ids(ids.iter().copied());
-    get_req.properties(email_get_properties());
-    get_req.arguments().fetch_text_body_values(true);
-    get_req.arguments().fetch_html_body_values(true);
+    let account_id = request.default_account_id().to_string();
+    let mut get = email::EmailGet::new(&account_id);
+    get.ids(ids.iter().copied());
+    get.properties(email_get_properties());
+    get.arguments().fetch_text_body_values(true);
+    get.arguments().fetch_html_body_values(true);
+    let handle = request
+        .call(get)
+        .map_err(|e| format!("Email/get batch: {e}"))?;
 
-    let response = request
+    let mut response = request
         .send()
         .await
         .map_err(|e| format!("Email/get batch: {e}"))?;
 
     response
-        .unwrap_method_responses()
-        .pop()
-        .and_then(|r| r.unwrap_get_email().ok())
+        .get(&handle)
         .map(|mut r| r.take_list())
-        .ok_or_else(|| "No Email/get response".to_string())
+        .map_err(|e| format!("Email/get batch: {e}"))
 }
 
 /// Parse a batch of emails into our internal structs.

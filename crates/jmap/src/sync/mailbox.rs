@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use jmap_client::mailbox::Role;
+use jmap_client::mailbox::{MailboxGet, Role};
+use jmap_client::email::EmailGet;
 
 use super::super::client::JmapClient;
 use super::super::mailbox_mapper::{MailboxInfo, map_mailbox_to_label};
@@ -172,40 +173,43 @@ pub(super) async fn sync_mailbox_changes(
 // ---------------------------------------------------------------------------
 
 pub(super) async fn get_mailbox_state(client: &JmapClient) -> Result<String, String> {
-    // Fetch mailboxes to get the state string
     let inner = client.inner();
     let mut request = inner.build();
-    request.get_mailbox();
-    let response = request
+    let account_id = request.default_account_id().to_string();
+    let get = MailboxGet::new(&account_id);
+    let handle = request
+        .call(get)
+        .map_err(|e| format!("Mailbox state: {e}"))?;
+    let mut response = request
         .send()
         .await
         .map_err(|e| format!("Mailbox state: {e}"))?;
 
     response
-        .unwrap_method_responses()
-        .pop()
-        .and_then(|r| r.unwrap_get_mailbox().ok())
+        .get(&handle)
         .map(|r| r.state().to_string())
-        .ok_or_else(|| "No Mailbox/get response for state".to_string())
+        .map_err(|e| format!("Mailbox state: {e}"))
 }
 
 pub(super) async fn get_email_state(client: &JmapClient) -> Result<String, String> {
     let inner = client.inner();
     let mut request = inner.build();
-    let get_req = request.get_email();
-    get_req.ids(std::iter::empty::<&str>());
+    let account_id = request.default_account_id().to_string();
+    let mut get = EmailGet::new(&account_id);
+    get.ids(std::iter::empty::<&str>());
+    let handle = request
+        .call(get)
+        .map_err(|e| format!("Email state: {e}"))?;
 
-    let response = request
+    let mut response = request
         .send()
         .await
         .map_err(|e| format!("Email state: {e}"))?;
 
     response
-        .unwrap_method_responses()
-        .pop()
-        .and_then(|r| r.unwrap_get_email().ok())
+        .get(&handle)
         .map(|r| r.state().to_string())
-        .ok_or_else(|| "No Email/get response for state".to_string())
+        .map_err(|e| format!("Email state: {e}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -218,18 +222,20 @@ pub async fn fetch_all_mailboxes(
 ) -> Result<Vec<jmap_client::mailbox::Mailbox<jmap_client::Get>>, String> {
     let inner = client.inner();
     let mut request = inner.build();
-    request.get_mailbox();
-    let response = request
+    let account_id = request.default_account_id().to_string();
+    let get = MailboxGet::new(&account_id);
+    let handle = request
+        .call(get)
+        .map_err(|e| format!("Mailbox/get: {e}"))?;
+    let mut response = request
         .send()
         .await
         .map_err(|e| format!("Mailbox/get: {e}"))?;
 
-    Ok(response
-        .unwrap_method_responses()
-        .pop()
-        .and_then(|r| r.unwrap_get_mailbox().ok())
+    response
+        .get(&handle)
         .map(|mut r| r.take_list())
-        .unwrap_or_default())
+        .map_err(|e| format!("Mailbox/get: {e}"))
 }
 
 pub(crate) fn role_to_str(role: &jmap_client::mailbox::Role) -> &'static str {

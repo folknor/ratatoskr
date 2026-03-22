@@ -141,8 +141,9 @@ pub async fn start_push(
 
     let ws_url = ws_caps.url().to_string();
 
-    // Extract auth header from the inner client's headers
+    // Extract auth header from the transport's headers
     let auth_header = inner
+        .transport()
         .headers()
         .get(reqwest::header::AUTHORIZATION)
         .ok_or("No Authorization header on JMAP client")?

@@ -59,20 +59,28 @@ pub async fn list_sieve_scripts(client: &JmapClient) -> Result<Vec<SieveScript>,
 
     // Batch-get metadata for all scripts.
     let mut request = inner.build();
-    let get_req = request.get_sieve_script().ids(ids);
-    get_req.properties([
+    let account_id = request.default_account_id().to_string();
+    let mut get = jmap_client::sieve::SieveScriptGet::new(&account_id);
+    get.ids(ids);
+    get.properties([
         jmap_client::sieve::Property::Id,
         jmap_client::sieve::Property::Name,
         jmap_client::sieve::Property::IsActive,
     ]);
+    let handle = request
+        .call(get)
+        .map_err(|e| format!("SieveScript/get: {e}"))?;
 
-    use jmap_client::core::response::SieveScriptGetResponse;
     let mut response = request
-        .send_single::<SieveScriptGetResponse>()
+        .send()
         .await
         .map_err(|e| format!("SieveScript/get: {e}"))?;
 
-    let scripts = response
+    let mut get_response = response
+        .get(&handle)
+        .map_err(|e| format!("SieveScript/get: {e}"))?;
+
+    let scripts = get_response
         .take_list()
         .into_iter()
         .map(|s| SieveScript {

@@ -5,11 +5,9 @@
 
 use std::collections::HashMap;
 
-use jmap_client::calendar_event::CalendarEvent;
+use jmap_client::calendar::CalendarGet;
+use jmap_client::calendar_event::{CalendarEvent, CalendarEventGet, CalendarEventSet};
 use jmap_client::core::set::SetObject;
-use jmap_client::core::response::{
-    CalendarEventGetResponse, CalendarEventSetResponse, CalendarGetResponse,
-};
 use jmap_client::Get;
 
 use ratatoskr_db::db::DbState;
@@ -39,16 +37,23 @@ pub async fn sync_calendar_list(
 ) -> Result<Vec<JmapCalendarInfo>, String> {
     let inner = client.inner();
     let mut request = inner.build();
+    let req_account_id = request.default_account_id().to_string();
     // No IDs set => fetches all calendars
-    request.get_calendar();
-
-    let mut response = request
-        .send_single::<CalendarGetResponse>()
-        .await
+    let get = CalendarGet::new(&req_account_id);
+    let handle = request
+        .call(get)
         .map_err(|e| format!("Calendar/get: {e}"))?;
 
-    let state = response.state().to_string();
-    let calendar_list = response.take_list();
+    let mut response = request
+        .send()
+        .await
+        .map_err(|e| format!("Calendar/get: {e}"))?;
+    let mut get_response = response
+        .get(&handle)
+        .map_err(|e| format!("Calendar/get: {e}"))?;
+
+    let state = get_response.state().to_string();
+    let calendar_list = get_response.take_list();
 
     let mut result = Vec::with_capacity(calendar_list.len());
 
@@ -109,15 +114,22 @@ pub async fn sync_all_events(
     // Fetch ALL events (no filter) — the server returns them all with state
     let inner = client.inner();
     let mut request = inner.build();
-    request.get_calendar_event();
-
-    let mut response = request
-        .send_single::<CalendarEventGetResponse>()
-        .await
+    let req_account_id = request.default_account_id().to_string();
+    let get = CalendarEventGet::new(&req_account_id);
+    let handle = request
+        .call(get)
         .map_err(|e| format!("CalendarEvent/get initial: {e}"))?;
 
-    let state = response.state().to_string();
-    let events = response.take_list();
+    let mut response = request
+        .send()
+        .await
+        .map_err(|e| format!("CalendarEvent/get initial: {e}"))?;
+    let mut get_response = response
+        .get(&handle)
+        .map_err(|e| format!("CalendarEvent/get initial: {e}"))?;
+
+    let state = get_response.state().to_string();
+    let events = get_response.take_list();
 
     log::info!(
         "[JMAP] Initial event sync for account {account_id}: {} events",
@@ -236,8 +248,9 @@ pub async fn create_event_remote(
 ) -> Result<String, String> {
     let inner = client.inner();
     let mut request = inner.build();
-    let set_req = request.set_calendar_event();
-    let event = set_req.create();
+    let req_account_id = request.default_account_id().to_string();
+    let mut set = CalendarEventSet::new(&req_account_id);
+    let event = set.create();
     event
         .calendar_ids([calendar_remote_id])
         .title(title)
@@ -270,12 +283,18 @@ pub async fn create_event_remote(
         .create_id()
         .ok_or("Failed to get create ID for CalendarEvent")?;
 
+    let handle = request
+        .call(set)
+        .map_err(|e| format!("CalendarEvent/set create: {e}"))?;
     let mut response = request
-        .send_single::<CalendarEventSetResponse>()
+        .send()
         .await
         .map_err(|e| format!("CalendarEvent/set create: {e}"))?;
+    let mut set_response = response
+        .get(&handle)
+        .map_err(|e| format!("CalendarEvent/set create: {e}"))?;
 
-    let created_event = response
+    let created_event = set_response
         .created(&create_id)
         .map_err(|e| format!("CalendarEvent create failed: {e}"))?;
 
@@ -299,8 +318,9 @@ pub async fn update_event_remote(
 ) -> Result<(), String> {
     let inner = client.inner();
     let mut request = inner.build();
-    let set_req = request.set_calendar_event();
-    let event = set_req.update(event_remote_id);
+    let req_account_id = request.default_account_id().to_string();
+    let mut set = CalendarEventSet::new(&req_account_id);
+    let event = set.update(event_remote_id);
     event.title(title).description(description);
 
     let (start_str, duration_str) = format_jscalendar_times(start_time, end_time, is_all_day);
@@ -325,12 +345,17 @@ pub async fn update_event_remote(
         event.locations(locations);
     }
 
+    let handle = request
+        .call(set)
+        .map_err(|e| format!("CalendarEvent/set update: {e}"))?;
     let mut response = request
-        .send_single::<CalendarEventSetResponse>()
+        .send()
         .await
         .map_err(|e| format!("CalendarEvent/set update: {e}"))?;
 
     response
+        .get(&handle)
+        .map_err(|e| format!("CalendarEvent/set update: {e}"))?
         .updated(event_remote_id)
         .map_err(|e| format!("CalendarEvent update failed: {e}"))?;
 
@@ -344,14 +369,21 @@ pub async fn delete_event_remote(
 ) -> Result<(), String> {
     let inner = client.inner();
     let mut request = inner.build();
-    request.set_calendar_event().destroy([event_remote_id]);
+    let req_account_id = request.default_account_id().to_string();
+    let mut set = CalendarEventSet::new(&req_account_id);
+    set.destroy([event_remote_id]);
+    let handle = request
+        .call(set)
+        .map_err(|e| format!("CalendarEvent/set destroy: {e}"))?;
 
     let mut response = request
-        .send_single::<CalendarEventSetResponse>()
+        .send()
         .await
         .map_err(|e| format!("CalendarEvent/set destroy: {e}"))?;
 
     response
+        .get(&handle)
+        .map_err(|e| format!("CalendarEvent/set destroy: {e}"))?
         .destroyed(event_remote_id)
         .map_err(|e| format!("CalendarEvent destroy failed: {e}"))?;
 
@@ -390,19 +422,22 @@ async fn fetch_event_batch(
 ) -> Result<Vec<CalendarEvent<Get>>, String> {
     let inner = client.inner();
     let mut request = inner.build();
-    request.get_calendar_event().ids(ids.iter().copied());
+    let req_account_id = request.default_account_id().to_string();
+    let mut get = CalendarEventGet::new(&req_account_id);
+    get.ids(ids.iter().copied());
+    let handle = request
+        .call(get)
+        .map_err(|e| format!("CalendarEvent/get batch: {e}"))?;
 
-    let response = request
+    let mut response = request
         .send()
         .await
         .map_err(|e| format!("CalendarEvent/get batch: {e}"))?;
 
     response
-        .unwrap_method_responses()
-        .pop()
-        .and_then(|r| r.unwrap_get_calendar_event().ok())
+        .get(&handle)
         .map(|mut r| r.take_list())
-        .ok_or_else(|| "No CalendarEvent/get response".to_string())
+        .map_err(|e| format!("CalendarEvent/get batch: {e}"))
 }
 
 /// Persist a JMAP CalendarEvent into the local database.

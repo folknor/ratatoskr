@@ -1,3 +1,5 @@
+use jmap_client::identity::IdentityGet;
+
 use super::client::JmapClient;
 use super::mailbox_mapper::label_id_to_mailbox_id;
 
@@ -56,17 +58,25 @@ pub(super) async fn fetch_mailbox_list_from_server(
 pub async fn get_first_identity_id(client: &jmap_client::client::Client) -> Result<String, String> {
     log::debug!("[JMAP] Fetching identity for email submission");
     let mut request = client.build();
-    request.get_identity();
-    let response = request
+    let account_id = request.default_account_id().to_string();
+    let get = IdentityGet::new(&account_id);
+    let handle = request
+        .call(get)
+        .map_err(|e| format!("Identity/get: {e}"))?;
+    let mut response = request
         .send()
         .await
         .map_err(|e| format!("Identity/get: {e}"))?;
 
-    response
-        .unwrap_method_responses()
-        .pop()
-        .and_then(|r| r.unwrap_get_identity().ok())
-        .and_then(|mut r| r.take_list().into_iter().next().map(|mut i| i.take_id()))
+    let mut get_response = response
+        .get(&handle)
+        .map_err(|e| format!("Identity/get: {e}"))?;
+
+    get_response
+        .take_list()
+        .into_iter()
+        .next()
+        .map(|mut i| i.take_id())
         .ok_or_else(|| "No identity found for email submission".to_string())
 }
 
