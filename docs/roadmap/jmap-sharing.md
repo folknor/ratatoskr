@@ -1,7 +1,7 @@
 # JMAP Sharing (RFC 9670)
 
 **Tier**: 2 — Enhances JMAP provider parity
-**Status**: 🟡 **Phases 1-2 done** — `jmap-client` fork has full RFC 9670 support (Principal CRUD, ShareNotification, `myRights`/`isSubscribed`/`shareWith` on Mailbox). Phase 1 (Session discovery + revocation) and Phase 2 (shared account sync orchestration with independent state tokens) are wired. Remaining phases (3-6) not started.
+**Status**: 🟡 **Phases 1-3 done** — `jmap-client` fork has full RFC 9670 support. Phase 1 (Session discovery + revocation), Phase 2 (shared account sync with independent state tokens), and Phase 3 (`myRights` persisted as 9 INTEGER columns on labels, surfaced in `NavigationFolder`) are wired. Remaining phases (4-6) not started.
 
 ---
 
