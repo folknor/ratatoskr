@@ -111,15 +111,15 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **Read receipts (outgoing)** — MDN support. See `docs/roadmap/tracking-blocking.md`.
 - [ ] **Inline image store eviction UI** — Settings control for store size (128 MB hardcoded).
 
-- [ ] **Provider push notifications** — IMAP IDLE, JMAP push, Graph webhooks, Gmail watch.
-- [ ] **Connect sync orchestrator to IcedProgressReporter** — Reporter and subscription exist, sync pipeline not yet using it. Once connected, also wire `begin_sync_generation`/`prune_stale_sync` for stale progress cleanup.
+- [ ] **Provider push notifications (remaining)** — JMAP WebSocket push is wired. Still missing: IMAP IDLE (persistent connection per folder), Graph/Gmail (poll-based, needs tuning — true push requires cloud infrastructure).
+- [x] ~~**Connect sync orchestrator to IcedProgressReporter**~~ — Sync dispatch wired: initial sync on boot, periodic delta sync every 5 min, `IcedProgressReporter` passed via `ProviderCtx`. `begin_sync_generation`/`prune_stale_sync` still not called (low priority — sync progress display works without them).
 - [ ] **Token expiry → status bar warning** — `WarningKind::TokenExpiry` type, UI, and click-to-reauth handler all exist. Missing: auth error detection path that calls `status_bar.set_warning()` with `TokenExpiry` when OAuth refresh fails or tokens expire.
 - [ ] **Pop-out HTML rendering** — SimpleHtml/OriginalHtml modes in message view pop-out fall back to plain text. Depends on the DOM-to-widget pipeline (`html_render.rs`) being wired into the pop-out view. Tracked separately in the HTML rendering section above.
 - [ ] **Pop-out Print** — OS print dialog integration for message view and compose pop-out windows. Platform-specific, no iced precedent. Needs investigation.
 - [ ] **Pop-out default rendering mode from settings** — `MessageViewState` hardcodes `RenderingMode::default()` (SimpleHtml). Should load from a system-wide user preference. Needs a settings field + plumbing to pass it into `from_thread_message()` and `from_session_entry()`.
 - [ ] **Signature: draft restoration with signature state** — Draft save does not persist `signature_separator_index` or `active_signature_id`. On draft reopen, signature position in the document is not reconstructed.
 - [ ] **Signature: per-account default dropdown in Account Settings** — Account editor overlay has no signature dropdown for selecting the default signature for an account.
-- [ ] **Signature: edit detection flag** — No dirty/edited tracking in `SignatureEditorState` for confirming unsaved changes on close.
+- [x] ~~**Signature: edit detection flag**~~ — `dirty: bool` added to `SignatureEditorState`, set on name/body/default edits.
 - [ ] **GAL directory API calls** — `gal_cache` table and autocomplete integration exist. Missing: actual Graph `/users` and Google Directory API calls to populate the cache. Awaits sync orchestrator providing provider client access. See `docs/contacts/problem-statement.md` § GAL Caching.
 - [ ] **CardDAV contact write-back** — CardDAV client supports PROPFIND/REPORT/GET but not PUT/DELETE. Need vCard generation + PUT method for pushing contact edits to CardDAV servers. See `docs/contacts/problem-statement.md`.
 - [ ] **Provider write-back HTTP calls** — `dispatch_provider_write_back()` scaffolded for Google/Graph (body builders + server info lookups exist). JMAP `ContactCard/set` fully implemented. Missing: actual HTTP dispatch for Google (`PATCH /v1/{resourceName}:updateContact`) and Graph (`PATCH /me/contacts/{id}`). Awaits provider client access from handlers.
