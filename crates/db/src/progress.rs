@@ -10,6 +10,14 @@ pub trait ProgressReporter: Send + Sync {
     fn emit_json(&self, event_name: &str, json: serde_json::Value);
 }
 
+/// A no-op reporter that silently discards all events.
+/// Used when a `ProviderCtx` is needed but progress reporting is not.
+pub struct NoopProgressReporter;
+
+impl ProgressReporter for NoopProgressReporter {
+    fn emit_json(&self, _event_name: &str, _json: serde_json::Value) {}
+}
+
 /// Convenience: serialize a `Serialize` value and emit it.
 pub fn emit_event<T: serde::Serialize>(
     reporter: &dyn ProgressReporter,

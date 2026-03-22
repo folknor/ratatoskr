@@ -1,6 +1,9 @@
 use iced::Task;
 
+use std::sync::Arc;
+
 use crate::command_dispatch::{self, EmailAction};
+use crate::db::Db;
 use crate::{APP_DATA_DIR, App, Message};
 use ratatoskr_command_palette::{CommandArgs, CommandId, KeyBinding, OptionItem};
 
@@ -147,9 +150,9 @@ impl App {
         Task::none()
     }
 
-    /// Apply a label to all selected threads (local DB operation).
-    /// For tag-type labels, inserts thread_labels entries.
-    /// Provider write-back happens during the next sync cycle.
+    /// Apply a label to all selected threads.
+    /// 1. Local DB: insert thread_labels entries (instant UI feedback)
+    /// 2. Provider write-back: call add_tag (container) or apply_category (tag)
     fn apply_label_to_selected_threads(&self, label_id: &str) -> Task<Message> {
         let indices = self.thread_list.selected_indices();
         let threads: Vec<(String, String)> = indices
@@ -164,21 +167,52 @@ impl App {
 
         let db = std::sync::Arc::clone(&self.db);
         let lid = label_id.to_string();
+        let encryption_key = self.encryption_key;
 
         Task::perform(
             async move {
+                // 1. Local DB write
+                let threads_clone = threads.clone();
+                let lid_clone = lid.clone();
                 db.with_write_conn(move |conn| {
-                    for (account_id, thread_id) in &threads {
+                    for (account_id, thread_id) in &threads_clone {
                         conn.execute(
                             "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
                              VALUES (?1, ?2, ?3)",
-                            rusqlite::params![account_id, thread_id, lid],
+                            rusqlite::params![account_id, thread_id, lid_clone],
                         )
                         .map_err(|e| format!("apply label: {e}"))?;
                     }
                     Ok(())
                 })
-                .await
+                .await?;
+
+                // 2. Provider write-back (best-effort)
+                if let Some(key) = encryption_key {
+                    let label_info = db.with_conn({
+                        let lid = lid.clone();
+                        move |conn| {
+                            conn.query_row(
+                                "SELECT name, label_kind FROM labels WHERE id = ?1 LIMIT 1",
+                                rusqlite::params![lid],
+                                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                            )
+                            .map_err(|e| e.to_string())
+                        }
+                    })
+                    .await;
+
+                    if let Ok((label_name, label_kind)) = label_info {
+                        for (account_id, thread_id) in &threads {
+                            if let Err(e) = provider_label_write_back(
+                                &db, account_id, thread_id, &lid, &label_name, &label_kind, key, true,
+                            ).await {
+                                log::warn!("Provider write-back failed for {account_id}/{thread_id}: {e}");
+                            }
+                        }
+                    }
+                }
+                Ok::<(), String>(())
             },
             |result| {
                 if let Err(e) = result {
@@ -189,7 +223,9 @@ impl App {
         )
     }
 
-    /// Remove a label from all selected threads (local DB operation).
+    /// Remove a label from all selected threads.
+    /// 1. Local DB: delete thread_labels entries
+    /// 2. Provider write-back: call remove_tag (container) or remove_category (tag)
     fn remove_label_from_selected_threads(&self, label_id: &str) -> Task<Message> {
         let indices = self.thread_list.selected_indices();
         let threads: Vec<(String, String)> = indices
@@ -204,21 +240,52 @@ impl App {
 
         let db = std::sync::Arc::clone(&self.db);
         let lid = label_id.to_string();
+        let encryption_key = self.encryption_key;
 
         Task::perform(
             async move {
+                // 1. Local DB write
+                let threads_clone = threads.clone();
+                let lid_clone = lid.clone();
                 db.with_write_conn(move |conn| {
-                    for (account_id, thread_id) in &threads {
+                    for (account_id, thread_id) in &threads_clone {
                         conn.execute(
                             "DELETE FROM thread_labels \
                              WHERE account_id = ?1 AND thread_id = ?2 AND label_id = ?3",
-                            rusqlite::params![account_id, thread_id, lid],
+                            rusqlite::params![account_id, thread_id, lid_clone],
                         )
                         .map_err(|e| format!("remove label: {e}"))?;
                     }
                     Ok(())
                 })
-                .await
+                .await?;
+
+                // 2. Provider write-back (best-effort)
+                if let Some(key) = encryption_key {
+                    let label_info = db.with_conn({
+                        let lid = lid.clone();
+                        move |conn| {
+                            conn.query_row(
+                                "SELECT name, label_kind FROM labels WHERE id = ?1 LIMIT 1",
+                                rusqlite::params![lid],
+                                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                            )
+                            .map_err(|e| e.to_string())
+                        }
+                    })
+                    .await;
+
+                    if let Ok((label_name, label_kind)) = label_info {
+                        for (account_id, thread_id) in &threads {
+                            if let Err(e) = provider_label_write_back(
+                                &db, account_id, thread_id, &lid, &label_name, &label_kind, key, false,
+                            ).await {
+                                log::warn!("Provider write-back failed for {account_id}/{thread_id}: {e}");
+                            }
+                        }
+                    }
+                }
+                Ok::<(), String>(())
             },
             |result| {
                 if let Err(e) = result {
@@ -228,6 +295,62 @@ impl App {
             },
         )
     }
+}
+
+/// Dispatch a provider-side label apply or remove for a single thread.
+///
+/// Creates a minimal `ProviderCtx` with a real `DbState` (needed for token
+/// refresh). Body store, inline images, and search are not used by label
+/// operations — dummy/empty state is passed. The `add` parameter controls
+/// whether this is an apply (true) or remove (false).
+#[allow(clippy::too_many_arguments)]
+async fn provider_label_write_back(
+    db: &Arc<Db>,
+    account_id: &str,
+    thread_id: &str,
+    label_id: &str,
+    label_name: &str,
+    label_kind: &str,
+    encryption_key: [u8; 32],
+    add: bool,
+) -> Result<(), String> {
+    let provider = super::provider::create_provider(db, account_id, encryption_key).await?;
+    let core_db = ratatoskr_core::db::DbState::from_arc(db.write_conn_arc());
+
+    // For label write-back we only need db + account_id on the ctx.
+    // Body store, inline images, search, and progress are unused by
+    // add_tag / remove_tag / apply_category / remove_category.
+    // We pass the real db but use ProgressReporter::noop for the rest.
+    let data_dir = crate::APP_DATA_DIR.get().ok_or("APP_DATA_DIR not set")?;
+    let body_store = ratatoskr_core::body_store::BodyStoreState::init(data_dir)
+        .map_err(|e| format!("body store init: {e}"))?;
+    let search = ratatoskr_core::search::SearchState::init(data_dir)
+        .map_err(|e| format!("search init: {e}"))?;
+    let inline_images = ratatoskr_stores::inline_image_store::InlineImageStoreState::init(data_dir)
+        .map_err(|e| format!("inline image init: {e}"))?;
+
+    let ctx = ratatoskr_provider_utils::types::ProviderCtx {
+        account_id,
+        db: &core_db,
+        body_store: &body_store,
+        inline_images: &inline_images,
+        search: &search,
+        progress: &ratatoskr_core::progress::NoopProgressReporter,
+    };
+
+    let result = if add {
+        if label_kind == "tag" {
+            provider.apply_category(&ctx, thread_id, label_name).await
+        } else {
+            provider.add_tag(&ctx, thread_id, label_id).await
+        }
+    } else if label_kind == "tag" {
+        provider.remove_category(&ctx, thread_id, label_name).await
+    } else {
+        provider.remove_tag(&ctx, thread_id, label_id).await
+    };
+
+    result.map_err(|e| e.to_string())
 }
 
 /// Build typed `CommandArgs` from the selected option item.
