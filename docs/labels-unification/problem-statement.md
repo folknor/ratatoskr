@@ -83,6 +83,17 @@ Pinned searches, smart folders, and labels are **always the same** regardless of
 
 Labels in section 4 have no hierarchy. A Gmail user label named "Projects/Alpha" appears as a single flat entry with that name. Hierarchy is a provider folder concept — it belongs in section 2 only.
 
+### Labels section ordering
+
+Labels in section 4 are sorted **alphabetically by normalized name**. No drag-and-drop reordering — alphabetical is predictable and scales to large label counts. Users who want prioritized access to specific labels should use smart folders or pinned searches.
+
+### Section 2 vs Section 4 semantics
+
+Sections 2 and 4 have fundamentally different interaction semantics:
+
+- **Section 2 (folders)**: Operations are **moves**. Clicking "Archive" removes from Inbox. Dragging a thread from Inbox to a folder moves it. These are exclusive-membership operations at the provider level (IMAP COPY+DELETE, Exchange folder move, JMAP mailbox update). `add_tag()`/`remove_tag()` is NOT the right abstraction for section 2 — folder operations use provider-specific move methods.
+- **Section 4 (labels)**: Operations are **additive tags**. Applying a label adds it. Removing a label removes it. Neither affects folder membership. These are the operations that go through `add_tag()`/`remove_tag()` on ProviderOps.
+
 ## Provider Mapping
 
 | Provider | Folders — section 2 (`label_kind = 'container'`) | Labels — section 4 (`label_kind = 'tag'`) |
@@ -103,6 +114,17 @@ IMAP keywords are only usable when the server advertises `PERMANENTFLAGS` that i
 - **Fixed keywords only**: If the server advertises specific permanent flags (e.g., `$label1` through `$label5`), those can be exposed as labels.
 - **No custom flags**: If the server supports no custom flags at all, that account contributes no tag-type labels. The "apply label" action is unavailable for messages on that account — the UI grays it out or shows a notice.
 - **Capability is checked once per session** and cached on the account's sync state.
+
+### Provider keyword/category limits
+
+Providers impose caps on the number of tags:
+
+- **Exchange**: 25 categories maximum per mailbox
+- **IMAP**: Server-dependent. Many servers cap custom keywords at ~30 (some less).
+- **Gmail**: No hard cap on user labels (practical limit ~10,000).
+- **JMAP**: Server-dependent. No standard cap.
+
+When creating a label hits a provider cap, creation silently fails on that account. The label exists locally and on other accounts. The user is not prompted — the failure is logged and the label works everywhere except that account. If the user later tries to apply the label to a message on the capped account, the apply operation fails with a notice: "This account has reached its label limit."
 
 ## Label Colors
 
@@ -201,7 +223,27 @@ Label apply/remove operations go through `add_tag()`/`remove_tag()` on ProviderO
 
 ### Thread-level rollup
 
-Labels are applied at the message level on most providers, but `thread_labels` is thread-level. A thread has a label if **any message** in it has that label. The existing label sync already handles this rollup for Gmail labels and provider folders — the same logic applies to categories/keywords.
+Labels are applied at the message level on most providers, but `thread_labels` is thread-level. A thread has a label if **any message** in it has that label. This is intentionally sticky — once any message in a thread is labeled, the thread has that label until all messages with that label are either unlabeled or deleted.
+
+**Recalculation triggers:**
+- When a label is removed from a message, recalculate whether the thread still has that label (check remaining messages).
+- When a labeled message is deleted, recalculate.
+- When a new message arrives in the thread, it does NOT automatically inherit the thread's labels. The thread retains the label from existing messages; the new message is unlabeled.
+
+The existing label sync already handles this rollup for Gmail labels and provider folders — the same logic applies to categories/keywords.
+
+## Search Integration
+
+The unified label system integrates with the search pipeline. The `label:` operator in the query language matches both container-type and tag-type labels by name:
+
+```
+label:Project-Alpha     — matches threads with that label (any account)
+label:"Red Category"    — quoted names with spaces
+```
+
+Since labels are grouped by normalized name for display, `label:` search also matches by normalized name across all accounts — the same behavior as clicking the label in the sidebar.
+
+Smart folder queries can reference labels: a smart folder with query `label:Important is:unread` shows unread threads with the "Important" label across all accounts.
 
 ## Unread Counts
 
@@ -267,3 +309,9 @@ Once all sync paths write to `labels`/`thread_labels`, drop `categories` and `me
 - **Renaming is complex.** Renaming a label means renaming on every account that has it. Partial failures leave split state. This is inherent to name-based grouping and is acceptable — renaming labels is rare.
 
 - **IMAP keyword support is not universal.** Some IMAP servers cannot store custom keywords. Those accounts silently have no tag-type labels.
+
+- **Provider caps may silently limit labels.** Exchange (25 categories) and many IMAP servers (~30 keywords) have hard limits. Label creation and application fail silently on capped accounts.
+
+## Future Considerations
+
+- **Rename `thread_categories` table.** The AI inbox bundling system (`thread_categories`) shares the word "categories" with Exchange categories, causing confusion. A future rename to `thread_bundles` or `thread_classifications` would reduce ambiguity. Out of scope for this spec.
