@@ -110,6 +110,7 @@ impl App {
         };
         let reporter = Arc::clone(&self.sync_reporter);
 
+        let aid = account_id.clone();
         Task::perform(
             async move {
                 let provider = create_provider(&db, &account_id, encryption_key).await?;
@@ -122,14 +123,26 @@ impl App {
                     search: &*search_state,
                     progress: reporter.as_ref(),
                 };
-                provider.sync_delta(&ctx, None).await.map_err(|e| e.to_string())
+                provider.sync_delta(&ctx, None).await
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
             },
-            |result| {
-                if let Err(e) = result {
-                    log::error!("Sync delta failed: {e}");
-                }
-                Message::Noop
-            },
+            move |result| Message::SyncComplete(aid, result),
         )
+    }
+
+    /// Dispatch delta sync for all active accounts.
+    pub(crate) fn sync_all_accounts(&self) -> Task<Message> {
+        let tasks: Vec<Task<Message>> = self
+            .sidebar
+            .accounts
+            .iter()
+            .map(|a| self.dispatch_sync_delta(a.id.clone()))
+            .collect();
+
+        if tasks.is_empty() {
+            return Task::none();
+        }
+        Task::batch(tasks)
     }
 }

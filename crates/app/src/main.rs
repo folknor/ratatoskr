@@ -194,6 +194,10 @@ pub enum Message {
     FocusSearch,
     ShowHelp,
     SyncCurrentFolder,
+    /// Periodic sync timer tick.
+    SyncTick,
+    /// A sync operation completed (success or failure). Reload navigation.
+    SyncComplete(String, Result<(), String>),
     SetReadingPanePosition(ReadingPanePosition),
 
     // Palette placeholder (Slice 6b)
@@ -620,6 +624,14 @@ impl App {
             );
         }
 
+        // Periodic sync — delta sync all accounts every 5 minutes
+        if !self.sidebar.accounts.is_empty() && self.encryption_key.is_some() {
+            subs.push(
+                iced::time::every(std::time::Duration::from_secs(300))
+                    .map(|_| Message::SyncTick),
+            );
+        }
+
         // GAL (organization directory) cache refresh — every hour
         subs.push(
             iced::time::every(std::time::Duration::from_secs(3600))
@@ -821,7 +833,16 @@ impl App {
             Message::ToggleSidebar => Task::none(),
             Message::FocusSearch => self.update(Message::FocusSearchBar),
             Message::ShowHelp => Task::none(),
-            Message::SyncCurrentFolder => Task::none(),
+            Message::SyncCurrentFolder => self.sync_all_accounts(),
+            Message::SyncTick => self.sync_all_accounts(),
+            Message::SyncComplete(account_id, result) => {
+                if let Err(ref e) = result {
+                    log::error!("Sync failed for {account_id}: {e}");
+                }
+                // Reload navigation + threads to reflect any changes from sync
+                self.nav_generation += 1;
+                self.load_navigation_and_threads()
+            }
             Message::SetReadingPanePosition(_pos) => Task::none(),
             Message::Palette(msg) => self.handle_palette(msg),
 
@@ -1844,7 +1865,8 @@ impl App {
         self.status = format!("Loaded {} accounts", self.sidebar.accounts.len());
         let sig_task = handlers::signatures::load_signatures_async(&self.db)
             .map(Message::SignatureOp);
-        Task::batch([self.load_navigation_and_threads(), sig_task])
+        let sync_task = self.sync_all_accounts();
+        Task::batch([self.load_navigation_and_threads(), sig_task, sync_task])
     }
 
     fn view_first_launch_modal<'a>(
