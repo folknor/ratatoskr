@@ -147,6 +147,22 @@ impl Component for Settings {
             SettingsMessage::ContactEditorSave => {
                 return self.handle_contact_save();
             }
+            // Auto-save for local contacts when fields change
+            SettingsMessage::ContactEditorFieldChanged(_, _) => {
+                // The field value is set in handle_remaining_message.
+                // Here we check if we should auto-save (local contact).
+                self.handle_remaining_message(message);
+                if let Some(ref editor) = self.contact_editor {
+                    let is_local = editor
+                        .source
+                        .as_deref()
+                        .is_none_or(|s| s == "user");
+                    if is_local && editor.contact_id.is_some() {
+                        return self.handle_contact_save();
+                    }
+                }
+                return (Task::none(), None);
+            }
             SettingsMessage::ContactDelete(id) => {
                 // Show confirmation prompt instead of immediate delete
                 self.confirm_delete_contact = Some(id);
@@ -579,11 +595,13 @@ impl Settings {
                         ContactField::Company => editor.company = value,
                         ContactField::Notes => editor.notes = value,
                     }
+                    editor.dirty = true;
                 }
             }
             SettingsMessage::ContactEditorAccountChanged(account_id) => {
                 if let Some(ref mut editor) = self.contact_editor {
                     editor.account_id = account_id;
+                    editor.dirty = true;
                 }
             }
             SettingsMessage::ContactSaved(Ok(())) | SettingsMessage::ContactDeleted(Ok(())) => {}
@@ -763,7 +781,7 @@ impl Settings {
         (Task::none(), Some(SettingsEvent::SaveSignature(request)))
     }
 
-    fn open_contact_editor(&mut self, contact_id: &str) {
+    pub(crate) fn open_contact_editor(&mut self, contact_id: &str) {
         if let Some(contact) = self.contacts.iter().find(|c| c.id == contact_id) {
             self.contact_editor = Some(ContactEditorState {
                 contact_id: Some(contact.id.clone()),
@@ -774,6 +792,8 @@ impl Settings {
                 phone: contact.phone.clone().unwrap_or_default(),
                 company: contact.company.clone().unwrap_or_default(),
                 notes: contact.notes.clone().unwrap_or_default(),
+                source: contact.source.clone(),
+                dirty: false,
             });
             self.overlay = Some(SettingsOverlay::EditContact {
                 contact_id: Some(contact.id.clone()),
@@ -782,7 +802,7 @@ impl Settings {
         }
     }
 
-    fn open_new_contact_editor(&mut self) {
+    pub(crate) fn open_new_contact_editor(&mut self) {
         self.contact_editor = Some(ContactEditorState {
             contact_id: None,
             account_id: None,
@@ -792,6 +812,8 @@ impl Settings {
             phone: String::new(),
             company: String::new(),
             notes: String::new(),
+            source: None,
+            dirty: false,
         });
         self.overlay = Some(SettingsOverlay::EditContact { contact_id: None });
         self.overlay_anim.go_mut(true, Instant::now());

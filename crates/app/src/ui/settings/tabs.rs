@@ -1294,12 +1294,36 @@ fn contact_card(contact: &crate::db::ContactEntry) -> Element<'_, SettingsMessag
         );
     }
 
-    // Group pills
+    // Group pills — styled badges
     if !contact.groups.is_empty() {
-        let group_text = contact.groups.join(", ");
-        left_col = left_col.push(
-            text(format!("Groups: {group_text}")).size(TEXT_XS).style(text::primary),
-        );
+        let mut pill_row = row![].spacing(SPACE_XXS);
+        for group_name in &contact.groups {
+            let pill = container(
+                text(group_name).size(TEXT_XS).style(text::primary),
+            )
+            .padding(iced::Padding { top: 1.0, right: 6.0, bottom: 1.0, left: 6.0 })
+            .style(theme::ContainerClass::Badge.style());
+            pill_row = pill_row.push(pill);
+        }
+        left_col = left_col.push(pill_row);
+    }
+
+    // Account source pill
+    if let Some(ref source) = contact.source {
+        let source_label = match source.as_str() {
+            "google" => "Google",
+            "graph" => "Microsoft",
+            "carddav" => "CardDAV",
+            "jmap" => "JMAP",
+            "user" => "Local",
+            other => other,
+        };
+        let source_pill = container(
+            text(source_label).size(TEXT_XS).style(text::secondary),
+        )
+        .padding(iced::Padding { top: 1.0, right: 6.0, bottom: 1.0, left: 6.0 })
+        .style(theme::ContainerClass::Badge.style());
+        left_col = left_col.push(source_pill);
     }
 
     let mut right_col = column![].spacing(SPACE_XXXS).align_x(Alignment::End);
@@ -1543,17 +1567,45 @@ fn contact_editor_buttons<'a>(
 
     btn_row = btn_row.push(Space::new().width(Length::Fill));
 
-    let can_save = !editor.email.trim().is_empty();
-    let mut save_btn = button(
-        container(text("Save").size(TEXT_LG)).center_x(Length::Fill),
-    )
-    .padding(PAD_BUTTON)
-    .style(theme::ButtonClass::Primary.style())
-    .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
-    if can_save {
-        save_btn = save_btn.on_press(SettingsMessage::ContactEditorSave);
+    // Local contacts auto-save on field change — no Save button needed.
+    // Synced contacts need an explicit Save button (enabled when dirty).
+    let is_local = editor.source.as_deref().is_none_or(|s| s == "user");
+    if is_local {
+        // Show a subtle "Auto-saved" indicator when dirty
+        if editor.contact_id.is_some() {
+            btn_row = btn_row.push(
+                text("Auto-saved")
+                    .size(TEXT_SM)
+                    .style(text::secondary),
+            );
+        } else {
+            // New contact: still need a Create button
+            let can_save = !editor.email.trim().is_empty();
+            let mut save_btn = button(
+                container(text("Create").size(TEXT_LG)).center_x(Length::Fill),
+            )
+            .padding(PAD_BUTTON)
+            .style(theme::ButtonClass::Primary.style())
+            .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
+            if can_save {
+                save_btn = save_btn.on_press(SettingsMessage::ContactEditorSave);
+            }
+            btn_row = btn_row.push(save_btn);
+        }
+    } else {
+        // Synced contact: explicit Save button, enabled when dirty
+        let can_save = !editor.email.trim().is_empty() && editor.dirty;
+        let mut save_btn = button(
+            container(text("Save").size(TEXT_LG)).center_x(Length::Fill),
+        )
+        .padding(PAD_BUTTON)
+        .style(theme::ButtonClass::Primary.style())
+        .width(Length::Fixed(EDITOR_BUTTON_WIDTH));
+        if can_save {
+            save_btn = save_btn.on_press(SettingsMessage::ContactEditorSave);
+        }
+        btn_row = btn_row.push(save_btn);
     }
-    btn_row = btn_row.push(save_btn);
 
     btn_row.into()
 }

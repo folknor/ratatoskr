@@ -59,7 +59,7 @@ Prioritized implementation plan for Ratatoskr features.
 
 | Task | Spec | Status |
 |------|------|--------|
-| Contacts autocomplete + token input | `docs/contacts/autocomplete-implementation-spec.md` | Partially implemented (2026-03-21). Token input widget implemented (`crates/app/src/ui/token_input.rs`): wrapping flow layout, keyboard state machine, arrow keys, right-click context menu, group icon. Compose window has To/Cc/Bcc fields with `TokenInputValue` (`pop_out/compose.rs:475`). Backend: `search_contacts_for_autocomplete` in `crates/app/src/db/contacts.rs`, core `search_contacts()` with FTS5. **Not wired:** `dispatch_autocomplete_search()` / `should_trigger_autocomplete()` exist (`handlers/contacts.rs:223,254`) but are never called — autocomplete dropdown never renders. RFC 5322 paste parser (`token_input_parse.rs:26`) exists with tests but `Paste` handler uses naive `split([',', ';', '\n'])` instead (`compose.rs:450`). Missing: autocomplete dropdown rendering, keyboard interception for dropdown, drag-and-drop between fields, GAL caching. |
+| Contacts autocomplete + token input | `docs/contacts/autocomplete-implementation-spec.md` | Substantially complete (2026-03-22). **All 6 phases implemented.** Phase 1: token input widget with wrapping flow, keyboard state machine, group icon, drag detection. Phase 2: autocomplete wired end-to-end — `dispatch_autocomplete_search()` called from `pop_out.rs`, dropdown renders with keyboard nav (Up/Down/Enter/Tab/Escape via `autocomplete_open` flag), generation-tracked results. Phase 3: RFC 5322 paste parser wired (`token_input_parse.rs`), bulk paste banner for 10+ addresses. Phase 4: context menu with Delete/Expand group/Move to field, recursive group expansion with display name lookup. Phase 5: drag detection (4px threshold), `DragStarted` message, context menu "Move to" as primary move mechanism. Phase 6: Bcc nudge banner when group added to To/Cc, bulk paste banner. GAL cache table exists and is searched during autocomplete; GAL pre-fetch awaits sync orchestrator. Remaining: GAL directory API calls (need provider client access). |
 | Search app integration (slices 5-6) | `docs/search/app-integration-spec.md` | Substantially complete (2026-03-21). Unified pipeline wired (`handlers/search.rs:366`): Tantivy+SQL fallback. Multi-value from/to, debounce, generational tracking (`search_generation` at `main.rs:339`), smart folder token migration. `delete_all_pinned_searches` DB function exists (`db/pinned_searches.rs:295`) but has no `Message` variant — unwired from UI. Missing: typeahead (Phase 3), "Search here" (Phase 4), smart folder graduation. |
 
 ### Tier 3 — Compose / Advanced Surfaces
@@ -75,7 +75,7 @@ Prioritized implementation plan for Ratatoskr features.
 
 | Task | Spec | Status |
 |------|------|--------|
-| Contacts management + import | Not yet written | Substantially complete (2026-03-21). Backend: CardDAV sync (`crates/core/src/carddav/`), Google/Graph contact sync, dedup, unified search (`core/src/db/queries.rs:680`), contact group CRUD (`core/src/db/queries_extra/contact_groups.rs`). `crates/contact-import/` crate with CSV/vCard import, encoding detection, column mapping (`contact-import/src/lib.rs`). Settings UI: contact/group lists (`tabs.rs:1146`), slide-in editor overlays, new/edit/delete with confirmation, import wizard overlay (`tabs.rs:2182`). App-level contacts CRUD uses raw SQL in `crates/app/src/db/contacts.rs`, not core CRUD functions. Missing: LDAP, provider write-back on edit, XLSX import. |
+| Contacts management + import | Not yet written | Substantially complete (2026-03-22). Backend: CardDAV sync, Google/Graph contact sync, dedup, unified search, contact group CRUD. `crates/contact-import/` with CSV/vCard import, encoding detection, column mapping. Settings UI: contact/group lists with styled group/account pills (Badge containers), slide-in editors, new/edit/delete with confirmation, import wizard. **Group creation from import now works** — creates `contact_groups` and links members. **Distinct save behavior** — local contacts auto-save, synced contacts show explicit Save button (enabled when dirty). **Provider write-back** dispatched after save (JMAP fully implemented in core, Google/Graph scaffolded, CardDAV pending). **Inline contact editing** — sender name in reading pane is clickable, opens settings editor. Missing: LDAP, XLSX import (deferred), CardDAV PUT for write-back. |
 | Emoji picker | Not yet written | Done ✅ (2026-03-21). 10-category searchable grid (Recent, Smileys, People, Nature, Food, Activities, Travel, Objects, Symbols, Flags) with skin tone selector (6 variants via `SkinTone::ALL`), recent emoji persistence, 340+ emoji (`crates/app/src/ui/emoji_picker.rs`). |
 | Read receipts (outgoing) | No spec needed | Not started |
 
@@ -88,33 +88,38 @@ Prioritized implementation plan for Ratatoskr features.
 | Layer 3: Day/Week/Work Week time grid | No spec (product doc) | Done ✅ |
 | Layer 4: Event CRUD + popover/modal | No spec (product doc) | Done ✅ |
 | Layer 5: Provider sync (Google/Graph/CalDAV) | No spec (product doc) | Done ✅ — Google Calendar API, Microsoft Graph, and CalDAV all wired. CalDAV client in `crates/core/src/caldav/` and `crates/calendar/src/caldav/` (PROPFIND, REPORT, iCalendar parsing, ctag-based incremental sync). |
+| Full spec compliance pass (2026-03-22) | `docs/calendar/problem-statement.md` | 37/50 gaps resolved ✅ — see `docs/calendar/discrepancies.md` |
 
-**Deferred calendar review items (tracked, not blocking):**
-- `calendar_default_view` setting seeded in DB but never read — `CalendarState::new()` hardcodes Month. Should read from settings table at boot.
-- New v63 schema fields (`title`, `timezone`, `recurrence_rule`, `organizer_name`, `rsvp_status`, `created_at` on events; `sort_order`, `is_default`, `provider_id` on calendars) not surfaced through `DbCalendarEvent`/`DbCalendar` types. Layer 4/5 may have partially addressed this — needs verification.
-- `SELECT *` in some calendar queries — should use explicit column lists to avoid breakage if columns are added/reordered.
-- Missing FK constraints on `calendar_attendees`/`calendar_reminders` → `calendar_events`. Orphaned rows possible if events deleted without cleanup. `db_delete_calendar_event` doesn't cascade.
-- `mix()` made pub speculatively in theme.rs — revert if not used externally.
-- Unicode arrows (◀/▶) in mini-month nav — should use icon:: helpers for consistency.
-- O(n²) overlap computation in `set_total_columns()` — compares every event pair. Fine for typical day counts (<20 events) but should have a comment or TODO for future optimization.
-- Full event cloning per view rebuild in `events_for_date()` — manually clones every field (no Clone derive). Now relevant with real provider data from sync.
-- `TimeGridConfig` rebuilt unnecessarily for Month view — the Month branch in `rebuild_view_data()` builds a throwaway day view config that's never rendered. Wasteful, if harmless.
-- No scroll-to-now/working-hours — time grid renders 0–24 from midnight with no auto-scroll to current time or business hours.
-- No recurrence icon on event blocks — spec requires indicator for recurring events, but `TimeGridEvent` has no `is_recurring` field yet.
-- Weekend columns not narrower in week view — spec notes this is common but says "often" not "must."
-- CalDAV iCalendar parsing is hand-rolled (not `calcard` crate) — works for standard events but may miss edge cases in complex RRULE/VTIMEZONE data.
+**Resolved in spec compliance pass (2026-03-22):** v63 schema fields surfaced in types + FromRow, `SELECT *` eliminated, CASCADE delete on all event delete paths, `availability` + `visibility` columns (migration v65), `calendar_default_view` read at boot, recurrence expansion (DAILY/WEEKLY/MONTHLY/YEARLY with INTERVAL/COUNT/UNTIL), recurrence icon on event blocks, two-tier event detail (compact 300px popover → full two-panel modal with mini day view), organizer/attendees/reminders/RSVP status display, calendar selector/timezone/availability/visibility in editor, ISO week numbers in month view, narrower weekend columns, calendar list with color dots + visibility toggles, event dots on mini-month, clickable agenda items, view switcher in sidebar header, Ctrl+1 Switch to Mail / Ctrl+2 Toggle Calendar / distinct Switch to Calendar + Switch to Mail commands, pop-out calendar window, 📅 email-to-calendar button on expanded messages, unsaved changes prompt, ✕ close buttons. `UpsertCalendarEventParams` + `LocalCalendarEventParams` structs replace long arg lists. All 4 provider sync paths populate new fields.
+
+**Remaining calendar items (require custom iced widget work or provider API integration):**
+- Drag interactions (move, resize, range-select) — need custom `advanced::Widget` with continuous position mapping. Spec acknowledges as "hardest to implement well in iced."
+- Scroll-to-now — blocked by iced fork lacking `scroll_to()` API (UI.md:60).
+- Multi-day spanning bars in month view — need fundamentally different layout approach (absolute positioning across cells).
+- RSVP action buttons — need provider API round-trips (Google/Graph/CalDAV RSVP endpoints).
+- Recurring event edit/delete prompts ("this / following / all") — need exception tracking + provider API.
+- Meeting invite detection (F2-F4) — need iCalendar MIME part parsing in email pipeline.
+- Attendee input with autocomplete — blocked on contacts autocomplete dropdown (Tier 2 gap).
+
+**Minor polish (not blocking):**
+- `mix()` pub in theme.rs — revert if unused externally.
+- Unicode arrows (◀/▶) in mini-month nav — should use `icon::` helpers.
+- O(n²) overlap in `set_total_columns()` — fine for typical counts.
+- `TimeGridConfig` rebuilt unnecessarily for Month view — wasteful, harmless.
+- CalDAV iCalendar parsing hand-rolled — works for standard events, may miss complex RRULE/VTIMEZONE edge cases.
 
 ## Spec Status
 
-*(Full audit 2026-03-21 — per-feature reports in `docs/<feature>/discrepancies.md`)*
+*(Full audit 2026-03-21, calendar update 2026-03-22 — per-feature reports in `docs/<feature>/discrepancies.md`)*
 
 | Spec | Doc | Audit Status |
 |------|-----|-------------|
+| Calendar | `docs/calendar/problem-statement.md` | 37/50 spec gaps resolved (2026-03-22). Data model fully wired (v63 fields, availability/visibility, CASCADE delete). Two-tier event detail (popover→modal), attendees/RSVP/reminders/recurrence display, calendar list+dots+clickable agenda, view switcher in header, Ctrl+1/2, pop-out window, 📅 email-to-calendar, recurrence expansion, ISO week numbers, narrower weekends. Remaining: drag interactions (custom widget), scroll-to-now (blocked by iced API), multi-day spanning bars, RSVP action buttons (provider API), meeting invite detection (iCalendar parsing). Full details in `docs/calendar/discrepancies.md`. |
 | Command palette app integration | `docs/command-palette/app-integration-spec.md` | Core infra solid (Slices 1-4). `NavigateToLabel` wired end-to-end (`handlers/commands.rs:146`). `provider_kind`/`current_view` fixed. Chord indicator added. Snooze presets implemented. Recency sort wired. Palette implements `Component` trait (`ui/palette.rs:307`). No `PaletteEvent` enum — events dispatched via direct messages. 4 commands return None (`NavMsgNext/Prev` at `command_dispatch.rs:319`, `EmailSelectAll/FromHere` at `command_dispatch.rs:462-464`). `scroll_to_selected()` is a no-op (`ui/palette.rs:380`). |
 | Sidebar | `docs/sidebar/implementation-spec.md` | Phases 1A-1E + Phase 2 complete. Best cross-cutting compliance. Spam/All Mail wired. O(n^2) fixed. Dead code cleaned. Relative dates. Chevron styling. Minor: `SidebarEvent::CycleAccount` never emitted — parent handler at `main.rs:898` is dead code (`sidebar.rs:122-134` handles internally). `NavigationTarget` still deferred. Mixed drafts: count path handles both (`get_draft_count_with_local`), list path returns server-synced only. |
 | Accounts | `docs/accounts/implementation-spec.md` | Wizard substantially complete. Real discovery wired, OAuth flow, protocol selection, credential validation, core CRUD for creation (`create_account_sync` at `add_account.rs:936`), account editor in settings. `AccountHealth` enum exists but `compute_health()` always receives `None`/`true` for `token_expires_at`/`is_active` — always returns Healthy (`main.rs:1370`). Account deletion uses raw `DELETE FROM accounts` (`main.rs:1194`), not core CRUD. Drag-to-reorder implemented (`AccountDragState` at `settings/types.rs:747`, wired via `AccountGripPress`/`AccountDragMove`/`AccountDragEnd` at `settings/update.rs:410,136,139`). Missing: re-auth flow (Phase 7 is TODO stub at `settings/update.rs:76-78`), sidebar Phase 6 (color dots). |
 | Status bar | `docs/status-bar/implementation-spec.md` | Scaffold implemented. `IcedProgressReporter` + `SyncEvent` types exist (`status_bar.rs:143-166`). `create_sync_progress_channel()` factory exists but is never called — no sync orchestrator connection (`main.rs:733-736` dispatch exists, no sender). Idle fixed height. Settings toggle wired. `Message::SyncProgress(SyncEvent)` variant exists but nothing sends it. Generational tracking methods (`begin_sync_generation`, `prune_stale_sync` at `status_bar.rs:237-264`) exist but are never called. Confirmation dispatch: `show_confirmation()` only called from placeholder reauth handler (`main.rs:1051`); no email action handlers call it because `Message::EmailAction` is a no-op (`main.rs:619`). Not in pop-outs. Remaining: connect sync orchestrator, wire confirmations to email actions, wire token expiry warnings. |
-| Contacts autocomplete | `docs/contacts/autocomplete-implementation-spec.md` | Token input widget implemented and wired in compose. `AutocompleteState` struct exists with generation counter (`compose.rs:106`). Backend search functions exist in both core and app layers. **Autocomplete search never triggered**: `dispatch_autocomplete_search()` at `handlers/contacts.rs:223` is dead code. No autocomplete dropdown rendered in compose view. RFC 5322 paste parser at `token_input_parse.rs:26` is dead code (Paste handler uses naive split). App-level contacts CRUD uses raw SQL (`db/contacts.rs`), not core CRUD functions. `crates/contact-import/` crate exists with CSV/vCard import (`contact-import/src/lib.rs`). Import wizard UI in settings (`tabs.rs:2182`). |
+| Contacts autocomplete | `docs/contacts/autocomplete-implementation-spec.md` | All 6 phases implemented (2026-03-22). Autocomplete wired end-to-end: `dispatch_autocomplete_search()` called from `pop_out.rs`, dropdown renders with keyboard nav (Up/Down/Enter/Tab/Escape via `autocomplete_open`). RFC 5322 paste parser wired. Context menu: Delete/Expand group/Move to field. Bcc nudge banner for groups. Bulk paste banner (10+ addresses). Drag detection (4px threshold). GAL cache table and search wired; directory pre-fetch awaits provider clients. Group creation from import. Styled group/account pills. Distinct local-vs-synced save. Inline contact editing from reading pane (opens settings editor). Provider write-back dispatch (JMAP complete, Google/Graph scaffolded). Remaining: GAL directory API calls, CardDAV PUT, XLSX import (deferred). |
 | Search app integration | `docs/search/app-integration-spec.md` | Backend + app integration (Slices 1-5) complete. Unified pipeline wired (`handlers/search.rs:366`). Smart folder token migration done. `SearchBlur` is a no-op (`main.rs:640`). `SearchState` initialized per-search inside `execute_search()` (`handlers/search.rs:356`), not stored on `App`. Missing: typeahead (Phase 3), "Search here" (Phase 4), smart folder graduation. |
 | Editor | `docs/editor/architecture.md` | Very faithful. Double/triple click implemented. `SetBlockAttrs` added. `prepare_move_up/down` (`widget/cursor.rs:413,463`) tested but not wired into widget event path — vertical movement uses column-offset fallback. `TextAlignment` defined (`document.rs:150`) but not stored on block variants — `Block::attrs()` hardcodes `Left` (`document.rs:332-338`). |
 | Signatures | `docs/signatures/implementation-spec.md` | Phases 1-3, 5 partially implemented. DbSignature extended (7 cols at `crates/db/src/db/types.rs:536`). `html_to_plain_text` at `compose.rs:716`. Transactional defaults in core. App handlers use raw SQL, not core CRUD (`handlers/signatures.rs`). Signature editor uses `undoable_text_input` not rich text editor (`tabs.rs:1067-1087`). Async loading wired. Delete confirmation. `assemble_compose_document` exists as library code (`rich-text-editor/src/compose.rs:52`) but is not called from compose window. Missing: rich text editor in editor, Phase 4 account switching, draft restoration. |
@@ -135,8 +140,13 @@ Tier 1 — COMPLETE:
     Command Palette 6e-6f (persistence, keybinding UI)
     Sidebar Phase 2 — satisfied (no actions to strip)
 
-Tier 2 — PARTIALLY COMPLETE (2026-03-21):
-  Contacts Autocomplete: Token input widget ✅, backend search ✅, autocomplete wiring ✗ (dropdown never renders, paste parser not called)
+Tier 2 — SUBSTANTIALLY COMPLETE (2026-03-22):
+  Contacts Autocomplete ✅ (all 6 phases: widget, dropdown wired, paste parser, context menu, drag, banners)
+    ├── GAL cache table + autocomplete search ✅ (directory pre-fetch awaits provider clients)
+    ├── Group creation from import ✅
+    ├── Provider write-back dispatch ✅ (JMAP complete, Google/Graph scaffolded)
+    ├── Inline contact editing from reading pane ✅ (opens settings editor)
+    ├── Styled group/account pills ✅, distinct local-vs-synced save ✅
     └── Pop-Out Compose (Tier 3 — enhanced but still needs rich text, sending, drafts)
   Search App Integration ✅ (unified pipeline wired, token migration, dead code cleanup)
     └── Pinned Searches ✅ (CRUD, sidebar rendering, relative dates, startup expiry)
@@ -153,22 +163,31 @@ Tier 3 — PARTIALLY COMPLETE (2026-03-21):
   Pinned Searches ✅ (minus periodic expiry and "Clear all" UI)
 
   Remaining Tier 3 work:
-    Wire autocomplete dropdown + paste parser in compose
     Signatures Phase 4 (account switching in compose)
     Rich text editor in signature editor
     Pop-out compose: sending, drafts, auto-save, attachments, rich text
     Pop-out message view: session persistence, file picker for Save As, HTML rendering, Archive/Delete wiring
 
 Tier 4:
-  Contacts Management + Import ✅ (substantially complete: CardDAV/Google/Graph sync, dedup, contact-import crate, import wizard)
+  Contacts Management + Import ✅ (2026-03-22: group import, styled pills, distinct save, provider write-back, inline editing, GAL cache)
   Emoji Picker ✅ (complete: 10 categories incl. Recent + Flags, skin tones, recent persistence, 340+ emoji)
 
-Tier 5 — COMPLETE (2026-03-21):
+Tier 5 — 37/50 SPEC GAPS RESOLVED (2026-03-22):
   Calendar Layers 1-5 ✅ (depends on: Tier 1 shell being solid ✅)
     Layer 4: Event CRUD with detail/editor/delete overlays ✅
     Layer 5: Provider sync — Google Calendar API ✅, Microsoft Graph ✅, CalDAV ✅
     CalDAV client: PROPFIND/REPORT, iCalendar parsing, ctag-based incremental sync
     Account card drag-to-reorder in settings ✅ (custom AccountDragState at settings/types.rs:747)
+  Spec compliance pass (2026-03-22):
+    Data model: v63 fields surfaced, SELECT* eliminated, CASCADE delete, availability+visibility (v65), default view ✅
+    Recurrence: RRULE expansion (DAILY/WEEKLY/MONTHLY/YEARLY), recurrence icon on event blocks ✅
+    Event detail: two-tier popover→modal, organizer/attendees/reminders/RSVP, calendar selector/timezone/availability/visibility ✅
+    Views: ISO week numbers, narrower weekends ✅
+    Sidebar: calendar list+dots+clickable agenda, view switcher in header ✅
+    Navigation: Ctrl+1 Mail, Ctrl+2 Toggle, Switch to Calendar/Mail commands ✅
+    Pop-out: calendar window (↗ button, command, PopOutWindow::Calendar) ✅
+    Email: 📅 button on expanded messages (create event from subject/snippet) ✅
+    Remaining ✗: drag interactions, scroll-to-now, multi-day bars, RSVP actions, invite detection
 
 Main Layout (cross-cutting, 2026-03-21):
   Core's get_thread_detail() NOT wired ✗ (bridge exists at db/threads.rs:109 but never called; raw SQL path at main.rs:1526)
@@ -193,10 +212,10 @@ Main Layout (cross-cutting, 2026-03-21):
 - **Component trait:** Seven components extracted: Sidebar (`sidebar.rs:103`), ThreadList (`thread_list.rs:295`), ReadingPane (`reading_pane.rs:163`), Settings (`settings/update.rs:15`), StatusBar (`status_bar.rs:462`), AddAccountWizard (`add_account.rs:350`), Palette (`palette.rs:307`). Compose, calendar, and pop-out windows are not componentized.
 - **Token-to-Catalog theming:** Very clean — zero inline style closures across all UI files. Previous palette exceptions resolved (now uses `TextClass` variants).
 - **Subscription orchestration:** Infrastructure solid. Active subscriptions: keyboard listener, chord timeout, search debounce, status bar cycling, settings animation. `IcedProgressReporter` + `SyncEvent` + `create_sync_progress_channel()` exist (`status_bar.rs:143-166`) but sync orchestrator never calls them. Compose auto-save timer still missing.
-- **Dead code accumulation:** Partially reduced. Key remaining items: `load_thread_detail` bridge (`db/threads.rs:109-134`), `init_body_store` (`db/threads.rs:328-333`), core signature CRUD functions (unused by app), `SidebarEvent::CycleAccount` (`sidebar.rs:43`, parent handler at `main.rs:898`), `PendingChord.started` (`main.rs:143`), `prepare_move_up/down` (`widget/cursor.rs:413,463`), `dispatch_autocomplete_search` / `should_trigger_autocomplete` (`handlers/contacts.rs:223,254`), `RecipientField` (`token_input.rs:50`), `AUTOCOMPLETE_MAX_HEIGHT` / `AUTOCOMPLETE_ROW_HEIGHT` (`layout.rs:433,435`), `save_session_state` / `restore_pop_out_windows` / `SessionState::load` (`handlers/pop_out.rs:473,508`, `pop_out/session.rs:40`), `body_html` on `MessageViewState` (populated but never rendered).
-- **Editor** is complete (all 5 phases, 652 tests). Signatures and compose are now unblocked. Together with contacts autocomplete wiring (not yet done), the editor enables the full compose workflow.
+- **Dead code accumulation:** Partially reduced. Key remaining items: `load_thread_detail` bridge (`db/threads.rs:109-134`), `init_body_store` (`db/threads.rs:328-333`), core signature CRUD functions (unused by app), `SidebarEvent::CycleAccount` (`sidebar.rs:43`, parent handler at `main.rs:898`), `PendingChord.started` (`main.rs:143`), `prepare_move_up/down` (`widget/cursor.rs:413,463`), `save_session_state` / `restore_pop_out_windows` / `SessionState::load` (`handlers/pop_out.rs:473,508`, `pop_out/session.rs:40`), `body_html` on `MessageViewState` (populated but never rendered). **Resolved (2026-03-22):** `dispatch_autocomplete_search` and `should_trigger_autocomplete` are now wired. `RecipientField`, `AUTOCOMPLETE_MAX_HEIGHT`, `AUTOCOMPLETE_ROW_HEIGHT` are now used.
+- **Editor** is complete (all 5 phases, 652 tests). Signatures and compose are now unblocked. With contacts autocomplete now wired (2026-03-22), the editor enables the full compose workflow.
 - **Pop-out windows** are deliberately split into compose (heavy dependencies) and message-view (mostly independent, but Phase 1 is shared infrastructure). Phase 1 is complete. Message view has UI scaffold but session persistence is dead code and HTML rendering falls back to plain text. Compose enhanced with discard confirmation, token input recipients, formatting toolbar stubs, cc_addresses — still no sending, drafts, auto-save, attachments, or rich text.
-- **Contacts** are deliberately split into autocomplete (core email loop blocker) and management (additive, Tier 4). Token input widget implemented. Autocomplete search/dropdown NOT wired — `dispatch_autocomplete_search()` and `should_trigger_autocomplete()` are defined but never called (`handlers/contacts.rs:223,254`). RFC 5322 paste parser exists but is not called from `Paste` handler (`compose.rs:450`). Management UI in settings substantially complete. `crates/contact-import/` crate exists with CSV/vCard import and import wizard UI in settings (`tabs.rs:2182`).
+- **Contacts (2026-03-22 — substantially complete):** Autocomplete fully wired end-to-end (all 6 spec phases). Token input widget with drag detection, context menu (Delete/Expand group/Move to field), Bcc nudge and bulk paste banners. RFC 5322 paste parser wired. GAL cache table + autocomplete search integration (directory fetch awaits provider clients). Group creation from import. Styled pills on contact cards. Distinct local-vs-synced save behavior. Inline contact editing from reading pane. Provider write-back dispatch (JMAP complete, Google/Graph scaffolded). Remaining: GAL directory API calls, CardDAV PUT, XLSX import (deferred).
 - **Result type convergence:** The search specs identify four overlapping thread-result types (`UnifiedSearchResult`, `Thread`, `DbThread`, `SearchResult`). These should converge into a unified thread-presentation type. The natural time to do this is during search app integration (Tier 2) — specifically when wiring `UnifiedSearchResult` → `Thread` conversion in Phase 1 and the smart folder `DbThread` adapter in Phase 2. Not a blocker, but one of the cleaner refactor seams now visible.
 - **Label/folder semantics:** The resolver now checks provider type and rejects Add/Remove Label on folder-based providers (Exchange/IMAP/JMAP). Move to Folder is the correct operation for those providers. This distinction is enforced in `AppInputResolver` and `Db::is_folder_based_provider()`.
 - **Search execution wired (2026-03-21):** The unified pipeline is now reachable from the UI. App calls `search_pipeline::search()` with Tantivy when index is available (`handlers/search.rs:366`), falls back to smart folder parser + SQL builder for structured queries, and uses LIKE only as last-resort for pure free-text without index. `SearchBlur` is a no-op (`main.rs:640`). `SearchState` is re-initialized per search (`handlers/search.rs:356`), not stored on `App`.

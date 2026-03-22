@@ -1394,6 +1394,24 @@ static MIGRATIONS: &[Migration] = &[
             ALTER TABLE calendar_events ADD COLUMN visibility TEXT;
         "#,
     },
+    Migration {
+        version: 66,
+        description: "GAL (organization directory) cache table",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS gal_cache (
+                email TEXT NOT NULL,
+                display_name TEXT,
+                phone TEXT,
+                company TEXT,
+                title TEXT,
+                department TEXT,
+                account_id TEXT NOT NULL,
+                cached_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                PRIMARY KEY (account_id, email)
+            );
+            CREATE INDEX IF NOT EXISTS idx_gal_cache_email ON gal_cache(email);
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
@@ -1633,6 +1651,6 @@ mod tests {
         let max_ver: u32 = conn
             .query_row("SELECT MAX(version) AS max_ver FROM _migrations", [], |row| row.get("max_ver"))
             .expect("query");
-        assert_eq!(max_ver, 63);
+        assert_eq!(max_ver, 66);
     }
 }

@@ -113,6 +113,17 @@ pub enum TokenInputMessage {
     ArrowSelectToken(TokenId),
     /// Arrow right from last token — deselect and focus text.
     ArrowToText,
+    /// A drag was initiated on a token (exceeded 4px threshold).
+    DragStarted(TokenId),
+    // ── Autocomplete keyboard events (emitted when autocomplete_open) ──
+    /// Arrow down when autocomplete dropdown is visible.
+    AutocompleteDown,
+    /// Arrow up when autocomplete dropdown is visible.
+    AutocompleteUp,
+    /// Enter/Tab when autocomplete dropdown is visible — accept selection.
+    AutocompleteAccept,
+    /// Escape when autocomplete dropdown is visible — dismiss dropdown.
+    AutocompleteDismissKey,
 }
 
 // ── Widget state ────────────────────────────────────────
@@ -125,6 +136,8 @@ struct TokenInputState {
     token_bounds: Vec<Rectangle>,
     /// Whether the widget is focused.
     is_focused: bool,
+    /// Tracking a potential drag: (token_id, mouse_down_origin).
+    drag_tracking: Option<(TokenId, Point)>,
 }
 
 // ── Widget struct ───────────────────────────────────────
@@ -136,6 +149,10 @@ struct TokenInputWidget<'a, M> {
     on_message: Box<dyn Fn(TokenInputMessage) -> M + 'a>,
     /// Which token the parent considers selected (for backspace flow).
     selected_token: Option<TokenId>,
+    /// Whether the autocomplete dropdown is currently visible.
+    /// When true, ArrowUp/Down/Enter/Tab/Escape emit autocomplete messages
+    /// instead of normal token navigation.
+    autocomplete_open: bool,
 }
 
 /// Creates a token input field element.
@@ -155,6 +172,7 @@ pub fn token_input_field<'a, M: Clone + 'a>(
     text: &'a str,
     placeholder: &'a str,
     selected_token: Option<TokenId>,
+    autocomplete_open: bool,
     on_message: impl Fn(TokenInputMessage) -> M + 'a,
 ) -> Element<'a, M> {
     TokenInputWidget {
@@ -163,6 +181,7 @@ pub fn token_input_field<'a, M: Clone + 'a>(
         placeholder,
         on_message: Box::new(on_message),
         selected_token,
+        autocomplete_open,
     }
     .into()
 }
@@ -476,7 +495,51 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                 ..
             })
             | Event::Touch(iced::touch::Event::FingerPressed { .. }) => {
+                // Start drag tracking if clicking on a token
+                if let Some(pos) = cursor.position() {
+                    if bounds.contains(pos) {
+                        for (i, token) in self.tokens.iter().enumerate() {
+                            if let Some(chip) = state.token_bounds.get(i) {
+                                let abs = Rectangle {
+                                    x: bounds.x + chip.x,
+                                    y: bounds.y + chip.y,
+                                    width: chip.width,
+                                    height: chip.height,
+                                };
+                                if abs.contains(pos) {
+                                    state.drag_tracking =
+                                        Some((token.id, pos));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
                 handle_left_click(self, state, cursor, bounds, shell);
+            }
+
+            // ── Mouse move: drag detection ──────────────────
+            Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                if let (Some((token_id, origin)), Some(pos)) =
+                    (state.drag_tracking, cursor.position())
+                {
+                    let dx = pos.x - origin.x;
+                    let dy = pos.y - origin.y;
+                    if dx * dx + dy * dy > 16.0 {
+                        // 4px threshold
+                        state.drag_tracking = None;
+                        shell.publish((self.on_message)(
+                            TokenInputMessage::DragStarted(token_id),
+                        ));
+                    }
+                }
+            }
+
+            // ── Mouse up: cancel drag tracking ──────────────
+            Event::Mouse(mouse::Event::ButtonReleased(
+                mouse::Button::Left,
+            )) => {
+                state.drag_tracking = None;
             }
 
             // ── Keyboard events (only when focused) ────────
@@ -622,6 +685,20 @@ fn handle_key_press<M: Clone>(
             handle_backspace(widget, shell);
         }
 
+        // Arrow Up/Down: autocomplete navigation when dropdown open
+        keyboard::Key::Named(keyboard::key::Named::ArrowUp)
+            if widget.autocomplete_open =>
+        {
+            shell.publish((widget.on_message)(TokenInputMessage::AutocompleteUp));
+            shell.capture_event();
+        }
+        keyboard::Key::Named(keyboard::key::Named::ArrowDown)
+            if widget.autocomplete_open =>
+        {
+            shell.publish((widget.on_message)(TokenInputMessage::AutocompleteDown));
+            shell.capture_event();
+        }
+
         // Left arrow: navigate to previous token
         keyboard::Key::Named(keyboard::key::Named::ArrowLeft) => {
             handle_arrow_left(widget, shell);
@@ -632,17 +709,28 @@ fn handle_key_press<M: Clone>(
             handle_arrow_right(widget, shell);
         }
 
-        // Escape: blur
+        // Escape: dismiss autocomplete if open, otherwise blur
         keyboard::Key::Named(keyboard::key::Named::Escape) => {
-            shell.publish((widget.on_message)(TokenInputMessage::Blurred));
+            if widget.autocomplete_open {
+                shell.publish((widget.on_message)(
+                    TokenInputMessage::AutocompleteDismissKey,
+                ));
+            } else {
+                shell.publish((widget.on_message)(TokenInputMessage::Blurred));
+            }
             shell.capture_event();
         }
 
-        // Enter / Tab: tokenize current text
+        // Enter / Tab: accept autocomplete if open, otherwise tokenize
         keyboard::Key::Named(
             keyboard::key::Named::Enter | keyboard::key::Named::Tab,
         ) => {
-            if !widget.text.is_empty() {
+            if widget.autocomplete_open {
+                shell.publish((widget.on_message)(
+                    TokenInputMessage::AutocompleteAccept,
+                ));
+                shell.capture_event();
+            } else if !widget.text.is_empty() {
                 let text = widget.text.to_string();
                 shell.publish((widget.on_message)(
                     TokenInputMessage::TokenizeText(text),

@@ -1,4 +1,5 @@
 pub mod dedup;
+pub mod gal;
 pub mod save;
 pub mod search;
 pub mod seen_addresses;

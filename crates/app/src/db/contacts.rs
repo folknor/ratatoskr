@@ -66,6 +66,18 @@ pub fn search_contacts_for_autocomplete(
         }
     }
 
+    // Search GAL cache (second priority, after synced contacts).
+    let gal_remaining = limit - results.len() as i64;
+    if gal_remaining > 0 {
+        search_gal_cache(
+            conn,
+            &pattern,
+            gal_remaining,
+            &mut seen_emails,
+            &mut results,
+        )?;
+    }
+
     // Search seen_addresses table (lower priority, fills remaining).
     // Order by last_seen_at DESC for recency.
     let remaining = limit - results.len() as i64;
@@ -86,6 +98,40 @@ pub fn search_contacts_for_autocomplete(
     }
 
     Ok(results)
+}
+
+/// Search the GAL cache for autocomplete matches.
+fn search_gal_cache(
+    conn: &Connection,
+    pattern: &str,
+    limit: i64,
+    seen_emails: &mut std::collections::HashSet<String>,
+    results: &mut Vec<ContactMatch>,
+) -> Result<(), String> {
+    let sql = "SELECT email, display_name FROM gal_cache
+               WHERE email LIKE ?1 OR display_name LIKE ?1
+               ORDER BY display_name ASC
+               LIMIT ?2";
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![pattern, limit], |row| {
+            Ok(ContactMatch {
+                email: row.get("email")?,
+                display_name: row.get("display_name")?,
+                is_group: false,
+                group_id: None,
+                member_count: None,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        let contact = row.map_err(|e| e.to_string())?;
+        let key = contact.email.to_lowercase();
+        if seen_emails.insert(key) {
+            results.push(contact);
+        }
+    }
+    Ok(())
 }
 
 /// Search seen_addresses table for autocomplete matches.
@@ -239,6 +285,18 @@ impl Db {
     ) -> Result<Vec<String>, String> {
         self.with_conn(move |conn| {
             load_group_member_emails(conn, &group_id)
+        })
+        .await
+    }
+
+    /// Expand a contact group into individual (email, display_name) pairs.
+    /// Recursively expands nested groups with cycle detection.
+    pub async fn expand_contact_group(
+        &self,
+        group_id: String,
+    ) -> Result<Vec<(String, Option<String>)>, String> {
+        self.with_conn(move |conn| {
+            expand_group_with_names(conn, &group_id)
         })
         .await
     }
@@ -445,6 +503,71 @@ fn load_group_member_emails(
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
+}
+
+/// Expand a contact group into (email, display_name) pairs.
+/// Recursively expands nested groups (group-type members) with cycle
+/// detection via a visited set.
+fn expand_group_with_names(
+    conn: &Connection,
+    group_id: &str,
+) -> Result<Vec<(String, Option<String>)>, String> {
+    use std::collections::HashSet;
+
+    fn recurse(
+        conn: &Connection,
+        gid: &str,
+        visited: &mut HashSet<String>,
+        result: &mut Vec<(String, Option<String>)>,
+        seen_emails: &mut HashSet<String>,
+    ) -> Result<(), String> {
+        if !visited.insert(gid.to_string()) {
+            return Ok(()); // cycle
+        }
+        let mut stmt = conn
+            .prepare(
+                "SELECT member_type, member_value
+                 FROM contact_group_members
+                 WHERE group_id = ?1",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<(String, String)> = stmt
+            .query_map(params![gid], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        for (member_type, member_value) in rows {
+            if member_type == "group" {
+                recurse(conn, &member_value, visited, result, seen_emails)?;
+            } else {
+                let email_lower = member_value.to_lowercase();
+                if seen_emails.insert(email_lower) {
+                    // Look up display name from contacts table
+                    let display_name: Option<String> = conn
+                        .query_row(
+                            "SELECT display_name FROM contacts
+                             WHERE LOWER(email) = LOWER(?1) LIMIT 1",
+                            params![member_value],
+                            |row| row.get(0),
+                        )
+                        .ok()
+                        .flatten();
+                    result.push((member_value, display_name));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    let mut visited = HashSet::new();
+    let mut result = Vec::new();
+    let mut seen_emails = HashSet::new();
+    recurse(conn, group_id, &mut visited, &mut result, &mut seen_emails)?;
+    result.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(result)
 }
 
 fn save_contact_inner(

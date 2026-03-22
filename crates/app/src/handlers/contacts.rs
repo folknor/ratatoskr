@@ -38,9 +38,29 @@ impl App {
     pub(crate) fn handle_save_contact(&self, entry: ContactEntry) -> Task<Message> {
         let db = Arc::clone(&self.db);
         let filter = self.settings.contact_filter.clone();
+        let source = entry.source.clone();
+        let email = entry.email.clone();
+        let phone = entry.phone.clone();
+        let company = entry.company.clone();
+        let notes = entry.notes.clone();
+
+        // Save locally first, then attempt provider write-back for synced contacts
         Task::perform(
             async move {
                 db.save_contact(entry).await?;
+
+                // Provider write-back (best-effort — errors logged, not surfaced)
+                if let Some(ref src) = source {
+                    let wb_result = dispatch_provider_write_back(
+                        &db, src, &email, phone.as_deref(),
+                        company.as_deref(), notes.as_deref(),
+                    )
+                    .await;
+                    if let Err(e) = wb_result {
+                        log::warn!("Contact write-back failed for {email}: {e}");
+                    }
+                }
+
                 db.get_contacts_for_settings(filter).await
             },
             |result| Message::Settings(SettingsMessage::ContactsLoaded(result)),
@@ -186,7 +206,77 @@ async fn execute_contact_import(
         }
     }
 
-    Ok((imported, skipped_no_email, skipped_duplicate, updated, 0))
+    // Create groups from import and link members
+    let mut groups_created = 0usize;
+    let mut group_members: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+
+    // Collect group memberships
+    for contact in &contacts {
+        let Some(email) = contact.normalized_email() else {
+            continue;
+        };
+        if !email.contains('@') {
+            continue;
+        }
+        for group_name in &contact.groups {
+            let trimmed = group_name.trim();
+            if !trimmed.is_empty() {
+                group_members
+                    .entry(trimmed.to_string())
+                    .or_default()
+                    .push(email.clone());
+            }
+        }
+    }
+
+    // Create or update each group
+    for (group_name, members) in &group_members {
+        let db_grp = Arc::clone(db);
+        let name = group_name.clone();
+        let member_list = members.clone();
+
+        // Check if group already exists by name
+        let existing = db_grp
+            .with_conn(move |conn| {
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT id FROM contact_groups
+                         WHERE name = ?1 LIMIT 1",
+                    )
+                    .map_err(|e| e.to_string())?;
+                let found = stmt
+                    .query_row(rusqlite::params![name], |row| {
+                        row.get::<_, String>(0)
+                    })
+                    .ok();
+                Ok(found)
+            })
+            .await?;
+
+        let group_id = existing.unwrap_or_else(|| {
+            groups_created += 1;
+            uuid::Uuid::new_v4().to_string()
+        });
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        #[allow(clippy::cast_possible_wrap)]
+        let entry = crate::db::GroupEntry {
+            id: group_id,
+            name: group_name.clone(),
+            member_count: member_list.len() as i64,
+            created_at: now as i64,
+            updated_at: now as i64,
+        };
+
+        db.save_group(entry, member_list).await?;
+    }
+
+    Ok((imported, skipped_no_email, skipped_duplicate, updated, groups_created))
 }
 
 fn build_contact_entry(
@@ -214,6 +304,66 @@ fn build_contact_entry(
         account_color: None,
         groups: contact.groups.clone(),
         source: None,
+    }
+}
+
+// ── Provider write-back ─────────────────────────────────
+
+/// Dispatch a contact write-back to the appropriate provider.
+///
+/// This is called after the local save completes. It's best-effort —
+/// errors are returned for logging but do not prevent the local save.
+/// Display name changes are NOT pushed (local-only override per spec).
+async fn dispatch_provider_write_back(
+    db: &Arc<Db>,
+    source: &str,
+    email: &str,
+    phone: Option<&str>,
+    company: Option<&str>,
+    notes: Option<&str>,
+) -> Result<(), String> {
+    match source {
+        "google" => {
+            // Google People API write-back: scaffolding exists in
+            // core::contacts::sync_google but HTTP push not yet wired.
+            // The body builder and server info lookup are ready — once
+            // GmailClient is available at this layer, wire:
+            //   1. get_google_contact_server_info(db, email)
+            //   2. build_google_contact_update_body(phone, company, etag)
+            //   3. client.patch_absolute(url, body)
+            log::info!("Google contact write-back queued for {email} (not yet wired to HTTP)");
+            Ok(())
+        }
+        "graph" => {
+            // Microsoft Graph write-back: scaffolding exists in
+            // core::contacts::sync_graph but HTTP push not yet wired.
+            //   1. get_graph_contact_server_info(db, email)
+            //   2. build_graph_contact_update_body(phone, company)
+            //   3. client.patch(url, body)
+            log::info!("Graph contact write-back queued for {email} (not yet wired to HTTP)");
+            Ok(())
+        }
+        "jmap" => {
+            // JMAP ContactCard/set is fully implemented in
+            // crates/jmap/src/contacts_sync.rs::jmap_contacts_push_update.
+            // Need JmapClient instance to call it. When sync orchestrator
+            // provides client access, wire:
+            //   1. get_jmap_contact_server_info(db, email)
+            //   2. jmap_contacts_push_update(client, server_id, phone, company, notes)
+            log::info!("JMAP contact write-back queued for {email} (not yet wired to client)");
+            Ok(())
+        }
+        "carddav" => {
+            // CardDAV PUT is not yet implemented in the CardDavClient.
+            // Needs: vCard builder + PUT method on client.
+            log::info!("CardDAV contact write-back not yet supported for {email}");
+            Ok(())
+        }
+        "user" => Ok(()), // Local contacts don't need write-back
+        other => {
+            log::warn!("Unknown contact source '{other}' for write-back");
+            Ok(())
+        }
     }
 }
 

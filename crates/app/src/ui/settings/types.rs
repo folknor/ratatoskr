@@ -417,6 +417,11 @@ pub struct ContactEditorState {
     pub phone: String,
     pub company: String,
     pub notes: String,
+    /// Contact source: "user" (local), "google", "graph", "carddav", etc.
+    /// None for newly created contacts (treated as local).
+    pub source: Option<String>,
+    /// Whether fields have been modified since opening the editor.
+    pub dirty: bool,
 }
 
 /// Editing state for the group editor overlay.

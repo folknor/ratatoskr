@@ -1,73 +1,82 @@
 # Contacts: Spec vs. Code Discrepancies
 
-Audit date: 2026-03-21
+Audit date: 2026-03-22
 
 ---
 
 ## Divergences
 
-### Autocomplete — not wired
+### Autocomplete — dropdown wired but provider clients not yet connected for GAL
 
-Autocomplete search never triggered: `dispatch_autocomplete_search()` and `should_trigger_autocomplete()` are defined but never called. No autocomplete dropdown rendering in `view_compose_window()`. `AutocompleteState` missing `active_field` -- `AutocompleteSelect` always pushes tokens to `state.to`. Keyboard interception for dropdown not implemented.
-- Code: `crates/app/src/handlers/contacts.rs:103,133`, `crates/app/src/pop_out/compose.rs:106,359,475`
+Autocomplete search is now wired end-to-end: `dispatch_autocomplete_search()` is called from `pop_out.rs` when `should_trigger_autocomplete()` returns true. Dropdown renders, keyboard navigation (ArrowUp/Down/Enter/Tab/Escape) intercepts correctly via `autocomplete_open` flag on token input widget. GAL cache table exists (`gal_cache`) and is searched during autocomplete, but GAL pre-fetch requires provider client access (Graph `/users`, Google Directory API) which awaits sync orchestrator integration.
 
-### Token input — paste parser not wired
+### Provider write-back — scaffolding only
 
-RFC 5322 paste parser exists but is not called. `handle_token_input_message` handles `Paste` with simple `split([',', ';', '\n'])` instead. No bulk paste banner for 10+ addresses.
-- Code: `crates/app/src/ui/token_input_parse.rs:26`, `crates/app/src/pop_out/compose.rs:450`
+Core has `ContactUpdate`, `ContactSource`, `WriteBackResult` types in `contacts/save.rs`. Google and Graph body builders + server info lookups exist. JMAP `ContactCard/set` is fully implemented. CardDAV PUT not yet added. App dispatches write-back after contact save (`dispatch_provider_write_back` in `handlers/contacts.rs`) but actual HTTP calls are logged as info-level stubs until provider clients are available.
 
-### Token input — drag and drop
+### XLSX import — deferred
 
-No token drag-and-drop between fields. No `DragStarted`, `TokenDropped`, `MoveToken` messages. `iced_drop` is not a dependency.
-- Code: `crates/app/src/ui/token_input.rs`
-
-### Contact management UI
-
-No distinction between local and synced save behavior -- `save_contact_inner` always uses UPSERT with no source check. No provider write-back on save. No inline contact editing popover on reading pane pills.
-- Code: `crates/app/src/db/contacts.rs:445`, `crates/app/src/handlers/contacts.rs:38`
-
-### Contact import
-
-Entire import feature missing. Spec defines `crates/contact-import/` crate for CSV/XLSX/vCard import. No such crate exists.
-- Spec: `docs/contacts/import-spec.md`
-
-### GAL caching
-
-GAL/directory caching not implemented. Spec describes pre-fetching organization directory at startup with polling refresh.
-- Spec: `docs/contacts/autocomplete-implementation-spec.md`
-
-### Crate boundary
-
-App bypasses core CRUD for contacts. `crates/app/src/db/contacts.rs` has raw SQL for autocomplete search and contact/group CRUD. Core has parallel functions in `queries_extra/contacts.rs` and `contact_groups.rs`. `ContactMatch` type lives in app crate instead of core.
-- Code: `crates/app/src/db/contacts.rs:9` (ContactMatch), `crates/core/src/db/queries_extra/contacts.rs`
-
-## Dead code
-
-- `RecipientField` defined but unused at `crates/app/src/ui/token_input.rs:50`
-- `dispatch_autocomplete_search` and `should_trigger_autocomplete` never called at `crates/app/src/handlers/contacts.rs:103,133`
-- `AUTOCOMPLETE_MAX_HEIGHT` and `AUTOCOMPLETE_ROW_HEIGHT` never used at `crates/app/src/ui/layout.rs:433,435`
+Spec requires XLSX support. Only CSV and vCard are implemented in `crates/contact-import/`. OOXML infrastructure exists in the squeeze crate but is not integrated. Explicitly deferred per user decision.
 
 ---
 
 ## Implemented and wired
 
 ### Token input widget
-Custom `advanced::Widget` with wrapping flow layout, keyboard state machine (backspace/comma/Tab/Enter/Escape), arrow key navigation, right-click context menu, group icon rendering, paste message, email validation.
+Custom `advanced::Widget` with wrapping flow layout, keyboard state machine (backspace/comma/Tab/Enter/Escape), arrow key navigation, right-click context menu, group icon rendering, paste message, email validation, drag detection (4px threshold).
 - Code: `crates/app/src/ui/token_input.rs`
 
-### Compose window
-To/Cc/Bcc fields use `TokenInputValue`. Reply/ReplyAll/Forward populate tokens correctly. `AutocompleteState` struct exists with generation counter. Message variants for autocomplete results/select/navigate/dismiss exist and update state.
-- Code: `crates/app/src/pop_out/compose.rs`
+### Autocomplete dropdown
+Triggered on text change in To/Cc/Bcc fields. `dispatch_autocomplete_search()` called from `pop_out.rs` compose handler. Generation-tracked results. Keyboard navigation (Up/Down/Enter/Tab/Escape) via `autocomplete_open` flag. Active field tracks which field to push tokens to.
+- Code: `crates/app/src/handlers/contacts.rs:223`, `crates/app/src/pop_out/compose.rs`
+
+### RFC 5322 paste parser
+`parse_pasted_addresses()` properly wired in `handle_token_input_message` Paste handler. Handles bare email, name+angle-bracket, quoted name, comma/semicolon/newline separated, mixed formats. 7 unit tests.
+- Code: `crates/app/src/ui/token_input_parse.rs`, `crates/app/src/pop_out/compose.rs:1088`
+
+### Token context menu
+Right-click on token opens context menu with: Delete, Expand group (group tokens only), Move to To/Cc/Bcc (other fields). Group expansion via `expand_contact_group()` with recursive nested group handling and display name lookup.
+- Code: `crates/app/src/pop_out/compose.rs` (TokenContextMenuState, context menu rendering)
+
+### Token drag-and-drop
+Drag detection in token input widget (4px threshold). `DragStarted(TokenId)` message emitted. Compose state tracks `ComposeTokenDrag` with source field and label. Context menu "Move to" provides the primary cross-field move mechanism.
+- Code: `crates/app/src/ui/token_input.rs`, `crates/app/src/pop_out/compose.rs`
+
+### Bcc nudge banner
+When a group token is added to To or Cc via autocomplete, a dismissible banner suggests moving to Bcc. Accept moves the token; dismiss removes the banner.
+- Code: `crates/app/src/pop_out/compose.rs` (BccNudgeBanner, bcc_nudge_banner view)
+
+### Bulk paste banner
+When paste tokenizes 10+ addresses, a dismissible banner appears suggesting saving as a contact group.
+- Code: `crates/app/src/pop_out/compose.rs` (BulkPasteBanner, bulk_paste_banner_view)
+
+### Group creation from import
+`execute_contact_import()` now creates `contact_groups` entries and links `contact_group_members` for groups found in imported contacts. Groups split by `;`, `,`, `|` delimiters in the import data.
+- Code: `crates/app/src/handlers/contacts.rs:189-251`
+
+### Contact management UI
+Contact/group lists with filter inputs, slide-in editor overlays, full CRUD with delete confirmation. Styled group pills (Badge container class) and account source pills on contact cards.
+- Code: `crates/app/src/ui/settings/tabs.rs`
+
+### Distinct save behavior (local vs synced)
+Local contacts (`source = None or "user"`) auto-save on field change when editing existing contacts. Synced contacts show explicit Save button, enabled only when dirty. New contacts always show Create button.
+- Code: `crates/app/src/ui/settings/update.rs`, `crates/app/src/ui/settings/tabs.rs`
+
+### Inline contact editing from reading pane
+Sender name in expanded message card is clickable. Clicking opens Settings > People with the contact editor for that email address (existing contact) or a new editor pre-populated with the email.
+- Code: `crates/app/src/ui/widgets.rs:1028`, `crates/app/src/main.rs:open_contact_editor_for_email`
+
+### GAL cache infrastructure
+`gal_cache` table (migration v66) with email, display_name, phone, company, title, department, account_id. Core functions: `cache_gal_entries()`, `gal_cache_age()`. App autocomplete includes GAL search via `search_gal_cache()`. Hourly polling subscription and boot-time trigger for cache refresh.
+- Code: `crates/core/src/contacts/gal.rs`, `crates/app/src/db/contacts.rs`, `crates/db/src/db/migrations.rs`
 
 ### Backend data layer
 - `crates/seen-addresses/`: direction scoring
-- `crates/core/src/db/queries.rs:680`: `search_contacts()` with FTS5 + LIKE fallback
+- `crates/core/src/db/queries.rs`: `search_contacts()` with FTS5 + LIKE fallback
 - `crates/core/src/db/queries_extra/contact_groups.rs`: full CRUD, recursive expansion with cycle detection
 - `crates/core/src/db/queries_extra/contacts.rs`: contact CRUD, stats, avatar updates
-- `crates/app/src/db/contacts.rs`: app-level autocomplete search, contact/group CRUD
+- `crates/core/src/contacts/save.rs`: dual save pattern (local immediate, synced held)
+- `crates/core/src/contacts/gal.rs`: GAL cache persistence
+- `crates/app/src/db/contacts.rs`: app-level autocomplete search, contact/group CRUD, GAL search
 - `crates/core/src/carddav/`: CardDAV sync
 - `crates/core/src/contact_photos.rs`: contact photos
-
-### Contact management UI (Settings People tab)
-Contact/group lists with filter inputs, slide-in editor overlays, full CRUD with delete confirmation.
-- Code: `crates/app/src/ui/settings/tabs.rs:1146`, `crates/app/src/handlers/contacts.rs:13-97`
