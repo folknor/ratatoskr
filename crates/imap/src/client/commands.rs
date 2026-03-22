@@ -291,10 +291,18 @@ pub async fn fetch_changed_flags(
                 let flags: Vec<_> = fetch.flags().collect();
                 let is_read = flags.iter().any(|f| matches!(f, Flag::Seen));
                 let is_starred = flags.iter().any(|f| matches!(f, Flag::Flagged));
+                let keywords: Vec<String> = flags
+                    .iter()
+                    .filter_map(|f| match f {
+                        Flag::Custom(cow) => Some(cow.to_string()),
+                        _ => None,
+                    })
+                    .collect();
                 changes.push(FlagChange {
                     uid,
                     is_read,
                     is_starred,
+                    keywords,
                 });
             }
             Err(e) => {
@@ -350,10 +358,18 @@ pub async fn fetch_all_flags(
                 let flag_list: Vec<_> = fetch.flags().collect();
                 let is_read = flag_list.iter().any(|f| matches!(f, Flag::Seen));
                 let is_starred = flag_list.iter().any(|f| matches!(f, Flag::Flagged));
+                let keywords: Vec<String> = flag_list
+                    .iter()
+                    .filter_map(|f| match f {
+                        Flag::Custom(cow) => Some(cow.to_string()),
+                        _ => None,
+                    })
+                    .collect();
                 flags.push(FlagChange {
                     uid,
                     is_read,
                     is_starred,
+                    keywords,
                 });
             }
             Err(e) => {

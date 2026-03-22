@@ -599,6 +599,42 @@ pub fn apply_flag_changes(
         .map_err(|e| format!("reaggregate thread flags: {e}"))?;
     }
 
+    // Sync custom keywords to the unified labels system.
+    // Each keyword becomes a tag-type label; thread_labels entries link them.
+    for change in changes {
+        if change.keywords.is_empty() {
+            continue;
+        }
+        // Look up the thread_id for this message
+        let thread_id: Option<String> = tx
+            .query_row(
+                "SELECT thread_id FROM messages \
+                 WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid = ?3",
+                rusqlite::params![account_id, folder, i64::from(change.uid)],
+                |row| row.get(0),
+            )
+            .ok();
+        let Some(ref tid) = thread_id else { continue };
+
+        for kw in &change.keywords {
+            let label_id = format!("kw:{kw}");
+            // Ensure the label exists
+            tx.execute(
+                "INSERT OR IGNORE INTO labels (id, account_id, name, type, label_kind) \
+                 VALUES (?1, ?2, ?3, 'user', 'tag')",
+                rusqlite::params![label_id, account_id, kw],
+            )
+            .map_err(|e| format!("upsert keyword label: {e}"))?;
+            // Link to thread
+            tx.execute(
+                "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![account_id, tid, label_id],
+            )
+            .map_err(|e| format!("insert keyword thread_label: {e}"))?;
+        }
+    }
+
     tx.commit()
         .map_err(|e| format!("flag change commit: {e}"))?;
     Ok(updated)

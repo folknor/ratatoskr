@@ -267,7 +267,7 @@ fn sync_keyword_categories(
         return Ok(());
     }
 
-    // Upsert each keyword into the categories table
+    // Upsert each keyword into the categories table (legacy) and labels table (unified)
     for keyword in &unique_keywords {
         ratatoskr_db::db::queries::upsert_category(
             tx,
@@ -284,6 +284,21 @@ fn sync_keyword_categories(
             false,
             ratatoskr_db::db::queries::CategorySortOnConflict::Keep,
         )?;
+
+        // Also upsert as a tag-type label for the unified labels system.
+        let label_id = format!("kw:{keyword}");
+        tx.execute(
+            "INSERT OR IGNORE INTO labels (id, account_id, name, type, label_kind) \
+             VALUES (?1, ?2, ?3, 'user', 'tag')",
+            rusqlite::params![label_id, account_id, keyword],
+        )
+        .map_err(|e| format!("upsert jmap keyword label: {e}"))?;
+        tx.execute(
+            "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params![account_id, thread_id, label_id],
+        )
+        .map_err(|e| format!("insert jmap keyword thread_label: {e}"))?;
     }
 
     // Link thread to the first keyword category (don't overwrite manual assignments)

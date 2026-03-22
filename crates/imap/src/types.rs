@@ -162,4 +162,8 @@ pub struct FlagChange {
     pub uid: u32,
     pub is_read: bool,
     pub is_starred: bool,
+    /// Custom keywords (non-standard flags like `$label1`, `project-alpha`).
+    /// Empty when the server doesn't support custom keywords or none are set.
+    #[serde(default)]
+    pub keywords: Vec<String>,
 }
