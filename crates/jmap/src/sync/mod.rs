@@ -165,6 +165,9 @@ pub async fn jmap_initial_sync(
     // Phase 3: Shared account discovery from JMAP Session
     discover_shared_accounts(client, account_id, db).await;
 
+    // Phase 3b: Resolve shared account identities via Principals
+    resolve_shared_account_identities(client, account_id, db).await;
+
     // Phase 4: Contacts sync
     match super::contacts_sync::jmap_contacts_initial_sync(client, account_id, db).await {
         Ok(count) => log::info!("[JMAP] Initial contacts sync: {count} contacts for account {account_id}"),
@@ -338,7 +341,10 @@ pub async fn jmap_delta_sync(
     // 3. Shared account discovery (re-check Session on every delta sync)
     discover_shared_accounts(client, account_id, db).await;
 
-    // 3b. ShareNotification polling (RFC 9670)
+    // 3b. Resolve shared account identities via Principals
+    resolve_shared_account_identities(client, account_id, db).await;
+
+    // 3c. ShareNotification polling (RFC 9670)
     poll_share_notifications(client, account_id, db).await;
 
     // 4. Contacts delta sync
@@ -627,6 +633,153 @@ pub(crate) async fn discover_shared_accounts(
             session_shared_ids.len()
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Principal-based identity resolution (JMAP Sharing — Phase 6)
+// ---------------------------------------------------------------------------
+
+/// Resolve email addresses for shared accounts via JMAP Principals.
+///
+/// For each shared account, checks the `principals:owner` account capability
+/// to find the owning principal, then fetches that principal's email address.
+/// Caches the result in `shared_mailbox_sync_state.email_address`.
+///
+/// Requires `urn:ietf:params:jmap:principals` capability. Skips silently
+/// if the server doesn't support it.
+pub(crate) async fn resolve_shared_account_identities(
+    client: &JmapClient,
+    account_id: &str,
+    db: &DbState,
+) {
+    let inner = client.inner();
+    let session = inner.session();
+
+    if !session.has_capability("urn:ietf:params:jmap:principals") {
+        return;
+    }
+
+    // Get the principals account ID from the session capability.
+    let principals_account_id = session
+        .principals_capabilities()
+        .and_then(|c| c.account_id_for_principal())
+        .map(String::from);
+
+    // Iterate shared accounts and resolve each owner's email.
+    for jmap_account_id in session.accounts() {
+        let Some(account) = session.account(jmap_account_id) else {
+            continue;
+        };
+        if account.is_personal() {
+            continue;
+        }
+
+        // Check if we already have an email for this shared account.
+        match sync_state::get_shared_mailbox_email(db, account_id, jmap_account_id).await {
+            Ok(Some(_)) => continue, // already resolved
+            Ok(None) => {}           // need to resolve
+            Err(e) => {
+                log::debug!("[JMAP] Failed to check shared mailbox email: {e}");
+                continue;
+            }
+        }
+
+        // Try to resolve via principals:owner account capability.
+        let owner_principal_id = account
+            .capability("urn:ietf:params:jmap:principals:owner")
+            .and_then(|cap| {
+                // The capability value is PrincipalsOwnerCapabilities
+                // but we have it as a Capabilities enum. Extract principalId.
+                match cap {
+                    jmap_client::core::session::Capabilities::PrincipalsOwner(owner) => {
+                        owner.principal_id().map(String::from)
+                    }
+                    _ => None,
+                }
+            });
+
+        let Some(principal_id) = owner_principal_id else {
+            // No owner principal — try using the account name as email fallback.
+            let account_name = account.name();
+            if account_name.contains('@') {
+                if let Err(e) = sync_state::set_shared_mailbox_email(
+                    db, account_id, jmap_account_id, account_name,
+                )
+                .await
+                {
+                    log::debug!("[JMAP] Failed to set shared mailbox email from name: {e}");
+                }
+                log::info!(
+                    "[JMAP] Resolved shared account {jmap_account_id} email from name: {account_name}"
+                );
+            }
+            continue;
+        };
+
+        // Fetch the principal to get the email address.
+        // Use the principals account ID if specified, otherwise default.
+        let fetch_account = principals_account_id.as_deref();
+        let email = match fetch_principal_email(client, fetch_account, &principal_id).await {
+            Ok(Some(email)) => email,
+            Ok(None) => {
+                log::debug!(
+                    "[JMAP] Principal {principal_id} has no email for shared account {jmap_account_id}"
+                );
+                continue;
+            }
+            Err(e) => {
+                log::debug!(
+                    "[JMAP] Failed to fetch principal {principal_id}: {e}"
+                );
+                continue;
+            }
+        };
+
+        if let Err(e) =
+            sync_state::set_shared_mailbox_email(db, account_id, jmap_account_id, &email).await
+        {
+            log::warn!("[JMAP] Failed to cache shared account email: {e}");
+        } else {
+            log::info!(
+                "[JMAP] Resolved shared account {jmap_account_id} email: {email}"
+            );
+        }
+    }
+}
+
+/// Fetch a principal's email address by ID.
+async fn fetch_principal_email(
+    client: &JmapClient,
+    principals_account_id: Option<&str>,
+    principal_id: &str,
+) -> Result<Option<String>, String> {
+    let inner = client.inner();
+    let mut request = inner.build();
+    let account_id = principals_account_id
+        .map(String::from)
+        .unwrap_or_else(|| request.default_account_id().to_string());
+
+    let mut get = jmap_client::principal::PrincipalGet::new(&account_id);
+    get.ids([principal_id]);
+    get.properties([
+        jmap_client::principal::Property::Email,
+        jmap_client::principal::Property::Name,
+    ]);
+
+    let handle = request
+        .call(get)
+        .map_err(|e| format!("Principal/get: {e}"))?;
+    let mut response = request
+        .send()
+        .await
+        .map_err(|e| format!("Principal/get: {e}"))?;
+
+    let principal = response
+        .get(&handle)
+        .map(|mut r| r.take_list().pop())
+        .map_err(|e| format!("Principal/get: {e}"))?;
+
+    Ok(principal.and_then(|p| p.email().map(String::from)))
 }
 
 // ---------------------------------------------------------------------------

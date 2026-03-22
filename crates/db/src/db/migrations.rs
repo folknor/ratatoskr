@@ -1464,6 +1464,13 @@ static MIGRATIONS: &[Migration] = &[
             ALTER TABLE labels ADD COLUMN is_subscribed INTEGER;
         "#,
     },
+    Migration {
+        version: 71,
+        description: "Shared mailbox email address for identity resolution (Sharing Phase 6)",
+        sql: r#"
+            ALTER TABLE shared_mailbox_sync_state ADD COLUMN email_address TEXT;
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

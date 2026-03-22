@@ -605,3 +605,53 @@ pub async fn get_all_shared_mailbox_ids(
     })
     .await
 }
+
+/// Set the resolved email address for a shared mailbox.
+///
+/// Used by JMAP principal resolution to associate a JMAP shared account
+/// with its owner's email address for send identity auto-selection.
+pub async fn set_shared_mailbox_email(
+    db: &DbState,
+    account_id: &str,
+    mailbox_id: &str,
+    email: &str,
+) -> Result<(), String> {
+    let aid = account_id.to_string();
+    let mid = mailbox_id.to_string();
+    let em = email.to_string();
+
+    db.with_conn(move |conn| {
+        conn.execute(
+            "UPDATE shared_mailbox_sync_state \
+             SET email_address = ?3 \
+             WHERE account_id = ?1 AND mailbox_id = ?2",
+            rusqlite::params![aid, mid, em],
+        )
+        .map_err(|e| format!("set shared mailbox email: {e}"))?;
+        Ok(())
+    })
+    .await
+}
+
+/// Get the email address for a shared mailbox, if resolved.
+pub async fn get_shared_mailbox_email(
+    db: &DbState,
+    account_id: &str,
+    mailbox_id: &str,
+) -> Result<Option<String>, String> {
+    let aid = account_id.to_string();
+    let mid = mailbox_id.to_string();
+
+    db.with_conn(move |conn| {
+        conn.query_row(
+            "SELECT email_address FROM shared_mailbox_sync_state \
+             WHERE account_id = ?1 AND mailbox_id = ?2",
+            rusqlite::params![aid, mid],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("get shared mailbox email: {e}"))
+        .map(|opt| opt.flatten())
+    })
+    .await
+}
