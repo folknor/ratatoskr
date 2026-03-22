@@ -88,12 +88,15 @@ Phases 1-2 complete. Phase 3 blocked on upstream.
 
 ## Remaining Enhancements (HTML rendering)
 
-The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML. Remaining:
-- [ ] CID image loading from inline image store
-- [ ] Remote image loading with user consent (integrates with tracking-blocking allowlist)
-- [ ] Clickable links (`LinkClicked(url)` message)
-- [ ] Table rendering (table-for-layout is the hardest)
-- [ ] Image caching (`HashMap<String, image::Handle>`)
+The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has significant fidelity gaps. Remaining:
+- [ ] **Inline text formatting** — `<strong>`, `<b>`, `<em>`, `<i>`, `<u>`, `<s>`, `<code>` (inline) all ignored. Everything renders as plain text. Needs a `Vec<Span>` model per block or `iced::widget::rich_text`.
+- [ ] **Link rendering + click handling** — `<a href>` tags treated as plain text. URLs not extracted. Need `href` extraction, visual link styling, and `LinkClicked(url)` message emission.
+- [ ] **`<br>` handling** — Currently splits into separate paragraphs (extra vertical spacing). Should insert a line break within the current paragraph.
+- [ ] **HTML entity decoding** — Only 8 named entities decoded. Missing: numeric entities (`&#123;`, `&#x7B;`), common named entities (`&mdash;`, `&ndash;`, `&hellip;`, `&copy;`, etc.).
+- [ ] CID image loading from inline image store (`InlineImageStoreState` exists in stores crate, not wired to renderer)
+- [ ] Remote image loading with user consent (`block_remote_images` setting exists but disconnected from `render_html` — function signature needs context parameter)
+- [ ] Table rendering (table-for-layout is the hardest — no `<table>`/`<tr>`/`<td>` handling at all)
+- [ ] Image caching (`HashMap<String, image::Handle>`) — no `iced::widget::image` usage in app crate
 
 ## Remaining Enhancements (other)
 
@@ -118,12 +121,14 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML. Remaining
 
 Living reference — follow these patterns as features are built. Keep until 1.0.
 
-- **Generational load tracking** — Applied everywhere (nav, thread, search, palette, pop-out, sync, autocomplete). Remaining: calendar event loading on date navigation.
+- **Generational load tracking** — Applied to: nav, thread, search, palette, pop-out, sync, autocomplete, add-account wizard. Verified 2026-03-22. Gaps:
+  - Calendar event loading on date navigation (confirmed missing — race condition on rapid date changes)
+  - Search typeahead dynamic queries (`dispatch_typeahead_query` has no generation counter — stale suggestions possible on fast typing)
 
-- **Component trait** — 7 components (Sidebar, ThreadList, ReadingPane, Settings, StatusBar, AddAccountWizard, Palette). Remaining: Compose, Calendar, Pop-out windows.
+- **Component trait** — 7 components: Sidebar, ThreadList, ReadingPane, Settings, StatusBar, AddAccountWizard, Palette. All verified 2026-03-22. Non-components use free functions + App handler methods: Compose, Calendar, Pop-out windows. Conversion optional — current pattern works.
 
-- **Token-to-Catalog theming** — Zero inline closures. Exceptions: rich text editor (builder methods), token input (renderer.fill_quad).
+- **Token-to-Catalog theming** — Zero inline closure violations. Verified 2026-03-22. Exceptions: rich text editor (builder methods), token input (renderer.fill_quad).
 
-- **Config shadow pattern** — Implemented for app preferences (`PreferencesState`). Account editor and calendar event editor follow the pattern implicitly. Remaining: contact import wizard.
+- **Config shadow pattern** — Formal: `PreferencesState`. Implicit (clone-on-open): Account editor, Contact editor, Group editor, Calendar event editor, Signature editor. Missing: contact import wizard (creation wizard — value of formal shadow debatable).
 
-- **DOM-to-widget pipeline** — V1 in `html_render.rs`. Complexity heuristic falls back to plain text. See HTML rendering section above for remaining work.
+- **DOM-to-widget pipeline** — V1 in `html_render.rs`. Complexity heuristic (table depth >5, style tags >2) falls back to plain text. Used in reading pane only (NOT in pop-out message view). See HTML rendering section above for remaining work — significant fidelity gaps (no inline formatting, no links, no images).
