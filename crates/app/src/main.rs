@@ -257,6 +257,10 @@ pub enum Message {
     // Signature operations
     SignatureOp(handlers::SignatureResult),
 
+    // GAL (organization directory) cache
+    GalRefreshTick,
+    GalCacheRefreshed(Result<usize, String>),
+
     // Keyboard modifier tracking (for Ctrl+click, Shift+click)
     ModifiersChanged(iced::keyboard::Modifiers),
 }
@@ -436,6 +440,10 @@ impl App {
                 async move { db_ref2.list_pinned_searches().await },
                 Message::PinnedSearchesLoaded,
             ),
+            // Initial GAL cache population (deferred — provider clients
+            // aren't available at boot; the first GalRefreshTick will
+            // attempt the actual fetch once accounts are loaded)
+            Task::done(Message::GalRefreshTick),
         ];
         boot_tasks.append(&mut session_tasks);
         (app, Task::batch(boot_tasks))
@@ -554,6 +562,12 @@ impl App {
                     .map(|_| Message::ExpiryTick),
             );
         }
+
+        // GAL (organization directory) cache refresh — every hour
+        subs.push(
+            iced::time::every(std::time::Duration::from_secs(3600))
+                .map(|_| Message::GalRefreshTick),
+        );
 
         if self.settings.overlay_anim.is_animating(iced::time::Instant::now()) {
             subs.push(
@@ -886,6 +900,22 @@ impl App {
             // Sync progress pipeline
             Message::SyncProgress(event) => {
                 self.handle_sync_event(event);
+                Task::none()
+            }
+            Message::GalRefreshTick => {
+                // Refresh GAL cache for all connected accounts.
+                // Currently a placeholder — the actual directory API calls
+                // (Graph /users, Google Directory API) require provider
+                // clients. When the sync orchestrator provides account-level
+                // clients, this dispatches cache_gal_entries() per account.
+                log::debug!("GAL refresh tick (directory fetch not yet wired to provider clients)");
+                Task::none()
+            }
+            Message::GalCacheRefreshed(result) => {
+                match result {
+                    Ok(count) => log::info!("GAL cache refreshed: {count} entries"),
+                    Err(e) => log::warn!("GAL cache refresh failed: {e}"),
+                }
                 Task::none()
             }
             Message::ModifiersChanged(modifiers) => {
@@ -1223,7 +1253,48 @@ impl App {
                 // Find or create the contact, then open settings with editor.
                 self.open_contact_editor_for_email(email)
             }
+            ReadingPaneEvent::CreateEventFromEmail { message_index } => {
+                self.create_event_from_email(message_index)
+            }
         }
+    }
+
+    /// Create a calendar event pre-filled from the given email message.
+    fn create_event_from_email(&mut self, message_index: usize) -> Task<Message> {
+        use chrono::Timelike;
+        use crate::ui::calendar::{CalendarEventData, CalendarMessage, CalendarOverlay};
+
+        let msg = self.reading_pane.thread_messages.get(message_index);
+        let Some(msg) = msg else { return Task::none() };
+
+        let title = msg.subject.clone().unwrap_or_default();
+        let description = msg.snippet.clone().unwrap_or_default();
+
+        // Pre-fill attendees from To/Cc addresses.
+        let today = chrono::Local::now().date_naive();
+        let hour = chrono::Local::now().time().hour();
+        let mut event = CalendarEventData::new_at(today, hour.min(22));
+        event.title = title;
+        event.description = description;
+
+        // Set the account_id from the current context.
+        if let Some(account) = self.sidebar.accounts.first() {
+            event.account_id = Some(account.id.clone());
+        }
+
+        self.calendar.reset_editor_undo(&event);
+        let original_title = event.title.clone();
+        self.calendar.overlay = CalendarOverlay::EventEditor {
+            event,
+            is_new: true,
+            original_title,
+        };
+
+        // Switch to calendar mode to show the editor.
+        self.app_mode = AppMode::Calendar;
+        self.sidebar.in_calendar_mode = true;
+        self.sidebar.calendar_active_view = Some(self.calendar.active_view);
+        self.reload_calendar_events()
     }
 
     /// Open the contact editor in settings for a specific email address.

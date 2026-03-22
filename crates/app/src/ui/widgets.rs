@@ -1035,6 +1035,8 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     on_reply: impl Fn(usize) -> M,
     on_reply_all: impl Fn(usize) -> M,
     on_forward: impl Fn(usize) -> M,
+    on_edit_contact: impl Fn(String) -> M + 'a,
+    on_create_event: impl Fn(usize) -> M,
 ) -> Element<'a, M> {
     let sender = msg
         .from_name
@@ -1055,17 +1057,27 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     .padding(PAD_ICON_BTN)
     .style(theme::ButtonClass::BareIcon.style());
 
+    // Sender name — clickable to open contact editing
+    let sender_email = msg
+        .from_address
+        .clone()
+        .unwrap_or_default();
+    let sender_element: Element<'a, M> = button(
+        text(sender)
+            .size(TEXT_LG)
+            .font(font::text_semibold())
+            .style(text::base),
+    )
+    .on_press(on_edit_contact(sender_email))
+    .padding(0)
+    .style(theme::ButtonClass::BareTransparent.style())
+    .into();
+
     let header = row![
         avatar,
         column![
             row![
-                container(
-                    text(sender)
-                        .size(TEXT_LG)
-                        .font(font::text_semibold())
-                        .style(text::base),
-                )
-                .align_y(Alignment::Center),
+                container(sender_element).align_y(Alignment::Center),
                 Space::new().width(Length::Fill),
                 container(
                     text(date_str)
@@ -1105,10 +1117,21 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
             .into()
     };
 
+    let cal_btn = button(
+        row![
+            icon::calendar().size(ICON_SM).style(text::secondary),
+            text("Event").size(TEXT_SM).style(text::secondary),
+        ].spacing(SPACE_XXS).align_y(Alignment::Center),
+    )
+    .on_press(on_create_event(index))
+    .padding(PAD_ICON_BTN)
+    .style(theme::ButtonClass::Ghost.style());
+
     let actions = row![
         reply_button(icon::reply(), "Reply", on_reply(index)),
         reply_button(icon::reply_all(), "Reply All", on_reply_all(index)),
         reply_button(icon::forward(), "Forward", on_forward(index)),
+        cal_btn,
     ]
     .spacing(SPACE_XS);
 

@@ -28,6 +28,10 @@ pub enum ReadingPaneMessage {
     ReplyAll(usize),
     /// Forward the message at the given index.
     Forward(usize),
+    /// Open the inline contact editor popover for the given email address.
+    EditContact(String),
+    /// Create a calendar event from this message (📅 button).
+    CreateEventFromEmail(usize),
     Noop,
 }
 
@@ -43,6 +47,10 @@ pub enum ReadingPaneEvent {
     ReplyAllToMessage { message_index: usize },
     /// User clicked Forward on a specific message.
     ForwardMessage { message_index: usize },
+    /// User clicked a sender/recipient to edit their contact info.
+    EditContact { email: String },
+    /// User clicked 📅 on a message to create a calendar event.
+    CreateEventFromEmail { message_index: usize },
 }
 
 // ── State ──────────────────────────────────────────────
@@ -214,6 +222,12 @@ impl Component for ReadingPane {
                 (Task::none(), Some(ReadingPaneEvent::ForwardMessage {
                     message_index: index,
                 }))
+            }
+            ReadingPaneMessage::EditContact(email) => {
+                (Task::none(), Some(ReadingPaneEvent::EditContact { email }))
+            }
+            ReadingPaneMessage::CreateEventFromEmail(index) => {
+                (Task::none(), Some(ReadingPaneEvent::CreateEventFromEmail { message_index: index }))
             }
             ReadingPaneMessage::Noop => (Task::none(), None),
         }
@@ -455,6 +469,8 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
                 ReadingPaneMessage::Reply,
                 ReadingPaneMessage::ReplyAll,
                 ReadingPaneMessage::Forward,
+                ReadingPaneMessage::EditContact,
+                ReadingPaneMessage::CreateEventFromEmail,
             ));
         } else {
             msg_col = msg_col.push(widgets::collapsed_message_row(
