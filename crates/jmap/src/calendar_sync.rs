@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 use jmap_client::calendar_event::CalendarEvent;
+use jmap_client::core::set::SetObject;
 use jmap_client::core::response::{
     CalendarEventGetResponse, CalendarEventSetResponse, CalendarGetResponse,
 };
