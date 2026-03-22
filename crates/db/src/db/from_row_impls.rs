@@ -97,6 +97,7 @@ impl_from_row!(DbLabel {
     optbool right_rename,
     optbool right_delete,
     optbool right_submit,
+    optbool is_subscribed,
 });
 
 // ── Category ────────────────────────────────────────────────

@@ -442,6 +442,7 @@ fn query_thread_labels(
             right_rename: None,
             right_delete: None,
             right_submit: None,
+            is_subscribed: None,
         };
 
         let (bg, fg) = resolve_label_color(&db_label);

@@ -145,6 +145,9 @@ pub struct DbLabel {
     pub right_rename: Option<bool>,
     pub right_delete: Option<bool>,
     pub right_submit: Option<bool>,
+    // ── Subscription state (JMAP Sharing) ───────────────────
+    // None = unknown/not applicable. Some(true) = subscribed.
+    pub is_subscribed: Option<bool>,
 }
 
 // ── Category ─────────────────────────────────────────────────

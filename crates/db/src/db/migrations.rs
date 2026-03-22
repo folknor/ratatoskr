@@ -1457,6 +1457,13 @@ static MIGRATIONS: &[Migration] = &[
             ALTER TABLE labels ADD COLUMN right_submit INTEGER;
         "#,
     },
+    Migration {
+        version: 70,
+        description: "JMAP mailbox subscription state on labels (Sharing Phase 4)",
+        sql: r#"
+            ALTER TABLE labels ADD COLUMN is_subscribed INTEGER;
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

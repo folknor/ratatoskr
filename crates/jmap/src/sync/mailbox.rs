@@ -19,6 +19,7 @@ struct LabelRow {
     label_type: String,
     parent_label_id: Option<String>,
     rights: Option<MailboxRights>,
+    is_subscribed: Option<bool>,
 }
 
 /// Fetch all mailboxes, persist as labels, return (mailbox_map, mailbox_data).
@@ -88,6 +89,7 @@ pub(crate) async fn sync_mailboxes(
             label_type: mapping.label_type.to_string(),
             parent_label_id,
             rights: mb.my_rights().cloned(),
+            is_subscribed: Some(mb.is_subscribed()),
         });
     }
 
@@ -99,6 +101,7 @@ pub(crate) async fn sync_mailboxes(
         label_type: "system".to_string(),
         parent_label_id: None,
         rights: None,
+        is_subscribed: None,
     });
 
     // Persist labels + categories to DB
@@ -121,12 +124,13 @@ pub(crate) async fn sync_mailboxes(
                      (id, account_id, name, type, parent_label_id, \
                       right_read, right_add, right_remove, right_set_seen, \
                       right_set_keywords, right_create_child, right_rename, \
-                      right_delete, right_submit) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                      right_delete, right_submit, is_subscribed) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                     rusqlite::params![
                         row.label_id, row.account_id, row.label_name, row.label_type,
                         row.parent_label_id,
                         r_read, r_add, r_remove, r_seen, r_kw, r_child, r_rename, r_del, r_submit,
+                        row.is_subscribed,
                     ],
                 )
                 .map_err(|e| format!("upsert label: {e}"))?;

@@ -718,6 +718,69 @@ impl ProviderOps for JmapOps {
 }
 
 // ---------------------------------------------------------------------------
+// JMAP Sharing — mailbox subscription management
+// ---------------------------------------------------------------------------
+
+impl JmapOps {
+    /// Subscribe to a mailbox (JMAP `isSubscribed` property).
+    ///
+    /// For the primary account, uses the `mailbox_subscribe` helper.
+    /// For a shared account, builds the `Mailbox/set` call manually with
+    /// the shared account's JMAP ID.
+    pub async fn subscribe_mailbox(
+        &self,
+        mailbox_id: &str,
+        jmap_account_id: Option<&str>,
+    ) -> Result<(), String> {
+        self.set_mailbox_subscription(mailbox_id, jmap_account_id, true).await
+    }
+
+    /// Unsubscribe from a mailbox.
+    pub async fn unsubscribe_mailbox(
+        &self,
+        mailbox_id: &str,
+        jmap_account_id: Option<&str>,
+    ) -> Result<(), String> {
+        self.set_mailbox_subscription(mailbox_id, jmap_account_id, false).await
+    }
+
+    async fn set_mailbox_subscription(
+        &self,
+        mailbox_id: &str,
+        jmap_account_id: Option<&str>,
+        subscribed: bool,
+    ) -> Result<(), String> {
+        self.client.ensure_valid_token().await?;
+        let inner = self.client.inner();
+
+        let mut request = inner.build();
+        let account_id = jmap_account_id
+            .map(String::from)
+            .unwrap_or_else(|| request.default_account_id().to_string());
+
+        let mut set = jmap_client::mailbox::MailboxSet::new(&account_id);
+        set.update(mailbox_id).is_subscribed(subscribed);
+
+        let handle = request
+            .call(set)
+            .map_err(|e| format!("Mailbox/set subscribe: {e}"))?;
+        let mut response = request
+            .send()
+            .await
+            .map_err(|e| format!("Mailbox/set subscribe: {e}"))?;
+        response
+            .get(&handle)
+            .map_err(|e| format!("Mailbox/set subscribe: {e}"))?;
+
+        log::info!(
+            "[JMAP] Mailbox {mailbox_id} subscription set to {subscribed} (account: {})",
+            jmap_account_id.unwrap_or("primary")
+        );
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // JMAP FUTURERELEASE — Scheduled send via EmailSubmission
 // ---------------------------------------------------------------------------
 //

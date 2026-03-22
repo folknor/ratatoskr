@@ -79,6 +79,9 @@ pub struct NavigationFolder {
     /// Mailbox rights from JMAP/IMAP ACL. `None` for non-shared or unknown.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rights: Option<MailboxRightsInfo>,
+    /// JMAP subscription state. `None` for non-JMAP providers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_subscribed: Option<bool>,
 }
 
 /// The complete navigation state returned to the frontend.
@@ -193,6 +196,7 @@ fn build_universal_folders(
                 label_semantics: None,
                 query: None,
                 rights: None,
+                is_subscribed: None,
             }
         })
         .collect();
@@ -232,6 +236,7 @@ fn build_smart_folders(
                 label_semantics: None,
                 query: Some(sf.query),
                 rights: None,
+                is_subscribed: None,
             }
         })
         .collect())
@@ -293,6 +298,7 @@ fn build_account_labels(
             };
 
             NavigationFolder {
+                is_subscribed: label.is_subscribed,
                 id: label.id,
                 name: label.name,
                 folder_kind: kind,
@@ -341,6 +347,7 @@ fn build_all_account_tags(
             label_semantics: Some(LabelSemantics::Tag),
             query: None,
             rights: None,
+            is_subscribed: None,
         })
     })
     .map_err(|e| e.to_string())?
