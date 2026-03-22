@@ -103,4 +103,80 @@ impl Db {
         })
         .await
     }
+
+    /// Search contacts for typeahead suggestions (from:/to: operators).
+    pub async fn search_contacts_for_typeahead(
+        &self,
+        partial: String,
+    ) -> Result<Vec<TypeaheadItem>, String> {
+        self.with_conn(move |conn| {
+            let pattern = format!("%{partial}%");
+            let mut stmt = conn
+                .prepare(
+                    "SELECT DISTINCT display_name, email
+                     FROM seen_addresses
+                     WHERE (display_name LIKE ?1 COLLATE NOCASE
+                            OR email LIKE ?1 COLLATE NOCASE)
+                     ORDER BY last_seen_at DESC
+                     LIMIT 10",
+                )
+                .map_err(|e| e.to_string())?;
+
+            stmt.query_map(params![pattern], |row| {
+                let name: Option<String> = row.get("display_name")?;
+                let email: String = row.get("email")?;
+                let label = name.as_deref().unwrap_or(&email).to_string();
+                Ok(TypeaheadItem {
+                    label,
+                    detail: Some(email.clone()),
+                    insert_value: email,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+        })
+        .await
+    }
+
+    /// Search accounts for typeahead suggestions (account: operator).
+    pub async fn search_accounts_for_typeahead(
+        &self,
+        partial: String,
+    ) -> Result<Vec<TypeaheadItem>, String> {
+        self.with_conn(move |conn| {
+            let pattern = format!("%{partial}%");
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, email, display_name, account_name
+                     FROM accounts
+                     WHERE (email LIKE ?1 COLLATE NOCASE
+                            OR display_name LIKE ?1 COLLATE NOCASE
+                            OR account_name LIKE ?1 COLLATE NOCASE)
+                     ORDER BY sort_order ASC
+                     LIMIT 10",
+                )
+                .map_err(|e| e.to_string())?;
+
+            stmt.query_map(params![pattern], |row| {
+                let email: String = row.get("email")?;
+                let account_name: Option<String> = row.get("account_name")?;
+                let display_name: Option<String> = row.get("display_name")?;
+                let label = account_name
+                    .as_deref()
+                    .or(display_name.as_deref())
+                    .unwrap_or(&email)
+                    .to_string();
+                Ok(TypeaheadItem {
+                    label: label.clone(),
+                    detail: Some(email),
+                    insert_value: label,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+        })
+        .await
+    }
 }

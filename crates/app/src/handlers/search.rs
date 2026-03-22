@@ -15,6 +15,7 @@ impl App {
         self.thread_list.search_query = self.search_query.text().to_string();
         if self.search_query.text().trim().is_empty() {
             self.search_debounce_deadline = None;
+            self.thread_list.typeahead.visible = false;
             if self.thread_list.mode == ThreadListMode::Search {
                 self.clear_pinned_search_context();
                 self.nav_generation += 1;
@@ -26,6 +27,23 @@ impl App {
                 iced::time::Instant::now()
                     + std::time::Duration::from_millis(150),
             );
+        }
+
+        // Trigger typeahead based on cursor context (assume cursor at end)
+        let text = self.search_query.text().to_string();
+        let cursor_pos = text.len();
+        let ctx = ratatoskr_smart_folder::analyze_cursor_context(&text, cursor_pos);
+        match ctx {
+            ratatoskr_smart_folder::CursorContext::InsideOperator {
+                operator,
+                partial_value,
+                ..
+            } if !partial_value.is_empty() => {
+                return self.dispatch_typeahead_query(&operator, &partial_value);
+            }
+            _ => {
+                self.thread_list.typeahead.visible = false;
+            }
         }
         Task::none()
     }
@@ -123,6 +141,130 @@ impl App {
 
     pub(crate) fn handle_focus_search_bar(&self) -> Task<Message> {
         iced::widget::operation::focus::<Message>("search-bar".to_string())
+    }
+
+    /// Dispatch an async typeahead query based on operator type.
+    fn dispatch_typeahead_query(
+        &self,
+        operator: &str,
+        partial: &str,
+    ) -> Task<Message> {
+        use crate::ui::thread_list::{TypeaheadItem, ThreadListMessage};
+
+        // Static operators — resolve immediately
+        let static_items: Option<Vec<TypeaheadItem>> = match operator {
+            "in" => Some(
+                ["inbox", "sent", "drafts", "trash", "spam", "starred", "snoozed"]
+                    .iter()
+                    .filter(|s| s.starts_with(&partial.to_lowercase()))
+                    .map(|s| TypeaheadItem {
+                        label: s.to_string(),
+                        detail: None,
+                        insert_value: s.to_string(),
+                    })
+                    .collect(),
+            ),
+            "is" => Some(
+                ["unread", "read", "starred", "snoozed", "pinned", "muted"]
+                    .iter()
+                    .filter(|s| s.starts_with(&partial.to_lowercase()))
+                    .map(|s| TypeaheadItem {
+                        label: s.to_string(),
+                        detail: None,
+                        insert_value: s.to_string(),
+                    })
+                    .collect(),
+            ),
+            "has" => Some(
+                ["attachment", "pdf", "image", "excel", "word", "document", "archive", "video", "audio"]
+                    .iter()
+                    .filter(|s| s.starts_with(&partial.to_lowercase()))
+                    .map(|s| TypeaheadItem {
+                        label: s.to_string(),
+                        detail: None,
+                        insert_value: s.to_string(),
+                    })
+                    .collect(),
+            ),
+            "before" | "after" => Some(
+                [("Today", "0"), ("Yesterday", "-1"), ("Last 7 days", "-7"),
+                 ("Last 30 days", "-30"), ("Last 3 months", "-90"), ("Last year", "-365")]
+                    .iter()
+                    .filter(|(label, _)| label.to_lowercase().contains(&partial.to_lowercase()))
+                    .map(|(label, value)| TypeaheadItem {
+                        label: label.to_string(),
+                        detail: Some(format!("{operator}:{value}")),
+                        insert_value: value.to_string(),
+                    })
+                    .collect(),
+            ),
+            _ => None,
+        };
+
+        if let Some(items) = static_items {
+            return Task::done(Message::ThreadList(
+                ThreadListMessage::TypeaheadItemsLoaded(items),
+            ));
+        }
+
+        // Dynamic operators — query DB asynchronously
+        let db = Arc::clone(&self.db);
+        let partial = partial.to_string();
+        let op = operator.to_string();
+        Task::perform(
+            async move {
+                match op.as_str() {
+                    "from" | "to" => {
+                        db.search_contacts_for_typeahead(partial).await
+                    }
+                    "label" | "folder" => {
+                        db.search_labels_for_typeahead(partial).await
+                    }
+                    "account" => {
+                        db.search_accounts_for_typeahead(partial).await
+                    }
+                    _ => Ok(Vec::new()),
+                }
+            },
+            |result| {
+                let items = result.unwrap_or_default();
+                Message::ThreadList(ThreadListMessage::TypeaheadItemsLoaded(items))
+            },
+        )
+    }
+
+    /// Handle typeahead selection — insert the value into the query.
+    pub(crate) fn handle_typeahead_select(&mut self, idx: usize) -> Task<Message> {
+        let Some(item) = self.thread_list.typeahead.items.get(idx) else {
+            return Task::none();
+        };
+
+        let query = self.search_query.text().to_string();
+        let cursor_pos = query.len();
+        let ctx = ratatoskr_smart_folder::analyze_cursor_context(&query, cursor_pos);
+
+        if let ratatoskr_smart_folder::CursorContext::InsideOperator {
+            value_start,
+            value_end,
+            ..
+        } = ctx
+        {
+            let value = if item.insert_value.contains(' ') {
+                format!("\"{}\" ", item.insert_value)
+            } else {
+                format!("{} ", item.insert_value)
+            };
+            let new_query = format!("{}{}{}", &query[..value_start], value, &query[value_end..]);
+            self.search_query.set_text(new_query.clone());
+            self.thread_list.search_query = new_query;
+            self.thread_list.typeahead.visible = false;
+
+            // Trigger search execution with the new query
+            self.search_debounce_deadline = Some(
+                iced::time::Instant::now() + std::time::Duration::from_millis(50),
+            );
+        }
+        Task::none()
     }
 }
 

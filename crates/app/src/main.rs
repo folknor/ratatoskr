@@ -775,7 +775,13 @@ impl App {
             Message::SearchResultsLoaded(_, result) => self.handle_search_results(result),
             Message::SearchClear => self.handle_search_clear(),
             Message::FocusSearchBar => self.handle_focus_search_bar(),
-            Message::SearchBlur => Task::none(),
+            Message::SearchBlur => {
+                self.thread_list.typeahead.visible = false;
+                // Focus a non-existent widget to remove focus from the search bar.
+                // iced ignores focus operations on unknown IDs, but the act of
+                // issuing any focus operation clears the current focus.
+                iced::widget::operation::focus::<Message>("blur-sink".to_string())
+            }
 
             // Pinned searches — delegated to handlers/search.rs
             Message::PinnedSearchesLoaded(result) => self.handle_pinned_searches_loaded(result),
@@ -1194,9 +1200,10 @@ impl App {
                 self.update(Message::SearchExecute)
             }
             ThreadListEvent::TypeaheadQuery { .. } => {
-                // Dynamic typeahead queries are handled in
-                // handle_search_query_changed via maybe_trigger_typeahead_query.
                 Task::none()
+            }
+            ThreadListEvent::TypeaheadSelected(idx) => {
+                self.handle_typeahead_select(idx)
             }
             ThreadListEvent::MultiSelectionChanged(_count) => {
                 // Selection count changed — no action needed yet.

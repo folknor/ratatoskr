@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
-use iced::{Color, Element, Length, Task};
+use iced::{Color, Element, Length, Padding, Task};
 
 use crate::component::Component;
 use crate::db::Thread;
@@ -121,6 +121,8 @@ pub enum ThreadListEvent {
     BatchAction(Vec<usize>),
     /// Typeahead operator query needs async data.
     TypeaheadQuery { operator: String, partial_value: String },
+    /// User selected a typeahead suggestion.
+    TypeaheadSelected(usize),
     /// Search undo requested.
     SearchUndo,
     /// Search redo requested.
@@ -445,9 +447,9 @@ impl Component for ThreadList {
                 self.typeahead.visible = !self.typeahead.items.is_empty();
                 (Task::none(), None)
             }
-            ThreadListMessage::TypeaheadSelect(_idx) => {
+            ThreadListMessage::TypeaheadSelect(idx) => {
                 self.typeahead.visible = false;
-                (Task::none(), None)
+                (Task::none(), Some(ThreadListEvent::TypeaheadSelected(idx)))
             }
             ThreadListMessage::TypeaheadDismiss => {
                 self.typeahead.visible = false;
@@ -465,6 +467,7 @@ impl Component for ThreadList {
             &self.mode,
             self.threads.len(),
             selection_count,
+            &self.typeahead,
         );
 
         let body: Element<'_, ThreadListMessage> = if self.threads.is_empty() {
@@ -498,6 +501,7 @@ fn thread_list_header<'a>(
     mode: &ThreadListMode,
     thread_count: usize,
     selection_count: usize,
+    typeahead: &'a TypeaheadState,
 ) -> Element<'a, ThreadListMessage> {
     let search_input = text_input("Search...", search_query)
         .id("search-bar")
@@ -566,9 +570,50 @@ fn thread_list_header<'a>(
         }
     };
 
-    container(
-        column![search_input, context_row].spacing(SPACE_XXS),
-    )
+    let mut header_col = column![search_input, context_row].spacing(SPACE_XXS);
+
+    // Typeahead popup
+    if typeahead.visible && !typeahead.items.is_empty() {
+        let mut list = column![].spacing(0);
+        for (i, item) in typeahead.items.iter().enumerate() {
+            let is_selected = i == typeahead.selected;
+            let style = if is_selected {
+                theme::ButtonClass::Nav { active: true }
+            } else {
+                theme::ButtonClass::Action
+            };
+            let mut item_row = row![
+                text(&item.label).size(TEXT_SM),
+            ]
+            .spacing(SPACE_XS)
+            .align_y(iced::Alignment::Center);
+            if let Some(ref detail) = item.detail {
+                item_row = item_row.push(
+                    text(detail)
+                        .size(TEXT_XS)
+                        .style(theme::TextClass::Tertiary.style()),
+                );
+            }
+            list = list.push(
+                button(
+                    container(item_row)
+                        .padding(Padding::from([SPACE_XXS, SPACE_SM]))
+                        .width(Length::Fill),
+                )
+                .on_press(ThreadListMessage::TypeaheadSelect(i))
+                .padding(0)
+                .style(style.style())
+                .width(Length::Fill),
+            );
+        }
+        header_col = header_col.push(
+            container(list)
+                .style(theme::ContainerClass::Elevated.style())
+                .width(Length::Fill),
+        );
+    }
+
+    container(header_col)
     .padding(PAD_PANEL_HEADER)
     .into()
 }
