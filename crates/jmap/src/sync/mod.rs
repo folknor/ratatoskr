@@ -338,6 +338,9 @@ pub async fn jmap_delta_sync(
     // 3. Shared account discovery (re-check Session on every delta sync)
     discover_shared_accounts(client, account_id, db).await;
 
+    // 3b. ShareNotification polling (RFC 9670)
+    poll_share_notifications(client, account_id, db).await;
+
     // 4. Contacts delta sync
     match super::contacts_sync::jmap_contacts_delta_sync(client, account_id, db).await {
         Ok(count) => {
@@ -624,4 +627,173 @@ pub(crate) async fn discover_shared_accounts(
             session_shared_ids.len()
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// ShareNotification polling (JMAP Sharing — Phase 5)
+// ---------------------------------------------------------------------------
+
+/// Poll for ShareNotification changes (RFC 9670).
+///
+/// Checks if the server supports `urn:ietf:params:jmap:principals`, then
+/// uses `ShareNotification/changes` to detect new permission change records.
+/// New notifications are fetched, logged, and destroyed (acknowledged).
+///
+/// On any mailbox-related notification, re-runs session discovery to pick up
+/// grants or revocations. Non-fatal — errors are logged and skipped.
+pub(crate) async fn poll_share_notifications(
+    client: &JmapClient,
+    account_id: &str,
+    db: &DbState,
+) {
+    let inner = client.inner();
+    let session = inner.session();
+
+    // Check for principals capability — ShareNotification requires it.
+    if !session.has_capability("urn:ietf:params:jmap:principals") {
+        return;
+    }
+
+    // Load existing state token.
+    let since_state = match sync_state::load_jmap_sync_state(
+        db, account_id, "ShareNotification",
+    )
+    .await
+    {
+        Ok(state) => state,
+        Err(e) => {
+            log::warn!("[JMAP] Failed to load ShareNotification state: {e}");
+            return;
+        }
+    };
+
+    // If no state yet, do an initial get to capture the current state token
+    // without processing existing notifications (they predate our tracking).
+    if since_state.is_none() {
+        match get_share_notification_state(client).await {
+            Ok(state) => {
+                if let Err(e) = sync_state::save_jmap_sync_state(
+                    db, account_id, "ShareNotification", &state,
+                )
+                .await
+                {
+                    log::warn!("[JMAP] Failed to save initial ShareNotification state: {e}");
+                }
+            }
+            Err(e) => {
+                log::debug!("[JMAP] ShareNotification/get not available: {e}");
+            }
+        }
+        return;
+    }
+
+    let since = since_state.expect("checked above");
+
+    // Poll for changes.
+    let changes = match inner.share_notification_changes(&since, 500).await {
+        Ok(c) => c,
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("cannotCalculateChanges") {
+                // State expired — reset by capturing fresh state.
+                if let Ok(state) = get_share_notification_state(client).await {
+                    let _ = sync_state::save_jmap_sync_state(
+                        db, account_id, "ShareNotification", &state,
+                    )
+                    .await;
+                }
+            } else {
+                log::warn!("[JMAP] ShareNotification/changes failed: {msg}");
+            }
+            return;
+        }
+    };
+
+    let new_state = changes.new_state().to_string();
+    let created = changes.created();
+
+    if !created.is_empty() {
+        log::info!(
+            "[JMAP] {} new ShareNotification(s) for {account_id}",
+            created.len()
+        );
+
+        // Fetch the new notifications to log and check for mailbox changes.
+        let mut has_mailbox_change = false;
+        for notif_id in created {
+            match inner
+                .share_notification_get(notif_id, None::<Vec<jmap_client::share_notification::Property>>)
+                .await
+            {
+                Ok(Some(notif)) => {
+                    let obj_type = notif.object_type().unwrap_or("unknown");
+                    let obj_name = notif.name().unwrap_or("(unnamed)");
+                    let changer = notif
+                        .changed_by()
+                        .and_then(|cb| cb.name().or(cb.email()))
+                        .unwrap_or("unknown");
+
+                    if notif.new_rights().is_some() {
+                        log::info!(
+                            "[JMAP] Share granted: {changer} shared {obj_type} \"{obj_name}\""
+                        );
+                    } else {
+                        log::info!(
+                            "[JMAP] Share revoked: {changer} revoked access to {obj_type} \"{obj_name}\""
+                        );
+                    }
+
+                    if obj_type == "Mailbox" {
+                        has_mailbox_change = true;
+                    }
+
+                    // Acknowledge by destroying.
+                    if let Err(e) = inner.share_notification_destroy(notif_id).await {
+                        log::debug!("[JMAP] Failed to destroy ShareNotification {notif_id}: {e}");
+                    }
+                }
+                Ok(None) => {
+                    log::debug!("[JMAP] ShareNotification {notif_id} not found (already destroyed?)");
+                }
+                Err(e) => {
+                    log::debug!("[JMAP] Failed to fetch ShareNotification {notif_id}: {e}");
+                }
+            }
+        }
+
+        // If any mailbox sharing changed, re-run session discovery to pick up
+        // new or revoked accounts.
+        if has_mailbox_change {
+            log::info!("[JMAP] Mailbox sharing changed — re-running session discovery");
+            discover_shared_accounts(client, account_id, db).await;
+        }
+    }
+
+    // Save updated state.
+    if let Err(e) = sync_state::save_jmap_sync_state(
+        db, account_id, "ShareNotification", &new_state,
+    )
+    .await
+    {
+        log::warn!("[JMAP] Failed to save ShareNotification state: {e}");
+    }
+}
+
+/// Get the current ShareNotification state token without fetching items.
+async fn get_share_notification_state(client: &JmapClient) -> Result<String, String> {
+    let inner = client.inner();
+    let mut request = inner.build();
+    let account_id = request.default_account_id().to_string();
+    let get = jmap_client::share_notification::ShareNotificationGet::new(&account_id);
+    let handle = request
+        .call(get)
+        .map_err(|e| format!("ShareNotification state: {e}"))?;
+    let mut response = request
+        .send()
+        .await
+        .map_err(|e| format!("ShareNotification state: {e}"))?;
+    response
+        .get(&handle)
+        .map(|r| r.state().to_string())
+        .map_err(|e| format!("ShareNotification state: {e}"))
 }
