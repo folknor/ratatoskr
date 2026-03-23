@@ -118,8 +118,21 @@ impl App {
             self.status_bar.show_confirmation(display);
         }
 
+        // Collect selected thread info before any mutation.
+        let selected_threads: Vec<(String, String)> = self
+            .thread_list
+            .selected_indices()
+            .iter()
+            .filter_map(|&i| self.thread_list.threads.get(i))
+            .map(|t| (t.account_id.clone(), t.id.clone()))
+            .collect();
+
+        if selected_threads.is_empty() {
+            return Task::none();
+        }
+
         // Destructive actions remove the thread from the current view
-        // — trigger auto-advance.
+        // — perform DB update + trigger auto-advance.
         let removes_from_view = matches!(
             action,
             EmailAction::Archive
@@ -131,26 +144,158 @@ impl App {
         );
 
         if removes_from_view {
-            return self.handle_thread_list(
+            let db_task = self.dispatch_email_db_action(&action, &selected_threads);
+            let advance_task = self.handle_thread_list(
                 crate::ui::thread_list::ThreadListMessage::AutoAdvance,
             );
+            return Task::batch([db_task, advance_task]);
         }
 
-        // Dispatch actions locally (DB update, provider sync picks up changes).
+        // Non-destructive actions: dispatch DB update in place.
         match action {
-            EmailAction::ToggleStar => {
-                return self.toggle_star_selected_threads();
-            }
+            EmailAction::ToggleStar => self.toggle_star_selected_threads(),
             EmailAction::AddLabel { label_id } => {
-                return self.apply_label_to_selected_threads(&label_id);
+                self.apply_label_to_selected_threads(&label_id)
             }
             EmailAction::RemoveLabel { label_id } => {
-                return self.remove_label_from_selected_threads(&label_id);
+                self.remove_label_from_selected_threads(&label_id)
             }
-            _ => {}
+            EmailAction::ToggleRead => self.toggle_bool_selected_threads(
+                "is_read",
+                &selected_threads,
+                |t| &mut t.is_read,
+            ),
+            EmailAction::TogglePin => self.toggle_bool_selected_threads(
+                "is_pinned",
+                &selected_threads,
+                |t| &mut t.is_pinned,
+            ),
+            EmailAction::ToggleMute => self.toggle_bool_selected_threads(
+                "is_muted",
+                &selected_threads,
+                |t| &mut t.is_muted,
+            ),
+            _ => Task::none(),
+        }
+    }
+
+    /// Dispatch the DB operation for an email action (async, fire-and-forget).
+    fn dispatch_email_db_action(
+        &self,
+        action: &EmailAction,
+        threads: &[(String, String)],
+    ) -> Task<Message> {
+        let db = Arc::clone(&self.db);
+        let threads = threads.to_vec();
+        let action = action.clone();
+
+        Task::perform(
+            async move {
+                db.with_write_conn(move |conn| {
+                    use ratatoskr_core::email_actions::{insert_label, remove_label};
+
+                    for (account_id, thread_id) in &threads {
+                        match &action {
+                            EmailAction::Archive => {
+                                remove_label(conn, account_id, thread_id, "INBOX")?;
+                            }
+                            EmailAction::Trash => {
+                                remove_label(conn, account_id, thread_id, "INBOX")?;
+                                insert_label(conn, account_id, thread_id, "TRASH")?;
+                            }
+                            EmailAction::PermanentDelete => {
+                                ratatoskr_core::db::queries::delete_thread(
+                                    conn, account_id, thread_id,
+                                )?;
+                            }
+                            EmailAction::ToggleSpam => {
+                                remove_label(conn, account_id, thread_id, "INBOX")?;
+                                insert_label(conn, account_id, thread_id, "SPAM")?;
+                            }
+                            EmailAction::MoveToFolder { folder_id } => {
+                                // Remove from current folder (INBOX), add to target.
+                                remove_label(conn, account_id, thread_id, "INBOX")?;
+                                insert_label(conn, account_id, thread_id, folder_id)?;
+                            }
+                            EmailAction::Snooze { until } => {
+                                remove_label(conn, account_id, thread_id, "INBOX")?;
+                                conn.execute(
+                                    "UPDATE threads SET is_snoozed = 1, snooze_until = ?3 \
+                                     WHERE account_id = ?1 AND id = ?2",
+                                    rusqlite::params![account_id, thread_id, until],
+                                )
+                                .map_err(|e| format!("snooze: {e}"))?;
+                            }
+                            // Non-destructive actions handled separately.
+                            _ => {}
+                        }
+                    }
+                    Ok(())
+                })
+                .await
+            },
+            |result| {
+                if let Err(e) = result {
+                    log::error!("Email action DB error: {e}");
+                }
+                Message::Noop
+            },
+        )
+    }
+
+    /// Toggle a boolean field (is_read, is_pinned, is_muted) on selected threads.
+    /// Updates local UI optimistically, then persists to DB.
+    fn toggle_bool_selected_threads(
+        &mut self,
+        field: &'static str,
+        threads: &[(String, String)],
+        get_field: fn(&mut crate::db::Thread) -> &mut bool,
+    ) -> Task<Message> {
+        // Optimistic UI toggle
+        let indices = self.thread_list.selected_indices();
+        let mut toggled: Vec<(String, String, bool)> = Vec::new();
+        for &i in &indices {
+            if let Some(t) = self.thread_list.threads.get_mut(i) {
+                let val = get_field(t);
+                *val = !*val;
+                let new_val = *val;
+                toggled.push((t.account_id.clone(), t.id.clone(), new_val));
+            }
         }
 
-        Task::none()
+        if toggled.is_empty() {
+            return Task::none();
+        }
+
+        let db = Arc::clone(&self.db);
+        Task::perform(
+            async move {
+                db.with_write_conn(move |conn| {
+                    for (account_id, thread_id, new_value) in &toggled {
+                        match field {
+                            "is_read" => ratatoskr_core::db::queries::set_thread_read(
+                                conn, account_id, thread_id, *new_value,
+                            )?,
+                            "is_pinned" => ratatoskr_core::db::queries::set_thread_pinned(
+                                conn, account_id, thread_id, *new_value,
+                            )?,
+                            "is_muted" => ratatoskr_core::db::queries::set_thread_muted(
+                                conn, account_id, thread_id, *new_value,
+                            )?,
+                            _ => {}
+                        }
+                    }
+                    Ok(())
+                })
+                .await
+            },
+            move |result| {
+                if let Err(e) = result {
+                    log::error!("Toggle {field} DB error: {e}");
+                }
+                Message::Noop
+            },
+        )
     }
 
     /// Apply a label to all selected threads.

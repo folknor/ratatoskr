@@ -359,7 +359,7 @@ fn thread_view_with_commands<'a>(
 
     // Thread header (subject, expand/collapse) — uses ReadingPaneMessage internally
     col = col.push(
-        thread_header(thread_ref, &pane.message_expanded, &pane.thread_messages)
+        thread_header(thread_ref, &pane.message_expanded, &pane.thread_messages, &pane.thread_labels)
             .map(Message::ReadingPane),
     );
 
@@ -452,7 +452,7 @@ fn thread_view<'a>(
 ) -> Element<'a, ReadingPaneMessage> {
     let mut col = column![].spacing(0).width(Length::Fill);
 
-    col = col.push(thread_header(thread_ref, &pane.message_expanded, &pane.thread_messages));
+    col = col.push(thread_header(thread_ref, &pane.message_expanded, &pane.thread_messages, &pane.thread_labels));
 
     if !pane.thread_attachments.is_empty() {
         col = col.push(attachment_group(&pane.thread_attachments, pane.attachments_collapsed));
@@ -466,6 +466,7 @@ fn thread_header<'a>(
     thread_ref: &'a ThreadRef,
     message_expanded: &'a [bool],
     messages: &'a [ThreadMessage],
+    labels: &'a [ResolvedLabel],
 ) -> Element<'a, ReadingPaneMessage> {
     let subject = thread_ref.subject.as_deref().unwrap_or("(no subject)");
 
@@ -495,6 +496,40 @@ fn thread_header<'a>(
     .style(theme::ButtonClass::Ghost.style())
     .padding(PAD_ICON_BTN);
 
+    let mut info_row = row![
+        container(
+            text(format!("{} messages", messages.len()))
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .align_y(Alignment::Center),
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
+
+    // Label pills
+    for label in labels {
+        let bg = theme::hex_to_color(&label.color_bg);
+        let fg = theme::hex_to_color(&label.color_fg);
+        info_row = info_row.push(
+            container(
+                text(&label.name).size(TEXT_XS).color(fg),
+            )
+            .padding(Padding { top: 2.0, right: 6.0, bottom: 2.0, left: 6.0 })
+            .style(move |_theme: &iced::Theme| container::Style {
+                background: Some(bg.into()),
+                border: iced::Border {
+                    radius: RADIUS_LG.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+        );
+    }
+
+    info_row = info_row.push(Space::new().width(Length::Fill));
+    info_row = info_row.push(expand_collapse_btn);
+
     container(
         column![
             row![
@@ -503,17 +538,7 @@ fn thread_header<'a>(
                 star_btn,
             ]
             .align_y(Alignment::Center),
-            row![
-                container(
-                    text(format!("{} messages", messages.len()))
-                        .size(TEXT_SM)
-                        .style(theme::TextClass::Tertiary.style()),
-                )
-                .align_y(Alignment::Center),
-                Space::new().width(Length::Fill),
-                expand_collapse_btn,
-            ]
-            .align_y(Alignment::Center),
+            info_row,
         ]
         .spacing(SPACE_XXS),
     )

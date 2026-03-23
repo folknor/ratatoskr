@@ -161,8 +161,6 @@ pub enum Message {
     AccountsLoaded(u64, Result<Vec<db::Account>, String>),
     NavigationLoaded(u64, Result<NavigationState, String>),
     ThreadsLoaded(u64, Result<Vec<Thread>, String>),
-    ThreadMessagesLoaded(u64, Result<Vec<db::ThreadMessage>, String>),
-    ThreadAttachmentsLoaded(u64, Result<Vec<db::ThreadAttachment>, String>),
 
     // Existing UI
     Compose,
@@ -696,27 +694,6 @@ impl App {
             Message::ThreadsLoaded(_, Err(e)) => {
                 log::error!("ThreadsLoaded error: {e}");
                 self.status = format!("Threads error: {e}");
-                Task::none()
-            }
-            Message::ThreadMessagesLoaded(g, _) if g != self.thread_generation => Task::none(),
-            Message::ThreadMessagesLoaded(_, Ok(messages)) => {
-                self.reading_pane.apply_message_expansion(&messages);
-                self.reading_pane.thread_messages = messages;
-                Task::none()
-            }
-            Message::ThreadMessagesLoaded(_, Err(e)) => {
-                log::error!("ThreadMessagesLoaded error: {e}");
-                self.status = format!("Messages error: {e}");
-                Task::none()
-            }
-            Message::ThreadAttachmentsLoaded(g, _) if g != self.thread_generation => Task::none(),
-            Message::ThreadAttachmentsLoaded(_, Ok(attachments)) => {
-                self.reading_pane.thread_attachments = attachments;
-                Task::none()
-            }
-            Message::ThreadAttachmentsLoaded(_, Err(e)) => {
-                log::error!("ThreadAttachmentsLoaded error: {e}");
-                self.status = format!("Attachments error: {e}");
                 Task::none()
             }
 
@@ -1396,7 +1373,30 @@ impl App {
 
     fn handle_reading_pane_event(&mut self, event: ReadingPaneEvent) -> Task<Message> {
         match event {
-            ReadingPaneEvent::AttachmentCollapseChanged { .. } => Task::none(),
+            ReadingPaneEvent::AttachmentCollapseChanged { thread_key, collapsed } => {
+                // thread_key format is "account_id:thread_id"
+                if let Some((account_id, thread_id)) = thread_key.split_once(':') {
+                    let db = Arc::clone(&self.db);
+                    let account_id = account_id.to_string();
+                    let thread_id = thread_id.to_string();
+                    Task::perform(
+                        async move {
+                            db::threads::persist_attachments_collapsed(
+                                &db, account_id, thread_id, collapsed,
+                            )
+                            .await
+                        },
+                        |result| {
+                            if let Err(e) = result {
+                                log::error!("Failed to persist attachment collapse: {e}");
+                            }
+                            Message::Noop
+                        },
+                    )
+                } else {
+                    Task::none()
+                }
+            }
             ReadingPaneEvent::OpenMessagePopOut { message_index } => {
                 self.open_message_view_window(message_index)
             }
@@ -1862,27 +1862,6 @@ impl App {
                 );
             }
 
-            // Fallback: old separate queries (no body store)
-            let db = Arc::clone(&self.db);
-            let db2 = Arc::clone(&self.db);
-            let account_id2 = account_id.clone();
-            let thread_id2 = thread_id.clone();
-            return Task::batch([
-                Task::perform(
-                    async move {
-                        let r = db.get_thread_messages(account_id, thread_id).await;
-                        (load_gen, r)
-                    },
-                    |(g, result)| Message::ThreadMessagesLoaded(g, result),
-                ),
-                Task::perform(
-                    async move {
-                        let r = db2.get_thread_attachments(account_id2, thread_id2).await;
-                        (load_gen, r)
-                    },
-                    |(g, result)| Message::ThreadAttachmentsLoaded(g, result),
-                ),
-            ]);
         }
         Task::none()
     }

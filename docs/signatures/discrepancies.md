@@ -1,6 +1,6 @@
 # Signatures: Spec vs. Code Discrepancies
 
-Audit date: 2026-03-22
+Audit date: 2026-03-23
 
 ---
 
@@ -11,6 +11,7 @@ Audit date: 2026-03-22
 - Drag reorder grip handles implemented on signature rows
 - Account-switch signature replacement wired (resolve via db_resolve_signature_for_compose, apply via replace_signature, ComposeState tracks active_signature_id + signature_separator_index)
 - App handlers now use core CRUD (db_insert_signature, db_update_signature, db_delete_signature) instead of raw SQL
+- Signature edit detection flag (`dirty: bool` on `SignatureEditorState`) ✅
 
 ## Remaining
 
@@ -19,9 +20,6 @@ Draft save does not persist `signature_separator_index` or `active_signature_id`
 
 ### Per-account default signature dropdown in Account Settings
 Account editor overlay has no signature dropdown for selecting the default signature for an account. Tracked in TODO.md.
-
-### Signature edit detection flag
-No dirty/edited tracking in `SignatureEditorState` for confirming unsaved changes on close. Tracked in TODO.md.
 
 ## Not a discrepancy
 
