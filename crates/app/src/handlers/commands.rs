@@ -205,6 +205,11 @@ impl App {
 
     /// Dispatch a removes-from-view action through the action service.
     /// Auto-advance is deferred to handle_action_completed.
+    ///
+    /// Known UX regression: the user waits for the full provider round-trip
+    /// before the thread list advances. The old path advanced immediately.
+    /// The proper fix is splitting local mutation from provider dispatch so
+    /// advance fires after local success — that's Phase 3 optimistic UI.
     fn dispatch_action_service(
         &mut self,
         action: CompletedAction,
