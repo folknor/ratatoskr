@@ -152,6 +152,10 @@ struct PendingChord {
 #[derive(Debug, Clone, Copy)]
 pub enum CompletedAction {
     Archive,
+    Trash,
+    Spam,
+    MoveToFolder,
+    PermanentDelete,
     Star,
     MarkRead,
     Pin,
@@ -160,12 +164,19 @@ pub enum CompletedAction {
 
 impl CompletedAction {
     fn removes_from_view(self) -> bool {
-        matches!(self, Self::Archive)
+        matches!(
+            self,
+            Self::Archive | Self::Trash | Self::Spam | Self::MoveToFolder | Self::PermanentDelete
+        )
     }
 
     fn success_label(self) -> &'static str {
         match self {
             Self::Archive => "Archived",
+            Self::Trash => "Moved to Trash",
+            Self::Spam => "Spam status toggled",
+            Self::MoveToFolder => "Moved to folder",
+            Self::PermanentDelete => "Permanently deleted",
             Self::Star => "Star toggled",
             Self::MarkRead => "Read status toggled",
             Self::Pin => "Pin toggled",

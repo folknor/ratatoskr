@@ -1,0 +1,69 @@
+use super::context::ActionContext;
+use super::outcome::ActionOutcome;
+use super::provider::create_provider;
+use crate::email_actions::{insert_label, remove_label};
+use crate::progress::NoopProgressReporter;
+use ratatoskr_provider_utils::types::ProviderCtx;
+
+/// Move a single thread to a different folder.
+///
+/// `folder_id` is the target folder's label ID (Ratatoskr canonical for
+/// system folders, provider-prefixed for user folders).
+///
+/// `source_label_id` is the folder to remove from. `None` means "don't
+/// remove from any source" (just add to target). The caller resolves
+/// the source from the current navigation context — it's not always INBOX.
+pub async fn move_to_folder(
+    ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+    folder_id: &str,
+    source_label_id: Option<&str>,
+) -> ActionOutcome {
+    let db = ctx.db.clone();
+    let aid = account_id.to_string();
+    let tid = thread_id.to_string();
+    let fid = folder_id.to_string();
+    let source = source_label_id.map(String::from);
+    let local_result = tokio::task::spawn_blocking(move || {
+        let conn = db.conn();
+        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        if let Some(ref src) = source {
+            remove_label(&conn, &aid, &tid, src)?;
+        }
+        insert_label(&conn, &aid, &tid, &fid)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking: {e}"))
+    .and_then(|r| r);
+
+    if let Err(e) = local_result {
+        return ActionOutcome::Failed { error: e };
+    }
+
+    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+        Ok(p) => p,
+        Err(e) => {
+            log::warn!("Move local-only (provider create failed): {e}");
+            return ActionOutcome::LocalOnly { remote_error: e };
+        }
+    };
+
+    let provider_ctx = ProviderCtx {
+        account_id,
+        db: &ctx.db,
+        body_store: &ctx.body_store,
+        inline_images: &ctx.inline_images,
+        search: &ctx.search,
+        progress: &NoopProgressReporter,
+    };
+
+    match provider.move_to_folder(&provider_ctx, thread_id, folder_id).await {
+        Ok(()) => ActionOutcome::Success,
+        Err(e) => {
+            let msg = e.to_string();
+            log::warn!("Move remote failed for {account_id}/{thread_id}: {msg}");
+            ActionOutcome::LocalOnly { remote_error: msg }
+        }
+    }
+}

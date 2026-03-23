@@ -2,11 +2,19 @@ use iced::Task;
 
 use std::sync::Arc;
 
-use crate::command_dispatch::{self, EmailAction};
+use crate::command_dispatch::{self, EmailAction, NavigationTarget};
 use crate::db::Db;
 use crate::{APP_DATA_DIR, App, CompletedAction, Message};
 use ratatoskr_command_palette::{CommandArgs, CommandId, KeyBinding, OptionItem};
 use ratatoskr_core::actions::ActionOutcome;
+
+/// Parameters for actions that need more than account_id + thread_id.
+#[derive(Clone)]
+enum ActionParams {
+    None,
+    Spam { is_spam: bool },
+    MoveToFolder { folder_id: String, source_label_id: Option<String> },
+}
 
 impl App {
     /// Save keybinding overrides to disk. Call this after any mutation
@@ -157,24 +165,50 @@ impl App {
                 );
             }
 
-            // ── Legacy path: removes-from-view folder ops (Phase 2.1b) ──
-            EmailAction::Trash
-            | EmailAction::PermanentDelete
-            | EmailAction::ToggleSpam
-            | EmailAction::MoveToFolder { .. }
-            | EmailAction::Snooze { .. } => {
-                let confirmation = match &action {
-                    EmailAction::Trash => "Moved to Trash",
-                    EmailAction::PermanentDelete => "Permanently deleted",
-                    EmailAction::ToggleSpam => "Spam status toggled",
-                    EmailAction::MoveToFolder { .. } => "Moved to folder",
-                    EmailAction::Snooze { .. } => "Snoozed",
-                    _ => "",
-                };
+            // ── Removes-from-view folder ops via action service ──
+            EmailAction::Trash => {
+                return self.dispatch_action_service(
+                    CompletedAction::Trash,
+                    &selected_threads,
+                );
+            }
+            EmailAction::PermanentDelete => {
+                return self.dispatch_action_service(
+                    CompletedAction::PermanentDelete,
+                    &selected_threads,
+                );
+            }
+            EmailAction::ToggleSpam => {
+                // Resolve spam direction: if viewing spam folder, un-spam; otherwise mark spam.
+                // TODO: improve detection — currently checks if the navigation target
+                // label is "SPAM". This covers the common case (viewing spam folder).
+                let is_spam = self.navigation_target.as_ref()
+                    .and_then(NavigationTarget::to_label_id)
+                    .map_or(true, |lid| lid != "SPAM");
+                return self.dispatch_action_service_with_params(
+                    CompletedAction::Spam,
+                    &selected_threads,
+                    ActionParams::Spam { is_spam },
+                );
+            }
+            EmailAction::MoveToFolder { folder_id } => {
+                // Source is the current navigation folder, if any.
+                let source_label_id = self.navigation_target.as_ref()
+                    .and_then(NavigationTarget::to_label_id)
+                    .map(String::from);
+                return self.dispatch_action_service_with_params(
+                    CompletedAction::MoveToFolder,
+                    &selected_threads,
+                    ActionParams::MoveToFolder { folder_id, source_label_id },
+                );
+            }
+
+            // ── Legacy path: snooze (deferred from Phase 2.1) ──
+            EmailAction::Snooze { .. } => {
                 let display = if selection_count > 1 {
-                    format!("{confirmation} ({selection_count} threads)")
+                    format!("Snoozed ({selection_count} threads)")
                 } else {
-                    confirmation.to_string()
+                    "Snoozed".to_string()
                 };
                 self.status_bar.show_confirmation(display);
 
@@ -215,6 +249,15 @@ impl App {
         action: CompletedAction,
         threads: &[(String, String)],
     ) -> Task<Message> {
+        self.dispatch_action_service_with_params(action, threads, ActionParams::None)
+    }
+
+    fn dispatch_action_service_with_params(
+        &mut self,
+        action: CompletedAction,
+        threads: &[(String, String)],
+        params: ActionParams,
+    ) -> Task<Message> {
         let Some(ref action_ctx) = self.action_ctx else {
             self.status_bar.show_confirmation(
                 format!("\u{26A0} {} unavailable \u{2014} action service not initialized", action.success_label()),
@@ -228,11 +271,24 @@ impl App {
             async move {
                 let mut outcomes = Vec::with_capacity(threads.len());
                 for (account_id, thread_id) in &threads {
-                    let outcome = match action {
-                        CompletedAction::Archive => {
+                    let outcome = match (&action, &params) {
+                        (CompletedAction::Archive, _) => {
                             ratatoskr_core::actions::archive(&ctx, account_id, thread_id).await
                         }
-                        // Phase 2.1b will add Trash, Spam, MoveToFolder, PermanentDelete here.
+                        (CompletedAction::Trash, _) => {
+                            ratatoskr_core::actions::trash(&ctx, account_id, thread_id).await
+                        }
+                        (CompletedAction::PermanentDelete, _) => {
+                            ratatoskr_core::actions::permanent_delete(&ctx, account_id, thread_id).await
+                        }
+                        (CompletedAction::Spam, ActionParams::Spam { is_spam }) => {
+                            ratatoskr_core::actions::spam(&ctx, account_id, thread_id, *is_spam).await
+                        }
+                        (CompletedAction::MoveToFolder, ActionParams::MoveToFolder { folder_id, source_label_id }) => {
+                            ratatoskr_core::actions::move_to_folder(
+                                &ctx, account_id, thread_id, folder_id, source_label_id.as_deref(),
+                            ).await
+                        }
                         _ => ActionOutcome::Failed {
                             error: format!("{action:?} not yet migrated to action service"),
                         },
@@ -416,8 +472,8 @@ impl App {
         Task::none()
     }
 
-    /// Dispatch the DB operation for an email action (async, fire-and-forget).
-    /// Legacy path — actions are migrated to the action service in Phase 2.
+    /// Legacy dispatch for snooze only. All other actions go through the action service.
+    /// Snooze is deferred from action service migration (needs design decision).
     fn dispatch_email_db_action(
         &self,
         action: &EmailAction,
@@ -430,45 +486,17 @@ impl App {
         Task::perform(
             async move {
                 db.with_write_conn(move |conn| {
-                    use ratatoskr_core::email_actions::{insert_label, remove_label};
-
                     for (account_id, thread_id) in &threads {
-                        match &action {
-                            EmailAction::Archive => {
-                                // Archive is handled by the action service — should
-                                // not reach here. If it does, no-op rather than
-                                // silently doing local-only work.
-                                log::error!("Archive reached legacy dispatch path — this is a bug");
-                            }
-                            EmailAction::Trash => {
-                                remove_label(conn, account_id, thread_id, "INBOX")?;
-                                insert_label(conn, account_id, thread_id, "TRASH")?;
-                            }
-                            EmailAction::PermanentDelete => {
-                                ratatoskr_core::db::queries::delete_thread(
-                                    conn, account_id, thread_id,
-                                )?;
-                            }
-                            EmailAction::ToggleSpam => {
-                                remove_label(conn, account_id, thread_id, "INBOX")?;
-                                insert_label(conn, account_id, thread_id, "SPAM")?;
-                            }
-                            EmailAction::MoveToFolder { folder_id } => {
-                                // Remove from current folder (INBOX), add to target.
-                                remove_label(conn, account_id, thread_id, "INBOX")?;
-                                insert_label(conn, account_id, thread_id, folder_id)?;
-                            }
-                            EmailAction::Snooze { until } => {
-                                remove_label(conn, account_id, thread_id, "INBOX")?;
-                                conn.execute(
-                                    "UPDATE threads SET is_snoozed = 1, snooze_until = ?3 \
-                                     WHERE account_id = ?1 AND id = ?2",
-                                    rusqlite::params![account_id, thread_id, until],
-                                )
-                                .map_err(|e| format!("snooze: {e}"))?;
-                            }
-                            // Non-destructive actions handled separately.
-                            _ => {}
+                        if let EmailAction::Snooze { until } = &action {
+                            ratatoskr_core::email_actions::remove_label(
+                                conn, account_id, thread_id, "INBOX",
+                            )?;
+                            conn.execute(
+                                "UPDATE threads SET is_snoozed = 1, snooze_until = ?3 \
+                                 WHERE account_id = ?1 AND id = ?2",
+                                rusqlite::params![account_id, thread_id, until],
+                            )
+                            .map_err(|e| format!("snooze: {e}"))?;
                         }
                     }
                     Ok(())
@@ -477,7 +505,7 @@ impl App {
             },
             |result| {
                 if let Err(e) = result {
-                    log::error!("Email action DB error: {e}");
+                    log::error!("Snooze DB error: {e}");
                 }
                 Message::Noop
             },
