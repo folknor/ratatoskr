@@ -17,15 +17,15 @@ Every feature gets a **local-only implementation** as the baseline. Provider-nat
 | [Categories](categories.md) | ✅ Backend complete (missing: category picker UI) | Native (`categories`) | Labels (partial overlap) | `keywords` | IMAP keywords (limited) | Local-only labels+colors |
 | [Contacts](contacts.md) | ✅ Complete (all 8 phases) | Native (`/me/contacts`) | People API | CardDAV | CardDAV | Local address book |
 | Auto-collected contacts | ✅ Done | People API (ranked) | "Other Contacts" | Nothing | Nothing | `seen_addresses` table |
-| [@Mentions](mentions.md) | ✅ Done | Native (`mentions`) | Nothing | Nothing | Nothing | Local-only, no server flag |
-| [Reactions](reactions.md) | ✅ Done | Native (`reactions`) | Nothing | Nothing | Nothing | Local-only |
-| [Scheduled send](scheduled-send.md) | ✅ Done | Native (deferred delivery) | Native | `EmailSubmission.sendAt` | Nothing | Local timer + send-on-wake |
-| [Roaming signatures](signatures.md) | ✅ Done | Native (roaming settings) | Gmail API settings | Nothing | Nothing | Local-only signatures |
+| [@Mentions](mentions.md) | ⚠️ Phase 1 done (missing: compose @-autocomplete, mention deletion, count badge) | Native (`mentions`) | Nothing | Nothing | Nothing | Local-only, no server flag |
+| [Reactions](reactions.md) | ⚠️ Backend complete (missing: display UI, reaction picker) | Native (`reactions`) | Nothing | Nothing | Nothing | Local-only |
+| [Scheduled send](scheduled-send.md) | ⚠️ Backend complete (missing: schedule picker UI, "Scheduled" virtual folder) | Native (deferred delivery) | Native | `EmailSubmission.sendAt` | Nothing | Local timer + send-on-wake |
+| [Roaming signatures](signatures.md) | ⚠️ Backend complete (missing: compose signature placement UI, Exchange fetch) | Native (roaming settings) | Gmail API settings | Nothing | Nothing | Local-only signatures |
 | [Cloud attachments](cloud-attachments.md) | ⚠️ Partial (OneDrive done, Google Drive done) | OneDrive via Graph | Google Drive API | Nothing | Nothing | Local large-file warning only |
 | [Tracking blocking](tracking-blocking.md) | ⚠️ Mostly done (remaining: read receipt prompt UI) | N/A (client-side) | N/A (client-side) | N/A (client-side) | N/A (client-side) | Fully local |
 | [Shared mailboxes](shared-mailboxes.md) | ⚠️ Partial (Graph sync + sidebar done, JMAP in progress) | Native (delegate access) | Native (delegation) | Shared via ACL | IMAP ACL (RFC 4314) | N/A — requires server support |
 | [Public folders](public-folders.md) | ⚠️ Partial (EWS client + sidebar pins done) | Native (legacy Exchange) | Nothing | Nothing | Nothing | N/A — Exchange-only concept |
-| [BIMI](bimi.md) | ✅ Done | N/A (DNS + headers) | N/A (DNS + headers) | N/A (DNS + headers) | N/A (DNS + headers) | Fully local |
+| [BIMI](bimi.md) | ⚠️ Backend complete (missing: avatar display in message list) | N/A (DNS + headers) | N/A (DNS + headers) | N/A (DNS + headers) | N/A (DNS + headers) | Fully local |
 | [IMAP SPECIAL-USE](imap-special-use.md) | ✅ Done | N/A | N/A | N/A | Native | N/A |
 
 ### Multi-Account UX
@@ -71,16 +71,16 @@ These are features enterprise users actively rely on daily. Missing any of these
 
 Features users notice are missing after a week of daily use.
 
-- [@Mentions](mentions.md) — ✅ Done
-- [Roaming Signatures](signatures.md) — ✅ Done
-- [Scheduled Send](scheduled-send.md) — ✅ Done
-- [Reactions](reactions.md) — ✅ Done
+- [@Mentions](mentions.md) — ⚠️ Phase 1 done (sync + display + send). Missing: compose @-autocomplete, mention deletion, count badge
+- [Roaming Signatures](signatures.md) — ⚠️ Backend complete (Gmail + JMAP sync). Missing: signature placement in compose UI, Exchange fetch (no public API)
+- [Scheduled Send](scheduled-send.md) — ⚠️ Backend complete (server delegation + overdue handling). Missing: schedule picker UI, "Scheduled" virtual folder
+- [Reactions](reactions.md) — ⚠️ Backend complete (sync + parse + Gmail send). Missing: reaction display UI, reaction picker, Exchange write (blocked on MS API)
 
 ## Tier 3 — Differentiators and polish
 
 Features that go beyond Outlook parity into "this client is actually better."
 
-- [BIMI](bimi.md) — ✅ Done
+- [BIMI](bimi.md) — ⚠️ Backend complete (DNS + SVG + cache). Missing: BIMI logo display in message list avatars
 - [IMAP SPECIAL-USE](imap-special-use.md) — ✅ Done
 
 ---
