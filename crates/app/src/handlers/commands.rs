@@ -330,19 +330,23 @@ impl App {
         action: CompletedAction,
     ) {
         for (account_id, thread_id, prev) in rollback {
+            // Restore thread list state if the thread is still present.
             if let Some(t) = self.thread_list.threads.iter_mut().find(
                 |t| t.account_id == *account_id && t.id == *thread_id,
             ) {
                 match action {
-                    CompletedAction::Star => {
-                        t.is_starred = *prev;
-                        self.reading_pane.update_star(thread_id, *prev);
-                    }
+                    CompletedAction::Star => t.is_starred = *prev,
                     CompletedAction::MarkRead => t.is_read = *prev,
                     CompletedAction::Pin => t.is_pinned = *prev,
                     CompletedAction::Mute => t.is_muted = *prev,
                     _ => {}
                 }
+            }
+
+            // Restore reading pane state regardless of thread list presence —
+            // the thread may have left the list but still be displayed.
+            if matches!(action, CompletedAction::Star) {
+                self.reading_pane.update_star(thread_id, *prev);
             }
         }
     }
