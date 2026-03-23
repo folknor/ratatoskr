@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::command_dispatch::{self, EmailAction};
 use crate::db::Db;
-use crate::{APP_DATA_DIR, App, Message};
+use crate::{APP_DATA_DIR, App, CompletedAction, Message};
 use ratatoskr_command_palette::{CommandArgs, CommandId, KeyBinding, OptionItem};
 use ratatoskr_core::actions::ActionOutcome;
 
@@ -95,51 +95,13 @@ impl App {
     ) -> Task<Message> {
         let selection_count = self.thread_list.selection_count();
 
-        // Archive goes through the action service (Phase 1).
-        // All other actions use the legacy inline path until Phase 2.
-        if matches!(action, EmailAction::Archive) {
-            let selected_threads: Vec<(String, String)> = self
-                .thread_list
-                .selected_indices()
-                .iter()
-                .filter_map(|&i| self.thread_list.threads.get(i))
-                .map(|t| (t.account_id.clone(), t.id.clone()))
-                .collect();
+        // ── Actions through the action service ──────────────────
+        //
+        // Archive + boolean toggles go through core::actions.
+        // Removes-from-view folder ops use the legacy path until Phase 2.1b.
+        // Labels use the legacy path until Phase 2.2.
 
-            if selected_threads.is_empty() {
-                return Task::none();
-            }
-
-            // Auto-advance is deferred to handle_archive_completed —
-            // it only fires if the local mutation succeeded.
-            return self.dispatch_archive(selected_threads);
-        }
-
-        let confirmation = match &action {
-            EmailAction::Archive => None, // handled above via action service
-            EmailAction::Trash => Some("Moved to Trash"),
-            EmailAction::PermanentDelete => Some("Permanently deleted"),
-            EmailAction::ToggleSpam => Some("Spam status toggled"),
-            EmailAction::ToggleRead => Some("Read status toggled"),
-            EmailAction::ToggleStar => Some("Star toggled"),
-            EmailAction::TogglePin => Some("Pin toggled"),
-            EmailAction::ToggleMute => Some("Mute toggled"),
-            EmailAction::Unsubscribe => Some("Unsubscribed"),
-            EmailAction::MoveToFolder { .. } => Some("Moved to folder"),
-            EmailAction::AddLabel { .. } => Some("Label applied"),
-            EmailAction::RemoveLabel { .. } => Some("Label removed"),
-            EmailAction::Snooze { .. } => Some("Snoozed"),
-        };
-        if let Some(msg) = confirmation {
-            let display = if selection_count > 1 {
-                format!("{msg} ({selection_count} threads)")
-            } else {
-                msg.to_string()
-            };
-            self.status_bar.show_confirmation(display);
-        }
-
-        // Collect selected thread info before any mutation.
+        // Collect selected thread info.
         let selected_threads: Vec<(String, String)> = self
             .thread_list
             .selected_indices()
@@ -152,117 +114,297 @@ impl App {
             return Task::none();
         }
 
-        // Destructive actions remove the thread from the current view
-        // — perform DB update + trigger auto-advance.
-        let removes_from_view = matches!(
-            action,
-            EmailAction::Trash
-                | EmailAction::PermanentDelete
-                | EmailAction::ToggleSpam
-                | EmailAction::MoveToFolder { .. }
-                | EmailAction::Snooze { .. }
-        );
-
-        if removes_from_view {
-            let db_task = self.dispatch_email_db_action(&action, &selected_threads);
-            let advance_task = self.handle_thread_list(
-                crate::ui::thread_list::ThreadListMessage::AutoAdvance,
-            );
-            return Task::batch([db_task, advance_task]);
-        }
-
-        // Non-destructive actions: dispatch DB update in place.
         match action {
-            EmailAction::ToggleStar => self.toggle_star_selected_threads(),
+            // ── Removes-from-view via action service ──
+            EmailAction::Archive => {
+                return self.dispatch_action_service(
+                    CompletedAction::Archive,
+                    &selected_threads,
+                );
+            }
+
+            // ── Toggle actions via action service (with optimistic UI) ──
+            EmailAction::ToggleStar => {
+                let rollback = self.optimistic_toggle(&selected_threads, |t| &mut t.is_starred);
+                // Also update reading pane star state
+                for (_, tid, prev) in &rollback {
+                    self.reading_pane.update_star(tid, !prev);
+                }
+                return self.dispatch_toggle_action(
+                    CompletedAction::Star,
+                    rollback,
+                );
+            }
+            EmailAction::ToggleRead => {
+                let rollback = self.optimistic_toggle(&selected_threads, |t| &mut t.is_read);
+                return self.dispatch_toggle_action(
+                    CompletedAction::MarkRead,
+                    rollback,
+                );
+            }
+            EmailAction::TogglePin => {
+                let rollback = self.optimistic_toggle(&selected_threads, |t| &mut t.is_pinned);
+                return self.dispatch_toggle_action(
+                    CompletedAction::Pin,
+                    rollback,
+                );
+            }
+            EmailAction::ToggleMute => {
+                let rollback = self.optimistic_toggle(&selected_threads, |t| &mut t.is_muted);
+                return self.dispatch_toggle_action(
+                    CompletedAction::Mute,
+                    rollback,
+                );
+            }
+
+            // ── Legacy path: removes-from-view folder ops (Phase 2.1b) ──
+            EmailAction::Trash
+            | EmailAction::PermanentDelete
+            | EmailAction::ToggleSpam
+            | EmailAction::MoveToFolder { .. }
+            | EmailAction::Snooze { .. } => {
+                let confirmation = match &action {
+                    EmailAction::Trash => "Moved to Trash",
+                    EmailAction::PermanentDelete => "Permanently deleted",
+                    EmailAction::ToggleSpam => "Spam status toggled",
+                    EmailAction::MoveToFolder { .. } => "Moved to folder",
+                    EmailAction::Snooze { .. } => "Snoozed",
+                    _ => "",
+                };
+                let display = if selection_count > 1 {
+                    format!("{confirmation} ({selection_count} threads)")
+                } else {
+                    confirmation.to_string()
+                };
+                self.status_bar.show_confirmation(display);
+
+                let db_task = self.dispatch_email_db_action(&action, &selected_threads);
+                let advance_task = self.handle_thread_list(
+                    crate::ui::thread_list::ThreadListMessage::AutoAdvance,
+                );
+                return Task::batch([db_task, advance_task]);
+            }
+
+            // ── Legacy path: labels (Phase 2.2) ──
             EmailAction::AddLabel { label_id } => {
-                self.apply_label_to_selected_threads(&label_id)
+                self.status_bar.show_confirmation("Label applied".to_string());
+                return self.apply_label_to_selected_threads(&label_id);
             }
             EmailAction::RemoveLabel { label_id } => {
-                self.remove_label_from_selected_threads(&label_id)
+                self.status_bar.show_confirmation("Label removed".to_string());
+                return self.remove_label_from_selected_threads(&label_id);
             }
-            EmailAction::ToggleRead => self.toggle_bool_selected_threads(
-                "is_read",
-                &selected_threads,
-                |t| &mut t.is_read,
-            ),
-            EmailAction::TogglePin => self.toggle_bool_selected_threads(
-                "is_pinned",
-                &selected_threads,
-                |t| &mut t.is_pinned,
-            ),
-            EmailAction::ToggleMute => self.toggle_bool_selected_threads(
-                "is_muted",
-                &selected_threads,
-                |t| &mut t.is_muted,
-            ),
-            _ => Task::none(),
+
+            // ── Not yet migrated ──
+            EmailAction::Unsubscribe => {
+                self.status_bar.show_confirmation("Unsubscribed".to_string());
+                Task::none()
+            }
         }
     }
 
-    /// Archive via the action service (Phase 1).
-    fn dispatch_archive(&mut self, threads: Vec<(String, String)>) -> Task<Message> {
+    /// Dispatch a removes-from-view action through the action service.
+    /// Auto-advance is deferred to handle_action_completed.
+    fn dispatch_action_service(
+        &mut self,
+        action: CompletedAction,
+        threads: &[(String, String)],
+    ) -> Task<Message> {
         let Some(ref action_ctx) = self.action_ctx else {
             self.status_bar.show_confirmation(
-                "Archive unavailable \u{2014} action service not initialized".to_string(),
+                format!("\u{26A0} {} unavailable \u{2014} action service not initialized", action.success_label()),
             );
             return Task::none();
         };
 
         let ctx = action_ctx.clone();
+        let threads = threads.to_vec();
         Task::perform(
             async move {
                 let mut outcomes = Vec::with_capacity(threads.len());
                 for (account_id, thread_id) in &threads {
-                    outcomes.push(
-                        ratatoskr_core::actions::archive(&ctx, account_id, thread_id).await,
-                    );
+                    let outcome = match action {
+                        CompletedAction::Archive => {
+                            ratatoskr_core::actions::archive(&ctx, account_id, thread_id).await
+                        }
+                        // Phase 2.1b will add Trash, Spam, MoveToFolder, PermanentDelete here.
+                        _ => ActionOutcome::Failed {
+                            error: format!("{action:?} not yet migrated to action service"),
+                        },
+                    };
+                    outcomes.push(outcome);
                 }
-                outcomes
+                (action, outcomes)
             },
-            Message::ArchiveCompleted,
+            move |(action, outcomes)| Message::ActionCompleted {
+                action,
+                outcomes,
+                rollback: Vec::new(),
+            },
         )
     }
 
-    /// Handle archive completion — map outcomes to user feedback and
-    /// auto-advance if the local mutation succeeded.
-    pub(crate) fn handle_archive_completed(
+    /// Apply optimistic UI toggle to selected threads. Returns rollback data
+    /// keyed by (account_id, thread_id, previous_value).
+    fn optimistic_toggle(
         &mut self,
-        outcomes: &[ActionOutcome],
+        threads: &[(String, String)],
+        get_field: fn(&mut crate::db::Thread) -> &mut bool,
+    ) -> Vec<(String, String, bool)> {
+        let mut rollback = Vec::with_capacity(threads.len());
+        for (account_id, thread_id) in threads {
+            if let Some(t) = self.thread_list.threads.iter_mut().find(
+                |t| t.account_id == *account_id && t.id == *thread_id,
+            ) {
+                let field = get_field(t);
+                let prev = *field;
+                *field = !prev;
+                rollback.push((account_id.clone(), thread_id.clone(), prev));
+            }
+        }
+        rollback
+    }
+
+    /// Dispatch a toggle action through the action service with rollback data.
+    fn dispatch_toggle_action(
+        &mut self,
+        action: CompletedAction,
+        rollback: Vec<(String, String, bool)>,
     ) -> Task<Message> {
+        let Some(ref action_ctx) = self.action_ctx else {
+            // Reverse the optimistic toggle since we can't dispatch.
+            self.rollback_toggles(&rollback, action);
+            self.status_bar.show_confirmation(
+                format!("\u{26A0} {} unavailable \u{2014} action service not initialized", action.success_label()),
+            );
+            return Task::none();
+        };
+
+        let ctx = action_ctx.clone();
+        let targets: Vec<(String, String, bool)> = rollback
+            .iter()
+            .map(|(a, t, prev)| (a.clone(), t.clone(), !prev))
+            .collect();
+        Task::perform(
+            async move {
+                let mut outcomes = Vec::with_capacity(targets.len());
+                for (account_id, thread_id, new_value) in &targets {
+                    let outcome = match action {
+                        CompletedAction::Star => {
+                            ratatoskr_core::actions::star(&ctx, account_id, thread_id, *new_value).await
+                        }
+                        CompletedAction::MarkRead => {
+                            ratatoskr_core::actions::mark_read(&ctx, account_id, thread_id, *new_value).await
+                        }
+                        CompletedAction::Pin => {
+                            ratatoskr_core::actions::pin(&ctx, account_id, thread_id, *new_value).await
+                        }
+                        CompletedAction::Mute => {
+                            ratatoskr_core::actions::mute(&ctx, account_id, thread_id, *new_value).await
+                        }
+                        _ => ActionOutcome::Failed {
+                            error: format!("{action:?} is not a toggle action"),
+                        },
+                    };
+                    outcomes.push(outcome);
+                }
+                (action, outcomes, rollback)
+            },
+            move |(action, outcomes, rollback)| Message::ActionCompleted {
+                action,
+                outcomes,
+                rollback,
+            },
+        )
+    }
+
+    /// Restore previous toggle values on failure. Finds threads by ID, not index.
+    fn rollback_toggles(
+        &mut self,
+        rollback: &[(String, String, bool)],
+        action: CompletedAction,
+    ) {
+        for (account_id, thread_id, prev) in rollback {
+            if let Some(t) = self.thread_list.threads.iter_mut().find(
+                |t| t.account_id == *account_id && t.id == *thread_id,
+            ) {
+                match action {
+                    CompletedAction::Star => {
+                        t.is_starred = *prev;
+                        self.reading_pane.update_star(thread_id, *prev);
+                    }
+                    CompletedAction::MarkRead => t.is_read = *prev,
+                    CompletedAction::Pin => t.is_pinned = *prev,
+                    CompletedAction::Mute => t.is_muted = *prev,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    /// Handle action service completion — map outcomes to user feedback,
+    /// auto-advance for removes-from-view, rollback for failed toggles.
+    pub(crate) fn handle_action_completed(
+        &mut self,
+        action: CompletedAction,
+        outcomes: &[ActionOutcome],
+        rollback: &[(String, String, bool)],
+    ) -> Task<Message> {
+        let all_failed = outcomes.iter().all(ActionOutcome::is_failed);
         let any_failed = outcomes.iter().any(ActionOutcome::is_failed);
         let any_local_only = outcomes.iter().any(ActionOutcome::is_local_only);
-        let all_failed = outcomes.iter().all(ActionOutcome::is_failed);
 
-        if all_failed {
-            // Nothing was archived — don't advance.
-            let errors: Vec<&str> = outcomes
-                .iter()
-                .filter_map(|o| match o {
-                    ActionOutcome::Failed { error } => Some(error.as_str()),
-                    _ => None,
-                })
-                .collect();
-            // TODO: use a dedicated error display once status bar supports it.
-            // Using show_confirmation for now — styled the same as success.
-            self.status_bar
-                .show_confirmation(format!("\u{26A0} Archive failed: {}", errors.join("; ")));
-            return Task::none();
-        }
+        if action.removes_from_view() {
+            if all_failed {
+                let errors: Vec<&str> = outcomes
+                    .iter()
+                    .filter_map(|o| match o {
+                        ActionOutcome::Failed { error } => Some(error.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                // TODO: use dedicated error display once status bar supports it.
+                self.status_bar.show_confirmation(
+                    format!("\u{26A0} {} failed: {}", action.success_label(), errors.join("; ")),
+                );
+                return Task::none();
+            }
 
-        // At least some threads were archived locally — advance.
-        if any_failed || any_local_only {
-            // TODO: use a dedicated warning display once status bar supports it.
-            self.status_bar.show_confirmation(
-                "\u{26A0} Archived locally \u{2014} sync may revert this".to_string(),
+            if any_failed || any_local_only {
+                // TODO: use dedicated warning display once status bar supports it.
+                self.status_bar.show_confirmation(
+                    format!("\u{26A0} {} locally \u{2014} sync may revert this", action.success_label()),
+                );
+            } else {
+                self.status_bar
+                    .show_confirmation(action.success_label().to_string());
+            }
+
+            return self.handle_thread_list(
+                crate::ui::thread_list::ThreadListMessage::AutoAdvance,
             );
-        } else {
-            self.status_bar
-                .show_confirmation("Archived".to_string());
         }
 
-        self.handle_thread_list(
-            crate::ui::thread_list::ThreadListMessage::AutoAdvance,
-        )
+        // Toggle actions: rollback failed threads, refresh nav for read status.
+        if all_failed {
+            self.rollback_toggles(rollback, action);
+        } else if any_failed {
+            // Mixed: rollback only the failed ones.
+            let failed_rollback: Vec<(String, String, bool)> = rollback
+                .iter()
+                .zip(outcomes.iter())
+                .filter(|(_, o)| o.is_failed())
+                .map(|(r, _)| r.clone())
+                .collect();
+            self.rollback_toggles(&failed_rollback, action);
+        }
+
+        // Refresh nav state for read status changes (updates unread counts).
+        if matches!(action, CompletedAction::MarkRead) && !all_failed {
+            return self.fire_navigation_load();
+        }
+
+        Task::none()
     }
 
     /// Dispatch the DB operation for an email action (async, fire-and-forget).
@@ -333,60 +475,6 @@ impl App {
         )
     }
 
-    /// Toggle a boolean field (is_read, is_pinned, is_muted) on selected threads.
-    /// Updates local UI optimistically, then persists to DB.
-    fn toggle_bool_selected_threads(
-        &mut self,
-        field: &'static str,
-        threads: &[(String, String)],
-        get_field: fn(&mut crate::db::Thread) -> &mut bool,
-    ) -> Task<Message> {
-        // Optimistic UI toggle
-        let indices = self.thread_list.selected_indices();
-        let mut toggled: Vec<(String, String, bool)> = Vec::new();
-        for &i in &indices {
-            if let Some(t) = self.thread_list.threads.get_mut(i) {
-                let val = get_field(t);
-                *val = !*val;
-                let new_val = *val;
-                toggled.push((t.account_id.clone(), t.id.clone(), new_val));
-            }
-        }
-
-        if toggled.is_empty() {
-            return Task::none();
-        }
-
-        let db = Arc::clone(&self.db);
-        Task::perform(
-            async move {
-                db.with_write_conn(move |conn| {
-                    for (account_id, thread_id, new_value) in &toggled {
-                        match field {
-                            "is_read" => ratatoskr_core::db::queries::set_thread_read(
-                                conn, account_id, thread_id, *new_value,
-                            )?,
-                            "is_pinned" => ratatoskr_core::db::queries::set_thread_pinned(
-                                conn, account_id, thread_id, *new_value,
-                            )?,
-                            "is_muted" => ratatoskr_core::db::queries::set_thread_muted(
-                                conn, account_id, thread_id, *new_value,
-                            )?,
-                            _ => {}
-                        }
-                    }
-                    Ok(())
-                })
-                .await
-            },
-            move |result| {
-                if let Err(e) = result {
-                    log::error!("Toggle {field} DB error: {e}");
-                }
-                Message::Noop
-            },
-        )
-    }
 
     /// Apply a label to all selected threads.
     /// 1. Local DB: insert thread_labels entries (instant UI feedback)
@@ -534,52 +622,6 @@ impl App {
         )
     }
 
-    /// Toggle the star flag on all selected threads.
-    fn toggle_star_selected_threads(&mut self) -> Task<Message> {
-        let indices = self.thread_list.selected_indices();
-        let threads: Vec<(String, String, bool)> = indices
-            .iter()
-            .filter_map(|&i| self.thread_list.threads.get(i))
-            .map(|t| (t.account_id.clone(), t.id.clone(), t.is_starred))
-            .collect();
-
-        if threads.is_empty() {
-            return Task::none();
-        }
-
-        // Toggle local UI state immediately
-        for &i in &indices {
-            if let Some(t) = self.thread_list.threads.get_mut(i) {
-                t.is_starred = !t.is_starred;
-            }
-        }
-        // Also update reading pane if it's showing one of these threads
-        for (_, tid, was_starred) in &threads {
-            self.reading_pane.update_star(tid, !was_starred);
-        }
-
-        let db = std::sync::Arc::clone(&self.db);
-
-        Task::perform(
-            async move {
-                db.with_write_conn(move |conn| {
-                    for (account_id, thread_id, was_starred) in &threads {
-                        ratatoskr_core::db::queries::set_thread_starred(
-                            conn, account_id, thread_id, !was_starred,
-                        )?;
-                    }
-                    Ok(())
-                })
-                .await
-            },
-            |result| {
-                if let Err(e) = result {
-                    log::error!("Failed to toggle star: {e}");
-                }
-                Message::Noop
-            },
-        )
-    }
 }
 
 /// Dispatch a provider-side label apply or remove for a single thread.

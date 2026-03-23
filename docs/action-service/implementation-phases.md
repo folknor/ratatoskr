@@ -2,70 +2,98 @@
 
 This document sequences the implementation of the action service described in `problem-statement.md`. Each phase is independently shippable and improves the system even if subsequent phases are delayed or redesigned.
 
-The phases are ordered by two principles: (1) establish the contract boundary early so new code is forced through it, and (2) tackle the hardest design decisions (failure semantics, undo) only after the basic path is proven with real actions flowing through it.
+The phases are ordered by two principles: (1) establish the contract boundary early so new code is forced through it, and (2) tackle the hardest design decisions (failure semantics, concurrency) only after the basic path is proven with real actions flowing through it.
 
 ---
 
-## Phase 1: Foundation — One Action, End-to-End
+## Phase 1: Foundation — One Action, End-to-End ✅
 
-**Goal:** Prove the action service pattern with one real action, making only the design commitments necessary to ship it.
+**Status:** Complete. See `phase-1-plan.md`.
 
-Archive is the first action because it is the most common user-initiated mutation, immediately user-visible (thread leaves inbox), and exercises both local DB mutation (remove INBOX label) and provider dispatch (Gmail label remove, IMAP COPY+DELETE, Exchange folder move, JMAP mailbox update). If the pattern works for archive, it works for everything.
-
-**Scope:**
-- Create the action service module. Crate placement is a Phase 1 decision, but the bias is toward starting inside `ratatoskr-core` and extracting later if needed — avoid premature crate boundaries while the API is still being discovered.
-- Define just enough types to ship archive: an action context (dependencies the service needs), a result type (success or failure with reason), and the archive function itself.
-- Implement archive: local DB mutation + provider dispatch through `ProviderOps`.
-- Migrate the app crate's archive handler to call the service.
-- Verify the app crate no longer performs archive's provider dispatch directly.
-
-**What this phase discovers (not decides prematurely):**
-- The context shape will emerge from what archive actually needs. Don't over-design it for actions that don't exist yet.
-- The result type starts minimal (success/failure). It will grow when Phase 3 forces the failure policy.
-- The async model is whatever archive needs. Generalize in Phase 2 when more actions reveal the pattern.
-
-**What this phase does NOT do:**
-- No failure policy beyond "log and return error."
-- No undo tokens.
-- No bulk actions.
-- No pending-action queue or retry.
-
-**Exit criteria:** Archive flows through the service end-to-end (local + remote). The app handler is a one-liner. The pattern is proven and ready for replication.
+Archive flows through the action service (local DB + `ProviderOps::archive()`). `ActionContext`, `ActionOutcome`, and `create_provider` live in core. The app handler delegates to the service. Outcomes are surfaced to the user. Auto-advance is conditional on success.
 
 ---
 
-## Phase 2: Migrate Remaining Actions
+## Phase 2: Migrate All Write Operations
 
-**Goal:** Move all email actions through the service. Establish minimal concurrency semantics. Eliminate inline provider dispatch from the app crate.
+Phase 2 is decomposed into sub-phases because provider write operations are not uniform. Some have real implementations across all four providers. Others require resolving provider-specific interfaces, new trait methods, or design decisions about provider capability gaps.
+
+### Phase 2.1: Thread actions with uniform provider support
+
+**Goal:** Migrate the thread-level actions where all four providers have real `ProviderOps` implementations. Same pattern as archive — mechanical replication.
 
 **Scope:**
-- Migrate each mutation class:
-  - **Folder moves:** trash, mark-as-spam, move-to-folder.
-  - **Boolean flags with provider sync:** star, read/unread.
-  - **Boolean flags, local-only by design:** pin, mute. These go through the service with an explicit local-only marker so the distinction between "local by design" and "local because nobody wired the provider" is visible in the code.
-  - **Label mutations:** apply label, remove label. Relocate existing provider write-back from app into service.
-  - **Destructive:** permanent delete.
-  - **Deferred:** snooze.
-- Each action explicitly declares whether it requires provider dispatch, is local-only by design, or is local-only due to missing provider support.
-- Remove all direct provider construction and dispatch from the app crate's handlers.
-- Define minimal concurrency semantics: at minimum, actions on the same thread must not interleave. This does not require a full concurrency framework — it may be as simple as per-thread serialization or a check-and-warn. The point is to have a defined stance before multiple concurrent actions are possible, not to solve the general problem.
+- **Folder moves (all providers implemented):** trash, spam, move_to_folder.
+- **Boolean flags with provider dispatch (all providers implemented):** star, mark_read.
+- **Destructive (all providers implemented):** permanent_delete.
+- **Local-only by design:** pin, mute. Go through the service with an explicit local-only marker.
+- Remove the legacy `dispatch_email_db_action` function and all remaining inline DB mutations for these actions from the app crate.
 
-**Design decisions made in this phase:**
-- Per-action provider dispatch policy.
-- How local-only-by-design is represented.
-- How unsupported provider operations are handled.
-- Minimal concurrency contract (enough to be safe, not necessarily optimal).
+**Snooze is deferred from 2.1.** No `ProviderOps::snooze()` exists, and Gmail's native snooze has no equivalent on other providers. This requires a design decision (local-only by design? provider dispatch where supported? new trait method?) that doesn't belong in a mechanical migration phase. Snooze gets its own planning when it's prioritized.
 
-**What this phase does NOT do:**
-- No change to failure handling — still "log and return error."
-- No undo execution.
-- No bulk actions.
+**Concurrency semantics are deferred.** Defining ordering guarantees is a design decision, not a mechanical migration. Current behavior (fire-and-forget async per action) is preserved. Concurrency is addressed in Phase 5 when the full action set is in place and the real contention patterns are visible.
 
-**Internal sequencing:** Phase 2 migrates ~10 actions. The order matters — label mutations should migrate before folder moves, since folder moves are label mutations on Gmail. Detailed internal ordering is determined during Phase 2 planning, not here.
+**Exit criteria:** All thread-level email actions go through the service. `dispatch_email_db_action` is deleted. `handlers/commands.rs` contains only service calls + UI state management for these actions.
 
-**Exit criteria:** Every email action goes through the service. The app crate does not construct providers or dispatch provider calls. `handlers/commands.rs` contains only service calls + UI state management.
+### Phase 2.2: Label routing
 
-**Value after this phase:** The execution path is centralized and the provider abstraction is hidden from the app crate. This is structural progress — the right code is in the right place. But failure handling is still rudimentary. Actions that fail remotely after succeeding locally will still silently diverge until Phase 3 defines what to do about it.
+**Goal:** Migrate label apply/remove into the service, owning the `label_kind` dispatch.
+
+**Scope:**
+- Move `provider_label_write_back` from the app crate into the service.
+- The service owns the routing decision: `label_kind = 'tag'` → `apply_category`/`remove_category`, `label_kind = 'container'` → `add_tag`/`remove_tag`.
+- IMAP's intentional no-op on `add_tag`/`remove_tag` must be represented explicitly (not silently swallowed).
+- Address the labels unification spec's direction: `apply_category`/`remove_category` are supposed to become redundant in favor of `add_tag`/`remove_tag`. Decide whether Phase 2.2 consolidates them or preserves the current split for now.
+
+**Exit criteria:** Label apply/remove goes through the service. The app crate no longer contains `label_kind` branches or `provider_label_write_back`.
+
+### Phase 2.3: Drafts and send
+
+**Goal:** Bring draft lifecycle and send into the action service.
+
+**Scope:**
+- send_email, create_draft, update_draft, delete_draft.
+- Currently, send is deferred to the sync pipeline (local_drafts queue). The action service may own the local staging and let sync handle dispatch, or take over dispatch entirely. This is a design decision for this sub-phase.
+- Draft auto-save is currently local-only. Decide whether provider draft sync goes through the service or remains in the sync pipeline.
+
+**Note:** If the local staging vs remote dispatch semantics prove entangled with failure policy, this sub-phase may be better sequenced after Phase 3 rather than before it.
+
+**Exit criteria:** The app crate's compose send and draft save paths go through the service. The local_drafts staging pattern is either owned by the service or explicitly delegated to sync with a documented rationale.
+
+### Phase 2.4: Folder management
+
+**Goal:** Bring folder CRUD into the action service.
+
+**Scope:**
+- create_folder, rename_folder, delete_folder.
+- All four providers have real implementations on `ProviderOps`.
+- Not yet wired from any UI — this phase defines the service API and wires it so that when folder management UI is built, it goes through the service from day one.
+
+**Exit criteria:** Folder CRUD functions exist in the action service. When folder management UI is built, it calls the service.
+
+### Phase 2.5: Calendar event write-back
+
+**Goal:** Wire calendar event mutations through an authoritative write path.
+
+**Scope:**
+- Create, update, delete calendar events.
+- Provider implementations exist for Graph, Gmail, and JMAP but are never called from app handlers. Events are local DB only today.
+- Calendar write operations are not on `ProviderOps` — they use separate per-provider APIs.
+
+**Note:** Calendar and contact writes are different domains from email actions. They may warrant their own service modules (`core::calendar_actions`, `core::contact_actions`) rather than expanding `core::actions` into a grab-bag. The shared infrastructure (context, outcome types, provider resolution pattern) should be reusable, but the domain logic should not be forced into the same module. Decide during planning.
+
+**Exit criteria:** Calendar event save/delete goes through a centralized write path with provider dispatch where supported.
+
+### Phase 2.6: Contact write-back
+
+**Goal:** Wire contact mutations through an authoritative write path.
+
+**Scope:**
+- Save/delete contacts to providers.
+- JMAP is furthest along (full implementation exists). Google and Graph have scaffolding but need HTTP calls wired. CardDAV needs PUT support.
+- Same module placement question as 2.5 — likely `core::contact_actions` or similar, not `core::actions`.
+
+**Exit criteria:** Contact save for synced contacts goes through a centralized write path with provider dispatch where supported.
 
 ---
 
@@ -144,7 +172,7 @@ Archive is the first action because it is the most common user-initiated mutatio
 
 **Scope:**
 - Remove all provider crate dependencies from the app crate's `Cargo.toml`.
-- Remove `create_provider()` and any provider construction helpers from the app crate.
+- Remove `create_provider()` wrapper and any provider construction helpers from the app crate.
 - Remove `ProviderCtx` construction from the app crate.
 - Audit and remove any remaining `label_kind` branches, provider-specific imports, or direct provider type usage in the app crate.
 - If any legitimate app-crate need for provider access remains (e.g., account setup, OAuth flows), define a narrow, explicit API for it rather than exposing the full provider surface.
@@ -153,7 +181,7 @@ Archive is the first action because it is the most common user-initiated mutatio
 - What (if anything) the app crate is still allowed to know about providers.
 - How account setup / OAuth flows access provider crates without opening a back door.
 
-**Exit criteria:** Removing any provider crate from the app's dependency list does not break compilation (because the app doesn't use them). The action service is the only write path for email state mutations.
+**Exit criteria:** Removing any provider crate from the app's dependency list does not break compilation (because the app doesn't use them). The action service is the only write path for all provider mutations.
 
 ---
 
@@ -161,13 +189,18 @@ Archive is the first action because it is the most common user-initiated mutatio
 
 Each phase is designed to be independently valuable:
 
-- **After Phase 1:** One action works end-to-end. The pattern is proven.
-- **After Phase 2:** All actions go through the service. The path is centralized and provider logic is out of the app crate. Failure handling is still rudimentary — this is structural progress, not correctness.
-- **After Phase 3:** The service is trustworthy. Failure handling is consistent, observable, and explicitly defined. This is where the "silent divergence" problem is actually solved.
+- **After Phase 1:** One action works end-to-end. The pattern is proven. ✅
+- **After Phase 2.1:** All thread-level email actions go through the service.
+- **After Phase 2.2:** Label routing is centralized. No `label_kind` branches in the app crate.
+- **After Phase 2.3:** Draft and send lifecycle goes through the service.
+- **After Phase 2.4–2.6:** Folder, calendar, and contact writes go through the service.
+- **After Phase 3:** The service is trustworthy. Failure handling is consistent, observable, and explicitly defined.
 - **After Phase 4:** Undo works correctly for the first time.
 - **After Phase 5:** Bulk operations are handled and remote dispatch is reliable.
 - **After Phase 6:** The boundary is enforced by the compiler.
 
-Phases 1–3 are the critical path — they take the system from "no contract" to "trustworthy contract." Phase 4–5 can be reordered based on what hurts most in practice. Phase 6 is a cleanup pass that can happen any time after Phase 2.
+Phases 2.1–2.2 are the immediate priority. Phases 2.3–2.6 can be ordered by product need. Phases 3–5 build on the migrated actions. Phase 6 is a cleanup pass that can happen any time after Phase 2 is substantially complete.
 
-Detailed planning for each phase happens before that phase starts, not upfront. The design decisions listed in each phase are the ones that must be resolved during that phase's planning — attempting to resolve them all now would produce speculative answers.
+Phase 2 sub-phases are ordered by implementation risk: 2.1 is mechanical (uniform provider support), 2.2 requires resolving the label routing design, 2.3–2.6 each require interface decisions (new traits, provider capability gaps, sync pipeline interaction).
+
+Detailed planning for each phase happens before that phase starts, not upfront.

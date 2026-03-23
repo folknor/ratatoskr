@@ -7,10 +7,18 @@
 
 mod archive;
 mod context;
+mod mark_read;
+mod mute;
 mod outcome;
+mod pin;
 mod provider;
+mod star;
 
 pub use archive::archive;
 pub use context::ActionContext;
+pub use mark_read::mark_read;
+pub use mute::mute;
 pub use outcome::ActionOutcome;
+pub use pin::pin;
 pub use provider::create_provider;
+pub use star::star;

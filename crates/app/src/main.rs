@@ -148,6 +148,32 @@ struct PendingChord {
     first: Chord,
 }
 
+/// Which action completed — used in ActionCompleted to dispatch outcome handling.
+#[derive(Debug, Clone, Copy)]
+pub enum CompletedAction {
+    Archive,
+    Star,
+    MarkRead,
+    Pin,
+    Mute,
+}
+
+impl CompletedAction {
+    fn removes_from_view(self) -> bool {
+        matches!(self, Self::Archive)
+    }
+
+    fn success_label(self) -> &'static str {
+        match self {
+            Self::Archive => "Archived",
+            Self::Star => "Star toggled",
+            Self::MarkRead => "Read status toggled",
+            Self::Pin => "Pin toggled",
+            Self::Mute => "Mute toggled",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     // Existing component messages
@@ -185,8 +211,13 @@ pub enum Message {
     NavigateTo(NavigationTarget),
     Escape,
     EmailAction(EmailAction),
-    /// Archive completed via action service — carries per-thread outcomes.
-    ArchiveCompleted(Vec<ratatoskr_core::actions::ActionOutcome>),
+    /// Action service completed — carries action kind, outcomes, and rollback data for toggles.
+    ActionCompleted {
+        action: CompletedAction,
+        outcomes: Vec<ratatoskr_core::actions::ActionOutcome>,
+        /// For toggle actions: (account_id, thread_id, previous_value) for rollback on failure.
+        rollback: Vec<(String, String, bool)>,
+    },
     ComposeAction(ComposeAction),
     TaskAction(TaskAction),
     SetTheme(String),
@@ -830,7 +861,9 @@ impl App {
                 Task::none()
             }
             Message::EmailAction(action) => self.handle_email_action(action),
-            Message::ArchiveCompleted(ref outcomes) => self.handle_archive_completed(outcomes),
+            Message::ActionCompleted { action, ref outcomes, ref rollback } => {
+                self.handle_action_completed(action, outcomes, rollback)
+            }
             Message::ComposeAction(ref action) => self.handle_compose_action(action),
             Message::TaskAction(_action) => Task::none(),
             Message::SetTheme(theme) => {
