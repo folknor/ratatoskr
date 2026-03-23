@@ -185,6 +185,8 @@ pub enum Message {
     NavigateTo(NavigationTarget),
     Escape,
     EmailAction(EmailAction),
+    /// Archive completed via action service — carries per-thread outcomes.
+    ArchiveCompleted(Vec<ratatoskr_core::actions::ActionOutcome>),
     ComposeAction(ComposeAction),
     TaskAction(TaskAction),
     SetTheme(String),
@@ -347,6 +349,9 @@ struct App {
     inline_image_store: Option<ratatoskr_stores::inline_image_store::InlineImageStoreState>,
     /// Encryption key for decrypting provider credentials (OAuth tokens, passwords).
     encryption_key: Option<[u8; 32]>,
+    /// Action service context — the authoritative write path for email mutations.
+    /// `None` if stores failed to initialize at boot (degraded mode).
+    action_ctx: Option<ratatoskr_core::actions::ActionContext>,
 }
 
 impl App {
@@ -401,6 +406,30 @@ impl App {
             Ok(key) => Some(key),
             Err(e) => {
                 log::error!("Failed to load encryption key: {e}");
+                None
+            }
+        };
+
+        let action_ctx = match (&body_store, &inline_image_store, encryption_key) {
+            (Some(bs), Some(iis), Some(key)) => {
+                // SearchState is optional for the action service — actions don't
+                // use search. If it's unavailable, init a fresh one for ProviderCtx.
+                let search = ratatoskr_core::search::SearchState::init(data_dir).ok();
+                if let Some(ss) = search {
+                    Some(ratatoskr_core::actions::ActionContext {
+                        db: ratatoskr_core::db::DbState::from_arc(db.write_conn_arc()),
+                        body_store: bs.clone(),
+                        inline_images: iis.clone(),
+                        search: ss,
+                        encryption_key: key,
+                    })
+                } else {
+                    log::error!("Action service unavailable: search state failed to initialize");
+                    None
+                }
+            }
+            _ => {
+                log::error!("Action service unavailable: one or more stores failed to initialize");
                 None
             }
         };
@@ -473,6 +502,7 @@ impl App {
             body_store,
             inline_image_store,
             encryption_key,
+            action_ctx,
         };
 
         // Restore pop-out windows from previous session
@@ -804,6 +834,7 @@ impl App {
                 Task::none()
             }
             Message::EmailAction(action) => self.handle_email_action(action),
+            Message::ArchiveCompleted(ref outcomes) => self.handle_archive_completed(outcomes),
             Message::ComposeAction(ref action) => self.handle_compose_action(action),
             Message::TaskAction(_action) => Task::none(),
             Message::SetTheme(theme) => {

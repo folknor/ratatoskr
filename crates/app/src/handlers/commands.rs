@@ -6,6 +6,7 @@ use crate::command_dispatch::{self, EmailAction};
 use crate::db::Db;
 use crate::{APP_DATA_DIR, App, Message};
 use ratatoskr_command_palette::{CommandArgs, CommandId, KeyBinding, OptionItem};
+use ratatoskr_core::actions::ActionOutcome;
 
 impl App {
     /// Save keybinding overrides to disk. Call this after any mutation
@@ -94,8 +95,30 @@ impl App {
     ) -> Task<Message> {
         let selection_count = self.thread_list.selection_count();
 
+        // Archive goes through the action service (Phase 1).
+        // All other actions use the legacy inline path until Phase 2.
+        if matches!(action, EmailAction::Archive) {
+            let selected_threads: Vec<(String, String)> = self
+                .thread_list
+                .selected_indices()
+                .iter()
+                .filter_map(|&i| self.thread_list.threads.get(i))
+                .map(|t| (t.account_id.clone(), t.id.clone()))
+                .collect();
+
+            if selected_threads.is_empty() {
+                return Task::none();
+            }
+
+            let archive_task = self.dispatch_archive(selected_threads);
+            let advance_task = self.handle_thread_list(
+                crate::ui::thread_list::ThreadListMessage::AutoAdvance,
+            );
+            return Task::batch([archive_task, advance_task]);
+        }
+
         let confirmation = match &action {
-            EmailAction::Archive => Some("Archived"),
+            EmailAction::Archive => unreachable!("handled above"),
             EmailAction::Trash => Some("Moved to Trash"),
             EmailAction::PermanentDelete => Some("Permanently deleted"),
             EmailAction::ToggleSpam => Some("Spam status toggled"),
@@ -135,8 +158,7 @@ impl App {
         // — perform DB update + trigger auto-advance.
         let removes_from_view = matches!(
             action,
-            EmailAction::Archive
-                | EmailAction::Trash
+            EmailAction::Trash
                 | EmailAction::PermanentDelete
                 | EmailAction::ToggleSpam
                 | EmailAction::MoveToFolder { .. }
@@ -179,7 +201,61 @@ impl App {
         }
     }
 
+    /// Archive via the action service (Phase 1).
+    fn dispatch_archive(&mut self, threads: Vec<(String, String)>) -> Task<Message> {
+        let Some(ref action_ctx) = self.action_ctx else {
+            self.status_bar.show_confirmation(
+                "Archive unavailable \u{2014} action service not initialized".to_string(),
+            );
+            return Task::none();
+        };
+
+        let ctx = action_ctx.clone();
+        Task::perform(
+            async move {
+                let mut outcomes = Vec::with_capacity(threads.len());
+                for (account_id, thread_id) in &threads {
+                    outcomes.push(
+                        ratatoskr_core::actions::archive(&ctx, account_id, thread_id).await,
+                    );
+                }
+                outcomes
+            },
+            Message::ArchiveCompleted,
+        )
+    }
+
+    /// Handle archive completion — map outcomes to user feedback.
+    pub(crate) fn handle_archive_completed(
+        &mut self,
+        outcomes: &[ActionOutcome],
+    ) -> Task<Message> {
+        let any_failed = outcomes.iter().any(ActionOutcome::is_failed);
+        let any_local_only = outcomes.iter().any(ActionOutcome::is_local_only);
+
+        if any_failed {
+            let errors: Vec<&str> = outcomes
+                .iter()
+                .filter_map(|o| match o {
+                    ActionOutcome::Failed { error } => Some(error.as_str()),
+                    _ => None,
+                })
+                .collect();
+            self.status_bar
+                .show_confirmation(format!("Archive failed: {}", errors.join("; ")));
+        } else if any_local_only {
+            self.status_bar.show_confirmation(
+                "Archived locally \u{2014} sync may revert this".to_string(),
+            );
+        } else {
+            self.status_bar
+                .show_confirmation("Archived".to_string());
+        }
+        Task::none()
+    }
+
     /// Dispatch the DB operation for an email action (async, fire-and-forget).
+    /// Legacy path — actions are migrated to the action service in Phase 2.
     fn dispatch_email_db_action(
         &self,
         action: &EmailAction,
@@ -197,7 +273,10 @@ impl App {
                     for (account_id, thread_id) in &threads {
                         match &action {
                             EmailAction::Archive => {
-                                remove_label(conn, account_id, thread_id, "INBOX")?;
+                                // Archive is handled by the action service — should
+                                // not reach here. If it does, no-op rather than
+                                // silently doing local-only work.
+                                log::error!("Archive reached legacy dispatch path — this is a bug");
                             }
                             EmailAction::Trash => {
                                 remove_label(conn, account_id, thread_id, "INBOX")?;

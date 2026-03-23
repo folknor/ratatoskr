@@ -16,63 +16,16 @@ use crate::{App, Message};
 
 /// Create a provider ops instance for the given account.
 ///
-/// Reads credentials from the database, decrypts them with the encryption
-/// key, and constructs the appropriate provider client.
+/// Thin wrapper around `core::actions::provider::create_provider` that
+/// bridges the app's `Db` type to core's `DbState`. This wrapper is
+/// temporary — Phase 2 migrates remaining call sites and removes it.
 pub(crate) async fn create_provider(
     db: &Arc<Db>,
     account_id: &str,
     encryption_key: [u8; 32],
 ) -> Result<Box<dyn ProviderOps>, String> {
-    let aid = account_id.to_string();
-    let provider = db
-        .with_conn(move |conn| {
-            conn.query_row(
-                "SELECT provider FROM accounts WHERE id = ?1",
-                rusqlite::params![aid],
-                |row| row.get::<_, String>(0),
-            )
-            .map_err(|e| e.to_string())
-        })
-        .await?;
-
     let core_db = ratatoskr_core::db::DbState::from_arc(db.write_conn_arc());
-
-    match provider.as_str() {
-        "gmail_api" => {
-            let client =
-                ratatoskr_gmail::client::GmailClient::from_account(
-                    &core_db,
-                    account_id,
-                    encryption_key,
-                )
-                .await?;
-            Ok(Box::new(ratatoskr_gmail::ops::GmailOps::new(client)))
-        }
-        "graph" => {
-            let client =
-                ratatoskr_graph::client::GraphClient::from_account(
-                    &core_db,
-                    account_id,
-                    encryption_key,
-                )
-                .await?;
-            Ok(Box::new(ratatoskr_graph::ops::GraphOps::new(client)))
-        }
-        "jmap" => {
-            let client =
-                ratatoskr_jmap::client::JmapClient::from_account(
-                    &core_db,
-                    account_id,
-                    &encryption_key,
-                )
-                .await?;
-            Ok(Box::new(ratatoskr_jmap::ops::JmapOps::new(client)))
-        }
-        "imap" => Ok(Box::new(ratatoskr_imap::ops::ImapOps::new(
-            encryption_key,
-        ))),
-        other => Err(format!("Unknown provider: {other}")),
-    }
+    ratatoskr_core::actions::create_provider(&core_db, account_id, encryption_key).await
 }
 
 impl App {
