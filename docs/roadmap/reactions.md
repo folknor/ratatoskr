@@ -1,7 +1,7 @@
 # Reactions
 
-**Tier**: 2 — Keeps users from going back
-**Status**: ⚠️ **Phases 1–4 complete** — DB table, Exchange extended property parsing/sync/delta refresh, Gmail MIME parsing/sync/sending all implemented. Exchange write is permanently blocked (no public API, confirmed March 2026). Gmail is the only provider where users can add reactions. UI (display + picker) not yet built.
+**Tier**: ~~2 — Keeps users from going back~~ → **Dropped as a user-facing feature.**
+**Status**: ❌ **No UI will be built.** Backend defensive code remains (Phases 1–4) to avoid breaking on reaction data during sync. Exchange is read-only with no write API (permanently blocked). Gmail has full read/write but via a completely different mechanism (MIME). JMAP/IMAP have nothing. There is no unified model — reactions cannot be presented as a consistent cross-provider feature. Unlike labels, there is no useful local-only fallback (reactions are social).
 
 ---
 
@@ -26,7 +26,7 @@
 
 ## Work
 
-Phase 1 — defensive deserialization. Phase 2 — display reactions (Exchange + Gmail). Phase 3 — reaction picker (Gmail only — Exchange write is permanently blocked). Skip local fallback.
+No further work planned. Backend defensive code (Phases 1–4) stays to prevent sync breakage. No UI will be built — the feature cannot be unified across providers.
 
 ---
 

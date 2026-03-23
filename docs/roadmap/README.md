@@ -14,10 +14,11 @@ Every feature gets a **local-only implementation** as the baseline. Provider-nat
 
 | Feature | Status | Exchange (Graph) | Gmail API | JMAP | IMAP | Local Fallback |
 |---|---|---|---|---|---|---|
-| [Categories](categories.md) | ✅ Backend complete (missing: category picker UI) | Native (`categories`) | Labels (partial overlap) | `keywords` | IMAP keywords (limited) | Local-only labels+colors |
+| [Labels](research-provider-label-colors.md) | ✅ Backend complete (missing: label picker UI) | Native (`categories`) | Labels (partial overlap) | `keywords` | IMAP keywords (limited) | Local-only labels+colors |
+| Auto-responses | ⬚ Not started | `automaticRepliesSetting` (read+write, v1.0) | `VacationSettings` (read+write) | `VacationResponse` (read+write, RFC 8621) | ManageSieve (server-dependent) | N/A — requires server |
 | Auto-collected contacts | ✅ Done | People API (ranked) | "Other Contacts" | Nothing | Nothing | `seen_addresses` table |
 | [@Mentions](mentions.md) | ⚠️ Compose-only feature (missing: @-autocomplete UI). Phase 1 backend to be removed. | N/A | N/A | N/A | N/A | Insert @Name text + add to To/CC |
-| [Reactions](reactions.md) | ⚠️ Backend complete (missing: display UI, reaction picker). Exchange write permanently blocked — no public API. Gmail is only writable provider. | Read-only (extended props) | MIME reactions (read+write) | Nothing | Nothing | N/A |
+| [Reactions](reactions.md) | ❌ Dropped as user-facing feature. No unified model across providers. Backend stays for defensive sync. | Read-only (extended props) | MIME reactions (read+write) | Nothing | Nothing | N/A |
 | [Scheduled send](scheduled-send.md) | ⚠️ Backend complete (missing: schedule picker UI, "Scheduled" virtual folder) | Native (deferred delivery) | Native | `EmailSubmission.sendAt` | Nothing | Local timer + send-on-wake |
 | [Roaming signatures](signatures.md) | ⚠️ Backend complete (missing: compose signature placement UI). Exchange fetch permanently blocked — no public API. | N/A (no API, never will be) | Gmail API settings | JMAP Identity | Nothing | Local-only signatures |
 | [Cloud attachments](cloud-attachments.md) | ⚠️ Partial (OneDrive done, Google Drive done) | OneDrive via Graph | Google Drive API | Nothing | Nothing | Local large-file warning only |
@@ -57,7 +58,8 @@ Local schema: `seen_addresses` table with `email`, `display_name`, `last_seen`, 
 
 These are features enterprise users actively rely on daily. Missing any of these is a reason not to switch.
 
-- [Categories (Color Flags)](categories.md) — ✅ Backend complete. Missing: category picker UI, apply/remove from UI.
+- [Labels (Color Flags)](research-provider-label-colors.md) — ✅ Backend complete. Missing: label picker UI, apply/remove from UI. See `docs/labels-unification/problem-statement.md`.
+- [Auto-Responses](../auto-responses/problem-statement.md) — ⬚ Not started. Full read/write API on Exchange, Gmail, JMAP. Settings UI + status indicator needed.
 - [Tracking Pixel / Read Receipt Blocking](tracking-blocking.md) — ⚠️ Mostly done. Remote image strip + AMP blocking + link tracking indicators all implemented (2026-03-22). Remaining: UI for read receipt prompts.
 - [Cloud Attachment Linking](cloud-attachments.md) — ⚠️ Partial (OneDrive + Google Drive upload/permissions done)
 - [IMAP CONDSTORE/QRESYNC](imap-condstore-qresync.md) — ⚠️ Phase 2 (CONDSTORE + deletion detection done, VANISHED parsing blocked on async-imap #130)
@@ -71,7 +73,7 @@ Features users notice are missing after a week of daily use.
 - [@Mentions](mentions.md) — ⚠️ Compose-only feature: @-autocomplete in compose (insert text + add to To/CC). Phase 1 Exchange backend code to be removed — unnecessary complexity.
 - [Roaming Signatures](signatures.md) — ⚠️ Backend complete (Gmail + JMAP sync). Missing: signature placement in compose UI. Exchange fetch permanently blocked (Microsoft confirmed no plans for API).
 - [Scheduled Send](scheduled-send.md) — ⚠️ Backend complete (server delegation + overdue handling). Missing: schedule picker UI, "Scheduled" virtual folder
-- [Reactions](reactions.md) — ⚠️ Backend complete (sync + parse + Gmail send). Missing: reaction display UI, reaction picker (Gmail only — Exchange write permanently blocked, no public API)
+- ~~[Reactions](reactions.md) — Dropped. No unified cross-provider model. Backend defensive code remains.~~
 
 ## Tier 3 — Differentiators and polish
 

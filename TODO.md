@@ -119,6 +119,43 @@ All 6 backend phases complete (discovery, sync, rights, subscription, notificati
 - [ ] **Subscription toggle in sidebar** — `NavigationFolder.is_subscribed` is populated from JMAP `isSubscribed`. App needs a UI toggle (context menu or button) on shared account labels that calls `JmapOps::subscribe_mailbox()` / `unsubscribe_mailbox()`. These accept an optional `jmap_account_id` for shared accounts.
 - [ ] **Compose identity auto-selection from shared mailbox** — `shared_mailbox_sync_state.email_address` is resolved via JMAP Principals (Phase 6). When replying from a shared mailbox context, compose should query `sync_state::get_shared_mailbox_email()` and auto-set From. Also check `may_submit` from the mailbox rights before offering the identity.
 
+### Labels — `docs/labels-unification/problem-statement.md`
+
+- [ ] **Label picker UI** — Overlay for applying/removing tag-type labels from messages. Triggered from reading pane or command palette. Lists all available labels with colors. Provider dispatch via `add_tag()`/`remove_tag()`.
+
+### Mentions — `docs/roadmap/mentions.md`
+
+- [ ] **Compose @-autocomplete** — Detect `@` in compose editor, show floating contact picker, insert `@Display Name` text, auto-add to To/CC if not already a recipient. Works identically across all providers (cosmetic markup only).
+
+### Scheduled Send — `docs/roadmap/scheduled-send.md`
+
+Backend complete (server delegation + overdue handling). Missing UI.
+
+- [ ] **Schedule picker UI** — Date/time picker in compose toolbar. Delegates to Exchange (deferred delivery) or JMAP (FUTURERELEASE) server-side, falls back to local timer for Gmail/IMAP.
+- [ ] **"Scheduled" virtual folder** — Virtual folder view showing all pending scheduled messages across accounts with edit/reschedule/cancel.
+
+### Signatures — `docs/roadmap/signatures.md`
+
+Backend complete (Gmail + JMAP sync). Exchange fetch permanently blocked (no public API, Microsoft confirmed no plans).
+
+- [ ] **Signature placement in compose** — Insert signature in compose body. New compose: bottom. Reply: between new content and quoted text. Wrap in `<div id="ratatoskr-signature">` for replacement/stripping.
+
+### BIMI — `docs/roadmap/bimi.md`
+
+Backend complete (DNS + SVG + cache). Missing UI wiring.
+
+- [ ] **BIMI avatar display** — Wire `BimiLruCache` to message list sender avatars. Fall back to initials when no BIMI logo cached.
+
+### Auto-Responses — `docs/auto-responses/problem-statement.md`
+
+Not yet implemented. Full read/write API available on Exchange, Gmail, and JMAP.
+
+- [ ] **Exchange auto-reply read/write** — `GET/PATCH /me/mailboxSettings/automaticRepliesSetting`. Internal/external messages, scheduling, audience control.
+- [ ] **Gmail vacation settings read/write** — `users.settings.getVacation` / `updateVacation`. Single message, contact/domain restrictions.
+- [ ] **JMAP VacationResponse read/write** — `VacationResponse/get` / `VacationResponse/set` (RFC 8621). May need manual JMAP calls if `jmap-client` lacks support.
+- [ ] **Auto-reply settings UI** — Per-account editor in settings. Toggle, date pickers, message editor, audience selector. Internal/external tabs for Exchange only.
+- [ ] **Active auto-reply status indicator** — Status bar or sidebar indicator when any account has active auto-replies.
+
 ### IMAP CONDSTORE/QRESYNC — `docs/roadmap/imap-condstore-qresync.md`
 
 Phases 1-2 complete. Phase 3 blocked on upstream.
