@@ -15,18 +15,16 @@ Every feature gets a **local-only implementation** as the baseline. Provider-nat
 | Feature | Status | Exchange (Graph) | Gmail API | JMAP | IMAP | Local Fallback |
 |---|---|---|---|---|---|---|
 | [Categories](categories.md) | ✅ Backend complete (missing: category picker UI) | Native (`categories`) | Labels (partial overlap) | `keywords` | IMAP keywords (limited) | Local-only labels+colors |
-| [Contacts](contacts.md) | ✅ Complete (all 8 phases) | Native (`/me/contacts`) | People API | CardDAV | CardDAV | Local address book |
 | Auto-collected contacts | ✅ Done | People API (ranked) | "Other Contacts" | Nothing | Nothing | `seen_addresses` table |
-| [@Mentions](mentions.md) | ⚠️ Phase 1 done (missing: compose @-autocomplete, mention deletion, count badge) | Native (`mentions`) | Nothing | Nothing | Nothing | Local-only, no server flag |
-| [Reactions](reactions.md) | ⚠️ Backend complete (missing: display UI, reaction picker) | Native (`reactions`) | Nothing | Nothing | Nothing | Local-only |
+| [@Mentions](mentions.md) | ⚠️ Compose-only feature (missing: @-autocomplete UI). Phase 1 backend to be removed. | N/A | N/A | N/A | N/A | Insert @Name text + add to To/CC |
+| [Reactions](reactions.md) | ⚠️ Backend complete (missing: display UI, reaction picker). Exchange write permanently blocked — no public API. Gmail is only writable provider. | Read-only (extended props) | MIME reactions (read+write) | Nothing | Nothing | N/A |
 | [Scheduled send](scheduled-send.md) | ⚠️ Backend complete (missing: schedule picker UI, "Scheduled" virtual folder) | Native (deferred delivery) | Native | `EmailSubmission.sendAt` | Nothing | Local timer + send-on-wake |
-| [Roaming signatures](signatures.md) | ⚠️ Backend complete (missing: compose signature placement UI, Exchange fetch) | Native (roaming settings) | Gmail API settings | Nothing | Nothing | Local-only signatures |
+| [Roaming signatures](signatures.md) | ⚠️ Backend complete (missing: compose signature placement UI). Exchange fetch permanently blocked — no public API. | N/A (no API, never will be) | Gmail API settings | JMAP Identity | Nothing | Local-only signatures |
 | [Cloud attachments](cloud-attachments.md) | ⚠️ Partial (OneDrive done, Google Drive done) | OneDrive via Graph | Google Drive API | Nothing | Nothing | Local large-file warning only |
 | [Tracking blocking](tracking-blocking.md) | ⚠️ Mostly done (remaining: read receipt prompt UI) | N/A (client-side) | N/A (client-side) | N/A (client-side) | N/A (client-side) | Fully local |
 | [Shared mailboxes](shared-mailboxes.md) | ⚠️ Partial (Graph sync + sidebar done, JMAP in progress) | Native (delegate access) | Native (delegation) | Shared via ACL | IMAP ACL (RFC 4314) | N/A — requires server support |
 | [Public folders](public-folders.md) | ⚠️ Partial (EWS client + sidebar pins done) | Native (legacy Exchange) | Nothing | Nothing | Nothing | N/A — Exchange-only concept |
 | [BIMI](bimi.md) | ⚠️ Backend complete (missing: avatar display in message list) | N/A (DNS + headers) | N/A (DNS + headers) | N/A (DNS + headers) | N/A (DNS + headers) | Fully local |
-| [IMAP SPECIAL-USE](imap-special-use.md) | ✅ Done | N/A | N/A | N/A | Native | N/A |
 
 ### Multi-Account UX
 
@@ -60,7 +58,6 @@ Local schema: `seen_addresses` table with `email`, `display_name`, `last_seen`, 
 These are features enterprise users actively rely on daily. Missing any of these is a reason not to switch.
 
 - [Categories (Color Flags)](categories.md) — ✅ Backend complete. Missing: category picker UI, apply/remove from UI.
-- [Contacts & Groups](contacts.md) — ✅ Complete (all 8 phases). Missing: Google Groups (admin-only API limitation).
 - [Tracking Pixel / Read Receipt Blocking](tracking-blocking.md) — ⚠️ Mostly done. Remote image strip + AMP blocking + link tracking indicators all implemented (2026-03-22). Remaining: UI for read receipt prompts.
 - [Cloud Attachment Linking](cloud-attachments.md) — ⚠️ Partial (OneDrive + Google Drive upload/permissions done)
 - [IMAP CONDSTORE/QRESYNC](imap-condstore-qresync.md) — ⚠️ Phase 2 (CONDSTORE + deletion detection done, VANISHED parsing blocked on async-imap #130)
@@ -71,18 +68,16 @@ These are features enterprise users actively rely on daily. Missing any of these
 
 Features users notice are missing after a week of daily use.
 
-- [@Mentions](mentions.md) — ⚠️ Phase 1 done (sync + display + send). Missing: compose @-autocomplete, mention deletion, count badge
-- [Roaming Signatures](signatures.md) — ⚠️ Backend complete (Gmail + JMAP sync). Missing: signature placement in compose UI, Exchange fetch (no public API)
+- [@Mentions](mentions.md) — ⚠️ Compose-only feature: @-autocomplete in compose (insert text + add to To/CC). Phase 1 Exchange backend code to be removed — unnecessary complexity.
+- [Roaming Signatures](signatures.md) — ⚠️ Backend complete (Gmail + JMAP sync). Missing: signature placement in compose UI. Exchange fetch permanently blocked (Microsoft confirmed no plans for API).
 - [Scheduled Send](scheduled-send.md) — ⚠️ Backend complete (server delegation + overdue handling). Missing: schedule picker UI, "Scheduled" virtual folder
-- [Reactions](reactions.md) — ⚠️ Backend complete (sync + parse + Gmail send). Missing: reaction display UI, reaction picker, Exchange write (blocked on MS API)
+- [Reactions](reactions.md) — ⚠️ Backend complete (sync + parse + Gmail send). Missing: reaction display UI, reaction picker (Gmail only — Exchange write permanently blocked, no public API)
 
 ## Tier 3 — Differentiators and polish
 
 Features that go beyond Outlook parity into "this client is actually better."
 
 - [BIMI](bimi.md) — ⚠️ Backend complete (DNS + SVG + cache). Missing: BIMI logo display in message list avatars
-- [IMAP SPECIAL-USE](imap-special-use.md) — ✅ Done
-
 ---
 
 ## Implementation notes

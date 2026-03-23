@@ -1,7 +1,7 @@
 # Reactions
 
 **Tier**: 2 — Keeps users from going back
-**Status**: ✅ **Phases 1–4 complete** — DB table, Exchange extended property parsing/sync/delta refresh, Gmail MIME parsing/sync/sending all implemented
+**Status**: ⚠️ **Phases 1–4 complete** — DB table, Exchange extended property parsing/sync/delta refresh, Gmail MIME parsing/sync/sending all implemented. Exchange write is permanently blocked (no public API, confirmed March 2026). Gmail is the only provider where users can add reactions. UI (display + picker) not yet built.
 
 ---
 
@@ -9,12 +9,12 @@
 
 ## Cross-provider behavior
 
-| Provider | Native support |
-|---|---|
-| Exchange (Graph) | Full — `reactions` collection on message |
-| Gmail API | Nothing |
-| JMAP | Nothing |
-| IMAP | Nothing |
+| Provider | Native support | Read | Write |
+|---|---|---|---|
+| Exchange (Graph) | Undocumented extended properties (no `reactions` property on message resource) | Yes — via `singleValueExtendedProperties` | **No** — no public API, confirmed March 2026 |
+| Gmail API | MIME-based reactions (April 2025, default for all users Feb 2026) | Yes — detect `text/vnd.google.email-reaction+json` MIME part | Yes — send reaction MIME email |
+| JMAP | Nothing — no RFC or extension | Can parse Gmail-originated reaction MIME | No |
+| IMAP | Nothing | Can parse Gmail-originated reaction MIME | No |
 
 ## Pain points
 
@@ -22,11 +22,11 @@
 - Display: reactions appear as a row of emoji chips below the message (like Slack/Teams). Each chip shows the emoji + count + who reacted. This is a new UI element with no existing equivalent in the client.
 - Local-only reactions for non-Exchange: could implement local-only reactions that only the user sees. Questionable value — reactions are social, local-only defeats the purpose. Probably better to just not show the reaction UI on non-Exchange accounts.
 - Sync: reactions can change after initial sync (someone reacts later). Need to handle updates to the reactions collection during delta sync.
-- Compose: adding a reaction is a PATCH to the message on Graph. Need to handle the case where the user reacts to a message but is offline (queue and sync later? or require connectivity?).
+- Adding reactions: **Gmail only.** There is no public Graph API to add email reactions — the `chatMessage:setReaction` endpoint is Teams-only. PATCHing `OwnerReactionType` as an extended property would only set a local flag on the user's own copy without triggering Exchange's server-side propagation to other recipients. For Gmail, reactions are sent as regular MIME emails.
 
 ## Work
 
-Phase 1 — defensive deserialization. Phase 2 — display reactions on Exchange messages. Phase 3 — allow reacting on Exchange accounts. Skip local fallback.
+Phase 1 — defensive deserialization. Phase 2 — display reactions (Exchange + Gmail). Phase 3 — reaction picker (Gmail only — Exchange write is permanently blocked). Skip local fallback.
 
 ---
 
@@ -44,9 +44,11 @@ The Graph API `message` resource (v1.0 and beta) has **no `reactions` property**
 | Property name | Type | Description |
 |---|---|---|
 | `ReactionsCount` | Integer | Total number of reactions on the message |
-| `ReactionsSummary` | Binary | Serialized blob: reactor identity, reaction type, timestamp per reaction |
+| `ReactionsSummary` | Binary | Current state of reactions — reactor names, types, timestamps. Compressed binary format. **Most reliable property** per Glen Scales' testing. |
 | `OwnerReactionType` | String | The mailbox owner's own reaction (if any) |
 | `OwnerReactionTime` | SystemTime | When the mailbox owner reacted |
+| `MapiReactionsBlob` | Binary | JSON document with all reactions. Deprecated — exhibits client-dependent behavior. |
+| `ReactionsHistory` | Binary | Alternative to MapiReactionsBlob. Also client-dependent; not reliably available. |
 
 **Reading reactions via Graph**: Request extended properties with `$expand` or `$filter`:
 
@@ -57,9 +59,9 @@ GET /me/messages?$filter=singleValueExtendedProperties/any(
 )
 ```
 
-The `ReactionsSummary` is a binary blob with unpublished format. The only known parser is in the MSGReader .NET library.
+The `ReactionsSummary` is a binary blob with unpublished format. The only known parser is in the MSGReader .NET library (ported to PowerShell by Glen Scales). The format uses simple serialization (not compression) and contains reactor identities, reaction types, and timestamps. `ReactionsSummary` is more reliable than `MapiReactionsBlob` or `ReactionsHistory`, which exhibit client-dependent behavior and may be deprecated.
 
-**Writing reactions**: There is **no documented Graph API endpoint** to add or remove an email reaction. Ratatoskr can display reactions but cannot programmatically add them through any public API.
+**Writing reactions**: There is **no public Graph API endpoint** to add or remove an email reaction, confirmed as of March 2026. The `chatMessage:setReaction` endpoint is **Teams chat only** — it does not apply to email messages. PATCHing `OwnerReactionType` via `singleValueExtendedProperties` would only update the local flag on the authenticated user's own copy of the message — it does **not** trigger Exchange's server-side reaction propagation to other recipients' mailboxes. The propagation mechanism is an internal Exchange behavior triggered by Outlook's proprietary protocol, not by writing MAPI properties. Glen Scales (Exchange developer) confirms: "The lack of a public API for Outlook Reactions remains a frustrating limitation."
 
 ---
 
@@ -70,10 +72,25 @@ Outlook supports exactly **six reaction types**: like (thumbs up), love (heart),
 Key behaviors:
 - Reactions are same-tenant by default but work cross-tenant between Exchange Online orgs
 - Do **not** work for shared mailboxes, GCC High, DoD, or Gallatin environments
-- When sent to non-Exchange recipients, Outlook falls back to sending a **regular email notification**
+- When sent to non-Exchange recipients, Outlook falls back to sending a **regular email notification** (see §2.1 below)
 - The `x-ms-reactions: disallow` header suppresses the reaction UI
 - BCC recipients can react, visible only to themselves and the sender
 - Reactions do **not** appear to modify `lastModifiedDateTime` on the message — delta sync implications (see section 6)
+
+#### 2.1 Cross-Boundary Fallback Notifications
+
+When an Exchange user reacts to a message from a non-Exchange sender, Exchange sends a **fallback notification email** to the original sender. Two notification mechanisms exist:
+
+1. **Reaction Daily Digest** — sent to the *original message author* (who must be an Exchange user) summarizing reactions their messages received over the past 24 hours. Sent from `no-reply@outlook.mail.microsoft` with subject `Reaction Daily Digest - [Day], [Month] [Date], [Year]`. HTML-formatted with reaction emojis rendered as remote images. Users can unsubscribe via `outlook.office365.com/owa/ReactionDigestMailUnsubscribe.aspx`. This is an intra-Exchange notification — it tells an Exchange sender about reactions, it doesn't cross provider boundaries.
+
+2. **Cross-boundary fallback email** — sent when the reactor is on Exchange but the original sender is external (e.g., Gmail, IMAP). Microsoft's docs confirm this exists ("the reaction will be sent in the form of a fallback email instead") but provide **no documentation** on its format:
+   - No known subject line pattern
+   - No custom headers (no `x-ms-reaction` or equivalent marker)
+   - No machine-readable MIME part (unlike Gmail's `text/vnd.google.email-reaction+json`)
+   - Likely a plain notification email ("X reacted to your message") with no structured metadata
+   - Locale-dependent — subject/body presumably varies by language
+
+**Can we detect these?** Not reliably. Unlike Gmail reactions which have a dedicated content type (`text/vnd.google.email-reaction+json`), Exchange's fallback emails are opaque notification messages with no documented machine-readable markers. Heuristic detection (subject pattern matching, sender matching) would be fragile and locale-dependent. **Not worth pursuing.**
 
 ---
 
@@ -166,4 +183,4 @@ Serde's default behavior is to **silently ignore unknown fields** — exactly wh
 2. ✅ **Phase 2 (Gmail read)**: `extract_reaction_emoji()` in `gmail/src/parse.rs` parses `text/vnd.google.email-reaction+json` MIME parts during sync. `insert_reactions()` in `gmail/src/sync/storage.rs` resolves target via `In-Reply-To` and populates `message_reactions` with `source = 'gmail_mime'`. Migration v37 in `db` crate.
 3. ✅ **Phase 3 (Exchange read)**: `extract_reaction_properties()` in `graph/src/parse.rs` reads `OwnerReactionType` and `ReactionsCount` extended properties (GUID `{41F28F13-...}`). `insert_exchange_reactions()` in `graph/src/sync/persistence.rs` stores owner reaction + count metadata. `refresh_reactions_for_recent_messages()` in the same module polls via `$batch` every 5th sync cycle to catch reaction changes missed by delta queries.
 4. ✅ **Phase 4 (Gmail write)**: `send_reaction()` in `gmail/src/ops.rs` builds correct MIME structure with `build_reaction_mime()` and sends via Gmail API.
-5. **Phase 5 (Exchange write)**: Blocked on Microsoft providing a public API. Do not reverse-engineer.
+5. **Phase 5 (Exchange write)**: **Permanently blocked.** No public Graph API exists for adding email reactions (confirmed March 2026). The `chatMessage:setReaction` endpoint is Teams-only. PATCHing `OwnerReactionType` as an extended property only updates the local copy — no server-side propagation to other recipients. The reaction propagation mechanism is internal to Exchange/Outlook's proprietary protocol. Do not reverse-engineer. If Microsoft ever ships a public API, revisit.

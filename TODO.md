@@ -1,5 +1,9 @@
 # TODO
 
+## Dead Code Removal
+
+- [ ] **Nuke all backend mention code** — @mentions are a compose-time feature (insert `@Name` + add to To/CC). The Exchange beta API mention infrastructure is unnecessary complexity. Remove: `crates/core/src/mentions.rs`, `crates/graph/src/mentions.rs`, `is_mentioned` column on `messages`, `mentions` table (migration v40), `mentionsPreview` extraction in `crates/graph/src/parse.rs`, mention metadata in `crates/graph/src/ops/send.rs`. The only mention work needed is compose @-autocomplete UI.
+
 ## Remaining Work
 
 - [ ] **Better MIME handling** - for example in app/src/pop_out_compose.rs mime_from_extension, hardcoded things like this.

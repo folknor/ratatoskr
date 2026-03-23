@@ -1,7 +1,7 @@
 # Roaming Signatures
 
 **Tier**: 2 — Keeps users from going back
-**Status**: ✅ **Done** — DB schema with sync columns (`server_id`, `server_html_hash`, `source`, `last_synced_at`, `is_reply_default`, `body_text`). Gmail bidirectional sync via `sendAs` (pull server signatures on initial+delta sync, push local edits). JMAP Identity signature sync (`sync_jmap_identity_signatures`). Inline image extraction from signature HTML (base64 data-URI and CID parsing, dedup via xxh3, storage in inline image store). Exchange has no public API for signatures (see Research §1–2).
+**Status**: ⚠️ **Backend complete, UI missing** — DB schema with sync columns (`server_id`, `server_html_hash`, `source`, `last_synced_at`, `is_reply_default`, `body_text`). Gmail bidirectional sync via `sendAs` (pull server signatures on initial+delta sync, push local edits). JMAP Identity signature sync (`sync_jmap_identity_signatures`). Inline image extraction from signature HTML (base64 data-URI and CID parsing, dedup via xxh3, storage in inline image store). Exchange has no public API for signatures and never will (see Research §1–2). Missing: signature placement in compose UI.
 
 ---
 
@@ -32,7 +32,7 @@
 - ✅ Gmail bidirectional sync — local edits pushed via `update_send_as_signature` (`crates/gmail/src/api.rs`), conflict resolution by server HTML hash
 - ✅ JMAP Identity signature sync — `sync_jmap_identity_signatures` in `crates/jmap/src/signatures.rs`, upserts `htmlSignature`/`textSignature` keyed by `(account_id, server_id)`
 - ✅ Inline image handling — `crates/provider-utils/src/signature_images.rs` extracts base64 data-URIs and CID references from signature HTML, deduplicates via xxh3, stores in inline image store
-- ⬚ Exchange — no public Graph API exists for roaming signatures (see Research §1–2); sent-mail heuristic deferred to post-MVP
+- ✗ Exchange — **permanently blocked.** No public API exists and Microsoft has explicitly confirmed there never will be (see Research §1–2). Sent-mail heuristic not worth the effort. Exchange users create their signature locally on first account add.
 - ⬚ Signature placement in compose (iced UI work)
 
 ---
@@ -46,25 +46,37 @@
 
 ### 1. Exchange Roaming Signatures via Microsoft Graph
 
-#### Current state: No API exists
+#### Current state: No API exists, and Microsoft says there never will be
 
-As of March 2026, **Microsoft Graph has no endpoint for reading or writing roaming signatures** — not in v1.0, not in beta. The `GET /me/mailboxSettings` endpoint returns `automaticRepliesSetting`, `language`, `timeZone`, `dateFormat`, `timeFormat`, `delegateMeetMessageDeliveryOptions`, and `userPurpose`. Signatures are explicitly absent.
+As of March 2026, **Microsoft Graph has no endpoint for reading or writing roaming signatures** — not in v1.0, not in beta. The `GET /me/mailboxSettings` endpoint returns `automaticRepliesSetting`, `language`, `timeZone`, `dateFormat`, `timeFormat`, `delegateMeetMessageDeliveryOptions`, and `userPurpose`. Signatures are explicitly absent. The beta `mailboxSettings` schema is identical — no signature properties.
 
-This is a frequently requested feature (Graph UserVoice, GitHub discussions), but Microsoft has provided no timeline.
+**Microsoft has explicitly stated they have no plans to add this.** From the [Graph API Support for Roaming Signatures feature request](https://techcommunity.microsoft.com/idea/microsoft365developerplatform/graph-api-support-for-roaming-signatures/4106799) (April 2024): "We have _no plans to support roaming signature management_ in the Microsoft Graph API." Microsoft's recommended alternative is Outlook Add-ins with event-based hooks (`OnMessageCompose`), which is irrelevant to third-party email clients.
+
+This is despite Microsoft having broken EWS signature access when they rolled out roaming signatures (April 2023) and promising a Graph replacement that was never delivered.
 
 #### Where roaming signatures actually live
 
-Roaming signatures are stored in the non-IPM subtree of the user's Exchange Online mailbox, in an opaque folder not accessible through any documented Graph or EWS endpoint. Outlook clients read from this location directly using internal protocols.
+Roaming signatures are stored in an internal "Substrate" store (moved from the mailbox FAI in April 2023), not accessible through any documented Graph, EWS, or PowerShell endpoint. Outlook clients read from this location directly using internal protocols.
+
+#### All known approaches — exhaustively checked
+
+| Approach | Status | Detail |
+|----------|--------|--------|
+| Graph `mailboxSettings` | **No signature property** | Checked v1.0 and beta schemas. Not present. |
+| Graph beta endpoints | **Nothing** | No signature endpoint in any beta changelog through March 2026. |
+| EWS `OWA.UserOptions` FAI | **Broken since April 2023** | Roaming signatures moved storage; FAI contains stale data. |
+| PowerShell `Get-MailboxMessageConfiguration` | **Broken when roaming enabled** | `SignatureHtml`/`SignatureText` params don't work with roaming signatures (default for all tenants since 2023). Only works if admin disables roaming via support ticket. |
+| Outlook Add-ins (`OnMessageCompose`) | **Irrelevant** | Only works inside Outlook. We're a standalone client. |
+| Sent-mail heuristic | **Fragile, one-time** | Parse recent sent emails, extract signature by pattern matching. Best-effort first-run population. |
 
 #### Architecture implication
 
-**Exchange signatures cannot be fetched via any public API.** Options:
+**Exchange signatures cannot be fetched via any public API, and Microsoft has confirmed this will not change.** The only option is:
 
-1. **Do nothing** — user manually recreates their signature locally. Bad first-run experience.
-2. **Parse the user's recent sent messages** — fetch a few sent emails, extract the signature block by pattern-matching common signature markers. Fragile but pragmatic for first-run population. Only needs to work once.
-3. **Wait for Microsoft to ship a Graph endpoint.** Unknown timeline.
+1. **Do nothing** — user manually creates their signature locally. On first launch, show "Set up your signature" prompt. This is the pragmatic choice.
+2. **Sent-mail heuristic** — fetch recent sent emails, extract signature by pattern matching common markers (`-- `, `<div class="Signature">`, etc.). Fragile, locale-dependent, and not worth the implementation effort given it only saves the user one copy-paste.
 
-**Recommendation**: Option 2 as a best-effort first-run heuristic, with a clear "Edit signature" prompt so users can fix it immediately.
+**Recommendation**: Option 1. Prompt the user to set up their signature on first Exchange account add. Don't waste time on the sent-mail heuristic.
 
 ---
 
@@ -76,7 +88,9 @@ Before roaming signatures, OWA stored the user's signature in a FAI (folder-asso
 
 #### This no longer works
 
-Microsoft enabled roaming signatures across all Office 365 tenants in April 2023. When roaming signatures are enabled, OWA **ignores** the `OWA.UserOptions` configuration. The FAI may still exist with stale data, but it is no longer the source of truth.
+Microsoft enabled roaming signatures across all Office 365 tenants in April 2023. When roaming signatures are enabled, OWA **ignores** the `OWA.UserOptions` configuration. The FAI may still exist with stale data, but it is no longer the source of truth. Signature storage was moved to an internal "Substrate" store accessible only to Outlook's proprietary protocol.
+
+Additionally, **EWS itself is being retired in October 2026**, making any EWS-based approach doubly dead.
 
 **Bottom line**: EWS signature access is dead. Do not rely on it.
 

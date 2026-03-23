@@ -1,7 +1,7 @@
 # @Mentions
 
 **Tier**: 2 — Keeps users from going back
-**Status**: ✅ **Phase 1 complete** — DB table, `is_mentioned` column, `mentionsPreview` sync, lazy-load mention details via beta API, HTML correlation, send mentions all implemented
+**Status**: ⚠️ **Rethink needed** — Phase 1 backend (DB table, `is_mentioned` sync, HTML correlation, send mention metadata) was implemented but is unnecessary. @mentions in email are fundamentally a compose-time feature: insert `@Name` text in the body and add the person to To/CC. The Exchange mention metadata (`mentionsPreview`, `mentions` collection, beta API) is a nice-to-have highlight on the recipient side but not worth the complexity. All Phase 1 backend code should be removed. The only work needed is compose @-autocomplete (Phase 2).
 
 ---
 
@@ -26,7 +26,9 @@
 
 ## Work
 
-Display mentions on Exchange messages, @-autocomplete in compose using unified contacts, insert mention metadata for Exchange sends, text-only fallback for other providers.
+@-autocomplete in compose: user types `@`, contact picker appears, selecting a contact inserts `@Display Name` in the body and adds them to To/CC if not already a recipient. Same behavior across all providers. The Exchange mention metadata (beta API `mentions` array) is not worth the complexity — skip it.
+
+**Dead code to remove:** `crates/core/src/mentions.rs`, `crates/graph/src/mentions.rs`, `is_mentioned` column, `mentions` table (migration v40), `mentionsPreview` sync in `crates/graph/src/parse.rs`, mention metadata in `crates/graph/src/ops/send.rs`.
 
 ---
 
@@ -308,23 +310,16 @@ During Exchange message sync (beta endpoint):
 
 ### 9. Implementation Plan
 
-**Phase 1: Display (read-only)** — Done (`crates/core/src/mentions.rs`, `crates/graph/src/mentions.rs`, migration v40 in `crates/db/src/db/migrations.rs`)
-1. During Exchange sync, `mentionsPreview.isMentioned` extracted in `crates/graph/src/parse.rs` and stored in `messages.is_mentioned` column
-2. `mentions` table created (message_id, account_id, mentioned_address, etc.) with upsert on conflict
-3. Lazy-load mention details via `fetch_and_store_mentions()` in `crates/graph/src/mentions.rs` — calls `GET /beta/me/messages/{id}?$expand=mentions` and upserts into DB
-4. HTML body correlation via `correlate_mentions_in_html()` in `crates/core/src/mentions.rs` — regex matches `<a href="mailto:...">` against mentions table, returns `MentionAnnotation` with byte offsets for styling
-5. Send mentions via `crates/graph/src/ops/send.rs` — `send_via_draft()` accepts `mentions: &[(String, String)]` (name, address pairs) and includes them in the beta API request using the beta endpoint
+**Phase 1: Display (read-only)** — ❌ **Remove.** Implemented but unnecessary. @mentions in email are a compose-time feature (insert text + add to recipients), not a display-time feature. The Exchange beta API mention metadata adds complexity for minimal user value. Code to remove: `crates/core/src/mentions.rs`, `crates/graph/src/mentions.rs`, `is_mentioned` column + `mentions` table (migration v40), `mentionsPreview` extraction in `crates/graph/src/parse.rs`, mention metadata in `crates/graph/src/ops/send.rs`.
 
-**Phase 2: Compose**
+**Phase 2: Compose** — This is the only phase that matters.
 1. Implement @-autocomplete trigger detection in the compose `text_editor`
 2. Show floating contact picker overlay, querying FTS5 contacts
-3. On selection, insert `@Display Name` text and store `MentionDraft { name, address }` in compose state
+3. On selection, insert `@Display Name` text in the body
 4. Auto-add mentioned person to To: if not already a recipient
+5. On send, convert `@Display Name` to `<a href="mailto:email">@Display Name</a>` in HTML body (cosmetic, works across all providers)
 
-**Phase 3: Polish**
-1. Mention deletion via `DELETE /beta/me/messages/{id}/mentions/{mention-id}`
-2. Mention count badge in sidebar filter
-3. Handle forwarded messages (mentions array is NOT carried over to forwards)
+**Phase 3: Polish** — ❌ **Remove.** Mention deletion, count badge, and forward handling were all tied to the Exchange beta API metadata. Not needed.
 
 ---
 
