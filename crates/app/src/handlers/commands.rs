@@ -2,7 +2,7 @@ use iced::Task;
 
 use std::sync::Arc;
 
-use crate::command_dispatch::{self, EmailAction, NavigationTarget};
+use crate::command_dispatch::{self, EmailAction};
 use crate::db::Db;
 use crate::{APP_DATA_DIR, App, CompletedAction, Message};
 use ratatoskr_command_palette::{CommandArgs, CommandId, KeyBinding, OptionItem};
@@ -179,12 +179,10 @@ impl App {
                 );
             }
             EmailAction::ToggleSpam => {
-                // Resolve spam direction: if viewing spam folder, un-spam; otherwise mark spam.
-                // TODO: improve detection — currently checks if the navigation target
-                // label is "SPAM". This covers the common case (viewing spam folder).
-                let is_spam = self.navigation_target.as_ref()
-                    .and_then(NavigationTarget::to_label_id)
-                    .map_or(true, |lid| lid != "SPAM");
+                // Resolve spam direction from the sidebar's active folder.
+                // If viewing the spam folder, un-spam; otherwise mark as spam.
+                let current_label = self.sidebar.selected_label.as_deref();
+                let is_spam = current_label != Some("SPAM");
                 return self.dispatch_action_service_with_params(
                     CompletedAction::Spam,
                     &selected_threads,
@@ -192,10 +190,8 @@ impl App {
                 );
             }
             EmailAction::MoveToFolder { folder_id } => {
-                // Source is the current navigation folder, if any.
-                let source_label_id = self.navigation_target.as_ref()
-                    .and_then(NavigationTarget::to_label_id)
-                    .map(String::from);
+                // Source is the sidebar's active folder, if any.
+                let source_label_id = self.sidebar.selected_label.clone();
                 return self.dispatch_action_service_with_params(
                     CompletedAction::MoveToFolder,
                     &selected_threads,
@@ -435,7 +431,16 @@ impl App {
                 return Task::none();
             }
 
-            if any_failed || any_local_only {
+            if any_failed {
+                // Mixed: some succeeded, some failed.
+                let succeeded = outcomes.iter().filter(|o| !o.is_failed()).count();
+                let total = outcomes.len();
+                // TODO: use dedicated warning display once status bar supports it.
+                self.status_bar.show_confirmation(
+                    format!("\u{26A0} {} {succeeded} of {total} threads \u{2014} {failed} failed",
+                        action.success_label(), failed = total - succeeded),
+                );
+            } else if any_local_only {
                 // TODO: use dedicated warning display once status bar supports it.
                 self.status_bar.show_confirmation(
                     format!("\u{26A0} {} locally \u{2014} sync may revert this", action.success_label()),
