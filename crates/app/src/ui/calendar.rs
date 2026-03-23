@@ -11,8 +11,9 @@ use chrono::{Datelike, Local, NaiveDate, Weekday};
 use iced::widget::{
     button, checkbox, column, container, mouse_area, row, scrollable, text, text_input, Space,
 };
-use iced::{Alignment, Element, Length};
+use iced::{Alignment, Element, Length, Theme};
 
+use crate::icon;
 use super::calendar_month;
 use super::calendar_time_grid;
 use super::layout::*;
@@ -35,8 +36,8 @@ impl CalendarView {
     pub fn label(self) -> &'static str {
         match self {
             Self::Day => "D",
-            Self::WorkWeek => "WW",
-            Self::Week => "W",
+            Self::WorkWeek => "5",
+            Self::Week => "7",
             Self::Month => "M",
         }
     }
@@ -455,6 +456,8 @@ pub enum CalendarMessage {
     /// Calendar events loaded from DB for view rendering.
     /// The `u64` is the load generation — stale results are discarded.
     EventsLoaded(u64, Result<Vec<calendar_time_grid::TimeGridEvent>, String>),
+    /// Switch back to mail mode.
+    SwitchToMail,
     /// Pop out the calendar into a separate window.
     PopOutCalendar,
     /// Toggle visibility of a calendar (checkbox in sidebar).
@@ -1334,9 +1337,6 @@ fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMessage> {
         CalendarMessage::NextMonth,
     );
 
-    // View switcher buttons
-    let view_switcher = view_switcher_row(state.active_view);
-
     // Today button
     let today_btn = button(
         text("Today")
@@ -1354,14 +1354,6 @@ fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMessage> {
             .style(text::primary),
     )
     .on_press(CalendarMessage::CreateEvent)
-    .padding(PAD_ICON_BTN)
-    .style(theme::ButtonClass::Ghost.style());
-
-    // Pop-out button
-    let pop_out_btn = button(
-        text("\u{2197}").size(TEXT_SM).style(text::secondary),
-    )
-    .on_press(CalendarMessage::PopOutCalendar)
     .padding(PAD_ICON_BTN)
     .style(theme::ButtonClass::Ghost.style());
 
@@ -1411,14 +1403,103 @@ fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMessage> {
 
     let calendar_list = container(calendar_list_col).padding(SPACE_XS);
 
+    // Mode toggle button (tall square, same as mail sidebar)
+    let mode_btn = container(
+        button(
+            container(icon::mail().size(ICON_HERO).style(text::primary))
+                .center_x(Length::Fill)
+                .center_y(Length::Fill),
+        )
+        .on_press(CalendarMessage::SwitchToMail)
+        .height(Length::Fill)
+        .width(Length::Fill)
+        .style(theme::ButtonClass::Experiment { variant: 10 }.style()),
+    )
+    .width(SIDEBAR_HEADER_HEIGHT) // square
+    .height(Length::Fill);
+
+    // View switcher + pop-out stacked to the right
+    let views = [
+        CalendarView::Day,
+        CalendarView::WorkWeek,
+        CalendarView::Week,
+        CalendarView::Month,
+    ];
+    let mut view_row = row![].spacing(SPACE_XXS);
+    for v in views {
+        let is_active = v == state.active_view;
+        let (btn_style, txt_style): (_, fn(&Theme) -> text::Style) = if is_active {
+            (theme::ButtonClass::Primary.style(), |_| text::Style { color: Some(theme::ON_AVATAR) })
+        } else {
+            (theme::ButtonClass::Experiment { variant: 8 }.style(), text::primary)
+        };
+        view_row = view_row.push(
+            button(
+                container(
+                    text(v.label())
+                        .size(TEXT_SM)
+                        .style(txt_style),
+                )
+                .center_x(Length::Fill)
+                .center_y(Length::Fill),
+            )
+            .on_press(CalendarMessage::SetView(v))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(btn_style),
+        );
+    }
+    let right_stack = container(
+        view_row.height(Length::Fill),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill);
+
+    // Fixed-height header so Fill children resolve correctly
+    let header = container(
+        row![mode_btn, right_stack]
+            .spacing(SPACE_XXS)
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+    .height(SIDEBAR_HEADER_HEIGHT)
+    .width(Length::Fill);
+
+    // Pop-out button at the bottom (styled like settings button)
+    let pop_out_btn = iced::widget::tooltip(
+        button(
+            container(
+                row![
+                    container(icon::external_link().size(ICON_LG).style(text::primary))
+                        .align_y(Alignment::Center),
+                    container(text("Pop Out").size(TEXT_LG).style(text::primary))
+                        .align_y(Alignment::Center),
+                ]
+                .spacing(SPACE_XXS)
+                .align_y(Alignment::Center),
+            )
+            .center_x(Length::Fill),
+        )
+        .on_press(CalendarMessage::PopOutCalendar)
+        .style(theme::ButtonClass::Experiment { variant: 10 }.style())
+        .padding(PAD_BUTTON)
+        .width(Length::Fill),
+        text("Open calendar in a separate window").size(TEXT_XS).style(theme::TextClass::OnPrimary.style()),
+        iced::widget::tooltip::Position::Top,
+    )
+    .gap(SPACE_XXS)
+    .style(theme::ContainerClass::Floating.style());
+
     let content = column![
-        mini,
+        header,
         Space::new().height(SPACE_XS),
-        view_switcher,
+        mini,
         Space::new().height(SPACE_XXS),
-        row![today_btn, new_event_btn, pop_out_btn].spacing(SPACE_XXS),
+        row![today_btn, new_event_btn].spacing(SPACE_XXS),
         Space::new().height(SPACE_SM),
         calendar_list,
+        Space::new().height(Length::Fill),
+        pop_out_btn,
     ]
     .spacing(0)
     .width(Length::Fill);
@@ -1429,39 +1510,6 @@ fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMessage> {
         .padding(PAD_SIDEBAR)
         .style(theme::ContainerClass::Sidebar.style())
         .into()
-}
-
-/// Row of view switcher buttons: D, WW, W, M.
-fn view_switcher_row(active: CalendarView) -> Element<'static, CalendarMessage> {
-    let views = [
-        CalendarView::Day,
-        CalendarView::WorkWeek,
-        CalendarView::Week,
-        CalendarView::Month,
-    ];
-
-    let mut r = row![].spacing(SPACE_XXS);
-    for v in views {
-        let is_active = v == active;
-        let style = if is_active {
-            theme::ButtonClass::Nav { active: true }.style()
-        } else {
-            theme::ButtonClass::Ghost.style()
-        };
-
-        r = r.push(
-            button(
-                text(v.label())
-                    .size(TEXT_SM)
-                    .style(if is_active { text::primary } else { text::secondary }),
-            )
-            .on_press(CalendarMessage::SetView(v))
-            .padding(PAD_ICON_BTN)
-            .style(style),
-        );
-    }
-
-    r.into()
 }
 
 /// Calendar main content area: dispatches to the appropriate view.

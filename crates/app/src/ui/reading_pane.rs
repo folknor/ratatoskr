@@ -36,6 +36,7 @@ pub enum ReadingPaneMessage {
     NextMessage,
     /// Navigate to the previous message in the thread (expand it).
     PrevMessage,
+    ToggleStar,
     Noop,
 }
 
@@ -55,6 +56,8 @@ pub enum ReadingPaneEvent {
     EditContact { email: String },
     /// User clicked 📅 on a message to create a calendar event.
     CreateEventFromEmail { message_index: usize },
+    /// User toggled the star on the thread.
+    ToggleStar,
 }
 
 // ── State ──────────────────────────────────────────────
@@ -193,6 +196,15 @@ impl ReadingPane {
         self.current_thread.as_ref().map(|t| format!("{}:{}", t.account_id, t.id))
     }
 
+    /// Update the star state for a thread if it's currently displayed.
+    pub fn update_star(&mut self, thread_id: &str, is_starred: bool) {
+        if let Some(ref mut t) = self.current_thread {
+            if t.id == thread_id {
+                t.is_starred = is_starred;
+            }
+        }
+    }
+
     /// Get the message ID of the currently focused message (for CommandContext).
     pub fn focused_message_id(&self) -> Option<String> {
         let idx = self.focused_message?;
@@ -295,6 +307,9 @@ impl Component for ReadingPane {
                     *e = true;
                 }
                 (Task::none(), None)
+            }
+            ReadingPaneMessage::ToggleStar => {
+                (Task::none(), Some(ReadingPaneEvent::ToggleStar))
             }
             ReadingPaneMessage::Noop => (Task::none(), None),
         }
@@ -409,19 +424,12 @@ fn command_toolbar<'a>(
             binding_table,
             ctx,
         ),
-        widgets::command_icon_button(
-            CommandId::EmailStar,
-            icon::star(),
-            registry,
-            binding_table,
-            ctx,
-        ),
     ]
     .spacing(SPACE_XS)
     .align_y(Alignment::Center);
 
     container(toolbar)
-        .padding(PAD_TOOLBAR)
+        .padding(PAD_CONTENT)
         .width(Length::Fill)
         .into()
 }
@@ -466,16 +474,11 @@ fn thread_header<'a>(
     } else {
         text::secondary
     };
-    let star_btn_class = if thread_ref.is_starred {
-        theme::ButtonClass::StarActive
-    } else {
-        theme::ButtonClass::BareIcon
-    };
 
     let star_btn = button(icon::star().size(ICON_XL).style(star_icon_style))
-        .on_press(ReadingPaneMessage::Noop)
+        .on_press(ReadingPaneMessage::ToggleStar)
         .padding(PAD_ICON_BTN)
-        .style(star_btn_class.style());
+        .style(theme::ButtonClass::Ghost.style());
 
     let toggle_label = if message_expanded.iter().all(|&e| e) {
         "Collapse all"

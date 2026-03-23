@@ -211,6 +211,9 @@ impl App {
                 }
                 Task::none()
             }
+            CalendarMessage::SwitchToMail => {
+                return self.update(Message::SetAppMode(crate::AppMode::Mail));
+            }
             CalendarMessage::PopOutCalendar => {
                 // Check if a calendar pop-out already exists.
                 let existing = self.pop_out_windows.values().any(|w| {
@@ -230,7 +233,6 @@ impl App {
                 self.pop_out_windows.insert(id, crate::pop_out::PopOutWindow::Calendar);
                 // Switch main window back to mail mode.
                 self.app_mode = crate::AppMode::Mail;
-                self.sidebar.in_calendar_mode = false;
                 open_task.discard()
             }
             CalendarMessage::EventsLoaded(load_generation, result) => {

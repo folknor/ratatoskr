@@ -172,7 +172,7 @@ pub fn month_view<'a, M: 'a + Clone>(
             );
             week_row = week_row.push(cell);
         }
-        grid = grid.push(week_row);
+        grid = grid.push(week_row.height(Length::Fill));
     }
 
     container(grid)
@@ -281,7 +281,7 @@ fn day_cell<'a, M: 'a + Clone>(
 
     container(content)
         .width(Length::Fill)
-        .height(Length::Fixed(CALENDAR_CELL_MIN_HEIGHT))
+        .height(Length::Fill)
         .padding(SPACE_XXXS)
         .style(cell_style.style())
         .into()
@@ -388,7 +388,7 @@ pub fn mini_month<'a, M: 'a + Clone>(
                     .size(TEXT_XS)
                     .style(theme::TextClass::Tertiary.style()),
             )
-            .width(MINI_MONTH_CELL_SIZE)
+            .width(Length::Fill)
             .height(MINI_MONTH_CELL_SIZE)
             .align_x(Alignment::Center)
             .align_y(Alignment::Center),
@@ -446,14 +446,14 @@ pub fn mini_month<'a, M: 'a + Clone>(
 
             let cell_container = if is_selected {
                 container(cell_content)
-                    .width(MINI_MONTH_CELL_SIZE)
+                    .width(Length::Fill)
                     .height(MINI_MONTH_CELL_SIZE)
                     .align_x(Alignment::Center)
                     .align_y(Alignment::Center)
                     .style(theme::ContainerClass::MiniMonthSelected.style())
             } else {
                 container(cell_content)
-                    .width(MINI_MONTH_CELL_SIZE)
+                    .width(Length::Fill)
                     .height(MINI_MONTH_CELL_SIZE)
                     .align_x(Alignment::Center)
                     .align_y(Alignment::Center)

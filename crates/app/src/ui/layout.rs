@@ -56,6 +56,8 @@ pub const ICON_MD: f32 = 12.0;
 pub const ICON_LG: f32 = 13.0;
 /// 14px — Dropdown items, reply buttons, leading slot icons
 pub const ICON_XL: f32 = 14.0;
+/// 28px — Mode switcher hero icon
+pub const ICON_HERO: f32 = 28.0;
 
 // ── Avatar sizes ───────────────────────────────────────
 // Every avatar_circle() call must reference one of these.
@@ -121,14 +123,16 @@ pub const PAD_RIGHT_SIDEBAR: Padding = Padding {
 };
 
 /// Starred thread card warm background alpha
-pub const STARRED_BG_ALPHA: f32 = 0.12;
+pub const STARRED_BG_ALPHA: f32 = 0.25;
 
 /// Auto-collapse right sidebar when window width drops below this
 pub const RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH: f32 = 1200.0;
 
 // ── Per-pane minimum widths (for resize clamping) ──────
 
-pub const SIDEBAR_MIN_WIDTH: f32 = 200.0;
+pub const SIDEBAR_MIN_WIDTH: f32 = 220.0;
+/// Height of the sidebar header (mode button + dropdown + compose stack)
+pub const SIDEBAR_HEADER_HEIGHT: f32 = 76.0;
 pub const THREAD_LIST_MIN_WIDTH: f32 = 250.0;
 
 // ── Padding presets ─────────────────────────────────────
@@ -280,12 +284,12 @@ pub const PAD_SELECT_TRIGGER: Padding = Padding {
     left: 0.0,
 };
 
-/// Message body inner padding (horizontal only).
+/// Message body inner padding.
 pub const PAD_BODY: Padding = Padding {
     top: 12.0,
-    right: 0.0,
+    right: 16.0,
     bottom: 12.0,
-    left: 0.0,
+    left: 16.0,
 };
 
 // ── Settings-specific sizes ────────────────────────────
@@ -410,7 +414,8 @@ pub const CALENDAR_CELL_MIN_HEIGHT: f32 = 80.0;
 /// Height of a single event entry row in the month grid.
 pub const CALENDAR_EVENT_HEIGHT: f32 = 20.0;
 /// Height of the day-of-week header row in the month grid.
-pub const CALENDAR_HEADER_HEIGHT: f32 = 28.0;
+/// Calendar sidebar header height (matches mail sidebar dropdown + gap + compose)
+pub const CALENDAR_HEADER_HEIGHT: f32 = 64.0;
 /// Cell size (width and height) for the mini-month date grid.
 pub const MINI_MONTH_CELL_SIZE: f32 = 28.0;
 

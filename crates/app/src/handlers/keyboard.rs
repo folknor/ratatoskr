@@ -41,6 +41,17 @@ impl App {
             return self.handle_palette_key(key);
         }
 
+        // 2. If settings is open, Escape closes it.
+        if self.show_settings {
+            if *key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
+                return self.update(Message::Settings(
+                    crate::ui::settings::SettingsMessage::Close,
+                ));
+            }
+            // Don't process other shortcuts while settings is open.
+            return Task::none();
+        }
+
         // 2a. If typeahead is visible, intercept arrow keys and Tab/Enter/Escape.
         if self.thread_list.typeahead.visible {
             match key {

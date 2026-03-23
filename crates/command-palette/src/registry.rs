@@ -335,6 +335,8 @@ fn desc(
         input_schema: None,
         keywords: &[],
         is_undoable: false,
+        palette_label: None,
+        description: None,
     }
 }
 
@@ -357,6 +359,8 @@ fn desc_kw(
         input_schema: None,
         keywords,
         is_undoable: false,
+        palette_label: None,
+        description: None,
     }
 }
 
@@ -380,6 +384,8 @@ fn toggle(
         input_schema: None,
         keywords: &[],
         is_undoable: false,
+        palette_label: None,
+        description: None,
     }
 }
 
@@ -390,6 +396,16 @@ fn undoable(mut d: CommandDescriptor) -> CommandDescriptor {
 
 fn with_keywords(mut d: CommandDescriptor, keywords: &'static [&'static str]) -> CommandDescriptor {
     d.keywords = keywords;
+    d
+}
+
+fn with_docs(
+    mut d: CommandDescriptor,
+    palette_label: &'static str,
+    description: &'static str,
+) -> CommandDescriptor {
+    d.palette_label = Some(palette_label);
+    d.description = Some(description);
     d
 }
 
@@ -412,352 +428,272 @@ fn parameterized(
         input_schema: Some(input_schema),
         keywords: &[],
         is_undoable: false,
+        palette_label: None,
+        description: None,
     }
 }
 
 fn register_navigation(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc(CommandId::NavNext, "Next Thread", "Navigation", Some(KeyBinding::key('j')), always));
-    out.push(desc(CommandId::NavPrev, "Previous Thread", "Navigation", Some(KeyBinding::key('k')), always));
-    out.push(desc(CommandId::NavOpen, "Open Thread", "Navigation", Some(KeyBinding::key('o')), needs_selection));
-    out.push(desc(
-        CommandId::NavMsgNext,
-        "Next Message",
-        "Navigation",
+    out.push(with_docs(desc(CommandId::NavNext, "Next", "Navigation", Some(KeyBinding::key('j')), always),
+        "Next Thread", "Move selection to the next thread in the list."));
+    out.push(with_docs(desc(CommandId::NavPrev, "Previous", "Navigation", Some(KeyBinding::key('k')), always),
+        "Previous Thread", "Move selection to the previous thread in the list."));
+    out.push(with_docs(desc(CommandId::NavOpen, "Open", "Navigation", Some(KeyBinding::key('o')), needs_selection),
+        "Open Thread", "Open the selected thread in the reading pane."));
+    out.push(with_docs(desc(
+        CommandId::NavMsgNext, "Next Message", "Navigation",
         Some(KeyBinding::named(NamedKey::ArrowDown)),
         |ctx| ctx.active_message_id.is_some(),
-    ));
-    out.push(desc(
-        CommandId::NavMsgPrev,
-        "Previous Message",
-        "Navigation",
+    ), "Next Message", "Expand and scroll to the next message within the open thread."));
+    out.push(with_docs(desc(
+        CommandId::NavMsgPrev, "Previous Message", "Navigation",
         Some(KeyBinding::named(NamedKey::ArrowUp)),
         |ctx| ctx.active_message_id.is_some(),
-    ));
-    out.push(desc(CommandId::NavGoInbox, "Go to Inbox", "Navigation", Some(KeyBinding::seq('g', 'i')), always));
-    out.push(desc(CommandId::NavGoStarred, "Go to Starred", "Navigation", Some(KeyBinding::seq('g', 's')), always));
-    out.push(desc(CommandId::NavGoSent, "Go to Sent", "Navigation", Some(KeyBinding::seq('g', 't')), always));
-    out.push(desc(CommandId::NavGoDrafts, "Go to Drafts", "Navigation", Some(KeyBinding::seq('g', 'd')), always));
-    out.push(desc(CommandId::NavGoSnoozed, "Go to Snoozed", "Navigation", None, always));
-    out.push(desc(CommandId::NavGoTrash, "Go to Trash", "Navigation", None, always));
-    out.push(desc(CommandId::NavGoAllMail, "Go to All Mail", "Navigation", None, always));
-    out.push(parameterized(
-        CommandId::NavigateToLabel,
-        "Go to Label",
-        "Navigation",
-        Some(KeyBinding::seq('g', 'l')),
-        always,
+    ), "Previous Message", "Expand and scroll to the previous message within the open thread."));
+    out.push(with_docs(desc(CommandId::NavGoInbox, "Inbox", "Navigation", Some(KeyBinding::seq('g', 'i')), always),
+        "Go to Inbox", "Navigate to the Inbox folder across all accounts."));
+    out.push(with_docs(desc(CommandId::NavGoStarred, "Starred", "Navigation", Some(KeyBinding::seq('g', 's')), always),
+        "Go to Starred", "Navigate to the Starred virtual folder."));
+    out.push(with_docs(desc(CommandId::NavGoSent, "Sent", "Navigation", Some(KeyBinding::seq('g', 't')), always),
+        "Go to Sent", "Navigate to the Sent folder."));
+    out.push(with_docs(desc(CommandId::NavGoDrafts, "Drafts", "Navigation", Some(KeyBinding::seq('g', 'd')), always),
+        "Go to Drafts", "Navigate to the Drafts folder."));
+    out.push(with_docs(desc(CommandId::NavGoSnoozed, "Snoozed", "Navigation", None, always),
+        "Go to Snoozed", "Navigate to the Snoozed virtual folder."));
+    out.push(with_docs(desc(CommandId::NavGoTrash, "Trash", "Navigation", None, always),
+        "Go to Trash", "Navigate to the Trash folder."));
+    out.push(with_docs(desc(CommandId::NavGoAllMail, "All Mail", "Navigation", None, always),
+        "Go to All Mail", "Navigate to All Mail (all messages across all folders)."));
+    out.push(with_docs(parameterized(
+        CommandId::NavigateToLabel, "Go to Label", "Navigation",
+        Some(KeyBinding::seq('g', 'l')), always,
         InputSchema::Single {
             param: super::input::ParamDef::ListPicker { label: "Label" },
         },
-    ));
+    ), "Go to Label", "Navigate to a specific label or folder by name."));
     register_navigation_categories(out);
 }
 
 fn register_navigation_categories(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc(CommandId::NavGoPrimary, "Go to Primary", "Navigation", Some(KeyBinding::seq('g', 'p')), always));
-    out.push(desc(CommandId::NavGoUpdates, "Go to Updates", "Navigation", Some(KeyBinding::seq('g', 'u')), always));
-    out.push(desc(
-        CommandId::NavGoPromotions,
-        "Go to Promotions",
-        "Navigation",
-        Some(KeyBinding::seq('g', 'o')),
-        always,
-    ));
-    out.push(desc(CommandId::NavGoSocial, "Go to Social", "Navigation", Some(KeyBinding::seq('g', 'c')), always));
-    out.push(desc(
-        CommandId::NavGoNewsletters,
-        "Go to Newsletters",
-        "Navigation",
-        Some(KeyBinding::seq('g', 'n')),
-        always,
-    ));
-    out.push(desc(CommandId::NavGoTasks, "Go to Tasks", "Navigation", Some(KeyBinding::seq('g', 'k')), always));
-    out.push(desc(
-        CommandId::NavGoAttachments,
-        "Go to Attachments",
-        "Navigation",
-        Some(KeyBinding::seq('g', 'a')),
-        always,
-    ));
-    out.push(desc(
-        CommandId::NavEscape,
-        "Close / Go Back",
-        "Navigation",
+    out.push(with_docs(desc(CommandId::NavGoPrimary, "Primary", "Navigation", Some(KeyBinding::seq('g', 'p')), always),
+        "Go to Primary", "Navigate to the Primary category (Gmail) or Focused inbox."));
+    out.push(with_docs(desc(CommandId::NavGoUpdates, "Updates", "Navigation", Some(KeyBinding::seq('g', 'u')), always),
+        "Go to Updates", "Navigate to the Updates category."));
+    out.push(with_docs(desc(CommandId::NavGoPromotions, "Promotions", "Navigation", Some(KeyBinding::seq('g', 'o')), always),
+        "Go to Promotions", "Navigate to the Promotions category."));
+    out.push(with_docs(desc(CommandId::NavGoSocial, "Social", "Navigation", Some(KeyBinding::seq('g', 'c')), always),
+        "Go to Social", "Navigate to the Social category."));
+    out.push(with_docs(desc(CommandId::NavGoNewsletters, "Newsletters", "Navigation", Some(KeyBinding::seq('g', 'n')), always),
+        "Go to Newsletters", "Navigate to the Newsletters category."));
+    out.push(with_docs(desc(CommandId::NavGoTasks, "Tasks", "Navigation", Some(KeyBinding::seq('g', 'k')), always),
+        "Go to Tasks", "Navigate to the Tasks view."));
+    out.push(with_docs(desc(CommandId::NavGoAttachments, "Attachments", "Navigation", Some(KeyBinding::seq('g', 'a')), always),
+        "Go to Attachments", "Navigate to the Attachments view."));
+    out.push(with_docs(desc(
+        CommandId::NavEscape, "Close", "Navigation",
         Some(KeyBinding::named(NamedKey::Escape)),
         |ctx| ctx.has_selection() || ctx.composer_is_open,
-    ));
+    ), "Close / Go Back", "Close the current overlay, deselect the thread, or dismiss the composer."));
 }
 
 fn register_email(out: &mut Vec<CommandDescriptor>) {
-    out.push(undoable(desc_kw(
+    out.push(with_docs(undoable(desc_kw(
         CommandId::EmailArchive, "Archive", "Email",
         Some(KeyBinding::key('e')), needs_selection,
         &["done", "file"],
-    )));
-    out.push(undoable(desc_kw(
-        CommandId::EmailTrash,
-        "Move to Trash",
-        "Email",
+    )), "Archive", "Remove the thread from inbox without deleting it. Can be undone."));
+    out.push(with_docs(undoable(desc_kw(
+        CommandId::EmailTrash, "Delete", "Email",
         Some(KeyBinding::key('#')),
         |ctx| ctx.has_selection() && ctx.thread_in_trash != Some(true),
-        &["delete", "remove"],
-    )));
-    out.push(desc(
-        CommandId::EmailPermanentDelete,
-        "Permanently Delete",
-        "Email",
-        None,
+        &["delete", "remove", "trash"],
+    )), "Delete — Move to Trash", "Move the selected thread to the Trash folder. Can be undone."));
+    out.push(with_docs(desc(
+        CommandId::EmailPermanentDelete, "Permanently Delete", "Email", None,
         |ctx| ctx.has_selection() && ctx.thread_in_trash == Some(true),
-    ));
-    out.push(undoable(toggle(
-        CommandId::EmailSpam,
-        "Report Spam",
-        "Not Spam",
-        "Email",
-        Some(KeyBinding::key('!')),
-        needs_selection,
+    ), "Permanently Delete", "Permanently delete the thread. This cannot be undone. Only available for threads already in Trash."));
+    out.push(with_docs(undoable(toggle(
+        CommandId::EmailSpam, "Spam", "Not Spam", "Email",
+        Some(KeyBinding::key('!')), needs_selection,
         |ctx| ctx.thread_in_spam == Some(true),
-    )));
+    )), "Report Spam / Not Spam", "Mark the thread as spam, or remove the spam flag if already marked. Can be undone."));
     register_email_toggles(out);
     register_email_other(out);
 }
 
 fn register_email_toggles(out: &mut Vec<CommandDescriptor>) {
-    out.push(undoable(with_keywords(
+    out.push(with_docs(undoable(with_keywords(
         toggle(
-            CommandId::EmailMarkRead,
-            "Mark as Read",
-            "Mark as Unread",
-            "Email",
-            None,
-            needs_selection,
+            CommandId::EmailMarkRead, "Mark Read", "Mark Unread", "Email",
+            None, needs_selection,
             |ctx| ctx.thread_is_read == Some(true),
         ),
         &["seen"],
-    )));
-    out.push(undoable(toggle(
-        CommandId::EmailStar,
-        "Star",
-        "Unstar",
-        "Email",
-        Some(KeyBinding::key('s')),
-        needs_selection,
+    )), "Mark as Read / Unread", "Toggle the read/unread status of the selected thread. Can be undone."));
+    out.push(with_docs(undoable(toggle(
+        CommandId::EmailStar, "Star", "Unstar", "Email",
+        Some(KeyBinding::key('s')), needs_selection,
         |ctx| ctx.thread_is_starred == Some(true),
-    )));
-    out.push(undoable(toggle(
-        CommandId::EmailPin,
-        "Pin",
-        "Unpin",
-        "Email",
-        Some(KeyBinding::key('p')),
-        needs_selection,
+    )), "Star / Unstar", "Toggle the star flag on the selected thread. Starred threads appear in the Starred folder. Can be undone."));
+    out.push(with_docs(undoable(toggle(
+        CommandId::EmailPin, "Pin", "Unpin", "Email",
+        Some(KeyBinding::key('p')), needs_selection,
         |ctx| ctx.thread_is_pinned == Some(true),
-    )));
-    out.push(undoable(toggle(
-        CommandId::EmailMute,
-        "Mute",
-        "Unmute",
-        "Email",
-        Some(KeyBinding::key('m')),
-        needs_selection,
+    )), "Pin / Unpin", "Pin the thread to the top of the thread list. Pinned threads stay visible regardless of sort order. Can be undone."));
+    out.push(with_docs(undoable(toggle(
+        CommandId::EmailMute, "Mute", "Unmute", "Email",
+        Some(KeyBinding::key('m')), needs_selection,
         |ctx| ctx.thread_is_muted == Some(true),
-    )));
+    )), "Mute / Unmute", "Mute the thread so new replies don't bring it back to the inbox. Can be undone."));
 }
 
 fn register_email_other(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc(
-        CommandId::EmailUnsubscribe,
-        "Unsubscribe",
-        "Email",
-        Some(KeyBinding::key('u')),
-        needs_single_selection,
-    ));
-    out.push(undoable(with_keywords(
+    out.push(with_docs(desc(
+        CommandId::EmailUnsubscribe, "Unsubscribe", "Email",
+        Some(KeyBinding::key('u')), needs_single_selection,
+    ), "Unsubscribe", "Unsubscribe from the mailing list associated with this thread, if a List-Unsubscribe header is present."));
+    out.push(with_docs(undoable(with_keywords(
         parameterized(
-            CommandId::EmailMoveToFolder,
-            "Move to Folder",
-            "Email",
-            Some(KeyBinding::key('v')),
-            needs_selection,
+            CommandId::EmailMoveToFolder, "Move", "Email",
+            Some(KeyBinding::key('v')), needs_selection,
             InputSchema::Single {
                 param: super::input::ParamDef::ListPicker { label: "Folder" },
             },
         ),
-        &["file", "organize"],
-    )));
-    out.push(undoable(parameterized(
-        CommandId::EmailAddLabel,
-        "Add Label",
-        "Email",
-        None,
-        needs_selection,
+        &["file", "organize", "move"],
+    )), "Move to Folder", "Move the selected thread to a different folder. Can be undone."));
+    out.push(with_docs(undoable(parameterized(
+        CommandId::EmailAddLabel, "Add Label", "Email",
+        None, needs_selection,
         InputSchema::Single {
             param: super::input::ParamDef::ListPicker { label: "Label" },
         },
-    )));
-    out.push(undoable(parameterized(
-        CommandId::EmailRemoveLabel,
-        "Remove Label",
-        "Email",
-        None,
-        needs_selection,
+    )), "Add Label", "Apply a label to the selected thread. Labels are synced to the provider."));
+    out.push(with_docs(undoable(parameterized(
+        CommandId::EmailRemoveLabel, "Remove Label", "Email",
+        None, needs_selection,
         InputSchema::Single {
             param: super::input::ParamDef::ListPicker { label: "Label" },
         },
-    )));
-    out.push(undoable(parameterized(
-        CommandId::EmailSnooze,
-        "Snooze",
-        "Email",
-        None,
-        needs_selection,
+    )), "Remove Label", "Remove a label from the selected thread."));
+    out.push(with_docs(undoable(parameterized(
+        CommandId::EmailSnooze, "Snooze", "Email",
+        None, needs_selection,
         InputSchema::Single {
             param: super::input::ParamDef::DateTime { label: "Snooze until" },
         },
-    )));
-    out.push(desc(CommandId::EmailSelectAll, "Select All", "Email", Some(KeyBinding::cmd_or_ctrl('a')), always));
-    out.push(desc(
-        CommandId::EmailSelectFromHere,
-        "Select All From Here",
-        "Email",
-        Some(KeyBinding::cmd_or_ctrl_shift('a')),
-        needs_selection,
-    ));
+    )), "Snooze", "Hide the thread until a specified date and time, then return it to the inbox."));
+    out.push(with_docs(desc(CommandId::EmailSelectAll, "Select All", "Email", Some(KeyBinding::cmd_or_ctrl('a')), always),
+        "Select All Threads", "Select all threads in the current view."));
+    out.push(with_docs(desc(
+        CommandId::EmailSelectFromHere, "Select From Here", "Email",
+        Some(KeyBinding::cmd_or_ctrl_shift('a')), needs_selection,
+    ), "Select All From Here", "Extend the selection from the current thread to the end of the list."));
 }
 
 fn register_compose(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc_kw(
-        CommandId::ComposeNew, "Compose New Email", "Compose",
+    out.push(with_docs(desc_kw(
+        CommandId::ComposeNew, "Compose", "Compose",
         Some(KeyBinding::key('c')), always,
-        &["write", "new", "create"],
-    ));
-    out.push(desc_kw(
+        &["write", "new", "create", "email"],
+    ), "Compose New Email", "Open the compose window to write a new email."));
+    out.push(with_docs(desc_kw(
         CommandId::ComposeReply, "Reply", "Compose",
         Some(KeyBinding::key('r')), needs_selection,
         &["respond"],
-    ));
-    out.push(desc(CommandId::ComposeReplyAll, "Reply All", "Compose", Some(KeyBinding::key('a')), needs_selection));
-    out.push(desc_kw(
+    ), "Reply", "Reply to the sender of the selected message."));
+    out.push(with_docs(desc(CommandId::ComposeReplyAll, "Reply All", "Compose", Some(KeyBinding::key('a')), needs_selection),
+        "Reply All", "Reply to all recipients of the selected message."));
+    out.push(with_docs(desc_kw(
         CommandId::ComposeForward, "Forward", "Compose",
         Some(KeyBinding::key('f')), needs_selection,
         &["send", "share"],
-    ));
+    ), "Forward", "Forward the selected message to new recipients."));
 }
 
 fn register_tasks(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc(CommandId::TaskCreate, "Create Task", "Tasks", None, always));
-    out.push(desc(
-        CommandId::TaskCreateFromEmail,
-        "Create Task from Email",
-        "Tasks",
-        Some(KeyBinding::key('t')),
-        needs_selection,
-    ));
-    out.push(desc(CommandId::TaskTogglePanel, "Toggle Task Panel", "Tasks", None, always));
-    // No default binding — NavGoTasks already owns "g then k".
-    out.push(desc(CommandId::TaskViewAll, "View All Tasks", "Tasks", None, always));
+    out.push(with_docs(desc(CommandId::TaskCreate, "New Task", "Tasks", None, always),
+        "Create Task", "Create a new task."));
+    out.push(with_docs(desc(
+        CommandId::TaskCreateFromEmail, "Task from Email", "Tasks",
+        Some(KeyBinding::key('t')), needs_selection,
+    ), "Create Task from Email", "Create a task linked to the selected email thread."));
+    out.push(with_docs(desc(CommandId::TaskTogglePanel, "Toggle Panel", "Tasks", None, always),
+        "Toggle Task Panel", "Show or hide the task panel."));
+    out.push(with_docs(desc(CommandId::TaskViewAll, "View All", "Tasks", None, always),
+        "View All Tasks", "Show the full task list."));
 }
 
 fn register_view(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc(
-        CommandId::ViewToggleSidebar,
-        "Toggle Sidebar",
-        "View",
-        Some(KeyBinding::cmd_or_ctrl_shift('e')),
-        always,
-    ));
-    out.push(desc(CommandId::ViewSetThemeLight, "Light Theme", "View", None, always));
-    out.push(desc(CommandId::ViewSetThemeDark, "Dark Theme", "View", None, always));
-    out.push(desc(CommandId::ViewSetThemeSystem, "System Theme", "View", None, always));
-    out.push(desc(CommandId::ViewToggleTaskPanel, "Toggle Task Panel", "View", None, always));
+    out.push(with_docs(desc(
+        CommandId::ViewToggleSidebar, "Toggle Sidebar", "View",
+        Some(KeyBinding::cmd_or_ctrl_shift('e')), always,
+    ), "Toggle Sidebar", "Show or hide the left sidebar."));
+    out.push(with_docs(desc(CommandId::ViewSetThemeLight, "Light Theme", "View", None, always),
+        "Light Theme", "Switch to the light color theme."));
+    out.push(with_docs(desc(CommandId::ViewSetThemeDark, "Dark Theme", "View", None, always),
+        "Dark Theme", "Switch to the dark color theme."));
+    out.push(with_docs(desc(CommandId::ViewSetThemeSystem, "System Theme", "View", None, always),
+        "System Theme", "Follow the operating system's light/dark preference."));
+    out.push(with_docs(desc(CommandId::ViewToggleTaskPanel, "Toggle Task Panel", "View", None, always),
+        "Toggle Task Panel", "Show or hide the task panel."));
     register_view_reading_pane(out);
 }
 
 fn register_view_reading_pane(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc(
-        CommandId::ViewReadingPaneRight,
-        "Reading Pane Right",
-        "View",
-        None,
-        always,
-    ));
-    out.push(desc(
-        CommandId::ViewReadingPaneBottom,
-        "Reading Pane Bottom",
-        "View",
-        None,
-        always,
-    ));
-    out.push(desc(
-        CommandId::ViewReadingPaneHidden,
-        "Reading Pane Hidden",
-        "View",
-        None,
-        always,
-    ));
+    out.push(with_docs(desc(CommandId::ViewReadingPaneRight, "Pane Right", "View", None, always),
+        "Reading Pane Right", "Position the reading pane to the right of the thread list."));
+    out.push(with_docs(desc(CommandId::ViewReadingPaneBottom, "Pane Bottom", "View", None, always),
+        "Reading Pane Bottom", "Position the reading pane below the thread list."));
+    out.push(with_docs(desc(CommandId::ViewReadingPaneHidden, "Pane Hidden", "View", None, always),
+        "Reading Pane Hidden", "Hide the reading pane. Double-click a thread to open it."));
 }
 
 fn register_calendar(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc_kw(
-        CommandId::CalendarToggle,
-        "Toggle Calendar",
-        "Calendar",
-        Some(KeyBinding::cmd_or_ctrl('2')),
-        always,
+    out.push(with_docs(desc_kw(
+        CommandId::CalendarToggle, "Toggle Calendar", "Calendar",
+        Some(KeyBinding::cmd_or_ctrl('2')), always,
         &["switch mode", "mail", "calendar"],
-    ));
-    out.push(desc_kw(
-        CommandId::SwitchToCalendar,
-        "Switch to Calendar",
-        "Calendar",
-        None,
-        always,
+    ), "Toggle Calendar", "Switch between mail and calendar views."));
+    out.push(with_docs(desc_kw(
+        CommandId::SwitchToCalendar, "Calendar", "Calendar",
+        None, always,
         &["open calendar", "show calendar"],
-    ));
-    out.push(desc_kw(
-        CommandId::SwitchToMail,
-        "Switch to Mail",
-        "Mail",
-        Some(KeyBinding::cmd_or_ctrl('1')),
-        always,
+    ), "Switch to Calendar", "Switch to the calendar view."));
+    out.push(with_docs(desc_kw(
+        CommandId::SwitchToMail, "Mail", "Mail",
+        Some(KeyBinding::cmd_or_ctrl('1')), always,
         &["open mail", "show mail", "inbox"],
-    ));
-    out.push(desc(CommandId::CalendarViewDay, "Day View", "Calendar", None, always));
-    out.push(desc(CommandId::CalendarViewWorkWeek, "Work Week View", "Calendar", None, always));
-    out.push(desc(CommandId::CalendarViewWeek, "Week View", "Calendar", None, always));
-    out.push(desc(CommandId::CalendarViewMonth, "Month View", "Calendar", None, always));
-    out.push(desc_kw(
-        CommandId::CalendarToday,
-        "Go to Today",
-        "Calendar",
-        None,
-        always,
+    ), "Switch to Mail", "Switch to the mail view."));
+    out.push(with_docs(desc(CommandId::CalendarViewDay, "Day", "Calendar", None, always),
+        "Day View", "Show a single day in the calendar."));
+    out.push(with_docs(desc(CommandId::CalendarViewWorkWeek, "Work Week", "Calendar", None, always),
+        "Work Week View", "Show Monday through Friday in the calendar."));
+    out.push(with_docs(desc(CommandId::CalendarViewWeek, "Week", "Calendar", None, always),
+        "Week View", "Show all seven days of the week in the calendar."));
+    out.push(with_docs(desc(CommandId::CalendarViewMonth, "Month", "Calendar", None, always),
+        "Month View", "Show the full month grid in the calendar."));
+    out.push(with_docs(desc_kw(
+        CommandId::CalendarToday, "Today", "Calendar",
+        None, always,
         &["today", "now", "current date"],
-    ));
-    out.push(desc_kw(
-        CommandId::CalendarCreateEvent,
-        "Create Event",
-        "Calendar",
-        None,
-        always,
-        &["new event", "add event"],
-    ));
-    out.push(desc_kw(
-        CommandId::CalendarPopOut,
-        "Pop Out Calendar",
-        "Calendar",
-        None,
-        always,
+    ), "Go to Today", "Jump the calendar view to today's date."));
+    out.push(with_docs(desc_kw(
+        CommandId::CalendarCreateEvent, "New Event", "Calendar",
+        None, always,
+        &["new event", "add event", "create"],
+    ), "Create Event", "Open the event creation dialog."));
+    out.push(with_docs(desc_kw(
+        CommandId::CalendarPopOut, "Pop Out", "Calendar",
+        None, always,
         &["separate window", "multi monitor", "detach calendar"],
-    ));
+    ), "Pop Out Calendar", "Open the calendar in a separate window for multi-monitor setups."));
 }
 
 fn register_smart_folders(out: &mut Vec<CommandDescriptor>) {
-    out.push(with_keywords(
+    out.push(with_docs(with_keywords(
         parameterized(
-            CommandId::SmartFolderSave,
-            "Save as Smart Folder",
-            "Search",
+            CommandId::SmartFolderSave, "Save Search", "Search",
             None,
             |ctx| ctx.search_query.as_ref().is_some_and(|q| !q.is_empty()),
             InputSchema::Single {
@@ -768,39 +704,31 @@ fn register_smart_folders(out: &mut Vec<CommandDescriptor>) {
             },
         ),
         &["smart folder", "save search", "pin"],
-    ));
+    ), "Save as Smart Folder", "Save the current search query as a smart folder in the sidebar for quick access."));
 }
 
 fn register_app(out: &mut Vec<CommandDescriptor>) {
-    out.push(desc_kw(CommandId::AppSearch, "Search", "App", Some(KeyBinding::key('/')), always, &["find", "ctrl+f"]));
-    out.push(desc(CommandId::AppAskAi, "Ask AI", "App", Some(KeyBinding::key('i')), always));
-    out.push(desc(CommandId::AppHelp, "Keyboard Shortcuts", "App", Some(KeyBinding::key('?')), always));
-    out.push(desc(
-        CommandId::AppSyncFolder,
-        "Sync Current Folder",
-        "App",
+    out.push(with_docs(desc_kw(CommandId::AppSearch, "Search", "App", Some(KeyBinding::key('/')), always, &["find", "ctrl+f"]),
+        "Search", "Search across all emails. Supports smart folder query syntax."));
+    out.push(with_docs(desc(CommandId::AppAskAi, "Ask AI", "App", Some(KeyBinding::key('i')), always),
+        "Ask AI", "Open the AI assistant."));
+    out.push(with_docs(desc(CommandId::AppHelp, "Shortcuts", "App", Some(KeyBinding::key('?')), always),
+        "Keyboard Shortcuts", "Show the keyboard shortcuts reference."));
+    out.push(with_docs(desc(
+        CommandId::AppSyncFolder, "Sync", "App",
         Some(KeyBinding::named(NamedKey::F5)),
         |ctx| ctx.active_account_id.is_some(),
-    ));
-    out.push(desc_kw(
-        CommandId::AppOpenPalette,
-        "Command Palette",
-        "App",
-        Some(KeyBinding::cmd_or_ctrl('k')),
-        always,
+    ), "Sync Current Folder", "Trigger an immediate sync of the current folder with the mail provider."));
+    out.push(with_docs(desc_kw(
+        CommandId::AppOpenPalette, "Command Palette", "App",
+        Some(KeyBinding::cmd_or_ctrl('k')), always,
         &["palette", "commands"],
-    ));
-    // Undo: only available when there are tokens in the undo stack.
-    // The app sets `has_undo` on CommandContext (approximated here via always-available;
-    // the app checks the stack before executing).
-    out.push(desc_kw(
-        CommandId::Undo,
-        "Undo",
-        "App",
-        Some(KeyBinding::cmd_or_ctrl('z')),
-        always,
+    ), "Command Palette", "Open the command palette to search and execute any command."));
+    out.push(with_docs(desc_kw(
+        CommandId::Undo, "Undo", "App",
+        Some(KeyBinding::cmd_or_ctrl('z')), always,
         &["revert", "undo"],
-    ));
+    ), "Undo", "Reverse the last undoable action (archive, delete, star, move, etc.)."));
 }
 
 #[cfg(test)]

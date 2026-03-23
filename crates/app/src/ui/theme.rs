@@ -242,6 +242,8 @@ pub enum ContainerClass {
     Badge,
     /// Message card with rounded border.
     MessageCard,
+    /// Email body inset — always white for rendering fidelity.
+    EmailBody,
     /// Action bar (no radius).
     ActionBar,
     /// Floating tooltip/popover on primary background.
@@ -298,6 +300,7 @@ impl ContainerClass {
             Self::Elevated => style_elevated_container,
             Self::Badge => style_badge_container,
             Self::MessageCard => style_message_card_container,
+            Self::EmailBody => style_email_body_container,
             Self::ActionBar => style_action_bar_container,
             Self::Floating => style_floating_container,
             Self::SettingsSection => style_settings_section_container,
@@ -518,10 +521,19 @@ fn style_thread_card_button(
     }
 }
 
-fn style_ghost_button(theme: &Theme, _status: button::Status) -> button::Style {
-    button::Style {
-        text_color: theme.palette().background.base.text,
-        ..Default::default()
+fn style_ghost_button(theme: &Theme, status: button::Status) -> button::Style {
+    let p = theme.palette();
+    match status {
+        button::Status::Hovered => button::Style {
+            background: Some(p.background.weakest.color.into()),
+            text_color: p.background.base.text,
+            border: border::rounded(RADIUS_SM),
+            ..Default::default()
+        },
+        _ => button::Style {
+            text_color: p.background.base.text,
+            ..Default::default()
+        },
     }
 }
 
@@ -978,6 +990,18 @@ fn style_message_card_container(theme: &Theme) -> container::Style {
     }
 }
 
+fn style_email_body_container(_theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Color::WHITE.into()),
+        border: iced::Border {
+            color: Color::BLACK.scale_alpha(0.08),
+            width: 1.0,
+            radius: RADIUS_MD.into(),
+        },
+        ..Default::default()
+    }
+}
+
 fn style_action_bar_container(theme: &Theme) -> container::Style {
     let p = theme.palette();
     container::Style {
@@ -1089,7 +1113,7 @@ fn style_status_bar_container(theme: &Theme) -> container::Style {
         background: Some(p.background.weaker.color.into()),
         border: iced::Border {
             color: p.background.strongest.color.scale_alpha(0.1),
-            width: 1.0,
+            width: 0.0,
             radius: 0.0.into(),
         },
         ..Default::default()

@@ -743,6 +743,9 @@ impl App {
             Message::ToggleSettings => {
                 self.show_settings = !self.show_settings;
                 if self.show_settings {
+                    self.settings.overlay = None;
+                    self.settings.overlay_anim.go_mut(false, iced::time::Instant::now());
+                    self.settings.active_tab = crate::ui::settings::Tab::General;
                     self.settings.begin_editing();
                 }
                 Task::none()
@@ -933,6 +936,14 @@ impl App {
             // Calendar — delegated to handlers/calendar.rs
             Message::Calendar(cal_msg) => self.handle_calendar(*cal_msg),
             Message::ToggleAppMode => {
+                // If calendar is popped out and we're in mail, focus the pop-out window
+                if self.app_mode == AppMode::Mail {
+                    if let Some((&win_id, _)) = self.pop_out_windows.iter().find(|(_, w)| {
+                        matches!(w, PopOutWindow::Calendar)
+                    }) {
+                        return iced::window::gain_focus(win_id);
+                    }
+                }
                 let target = match self.app_mode {
                     AppMode::Mail => AppMode::Calendar,
                     AppMode::Calendar => AppMode::Mail,
@@ -944,8 +955,6 @@ impl App {
                     return Task::none();
                 }
                 self.app_mode = mode;
-                self.sidebar.in_calendar_mode = self.app_mode == AppMode::Calendar;
-                self.sidebar.calendar_active_view = Some(self.calendar.active_view);
                 if self.app_mode == AppMode::Calendar {
                     return self.reload_calendar_events();
                 }
@@ -954,9 +963,7 @@ impl App {
             Message::SetCalendarView(view) => {
                 if self.app_mode != AppMode::Calendar {
                     self.app_mode = AppMode::Calendar;
-                    self.sidebar.in_calendar_mode = true;
                 }
-                self.sidebar.calendar_active_view = Some(view);
                 self.update(Message::Calendar(Box::new(CalendarMessage::SetView(view))))
             }
             Message::CalendarToday => {
@@ -1111,28 +1118,23 @@ impl App {
 
         if self.show_settings {
             let settings_view = self.settings.view().map(Message::Settings);
-            let status_bar = self.status_bar_view();
-            return column![
-                container(settings_view).height(Length::Fill),
-                status_bar,
-            ]
-            .into();
+            return container(settings_view)
+                .height(Length::Fill)
+                .width(Length::Fill)
+                .into();
         }
-
-        let sidebar = container(self.sidebar.view().map(Message::Sidebar))
-            .width(self.sidebar_width)
-            .height(Length::Fill);
-
-        let divider_sidebar = self.build_divider(Divider::Sidebar);
 
         let layout = match self.app_mode {
             AppMode::Calendar => {
                 let calendar_view = ui::calendar::calendar_layout(&self.calendar)
                     .map(|m| Message::Calendar(Box::new(m)));
-                row![sidebar, divider_sidebar, calendar_view]
-                    .height(Length::Fill)
+                row![calendar_view].height(Length::Fill)
             }
             AppMode::Mail => {
+                let sidebar = container(self.sidebar.view().map(Message::Sidebar))
+                    .width(SIDEBAR_MIN_WIDTH)
+                    .height(Length::Fill);
+
                 let thread_list = container(self.thread_list.view().map(Message::ThreadList))
                     .width(self.thread_list_width)
                     .height(Length::Fill);
@@ -1152,13 +1154,18 @@ impl App {
                 };
                 let right_sidebar = ui::right_sidebar::view(self.right_sidebar_open, &rs_data);
 
-                row![sidebar, divider_sidebar, thread_list, divider_thread, reading_pane, right_sidebar]
-                    .height(Length::Fill)
+                let status_bar = self.status_bar_view();
+                let content_area = column![
+                    row![thread_list, divider_thread, reading_pane, right_sidebar]
+                        .height(Length::Fill),
+                    status_bar,
+                ];
+
+                row![sidebar, content_area].height(Length::Fill)
             }
         };
 
-        let status_bar = self.status_bar_view();
-        let full_layout = column![layout, status_bar];
+        let full_layout = column![layout];
 
         let main_layout: Element<'_, Message> = if self.dragging.is_some() {
             mouse_area(full_layout)
@@ -1249,10 +1256,13 @@ impl App {
                 self.update_thread_list_context_from_sidebar();
                 self.handle_label_selected(label_id)
             }
-            SidebarEvent::Compose => Task::none(),
+            SidebarEvent::Compose => self.update(Message::Compose),
             SidebarEvent::ToggleSettings => {
                 self.show_settings = !self.show_settings;
                 if self.show_settings {
+                    self.settings.overlay = None;
+                    self.settings.overlay_anim.go_mut(false, iced::time::Instant::now());
+                    self.settings.active_tab = crate::ui::settings::Tab::General;
                     self.settings.begin_editing();
                 }
                 Task::none()
@@ -1265,9 +1275,6 @@ impl App {
             }
             SidebarEvent::ModeToggled => {
                 self.update(Message::ToggleAppMode)
-            }
-            SidebarEvent::CalendarViewChanged(view) => {
-                self.update(Message::SetCalendarView(view))
             }
             SidebarEvent::SearchHere { query_prefix } => {
                 self.update(Message::SearchHere(query_prefix))
@@ -1328,7 +1335,7 @@ impl App {
                 if let Some(text) = self.search_query.undo() {
                     let query = text.to_owned();
                     self.thread_list.search_query.clone_from(&query);
-                    self.apply_search_debounce();
+                    return self.apply_search_debounce();
                 }
                 Task::none()
             }
@@ -1336,7 +1343,7 @@ impl App {
                 if let Some(text) = self.search_query.redo() {
                     let query = text.to_owned();
                     self.thread_list.search_query.clone_from(&query);
-                    self.apply_search_debounce();
+                    return self.apply_search_debounce();
                 }
                 Task::none()
             }
@@ -1416,6 +1423,9 @@ impl App {
             ReadingPaneEvent::CreateEventFromEmail { message_index } => {
                 self.create_event_from_email(message_index)
             }
+            ReadingPaneEvent::ToggleStar => {
+                self.update(Message::ExecuteCommand(CommandId::EmailStar))
+            }
         }
     }
 
@@ -1450,10 +1460,15 @@ impl App {
             original_title,
         };
 
-        // Switch to calendar mode to show the editor.
+        // If calendar is popped out, focus that window instead of switching main to calendar.
+        if let Some((&win_id, _)) = self.pop_out_windows.iter().find(|(_, w)| {
+            matches!(w, crate::pop_out::PopOutWindow::Calendar)
+        }) {
+            return iced::window::gain_focus(win_id);
+        }
+
+        // Otherwise switch to calendar mode to show the editor.
         self.app_mode = AppMode::Calendar;
-        self.sidebar.in_calendar_mode = true;
-        self.sidebar.calendar_active_view = Some(self.calendar.active_view);
         self.reload_calendar_events()
     }
 

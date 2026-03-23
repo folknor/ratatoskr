@@ -2,7 +2,41 @@
 
 ## Remaining Work
 
+- [ ] **Better MIME handling** - for example in app/src/pop_out_compose.rs mime_from_extension, hardcoded things like this.
+
+- [ ] **Starred thread card background** — The golden tint on starred thread cards uses a fixed `mix()` ratio (`STARRED_BG_ALPHA`) which may not look right across all themes. Needs a GPU-level blend/shader effect that adapts to the theme's background luminance so the starred highlight reads consistently in both light and dark themes.
+
+- [ ] **Star icon: need filled variant** — Lucide only has outline icons. The star toggle in the reading pane needs a filled star (golden) for the active state and an outline star for inactive. Currently uses Unicode ★ as a stopgap, which causes size mismatch and visual jank. Options: (1) add a second icon font with filled variants, (2) use an SVG/image icon, (3) custom widget that draws a filled star path. The button should also not change background color on toggle — just the icon fill.
+
+- [ ] **Collapse individual expanded messages** — Removed the full-card click-to-collapse overlay because it intercepted all clicks on the message body. Need a dedicated collapse affordance — e.g. clicking the message header row (sender/date area), a small collapse chevron button, or a right-click context menu option.
+
+- [ ] **Contact pills on recipients** — Per `docs/pop-out-windows/problem-statement.md`: recipients in To/Cc fields should appear as plain text but become contact pills on hover, revealing an inline edit button for quick contact editing. Applies to: reading pane message headers, pop-out message view, compose window recipient display. Currently recipients are plain text everywhere with no hover interaction. Needs: (1) a contact pill widget that blends with background at rest and reveals pill styling + edit button on hover, (2) display name resolution from the contact system (name → email fallback chain), (3) wiring to the existing `EditContact` flow that opens the settings contact editor.
+
+- [ ] **Email body background override setting** — Email body areas are always rendered on a white background for fidelity (HTML emails are authored against white). Users should be able to override this to use the theme's background instead, for a fully immersive dark mode experience at the cost of email rendering accuracy. Setting in Preferences with three options: "Always white" (default), "Match theme", "Auto" (white in light themes, theme bg in dark themes).
+
+- [ ] **Calendar pop-out awareness as a system-wide contract** — When the calendar is popped out, any action that would show calendar UI (create event from email, toggle calendar mode, calendar commands) must route to the pop-out window rather than switching the main window to calendar mode. Currently this is handled ad-hoc with `pop_out_windows.iter().find(Calendar)` checks in individual handlers (`create_event_from_email`, `ToggleAppMode`). This should be a centralized guard — e.g. a helper like `fn calendar_target(&self) -> CalendarTarget { PopOut(window_id) | Inline }` that all calendar-related actions use, so the contract can't be violated by new code that forgets the check.
+
+- [ ] **Compose routing contract** — "Open compose" can originate from the sidebar button, Reply/Forward/Forward on messages, command palette, or keyboard shortcut. Each needs to check for an existing compose window for the same draft and focus it rather than duplicating. Centralize as `fn compose_target(&self, draft_id: Option<&str>) -> ComposeTarget { NewWindow | ExistingWindow(id) }`.
+
+- [ ] **Settings entry contract** — Settings can be opened from the sidebar button, contact edit click, command palette, or keyboard shortcut. Each entry point needs consistent reset logic (clear overlay, reset animation, set tab). Centralize as `fn open_settings(&mut self, tab: Option<Tab>, overlay: Option<SettingsOverlay>)` so no caller can forget the reset.
+
+- [ ] **Thread navigation contract** — "Show this thread" can come from notifications, search results, agenda items, calendar event links, or deep links. Each needs to handle: is mail mode active? Is the reading pane visible? Should we switch modes? Centralize as `fn navigate_to_thread(&mut self, account_id, thread_id) -> Task<Message>`.
+
+- [ ] **Overlay exclusivity contract** — Command palette, event detail popover, delete confirmation, contact editor, and calendar event editor can all open overlays. Opening one should dismiss conflicting others. Centralize as a `fn request_overlay()` guard that enforces mutual exclusion rather than each caller manually checking.
+
+- [ ] **App logo in first-launch modal + about page** — `assets/icon.svg` exists but isn't rendered anywhere. Needs iced `svg` feature enabled to use `iced::widget::svg`. SVG preferred over PNG because the icon should be re-colored to match the active theme (e.g. primary color tint). Requires adding `"svg"` to the iced features list in `crates/app/Cargo.toml`.
+
+- [ ] **Wire email actions to DB + provider** — `handle_email_action()` in `handlers/commands.rs` shows a status bar confirmation and triggers auto-advance for destructive actions (Archive, Delete, Spam, Move, Snooze), but **never performs the actual DB operation**. The thread stays in place after the next thread list reload. Each action needs: (1) local DB update (e.g. `set_thread_trashed`, remove from inbox label, move to spam folder), (2) optimistic UI removal from thread list, (3) provider write-back (label add/remove for Gmail, folder move for IMAP/JMAP/Graph). `ToggleStar` was wired as a reference implementation — same pattern needed for Archive (`remove INBOX label`), Trash (`add TRASH label / set is_trashed`), Spam (`add SPAM label`), ToggleRead (`set is_read`), TogglePin (`set is_pinned`), ToggleMute (`set is_muted`), MoveToFolder, Snooze. The undo system also depends on this — undo tokens are created but the original action is a no-op, so undo reverses nothing.
+
+- [ ] **Hardcoded values** - We need to do a sweep of the codebase for hardcoded values that shouldn't be. These need to be extracted to a common location so that we can keep track of them and decide whether or not to make them configurable.
+
+- [ ] **Wire command palette extended labels + descriptions to UI** — `CommandDescriptor` now has `palette_label` (longer label for command palette display) and `description` (markdown-ready help text). All ~50 commands populated. Not yet rendered — the palette still uses `label`. Wire `resolved_palette_label()` into palette rendering, and `description` into a future help/shortcut reference panel.
+
+- [ ] **Crate structure and dependency graph** - So much has been implemented without any real consideration for what kind of code lives where. It might be time to get a grip on things.
+
 - [ ] **Pop-out body loading uses snippet fallback** — `message_queries.rs` queries `snippet` from the `messages` table instead of reading from BodyStore (`bodies.db`). Pop-out windows show snippet text, not full message bodies. Should use `BodyStoreState::get()` for proper zstd-decompressed body content.
+
+- [x] ~~**JMAP for Calendars**~~ — Wired: `crates/jmap/src/calendar_sync.rs` (Calendar/get, CalendarEvent/get+changes+set), called from JMAP sync pipeline. Calendar sync orchestrator (`crates/calendar/src/sync.rs`) handles JMAP alongside Google and Graph.
 
 - [ ] **Scroll virtualization** — Thread list renders all cards in `column![]` inside `scrollable`. Needs iced-level virtual scrolling for large mailboxes.
 
@@ -90,7 +124,6 @@ Phases 1-2 complete. Phase 3 blocked on upstream.
 ## Blocked / External
 
 - [ ] **Ship a default Microsoft OAuth client ID** — Manual Azure AD registration task.
-- [ ] **JMAP for Calendars** — Blocked on `jmap-client` upstream (Issue #3). CalDAV covers this.
 - [ ] **QRESYNC VANISHED parsing** — Blocked on `async-imap` upstream (Issue #130). See above.
 
 ## Remaining Enhancements (HTML rendering)

@@ -89,6 +89,12 @@ Non-component UI: `calendar.rs`, `calendar_month.rs`, `calendar_time_grid.rs`, `
 
 **Popover overlay positioning must include the `translation` vector.** In `Widget::overlay()`, `layout.position()` returns coordinates relative to the parent widget, not the window. Add the `translation` parameter: `layout.position() + translation`. Without this, popups misposition at non-1.0 scale factors and inside scrollables.
 
+**`Length::Fill` collapses to zero without a fixed-size ancestor.** If a button or container has `height(Length::Fill)` inside a row/column that defaults to `Shrink` height, the Fill child gets zero height — there's nothing to fill into. The fix is to wrap the parent in a container with an explicit fixed `height(CONSTANT)`. Then Fill children inside resolve correctly against that concrete size. Same applies to `width(Length::Fill)` in vertical layouts. This is the #1 cause of "everything disappeared" when restructuring layouts.
+
+**Dropdown menus in narrow containers need explicit width.** The popover menu inherits its max width from the trigger element. If the trigger is inside a narrow container (e.g., the sidebar header right-stack after a mode button takes 76px), the menu will be too narrow to show full labels. Give the menu container an explicit `width(CONSTANT)` so it overflows the trigger — standard dropdown behavior.
+
+**`iced::window::gain_focus(id)` exists in the Halloy fork.** Despite earlier assumptions, the fork does expose `gain_focus` for programmatic window focusing. Works on X11; Wayland ignores it (compositor policy). Use it for bring-to-foreground behavior like focusing a pop-out calendar window.
+
 ## PaneGrid internals and scale factor
 
 ### How iced computes window/layout sizes

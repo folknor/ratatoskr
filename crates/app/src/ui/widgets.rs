@@ -53,14 +53,8 @@ pub fn command_button<'a>(
         btn = btn.on_press(Message::ExecuteCommand(id));
     }
 
-    if let Some(kb) = keybinding {
-        tooltip(btn, text(kb).size(TEXT_XS), tooltip::Position::Bottom)
-            .gap(SPACE_XXS)
-            .style(theme::ContainerClass::Floating.style())
-            .into()
-    } else {
-        btn.into()
-    }
+    let _ = keybinding;
+    btn.into()
 }
 
 /// Build a toolbar button for a registered command, with an icon.
@@ -103,14 +97,8 @@ pub fn command_icon_button<'a>(
         btn = btn.on_press(Message::ExecuteCommand(id));
     }
 
-    if let Some(kb) = keybinding {
-        tooltip(btn, text(kb).size(TEXT_XS), tooltip::Position::Bottom)
-            .gap(SPACE_XXS)
-            .style(theme::ContainerClass::Floating.style())
-            .into()
-    } else {
-        btn.into()
-    }
+    let _ = keybinding;
+    btn.into()
 }
 
 // ── Leading slot ───────────────────────────────────────
@@ -451,7 +439,8 @@ pub fn dropdown<'a, M: Clone + 'a>(
     .on_press(on_toggle.clone())
     .padding(PAD_DROPDOWN)
     .style(theme::ButtonClass::Action.style())
-    .width(Length::Fill);
+    .width(Length::Fill)
+    .height(DROPDOWN_TRIGGER_HEIGHT);
 
     if !open {
         return trigger.into();
@@ -490,11 +479,12 @@ pub fn dropdown<'a, M: Clone + 'a>(
         column(menu_items).spacing(SPACE_XXS).width(Length::Fill),
     )
     .padding(PAD_DROPDOWN)
-    .style(theme::ContainerClass::Floating.style())
+    .style(theme::ContainerClass::SelectMenu.style())
     .width(Length::Fill);
 
     crate::ui::popover::popover(trigger)
         .popup(menu)
+        .popup_width(SIDEBAR_MIN_WIDTH)
         .on_dismiss(on_toggle)
         .into()
 }
@@ -614,9 +604,9 @@ pub fn settings_button<'a, M: Clone + 'a>(on_press: M) -> Element<'a, M> {
     button(
         container(
             row![
-                container(icon::settings().size(ICON_LG))
+                container(icon::settings().size(ICON_LG).style(text::primary))
                     .align_y(Alignment::Center),
-                container(text("Settings").size(TEXT_LG))
+                container(text("Settings").size(TEXT_LG).style(text::primary))
                     .align_y(Alignment::Center),
             ]
             .spacing(SPACE_XXS)
@@ -625,7 +615,7 @@ pub fn settings_button<'a, M: Clone + 'a>(on_press: M) -> Element<'a, M> {
         .center_x(Length::Fill),
     )
     .on_press(on_press)
-    .style(theme::ButtonClass::Secondary.style())
+    .style(theme::ButtonClass::Experiment { variant: 10 }.style())
     .padding(PAD_BUTTON)
     .width(Length::Fill)
     .into()
@@ -961,17 +951,15 @@ pub fn reply_button<'a, M: Clone + 'a>(
 ) -> Element<'a, M> {
     button(
         row![
-            container(ico.size(ICON_XL).style(text::secondary))
-                .align_y(Alignment::Center),
-            container(text(label).size(TEXT_MD).style(text::secondary))
-                .align_y(Alignment::Center),
+            ico.size(ICON_SM).style(text::secondary),
+            text(label).size(TEXT_SM).style(text::secondary),
         ]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
     )
     .on_press(on_press)
-    .padding(PAD_BUTTON)
-    .style(button::secondary)
+    .padding(PAD_ICON_BTN)
+    .style(theme::ButtonClass::Ghost.style())
     .into()
 }
 
@@ -1039,42 +1027,44 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     on_edit_contact: impl Fn(String) -> M + 'a,
     on_create_event: impl Fn(usize) -> M,
 ) -> Element<'a, M> {
-    let sender = msg
+    let sender_name = msg
         .from_name
         .as_deref()
         .or(msg.from_address.as_deref())
         .unwrap_or("(unknown)");
+    let sender_email_str = msg
+        .from_address
+        .as_deref()
+        .unwrap_or("");
 
-    let avatar = avatar_circle(sender, AVATAR_MESSAGE_CARD);
+    let avatar = avatar_circle(sender_name, AVATAR_MESSAGE_CARD);
     let date_str = format_message_date(msg.date, first_message_date, date_display);
 
     let recipients = msg.to_addresses.as_deref().unwrap_or("");
 
     // Pop-out icon button
     let pop_out_btn = button(
-        icon::external_link().size(ICON_MD).style(text::secondary),
+        icon::external_link().size(ICON_SM).style(text::secondary),
     )
     .on_press(on_pop_out(index))
     .padding(PAD_ICON_BTN)
-    .style(theme::ButtonClass::BareIcon.style());
+    .style(theme::ButtonClass::Ghost.style());
 
     // Sender name — clickable to open contact editing
-    let sender_email = msg
-        .from_address
-        .clone()
-        .unwrap_or_default();
+    let sender_email_owned = msg.from_address.clone().unwrap_or_default();
     let sender_element: Element<'a, M> = button(
-        text(sender)
+        text(sender_name)
             .size(TEXT_LG)
             .font(font::text_semibold())
             .style(text::base),
     )
-    .on_press(on_edit_contact(sender_email))
+    .on_press(on_edit_contact(sender_email_owned))
     .padding(0)
     .style(theme::ButtonClass::BareTransparent.style())
     .into();
 
-    let header = row![
+    // Row 1-2: avatar spanning sender name + sender email
+    let avatar_rows = row![
         avatar,
         column![
             row![
@@ -1090,7 +1080,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
             ]
             .align_y(Alignment::Center)
             .spacing(SPACE_XS),
-            text(recipients)
+            text(sender_email_str)
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         ]
@@ -1100,7 +1090,26 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     .spacing(SPACE_SM)
     .align_y(Alignment::Start);
 
-    let body: Element<'_, M> = if let Some(html) = msg.body_html.as_deref() {
+    // Row 3: "To" label right-aligned under avatar, recipients to the right
+    let to_row = row![
+        container(
+            text("To")
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .width(AVATAR_MESSAGE_CARD + SPACE_SM) // avatar width + gap
+        .padding(iced::Padding { top: 0.0, right: SPACE_XS, bottom: 0.0, left: 0.0 })
+        .align_x(Alignment::End),
+        text(recipients)
+            .size(TEXT_SM)
+            .style(text::base),
+    ]
+    .spacing(0)
+    .align_y(Alignment::Start);
+
+    let header = column![avatar_rows, to_row].spacing(SPACE_XXS);
+
+    let body_inner: Element<'_, M> = if let Some(html) = msg.body_html.as_deref() {
         container(super::html_render::render_html::<M>(
             html,
             msg.body_text.as_deref(),
@@ -1114,7 +1123,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
             .or(msg.snippet.as_deref())
             .unwrap_or("(no preview available)");
         if search_highlight_terms.is_empty() {
-            container(text(display).size(TEXT_LG).style(text::secondary))
+            container(text(display).size(TEXT_LG))
                 .padding(PAD_BODY)
                 .into()
         } else {
@@ -1123,6 +1132,11 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
                 .into()
         }
     };
+
+    let body: Element<'_, M> = container(body_inner)
+        .width(Length::Fill)
+        .style(theme::ContainerClass::EmailBody.style())
+        .into();
 
     let cal_btn = button(
         row![
@@ -1144,17 +1158,11 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
 
     let card_content = column![header, body, actions].spacing(SPACE_XS);
 
-    button(
-        container(card_content)
-            .padding(PAD_CARD)
-            .width(Length::Fill)
-            .style(theme::ContainerClass::MessageCard.style()),
-    )
-    .on_press(on_toggle(index))
-    .padding(0)
-    .style(theme::ButtonClass::BareTransparent.style())
-    .width(Length::Fill)
-    .into()
+    container(card_content)
+        .padding(PAD_CARD)
+        .width(Length::Fill)
+        .style(theme::ContainerClass::MessageCard.style())
+        .into()
 }
 
 // ── Collapsed message row ───────────────────────────────
@@ -1209,15 +1217,8 @@ pub fn collapsed_message_row<'a, M: Clone + 'a>(
     .spacing(SPACE_XS)
     .align_y(Alignment::Center);
 
-    let pad = iced::Padding {
-        top: SPACE_XXS,
-        right: SPACE_SM,
-        bottom: SPACE_XXS,
-        left: SPACE_SM,
-    };
-
     button(
-        container(content).padding(pad).width(Length::Fill),
+        container(content).width(Length::Fill),
     )
     .on_press(on_toggle(index))
     .padding(0)

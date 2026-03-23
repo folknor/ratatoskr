@@ -31,8 +31,6 @@ pub enum SidebarMessage {
     DismissPinnedSearch(i64),
     RefreshPinnedSearch(i64),
     ToggleMode,
-    /// Set the calendar view from the sidebar header view switcher.
-    SetCalendarView(super::calendar::CalendarView),
     /// Right-click "Search here" on a label/folder.
     SearchHere(String),
     /// Click a smart folder — execute its query via the unified search pipeline.
@@ -55,8 +53,6 @@ pub enum SidebarEvent {
     PinnedSearchDismissed(i64),
     PinnedSearchRefreshed(i64),
     ModeToggled,
-    /// Calendar view changed from sidebar header view switcher.
-    CalendarViewChanged(super::calendar::CalendarView),
     /// "Search here" — prefill search bar with a scope query prefix.
     SearchHere { query_prefix: String },
     /// Smart folder selected — execute its query via the unified search pipeline.
@@ -94,10 +90,6 @@ pub struct Sidebar {
     pub pinned_public_folders: Vec<PinnedPublicFolder>,
     /// Currently selected shared mailbox (by mailbox_id), if any.
     pub selected_shared_mailbox: Option<String>,
-    /// Whether the app is in calendar mode. Set by the parent App.
-    pub in_calendar_mode: bool,
-    /// Active calendar view, kept in sync by the parent App for the header view switcher.
-    pub calendar_active_view: Option<super::calendar::CalendarView>,
 }
 
 impl Sidebar {
@@ -116,8 +108,6 @@ impl Sidebar {
             shared_mailboxes: Vec::new(),
             pinned_public_folders: Vec::new(),
             selected_shared_mailbox: None,
-            in_calendar_mode: false,
-            calendar_active_view: None,
         }
     }
 
@@ -203,10 +193,6 @@ impl Component for Sidebar {
             SidebarMessage::ToggleMode => {
                 (Task::none(), Some(SidebarEvent::ModeToggled))
             }
-            SidebarMessage::SetCalendarView(view) => {
-                self.calendar_active_view = Some(view);
-                (Task::none(), Some(SidebarEvent::CalendarViewChanged(view)))
-            }
             SidebarMessage::SearchHere(query_prefix) => {
                 (Task::none(), Some(SidebarEvent::SearchHere { query_prefix }))
             }
@@ -230,54 +216,44 @@ impl Component for Sidebar {
     fn view(&self) -> Element<'_, SidebarMessage> {
         let show_labels = self.selected_account.is_some();
 
-        // Mode toggle + scope dropdown header
-        let mode_icon = if self.in_calendar_mode {
-            icon::mail()
-        } else {
-            icon::calendar()
-        };
-        let mode_btn = button(
-            container(mode_icon.size(ICON_SM))
-                .center(Length::Shrink),
+        // Mode toggle button (tall square spanning dropdown + compose height)
+        let mode_btn = container(
+            button(
+                container(icon::calendar().size(ICON_HERO).style(text::primary))
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill),
+            )
+            .on_press(SidebarMessage::ToggleMode)
+            .height(Length::Fill)
+            .width(Length::Fill)
+            .style(theme::ButtonClass::Experiment { variant: 10 }.style()),
         )
-        .on_press(SidebarMessage::ToggleMode)
-        .padding(SPACE_XS)
-        .style(theme::ButtonClass::Ghost.style());
+        .width(SIDEBAR_HEADER_HEIGHT) // square
+        .height(Length::Fill);
 
-        let header_row = if self.in_calendar_mode {
-            // Calendar mode: show view switcher buttons right of mode toggle.
-            let views = [
-                (super::calendar::CalendarView::Day, "D"),
-                (super::calendar::CalendarView::WorkWeek, "WW"),
-                (super::calendar::CalendarView::Week, "W"),
-                (super::calendar::CalendarView::Month, "M"),
-            ];
-            let mut r = row![mode_btn].spacing(SPACE_XXS).align_y(Alignment::Center);
-            for (view, label) in views {
-                let is_active = self.calendar_active_view == Some(view);
-                let style = if is_active {
-                    theme::ButtonClass::Nav { active: true }.style()
-                } else {
-                    theme::ButtonClass::Ghost.style()
-                };
-                r = r.push(
-                    button(
-                        text(label)
-                            .size(TEXT_SM)
-                            .style(if is_active { text::primary } else { text::secondary }),
-                    )
-                    .on_press(SidebarMessage::SetCalendarView(view))
-                    .padding(PAD_ICON_BTN)
-                    .style(style),
-                );
-            }
-            r.width(Length::Fill)
-        } else {
-            row![mode_btn, scope_dropdown(self)]
+        // Stack the dropdown and compose button vertically
+        let right_stack = container(
+            column![
+                scope_dropdown(self),
+                Space::new().height(SPACE_XXS),
+                widgets::compose_button(SidebarMessage::Compose),
+            ]
+            .spacing(0)
+            .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_y(Alignment::Center);
+
+        // Fixed-height header so Fill children resolve correctly
+        let header_row = container(
+            row![mode_btn, right_stack]
                 .spacing(SPACE_XXS)
-                .align_y(Alignment::Center)
                 .width(Length::Fill)
-        };
+                .height(Length::Fill),
+        )
+        .height(SIDEBAR_HEADER_HEIGHT)
+        .width(Length::Fill);
 
         let mut col = column![
             header_row,
@@ -291,8 +267,6 @@ impl Component for Sidebar {
             col = col.push(pinned_searches_section(self));
             col = col.push(Space::new().height(SPACE_XXS));
         }
-
-        col = col.push(widgets::compose_button(SidebarMessage::Compose));
         col = col.push(Space::new().height(SPACE_XS));
         col = col.push(nav_items(self));
         col = col.push(widgets::section_break());

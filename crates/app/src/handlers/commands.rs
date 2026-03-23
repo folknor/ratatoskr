@@ -136,8 +136,11 @@ impl App {
             );
         }
 
-        // Dispatch label apply/remove locally (DB-only, provider sync picks up changes).
+        // Dispatch actions locally (DB update, provider sync picks up changes).
         match action {
+            EmailAction::ToggleStar => {
+                return self.toggle_star_selected_threads();
+            }
             EmailAction::AddLabel { label_id } => {
                 return self.apply_label_to_selected_threads(&label_id);
             }
@@ -290,6 +293,53 @@ impl App {
             |result| {
                 if let Err(e) = result {
                     log::error!("Failed to remove label: {e}");
+                }
+                Message::Noop
+            },
+        )
+    }
+
+    /// Toggle the star flag on all selected threads.
+    fn toggle_star_selected_threads(&mut self) -> Task<Message> {
+        let indices = self.thread_list.selected_indices();
+        let threads: Vec<(String, String, bool)> = indices
+            .iter()
+            .filter_map(|&i| self.thread_list.threads.get(i))
+            .map(|t| (t.account_id.clone(), t.id.clone(), t.is_starred))
+            .collect();
+
+        if threads.is_empty() {
+            return Task::none();
+        }
+
+        // Toggle local UI state immediately
+        for &i in &indices {
+            if let Some(t) = self.thread_list.threads.get_mut(i) {
+                t.is_starred = !t.is_starred;
+            }
+        }
+        // Also update reading pane if it's showing one of these threads
+        for (_, tid, was_starred) in &threads {
+            self.reading_pane.update_star(tid, !was_starred);
+        }
+
+        let db = std::sync::Arc::clone(&self.db);
+
+        Task::perform(
+            async move {
+                db.with_write_conn(move |conn| {
+                    for (account_id, thread_id, was_starred) in &threads {
+                        ratatoskr_core::db::queries::set_thread_starred(
+                            conn, account_id, thread_id, !was_starred,
+                        )?;
+                    }
+                    Ok(())
+                })
+                .await
+            },
+            |result| {
+                if let Err(e) = result {
+                    log::error!("Failed to toggle star: {e}");
                 }
                 Message::Noop
             },
