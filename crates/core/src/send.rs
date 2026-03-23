@@ -137,7 +137,7 @@ pub fn build_mime_message(req: &SendRequest) -> Result<Vec<u8>, SendError> {
     );
 
     if let Some(ref in_reply_to) = req.in_reply_to {
-        builder = builder.in_reply_to(in_reply_to.to_string());
+        builder = builder.in_reply_to(in_reply_to.clone());
     }
     if let Some(ref refs) = req.references {
         // References header contains space-separated Message-IDs.
@@ -158,11 +158,11 @@ pub fn build_mime_message(req: &SendRequest) -> Result<Vec<u8>, SendError> {
     // ── Body ─────────────────────────────────────────────
     let text_part = SinglePart::builder()
         .header(ContentType::TEXT_PLAIN)
-        .body(req.body_text.to_owned());
+        .body(req.body_text.clone());
 
     let html_part = SinglePart::builder()
         .header(ContentType::TEXT_HTML)
-        .body(req.body_html.to_owned());
+        .body(req.body_html.clone());
 
     let alternative = MultiPart::alternative()
         .singlepart(text_part)
@@ -185,11 +185,11 @@ pub fn build_mime_message(req: &SendRequest) -> Result<Vec<u8>, SendError> {
 
             let attachment = if let Some(ref cid) = att.content_id {
                 // Inline attachment (e.g. embedded image referenced by cid)
-                Attachment::new_inline(cid.to_owned())
-                    .body(att.data.to_owned(), content_type)
+                Attachment::new_inline(cid.clone())
+                    .body(att.data.clone(), content_type)
             } else {
-                Attachment::new(att.filename.to_owned())
-                    .body(att.data.to_owned(), content_type)
+                Attachment::new(att.filename.clone())
+                    .body(att.data.clone(), content_type)
             };
 
             mixed = mixed.singlepart(attachment);

@@ -41,7 +41,7 @@ pub fn decode_to_utf8(data: &[u8]) -> Result<String, String> {
 /// Checks comma, semicolon, and tab. Returns the delimiter that appears
 /// most consistently across lines.
 pub fn detect_delimiter(text: &str) -> u8 {
-    let candidates: &[u8] = &[b',', b';', b'\t'];
+    let candidates: &[u8] = b",;\t";
     let lines: Vec<&str> = text.lines().take(10).collect();
 
     if lines.is_empty() {
@@ -122,7 +122,7 @@ pub fn detect_has_header(rows: &[Vec<String>]) -> bool {
         .count();
 
     // If more than half the cells look like data, it's not a header
-    let threshold = (first_row.len() + 1) / 2;
+    let threshold = first_row.len().div_ceil(2);
     data_like_count < threshold
 }
 
@@ -146,7 +146,7 @@ fn looks_like_data(value: &str) -> bool {
     // All digits (or digits with common phone separators): likely data
     let digit_ratio = trimmed
         .chars()
-        .filter(|c| c.is_ascii_digit())
+        .filter(char::is_ascii_digit)
         .count() as f64
         / trimmed.len() as f64;
     if digit_ratio > 0.7 && trimmed.len() > 3 {

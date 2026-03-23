@@ -88,7 +88,7 @@ pub fn compress(
     );
 
     if format == Format::Unsupported {
-        log::warn!("Unsupported format for compression: mime={}", mime_type);
+        log::warn!("Unsupported format for compression: mime={mime_type}");
     }
 
     let unchanged = || {
@@ -102,7 +102,7 @@ pub fn compress(
 
     let result = match format {
         Format::Jpeg | Format::Png | Format::WebP | Format::Gif | Format::Bmp | Format::Tiff => {
-            log::debug!("Using image compression strategy for {:?}", format);
+            log::debug!("Using image compression strategy for {format:?}");
             image::compress_image(input, format, config)
         }
         Format::Heic => {
@@ -127,7 +127,7 @@ pub fn compress(
                 detect::OoxmlKind::Xlsx => ArchiveKind::Xlsx,
                 detect::OoxmlKind::Pptx => ArchiveKind::Pptx,
             };
-            log::debug!("Using OOXML archive compression strategy for {:?}", kind);
+            log::debug!("Using OOXML archive compression strategy for {kind:?}");
             archive::compress_archive(input, archive_kind, config)
         }
         Format::Odf(kind) => {
@@ -136,7 +136,7 @@ pub fn compress(
                 detect::OdfKind::Ods => ArchiveKind::Ods,
                 detect::OdfKind::Odp => ArchiveKind::Odp,
             };
-            log::debug!("Using ODF archive compression strategy for {:?}", kind);
+            log::debug!("Using ODF archive compression strategy for {kind:?}");
             archive::compress_archive(input, archive_kind, config)
         }
         Format::Svg => {
@@ -163,7 +163,7 @@ pub fn compress(
             }
         }
         Err(e) => {
-            log::error!("Compression failed: {}", e);
+            log::error!("Compression failed: {e}");
         }
     }
 

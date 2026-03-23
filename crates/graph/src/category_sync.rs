@@ -34,7 +34,7 @@ pub async fn graph_categories_sync(
     let aid = account_id.to_string();
     let categories = response.value;
     let count = categories.len();
-    log::info!("[Graph] Category sync for account {account_id}: {} categories fetched", count);
+    log::info!("[Graph] Category sync for account {account_id}: {count} categories fetched");
 
     db.with_conn(move |conn| {
         let tx = conn
@@ -59,8 +59,8 @@ pub async fn graph_categories_sync(
                 &cat.display_name,
                 &ratatoskr_db::db::queries::CategoryColors {
                     preset: Some(color_preset),
-                    bg: color_bg.clone(),
-                    fg: color_fg.clone(),
+                    bg: color_bg,
+                    fg: color_fg,
                 },
                 &cat.id,
                 i64::try_from(i).unwrap_or(0),

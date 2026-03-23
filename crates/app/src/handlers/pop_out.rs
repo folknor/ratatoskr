@@ -60,7 +60,7 @@ impl App {
                     PopOutMessage::MessageView(m) => m,
                     _ => return Task::none(),
                 };
-                self.open_compose_from_message_view(window_id, mv_msg)
+                self.open_compose_from_message_view(window_id, &mv_msg)
             }
             // Save As — needs db access from App
             (
@@ -88,9 +88,9 @@ impl App {
                         db.with_write_conn(move |conn| {
                             ratatoskr_core::db::queries::remove_thread_label(
                                 conn,
-                                account_id,
-                                thread_id,
-                                "INBOX".to_string(),
+                                &account_id,
+                                &thread_id,
+                                "INBOX",
                             )
                         })
                         .await
@@ -115,15 +115,15 @@ impl App {
                         db.with_write_conn(move |conn| {
                             ratatoskr_core::db::queries::add_thread_label(
                                 conn,
-                                account_id.clone(),
-                                thread_id.clone(),
-                                "TRASH".to_string(),
+                                &account_id,
+                                &thread_id,
+                                "TRASH",
                             )?;
                             ratatoskr_core::db::queries::remove_thread_label(
                                 conn,
-                                account_id,
-                                thread_id,
-                                "INBOX".to_string(),
+                                &account_id,
+                                &thread_id,
+                                "INBOX",
                             )
                         })
                         .await
@@ -403,7 +403,7 @@ impl App {
 
         let (window_id, open_task) = iced::window::open(settings);
         self.pop_out_windows
-            .insert(window_id, PopOutWindow::MessageView(state));
+            .insert(window_id, PopOutWindow::MessageView(Box::new(state)));
 
         self.dispatch_message_view_loads(
             window_id,
@@ -441,7 +441,7 @@ impl App {
 
         let (window_id, open_task) = iced::window::open(settings);
         self.pop_out_windows
-            .insert(window_id, PopOutWindow::Compose(state));
+            .insert(window_id, PopOutWindow::Compose(Box::new(state)));
         self.composer_is_open = true;
 
         open_task.discard()
@@ -451,7 +451,7 @@ impl App {
     pub(crate) fn open_compose_from_message_view(
         &mut self,
         window_id: iced::window::Id,
-        action: MessageViewMessage,
+        action: &MessageViewMessage,
     ) -> Task<Message> {
         let Some(PopOutWindow::MessageView(mv)) =
             self.pop_out_windows.get(&window_id)
@@ -460,7 +460,7 @@ impl App {
         };
 
         let subject = mv.subject.clone().unwrap_or_default();
-        let mode = match action {
+        let mode = match *action {
             MessageViewMessage::Reply => ComposeMode::Reply {
                 original_subject: subject,
             },
@@ -475,7 +475,7 @@ impl App {
 
         let state = ComposeState::new_reply(
             &self.sidebar.accounts,
-            mode.clone(),
+            &mode,
             mv.from_address.as_deref(),
             mv.from_name.as_deref(),
             mv.cc_addresses.as_deref(),
@@ -491,7 +491,7 @@ impl App {
     /// from the main window's reading pane context).
     pub(crate) fn handle_compose_action(
         &mut self,
-        action: crate::command_dispatch::ComposeAction,
+        action: &crate::command_dispatch::ComposeAction,
     ) -> Task<Message> {
         let selected_thread = self
             .thread_list
@@ -503,7 +503,7 @@ impl App {
             .and_then(|t| t.subject.clone())
             .unwrap_or_default();
 
-        let mode = match action {
+        let mode = match *action {
             crate::command_dispatch::ComposeAction::Reply => {
                 ComposeMode::Reply {
                     original_subject: subject,
@@ -530,7 +530,7 @@ impl App {
 
         let state = ComposeState::new_reply(
             &self.sidebar.accounts,
-            mode.clone(),
+            &mode,
             to_email,
             to_name,
             cc_emails,
@@ -742,7 +742,7 @@ impl App {
             let message_id = entry.message_id.clone();
 
             self.pop_out_windows
-                .insert(window_id, PopOutWindow::MessageView(state));
+                .insert(window_id, PopOutWindow::MessageView(Box::new(state)));
 
             tasks.push(self.dispatch_message_view_loads(
                 window_id,

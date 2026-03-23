@@ -102,12 +102,12 @@ fn extract_display_name(card: &jmap_client::contact_card::ContactCard) -> Option
     let name_obj = card.name()?;
 
     // Try `full` first (a string or an array of components — check both)
-    if let Some(full) = name_obj.get("full") {
-        if let Some(s) = full.as_str() {
-            let trimmed = s.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
+    if let Some(full) = name_obj.get("full")
+        && let Some(s) = full.as_str()
+    {
+        let trimmed = s.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
         }
     }
 

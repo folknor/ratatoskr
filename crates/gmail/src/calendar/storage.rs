@@ -282,13 +282,13 @@ fn parse_event_times(event: &GoogleCalendarEvent) -> (i64, i64, bool) {
     let (start, is_all_day) = event
         .start
         .as_ref()
-        .map(|s| parse_single_datetime(s))
+        .map(parse_single_datetime)
         .unwrap_or((0, false));
 
     let (end, _) = event
         .end
         .as_ref()
-        .map(|e| parse_single_datetime(e))
+        .map(parse_single_datetime)
         .unwrap_or((start + 3600, false));
 
     (start, end, is_all_day)

@@ -154,15 +154,15 @@ fn read_setting_map(
 
 pub fn get_threads(
     conn: &Connection,
-    account_id: String,
-    label_id: Option<String>,
+    account_id: &str,
+    label_id: Option<&str>,
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> Result<Vec<DbThread>, String> {
     let lim = limit.unwrap_or(50);
     let off = offset.unwrap_or(0);
 
-    if let Some(ref lid) = label_id {
+    if let Some(lid) = label_id {
         let sql = format!(
             "SELECT t.*, m.from_name, m.from_address FROM threads t
              INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
@@ -173,7 +173,7 @@ pub fn get_threads(
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?3 OFFSET ?4"
         );
-        query_as::<DbThread>(conn, &sql, &[&account_id, lid, &lim, &off])
+        query_as::<DbThread>(conn, &sql, &[&account_id, &lid, &lim, &off])
     } else {
         let sql = format!(
             "SELECT t.*, m.from_name, m.from_address FROM threads t
@@ -189,8 +189,8 @@ pub fn get_threads(
 
 pub fn get_threads_for_category(
     conn: &Connection,
-    account_id: String,
-    category: String,
+    account_id: &str,
+    category: &str,
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> Result<Vec<DbThread>, String> {
@@ -229,8 +229,8 @@ pub fn get_threads_for_category(
 
 pub fn get_thread_by_id(
     conn: &Connection,
-    account_id: String,
-    thread_id: String,
+    account_id: &str,
+    thread_id: &str,
 ) -> Result<Option<DbThread>, String> {
     let sql = format!(
         "SELECT t.*, m.from_name, m.from_address FROM threads t
@@ -244,8 +244,8 @@ pub fn get_thread_by_id(
 
 pub fn get_thread_label_ids(
     conn: &Connection,
-    account_id: String,
-    thread_id: String,
+    account_id: &str,
+    thread_id: &str,
 ) -> Result<Vec<String>, String> {
     let mut stmt = conn
         .prepare("SELECT label_id FROM thread_labels WHERE account_id = ?1 AND thread_id = ?2")
@@ -302,7 +302,7 @@ pub async fn get_messages_for_thread(
     Ok(messages)
 }
 
-pub fn get_labels(conn: &Connection, account_id: String) -> Result<Vec<DbLabel>, String> {
+pub fn get_labels(conn: &Connection, account_id: &str) -> Result<Vec<DbLabel>, String> {
     query_as::<DbLabel>(
         conn,
         "SELECT * FROM labels WHERE account_id = ?1 ORDER BY sort_order ASC, name ASC",
@@ -474,7 +474,7 @@ mod tests {
     }
 }
 
-pub fn set_setting(conn: &Connection, key: String, value: String) -> Result<(), String> {
+pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
     conn.execute(
         "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
         params![key, value],
@@ -501,44 +501,44 @@ fn set_thread_bool_field(
 
 pub fn set_thread_read(
     conn: &Connection,
-    account_id: String,
-    thread_id: String,
+    account_id: &str,
+    thread_id: &str,
     is_read: bool,
 ) -> Result<(), String> {
-    set_thread_bool_field(conn, &account_id, &thread_id, "is_read", is_read)
+    set_thread_bool_field(conn, account_id, thread_id, "is_read", is_read)
 }
 
 pub fn set_thread_starred(
     conn: &Connection,
-    account_id: String,
-    thread_id: String,
+    account_id: &str,
+    thread_id: &str,
     is_starred: bool,
 ) -> Result<(), String> {
-    set_thread_bool_field(conn, &account_id, &thread_id, "is_starred", is_starred)
+    set_thread_bool_field(conn, account_id, thread_id, "is_starred", is_starred)
 }
 
 pub fn set_thread_pinned(
     conn: &Connection,
-    account_id: String,
-    thread_id: String,
+    account_id: &str,
+    thread_id: &str,
     is_pinned: bool,
 ) -> Result<(), String> {
-    set_thread_bool_field(conn, &account_id, &thread_id, "is_pinned", is_pinned)
+    set_thread_bool_field(conn, account_id, thread_id, "is_pinned", is_pinned)
 }
 
 pub fn set_thread_muted(
     conn: &Connection,
-    account_id: String,
-    thread_id: String,
+    account_id: &str,
+    thread_id: &str,
     is_muted: bool,
 ) -> Result<(), String> {
-    set_thread_bool_field(conn, &account_id, &thread_id, "is_muted", is_muted)
+    set_thread_bool_field(conn, account_id, thread_id, "is_muted", is_muted)
 }
 
 pub fn delete_thread(
     conn: &Connection,
-    account_id: String,
-    thread_id: String,
+    account_id: &str,
+    thread_id: &str,
 ) -> Result<(), String> {
     conn.execute(
         "DELETE FROM threads WHERE account_id = ?1 AND id = ?2",
@@ -550,9 +550,9 @@ pub fn delete_thread(
 
 pub fn add_thread_label(
     conn: &Connection,
-    account_id: String,
-    thread_id: String,
-    label_id: String,
+    account_id: &str,
+    thread_id: &str,
+    label_id: &str,
 ) -> Result<(), String> {
     conn.execute(
         "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES (?1, ?2, ?3)",
@@ -564,9 +564,9 @@ pub fn add_thread_label(
 
 pub fn remove_thread_label(
     conn: &Connection,
-    account_id: String,
-    thread_id: String,
-    label_id: String,
+    account_id: &str,
+    thread_id: &str,
+    label_id: &str,
 ) -> Result<(), String> {
     conn.execute(
         "DELETE FROM thread_labels WHERE account_id = ?1 AND thread_id = ?2 AND label_id = ?3",
@@ -576,7 +576,7 @@ pub fn remove_thread_label(
     Ok(())
 }
 
-pub fn upsert_label(conn: &Connection, label: DbLabel) -> Result<(), String> {
+pub fn upsert_label(conn: &Connection, label: &DbLabel) -> Result<(), String> {
     conn.execute(
         "INSERT OR REPLACE INTO labels (account_id, id, name, type, color_bg, color_fg, visible, sort_order, imap_folder_path, imap_special_use)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
@@ -597,7 +597,7 @@ pub fn upsert_label(conn: &Connection, label: DbLabel) -> Result<(), String> {
     Ok(())
 }
 
-pub fn delete_label(conn: &Connection, account_id: String, label_id: String) -> Result<(), String> {
+pub fn delete_label(conn: &Connection, account_id: &str, label_id: &str) -> Result<(), String> {
     conn.execute(
         "DELETE FROM labels WHERE account_id = ?1 AND id = ?2",
         params![account_id, label_id],
@@ -608,7 +608,7 @@ pub fn delete_label(conn: &Connection, account_id: String, label_id: String) -> 
 
 pub fn get_category_unread_counts(
     conn: &Connection,
-    account_id: String,
+    account_id: &str,
 ) -> Result<Vec<CategoryCount>, String> {
     query_as::<CategoryCount>(
         conn,
@@ -624,8 +624,8 @@ pub fn get_category_unread_counts(
 
 pub fn get_categories_for_threads(
     conn: &Connection,
-    account_id: String,
-    thread_ids: Vec<String>,
+    account_id: &str,
+    thread_ids: &[String],
 ) -> Result<Vec<ThreadCategoryRow>, String> {
     if thread_ids.is_empty() {
         return Ok(Vec::new());
@@ -646,7 +646,7 @@ pub fn get_categories_for_threads(
 
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-        param_values.push(Box::new(account_id.clone()));
+        param_values.push(Box::new(account_id.to_owned()));
         for thread_id in chunk {
             param_values.push(Box::new(thread_id.clone()));
         }
@@ -667,8 +667,8 @@ pub fn get_categories_for_threads(
 
 pub fn get_attachments_for_message(
     conn: &Connection,
-    account_id: String,
-    message_id: String,
+    account_id: &str,
+    message_id: &str,
 ) -> Result<Vec<DbAttachment>, String> {
     query_as::<DbAttachment>(
         conn,
@@ -679,12 +679,12 @@ pub fn get_attachments_for_message(
 
 pub fn search_contacts(
     conn: &Connection,
-    query: String,
+    query: &str,
     limit: i64,
 ) -> Result<Vec<DbContact>, String> {
-    match search_contacts_fts(conn, &query, limit) {
+    match search_contacts_fts(conn, query, limit) {
         Ok(results) => Ok(results),
-        Err(_) => search_contacts_like(conn, &query, limit),
+        Err(_) => search_contacts_like(conn, query, limit),
     }
 }
 
@@ -780,7 +780,7 @@ fn build_fts_query(raw: &str) -> String {
         .join(" ")
 }
 
-pub fn get_contact_by_email(conn: &Connection, email: String) -> Result<Option<DbContact>, String> {
+pub fn get_contact_by_email(conn: &Connection, email: &str) -> Result<Option<DbContact>, String> {
     let normalized = email.to_lowercase();
     query_one::<DbContact>(
         conn,
@@ -791,10 +791,10 @@ pub fn get_contact_by_email(conn: &Connection, email: String) -> Result<Option<D
 
 pub fn get_thread_count(
     conn: &Connection,
-    account_id: String,
-    label_id: Option<String>,
+    account_id: &str,
+    label_id: Option<&str>,
 ) -> Result<i64, String> {
-    if let Some(ref label_id) = label_id {
+    if let Some(label_id) = label_id {
         conn.query_row(
             "SELECT COUNT(DISTINCT t.id) AS cnt FROM threads t
              INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
@@ -826,7 +826,7 @@ pub async fn get_provider_type(db: &DbState, account_id: &str) -> Result<String,
     .await
 }
 
-pub fn get_unread_count(conn: &Connection, account_id: String) -> Result<i64, String> {
+pub fn get_unread_count(conn: &Connection, account_id: &str) -> Result<i64, String> {
     conn.query_row(
         "SELECT COUNT(*) AS cnt FROM threads t
          INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id

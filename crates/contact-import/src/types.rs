@@ -103,10 +103,10 @@ impl ImportedContact {
     ///
     /// If `display_name` is set, use it. Otherwise, combine first + last.
     pub fn effective_display_name(&self) -> Option<String> {
-        if let Some(ref name) = self.display_name {
-            if !name.is_empty() {
-                return Some(name.clone());
-            }
+        if let Some(ref name) = self.display_name
+            && !name.is_empty()
+        {
+            return Some(name.clone());
         }
         match (&self.first_name, &self.last_name) {
             (Some(first), Some(last)) if !first.is_empty() && !last.is_empty() => {

@@ -57,6 +57,7 @@ fn xml_ns_prefixes_for(xml: &str, ns_uri: &str) -> Vec<String> {
 /// Split a CalDAV multistatus XML document into individual `<response>` fragments.
 ///
 /// Returns slices of the original string, each containing one `<…:response>…</…:response>` block.
+#[allow(clippy::cast_possible_truncation)]
 pub(super) fn split_xml_responses(xml: &str) -> Vec<&str> {
     let dav_prefixes = xml_ns_prefixes_for(xml, "DAV:");
     let mut responses = Vec::new();
@@ -135,6 +136,7 @@ pub(crate) fn extract_tag_value(xml: &str, tag_name: &str) -> Option<String> {
 /// Find the first element whose local name matches `tag_name` (case-insensitive,
 /// any namespace prefix) and return the raw XML slice including the element's
 /// start and end tags.
+#[allow(clippy::cast_possible_truncation)]
 fn extract_first_element<'a>(xml: &'a str, tag_name: &str) -> Option<&'a str> {
     let all_prefixes = {
         let mut prefixes = Vec::new();

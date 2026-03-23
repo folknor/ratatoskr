@@ -104,7 +104,7 @@ impl BodyStoreState {
         body_html: Option<String>,
         body_text: Option<String>,
     ) -> Result<(), String> {
-        log::debug!("Storing body for message_id={}", message_id);
+        log::debug!("Storing body for message_id={message_id}");
         self.with_conn(move |conn| {
             let html_blob = body_html.as_deref().map(compress).transpose()?;
             let text_blob = body_text.as_deref().map(compress).transpose()?;
@@ -152,7 +152,7 @@ impl BodyStoreState {
 
     /// Retrieve a single message body (decompressed).
     pub async fn get(&self, message_id: String) -> Result<Option<MessageBody>, String> {
-        log::debug!("Retrieving body for message_id={}", message_id);
+        log::debug!("Retrieving body for message_id={message_id}");
         self.with_conn(move |conn| {
             let mut stmt = conn
                 .prepare("SELECT body_html, body_text FROM bodies WHERE message_id = ?1")

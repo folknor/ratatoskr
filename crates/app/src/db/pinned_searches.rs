@@ -275,7 +275,7 @@ impl Db {
                     .collect();
 
                 let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                    param_values.iter().map(|p| p.as_ref()).collect();
+                    param_values.iter().map(std::convert::AsRef::as_ref).collect();
 
                 let rows = stmt
                     .query_map(param_refs.as_slice(), row_to_thread)
@@ -306,6 +306,7 @@ impl Db {
                 )
                 .map_err(|e| e.to_string())?;
 
+            #[allow(clippy::cast_possible_wrap)]
             stmt.query_map(params![limit as i64], |row| row.get(0))
                 .map_err(|e| e.to_string())?
                 .collect::<Result<Vec<String>, _>>()

@@ -142,7 +142,7 @@ impl InlineImageStoreState {
 
     /// Retrieve an inline image by content hash.
     pub async fn get(&self, content_hash: String) -> Result<Option<(Vec<u8>, String)>, String> {
-        log::debug!("Retrieving inline image hash={}", content_hash);
+        log::debug!("Retrieving inline image hash={content_hash}");
         self.with_conn(move |conn| {
             let result = conn
                 .query_row(
@@ -246,9 +246,7 @@ impl InlineImageStoreState {
             }
 
             log::warn!(
-                "Inline image store size ({} bytes) exceeds threshold ({} bytes), pruning",
-                total_bytes,
-                max_bytes
+                "Inline image store size ({total_bytes} bytes) exceeds threshold ({max_bytes} bytes), pruning"
             );
             let excess = total_bytes - max_bytes_i64;
             let mut stmt = conn
@@ -291,7 +289,7 @@ impl InlineImageStoreState {
             tx.commit()
                 .map_err(|e| format!("inline image prune commit: {e}"))?;
             if deleted > 0 {
-                log::info!("Pruned {} inline images, freed {} bytes", deleted, freed);
+                log::info!("Pruned {deleted} inline images, freed {freed} bytes");
             }
             Ok(deleted)
         })

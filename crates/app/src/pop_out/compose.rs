@@ -419,7 +419,7 @@ impl ComposeState {
 
     pub fn new_reply(
         accounts: &[db::Account],
-        mode: ComposeMode,
+        mode: &ComposeMode,
         to_email: Option<&str>,
         to_name: Option<&str>,
         cc_emails: Option<&str>,

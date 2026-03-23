@@ -44,6 +44,7 @@ pub fn correlate_mentions_in_html(
 
     // 2. Find all <a href="mailto:...">...</a> spans in the HTML.
     //    The regex captures the full <a ...>...</a> tag and the email address.
+    #[allow(clippy::unwrap_in_result)]
     let re = Regex::new(r#"(?i)<a\s[^>]*href\s*=\s*"mailto:([^"?]+)[^"]*"[^>]*>.*?</a>"#)
         .expect("static regex is valid");
 

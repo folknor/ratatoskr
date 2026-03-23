@@ -230,7 +230,7 @@ pub enum Message {
     SmartFolderSaved(Result<i64, String>),
 
     // Calendar
-    Calendar(CalendarMessage),
+    Calendar(Box<CalendarMessage>),
     ToggleAppMode,
     SetAppMode(AppMode),
     SetCalendarView(CalendarView),
@@ -824,7 +824,7 @@ impl App {
                 Task::none()
             }
             Message::EmailAction(action) => self.handle_email_action(action),
-            Message::ComposeAction(action) => self.handle_compose_action(action),
+            Message::ComposeAction(ref action) => self.handle_compose_action(action),
             Message::TaskAction(_action) => Task::none(),
             Message::SetTheme(theme) => {
                 self.settings.theme = theme;
@@ -931,7 +931,7 @@ impl App {
             Message::SmartFolderSaved(result) => self.handle_smart_folder_saved(result),
 
             // Calendar — delegated to handlers/calendar.rs
-            Message::Calendar(cal_msg) => self.handle_calendar(cal_msg),
+            Message::Calendar(cal_msg) => self.handle_calendar(*cal_msg),
             Message::ToggleAppMode => {
                 let target = match self.app_mode {
                     AppMode::Mail => AppMode::Calendar,
@@ -957,10 +957,10 @@ impl App {
                     self.sidebar.in_calendar_mode = true;
                 }
                 self.sidebar.calendar_active_view = Some(view);
-                self.update(Message::Calendar(CalendarMessage::SetView(view)))
+                self.update(Message::Calendar(Box::new(CalendarMessage::SetView(view))))
             }
             Message::CalendarToday => {
-                self.update(Message::Calendar(CalendarMessage::Today))
+                self.update(Message::Calendar(Box::new(CalendarMessage::Today)))
             }
 
             // Account management
@@ -1093,7 +1093,7 @@ impl App {
                 }
                 PopOutWindow::Calendar => {
                     ui::calendar::calendar_layout(&self.calendar)
-                        .map(Message::Calendar)
+                        .map(|m| Message::Calendar(Box::new(m)))
                 }
             };
         }
@@ -1128,7 +1128,7 @@ impl App {
         let layout = match self.app_mode {
             AppMode::Calendar => {
                 let calendar_view = ui::calendar::calendar_layout(&self.calendar)
-                    .map(Message::Calendar);
+                    .map(|m| Message::Calendar(Box::new(m)));
                 row![sidebar, divider_sidebar, calendar_view]
                     .height(Length::Fill)
             }
@@ -1517,7 +1517,7 @@ impl App {
 
         let state = pop_out::compose::ComposeState::new_reply(
             &self.sidebar.accounts,
-            mode.clone(),
+            &mode,
             to_email.as_deref(),
             to_name.as_deref(),
             cc_emails.as_deref(),
@@ -1702,7 +1702,7 @@ impl App {
         Task::perform(
             async move {
                 db.with_write_conn(move |conn| {
-                    ratatoskr_core::account::delete::delete_account_row(&conn, &account_id)
+                    ratatoskr_core::account::delete::delete_account_row(conn, &account_id)
                 })
                 .await
             },
@@ -1720,7 +1720,7 @@ impl App {
             async move {
                 db.with_write_conn(move |conn| {
                     ratatoskr_core::db::queries_extra::update_account_sync(
-                        &conn, &account_id, params,
+                        conn, &account_id, params,
                     )
                 })
                 .await
@@ -2150,7 +2150,7 @@ async fn load_threads_scoped(
                 .collect();
             threads.extend(local_threads);
             // Sort all drafts together by updated_at DESC
-            threads.sort_by(|a, b| b.last_message_at.cmp(&a.last_message_at));
+            threads.sort_by_key(|t| std::cmp::Reverse(t.last_message_at));
         }
 
         Ok(threads)

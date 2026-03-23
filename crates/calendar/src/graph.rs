@@ -128,7 +128,7 @@ fn json_to_graph_event_create(value: &serde_json::Value) -> Result<GraphEventCre
 
     let is_all_day = value.get("isAllDay")
         .or_else(|| value.get("is_all_day"))
-        .and_then(|v| v.as_bool());
+        .and_then(serde_json::Value::as_bool);
 
     let start = parse_event_datetime(value, "start", "startDateTime", is_all_day.unwrap_or(false))?;
     let end = parse_event_datetime(value, "end", "endDateTime", is_all_day.unwrap_or(false))?;

@@ -41,15 +41,15 @@ pub fn auto_detect_mappings(headers: &[String]) -> Vec<ColumnMapping> {
 fn detect_field(normalized: &str, used: &[ContactField]) -> ContactField {
     // Try each pattern set in priority order
     let candidates = [
-        (ContactField::Email, &EMAIL_PATTERNS[..]),
-        (ContactField::DisplayName, &NAME_PATTERNS[..]),
-        (ContactField::FirstName, &FIRST_NAME_PATTERNS[..]),
-        (ContactField::LastName, &LAST_NAME_PATTERNS[..]),
-        (ContactField::Phone, &PHONE_PATTERNS[..]),
-        (ContactField::Company, &COMPANY_PATTERNS[..]),
-        (ContactField::Email2, &EMAIL2_PATTERNS[..]),
-        (ContactField::Notes, &NOTES_PATTERNS[..]),
-        (ContactField::Group, &GROUP_PATTERNS[..]),
+        (ContactField::Email, EMAIL_PATTERNS),
+        (ContactField::DisplayName, NAME_PATTERNS),
+        (ContactField::FirstName, FIRST_NAME_PATTERNS),
+        (ContactField::LastName, LAST_NAME_PATTERNS),
+        (ContactField::Phone, PHONE_PATTERNS),
+        (ContactField::Company, COMPANY_PATTERNS),
+        (ContactField::Email2, EMAIL2_PATTERNS),
+        (ContactField::Notes, NOTES_PATTERNS),
+        (ContactField::Group, GROUP_PATTERNS),
     ];
 
     for (field, patterns) in &candidates {

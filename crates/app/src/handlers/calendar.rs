@@ -82,7 +82,7 @@ impl App {
                         }
                         Ok(data)
                     },
-                    |result| Message::Calendar(CalendarMessage::EventLoaded(result)),
+                    |result| Message::Calendar(Box::new(CalendarMessage::EventLoaded(result))),
                 )
             }
             CalendarMessage::EventLoaded(result) => {
@@ -195,7 +195,7 @@ impl App {
                 self.calendar.overlay = CalendarOverlay::None;
                 Task::perform(
                     async move { db.delete_calendar_event(event_id).await },
-                    |r| Message::Calendar(CalendarMessage::EventDeleted(r)),
+                    |r| Message::Calendar(Box::new(CalendarMessage::EventDeleted(r))),
                 )
             }
             CalendarMessage::EventDeleted(result) => {
@@ -261,7 +261,7 @@ impl App {
                     async move {
                         db.set_calendar_visibility(calendar_id, visible).await
                     },
-                    |_| Message::Calendar(CalendarMessage::EventSaved(Ok(()))),
+                    |_| Message::Calendar(Box::new(CalendarMessage::EventSaved(Ok(())))),
                 )
             }
             CalendarMessage::CalendarsLoaded(load_generation, result) => {
@@ -399,14 +399,14 @@ impl App {
         if let Some(id) = event.id.clone() {
             Task::perform(
                 async move { db.update_calendar_event(id, params).await },
-                |r| Message::Calendar(CalendarMessage::EventSaved(r)),
+                |r| Message::Calendar(Box::new(CalendarMessage::EventSaved(r))),
             )
         } else {
             Task::perform(
                 async move {
                     db.create_calendar_event(params).await.map(|_id| ())
                 },
-                |r| Message::Calendar(CalendarMessage::EventSaved(r)),
+                |r| Message::Calendar(Box::new(CalendarMessage::EventSaved(r))),
             )
         }
     }
@@ -423,11 +423,11 @@ impl App {
         Task::batch([
             Task::perform(
                 async move { db.load_calendar_events_for_view().await },
-                move |r| Message::Calendar(CalendarMessage::EventsLoaded(load_generation, r)),
+                move |r| Message::Calendar(Box::new(CalendarMessage::EventsLoaded(load_generation, r))),
             ),
             Task::perform(
                 async move { db2.load_calendars_for_sidebar().await },
-                move |r| Message::Calendar(CalendarMessage::CalendarsLoaded(load_generation, r)),
+                move |r| Message::Calendar(Box::new(CalendarMessage::CalendarsLoaded(load_generation, r))),
             ),
         ])
     }

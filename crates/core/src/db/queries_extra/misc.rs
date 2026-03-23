@@ -134,7 +134,7 @@ pub async fn db_get_imap_uids_for_messages(
             param_values.push(Box::new(id.clone()));
         }
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-            param_values.iter().map(|p| p.as_ref()).collect();
+            param_values.iter().map(std::convert::AsRef::as_ref).collect();
         let rows = stmt
             .query_map(param_refs.as_slice(), ImapMessageRow::from_row)
             .map_err(|e| e.to_string())?;
@@ -202,7 +202,7 @@ pub async fn db_update_message_imap_folder(
             param_values.push(Box::new(id.clone()));
         }
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-            param_values.iter().map(|p| p.as_ref()).collect();
+            param_values.iter().map(std::convert::AsRef::as_ref).collect();
         conn.execute(&sql, param_refs.as_slice())
             .map_err(|e| e.to_string())?;
         Ok(())
@@ -360,7 +360,7 @@ pub async fn db_query_raw_select(
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let col_count = stmt.column_count();
         let col_names: Vec<String> = (0..col_count)
-            .map(|i| stmt.column_name(i).map(|s| s.to_string()))
+            .map(|i| stmt.column_name(i).map(ToString::to_string))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
 
@@ -385,7 +385,7 @@ pub async fn db_query_raw_select(
             })
             .collect();
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-            param_values.iter().map(|p| p.as_ref()).collect();
+            param_values.iter().map(std::convert::AsRef::as_ref).collect();
 
         let rows = stmt
             .query_map(param_refs.as_slice(), |row| {

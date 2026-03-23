@@ -71,6 +71,7 @@ pub fn build_month_grid(
 
     for week_idx in 0..num_weeks {
         let mut week: [MonthDay; 7] = std::array::from_fn(|day_idx| {
+            #[allow(clippy::cast_possible_wrap)]
             let offset = (week_idx * 7 + day_idx) as i64;
             let date = grid_start + chrono::Duration::days(offset);
             MonthDay {
@@ -407,6 +408,7 @@ pub fn mini_month<'a, M: 'a + Clone>(
     for w in 0..num_weeks {
         let mut week_row = row![].spacing(SPACE_0);
         for d in 0..7 {
+            #[allow(clippy::cast_possible_wrap)]
             let offset = (w * 7 + d) as i64;
             let date = grid_start + chrono::Duration::days(offset);
             let in_month = date.month() == month && date.year() == year;
@@ -480,6 +482,7 @@ fn max_visible_events() -> usize {
     // Cell height minus date row (~20px) minus "+N more" row (~16px),
     // divided by event row height.
     let available = CALENDAR_CELL_MIN_HEIGHT - CALENDAR_EVENT_HEIGHT - CALENDAR_EVENT_HEIGHT;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let count = (available / CALENDAR_EVENT_HEIGHT).floor() as usize;
     count.max(1)
 }
@@ -506,6 +509,7 @@ fn last_day_of_month(year: i32, month: u32) -> NaiveDate {
 /// Number of days between two dates (inclusive would be +1 at call site).
 fn days_between(a: NaiveDate, b: NaiveDate) -> usize {
     let diff = (b - a).num_days();
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     if diff < 0 { 0 } else { diff as usize }
 }
 

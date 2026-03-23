@@ -231,10 +231,10 @@ where
         viewport: &Rectangle,
     ) {
         let state: &DroppableState = tree.state.downcast_ref::<DroppableState>();
-        if let Action::Drag(_, _) = state.action {
-            if self.drag_hide {
-                return;
-            }
+        if let Action::Drag(_, _) = state.action
+            && self.drag_hide
+        {
+            return;
         }
 
         self.content.as_widget().draw(
@@ -323,20 +323,20 @@ where
                 })
                 | Event::Touch(touch::Event::FingerPressed { .. }) => {
                     let bounds = layout.bounds();
-                    if cursor.is_over(bounds) {
-                        if let Some(pos) = cursor.position() {
-                            // Select the droppable and store the position before dragging
-                            state.action = Action::Select(pos);
-                            state.widget_pos = bounds.position();
-                            state.overlay_bounds.width = bounds.width;
-                            state.overlay_bounds.height = bounds.height;
+                    if cursor.is_over(bounds)
+                        && let Some(pos) = cursor.position()
+                    {
+                        // Select the droppable and store the position before dragging
+                        state.action = Action::Select(pos);
+                        state.widget_pos = bounds.position();
+                        state.overlay_bounds.width = bounds.width;
+                        state.overlay_bounds.height = bounds.height;
 
-                            if let Some(on_click) = self.on_click.clone() {
-                                shell.publish(on_click);
-                            }
-
-                            shell.capture_event();
+                        if let Some(on_click) = self.on_click.clone() {
+                            shell.publish(on_click);
                         }
+
+                        shell.capture_event();
                     }
                 }
                 Event::Mouse(mouse::Event::ButtonPressed {
@@ -406,8 +406,9 @@ where
                         _ => false,
                     };
 
-                    if should_drag {
-                        if let Action::Drag(start, _) = state.action {
+                    if should_drag
+                        && let Action::Drag(start, _) = state.action
+                    {
                             // Apply drag mode constraints
                             let constrained = if let Some((drag_x, drag_y)) = self.drag_mode {
                                 Point {
@@ -439,7 +440,6 @@ where
                             }
 
                             shell.request_redraw();
-                        }
                     }
                 }
                 _ => {}
@@ -515,14 +515,14 @@ where
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
         let state: &mut DroppableState = tree.state.downcast_mut::<DroppableState>();
-        if self.drag_overlay {
-            if let Action::Drag(_, _) = state.action {
-                return Some(overlay::Element::new(Box::new(DragOverlay {
-                    content: &mut self.content,
-                    tree: &mut tree.children[0],
-                    overlay_bounds: state.overlay_bounds,
-                })));
-            }
+        if self.drag_overlay
+            && let Action::Drag(_, _) = state.action
+        {
+            return Some(overlay::Element::new(Box::new(DragOverlay {
+                content: &mut self.content,
+                tree: &mut tree.children[0],
+                overlay_bounds: state.overlay_bounds,
+            })));
         }
         self.content.as_widget_mut().overlay(
             &mut tree.children[0],

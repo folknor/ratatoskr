@@ -51,9 +51,9 @@ fn calendar_section(cal: &CalendarState) -> Element<'_, Message> {
         today,
         cal.week_start,
         &cal.dates_with_events,
-        |date| Message::Calendar(CalendarMessage::SelectDate(date)),
-        Message::Calendar(CalendarMessage::PrevMonth),
-        Message::Calendar(CalendarMessage::NextMonth),
+        |date| Message::Calendar(Box::new(CalendarMessage::SelectDate(date))),
+        Message::Calendar(Box::new(CalendarMessage::PrevMonth)),
+        Message::Calendar(Box::new(CalendarMessage::NextMonth)),
     );
 
     container(
@@ -112,7 +112,7 @@ fn agenda_item(event: &crate::ui::calendar_time_grid::TimeGridEvent) -> Element<
     button(
         column![time_text, title_text].spacing(SPACE_XXXS),
     )
-    .on_press(Message::Calendar(CalendarMessage::EventClicked(event_id)))
+    .on_press(Message::Calendar(Box::new(CalendarMessage::EventClicked(event_id))))
     .padding(Padding::from([SPACE_XXXS, 0.0]))
     .width(Length::Fill)
     .style(theme::ButtonClass::Ghost.style())

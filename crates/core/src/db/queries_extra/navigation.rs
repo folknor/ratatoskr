@@ -266,7 +266,7 @@ fn build_account_labels(
 ) -> Result<Vec<NavigationFolder>, String> {
     let provider = get_account_provider(conn, account_id)?;
     let semantics = label_semantics_for_provider(&provider);
-    let all_labels = get_labels(conn, account_id.to_owned())?;
+    let all_labels = get_labels(conn, account_id)?;
     let system_ids = system_label_ids();
     let unread_by_label = get_label_unread_counts(conn, account_id)?;
 

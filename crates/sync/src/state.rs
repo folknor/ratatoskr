@@ -651,7 +651,7 @@ pub async fn get_shared_mailbox_email(
         )
         .optional()
         .map_err(|e| format!("get shared mailbox email: {e}"))
-        .map(|opt| opt.flatten())
+        .map(std::option::Option::flatten)
     })
     .await
 }

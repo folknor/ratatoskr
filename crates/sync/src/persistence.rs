@@ -342,7 +342,7 @@ pub async fn store_inline_images(
         return;
     }
 
-    log::debug!("Storing inline images for {}", provider_name);
+    log::debug!("Storing inline images for {provider_name}");
     if let Err(error) = inline_images.put_batch(images).await {
         log::warn!("Failed to store {provider_name} inline images: {error}");
     }

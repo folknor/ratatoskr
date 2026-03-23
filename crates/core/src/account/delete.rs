@@ -111,7 +111,7 @@ pub fn referenced_hashes_excluding_account(
         for hash in chunk {
             params.push(Box::new((*hash).to_string()));
         }
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(std::convert::AsRef::as_ref).collect();
         let rows = stmt
             .query_map(param_refs.as_slice(), |row| row.get::<_, String>("content_hash"))
             .map_err(|e| format!("query batch ref count: {e}"))?;

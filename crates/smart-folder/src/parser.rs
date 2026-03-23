@@ -109,9 +109,8 @@ pub fn analyze_cursor_context(query: &str, cursor_pos: usize) -> CursorContext {
         let partial = &query[value_start..cursor];
 
         // If the partial value starts with a quote, allow spaces inside it.
-        if partial.starts_with('"') {
+        if let Some(after_open) = partial.strip_prefix('"') {
             // Inside a quoted value — check if there's a closing quote before cursor.
-            let after_open = &partial[1..];
             if after_open.contains('"') {
                 // Closing quote found before cursor — not inside the operator anymore.
                 continue;

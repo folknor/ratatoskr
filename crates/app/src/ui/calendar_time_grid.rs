@@ -701,7 +701,10 @@ fn event_block<'a, M: 'a + Clone>(
         if col_idx > 0 {
             r = r.push(
                 Space::new()
-                    .width(Length::FillPortion(col_idx as u16))
+                    .width(Length::FillPortion(
+                        #[allow(clippy::cast_possible_truncation)]
+                        { col_idx as u16 }
+                    ))
                     .height(height),
             );
         }
@@ -718,7 +721,10 @@ fn event_block<'a, M: 'a + Clone>(
         if remaining > 0 {
             r = r.push(
                 Space::new()
-                    .width(Length::FillPortion(remaining as u16))
+                    .width(Length::FillPortion(
+                        #[allow(clippy::cast_possible_truncation)]
+                        { remaining as u16 }
+                    ))
                     .height(height),
             );
         }

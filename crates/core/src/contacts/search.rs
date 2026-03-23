@@ -69,13 +69,13 @@ pub fn search_contacts_unified(
     search_contacts_table(conn, &pattern, limit, &mut seen_emails, &mut results)?;
 
     // 2. Search seen_addresses table (lower priority, fills remaining).
-    let remaining = limit - results.len() as i64;
+    let remaining = limit - i64::try_from(results.len()).unwrap_or(i64::MAX);
     if remaining > 0 {
         search_seen_addresses_table(conn, &pattern, remaining, &mut seen_emails, &mut results)?;
     }
 
     // 3. Search contact groups by name.
-    let group_remaining = limit - results.len() as i64;
+    let group_remaining = limit - i64::try_from(results.len()).unwrap_or(i64::MAX);
     if group_remaining > 0 {
         search_groups_table(conn, &pattern, group_remaining, &mut results)?;
     }

@@ -38,11 +38,11 @@ pub fn read_cached(app_data_dir: &Path, content_hash: &str) -> Option<Vec<u8>> {
     let path = cache_dir(app_data_dir).ok()?.join(content_hash);
     match std::fs::read(&path) {
         Ok(data) => {
-            log::debug!("Attachment cache hit for hash={}", content_hash);
+            log::debug!("Attachment cache hit for hash={content_hash}");
             Some(data)
         }
         Err(_) => {
-            log::debug!("Attachment cache miss for hash={}", content_hash);
+            log::debug!("Attachment cache miss for hash={content_hash}");
             None
         }
     }
@@ -183,7 +183,7 @@ pub async fn enforce_cache_limit(db: &DbState, app_data_dir: &Path) -> Result<()
     if max_bytes <= 0 {
         return Ok(());
     }
-    log::debug!("Enforcing attachment cache limit: max {} bytes", max_bytes);
+    log::debug!("Enforcing attachment cache limit: max {max_bytes} bytes");
 
     loop {
         let current_size: i64 = db

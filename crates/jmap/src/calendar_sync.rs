@@ -587,12 +587,11 @@ async fn delete_event_by_jmap_id(
 fn extract_location(event: &CalendarEvent<Get>) -> Option<String> {
     let locations = event.locations()?;
     for (_key, value) in locations {
-        if let Some(obj) = value.as_object() {
-            if let Some(name) = obj.get("name").and_then(|n| n.as_str()) {
-                if !name.is_empty() {
-                    return Some(name.to_string());
-                }
-            }
+        if let Some(obj) = value.as_object()
+            && let Some(name) = obj.get("name").and_then(|n| n.as_str())
+            && !name.is_empty()
+        {
+            return Some(name.to_string());
         }
     }
     None
@@ -606,10 +605,10 @@ fn resolve_calendar_id(
     let calendar_ids = event.calendar_ids()?;
     for (remote_cal_id, value) in calendar_ids {
         // calendarIds maps calendar_id -> true for calendars this event belongs to
-        if value.as_bool() == Some(true) {
-            if let Some(local_id) = cal_map.get(remote_cal_id.as_str()) {
-                return Some((*local_id).to_string());
-            }
+        if value.as_bool() == Some(true)
+            && let Some(local_id) = cal_map.get(remote_cal_id.as_str())
+        {
+            return Some((*local_id).to_string());
         }
     }
     None
@@ -621,22 +620,22 @@ fn extract_organizer_email(event: &CalendarEvent<Get>) -> Option<String> {
     for (_key, value) in participants {
         let obj = value.as_object()?;
         // Look for roles containing "owner"
-        if let Some(roles) = obj.get("roles").and_then(|r| r.as_object()) {
-            if roles.contains_key("owner") {
-                if let Some(email) = obj
-                    .get("sendTo")
-                    .and_then(|s| s.as_object())
-                    .and_then(|s| s.get("imip"))
-                    .and_then(|v| v.as_str())
-                {
-                    // Strip "mailto:" prefix
-                    let email = email.strip_prefix("mailto:").unwrap_or(email);
-                    return Some(email.to_string());
-                }
-                // Try email field directly
-                if let Some(email) = obj.get("email").and_then(|e| e.as_str()) {
-                    return Some(email.to_string());
-                }
+        if let Some(roles) = obj.get("roles").and_then(|r| r.as_object())
+            && roles.contains_key("owner")
+        {
+            if let Some(email) = obj
+                .get("sendTo")
+                .and_then(|s| s.as_object())
+                .and_then(|s| s.get("imip"))
+                .and_then(|v| v.as_str())
+            {
+                // Strip "mailto:" prefix
+                let email = email.strip_prefix("mailto:").unwrap_or(email);
+                return Some(email.to_string());
+            }
+            // Try email field directly
+            if let Some(email) = obj.get("email").and_then(|e| e.as_str()) {
+                return Some(email.to_string());
             }
         }
     }
@@ -837,7 +836,7 @@ fn format_jscalendar_times(
     let start_dt = chrono::Utc
         .timestamp_opt(start_time, 0)
         .single()
-        .unwrap_or_else(|| chrono::Utc::now());
+        .unwrap_or_else(chrono::Utc::now);
 
     if is_all_day {
         let start_str = start_dt.format("%Y-%m-%d").to_string();

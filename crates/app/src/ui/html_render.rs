@@ -391,7 +391,7 @@ impl<'a> HtmlParser<'a> {
                         Some(ListKind::Ordered) => {
                             if let Some(counter) = self.list_counters.last_mut() {
                                 *counter += 1;
-                                format!("{}.", counter)
+                                format!("{counter}.")
                             } else {
                                 "\u{2022}".to_string()
                             }

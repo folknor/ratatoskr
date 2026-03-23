@@ -701,6 +701,7 @@ pub fn chord_indicator<'a, M: 'a>(
 fn snooze_preset_options() -> Vec<OptionItem> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    #[allow(clippy::cast_possible_wrap)]
     let now_secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)

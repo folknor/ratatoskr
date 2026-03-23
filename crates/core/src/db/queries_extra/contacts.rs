@@ -97,7 +97,7 @@ pub async fn db_delete_contact(db: &DbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM contacts WHERE id = ?1", params![id])
             .map_err(|e| {
-                log::error!("Failed to delete contact {}: {e}", id);
+                log::error!("Failed to delete contact {id}: {e}");
                 e.to_string()
             })?;
         Ok(())

@@ -98,7 +98,7 @@ pub async fn caldav_create_event_impl(
 ) -> Result<CalendarEventDto, String> {
     let config = load_caldav_account_config(db, encryption_key, account_id).await?;
     let client = shared_http_client();
-    let input = ical::parse_caldav_event_input(event)?;
+    let input = ical::parse_caldav_event_input(&event)?;
     let uid = uuid::Uuid::new_v4().to_string();
     let ical_data = ical::build_caldav_ical_event(&input, Some(&uid));
     let remote_event_id = xml::join_url_path(calendar_remote_id, &format!("{uid}.ics"))?;
@@ -128,7 +128,7 @@ pub async fn caldav_update_event_impl(
 ) -> Result<CalendarEventDto, String> {
     let config = load_caldav_account_config(db, encryption_key, account_id).await?;
     let client = shared_http_client();
-    let input = ical::parse_caldav_event_input(event)?;
+    let input = ical::parse_caldav_event_input(&event)?;
     let existing = fetch_caldav_event_by_href(client, &config, remote_event_id).await?;
     let merged = ical::merge_caldav_event_input(&existing, &input);
     let ical_data = ical::build_caldav_ical_event(&merged, existing.uid.as_deref());

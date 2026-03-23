@@ -21,7 +21,7 @@ impl App {
                 {
                     return self.handle_window_close(window_id);
                 }
-                self.handle_key_pressed(key, modifiers, status)
+                self.handle_key_pressed(&key, modifiers, status)
             }
             KeyEventMessage::PendingChordTimeout => {
                 self.pending_chord = None;
@@ -32,18 +32,18 @@ impl App {
 
     fn handle_key_pressed(
         &mut self,
-        key: iced::keyboard::Key,
+        key: &iced::keyboard::Key,
         modifiers: iced::keyboard::Modifiers,
         status: iced::event::Status,
     ) -> Task<Message> {
         // 1. If palette is open, route to palette-specific handler
         if self.palette.is_open() {
-            return self.handle_palette_key(&key);
+            return self.handle_palette_key(key);
         }
 
         // 2a. If typeahead is visible, intercept arrow keys and Tab/Enter/Escape.
         if self.thread_list.typeahead.visible {
-            match &key {
+            match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
                     return self.update(Message::ThreadList(
                         ThreadListMessage::TypeaheadNavigate(TypeaheadDirection::Up),
@@ -79,7 +79,7 @@ impl App {
         }
 
         // 3. Convert iced key to command-palette Chord
-        let Some(chord) = command_dispatch::iced_key_to_chord(&key, &modifiers) else {
+        let Some(chord) = command_dispatch::iced_key_to_chord(key, &modifiers) else {
             return Task::none();
         };
 

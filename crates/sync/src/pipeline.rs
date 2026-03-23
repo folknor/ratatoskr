@@ -183,18 +183,14 @@ pub fn cleanup_orphan_threads(
         }
     }
     if count > 0 {
-        log::info!(
-            "Cleaned up {} orphan threads for account {}",
-            count,
-            account_id
-        );
+        log::info!("Cleaned up {count} orphan threads for account {account_id}");
     }
     Ok(count)
 }
 
 /// Mark initial sync as completed for providers whose delta state is stored elsewhere.
 pub fn mark_initial_sync_completed(conn: &Connection, account_id: &str) -> Result<(), String> {
-    log::info!("Marking initial sync completed for account {}", account_id);
+    log::info!("Marking initial sync completed for account {account_id}");
     conn.execute(
         "UPDATE accounts SET initial_sync_completed = 1, updated_at = unixepoch() WHERE id = ?1",
         rusqlite::params![account_id],
@@ -205,7 +201,7 @@ pub fn mark_initial_sync_completed(conn: &Connection, account_id: &str) -> Resul
 
 /// Clear account history_id (forces next sync to be initial).
 pub fn clear_account_history_id(conn: &Connection, account_id: &str) -> Result<(), String> {
-    log::info!("Clearing history_id for account {} (forcing initial sync)", account_id);
+    log::info!("Clearing history_id for account {account_id} (forcing initial sync)");
     conn.execute(
         "UPDATE accounts SET history_id = NULL, initial_sync_completed = 0, updated_at = unixepoch() WHERE id = ?1",
         rusqlite::params![account_id],
@@ -216,7 +212,7 @@ pub fn clear_account_history_id(conn: &Connection, account_id: &str) -> Result<(
 
 /// Clear all folder sync states for an account (forces full folder resync).
 pub fn clear_all_folder_sync_states(conn: &Connection, account_id: &str) -> Result<(), String> {
-    log::info!("Clearing all folder sync states for account {}", account_id);
+    log::info!("Clearing all folder sync states for account {account_id}");
     conn.execute(
         "DELETE FROM folder_sync_state WHERE account_id = ?1",
         rusqlite::params![account_id],

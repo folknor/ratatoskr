@@ -115,7 +115,7 @@ pub(super) fn parse_caldav_ical_event(
 }
 
 pub(super) fn parse_caldav_event_input(
-    value: serde_json::Value,
+    value: &serde_json::Value,
 ) -> Result<serde_json::Map<String, serde_json::Value>, String> {
     value
         .as_object()

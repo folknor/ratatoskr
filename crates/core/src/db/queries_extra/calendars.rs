@@ -392,7 +392,7 @@ pub async fn db_delete_calendar_event(db: &DbState, event_id: String) -> Result<
             params![event_id],
         )
         .map_err(|e| {
-            log::error!("Failed to delete calendar event {}: {e}", event_id);
+            log::error!("Failed to delete calendar event {event_id}: {e}");
             e.to_string()
         })?;
         Ok(())
@@ -805,7 +805,9 @@ fn advance_months(timestamp: i64, months: i64) -> i64 {
     };
     let naive = dt.naive_local();
     let total_months = naive.month() as i64 - 1 + months;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let new_month = ((total_months % 12) + 1) as u32;
+    #[allow(clippy::cast_possible_truncation)]
     let new_year = naive.year() + (total_months / 12) as i32;
     let new_day = naive.day().min(days_in_month(new_year, new_month));
     let Some(new_date) = chrono::NaiveDate::from_ymd_opt(new_year, new_month, new_day) else {

@@ -67,6 +67,7 @@ pub fn search_contacts_for_autocomplete(
     }
 
     // Search GAL cache (second priority, after synced contacts).
+    #[allow(clippy::cast_possible_wrap)]
     let gal_remaining = limit - results.len() as i64;
     if gal_remaining > 0 {
         search_gal_cache(
@@ -80,6 +81,7 @@ pub fn search_contacts_for_autocomplete(
 
     // Search seen_addresses table (lower priority, fills remaining).
     // Order by last_seen_at DESC for recency.
+    #[allow(clippy::cast_possible_wrap)]
     let remaining = limit - results.len() as i64;
     if remaining > 0 {
         search_seen_addresses(
@@ -92,6 +94,7 @@ pub fn search_contacts_for_autocomplete(
     }
 
     // Search contact groups by name.
+    #[allow(clippy::cast_possible_wrap)]
     let group_remaining = limit - results.len() as i64;
     if group_remaining > 0 {
         search_groups(conn, &pattern, group_remaining, &mut results)?;

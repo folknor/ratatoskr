@@ -445,7 +445,7 @@ impl Component for AddAccountWizard {
                 (Task::none(), None)
             }
             AddAccountMessage::DiscoveryComplete(_, Ok(config)) => {
-                self.handle_discovery_result(config)
+                self.handle_discovery_result(&config)
             }
             AddAccountMessage::DiscoveryComplete(_, Err(e)) => {
                 // Duplicate account errors go back to email input.
@@ -628,7 +628,7 @@ impl AddAccountWizard {
 
     fn handle_discovery_result(
         &mut self,
-        config: DiscoveredConfig,
+        config: &DiscoveredConfig,
     ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
         if config.options.is_empty() {
             self.error = Some(
@@ -715,17 +715,19 @@ impl AddAccountWizard {
                             &provider, &open_url,
                         )
                         .await;
-                        let mapped = result.map(|bundle| OAuthSuccess {
-                            access_token: bundle.tokens.access_token,
-                            refresh_token: bundle.tokens.refresh_token,
-                            token_expires_at: Some(
-                                chrono::Utc::now().timestamp()
-                                    + bundle.tokens.expires_in as i64,
-                            ),
-                            user_email: bundle.user_info.email,
-                            user_name: bundle.user_info.name,
-                            oauth_provider: provider_id_clone,
-                            oauth_client_id: client_id_clone,
+                        let mapped = result.map(|bundle| {
+                            #[allow(clippy::cast_possible_wrap)]
+                            let expires_at = chrono::Utc::now().timestamp()
+                                + bundle.tokens.expires_in as i64;
+                            OAuthSuccess {
+                                access_token: bundle.tokens.access_token,
+                                refresh_token: bundle.tokens.refresh_token,
+                                token_expires_at: Some(expires_at),
+                                user_email: bundle.user_info.email,
+                                user_name: bundle.user_info.name,
+                                oauth_provider: provider_id_clone,
+                                oauth_client_id: client_id_clone,
+                            }
                         });
                         (generation, mapped)
                     },
@@ -821,17 +823,19 @@ impl AddAccountWizard {
                     &provider, &open_url,
                 )
                 .await;
-                let mapped = result.map(|bundle| OAuthSuccess {
-                    access_token: bundle.tokens.access_token,
-                    refresh_token: bundle.tokens.refresh_token,
-                    token_expires_at: Some(
-                        chrono::Utc::now().timestamp()
-                            + bundle.tokens.expires_in as i64,
-                    ),
-                    user_email: bundle.user_info.email,
-                    user_name: bundle.user_info.name,
-                    oauth_provider: provider_id_clone,
-                    oauth_client_id: client_id_clone,
+                let mapped = result.map(|bundle| {
+                    #[allow(clippy::cast_possible_wrap)]
+                    let expires_at = chrono::Utc::now().timestamp()
+                        + bundle.tokens.expires_in as i64;
+                    OAuthSuccess {
+                        access_token: bundle.tokens.access_token,
+                        refresh_token: bundle.tokens.refresh_token,
+                        token_expires_at: Some(expires_at),
+                        user_email: bundle.user_info.email,
+                        user_name: bundle.user_info.name,
+                        oauth_provider: provider_id_clone,
+                        oauth_client_id: client_id_clone,
+                    }
                 });
                 (generation, mapped)
             },
@@ -1067,7 +1071,7 @@ impl AddAccountWizard {
             async move {
                 let result = db
                     .with_write_conn(move |conn| {
-                        create_account_sync(conn, create_params)
+                        create_account_sync(conn, &create_params)
                     })
                     .await;
                 match result {

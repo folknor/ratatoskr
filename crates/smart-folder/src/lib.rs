@@ -1,6 +1,5 @@
 mod parser;
 mod sql_builder;
-mod tokens;
 
 pub use parser::{CursorContext, ParsedQuery, analyze_cursor_context, parse_query};
 pub use sql_builder::{count_matching, query_threads};
@@ -29,7 +28,7 @@ pub fn execute_smart_folder_query(
 ) -> Result<Vec<DbThread>, String> {
     let query = migrate_legacy_tokens(params.query);
     let parsed = parse_query(&query);
-    log::debug!("Smart folder query parsed: {:?}", parsed);
+    log::debug!("Smart folder query parsed: {parsed:?}");
     let result = sql_builder::query_threads(conn, &parsed, params.scope, params.limit, params.offset);
     if let Err(ref e) = result {
         log::error!("Smart folder query execution failed: {e}");

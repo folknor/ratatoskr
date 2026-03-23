@@ -21,7 +21,7 @@ fn next_account_color(conn: &Connection) -> String {
         .prepare("SELECT account_color FROM accounts WHERE account_color IS NOT NULL")
         .and_then(|mut stmt| {
             stmt.query_map([], |row| row.get::<_, String>(0))
-                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                .map(|rows| rows.filter_map(Result::ok).collect())
         })
         .unwrap_or_default();
 

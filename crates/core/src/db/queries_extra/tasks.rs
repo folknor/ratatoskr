@@ -259,9 +259,11 @@ pub async fn db_reorder_tasks(db: &DbState, task_ids: Vec<String>) -> Result<(),
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         let now = chrono::Utc::now().timestamp();
         for (i, task_id) in task_ids.iter().enumerate() {
+            #[allow(clippy::cast_possible_wrap)]
+            let sort_order = i as i64;
             tx.execute(
                 "UPDATE tasks SET sort_order = ?1, updated_at = ?3 WHERE id = ?2",
-                params![i as i64, task_id, now],
+                params![sort_order, task_id, now],
             )
             .map_err(|e| e.to_string())?;
         }

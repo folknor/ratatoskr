@@ -52,7 +52,7 @@ pub struct UpdateAccountParams {
 /// `Db::with_write_conn` use this function.
 pub fn create_account_sync(
     conn: &Connection,
-    params: CreateAccountParams,
+    params: &CreateAccountParams,
 ) -> Result<String, String> {
     log::info!("Creating account: email={}, provider={}", params.email, params.provider);
     let id = uuid::Uuid::new_v4().to_string();
@@ -141,7 +141,7 @@ pub async fn db_create_account(
     db: &DbState,
     params: CreateAccountParams,
 ) -> Result<String, String> {
-    db.with_conn(move |conn| create_account_sync(conn, params))
+    db.with_conn(move |conn| create_account_sync(conn, &params))
         .await
 }
 

@@ -441,7 +441,7 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
         }
 
         // Text area: placeholder or current text
-        draw_text_area(self, state, renderer, &palette, bounds);
+        draw_text_area(self, state, renderer, palette, bounds);
     }
 
     fn update(

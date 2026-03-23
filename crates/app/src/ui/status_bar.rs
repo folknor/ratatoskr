@@ -93,7 +93,7 @@ pub enum SyncEvent {
 impl SyncEvent {
     /// Parse a `SyncEvent` from a raw progress reporter event name and
     /// JSON payload.
-    pub fn from_json(event_name: &str, json: serde_json::Value) -> Self {
+    pub fn from_json(event_name: &str, json: &serde_json::Value) -> Self {
         // Sync-complete events are signalled by the event name suffix.
         if event_name.ends_with("-sync-complete") {
             let account_id = json
@@ -151,7 +151,7 @@ pub struct IcedProgressReporter {
 
 impl ratatoskr_core::progress::ProgressReporter for IcedProgressReporter {
     fn emit_json(&self, event_name: &str, json: serde_json::Value) {
-        let event = SyncEvent::from_json(event_name, json);
+        let event = SyncEvent::from_json(event_name, &json);
         // Best-effort send — drop on failure (receiver closed).
         let _ = self.sender.send(event);
     }

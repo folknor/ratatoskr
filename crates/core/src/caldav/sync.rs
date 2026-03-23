@@ -354,7 +354,7 @@ async fn sync_event_attendees(
 
         // Insert attendees
         for att in &attendees {
-            let rsvp = att.partstat.as_deref().map(|s| s.to_lowercase());
+            let rsvp = att.partstat.as_deref().map(str::to_lowercase);
             conn.execute(
                 "INSERT INTO calendar_attendees (event_id, account_id, email, name, rsvp_status, is_organizer) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
