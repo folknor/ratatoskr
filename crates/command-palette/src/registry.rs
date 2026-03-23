@@ -155,6 +155,7 @@ impl CommandRegistry {
                 CommandMatch {
                     id: d.id,
                     label: d.resolved_label(ctx),
+                    palette_label: d.resolved_palette_label(ctx),
                     category: d.category,
                     keybinding: d.keybinding.map(|kb| kb.display(platform)),
                     available: (d.is_available)(ctx),
@@ -209,6 +210,7 @@ impl CommandRegistry {
                 results.push(CommandMatch {
                     id: d.id,
                     label,
+                    palette_label: d.resolved_palette_label(ctx),
                     category: d.category,
                     keybinding: d.keybinding.map(|kb| kb.display(platform)),
                     available,

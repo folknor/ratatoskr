@@ -1,6 +1,6 @@
 # Pop-Out Windows: Spec vs. Code Discrepancies
 
-Audit date: 2026-03-22
+Audit date: 2026-03-23
 
 ---
 
@@ -18,6 +18,7 @@ Audit date: 2026-03-22
 - Link insertion dialog fully implemented
 - Dead code (save_session_state, restore_pop_out_windows, SessionState::load) — no longer dead
 - scroll_offset dead field removed
+- Body loading now uses BodyStore first (full zstd-decompressed bodies), falling back to DB snippet *(2026-03-23)*
 
 ## Remaining
 

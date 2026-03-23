@@ -559,11 +559,19 @@ impl App {
         let db2 = Arc::clone(&self.db);
         let account_id2 = account_id.clone();
         let message_id2 = message_id.clone();
+        let body_store = self.body_store.clone();
 
         Task::batch([
             open_task.discard(),
             Task::perform(
                 async move {
+                    // Try body store first (has full zstd-decompressed bodies),
+                    // fall back to DB snippet if body store unavailable.
+                    if let Some(bs) = body_store {
+                        if let Ok(Some(body)) = bs.get(message_id.clone()).await {
+                            return Ok((body.body_text, body.body_html));
+                        }
+                    }
                     db.load_message_body(account_id, message_id).await
                 },
                 move |result| {

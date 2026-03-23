@@ -30,11 +30,11 @@
 
 - [ ] **Hardcoded values** - We need to do a sweep of the codebase for hardcoded values that shouldn't be. These need to be extracted to a common location so that we can keep track of them and decide whether or not to make them configurable.
 
-- [ ] **Wire command palette extended labels + descriptions to UI** — `CommandDescriptor` now has `palette_label` (longer label for command palette display) and `description` (markdown-ready help text). All ~50 commands populated. Not yet rendered — the palette still uses `label`. Wire `resolved_palette_label()` into palette rendering, and `description` into a future help/shortcut reference panel.
+- [x] **Wire command palette extended labels to UI** — *(2026-03-23)* `CommandMatch` now carries `palette_label` from `resolved_palette_label()`. Palette rendering uses the longer label. `description` field still not rendered (for future help/shortcut reference panel).
 
 - [ ] **Crate structure and dependency graph** - So much has been implemented without any real consideration for what kind of code lives where. It might be time to get a grip on things.
 
-- [ ] **Pop-out body loading uses snippet fallback** — `message_queries.rs` queries `snippet` from the `messages` table instead of reading from BodyStore (`bodies.db`). Pop-out windows show snippet text, not full message bodies. Should use `BodyStoreState::get()` for proper zstd-decompressed body content.
+- [x] **Pop-out body loading uses BodyStore** — *(2026-03-23)* `dispatch_message_view_loads()` now tries `BodyStoreState::get()` first for full zstd-decompressed bodies, falling back to DB snippet if body store is unavailable.
 
 - [x] ~~**JMAP for Calendars**~~ — Wired: `crates/jmap/src/calendar_sync.rs` (Calendar/get, CalendarEvent/get+changes+set), called from JMAP sync pipeline. Calendar sync orchestrator (`crates/calendar/src/sync.rs`) handles JMAP alongside Google and Graph.
 

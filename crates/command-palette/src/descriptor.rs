@@ -52,6 +52,8 @@ impl CommandDescriptor {
 pub struct CommandMatch {
     pub id: CommandId,
     pub label: &'static str,
+    /// Longer label for command palette display (falls back to `label`).
+    pub palette_label: &'static str,
     pub category: &'static str,
     pub keybinding: Option<String>,
     pub available: bool,

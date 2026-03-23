@@ -492,7 +492,7 @@ fn build_results_column(
         let is_selected = i == selected_index;
         let row_element = palette_result_row(
             result.category,
-            result.label,
+            result.palette_label,
             result.keybinding.clone(),
             result.available,
             result.input_mode,
