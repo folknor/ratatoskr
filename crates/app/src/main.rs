@@ -410,23 +410,21 @@ impl App {
             }
         };
 
-        let action_ctx = match (&body_store, &inline_image_store, encryption_key) {
-            (Some(bs), Some(iis), Some(key)) => {
-                // SearchState is optional for the action service — actions don't
-                // use search. If it's unavailable, init a fresh one for ProviderCtx.
-                let search = ratatoskr_core::search::SearchState::init(data_dir).ok();
-                if let Some(ss) = search {
-                    Some(ratatoskr_core::actions::ActionContext {
-                        db: ratatoskr_core::db::DbState::from_arc(db.write_conn_arc()),
-                        body_store: bs.clone(),
-                        inline_images: iis.clone(),
-                        search: ss,
-                        encryption_key: key,
-                    })
-                } else {
-                    log::error!("Action service unavailable: search state failed to initialize");
-                    None
-                }
+        // Initialize search state once — shared between the app and action service.
+        let search_state: Option<Arc<ratatoskr_core::search::SearchState>> =
+            ratatoskr_core::search::SearchState::init(data_dir)
+                .map(Arc::new)
+                .ok();
+
+        let action_ctx = match (&body_store, &inline_image_store, &search_state, encryption_key) {
+            (Some(bs), Some(iis), Some(ss), Some(key)) => {
+                Some(ratatoskr_core::actions::ActionContext {
+                    db: ratatoskr_core::db::DbState::from_arc(db.write_conn_arc()),
+                    body_store: bs.clone(),
+                    inline_images: iis.clone(),
+                    search: (**ss).clone(),
+                    encryption_key: key,
+                })
             }
             _ => {
                 log::error!("Action service unavailable: one or more stores failed to initialize");
@@ -481,9 +479,7 @@ impl App {
                 resolver,
             ),
             undo_stack: UndoStack::default(),
-            search_state: ratatoskr_core::search::SearchState::init(data_dir)
-                .map(Arc::new)
-                .ok(),
+            search_state,
             search_generation: 0,
             search_query: UndoableText::new(),
             search_debounce_deadline: None,

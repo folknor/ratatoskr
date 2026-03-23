@@ -110,15 +110,13 @@ impl App {
                 return Task::none();
             }
 
-            let archive_task = self.dispatch_archive(selected_threads);
-            let advance_task = self.handle_thread_list(
-                crate::ui::thread_list::ThreadListMessage::AutoAdvance,
-            );
-            return Task::batch([archive_task, advance_task]);
+            // Auto-advance is deferred to handle_archive_completed —
+            // it only fires if the local mutation succeeded.
+            return self.dispatch_archive(selected_threads);
         }
 
         let confirmation = match &action {
-            EmailAction::Archive => unreachable!("handled above"),
+            EmailAction::Archive => None, // handled above via action service
             EmailAction::Trash => Some("Moved to Trash"),
             EmailAction::PermanentDelete => Some("Permanently deleted"),
             EmailAction::ToggleSpam => Some("Spam status toggled"),
@@ -225,15 +223,18 @@ impl App {
         )
     }
 
-    /// Handle archive completion — map outcomes to user feedback.
+    /// Handle archive completion — map outcomes to user feedback and
+    /// auto-advance if the local mutation succeeded.
     pub(crate) fn handle_archive_completed(
         &mut self,
         outcomes: &[ActionOutcome],
     ) -> Task<Message> {
         let any_failed = outcomes.iter().any(ActionOutcome::is_failed);
         let any_local_only = outcomes.iter().any(ActionOutcome::is_local_only);
+        let all_failed = outcomes.iter().all(ActionOutcome::is_failed);
 
-        if any_failed {
+        if all_failed {
+            // Nothing was archived — don't advance.
             let errors: Vec<&str> = outcomes
                 .iter()
                 .filter_map(|o| match o {
@@ -241,17 +242,27 @@ impl App {
                     _ => None,
                 })
                 .collect();
+            // TODO: use a dedicated error display once status bar supports it.
+            // Using show_confirmation for now — styled the same as success.
             self.status_bar
-                .show_confirmation(format!("Archive failed: {}", errors.join("; ")));
-        } else if any_local_only {
+                .show_confirmation(format!("\u{26A0} Archive failed: {}", errors.join("; ")));
+            return Task::none();
+        }
+
+        // At least some threads were archived locally — advance.
+        if any_failed || any_local_only {
+            // TODO: use a dedicated warning display once status bar supports it.
             self.status_bar.show_confirmation(
-                "Archived locally \u{2014} sync may revert this".to_string(),
+                "\u{26A0} Archived locally \u{2014} sync may revert this".to_string(),
             );
         } else {
             self.status_bar
                 .show_confirmation("Archived".to_string());
         }
-        Task::none()
+
+        self.handle_thread_list(
+            crate::ui::thread_list::ThreadListMessage::AutoAdvance,
+        )
     }
 
     /// Dispatch the DB operation for an email action (async, fire-and-forget).
