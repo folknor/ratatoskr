@@ -10,7 +10,7 @@ use crate::db::queries::set_thread_read;
 use crate::progress::NoopProgressReporter;
 
 /// Local DB mutation for mark-read (idempotent).
-async fn mark_read_local(ctx: &ActionContext, account_id: &str, thread_id: &str, read: bool) -> Result<(), ActionError> {
+pub(crate) async fn mark_read_local(ctx: &ActionContext, account_id: &str, thread_id: &str, read: bool) -> Result<(), ActionError> {
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();

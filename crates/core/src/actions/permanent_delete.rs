@@ -10,7 +10,7 @@ use crate::db::queries::delete_thread;
 use crate::progress::NoopProgressReporter;
 
 /// Local DB mutation for permanent delete (idempotent).
-async fn permanent_delete_local(ctx: &ActionContext, account_id: &str, thread_id: &str) -> Result<(), ActionError> {
+pub(crate) async fn permanent_delete_local(ctx: &ActionContext, account_id: &str, thread_id: &str) -> Result<(), ActionError> {
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();

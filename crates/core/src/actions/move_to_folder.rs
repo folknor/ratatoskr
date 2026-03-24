@@ -10,7 +10,7 @@ use crate::email_actions::{insert_label, remove_label};
 use crate::progress::NoopProgressReporter;
 
 /// Local DB mutation for move-to-folder (idempotent).
-async fn move_local(
+pub(crate) async fn move_local(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,

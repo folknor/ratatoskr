@@ -10,7 +10,7 @@ use crate::progress::NoopProgressReporter;
 
 /// Local DB mutation for add-label: look up label metadata + insert (idempotent).
 /// Returns `(label_name, label_kind)` for provider routing.
-async fn add_label_local(
+pub(crate) async fn add_label_local(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,
@@ -144,7 +144,7 @@ pub(crate) async fn add_label_with_provider(
 
 /// Local DB mutation for remove-label: look up label metadata + remove (idempotent).
 /// Returns `(label_name, label_kind)` for provider routing.
-async fn remove_label_local(
+pub(crate) async fn remove_label_local(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,

@@ -10,7 +10,7 @@ use crate::email_actions::{insert_label, remove_label};
 use crate::progress::NoopProgressReporter;
 
 /// Local DB mutation for spam (idempotent).
-async fn spam_local(ctx: &ActionContext, account_id: &str, thread_id: &str, is_spam: bool) -> Result<(), ActionError> {
+pub(crate) async fn spam_local(ctx: &ActionContext, account_id: &str, thread_id: &str, is_spam: bool) -> Result<(), ActionError> {
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();

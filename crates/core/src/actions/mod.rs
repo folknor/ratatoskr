@@ -6,6 +6,7 @@
 //! and never constructs providers or dispatches provider calls directly.
 
 mod archive;
+pub mod batch;
 mod context;
 pub mod contacts;
 mod folder;
@@ -25,6 +26,7 @@ mod star;
 mod trash;
 
 pub use archive::archive;
+pub use batch::{BatchAction, batch_execute};
 pub use context::ActionContext;
 pub use folder::{create_folder, delete_folder, rename_folder};
 pub use ratatoskr_provider_utils::types::ProviderFolderMutation;

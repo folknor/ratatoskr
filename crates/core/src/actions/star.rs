@@ -10,7 +10,7 @@ use crate::db::queries::set_thread_starred;
 use crate::progress::NoopProgressReporter;
 
 /// Local DB mutation for star (idempotent).
-async fn star_local(ctx: &ActionContext, account_id: &str, thread_id: &str, starred: bool) -> Result<(), ActionError> {
+pub(crate) async fn star_local(ctx: &ActionContext, account_id: &str, thread_id: &str, starred: bool) -> Result<(), ActionError> {
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
