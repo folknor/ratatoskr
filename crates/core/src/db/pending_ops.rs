@@ -58,6 +58,13 @@ fn backoff_schedule(operation_type: &str) -> &'static [i64] {
 
 // ── Commands ─────────────────────────────────────────────────
 
+/// Enqueue a pending operation, replacing any existing pending/executing op
+/// for the same `(account_id, resource_id, operation_type)`.
+///
+/// This is atomic (single connection hold): delete old + insert new.
+/// Handles both deduplication and directional updates (e.g., spam→unspam
+/// replaces the old params rather than being dropped as a duplicate).
+#[allow(clippy::too_many_arguments)]
 pub async fn db_pending_ops_enqueue(
     db: &DbState,
     id: String,
@@ -69,6 +76,17 @@ pub async fn db_pending_ops_enqueue(
 ) -> Result<(), String> {
     db
         .with_conn(move |conn| {
+            // Replace any existing pending/executing op for this resource+type.
+            // This prevents duplicates AND ensures directional actions (spam,
+            // star, markRead) get their params updated to the latest intent.
+            conn.execute(
+                "DELETE FROM pending_operations \
+                 WHERE account_id = ?1 AND resource_id = ?2 AND operation_type = ?3 \
+                   AND status IN ('pending', 'executing')",
+                params![account_id, resource_id, operation_type],
+            )
+            .map_err(|e| format!("replace pending op: {e}"))?;
+
             conn.execute(
                 "INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params, status, max_retries)
                  VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6)",
@@ -78,28 +96,6 @@ pub async fn db_pending_ops_enqueue(
             Ok(())
         })
         .await
-}
-
-/// Check if a pending or executing op already exists for this resource.
-pub async fn db_pending_ops_exists(
-    db: &DbState,
-    account_id: String,
-    resource_id: String,
-    operation_type: String,
-) -> Result<bool, String> {
-    db.with_conn(move |conn| {
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pending_operations \
-                 WHERE account_id = ?1 AND resource_id = ?2 AND operation_type = ?3 \
-                   AND status IN ('pending', 'executing')",
-                params![account_id, resource_id, operation_type],
-                |row| row.get(0),
-            )
-            .map_err(|e| format!("check pending op exists: {e}"))?;
-        Ok(count > 0)
-    })
-    .await
 }
 
 pub async fn db_pending_ops_get(

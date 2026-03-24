@@ -7,9 +7,9 @@
 use super::context::ActionContext;
 use super::outcome::{ActionError, ActionOutcome};
 use crate::db::pending_ops::{
-    db_pending_ops_delete, db_pending_ops_enqueue, db_pending_ops_exists,
-    db_pending_ops_get, db_pending_ops_increment_retry,
-    db_pending_ops_recover_executing, db_pending_ops_update_status,
+    db_pending_ops_delete, db_pending_ops_enqueue, db_pending_ops_get,
+    db_pending_ops_increment_retry, db_pending_ops_recover_executing,
+    db_pending_ops_update_status,
 };
 
 /// Per-action-type retry policy.
@@ -39,9 +39,10 @@ fn retry_policy(operation_type: &str) -> RetryPolicy {
 /// Called by action functions after determining the outcome. Only enqueues
 /// if `retryable` is true AND `reason.is_retryable()` (policy + capability).
 ///
-/// Deduplicates: skips enqueue if a pending or executing op already exists
-/// for the same (account_id, resource_id, operation_type). Failed ops are
-/// NOT checked — a new user action should supersede exhausted retries.
+/// Deduplication is atomic: `db_pending_ops_enqueue` replaces any existing
+/// pending/executing op for the same (account_id, resource_id, operation_type)
+/// in a single connection hold. This handles both exact duplicates and
+/// directional updates (e.g., spam→unspam replaces stale params).
 pub async fn enqueue_if_retryable(
     ctx: &ActionContext,
     outcome: &ActionOutcome,
@@ -62,28 +63,6 @@ pub async fn enqueue_if_retryable(
     {
         if !reason.is_retryable() {
             return;
-        }
-
-        // Dedup: skip if a pending or executing op already exists for this resource.
-        match db_pending_ops_exists(
-            &ctx.db,
-            account_id.to_string(),
-            resource_id.to_string(),
-            operation_type.to_string(),
-        )
-        .await
-        {
-            Ok(true) => {
-                log::debug!(
-                    "[pending_ops] Skipping duplicate enqueue: {operation_type} for {resource_id}"
-                );
-                return;
-            }
-            Err(e) => {
-                log::warn!("[pending_ops] Dedup check failed, proceeding with enqueue: {e}");
-                // Fall through — better to risk a duplicate than lose the op.
-            }
-            Ok(false) => {}
         }
 
         let policy = retry_policy(operation_type);
