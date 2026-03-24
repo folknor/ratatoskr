@@ -46,25 +46,6 @@ pub(crate) async fn add_label_local(
             ));
         }
 
-        // IMAP keyword capability preflight: if the label is a keyword (kw: prefix)
-        // and the account is known not to support custom keywords, reject before
-        // writing to thread_labels (prevents local-only drift that can't reconcile).
-        if lid.starts_with("kw:") {
-            let supports: Option<i64> = conn
-                .query_row(
-                    "SELECT supports_keywords FROM accounts WHERE id = ?1",
-                    rusqlite::params![aid],
-                    |row| row.get(0),
-                )
-                .ok()
-                .flatten();
-            if supports == Some(0) {
-                return Err(ActionError::invalid_state(
-                    "this IMAP server does not support custom keywords",
-                ));
-            }
-        }
-
         crate::email_actions::insert_label(&conn, &aid, &tid, &lid)
             .map_err(ActionError::db)?;
 
@@ -193,23 +174,6 @@ pub(crate) async fn remove_label_local(
             return Err(ActionError::invalid_state(
                 "container labels use move operations, not add/remove",
             ));
-        }
-
-        // IMAP keyword capability preflight (same as add_label_local)
-        if lid.starts_with("kw:") {
-            let supports: Option<i64> = conn
-                .query_row(
-                    "SELECT supports_keywords FROM accounts WHERE id = ?1",
-                    rusqlite::params![aid],
-                    |row| row.get(0),
-                )
-                .ok()
-                .flatten();
-            if supports == Some(0) {
-                return Err(ActionError::invalid_state(
-                    "this IMAP server does not support custom keywords",
-                ));
-            }
         }
 
         crate::email_actions::remove_label(&conn, &aid, &tid, &lid)

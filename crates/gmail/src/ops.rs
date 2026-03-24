@@ -365,9 +365,6 @@ impl ProviderOps for GmailOps {
     }
 }
 
-// ── Helpers ──────────────────────────────────────────────────
-
-/// Find a Gmail label ID by its display name (case-insensitive).
 // ── Gmail-specific operations (not part of ProviderOps) ─────
 
 /// The MIME type Gmail uses to identify emoji reaction messages.
