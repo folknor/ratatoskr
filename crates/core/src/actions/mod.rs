@@ -11,6 +11,7 @@ pub mod contacts;
 mod folder;
 mod label;
 mod log;
+pub mod pending;
 mod mark_read;
 mod move_to_folder;
 mod mute;

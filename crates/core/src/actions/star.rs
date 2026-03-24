@@ -1,6 +1,7 @@
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
+use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
 use crate::db::queries::set_thread_starred;
 use crate::progress::NoopProgressReporter;
@@ -17,6 +18,7 @@ pub async fn star(
     starred: bool,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("star", account_id, thread_id);
+    let params_json = format!(r#"{{"starred":{starred}}}"#);
 
     let db = ctx.db.clone();
     let aid = account_id.to_string();
@@ -40,6 +42,7 @@ pub async fn star(
         Ok(p) => p,
         Err(e) => {
             let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            enqueue_if_retryable(ctx, &outcome, account_id, "star", thread_id, &params_json).await;
             mlog.emit(&outcome);
             return outcome;
         }
@@ -61,6 +64,7 @@ pub async fn star(
             ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
         }
     };
+    enqueue_if_retryable(ctx, &outcome, account_id, "star", thread_id, &params_json).await;
     mlog.emit(&outcome);
     outcome
 }

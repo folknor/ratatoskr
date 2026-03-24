@@ -1,6 +1,7 @@
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
+use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
 use crate::email_actions::{insert_label, remove_label};
 use crate::progress::NoopProgressReporter;
@@ -22,6 +23,11 @@ pub async fn move_to_folder(
     source_label_id: Option<&str>,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("move_to_folder", account_id, thread_id);
+    let params_json = if let Some(src) = source_label_id {
+        format!(r#"{{"folderId":"{folder_id}","sourceLabelId":"{src}"}}"#)
+    } else {
+        format!(r#"{{"folderId":"{folder_id}"}}"#)
+    };
 
     let db = ctx.db.clone();
     let aid = account_id.to_string();
@@ -50,6 +56,7 @@ pub async fn move_to_folder(
         Ok(p) => p,
         Err(e) => {
             let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            enqueue_if_retryable(ctx, &outcome, account_id, "moveToFolder", thread_id, &params_json).await;
             mlog.emit(&outcome);
             return outcome;
         }
@@ -71,6 +78,7 @@ pub async fn move_to_folder(
             ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
         }
     };
+    enqueue_if_retryable(ctx, &outcome, account_id, "moveToFolder", thread_id, &params_json).await;
     mlog.emit(&outcome);
     outcome
 }

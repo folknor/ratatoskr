@@ -99,6 +99,21 @@ impl App {
         Task::batch(tasks)
     }
 
+    /// Process pending operations from the retry queue.
+    /// Called on SyncTick alongside delta sync.
+    pub(crate) fn process_pending_ops(&self) -> Task<Message> {
+        let Some(ref action_ctx) = self.action_ctx else {
+            return Task::none();
+        };
+        let ctx = action_ctx.clone();
+        Task::perform(
+            async move {
+                ratatoskr_core::actions::pending::process_pending_ops(&ctx).await;
+            },
+            |()| Message::Noop,
+        )
+    }
+
     /// Start JMAP push notification managers for all JMAP accounts.
     /// Call after accounts are loaded and encryption key is available.
     pub(crate) fn start_jmap_push(&mut self) -> Task<Message> {

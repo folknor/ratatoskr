@@ -1,6 +1,7 @@
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
+use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
 use crate::email_actions::{insert_label, remove_label};
 use crate::progress::NoopProgressReporter;
@@ -17,6 +18,7 @@ pub async fn spam(
     is_spam: bool,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("spam", account_id, thread_id);
+    let params_json = format!(r#"{{"isSpam":{is_spam}}}"#);
 
     let db = ctx.db.clone();
     let aid = account_id.to_string();
@@ -46,6 +48,7 @@ pub async fn spam(
         Ok(p) => p,
         Err(e) => {
             let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            enqueue_if_retryable(ctx, &outcome, account_id, "spam", thread_id, &params_json).await;
             mlog.emit(&outcome);
             return outcome;
         }
@@ -67,6 +70,7 @@ pub async fn spam(
             ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
         }
     };
+    enqueue_if_retryable(ctx, &outcome, account_id, "spam", thread_id, &params_json).await;
     mlog.emit(&outcome);
     outcome
 }

@@ -72,6 +72,11 @@ Contact save/delete in `core::actions::contacts`. JMAP write-back fully wired (s
 **Goal:** Define and implement the partial-failure semantics. This is where the service becomes trustworthy.
 
 **Scope:**
+**Status:** Complete. See `phase-3-breakdown.md` and `phase-3.1-plan.md`.
+
+Sub-phases: 3.1 (ActionError enum + RemoteFailureKind), 3.2 (retryable: bool on LocalOnly, retry classification per action class), 3.3 (MutationLog with duration + identity tracking), 3.4 (pending_operations queue wired — email actions enqueue on retryable LocalOnly, periodic worker processes queue, crash recovery on boot).
+
+**Original scope (now implemented):**
 - Define the failure policy per mutation class:
   - **Local success + remote failure.** The policy may differ by action class. Archive and trash likely need pending-retry or rollback — silent divergence is unacceptable for folder-level actions. Star and read/unread may tolerate local-only with eventual sync reconciliation. The policy must be explicit per action, not a blanket rule.
   - **Remote timeout / unknown completion.** Define local state behavior.

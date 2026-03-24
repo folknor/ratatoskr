@@ -1,6 +1,7 @@
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
+use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
 use crate::db::queries::delete_thread;
 use crate::progress::NoopProgressReporter;
@@ -36,6 +37,7 @@ pub async fn permanent_delete(
         Ok(p) => p,
         Err(e) => {
             let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            enqueue_if_retryable(ctx, &outcome, account_id, "permanentDelete", thread_id, "{}").await;
             mlog.emit(&outcome);
             return outcome;
         }
@@ -57,6 +59,7 @@ pub async fn permanent_delete(
             ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
         }
     };
+    enqueue_if_retryable(ctx, &outcome, account_id, "permanentDelete", thread_id, "{}").await;
     mlog.emit(&outcome);
     outcome
 }

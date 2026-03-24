@@ -1,6 +1,7 @@
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
+use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
 use crate::email_actions::{insert_label, remove_label};
 use crate::progress::NoopProgressReporter;
@@ -38,6 +39,7 @@ pub async fn trash(
         Ok(p) => p,
         Err(e) => {
             let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            enqueue_if_retryable(ctx, &outcome, account_id, "trash", thread_id, "{}").await;
             mlog.emit(&outcome);
             return outcome;
         }
@@ -59,6 +61,7 @@ pub async fn trash(
             ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
         }
     };
+    enqueue_if_retryable(ctx, &outcome, account_id, "trash", thread_id, "{}").await;
     mlog.emit(&outcome);
     outcome
 }

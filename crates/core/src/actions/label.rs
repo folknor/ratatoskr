@@ -1,6 +1,7 @@
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
+use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
 use crate::progress::NoopProgressReporter;
 use ratatoskr_provider_utils::types::ProviderCtx;
@@ -21,6 +22,7 @@ pub async fn add_label(
     label_id: &str,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("add_label", account_id, thread_id);
+    let params_json = format!(r#"{{"labelId":"{label_id}"}}"#);
 
     // 1. Look up label metadata + local DB mutation in one spawn_blocking call
     let db = ctx.db.clone();
@@ -74,6 +76,7 @@ pub async fn add_label(
                 reason: ActionError::remote(e),
                 retryable: true,
             };
+            enqueue_if_retryable(ctx, &outcome, account_id, "addLabel", thread_id, &params_json).await;
             mlog.emit(&outcome);
             return outcome;
         }
@@ -110,6 +113,7 @@ pub async fn add_label(
             }
         }
     };
+    enqueue_if_retryable(ctx, &outcome, account_id, "addLabel", thread_id, &params_json).await;
     mlog.emit(&outcome);
     outcome
 }
@@ -125,6 +129,7 @@ pub async fn remove_label(
     label_id: &str,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("remove_label", account_id, thread_id);
+    let params_json = format!(r#"{{"labelId":"{label_id}"}}"#);
 
     let db = ctx.db.clone();
     let aid = account_id.to_string();
@@ -174,6 +179,7 @@ pub async fn remove_label(
                 reason: ActionError::remote(e),
                 retryable: true,
             };
+            enqueue_if_retryable(ctx, &outcome, account_id, "removeLabel", thread_id, &params_json).await;
             mlog.emit(&outcome);
             return outcome;
         }
@@ -208,6 +214,7 @@ pub async fn remove_label(
             }
         }
     };
+    enqueue_if_retryable(ctx, &outcome, account_id, "removeLabel", thread_id, &params_json).await;
     mlog.emit(&outcome);
     outcome
 }

@@ -556,7 +556,6 @@ impl App {
             action_ctx,
         };
 
-        // Restore pop-out windows from previous session
         // Resurface orphaned 'queued' drafts from the old send path.
         // These were never sent — transition to 'failed' so they're visible
         // to future outbox UI rather than silently deleting user data.
@@ -571,6 +570,7 @@ impl App {
             log::warn!("Failed to resurface orphaned queued drafts: {e}");
         }
 
+        // Restore pop-out windows from previous session
         let mut session_tasks = app.restore_pop_out_windows(&session);
 
         let load_gen = app.nav_generation;
@@ -599,6 +599,19 @@ impl App {
             // attempt the actual fetch once accounts are loaded)
             Task::done(Message::GalRefreshTick),
         ];
+
+        // Pending-ops crash recovery: reset stranded 'executing' ops to 'pending',
+        // resurface stale 'sending' drafts as 'failed'.
+        if let Some(ref ctx) = app.action_ctx {
+            let ctx = ctx.clone();
+            boot_tasks.push(Task::perform(
+                async move {
+                    ratatoskr_core::actions::pending::recover_on_boot(&ctx).await;
+                },
+                |()| Message::Noop,
+            ));
+        }
+
         boot_tasks.append(&mut session_tasks);
         (app, Task::batch(boot_tasks))
     }
@@ -915,7 +928,11 @@ impl App {
             Message::FocusSearch => self.update(Message::FocusSearchBar),
             Message::ShowHelp => Task::none(),
             Message::SyncCurrentFolder => self.sync_all_accounts(),
-            Message::SyncTick => self.sync_all_accounts(),
+            Message::SyncTick => {
+                let sync_task = self.sync_all_accounts();
+                let pending_task = self.process_pending_ops();
+                Task::batch([sync_task, pending_task])
+            }
             Message::SyncComplete(account_id, result) => {
                 match result {
                     Err(ref e) => {
