@@ -134,6 +134,29 @@ pub async fn db_pending_ops_delete(db: &DbState, id: String) -> Result<(), Strin
     .await
 }
 
+/// Cancel pending ops for a specific resource and operation type.
+/// Used by undo to prevent retried actions from re-executing after undo.
+/// Catches both 'pending' and 'executing' status — but cannot stop an
+/// already in-flight provider call.
+pub async fn db_pending_ops_cancel_for_resource(
+    db: &DbState,
+    account_id: String,
+    resource_id: String,
+    operation_type: String,
+) -> Result<(), String> {
+    db.with_conn(move |conn| {
+        conn.execute(
+            "DELETE FROM pending_operations \
+             WHERE account_id = ?1 AND resource_id = ?2 AND operation_type = ?3 \
+               AND status IN ('pending', 'executing')",
+            params![account_id, resource_id, operation_type],
+        )
+        .map_err(|e| format!("cancel pending op: {e}"))?;
+        Ok(())
+    })
+    .await
+}
+
 pub async fn db_pending_ops_increment_retry(db: &DbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         let (retry_count, max_retries): (i64, i64) = conn

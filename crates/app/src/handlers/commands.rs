@@ -9,12 +9,14 @@ use ratatoskr_command_palette::{CommandArgs, CommandId, KeyBinding, OptionItem};
 use ratatoskr_core::actions::ActionOutcome;
 
 /// Parameters for actions that need more than account_id + thread_id.
-#[derive(Clone)]
-enum ActionParams {
+/// Also used by undo token construction to recover prior state.
+#[derive(Debug, Clone)]
+pub(crate) enum ActionParams {
     None,
     Spam { is_spam: bool },
     MoveToFolder { folder_id: String, source_label_id: Option<String> },
     Label { label_id: String },
+    Trash { source_label_id: Option<String> },
 }
 
 impl App {
@@ -168,9 +170,11 @@ impl App {
 
             // ── Removes-from-view folder ops via action service ──
             EmailAction::Trash => {
-                return self.dispatch_action_service(
+                let source_label_id = self.sidebar.selected_label.clone();
+                return self.dispatch_action_service_with_params(
                     CompletedAction::Trash,
                     &selected_threads,
+                    ActionParams::Trash { source_label_id },
                 );
             }
             EmailAction::PermanentDelete => {
@@ -270,6 +274,7 @@ impl App {
 
         let ctx = action_ctx.clone();
         let threads = threads.to_vec();
+        let params_clone = params.clone();
         Task::perform(
             async move {
                 let mut outcomes = Vec::with_capacity(threads.len());
@@ -306,12 +311,14 @@ impl App {
                     };
                     outcomes.push(outcome);
                 }
-                (action, outcomes)
+                (action, outcomes, threads)
             },
-            move |(action, outcomes)| Message::ActionCompleted {
+            move |(action, outcomes, threads)| Message::ActionCompleted {
                 action,
                 outcomes,
                 rollback: Vec::new(),
+                threads,
+                params: params_clone,
             },
         )
     }
@@ -382,12 +389,18 @@ impl App {
                     };
                     outcomes.push(outcome);
                 }
-                (action, outcomes, rollback)
+                let threads: Vec<(String, String)> = rollback
+                    .iter()
+                    .map(|(a, t, _)| (a.clone(), t.clone()))
+                    .collect();
+                (action, outcomes, rollback, threads)
             },
-            move |(action, outcomes, rollback)| Message::ActionCompleted {
+            move |(action, outcomes, rollback, threads)| Message::ActionCompleted {
                 action,
                 outcomes,
                 rollback,
+                threads,
+                params: ActionParams::None,
             },
         )
     }
@@ -427,6 +440,8 @@ impl App {
         action: CompletedAction,
         outcomes: &[ActionOutcome],
         rollback: &[(String, String, bool)],
+        threads: &[(String, String)],
+        params: &ActionParams,
     ) -> Task<Message> {
         let all_failed = outcomes.iter().all(ActionOutcome::is_failed);
         let any_failed = outcomes.iter().any(ActionOutcome::is_failed);
@@ -466,6 +481,9 @@ impl App {
                 self.status_bar
                     .show_confirmation(action.success_label().to_string());
             }
+
+            // Produce undo tokens for succeeded threads
+            self.produce_undo_tokens(action, outcomes, threads, rollback, params);
 
             return self.handle_thread_list(
                 crate::ui::thread_list::ThreadListMessage::AutoAdvance,
@@ -508,6 +526,8 @@ impl App {
                 self.status_bar
                     .show_confirmation(action.success_label().to_string());
             }
+            // Produce undo tokens for succeeded threads (labels)
+            self.produce_undo_tokens(action, outcomes, threads, rollback, params);
             return Task::none();
         }
 
@@ -525,12 +545,190 @@ impl App {
             self.rollback_toggles(&failed_rollback, action);
         }
 
+        // Produce undo tokens for succeeded toggle threads
+        self.produce_undo_tokens(action, outcomes, threads, rollback, params);
+
         // Refresh nav state for read status changes (updates unread counts).
         if matches!(action, CompletedAction::MarkRead) && !all_failed {
             return self.fire_navigation_load();
         }
 
         Task::none()
+    }
+
+    // ── Undo token production ─────────────────────────────
+
+    /// Produce undo tokens for succeeded threads, grouped by account.
+    /// Called by handle_action_completed on non-all-failed outcomes.
+    fn produce_undo_tokens(
+        &mut self,
+        action: CompletedAction,
+        outcomes: &[ActionOutcome],
+        threads: &[(String, String)],
+        rollback: &[(String, String, bool)],
+        params: &ActionParams,
+    ) {
+        use ratatoskr_command_palette::UndoToken;
+        use std::collections::HashMap;
+
+        let all_failed = outcomes.iter().all(ActionOutcome::is_failed);
+        if all_failed {
+            return;
+        }
+
+        // PermanentDelete is irreversible — no undo token
+        if matches!(action, CompletedAction::PermanentDelete) {
+            return;
+        }
+
+        if !rollback.is_empty() {
+            // Toggle actions: use rollback data (filtered to non-failed)
+            let mut by_account: HashMap<&str, Vec<(String, bool)>> = HashMap::new();
+            for ((aid, tid, prev), outcome) in rollback.iter().zip(outcomes.iter()) {
+                if !outcome.is_failed() {
+                    by_account
+                        .entry(aid.as_str())
+                        .or_default()
+                        .push((tid.clone(), *prev));
+                }
+            }
+            for (account_id, entries) in by_account {
+                let thread_ids: Vec<String> = entries.iter().map(|(t, _)| t.clone()).collect();
+                let prev = entries.first().map(|(_, p)| *p).unwrap_or(false);
+                let token = match action {
+                    CompletedAction::Star => UndoToken::ToggleStar {
+                        account_id: account_id.to_string(),
+                        thread_ids,
+                        was_starred: prev,
+                    },
+                    CompletedAction::MarkRead => UndoToken::ToggleRead {
+                        account_id: account_id.to_string(),
+                        thread_ids,
+                        was_read: prev,
+                    },
+                    CompletedAction::Pin => UndoToken::TogglePin {
+                        account_id: account_id.to_string(),
+                        thread_ids,
+                        was_pinned: prev,
+                    },
+                    CompletedAction::Mute => UndoToken::ToggleMute {
+                        account_id: account_id.to_string(),
+                        thread_ids,
+                        was_muted: prev,
+                    },
+                    _ => continue,
+                };
+                self.undo_stack.push(token);
+            }
+        } else {
+            // Non-toggle actions: use threads + outcomes (filtered to non-failed)
+            let mut by_account: HashMap<&str, Vec<String>> = HashMap::new();
+            for ((aid, tid), outcome) in threads.iter().zip(outcomes.iter()) {
+                if !outcome.is_failed() {
+                    by_account
+                        .entry(aid.as_str())
+                        .or_default()
+                        .push(tid.clone());
+                }
+            }
+            for (account_id, thread_ids) in by_account {
+                let token = match action {
+                    CompletedAction::Archive => UndoToken::Archive {
+                        account_id: account_id.to_string(),
+                        thread_ids,
+                    },
+                    CompletedAction::Trash => {
+                        let source = match params {
+                            ActionParams::Trash { source_label_id } => {
+                                source_label_id.clone()
+                            }
+                            _ => None,
+                        };
+                        UndoToken::Trash {
+                            account_id: account_id.to_string(),
+                            thread_ids,
+                            original_folder_id: source,
+                        }
+                    }
+                    CompletedAction::Spam => {
+                        let was_spam = match params {
+                            ActionParams::Spam { is_spam } => !is_spam,
+                            _ => false,
+                        };
+                        UndoToken::ToggleSpam {
+                            account_id: account_id.to_string(),
+                            thread_ids,
+                            was_spam,
+                        }
+                    }
+                    CompletedAction::MoveToFolder => {
+                        let source = match params {
+                            ActionParams::MoveToFolder {
+                                source_label_id, ..
+                            } => source_label_id.clone(),
+                            _ => None,
+                        };
+                        let Some(source_folder_id) = source else {
+                            continue; // No source = no undo
+                        };
+                        UndoToken::MoveToFolder {
+                            account_id: account_id.to_string(),
+                            thread_ids,
+                            source_folder_id,
+                        }
+                    }
+                    CompletedAction::AddLabel => {
+                        let label_id = match params {
+                            ActionParams::Label { label_id } => label_id.clone(),
+                            _ => continue,
+                        };
+                        UndoToken::AddLabel {
+                            account_id: account_id.to_string(),
+                            thread_ids,
+                            label_id,
+                        }
+                    }
+                    CompletedAction::RemoveLabel => {
+                        let label_id = match params {
+                            ActionParams::Label { label_id } => label_id.clone(),
+                            _ => continue,
+                        };
+                        UndoToken::RemoveLabel {
+                            account_id: account_id.to_string(),
+                            thread_ids,
+                            label_id,
+                        }
+                    }
+                    _ => continue,
+                };
+                self.undo_stack.push(token);
+            }
+        }
+    }
+
+    // ── Undo dispatch ─────────────────────────────────────
+
+    /// Dispatch compensation for an undo token through the action service.
+    /// Uses suppress_pending_enqueue to prevent re-enqueue during undo.
+    /// Bypasses ActionCompleted — returns UndoCompleted directly.
+    pub(crate) fn dispatch_undo(
+        &mut self,
+        token: ratatoskr_command_palette::UndoToken,
+    ) -> Task<Message> {
+        let Some(ref action_ctx) = self.action_ctx else {
+            return Task::none();
+        };
+        let mut ctx = action_ctx.clone();
+        ctx.suppress_pending_enqueue = true;
+        let desc = token.description();
+
+        Task::perform(
+            async move {
+                let outcomes = execute_undo_compensation(&ctx, &token).await;
+                (desc, outcomes)
+            },
+            |(desc, outcomes)| Message::UndoCompleted { desc, outcomes },
+        )
     }
 
     /// Legacy dispatch for snooze only. All other actions go through the action service.
@@ -632,4 +830,162 @@ fn split_cross_account_id(encoded: &str) -> Option<(String, String)> {
         return None;
     }
     Some((account_id, label_id))
+}
+
+/// Execute compensation actions for an undo token.
+/// Cancels pending ops first, then dispatches the inverse action for each thread.
+async fn execute_undo_compensation(
+    ctx: &ratatoskr_core::actions::ActionContext,
+    token: &ratatoskr_command_palette::UndoToken,
+) -> Vec<ratatoskr_core::actions::ActionOutcome> {
+    use ratatoskr_command_palette::UndoToken;
+    use ratatoskr_core::actions;
+    use ratatoskr_core::db::pending_ops::db_pending_ops_cancel_for_resource;
+
+    match token {
+        UndoToken::Archive {
+            account_id,
+            thread_ids,
+        } => {
+            let mut outcomes = Vec::with_capacity(thread_ids.len());
+            for tid in thread_ids {
+                let _ = db_pending_ops_cancel_for_resource(
+                    &ctx.db, account_id.clone(), tid.clone(), "archive".to_string(),
+                ).await;
+                outcomes.push(actions::add_label(ctx, account_id, tid, "INBOX").await);
+            }
+            outcomes
+        }
+        UndoToken::Trash {
+            account_id,
+            thread_ids,
+            original_folder_id,
+        } => {
+            let mut outcomes = Vec::with_capacity(thread_ids.len());
+            for tid in thread_ids {
+                let _ = db_pending_ops_cancel_for_resource(
+                    &ctx.db, account_id.clone(), tid.clone(), "trash".to_string(),
+                ).await;
+                let outcome = if let Some(folder) = original_folder_id {
+                    actions::move_to_folder(ctx, account_id, tid, folder, None).await
+                } else {
+                    actions::add_label(ctx, account_id, tid, "INBOX").await
+                };
+                outcomes.push(outcome);
+            }
+            outcomes
+        }
+        UndoToken::MoveToFolder {
+            account_id,
+            thread_ids,
+            source_folder_id,
+        } => {
+            let mut outcomes = Vec::with_capacity(thread_ids.len());
+            for tid in thread_ids {
+                let _ = db_pending_ops_cancel_for_resource(
+                    &ctx.db, account_id.clone(), tid.clone(), "moveToFolder".to_string(),
+                ).await;
+                outcomes.push(
+                    actions::move_to_folder(ctx, account_id, tid, source_folder_id, None).await,
+                );
+            }
+            outcomes
+        }
+        UndoToken::ToggleRead {
+            account_id,
+            thread_ids,
+            was_read,
+        } => {
+            let mut outcomes = Vec::with_capacity(thread_ids.len());
+            for tid in thread_ids {
+                let _ = db_pending_ops_cancel_for_resource(
+                    &ctx.db, account_id.clone(), tid.clone(), "markRead".to_string(),
+                ).await;
+                outcomes.push(actions::mark_read(ctx, account_id, tid, *was_read).await);
+            }
+            outcomes
+        }
+        UndoToken::ToggleStar {
+            account_id,
+            thread_ids,
+            was_starred,
+        } => {
+            let mut outcomes = Vec::with_capacity(thread_ids.len());
+            for tid in thread_ids {
+                let _ = db_pending_ops_cancel_for_resource(
+                    &ctx.db, account_id.clone(), tid.clone(), "star".to_string(),
+                ).await;
+                outcomes.push(actions::star(ctx, account_id, tid, *was_starred).await);
+            }
+            outcomes
+        }
+        UndoToken::TogglePin {
+            account_id,
+            thread_ids,
+            was_pinned,
+        } => {
+            let mut outcomes = Vec::with_capacity(thread_ids.len());
+            for tid in thread_ids {
+                outcomes.push(actions::pin(ctx, account_id, tid, *was_pinned).await);
+            }
+            outcomes
+        }
+        UndoToken::ToggleMute {
+            account_id,
+            thread_ids,
+            was_muted,
+        } => {
+            let mut outcomes = Vec::with_capacity(thread_ids.len());
+            for tid in thread_ids {
+                outcomes.push(actions::mute(ctx, account_id, tid, *was_muted).await);
+            }
+            outcomes
+        }
+        UndoToken::ToggleSpam {
+            account_id,
+            thread_ids,
+            was_spam,
+        } => {
+            let mut outcomes = Vec::with_capacity(thread_ids.len());
+            for tid in thread_ids {
+                let _ = db_pending_ops_cancel_for_resource(
+                    &ctx.db, account_id.clone(), tid.clone(), "spam".to_string(),
+                ).await;
+                outcomes.push(actions::spam(ctx, account_id, tid, *was_spam).await);
+            }
+            outcomes
+        }
+        UndoToken::AddLabel {
+            account_id,
+            thread_ids,
+            label_id,
+        } => {
+            let mut outcomes = Vec::with_capacity(thread_ids.len());
+            for tid in thread_ids {
+                let _ = db_pending_ops_cancel_for_resource(
+                    &ctx.db, account_id.clone(), tid.clone(), "addLabel".to_string(),
+                ).await;
+                outcomes.push(actions::remove_label(ctx, account_id, tid, label_id).await);
+            }
+            outcomes
+        }
+        UndoToken::RemoveLabel {
+            account_id,
+            thread_ids,
+            label_id,
+        } => {
+            let mut outcomes = Vec::with_capacity(thread_ids.len());
+            for tid in thread_ids {
+                let _ = db_pending_ops_cancel_for_resource(
+                    &ctx.db, account_id.clone(), tid.clone(), "removeLabel".to_string(),
+                ).await;
+                outcomes.push(actions::add_label(ctx, account_id, tid, label_id).await);
+            }
+            outcomes
+        }
+        UndoToken::Snooze { .. } => {
+            // Snooze undo not yet implemented (snooze not in action service)
+            Vec::new()
+        }
+    }
 }

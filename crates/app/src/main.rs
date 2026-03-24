@@ -228,12 +228,16 @@ pub enum Message {
     NavigateTo(NavigationTarget),
     Escape,
     EmailAction(EmailAction),
-    /// Action service completed — carries action kind, outcomes, and rollback data for toggles.
+    /// Action service completed — carries action kind, outcomes, rollback, thread IDs, and params.
     ActionCompleted {
         action: CompletedAction,
         outcomes: Vec<ratatoskr_core::actions::ActionOutcome>,
         /// For toggle actions: (account_id, thread_id, previous_value) for rollback on failure.
         rollback: Vec<(String, String, bool)>,
+        /// Thread identities for undo token production: (account_id, thread_id).
+        threads: Vec<(String, String)>,
+        /// Action parameters for undo token construction (label_id, source folder, etc.).
+        params: crate::handlers::commands::ActionParams,
     },
     /// Send completed — carries compose window ID and outcome.
     /// Separate from ActionCompleted because send operates on a compose window,
@@ -317,6 +321,11 @@ pub enum Message {
 
     // Undo
     Undo,
+    /// Undo compensation completed.
+    UndoCompleted {
+        desc: String,
+        outcomes: Vec<ratatoskr_core::actions::ActionOutcome>,
+    },
 
     // Shared mailboxes & public folders
     SharedMailboxesLoaded(Result<Vec<db::SharedMailbox>, String>),
@@ -913,8 +922,8 @@ impl App {
                 Task::none()
             }
             Message::EmailAction(action) => self.handle_email_action(action),
-            Message::ActionCompleted { action, ref outcomes, ref rollback } => {
-                self.handle_action_completed(action, outcomes, rollback)
+            Message::ActionCompleted { action, ref outcomes, ref rollback, ref threads, ref params } => {
+                self.handle_action_completed(action, outcomes, rollback, threads, params)
             }
             Message::SendCompleted { window_id, ref outcome } => {
                 self.handle_send_completed(window_id, outcome)
@@ -1131,16 +1140,30 @@ impl App {
             }
             Message::Undo => {
                 if let Some(token) = self.undo_stack.pop() {
-                    let desc = token.description();
-                    log::info!("Undo: {desc}");
-                    // The actual compensation action would be dispatched here
-                    // once email actions are wired to providers. For now, log
-                    // the intent. The token carries all state needed to reverse
-                    // the action (account_id, thread_ids, prior state).
+                    return self.dispatch_undo(token);
+                }
+                Task::none()
+            }
+            Message::UndoCompleted { desc, ref outcomes } => {
+                let all_failed = outcomes.iter().all(ratatoskr_core::actions::ActionOutcome::is_failed);
+                let any_failed = outcomes.iter().any(ratatoskr_core::actions::ActionOutcome::is_failed);
+                if all_failed {
+                    self.status_bar.show_confirmation(
+                        format!("\u{26A0} Undo failed: {desc}"),
+                    );
+                } else if any_failed {
+                    self.status_bar.show_confirmation(
+                        "\u{26A0} Undo partially failed \u{2014} some changes may revert"
+                            .to_string(),
+                    );
+                } else {
                     self.status_bar
                         .show_confirmation(format!("Undone: {desc}"));
                 }
-                Task::none()
+                Task::batch([
+                    self.fire_navigation_load(),
+                    self.load_threads_for_current_view(),
+                ])
             }
             Message::SharedMailboxesLoaded(Ok(mailboxes)) => {
                 self.sidebar.shared_mailboxes = mailboxes;
