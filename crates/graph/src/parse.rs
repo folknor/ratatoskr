@@ -33,8 +33,6 @@ pub struct ParsedGraphMessage {
     pub owner_reaction_type: Option<String>,
     /// Total reactions count from Exchange extended properties.
     pub reactions_count: Option<i64>,
-    /// Whether the authenticated user is @mentioned in this message (Exchange beta API).
-    pub is_mentioned: bool,
 }
 
 ratatoskr_provider_utils::impl_message_addresses!(ParsedGraphMessage);
@@ -124,12 +122,6 @@ pub fn parse_graph_message(
     // Exchange reaction extended properties
     let (owner_reaction_type, reactions_count) = extract_reaction_properties(msg);
 
-    // Exchange @mention detection (beta API mentionsPreview)
-    let is_mentioned = msg
-        .mentions_preview
-        .as_ref()
-        .is_some_and(|mp| mp.is_mentioned);
-
     // Attachments
     let attachments: Vec<ParsedGraphAttachment> = msg
         .attachments
@@ -197,7 +189,6 @@ pub fn parse_graph_message(
         categories: categories.to_vec(),
         owner_reaction_type,
         reactions_count,
-        is_mentioned,
     })
 }
 

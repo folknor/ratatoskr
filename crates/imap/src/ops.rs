@@ -607,7 +607,6 @@ impl ProviderOps for ImapOps {
         ctx: &ProviderCtx<'_>,
         raw_base64url: &str,
         _thread_id: Option<&str>,
-        _mentions: &[(String, String)],
     ) -> Result<String, ProviderError> {
         let account_id = ctx.account_id.to_string();
         let configs = crate::account_config::load_both_configs(
@@ -663,7 +662,6 @@ impl ProviderOps for ImapOps {
         ctx: &ProviderCtx<'_>,
         raw_base64url: &str,
         _thread_id: Option<&str>,
-        _mentions: &[(String, String)],
     ) -> Result<String, ProviderError> {
         let account_id = ctx.account_id.to_string();
         let config = self.load_config(ctx).await?;
@@ -699,7 +697,7 @@ impl ProviderOps for ImapOps {
         if let Err(e) = self.delete_draft(ctx, draft_id).await {
             log::warn!("Failed to delete old draft {draft_id} during update: {e}");
         }
-        self.create_draft(ctx, raw_base64url, thread_id, &[]).await
+        self.create_draft(ctx, raw_base64url, thread_id).await
     }
 
     async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), ProviderError> {

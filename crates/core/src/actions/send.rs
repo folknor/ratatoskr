@@ -132,13 +132,11 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
         progress: &NoopProgressReporter,
     };
 
-    // Mentions are empty until @-autocomplete is built
     let outcome = match provider
         .send_email(
             &provider_ctx,
             &mime_base64url,
             thread_id_outer.as_deref(),
-            &[],
         )
         .await
     {

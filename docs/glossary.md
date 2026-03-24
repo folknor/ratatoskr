@@ -189,11 +189,9 @@ These terms appear in provider documentation but are **not** Ratatoskr concepts:
 
 The word "category" currently means three unrelated things in the code. This is a source of confusion and needs cleanup.
 
-### 1. Provider labels (Exchange categories, IMAP keywords, JMAP keywords)
+### 1. Provider labels (Exchange categories, IMAP keywords, JMAP keywords) — RESOLVED
 
-The old pre-unification system. `apply_category()`/`remove_category()` on `ProviderOps`, the `categories` table, the `message_categories` table, `graph/src/category_sync.rs`. These should all be renamed to use "label" terminology, and the `categories`/`message_categories` tables should be dropped once all sync paths use the unified `labels`/`thread_labels` system (labels unification Phase 6).
-
-**Files:** `provider-utils/src/ops.rs` (trait methods), `graph/src/category_sync.rs`, `gmail/src/ops.rs`, `jmap/src/ops.rs`, `imap/src/ops.rs`, `db/src/db/migrations.rs` (table definitions), `core/src/actions/label.rs` (dispatch routing).
+Cleaned up in labels unification Phase 6 *(2026-03-24)*. `apply_category()`/`remove_category()` removed from `ProviderOps`. `categories` and `message_categories` tables dropped (migration 72). All label dispatch unified through `add_tag`/`remove_tag`. The only remaining trace is the module filename `graph/src/category_sync.rs` (function inside renamed to `graph_label_sync`).
 
 ### 2. AI inbox bundles (Primary, Updates, Promotions, Social, Newsletters)
 

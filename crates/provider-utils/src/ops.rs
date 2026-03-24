@@ -71,27 +71,19 @@ pub trait ProviderOps: Send + Sync {
     // ── Send + Drafts ───────────────────────────────────────────
 
     /// Returns the sent message ID.
-    ///
-    /// `mentions` is a list of `(name, email)` pairs for @-mentions.
-    /// Only Graph/Exchange supports this; other providers ignore it.
     async fn send_email(
         &self,
         ctx: &ProviderCtx<'_>,
         raw_base64url: &str,
         thread_id: Option<&str>,
-        mentions: &[(String, String)],
     ) -> Result<String, ProviderError>;
 
     /// Returns the draft ID.
-    ///
-    /// `mentions` is a list of `(name, email)` pairs for @-mentions.
-    /// Only Graph/Exchange supports this; other providers ignore it.
     async fn create_draft(
         &self,
         ctx: &ProviderCtx<'_>,
         raw_base64url: &str,
         thread_id: Option<&str>,
-        mentions: &[(String, String)],
     ) -> Result<String, ProviderError>;
 
     /// Returns the (possibly new) draft ID.

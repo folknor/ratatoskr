@@ -1455,7 +1455,6 @@ db.executescript("""
         in_reply_to_header TEXT,
         imap_uid INTEGER,
         imap_folder TEXT,
-        is_mentioned INTEGER DEFAULT 0,
         is_reaction INTEGER DEFAULT 0,
         mdn_requested INTEGER DEFAULT 0,
         mdn_sent INTEGER DEFAULT 0,
@@ -1467,8 +1466,6 @@ db.executescript("""
     CREATE INDEX idx_messages_from ON messages(from_address);
     CREATE INDEX idx_messages_imap_uid ON messages(account_id, imap_folder, imap_uid);
     CREATE INDEX idx_messages_message_id ON messages(message_id_header);
-    CREATE INDEX idx_messages_is_mentioned ON messages(is_mentioned) WHERE is_mentioned = 1;
-
     CREATE TABLE attachments (
         id TEXT PRIMARY KEY,
         message_id TEXT NOT NULL,

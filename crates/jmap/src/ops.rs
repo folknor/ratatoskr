@@ -446,7 +446,6 @@ impl ProviderOps for JmapOps {
         _ctx: &ProviderCtx<'_>,
         raw_base64url: &str,
         _thread_id: Option<&str>,
-        _mentions: &[(String, String)],
     ) -> Result<String, ProviderError> {
         log::info!("[JMAP] Sending email");
         self.client.ensure_valid_token().await?;
@@ -523,7 +522,6 @@ impl ProviderOps for JmapOps {
         _ctx: &ProviderCtx<'_>,
         raw_base64url: &str,
         _thread_id: Option<&str>,
-        _mentions: &[(String, String)],
     ) -> Result<String, ProviderError> {
         self.client.ensure_valid_token().await?;
         let raw_bytes = ratatoskr_provider_utils::encoding::decode_base64url_nopad(raw_base64url)?;
@@ -561,7 +559,7 @@ impl ProviderOps for JmapOps {
             .email_destroy(draft_id)
             .await
             .map_err(|e| ProviderError::Server(format!("delete old draft: {e}")))?;
-        self.create_draft(_ctx, raw_base64url, _thread_id, &[]).await
+        self.create_draft(_ctx, raw_base64url, _thread_id).await
     }
 
     async fn delete_draft(&self, _ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), ProviderError> {

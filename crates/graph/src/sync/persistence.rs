@@ -195,9 +195,9 @@ fn upsert_messages(
               is_read, is_starred, raw_size, internal_date, \
               list_unsubscribe, list_unsubscribe_post, auth_results, \
               message_id_header, references_header, in_reply_to_header, body_cached, \
-              mdn_requested, is_mentioned) \
+              mdn_requested) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
-                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
             rusqlite::params![
                 b.id,
                 account_id,
@@ -223,7 +223,6 @@ fn upsert_messages(
                 b.in_reply_to_header,
                 if has_body { 1i64 } else { 0i64 },
                 b.mdn_requested,
-                msg.is_mentioned,
             ],
         )
         .map_err(|e| format!("upsert message: {e}"))?;

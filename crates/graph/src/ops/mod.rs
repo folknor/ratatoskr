@@ -202,9 +202,8 @@ impl ProviderOps for GraphOps {
         ctx: &ProviderCtx<'_>,
         raw_base64url: &str,
         thread_id: Option<&str>,
-        mentions: &[(String, String)],
     ) -> Result<String, ProviderError> {
-        Ok(send_via_draft(&self.client, ctx, raw_base64url, thread_id, mentions).await?)
+        Ok(send_via_draft(&self.client, ctx, raw_base64url, thread_id).await?)
     }
 
     async fn create_draft(
@@ -212,9 +211,8 @@ impl ProviderOps for GraphOps {
         ctx: &ProviderCtx<'_>,
         raw_base64url: &str,
         thread_id: Option<&str>,
-        mentions: &[(String, String)],
     ) -> Result<String, ProviderError> {
-        Ok(create_draft_impl(&self.client, ctx, raw_base64url, thread_id, mentions).await?)
+        Ok(create_draft_impl(&self.client, ctx, raw_base64url, thread_id).await?)
     }
 
     async fn update_draft(
@@ -230,7 +228,7 @@ impl ProviderOps for GraphOps {
         self.client
             .delete(&format!("{me}/messages/{enc_id}"), ctx.db)
             .await?;
-        Ok(create_draft_impl(&self.client, ctx, raw_base64url, thread_id, &[]).await?)
+        Ok(create_draft_impl(&self.client, ctx, raw_base64url, thread_id).await?)
     }
 
     async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), ProviderError> {

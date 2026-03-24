@@ -24,7 +24,6 @@ pub(crate) use ratatoskr_jmap as jmap;
 pub mod jmap_push;
 pub mod mdn;
 pub mod oauth;
-pub mod mentions;
 pub use ratatoskr_db::progress;
 pub mod provider;
 pub mod scheduled_send;

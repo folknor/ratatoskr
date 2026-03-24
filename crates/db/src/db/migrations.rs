@@ -1484,6 +1484,15 @@ static MIGRATIONS: &[Migration] = &[
         description: "IMAP keyword capability flag on accounts (labels unification Phase 6)",
         sql: "ALTER TABLE accounts ADD COLUMN supports_keywords INTEGER;",
     },
+    Migration {
+        version: 74,
+        description: "Drop mentions table and is_mentioned column (dead Exchange beta API code)",
+        sql: r#"
+            DROP TABLE IF EXISTS mentions;
+            DROP INDEX IF EXISTS idx_messages_is_mentioned;
+            ALTER TABLE messages DROP COLUMN is_mentioned;
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

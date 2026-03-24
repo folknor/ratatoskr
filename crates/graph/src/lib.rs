@@ -6,7 +6,6 @@ pub mod client;
 pub mod contact_sync;
 pub mod group_sync;
 pub mod folder_mapper;
-pub mod mentions;
 pub mod onedrive;
 pub mod ops;
 pub mod parse;

@@ -2,7 +2,7 @@
 
 ## Dead Code Removal
 
-- [ ] **Nuke all backend mention code** — @mentions are a compose-time feature (insert `@Name` + add to To/CC). The Exchange beta API mention infrastructure is unnecessary complexity. Remove: `crates/core/src/mentions.rs`, `crates/graph/src/mentions.rs`, `is_mentioned` column on `messages`, `mentions` table (migration v40), `mentionsPreview` extraction in `crates/graph/src/parse.rs`, mention metadata in `crates/graph/src/ops/send.rs`. The only mention work needed is compose @-autocomplete UI.
+- [x] **Nuke all backend mention code** — *(2026-03-24)* Removed: `crates/core/src/mentions.rs`, `crates/graph/src/mentions.rs`, `MentionsPreview`/`GraphMention` types, `is_mentioned` column + `mentions` table (migration 74), `mentionsPreview` in `$select`, mention params from `ProviderOps::send_email`/`create_draft` and all 4 provider impls, beta endpoint branching in `create_draft_impl`. @-autocomplete (compose-only) tracked separately under Mentions roadmap.
 
 ## Remaining Work
 

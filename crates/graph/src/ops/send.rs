@@ -12,10 +12,9 @@ pub(super) async fn send_via_draft(
     ctx: &ProviderCtx<'_>,
     raw_base64url: &str,
     thread_id: Option<&str>,
-    mentions: &[(String, String)],
 ) -> Result<String, String> {
     log::info!("[Graph] Sending email for account {}", ctx.account_id);
-    let draft_id = create_draft_impl(client, ctx, raw_base64url, thread_id, mentions).await?;
+    let draft_id = create_draft_impl(client, ctx, raw_base64url, thread_id).await?;
     // Send the draft — no response body (202 Accepted)
     let enc_draft_id = urlencoding::encode(&draft_id);
     let me = client.api_path_prefix();
@@ -73,19 +72,12 @@ pub(super) async fn create_draft_with_deferred_time(
 }
 
 /// Create a draft message from raw MIME (base64url-encoded).
-///
-/// When `mentions` is non-empty, uses the beta endpoint (`/beta/me/messages`)
-/// because the mentions resource is only available in the Graph beta API.
-#[allow(clippy::too_many_lines)]
 pub(super) async fn create_draft_impl(
     client: &GraphClient,
     ctx: &ProviderCtx<'_>,
     raw_base64url: &str,
     _thread_id: Option<&str>,
-    mentions: &[(String, String)],
 ) -> Result<String, String> {
-    use super::super::types::GraphMention;
-
     // Decode base64url → raw MIME bytes
     let raw_bytes = ratatoskr_provider_utils::encoding::decode_base64url_nopad(raw_base64url)
         .map_err(|e| format!("Failed to decode base64url: {e}"))?;
@@ -96,37 +88,13 @@ pub(super) async fn create_draft_impl(
         .ok_or("Failed to parse MIME message")?;
 
     // Build Graph message JSON from parsed MIME
-    let mut create_msg = mime_to_graph_message(&parsed)?;
+    let create_msg = mime_to_graph_message(&parsed)?;
 
-    // Inject mentions if provided
-    let use_beta = if mentions.is_empty() {
-        false
-    } else {
-        create_msg.mentions = Some(
-            mentions
-                .iter()
-                .map(|(name, address)| GraphMention {
-                    mentioned: super::super::types::GraphEmailAddress {
-                        name: Some(name.clone()),
-                        address: address.clone(),
-                    },
-                })
-                .collect(),
-        );
-        true
-    };
-
-    // Create draft — use beta endpoint when mentions are present
+    // Create draft
     let me = client.api_path_prefix();
-    let draft: serde_json::Value = if use_beta {
-        client
-            .post_beta(&format!("{me}/messages"), &create_msg, ctx.db)
-            .await?
-    } else {
-        client
-            .post(&format!("{me}/messages"), &create_msg, ctx.db)
-            .await?
-    };
+    let draft: serde_json::Value = client
+        .post(&format!("{me}/messages"), &create_msg, ctx.db)
+        .await?;
 
     let draft_id = draft
         .get("id")
@@ -199,7 +167,6 @@ pub(super) fn mime_to_graph_message(
         importance: None,
         internet_message_id: message_id,
         single_value_extended_properties: None,
-        mentions: None,
         from: None,
         sender: None,
         is_read_receipt_requested: Some(true),
