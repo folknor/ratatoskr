@@ -22,7 +22,7 @@ pub async fn add_label(
     label_id: &str,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("add_label", account_id, thread_id);
-    let params_json = format!(r#"{{"labelId":"{label_id}"}}"#);
+    let params_json = serde_json::json!({"labelId": label_id}).to_string();
 
     // 1. Look up label metadata + local DB mutation in one spawn_blocking call
     let db = ctx.db.clone();
@@ -129,7 +129,7 @@ pub async fn remove_label(
     label_id: &str,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("remove_label", account_id, thread_id);
-    let params_json = format!(r#"{{"labelId":"{label_id}"}}"#);
+    let params_json = serde_json::json!({"labelId": label_id}).to_string();
 
     let db = ctx.db.clone();
     let aid = account_id.to_string();

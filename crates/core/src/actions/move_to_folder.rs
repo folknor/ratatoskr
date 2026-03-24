@@ -23,11 +23,11 @@ pub async fn move_to_folder(
     source_label_id: Option<&str>,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("move_to_folder", account_id, thread_id);
-    let params_json = if let Some(src) = source_label_id {
-        format!(r#"{{"folderId":"{folder_id}","sourceLabelId":"{src}"}}"#)
-    } else {
-        format!(r#"{{"folderId":"{folder_id}"}}"#)
-    };
+    let params_json = serde_json::json!({
+        "folderId": folder_id,
+        "sourceLabelId": source_label_id,
+    })
+    .to_string();
 
     let db = ctx.db.clone();
     let aid = account_id.to_string();

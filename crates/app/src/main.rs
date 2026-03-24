@@ -479,6 +479,7 @@ impl App {
                     inline_images: iis.clone(),
                     search: (**ss).clone(),
                     encryption_key: key,
+                    suppress_pending_enqueue: false,
                 })
             }
             _ => {

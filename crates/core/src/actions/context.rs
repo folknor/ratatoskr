@@ -16,4 +16,8 @@ pub struct ActionContext {
     pub inline_images: InlineImageStoreState,
     pub search: SearchState,
     pub encryption_key: [u8; 32],
+    /// When true, `enqueue_if_retryable` is suppressed. Set by the
+    /// pending-ops worker to prevent retried actions from re-enqueuing
+    /// themselves (which would create duplicate pending ops).
+    pub suppress_pending_enqueue: bool,
 }

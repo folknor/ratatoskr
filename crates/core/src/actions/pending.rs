@@ -25,6 +25,11 @@ pub async fn enqueue_if_retryable(
     resource_id: &str,
     params_json: &str,
 ) {
+    // Suppressed during retry dispatch to prevent duplicate enqueue.
+    if ctx.suppress_pending_enqueue {
+        return;
+    }
+
     if let ActionOutcome::LocalOnly {
         retryable: true,
         reason,
@@ -70,6 +75,10 @@ pub async fn process_pending_ops(ctx: &ActionContext) {
 
     log::info!("[pending_ops] Processing {} pending operations", ops.len());
 
+    // Suppress enqueue during retry to prevent duplicate pending ops.
+    let mut retry_ctx = ctx.clone();
+    retry_ctx.suppress_pending_enqueue = true;
+
     for op in ops {
         // Mark as executing
         if let Err(e) = db_pending_ops_update_status(
@@ -84,7 +93,7 @@ pub async fn process_pending_ops(ctx: &ActionContext) {
             continue;
         }
 
-        let outcome = dispatch_pending_op(ctx, &op.account_id, &op.operation_type, &op.resource_id, &op.params).await;
+        let outcome = dispatch_pending_op(&retry_ctx, &op.account_id, &op.operation_type, &op.resource_id, &op.params).await;
 
         match outcome {
             ActionOutcome::Success => {
