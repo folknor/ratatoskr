@@ -9,10 +9,26 @@ use ratatoskr_provider_utils::ops::ProviderOps;
 
 use super::context::ActionContext;
 use super::log::MutationLog;
-use super::outcome::{ActionError, ActionOutcome};
+use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
 use super::{archive, label, mark_read, move_to_folder, mute, permanent_delete, pin, spam, star, trash};
+
+/// Classify a provider-creation error as permanent or potentially transient.
+///
+/// `create_provider` returns plain `String` errors. We classify known
+/// permanent patterns (unknown provider, account not found) so the batch
+/// executor doesn't spray the retry queue with unrecoverable ops.
+fn classify_provider_error(error: &str) -> RemoteFailureKind {
+    if error.starts_with("Unknown provider")
+        || error.contains("no rows returned")
+        || error.contains("QueryReturnedNoRows")
+    {
+        RemoteFailureKind::Permanent
+    } else {
+        RemoteFailureKind::Unknown
+    }
+}
 
 /// After this many consecutive retryable remote failures within one account
 /// group, remaining threads are short-circuited (local-only + enqueue).
@@ -120,8 +136,10 @@ async fn execute_account_group(
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
-            // Degraded fallback: per-thread _local + per-thread outcome
-            return degraded_fallback(ctx, action, account_id, &e, thread_indices).await;
+            // Classify the error — permanent failures (unknown provider, missing
+            // account) should not spam the retry queue.
+            let kind = classify_provider_error(&e);
+            return degraded_fallback(ctx, action, account_id, &e, kind, thread_indices).await;
         }
     };
 
@@ -130,10 +148,12 @@ async fn execute_account_group(
 
     for (idx, thread_id) in &thread_indices {
         if consecutive_remote_failures >= MAX_CONSECUTIVE_FAILURES {
-            // Short-circuit: per-thread degraded path
+            // Short-circuit: per-thread degraded path (retryable — provider was
+            // reachable but failing on consecutive operations)
             let outcome = handle_thread_degraded(
                 ctx, action, account_id, thread_id,
                 "provider presumed unavailable after consecutive failures",
+                RemoteFailureKind::Unknown,
             ).await;
             results.push((*idx, outcome));
             continue;
@@ -164,33 +184,40 @@ async fn degraded_fallback(
     action: &BatchAction,
     account_id: &str,
     provider_error: &str,
+    error_kind: RemoteFailureKind,
     thread_indices: Vec<(usize, String)>,
 ) -> Vec<(usize, ActionOutcome)> {
     let mut results = Vec::with_capacity(thread_indices.len());
     for (idx, thread_id) in thread_indices {
-        let outcome = handle_thread_degraded(ctx, action, account_id, &thread_id, provider_error).await;
+        let outcome =
+            handle_thread_degraded(ctx, action, account_id, &thread_id, provider_error, error_kind).await;
         results.push((idx, outcome));
     }
     results
 }
 
 /// Handle a single thread in degraded mode: apply _local, return per-thread
-/// outcome with MutationLog, enqueue if retryable.
+/// outcome with MutationLog, enqueue only if the error is retryable.
 async fn handle_thread_degraded(
     ctx: &ActionContext,
     action: &BatchAction,
     account_id: &str,
     thread_id: &str,
     provider_error: &str,
+    error_kind: RemoteFailureKind,
 ) -> ActionOutcome {
     let name = action_name(action);
     let mlog = MutationLog::begin(name, account_id, thread_id);
 
     match action_local(ctx, action, account_id, thread_id).await {
         Ok(()) => {
+            let retryable = matches!(
+                error_kind,
+                RemoteFailureKind::Transient | RemoteFailureKind::Unknown
+            );
             let outcome = ActionOutcome::LocalOnly {
-                reason: ActionError::remote(provider_error),
-                retryable: true,
+                reason: ActionError::remote_with_kind(error_kind, provider_error),
+                retryable,
             };
             let (op_type, params_json) = enqueue_params(action);
             enqueue_if_retryable(ctx, &outcome, account_id, op_type, thread_id, &params_json).await;
