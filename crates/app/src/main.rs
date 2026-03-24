@@ -163,6 +163,7 @@ pub enum CompletedAction {
     MarkRead,
     Pin,
     Mute,
+    Snooze,
     AddLabel,
     RemoveLabel,
     DeleteDraft,
@@ -172,7 +173,7 @@ impl CompletedAction {
     fn removes_from_view(self) -> bool {
         matches!(
             self,
-            Self::Archive | Self::Trash | Self::Spam | Self::MoveToFolder | Self::PermanentDelete
+            Self::Archive | Self::Trash | Self::Spam | Self::MoveToFolder | Self::PermanentDelete | Self::Snooze
         )
     }
 
@@ -187,6 +188,7 @@ impl CompletedAction {
             Self::MarkRead => "Read status toggled",
             Self::Pin => "Pin toggled",
             Self::Mute => "Mute toggled",
+            Self::Snooze => "Snoozed",
             Self::AddLabel => "Label applied",
             Self::RemoveLabel => "Label removed",
             Self::DeleteDraft => "Draft discarded",

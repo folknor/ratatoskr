@@ -12,7 +12,7 @@ use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
-use super::{archive, label, mark_read, move_to_folder, mute, permanent_delete, pin, spam, star, trash};
+use super::{archive, label, mark_read, move_to_folder, mute, permanent_delete, pin, snooze, spam, star, trash};
 
 /// Classify a provider-creation error as permanent or potentially transient.
 ///
@@ -49,6 +49,7 @@ pub enum BatchAction {
     RemoveLabel { label_id: String },
     Pin { pinned: bool },
     Mute { muted: bool },
+    Snooze { until: i64 },
 }
 
 /// Execute a batch action across multiple threads.
@@ -123,8 +124,8 @@ async fn execute_account_group(
 ) -> Vec<(usize, ActionOutcome)> {
     let mut results = Vec::with_capacity(thread_indices.len());
 
-    // Pin/mute are local-only — no provider needed, still guarded
-    if matches!(action, BatchAction::Pin { .. } | BatchAction::Mute { .. }) {
+    // Pin/mute/snooze are local-only — no provider needed, still guarded
+    if matches!(action, BatchAction::Pin { .. } | BatchAction::Mute { .. } | BatchAction::Snooze { .. }) {
         for (idx, thread_id) in thread_indices {
             let _guard = match ctx.try_acquire_flight(account_id, &thread_id) {
                 Some(g) => g,
@@ -298,7 +299,7 @@ async fn dispatch_with_provider(
         BatchAction::RemoveLabel { label_id } => {
             label::remove_label_with_provider(ctx, provider, account_id, thread_id, label_id).await
         }
-        BatchAction::Pin { .. } | BatchAction::Mute { .. } => {
+        BatchAction::Pin { .. } | BatchAction::Mute { .. } | BatchAction::Snooze { .. } => {
             unreachable!("local-only actions don't use provider dispatch")
         }
     }
@@ -327,13 +328,13 @@ async fn action_local(
         BatchAction::RemoveLabel { label_id } => {
             label::remove_label_local(ctx, account_id, thread_id, label_id).await.map(|_| ())
         }
-        BatchAction::Pin { .. } | BatchAction::Mute { .. } => {
+        BatchAction::Pin { .. } | BatchAction::Mute { .. } | BatchAction::Snooze { .. } => {
             unreachable!("local-only actions use direct dispatch")
         }
     }
 }
 
-/// Dispatch a local-only action (pin/mute).
+/// Dispatch a local-only action (pin/mute/snooze).
 async fn dispatch_local_only(
     ctx: &ActionContext,
     action: &BatchAction,
@@ -343,7 +344,8 @@ async fn dispatch_local_only(
     match action {
         BatchAction::Pin { pinned } => pin::pin(ctx, account_id, thread_id, *pinned).await,
         BatchAction::Mute { muted } => mute::mute(ctx, account_id, thread_id, *muted).await,
-        _ => unreachable!("only pin/mute are local-only"),
+        BatchAction::Snooze { until } => snooze::snooze(ctx, account_id, thread_id, *until).await,
+        _ => unreachable!("only pin/mute/snooze are local-only"),
     }
 }
 
@@ -366,7 +368,7 @@ fn enqueue_params(action: &BatchAction) -> (&'static str, String) {
         BatchAction::RemoveLabel { label_id } => {
             ("removeLabel", serde_json::json!({"labelId": label_id}).to_string())
         }
-        BatchAction::Pin { .. } | BatchAction::Mute { .. } => {
+        BatchAction::Pin { .. } | BatchAction::Mute { .. } | BatchAction::Snooze { .. } => {
             unreachable!("local-only actions don't enqueue")
         }
     }
@@ -386,5 +388,6 @@ fn action_name(action: &BatchAction) -> &'static str {
         BatchAction::RemoveLabel { .. } => "remove_label",
         BatchAction::Pin { .. } => "pin",
         BatchAction::Mute { .. } => "mute",
+        BatchAction::Snooze { .. } => "snooze",
     }
 }

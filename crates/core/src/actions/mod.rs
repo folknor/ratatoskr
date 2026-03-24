@@ -21,6 +21,7 @@ mod permanent_delete;
 mod pin;
 pub(crate) mod provider;
 mod send;
+mod snooze;
 mod spam;
 mod star;
 mod trash;
@@ -43,6 +44,7 @@ pub use permanent_delete::permanent_delete;
 pub use pin::pin;
 // create_provider is pub(crate) — only accessible within core, not to downstream crates.
 // The app must use action functions or sync_dispatch/jmap_push helpers.
+pub use snooze::{snooze, unsnooze};
 pub use spam::spam;
 pub use star::star;
 pub use trash::trash;

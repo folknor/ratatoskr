@@ -17,6 +17,7 @@ pub(crate) enum ActionParams {
     MoveToFolder { folder_id: String, source_label_id: Option<String> },
     Label { label_id: String },
     Trash { source_label_id: Option<String> },
+    Snooze { until: i64 },
 }
 
 impl App {
@@ -204,20 +205,12 @@ impl App {
                 );
             }
 
-            // ── Legacy path: snooze (deferred from Phase 2.1) ──
-            EmailAction::Snooze { .. } => {
-                let display = if selection_count > 1 {
-                    format!("Snoozed ({selection_count} threads)")
-                } else {
-                    "Snoozed".to_string()
-                };
-                self.status_bar.show_confirmation(display);
-
-                let db_task = self.dispatch_email_db_action(&action, &selected_threads);
-                let advance_task = self.handle_thread_list(
-                    crate::ui::thread_list::ThreadListMessage::AutoAdvance,
+            EmailAction::Snooze { until } => {
+                return self.dispatch_action_service_with_params(
+                    CompletedAction::Snooze,
+                    &selected_threads,
+                    &ActionParams::Snooze { until },
                 );
-                return Task::batch([db_task, advance_task]);
             }
 
             // ── Labels via action service (Phase 2.2) ──
@@ -666,6 +659,10 @@ impl App {
                             label_id,
                         }
                     }
+                    CompletedAction::Snooze => UndoToken::Snooze {
+                        account_id: account_id.to_string(),
+                        thread_ids,
+                    },
                     _ => continue,
                 };
                 self.undo_stack.push(token);
@@ -697,47 +694,6 @@ impl App {
             |(desc, outcomes)| Message::UndoCompleted { desc, outcomes },
         )
     }
-
-    /// Legacy dispatch for snooze only. All other actions go through the action service.
-    /// Snooze is deferred from action service migration (needs design decision).
-    fn dispatch_email_db_action(
-        &self,
-        action: &EmailAction,
-        threads: &[(String, String)],
-    ) -> Task<Message> {
-        let db = Arc::clone(&self.db);
-        let threads = threads.to_vec();
-        let action = action.clone();
-
-        Task::perform(
-            async move {
-                db.with_write_conn(move |conn| {
-                    for (account_id, thread_id) in &threads {
-                        if let EmailAction::Snooze { until } = &action {
-                            ratatoskr_core::email_actions::remove_label(
-                                conn, account_id, thread_id, "INBOX",
-                            )?;
-                            conn.execute(
-                                "UPDATE threads SET is_snoozed = 1, snooze_until = ?3 \
-                                 WHERE account_id = ?1 AND id = ?2",
-                                rusqlite::params![account_id, thread_id, until],
-                            )
-                            .map_err(|e| format!("snooze: {e}"))?;
-                        }
-                    }
-                    Ok(())
-                })
-                .await
-            },
-            |result| {
-                if let Err(e) = result {
-                    log::error!("Snooze DB error: {e}");
-                }
-                Message::Noop
-            },
-        )
-    }
-
 
 }
 
@@ -950,9 +906,14 @@ async fn execute_undo_compensation(
             }
             outcomes
         }
-        UndoToken::Snooze { .. } => {
-            // Snooze undo not yet implemented (snooze not in action service)
-            Vec::new()
+        UndoToken::Snooze { account_id, thread_ids } => {
+            let mut outcomes = Vec::with_capacity(thread_ids.len());
+            for tid in thread_ids {
+                outcomes.push(
+                    ratatoskr_core::actions::unsnooze(ctx, account_id, tid).await,
+                );
+            }
+            outcomes
         }
     }
 }
@@ -980,6 +941,9 @@ fn to_batch_action(action: CompletedAction, params: &ActionParams) -> Option<Bat
         }
         (CompletedAction::RemoveLabel, ActionParams::Label { label_id }) => {
             Some(BatchAction::RemoveLabel { label_id: label_id.clone() })
+        }
+        (CompletedAction::Snooze, ActionParams::Snooze { until }) => {
+            Some(BatchAction::Snooze { until: *until })
         }
         _ => {
             log::error!("to_batch_action: unhandled {action:?} / {params:?}");
