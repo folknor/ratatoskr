@@ -6,7 +6,7 @@ use crate::command_dispatch::{self, EmailAction};
 use crate::db::Db;
 use crate::{APP_DATA_DIR, App, CompletedAction, Message};
 use ratatoskr_command_palette::{CommandArgs, CommandId, KeyBinding, OptionItem};
-use ratatoskr_core::actions::ActionOutcome;
+use ratatoskr_core::actions::{ActionOutcome, BatchAction};
 
 /// Parameters for actions that need more than account_id + thread_id.
 /// Also used by undo token construction to recover prior state.
@@ -174,7 +174,7 @@ impl App {
                 return self.dispatch_action_service_with_params(
                     CompletedAction::Trash,
                     &selected_threads,
-                    ActionParams::Trash { source_label_id },
+                    &ActionParams::Trash { source_label_id },
                 );
             }
             EmailAction::PermanentDelete => {
@@ -191,7 +191,7 @@ impl App {
                 return self.dispatch_action_service_with_params(
                     CompletedAction::Spam,
                     &selected_threads,
-                    ActionParams::Spam { is_spam },
+                    &ActionParams::Spam { is_spam },
                 );
             }
             EmailAction::MoveToFolder { folder_id } => {
@@ -200,7 +200,7 @@ impl App {
                 return self.dispatch_action_service_with_params(
                     CompletedAction::MoveToFolder,
                     &selected_threads,
-                    ActionParams::MoveToFolder { folder_id, source_label_id },
+                    &ActionParams::MoveToFolder { folder_id, source_label_id },
                 );
             }
 
@@ -225,14 +225,14 @@ impl App {
                 return self.dispatch_action_service_with_params(
                     CompletedAction::AddLabel,
                     &selected_threads,
-                    ActionParams::Label { label_id },
+                    &ActionParams::Label { label_id },
                 );
             }
             EmailAction::RemoveLabel { label_id } => {
                 return self.dispatch_action_service_with_params(
                     CompletedAction::RemoveLabel,
                     &selected_threads,
-                    ActionParams::Label { label_id },
+                    &ActionParams::Label { label_id },
                 );
             }
 
@@ -256,14 +256,14 @@ impl App {
         action: CompletedAction,
         threads: &[(String, String)],
     ) -> Task<Message> {
-        self.dispatch_action_service_with_params(action, threads, ActionParams::None)
+        self.dispatch_action_service_with_params(action, threads, &ActionParams::None)
     }
 
     fn dispatch_action_service_with_params(
         &mut self,
         action: CompletedAction,
         threads: &[(String, String)],
-        params: ActionParams,
+        params: &ActionParams,
     ) -> Task<Message> {
         let Some(ref action_ctx) = self.action_ctx else {
             self.status_bar.show_confirmation(
@@ -275,42 +275,11 @@ impl App {
         let ctx = action_ctx.clone();
         let threads = threads.to_vec();
         let params_clone = params.clone();
+        let batch_action = to_batch_action(action, params);
         Task::perform(
             async move {
-                let mut outcomes = Vec::with_capacity(threads.len());
-                for (account_id, thread_id) in &threads {
-                    let outcome = match (&action, &params) {
-                        (CompletedAction::Archive, _) => {
-                            ratatoskr_core::actions::archive(&ctx, account_id, thread_id).await
-                        }
-                        (CompletedAction::Trash, _) => {
-                            ratatoskr_core::actions::trash(&ctx, account_id, thread_id).await
-                        }
-                        (CompletedAction::PermanentDelete, _) => {
-                            ratatoskr_core::actions::permanent_delete(&ctx, account_id, thread_id).await
-                        }
-                        (CompletedAction::Spam, ActionParams::Spam { is_spam }) => {
-                            ratatoskr_core::actions::spam(&ctx, account_id, thread_id, *is_spam).await
-                        }
-                        (CompletedAction::MoveToFolder, ActionParams::MoveToFolder { folder_id, source_label_id }) => {
-                            ratatoskr_core::actions::move_to_folder(
-                                &ctx, account_id, thread_id, folder_id, source_label_id.as_deref(),
-                            ).await
-                        }
-                        (CompletedAction::AddLabel, ActionParams::Label { label_id }) => {
-                            ratatoskr_core::actions::add_label(&ctx, account_id, thread_id, label_id).await
-                        }
-                        (CompletedAction::RemoveLabel, ActionParams::Label { label_id }) => {
-                            ratatoskr_core::actions::remove_label(&ctx, account_id, thread_id, label_id).await
-                        }
-                        _ => ActionOutcome::Failed {
-                            error: ratatoskr_core::actions::ActionError::invalid_state(
-                                format!("{action:?} not yet migrated to action service"),
-                            ),
-                        },
-                    };
-                    outcomes.push(outcome);
-                }
+                let outcomes =
+                    ratatoskr_core::actions::batch_execute(&ctx, batch_action, threads.clone()).await;
                 (action, outcomes, threads)
             },
             move |(action, outcomes, threads)| Message::ActionCompleted {
@@ -344,14 +313,17 @@ impl App {
         rollback
     }
 
-    /// Dispatch a toggle action through the action service with rollback data.
+    /// Dispatch a toggle action through the batch executor with rollback data.
+    ///
+    /// Toggles have per-thread target values (some true, some false). We
+    /// partition by value, run separate batch_execute calls in parallel,
+    /// then merge outcomes back in original order.
     fn dispatch_toggle_action(
         &mut self,
         action: CompletedAction,
         rollback: Vec<(String, String, bool)>,
     ) -> Task<Message> {
         let Some(ref action_ctx) = self.action_ctx else {
-            // Reverse the optimistic toggle since we can't dispatch.
             self.rollback_toggles(&rollback, action);
             self.status_bar.show_confirmation(
                 format!("\u{26A0} {} unavailable \u{2014} action service not initialized", action.success_label()),
@@ -360,35 +332,9 @@ impl App {
         };
 
         let ctx = action_ctx.clone();
-        let targets: Vec<(String, String, bool)> = rollback
-            .iter()
-            .map(|(a, t, prev)| (a.clone(), t.clone(), !prev))
-            .collect();
         Task::perform(
             async move {
-                let mut outcomes = Vec::with_capacity(targets.len());
-                for (account_id, thread_id, new_value) in &targets {
-                    let outcome = match action {
-                        CompletedAction::Star => {
-                            ratatoskr_core::actions::star(&ctx, account_id, thread_id, *new_value).await
-                        }
-                        CompletedAction::MarkRead => {
-                            ratatoskr_core::actions::mark_read(&ctx, account_id, thread_id, *new_value).await
-                        }
-                        CompletedAction::Pin => {
-                            ratatoskr_core::actions::pin(&ctx, account_id, thread_id, *new_value).await
-                        }
-                        CompletedAction::Mute => {
-                            ratatoskr_core::actions::mute(&ctx, account_id, thread_id, *new_value).await
-                        }
-                        _ => ActionOutcome::Failed {
-                            error: ratatoskr_core::actions::ActionError::invalid_state(
-                                format!("{action:?} is not a toggle action"),
-                            ),
-                        },
-                    };
-                    outcomes.push(outcome);
-                }
+                let outcomes = dispatch_toggle_batch(&ctx, action, &rollback).await;
                 let threads: Vec<(String, String)> = rollback
                     .iter()
                     .map(|(a, t, _)| (a.clone(), t.clone()))
@@ -991,6 +937,99 @@ async fn execute_undo_compensation(
         UndoToken::Snooze { .. } => {
             // Snooze undo not yet implemented (snooze not in action service)
             Vec::new()
+        }
+    }
+}
+
+// ── Batch helpers ───────────────────────────────────────────────────
+
+/// Convert app action types to core's BatchAction.
+fn to_batch_action(action: CompletedAction, params: &ActionParams) -> BatchAction {
+    match (action, params) {
+        (CompletedAction::Archive, _) => BatchAction::Archive,
+        (CompletedAction::Trash, _) => BatchAction::Trash,
+        (CompletedAction::PermanentDelete, _) => BatchAction::PermanentDelete,
+        (CompletedAction::Spam, ActionParams::Spam { is_spam }) => {
+            BatchAction::Spam { is_spam: *is_spam }
+        }
+        (CompletedAction::MoveToFolder, ActionParams::MoveToFolder { folder_id, source_label_id }) => {
+            BatchAction::MoveToFolder {
+                folder_id: folder_id.clone(),
+                source_label_id: source_label_id.clone(),
+            }
+        }
+        (CompletedAction::AddLabel, ActionParams::Label { label_id }) => {
+            BatchAction::AddLabel { label_id: label_id.clone() }
+        }
+        (CompletedAction::RemoveLabel, ActionParams::Label { label_id }) => {
+            BatchAction::RemoveLabel { label_id: label_id.clone() }
+        }
+        _ => {
+            log::error!("to_batch_action: unhandled {action:?} / {params:?}");
+            BatchAction::Archive // unreachable in practice
+        }
+    }
+}
+
+/// Partition toggle targets by new_value, batch-execute each partition
+/// in parallel, and merge outcomes back in original order.
+async fn dispatch_toggle_batch(
+    ctx: &ratatoskr_core::actions::ActionContext,
+    action: CompletedAction,
+    rollback: &[(String, String, bool)],
+) -> Vec<ActionOutcome> {
+    let total = rollback.len();
+
+    // Partition: (original_index, account_id, thread_id) grouped by new_value
+    let mut true_indices = Vec::new();
+    let mut true_targets = Vec::new();
+    let mut false_indices = Vec::new();
+    let mut false_targets = Vec::new();
+    for (i, (aid, tid, prev)) in rollback.iter().enumerate() {
+        let new_value = !prev;
+        if new_value {
+            true_indices.push(i);
+            true_targets.push((aid.clone(), tid.clone()));
+        } else {
+            false_indices.push(i);
+            false_targets.push((aid.clone(), tid.clone()));
+        }
+    }
+
+    let batch_true = to_toggle_batch(action, true);
+    let batch_false = to_toggle_batch(action, false);
+
+    // Execute both partitions in parallel
+    let (true_outcomes, false_outcomes) = iced::futures::future::join(
+        ratatoskr_core::actions::batch_execute(ctx, batch_true, true_targets),
+        ratatoskr_core::actions::batch_execute(ctx, batch_false, false_targets),
+    )
+    .await;
+
+    // Merge back in original order
+    let mut outcomes = Vec::with_capacity(total);
+    outcomes.resize_with(total, || ActionOutcome::Failed {
+        error: ratatoskr_core::actions::ActionError::invalid_state("toggle merge bug"),
+    });
+    for (idx, outcome) in true_indices.into_iter().zip(true_outcomes) {
+        outcomes[idx] = outcome;
+    }
+    for (idx, outcome) in false_indices.into_iter().zip(false_outcomes) {
+        outcomes[idx] = outcome;
+    }
+    outcomes
+}
+
+/// Map a toggle action + target value to a BatchAction.
+fn to_toggle_batch(action: CompletedAction, value: bool) -> BatchAction {
+    match action {
+        CompletedAction::Star => BatchAction::Star { starred: value },
+        CompletedAction::MarkRead => BatchAction::MarkRead { read: value },
+        CompletedAction::Pin => BatchAction::Pin { pinned: value },
+        CompletedAction::Mute => BatchAction::Mute { muted: value },
+        _ => {
+            log::error!("to_toggle_batch: {action:?} is not a toggle");
+            BatchAction::Star { starred: value }
         }
     }
 }
