@@ -105,7 +105,7 @@ Undo dispatches compensation actions through the normal action service. Those ac
 
 1. **Pending-ops suppression:** Use the existing `suppress_pending_enqueue` flag on `ActionContext`. The undo dispatcher sets it to `true`, same as the pending-ops worker does. Compensation actions don't enqueue.
 
-2. **Undo token suppression:** Add an `is_undo: bool` flag to `ActionCompleted` (default `false`). The undo dispatcher sets it to `true`. `handle_action_completed` skips token production when `is_undo` is true.
+2. **Undo token suppression:** Compensation actions bypass `ActionCompleted` entirely — `dispatch_undo` calls action functions directly and returns `UndoCompleted`, which has no token-production path. No `is_undo` flag needed on `ActionCompleted`.
 
 ### Undo outcomes are collected and reported
 
@@ -124,7 +124,7 @@ for tid in &thread_ids {
 }
 ```
 
-`db_pending_ops_cancel_for_resource` deletes pending ops matching `(account_id, resource_id, operation_type)` with `status IN ('pending', 'executing')`. Catching `'executing'` handles the race where a pending op is being retried while the user undoes.
+`db_pending_ops_cancel_for_resource` deletes pending ops matching `(account_id, resource_id, operation_type)` with `status IN ('pending', 'executing')`. This prevents future retries. It does NOT stop an in-flight provider call that's already running — if the worker has loaded the op and started the provider request, deleting the DB row can't cancel that network call. The in-flight mutation may complete, and the subsequent undo compensation will reverse it. This is acceptable for best-effort undo.
 
 ### Undo is best-effort
 
@@ -141,11 +141,10 @@ Message::ActionCompleted {
     rollback: Vec<(String, String, bool)>,
     threads: Vec<(String, String)>,  // (account_id, thread_id)
     params: ActionParams,
-    is_undo: bool,
 }
 ```
 
-Update `dispatch_action_service_with_params` and `dispatch_toggle_action` to pass `threads` and `params` through. Set `is_undo: false` at all existing dispatch sites.
+Update `dispatch_action_service_with_params` and `dispatch_toggle_action` to pass `threads` and `params` through.
 
 ### Step 2: Produce tokens in `handle_action_completed`
 
@@ -174,9 +173,18 @@ for (account_id, thread_ids) in by_account {
 **For toggle actions:**
 ```rust
 if !rollback.is_empty() {
-    // Group rollback by account_id
+    // Only include threads whose outcome was not Failed.
+    // Failed toggles are already rolled back immediately by rollback_toggles —
+    // including them in the undo token would re-flip threads that never changed.
+    let succeeded_rollback: Vec<&(String, String, bool)> = rollback.iter()
+        .zip(outcomes.iter())
+        .filter(|(_, o)| !o.is_failed())
+        .map(|(r, _)| r)
+        .collect();
+
+    // Group by account_id
     let mut by_account: HashMap<&str, Vec<(String, bool)>> = HashMap::new();
-    for (aid, tid, prev) in rollback {
+    for (aid, tid, prev) in &succeeded_rollback {
         by_account.entry(aid.as_str()).or_default().push((tid.clone(), *prev));
     }
     for (account_id, entries) in by_account {
@@ -259,7 +267,24 @@ enum ActionParams {
 
 The trash dispatch site captures `self.sidebar.selected_label.clone()` as the source, same as `MoveToFolder` already does.
 
-### Step 5: Implement undo dispatch
+### Step 5: Update trash dispatch to pass source
+
+In `handle_email_action`, the trash dispatch currently calls `dispatch_action_service(CompletedAction::Trash, &selected_threads)` with `ActionParams::None`. Change to:
+
+```rust
+EmailAction::Trash => {
+    let source_label_id = self.sidebar.selected_label.clone();
+    return self.dispatch_action_service_with_params(
+        CompletedAction::Trash,
+        &selected_threads,
+        ActionParams::Trash { source_label_id },
+    );
+}
+```
+
+Same pattern as `MoveToFolder` and `ToggleSpam` already use.
+
+### Step 6: Implement undo dispatch
 
 ```rust
 fn dispatch_undo(&mut self, token: UndoToken) -> Task<Message> {
@@ -304,7 +329,7 @@ async fn execute_compensation(
 }
 ```
 
-### Step 6: Add `UndoCompleted` message and handler
+### Step 7: Add `UndoCompleted` message and handler
 
 ```rust
 Message::UndoCompleted { desc, outcomes } => {
@@ -331,7 +356,7 @@ Message::UndoCompleted { desc, outcomes } => {
 }
 ```
 
-### Step 7: Implement `cancel_pending_ops_for_token`
+### Step 8: Implement `cancel_pending_ops_for_token`
 
 Add `db_pending_ops_cancel_for_resource` to `pending_ops.rs`:
 
@@ -358,7 +383,7 @@ pub async fn db_pending_ops_cancel_for_resource(
 
 `cancel_pending_ops_for_token` maps the token to the operation type and calls this for each thread.
 
-### Step 8: Verify
+### Step 9: Verify
 
 - Ctrl+Z after archive → thread reappears in inbox
 - Ctrl+Z after star → star state reverts
@@ -378,7 +403,7 @@ pub async fn db_pending_ops_cancel_for_resource(
 2. `Failed` produces no token. `PermanentDelete` produces no token.
 3. Token payloads carry exact prior state: `original_folder_id` for trash, `source_folder_id` for move, `was_spam` direction for spam, `label_id` for label ops, `previous_value` for toggles.
 4. Ctrl+Z pops the token and dispatches the inverse action through the service with `suppress_pending_enqueue = true`.
-5. Compensation actions do not produce undo tokens (`is_undo` flag on `ActionCompleted`).
+5. Compensation actions do not produce undo tokens (dispatch bypasses `ActionCompleted`, returns `UndoCompleted` directly).
 6. Undo of a retryable `LocalOnly` action cancels matching pending ops (including `'executing'` state for race safety).
 7. Undo outcomes are collected and reported — all-succeeded, partially-failed, or all-failed toasts.
 8. `UndoCompleted` refreshes thread list + navigation.
