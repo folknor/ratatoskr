@@ -275,7 +275,23 @@ impl App {
         let ctx = action_ctx.clone();
         let threads = threads.to_vec();
         let params_clone = params.clone();
-        let batch_action = to_batch_action(action, params);
+        let Some(batch_action) = to_batch_action(action, params) else {
+            let outcomes = vec![
+                ActionOutcome::Failed {
+                    error: ratatoskr_core::actions::ActionError::invalid_state(
+                        format!("{action:?} not supported for batch dispatch"),
+                    ),
+                };
+                threads.len()
+            ];
+            return Task::done(Message::ActionCompleted {
+                action,
+                outcomes,
+                rollback: Vec::new(),
+                threads,
+                params: params_clone,
+            });
+        };
         Task::perform(
             async move {
                 let outcomes =
@@ -944,29 +960,30 @@ async fn execute_undo_compensation(
 // ── Batch helpers ───────────────────────────────────────────────────
 
 /// Convert app action types to core's BatchAction.
-fn to_batch_action(action: CompletedAction, params: &ActionParams) -> BatchAction {
+/// Returns None for unsupported/mismatched action+params combinations.
+fn to_batch_action(action: CompletedAction, params: &ActionParams) -> Option<BatchAction> {
     match (action, params) {
-        (CompletedAction::Archive, _) => BatchAction::Archive,
-        (CompletedAction::Trash, _) => BatchAction::Trash,
-        (CompletedAction::PermanentDelete, _) => BatchAction::PermanentDelete,
+        (CompletedAction::Archive, _) => Some(BatchAction::Archive),
+        (CompletedAction::Trash, _) => Some(BatchAction::Trash),
+        (CompletedAction::PermanentDelete, _) => Some(BatchAction::PermanentDelete),
         (CompletedAction::Spam, ActionParams::Spam { is_spam }) => {
-            BatchAction::Spam { is_spam: *is_spam }
+            Some(BatchAction::Spam { is_spam: *is_spam })
         }
         (CompletedAction::MoveToFolder, ActionParams::MoveToFolder { folder_id, source_label_id }) => {
-            BatchAction::MoveToFolder {
+            Some(BatchAction::MoveToFolder {
                 folder_id: folder_id.clone(),
                 source_label_id: source_label_id.clone(),
-            }
+            })
         }
         (CompletedAction::AddLabel, ActionParams::Label { label_id }) => {
-            BatchAction::AddLabel { label_id: label_id.clone() }
+            Some(BatchAction::AddLabel { label_id: label_id.clone() })
         }
         (CompletedAction::RemoveLabel, ActionParams::Label { label_id }) => {
-            BatchAction::RemoveLabel { label_id: label_id.clone() }
+            Some(BatchAction::RemoveLabel { label_id: label_id.clone() })
         }
         _ => {
             log::error!("to_batch_action: unhandled {action:?} / {params:?}");
-            BatchAction::Archive // unreachable in practice
+            None
         }
     }
 }
@@ -996,8 +1013,26 @@ async fn dispatch_toggle_batch(
         }
     }
 
-    let batch_true = to_toggle_batch(action, true);
-    let batch_false = to_toggle_batch(action, false);
+    let Some(batch_true) = to_toggle_batch(action, true) else {
+        return vec![
+            ActionOutcome::Failed {
+                error: ratatoskr_core::actions::ActionError::invalid_state(
+                    format!("{action:?} is not a toggle action"),
+                ),
+            };
+            total
+        ];
+    };
+    let Some(batch_false) = to_toggle_batch(action, false) else {
+        return vec![
+            ActionOutcome::Failed {
+                error: ratatoskr_core::actions::ActionError::invalid_state(
+                    format!("{action:?} is not a toggle action"),
+                ),
+            };
+            total
+        ];
+    };
 
     // Execute both partitions in parallel
     let (true_outcomes, false_outcomes) = iced::futures::future::join(
@@ -1021,15 +1056,16 @@ async fn dispatch_toggle_batch(
 }
 
 /// Map a toggle action + target value to a BatchAction.
-fn to_toggle_batch(action: CompletedAction, value: bool) -> BatchAction {
+/// Returns None for non-toggle actions.
+fn to_toggle_batch(action: CompletedAction, value: bool) -> Option<BatchAction> {
     match action {
-        CompletedAction::Star => BatchAction::Star { starred: value },
-        CompletedAction::MarkRead => BatchAction::MarkRead { read: value },
-        CompletedAction::Pin => BatchAction::Pin { pinned: value },
-        CompletedAction::Mute => BatchAction::Mute { muted: value },
+        CompletedAction::Star => Some(BatchAction::Star { starred: value }),
+        CompletedAction::MarkRead => Some(BatchAction::MarkRead { read: value }),
+        CompletedAction::Pin => Some(BatchAction::Pin { pinned: value }),
+        CompletedAction::Mute => Some(BatchAction::Mute { muted: value }),
         _ => {
             log::error!("to_toggle_batch: {action:?} is not a toggle");
-            BatchAction::Star { starred: value }
+            None
         }
     }
 }
