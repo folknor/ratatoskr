@@ -1033,3 +1033,61 @@ fn to_toggle_batch(action: CompletedAction, value: bool) -> Option<BatchAction> 
         }
     }
 }
+
+// ── Snooze resurface ─────────────────────────────────────────
+
+impl App {
+    /// Check for snoozed threads that are due and unsnooze them.
+    pub(crate) fn handle_snooze_tick(&self) -> Task<Message> {
+        let Some(ref action_ctx) = self.action_ctx else {
+            return Task::none();
+        };
+        let ctx = action_ctx.clone();
+        Task::perform(
+            async move {
+                let now = chrono::Utc::now().timestamp();
+                let due = ratatoskr_core::db::queries_extra::db_get_snoozed_threads_due(
+                    &ctx.db, now,
+                )
+                .await?;
+                if due.is_empty() {
+                    return Ok(0);
+                }
+                let count = due.len();
+                for thread in &due {
+                    let outcome = ratatoskr_core::actions::unsnooze(
+                        &ctx,
+                        &thread.account_id,
+                        &thread.id,
+                    )
+                    .await;
+                    if let ratatoskr_core::actions::ActionOutcome::Failed { error } = outcome {
+                        log::error!(
+                            "Failed to unsnooze thread {}: {}",
+                            thread.id,
+                            error.user_message()
+                        );
+                    }
+                }
+                log::info!("Snooze resurface: unsnoozed {count} thread(s)");
+                Ok(count)
+            },
+            Message::SnoozeResurfaceComplete,
+        )
+    }
+
+    /// After unsnoozing due threads, reload navigation (unread counts) and thread list.
+    pub(crate) fn handle_snooze_resurface_complete(
+        &mut self,
+        result: Result<usize, String>,
+    ) -> Task<Message> {
+        match result {
+            Ok(0) => Task::none(),
+            Ok(_count) => self.load_navigation_and_threads(),
+            Err(e) => {
+                log::error!("Snooze resurface check failed: {e}");
+                Task::none()
+            }
+        }
+    }
+}

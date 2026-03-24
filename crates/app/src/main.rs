@@ -336,6 +336,10 @@ pub enum Message {
     SharedMailboxesLoaded(Result<Vec<db::SharedMailbox>, String>),
     PinnedPublicFoldersLoaded(Result<Vec<db::PinnedPublicFolder>, String>),
 
+    // Snooze resurface — periodic check for due snoozed threads
+    SnoozeTick,
+    SnoozeResurfaceComplete(Result<usize, String>),
+
     // GAL (organization directory) cache
     GalRefreshTick,
     GalCacheRefreshed(Result<usize, String>),
@@ -638,6 +642,9 @@ impl App {
             ));
         }
 
+        // Snooze resurface on boot: unsnooze threads that became due while the app was closed.
+        boot_tasks.push(Task::done(Message::SnoozeTick));
+
         boot_tasks.append(&mut session_tasks);
         (app, Task::batch(boot_tasks))
     }
@@ -763,6 +770,14 @@ impl App {
             subs.push(
                 iced::time::every(std::time::Duration::from_secs(300))
                     .map(|_| Message::SyncTick),
+            );
+        }
+
+        // Snooze resurface — check every 60 seconds for due threads
+        if self.action_ctx.is_some() {
+            subs.push(
+                iced::time::every(std::time::Duration::from_secs(60))
+                    .map(|_| Message::SnoozeTick),
             );
         }
 
@@ -1202,6 +1217,8 @@ impl App {
                 log::warn!("Failed to load pinned public folders: {e}");
                 Task::none()
             }
+            Message::SnoozeTick => self.handle_snooze_tick(),
+            Message::SnoozeResurfaceComplete(result) => self.handle_snooze_resurface_complete(result),
             Message::GalRefreshTick => {
                 // Refresh GAL cache for all connected accounts.
                 // Currently a placeholder — the actual directory API calls
