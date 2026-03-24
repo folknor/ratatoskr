@@ -60,13 +60,21 @@ impl App {
             async move {
                 let outcome =
                     ratatoskr_core::actions::contacts::save_contact(&ctx, input).await;
-                if let ratatoskr_core::actions::ActionOutcome::Failed { ref error } = outcome {
-                    log::error!("Contact save failed: {error}");
-                }
-                // Reload contacts regardless of outcome (local save may have succeeded)
-                db.get_contacts_for_settings(filter).await
+                // Reload contacts regardless of outcome (local save succeeded
+                // for Success and LocalOnly, failed for Failed)
+                let contacts = db.get_contacts_for_settings(filter).await;
+                (outcome, contacts)
             },
-            |result| Message::Settings(SettingsMessage::ContactsLoaded(result)),
+            |(outcome, contacts)| {
+                use ratatoskr_core::actions::ActionOutcome;
+                match outcome {
+                    ActionOutcome::Failed { error } => {
+                        log::error!("Contact save failed: {error}");
+                        Message::Settings(SettingsMessage::ContactSaved(Err(error)))
+                    }
+                    _ => Message::Settings(SettingsMessage::ContactsLoaded(contacts)),
+                }
+            },
         )
     }
 
@@ -82,12 +90,35 @@ impl App {
             async move {
                 let outcome =
                     ratatoskr_core::actions::contacts::delete_contact(&ctx, &id).await;
-                if let ratatoskr_core::actions::ActionOutcome::Failed { ref error } = outcome {
-                    log::error!("Contact delete failed: {error}");
+                match outcome {
+                    ratatoskr_core::actions::ActionOutcome::Failed { .. } => {
+                        // Provider-first delete failed (e.g. JMAP) — contact not
+                        // deleted locally. Don't reload (nothing changed).
+                        (outcome, None)
+                    }
+                    _ => {
+                        // Success or LocalOnly — contact deleted locally, reload list
+                        let contacts = db.get_contacts_for_settings(filter).await.ok();
+                        (outcome, contacts)
+                    }
                 }
-                db.get_contacts_for_settings(filter).await
             },
-            |result| Message::Settings(SettingsMessage::ContactsLoaded(result)),
+            |(outcome, contacts)| {
+                use ratatoskr_core::actions::ActionOutcome;
+                match outcome {
+                    ActionOutcome::Failed { error } => {
+                        log::error!("Contact delete failed: {error}");
+                        Message::Settings(SettingsMessage::ContactDeleted(Err(error)))
+                    }
+                    _ => {
+                        if let Some(list) = contacts {
+                            Message::Settings(SettingsMessage::ContactsLoaded(Ok(list)))
+                        } else {
+                            Message::Settings(SettingsMessage::ContactDeleted(Ok(())))
+                        }
+                    }
+                }
+            },
         )
     }
 

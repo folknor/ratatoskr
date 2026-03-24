@@ -74,12 +74,15 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
 
     // Need both account_id and server_id for provider dispatch
     let (Some(account_id), Some(server_id)) = (&input.account_id, &input.server_id) else {
-        // Synced contact without account/server identity — can't dispatch
-        log::warn!(
+        // Synced contact without account/server identity — can't dispatch.
+        // Return LocalOnly, not Success: the local save succeeded but provider
+        // write-back was impossible due to missing identity.
+        let msg = format!(
             "Synced contact {} has source={source} but missing account_id or server_id",
             input.email
         );
-        return ActionOutcome::Success;
+        log::warn!("{msg}");
+        return ActionOutcome::LocalOnly { remote_error: msg };
     };
 
     match dispatch_write_back(
