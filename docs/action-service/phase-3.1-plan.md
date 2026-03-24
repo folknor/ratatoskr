@@ -2,7 +2,7 @@
 
 ## Goal
 
-Replace all `String` error fields on `ActionOutcome` with a structured `ActionError` enum that supports user-facing messages and machine-readable retry classification. After this phase: no action returns a raw string error, the app shows meaningful error messages, and Phase 3.4 has the `RemoteFailureKind` it needs for enqueue decisions.
+Replace all `String` error fields on `ActionOutcome` with a structured `ActionError` enum. This introduces the type system for error categorization and seeds the few classifications we can currently know (`NotImplemented` for stubs, `Build` for MIME, `Db` for database errors). Most provider errors remain `Unknown` because they arrive as opaque strings — better classification is incremental work per-provider, not a Phase 3.1 goal. Phase 3.4 will use `RemoteFailureKind` for enqueue decisions; Phase 3.1 provides the infrastructure.
 
 ## Current State
 
@@ -83,6 +83,8 @@ impl ActionError {
 ```
 
 Also implement `Display` (delegates to `user_message()`) and `std::error::Error`.
+
+**`user_message()` is an intermediate step, not a polished user-safe boundary.** The messages still incorporate internal wording from provider errors and rusqlite messages. Phase 3.1 provides the structure (`ActionError` variants with categories) so that future work can refine the messages per-variant without changing the API. For now, `user_message()` is better than raw strings (it prepends context like "Network error:" or "Not found:") but is not fully user-safe copy.
 
 ### Convenience constructors
 
@@ -223,18 +225,31 @@ Err(e) => return ActionOutcome::Failed { error: format!("MIME build: {e}") },
 Err(e) => return ActionOutcome::Failed { error: ActionError::build(format!("{e}")) },
 ```
 
-**Label/event not found:**
+**Label/event/calendar/contact lookups via `query_row`:**
+
+`query_row` can fail with `QueryReturnedNoRows` (genuinely not found) or other `rusqlite::Error` variants (DB corruption, lock timeout, malformed row). These must be classified differently:
+
 ```rust
 // Before:
 .map_err(|e| format!("label lookup: {e}"))?;
 
-// After:
+// After (WRONG — maps all errors to NotFound):
 .map_err(|e| ActionError::not_found(format!("label: {e}")))?;
+
+// After (CORRECT — distinguish not-found from DB errors):
+.map_err(|e| match e {
+    rusqlite::Error::QueryReturnedNoRows => {
+        ActionError::not_found("label not found for this account")
+    }
+    other => ActionError::db(format!("label lookup: {other}")),
+})?;
 ```
+
+This applies to ~5 lookup sites: label metadata, event metadata, calendar remote ID, contact identity, and draft lookup. Each `query_row` call must match on the error variant.
 
 ### Step 3: Update calendar action functions in `crates/calendar/src/actions.rs`
 
-18 construction sites. Same patterns as Step 2. The `dispatch_write_back` and `dispatch_delete` functions return `Result<(), String>` — change to `Result<(), ActionError>`.
+18 construction sites. Same patterns as Step 2. The `dispatch_write_back` and `dispatch_delete` functions return `Result<(), String>` — change to `Result<(), ActionError>`. Provider functions that return `Result<(), String>` (e.g., `jmap_contacts_push_update`) need an intermediate `.map_err(ActionError::remote)` at the call site since they won't be changed to return `ActionError` directly.
 
 ### Step 4: Update app handlers
 
@@ -271,7 +286,7 @@ ActionOutcome::Failed { error } => Err(error),
 ActionOutcome::Failed { error } => Err(error.user_message()),
 ```
 
-**Contact handlers** (`contacts.rs`): Same pattern — `.user_message()` for error display.
+**Contact handlers** (`contacts.rs`): The save handler routes `Failed` to `ContactSaved(Err(error))` and the delete handler routes `Failed` to `ContactDeleted(Err(error))`. These already surface errors via the settings message system. However, the settings UI currently no-ops on both success and failure results (settings/update.rs:613-614 — both arms are empty). Phase 3.1 updates the error strings to use `.user_message()` in the handler; making the settings UI actually display these errors is a UI concern beyond Phase 3.1's scope but should be noted.
 
 ### Step 5: Verify
 
