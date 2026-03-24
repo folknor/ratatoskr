@@ -219,7 +219,7 @@ All three write to the `labels` + `thread_labels` tables, the same as existing f
 
 ### Outgoing (local → server)
 
-Label apply/remove operations go through `add_tag()`/`remove_tag()` on ProviderOps, which uses `label_kind` to select the correct remote operation (folder move vs tag set).
+Label apply/remove operations go through the action service (`core::actions::label`), which looks up `label_kind` and dispatches `apply_category()`/`remove_category()` for tag-kind labels or `add_tag()`/`remove_tag()` for container-kind labels on ProviderOps.
 
 ### Thread-level rollup
 

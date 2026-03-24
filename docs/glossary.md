@@ -193,7 +193,7 @@ The word "category" currently means three unrelated things in the code. This is 
 
 The old pre-unification system. `apply_category()`/`remove_category()` on `ProviderOps`, the `categories` table, the `message_categories` table, `graph/src/category_sync.rs`. These should all be renamed to use "label" terminology, and the `categories`/`message_categories` tables should be dropped once all sync paths use the unified `labels`/`thread_labels` system (labels unification Phase 6).
 
-**Files:** `provider-utils/src/ops.rs` (trait methods), `graph/src/category_sync.rs`, `gmail/src/ops.rs`, `jmap/src/ops.rs`, `imap/src/ops.rs`, `db/src/db/migrations.rs` (table definitions), `app/src/handlers/commands.rs` (`provider_label_write_back`).
+**Files:** `provider-utils/src/ops.rs` (trait methods), `graph/src/category_sync.rs`, `gmail/src/ops.rs`, `jmap/src/ops.rs`, `imap/src/ops.rs`, `db/src/db/migrations.rs` (table definitions), `core/src/actions/label.rs` (dispatch routing).
 
 ### 2. AI inbox bundles (Primary, Updates, Promotions, Social, Newsletters)
 
@@ -211,7 +211,7 @@ The `thread_categories` table and `sync/src/categorization.rs`. This is an autom
 
 This is not urgent but should happen before 1.0. Each is independent:
 
-- [ ] Rename `apply_category`/`remove_category` → merge into `add_tag`/`remove_tag` or rename to `apply_label`/`remove_label` on `ProviderOps`. Coordinate with action service Phase 2.2.
+- [ ] Rename `apply_category`/`remove_category` → merge into `add_tag`/`remove_tag` or rename to `apply_label`/`remove_label` on `ProviderOps`. Label dispatch in `core/src/actions/label.rs` routes by `label_kind` and would need updating.
 - [ ] Drop `categories` and `message_categories` tables (labels unification Phase 6).
 - [ ] Rename `thread_categories` → `thread_bundles`, `categorization.rs` → `bundling.rs`, `bundles_categories.rs` → `bundles.rs`.
 - [ ] Rename `CATEGORY_PRIMARY` etc. → `BUNDLE_PRIMARY` etc. in `command_dispatch.rs` and navigation.
