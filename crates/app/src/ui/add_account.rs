@@ -1396,6 +1396,7 @@ async fn validate_imap_connection(
         &security_str,
         username,
         password,
+        "password",
         accept_invalid_certs,
     )
     .await

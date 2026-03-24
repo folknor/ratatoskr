@@ -4,6 +4,9 @@
 
 /// Verify IMAP credentials by connecting and immediately disconnecting.
 ///
+/// `auth_method` is typically `"password"` for password-based auth or
+/// `"xoauth2"` for IMAP OAuth flows.
+///
 /// Returns `Ok(())` if the connection succeeds, or an error message.
 pub async fn verify_imap_credentials(
     host: &str,
@@ -11,6 +14,7 @@ pub async fn verify_imap_credentials(
     security: &str,
     username: &str,
     password: &str,
+    auth_method: &str,
     accept_invalid_certs: bool,
 ) -> Result<(), String> {
     let config = ratatoskr_imap::types::ImapConfig {
@@ -19,7 +23,7 @@ pub async fn verify_imap_credentials(
         security: security.to_string(),
         username: username.to_string(),
         password: password.to_string(),
-        auth_method: "password".to_string(),
+        auth_method: auth_method.to_string(),
         accept_invalid_certs,
     };
 

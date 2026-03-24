@@ -1,24 +1,21 @@
 //! Sync dispatch and provider-adjacent app helpers.
 //!
 //! All provider operations go through core. This module provides thin
-//! Task::perform wrappers for sync and JMAP push.
+//! Task::perform wrappers for sync and JMAP push, plus an iced subscription
+//! recipe for receiving continuous push notifications.
 
-use std::sync::Arc;
-
-use iced::Task;
-
-use crate::db::Db;
-use crate::{App, Message};
-
-// ── JMAP push subscription ─────────────────────────────────────────
-
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use iced::advanced::graphics::futures::subscription;
 use iced::advanced::subscription::Hasher;
 use iced::futures::stream::BoxStream;
 use iced::futures::StreamExt;
-use iced::Subscription;
+use iced::{Subscription, Task};
+
+use crate::db::Db;
+use crate::{App, Message};
+
+// ── JMAP push subscription ─────────────────────────────────────────
 
 /// Shared handle for the JMAP push notification receiver.
 pub type JmapPushReceiver = Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<String>>>>;
@@ -194,6 +191,7 @@ impl App {
         for (account_id, email) in jmap_accounts {
             let db = Arc::clone(&db);
             let notify_tx = notify_tx.clone();
+            let email_log = email.clone();
 
             tasks.push(Task::perform(
                 async move {
@@ -207,9 +205,10 @@ impl App {
                     )
                     .await
                 },
-                |result| {
-                    if let Err(e) = result {
-                        log::warn!("[JMAP Push] Failed to start: {e}");
+                move |result| {
+                    match result {
+                        Ok(()) => log::info!("[JMAP Push] Started for {email_log}"),
+                        Err(ref e) => log::warn!("[JMAP Push] Failed to start for {email_log}: {e}"),
                     }
                     Message::Noop
                 },
