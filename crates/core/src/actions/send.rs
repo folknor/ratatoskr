@@ -47,13 +47,20 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
         //   request.bcc         → bcc_addresses (joined)
         //   request.in_reply_to → reply_to_message_id
         //   mime_base64url       → attachments
+        // INSERT with ON CONFLICT so retries (same draft_id after failure)
+        // update the existing row instead of creating a new one.
         conn.execute(
             "INSERT INTO local_drafts \
              (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
               subject, body_html, reply_to_message_id, thread_id, \
               from_email, attachments, updated_at, sync_status) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, \
-                     unixepoch(), 'pending')",
+                     unixepoch(), 'pending') \
+             ON CONFLICT(id) DO UPDATE SET \
+               to_addresses = ?3, cc_addresses = ?4, bcc_addresses = ?5, \
+               subject = ?6, body_html = ?7, reply_to_message_id = ?8, \
+               thread_id = ?9, from_email = ?10, attachments = ?11, \
+               updated_at = unixepoch(), sync_status = 'pending'",
             rusqlite::params![
                 draft_id,
                 account_id,
@@ -155,14 +162,17 @@ pub async fn delete_draft(
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
 
-        let remote_id: Option<String> = conn
-            .query_row(
-                "SELECT remote_draft_id FROM local_drafts WHERE id = ?1",
-                rusqlite::params![did],
-                |row| row.get(0),
-            )
-            .ok()
-            .flatten();
+        let remote_id: Option<String> = match conn.query_row(
+            "SELECT remote_draft_id FROM local_drafts WHERE id = ?1",
+            rusqlite::params![did],
+            |row| row.get(0),
+        ) {
+            Ok(id) => id,
+            // No row found — draft doesn't exist locally, nothing to delete
+            Err(rusqlite::Error::QueryReturnedNoRows) => None,
+            // Actual DB error — propagate
+            Err(e) => return Err(format!("draft lookup: {e}")),
+        };
 
         conn.execute(
             "DELETE FROM local_drafts WHERE id = ?1",

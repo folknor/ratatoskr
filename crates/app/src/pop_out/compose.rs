@@ -379,6 +379,11 @@ pub struct ComposeState {
 
     // Send in progress — disables Send button, shows "Sending..." status
     pub sending: bool,
+
+    // Draft ID for the send path — set on first send attempt, reused on retry
+    // so that failed retries update the existing draft row instead of creating
+    // a new one.
+    pub send_draft_id: Option<String>,
 }
 
 impl ComposeState {
@@ -418,6 +423,7 @@ impl ComposeState {
             height: COMPOSE_DEFAULT_HEIGHT,
             draft_dirty: false,
             sending: false,
+            send_draft_id: None,
         }
     }
 

@@ -1024,7 +1024,12 @@ impl App {
             })
             .collect();
 
-        let draft_id = uuid::Uuid::new_v4().to_string();
+        // Reuse draft_id on retry so the action updates the existing
+        // 'failed' row instead of creating a new one.
+        let draft_id = state
+            .send_draft_id
+            .get_or_insert_with(|| uuid::Uuid::new_v4().to_string())
+            .clone();
 
         let send_req = ratatoskr_core::actions::SendRequest {
             draft_id,
