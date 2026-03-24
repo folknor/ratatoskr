@@ -27,10 +27,13 @@ Wire calendar event mutations through the action service so that creating, updat
 | **JMAP** | `create_event_remote(client, calendar_remote_id, title, desc, location, start, end, is_all_day)` | `update_event_remote(client, event_remote_id, title, desc, location, start, end, is_all_day)` | `delete_event_remote(client, event_remote_id)` |
 | **CalDAV** | `caldav_create_event_impl(db, key, account_id, calendar_remote_id, event_json)` | `caldav_update_event_impl(db, key, account_id, remote_event_id, event_json, etag)` | `caldav_delete_event_impl(db, key, account_id, remote_event_id, etag)` |
 
+All provider create/update functions return `Result<CalendarEventDto, String>` (defined in `crates/calendar/src/types.rs:23-52`). `CalendarEventDto` carries `remote_event_id`, `etag`, `summary`, timestamps, and all other event metadata the provider returns.
+
 **Key differences from email actions:**
 - Calendar writes are **not on `ProviderOps`**. Each provider exposes standalone async functions with provider-specific client types (`&GmailClient`, `&GraphClient`, `&JmapClient`, or `(db, key, account_id)` for CalDAV).
-- The action service's `create_provider()` returns `Box<dyn ProviderOps>` — unusable for calendar operations.
+- The action service's `create_provider()` returns `Box<dyn ProviderOps>` — unusable for calendar operations. A second provider-resolution path (`create_calendar_provider`) is needed. This lives in `actions/calendar.rs` alongside the dispatch helpers, not in `actions/provider.rs`, because it's calendar-domain-specific.
 - Provider APIs take different parameter shapes: Google/Graph take `serde_json::Value`, JMAP takes individual fields, CalDAV takes `serde_json::Value` + `etag`.
+- **Google needs `calendar_remote_id` for all three operations** (create, update, delete). Graph and JMAP need it only for create. CalDAV needs it for create. All three action functions must look up the event's `calendar_id` → `calendars.remote_id` to have this available.
 
 ### What doesn't exist
 
@@ -40,11 +43,11 @@ Wire calendar event mutations through the action service so that creating, updat
 
 ## Design Decisions
 
-### Calendar actions live in a separate module, not in `core::actions`
+### Calendar actions live in a separate module
 
-The implementation-phases doc noted: *"Calendar and contact writes are different domains from email actions. They may warrant their own service modules (`core::calendar_actions`, `core::contact_actions`) rather than expanding `core::actions` into a grab-bag."*
+The implementation-phases doc noted: *"Calendar and contact writes are different domains from email actions. They may warrant their own service modules."*
 
-**Decision:** Calendar actions live in `core::actions::calendar`. They share `ActionContext` and `ActionOutcome` but have their own provider resolution (typed clients, not `ProviderOps`).
+**Decision:** Calendar actions live in `core::actions::calendar`. They share `ActionContext` and `ActionOutcome` but have their own provider resolution (typed clients, not `ProviderOps`). This creates a second provider-resolution path alongside `create_provider()` — intentional duplication because the calendar domain uses fundamentally different client types.
 
 ### Calendar-specific provider resolution
 
@@ -65,22 +68,24 @@ This function reads `provider` and `calendar_provider` from the `accounts` table
 
 ### Local-first for create, provider-first for update/delete
 
-**Create** is local-first: insert the event into the local DB immediately (instant UI feedback), then dispatch to the provider. If the provider succeeds, update the local row with `remote_event_id`. If it fails, the event exists locally but not on the server — the user sees it, and a future sync-up could retry.
+**Create** is local-first: insert the event into the local DB immediately (instant UI feedback), then dispatch to the provider. If the provider succeeds, update the local row with `remote_event_id` from the returned `CalendarEventDto`. If the provider fails, return `LocalOnly` — the event exists locally but not on the server. The caller can surface this ("Event saved locally — not synced to server"). No automatic retry mechanism exists in Phase 2.5 — this is an honest `LocalOnly`, same semantics as email actions where local succeeded but remote didn't.
 
-**Update** and **delete** are provider-first for events that have a `remote_event_id` (synced from server). The provider is the source of truth. For locally-created events without a `remote_event_id`, update/delete are local-only.
+**Update** and **delete** are provider-first for events that have a `remote_event_id` (synced from server). The provider is the source of truth. For locally-created events without a `remote_event_id`, update/delete are local-only and return `Success`.
 
-This hybrid approach matches user expectations:
-- Creating an event should appear immediately in the calendar view.
-- Editing a server-synced event should propagate to the server.
-- Deleting a server-synced event should remove it from the server.
+### Event metadata lookup: `calendar_remote_id` and `etag`
 
-### `calendar_remote_id` resolution
+All three action functions need metadata beyond what the caller provides:
 
-Provider APIs need the calendar's `remote_id`, not the local `calendar_id`. The action function looks this up from the `calendars` table: `SELECT remote_id FROM calendars WHERE id = ?1 AND account_id = ?2`.
+- **`calendar_remote_id`**: looked up from `calendars.remote_id` via the event's `calendar_id`. Needed by Google for all operations, by Graph/JMAP/CalDAV for create.
+- **`remote_event_id`**: looked up from `calendar_events.remote_event_id`. Needed for update/delete provider dispatch. `NULL` means locally-created (no provider dispatch).
+- **`etag`**: looked up from `calendar_events.etag`. Needed by CalDAV for optimistic concurrency on update/delete.
+
+For **create**, the caller passes `calendar_id` → the action looks up `calendar_remote_id`.
+For **update/delete**, the action looks up `remote_event_id`, `etag`, `calendar_id`, and then `calendar_remote_id` from the existing event row + calendars table.
 
 ### Event data serialization for provider APIs
 
-Google and Graph take `serde_json::Value`. JMAP takes individual fields. CalDAV takes `serde_json::Value`. Rather than the action function building three different JSON shapes, define a `CalendarEventInput` struct with all fields, and let each provider dispatch branch serialize it appropriately:
+Define a `CalendarEventInput` struct as the provider-agnostic interface:
 
 ```rust
 pub struct CalendarEventInput {
@@ -97,14 +102,23 @@ pub struct CalendarEventInput {
 }
 ```
 
-The Google/Graph branches convert this to `serde_json::Value` using provider-specific field names. The JMAP branch passes individual fields. CalDAV converts to its own JSON shape. This conversion logic lives in the action module, not in the provider crates (which already have their own input formats).
+Each provider dispatch branch serializes this to the format the provider expects. This conversion is internal to the action module.
+
+### Completion message pattern
+
+Calendar operates on the calendar view, not the thread list. Like email send, it doesn't fit `ActionCompleted` (which carries per-thread outcomes and toggle rollback).
+
+**Decision:** Reuse the existing `CalendarMessage::EventSaved(Result<(), String>)` and `CalendarMessage::EventDeleted(Result<(), String>)` callbacks. The action service result is mapped to these: `Success`/`LocalOnly` → `Ok(())`, `Failed` → `Err(error)`. The existing completion handlers (close overlay, reload events) work unchanged.
+
+This avoids adding more `Message` variants. The tradeoff: `LocalOnly` is reported as success to the existing handler (overlay closes, events reload). To surface the "saved locally, not synced" distinction, the action function can log a warning and the status bar can show a degraded confirmation. This is acceptable for Phase 2.5 — Phase 3 will introduce richer outcome reporting.
 
 ### `ActionOutcome` semantics
 
-Same as folder operations (provider-first for update/delete):
-- `Success` = provider succeeded (for events with `remote_event_id`) or local-only write succeeded (for events without).
-- `Failed` = provider or local DB failed.
-- For create: `Success` means local insert succeeded. Provider dispatch is best-effort — if it fails, the event is local-only until sync retries. This matches the immediate-feedback expectation.
+- **Create**: `Success` = local insert + provider dispatch both succeeded. `LocalOnly` = local insert succeeded, provider failed (event is local-only with `remote_event_id = NULL`). `Failed` = local insert failed.
+- **Update (synced event)**: `Success` = provider + local both succeeded. `Failed` = provider failed.
+- **Update (local-only event)**: `Success` = local update succeeded. No provider dispatch.
+- **Delete (synced event)**: `Success` = provider + local both succeeded. `Failed` = provider failed.
+- **Delete (local-only event)**: `Success` = local delete succeeded. No provider dispatch.
 
 ## Action Function Signatures
 
@@ -136,60 +150,71 @@ pub async fn delete_calendar_event(
 
 ### Step 1: Define `CalendarEventInput` and `CalendarProvider`
 
-In `crates/core/src/actions/calendar.rs`:
-
-```rust
-/// Provider-agnostic input for calendar event create/update.
-#[derive(Debug, Clone)]
-pub struct CalendarEventInput {
-    pub title: String,
-    pub description: String,
-    pub location: String,
-    pub start_time: i64,
-    pub end_time: i64,
-    pub is_all_day: bool,
-    pub timezone: Option<String>,
-    pub recurrence_rule: Option<String>,
-    pub availability: Option<String>,
-    pub visibility: Option<String>,
-}
-```
+In `crates/core/src/actions/calendar.rs`.
 
 ### Step 2: Implement `create_calendar_provider`
 
-Reads the account's calendar provider from the DB and constructs the typed client. Same provider-resolution logic as `calendar_sync_account_impl`.
+Reads `provider` and `calendar_provider` from the `accounts` table. Same resolution logic as `calendar_sync_account_impl`: `gmail_api` or `calendar_provider = 'google_api'` → Google, `graph` → Graph, `caldav` or `calendar_provider = 'caldav'` → CalDAV, `jmap` → JMAP. Constructs the typed client using `GmailClient::from_account`, `GraphClient::from_account`, `JmapClient::from_account` (same as `create_provider` in `actions/provider.rs`).
 
 ### Step 3: Implement provider dispatch helpers
 
-Private functions that take `CalendarProvider` + `CalendarEventInput` and call the right provider API:
+Private functions that take `CalendarProvider`, `&ActionContext` (for `db`, `encryption_key`), and the operation-specific parameters:
 
-- `dispatch_create(provider, db, calendar_remote_id, input)` — returns `Result<CalendarEventDto, String>`
-- `dispatch_update(provider, db, remote_event_id, input, etag)` — returns `Result<CalendarEventDto, String>`
-- `dispatch_delete(provider, db, remote_event_id, etag)` — returns `Result<(), String>`
+```rust
+async fn dispatch_create(
+    provider: &CalendarProvider,
+    ctx: &ActionContext,
+    calendar_remote_id: &str,
+    input: &CalendarEventInput,
+) -> Result<CalendarEventDto, String>
 
-Each builds the provider-specific payload (JSON for Google/Graph/CalDAV, individual fields for JMAP) and calls the existing provider function.
+async fn dispatch_update(
+    provider: &CalendarProvider,
+    ctx: &ActionContext,
+    calendar_remote_id: &str,
+    remote_event_id: &str,
+    input: &CalendarEventInput,
+    etag: Option<&str>,
+) -> Result<CalendarEventDto, String>
+
+async fn dispatch_delete(
+    provider: &CalendarProvider,
+    ctx: &ActionContext,
+    calendar_remote_id: &str,
+    remote_event_id: &str,
+    etag: Option<&str>,
+) -> Result<(), String>
+```
+
+Each builds the provider-specific payload and calls the existing provider function. `calendar_remote_id` is available for all operations — Google needs it for update/delete, others may ignore it.
 
 ### Step 4: Implement `create_calendar_event`
 
-1. Look up `calendar_remote_id` from `calendars` table.
-2. Local DB insert via `create_calendar_event_sync()` — instant feedback.
-3. Create calendar provider client.
-4. Dispatch to provider. On success, update local row with `remote_event_id` from the `CalendarEventDto`.
-5. Return `Success` regardless of provider result (local insert is the gate for create).
+1. Look up `calendar_remote_id` from `calendars` table via `calendar_id`.
+2. Local DB insert via `create_calendar_event_sync()` — instant feedback. Captures the generated `event_id`.
+3. Create calendar provider client. If provider creation fails, return `LocalOnly` (local insert already succeeded).
+4. Call `dispatch_create`. On success, update local row: `UPDATE calendar_events SET remote_event_id = ?1, etag = ?2 WHERE id = ?3` with values from `CalendarEventDto`. Return `Success`.
+5. On provider failure, return `LocalOnly { remote_error }`. The event exists locally with `remote_event_id = NULL`.
 
 ### Step 5: Implement `update_calendar_event`
 
-1. Look up event's `remote_event_id` and `etag` from `calendar_events` table.
-2. If `remote_event_id` is `NULL` (locally-created, never synced): local-only update, return `Success`.
-3. If `remote_event_id` exists: dispatch to provider first, then update local DB with returned metadata.
-4. Return `Success` if provider succeeded (or if local-only), `Failed` if provider failed.
+1. Look up event's `remote_event_id`, `etag`, and `calendar_id` from `calendar_events` table.
+2. If `remote_event_id` is `NULL` (locally-created, never synced): local-only update via `update_calendar_event_sync()`, return `Success`.
+3. Look up `calendar_remote_id` from `calendars` table via `calendar_id`.
+4. Create calendar provider client.
+5. Call `dispatch_update` with `calendar_remote_id`, `remote_event_id`, `input`, `etag`.
+6. On success, update local DB with returned `CalendarEventDto` metadata. Return `Success`.
+7. On failure, return `Failed` (provider is source of truth for synced events — local not modified).
 
 ### Step 6: Implement `delete_calendar_event`
 
-1. Look up event's `remote_event_id` and `etag` from `calendar_events` table.
-2. If `remote_event_id` is `NULL`: local-only delete, return `Success`.
-3. If `remote_event_id` exists: dispatch to provider first, then delete locally.
-4. Return `Success` if provider succeeded (or if local-only), `Failed` if provider failed.
+1. Look up event's `remote_event_id`, `etag`, and `calendar_id` from `calendar_events` table.
+2. If `remote_event_id` is `NULL`: local-only delete via `delete_calendar_event_sync()`, return `Success`.
+3. Look up `calendar_remote_id` from `calendars` table via `calendar_id`.
+4. Create calendar provider client.
+5. Call `dispatch_delete` with `calendar_remote_id`, `remote_event_id`, `etag`.
+6. On success, delete locally via `delete_calendar_event_sync()`. Return `Success`.
+7. On failure, return `Failed`.
 
 ### Step 7: Register in `crates/core/src/actions/mod.rs`
 
@@ -197,18 +222,78 @@ Each builds the provider-specific payload (JSON for Google/Graph/CalDAV, individ
 pub mod calendar;
 ```
 
-Re-export `CalendarEventInput` from actions.
-
 ### Step 8: Migrate app handler
 
-Replace `handle_save_event()`:
-- Build `CalendarEventInput` from `CalendarEventData` (same field mapping that currently builds `LocalCalendarEventParams`).
-- Call `actions::calendar::create_calendar_event()` or `actions::calendar::update_calendar_event()` depending on `event.id`.
-- On completion, reload calendar events (same as current `EventSaved` handler).
+**Field mapping** from `CalendarEventData` (app-side) to `CalendarEventInput` (action service):
 
-Replace `DeleteEvent` handler:
-- Call `actions::calendar::delete_calendar_event()`.
-- On completion, reload calendar events.
+```rust
+let input = CalendarEventInput {
+    title: event.title.clone(),                    // CalendarEventData.title → title
+    description: event.description.clone(),        // .description → description
+    location: event.location.clone(),              // .location → location
+    start_time: start_ts,                          // computed from start_date + start_hour/minute
+    end_time: end_ts,                              // computed from start_date + end_hour/minute
+    is_all_day: event.all_day,                     // .all_day → is_all_day
+    timezone: event.timezone.clone(),              // .timezone → timezone
+    recurrence_rule: event.recurrence_rule.clone(),// .recurrence_rule → recurrence_rule
+    availability: event.availability.clone(),      // .availability → availability
+    visibility: event.visibility.clone(),          // .visibility → visibility
+};
+```
+
+The `start_ts` / `end_ts` computation (via `calendar_data_to_timestamp`) stays in the app handler — it uses app-side types (`NaiveDate`, hour/minute accessors).
+
+**`handle_save_event` becomes:**
+
+```rust
+fn handle_save_event(&mut self) -> Task<Message> {
+    // ... extract event, compute timestamps, resolve account_id (same as now) ...
+    let input = CalendarEventInput { /* field mapping above */ };
+
+    let Some(ref action_ctx) = self.action_ctx else {
+        return Task::none();
+    };
+    let ctx = action_ctx.clone();
+    let aid = account_id.clone();
+
+    if let Some(id) = event.id.clone() {
+        // Update existing
+        Task::perform(
+            async move {
+                let outcome = ratatoskr_core::actions::calendar::update_calendar_event(
+                    &ctx, &aid, &id, input,
+                ).await;
+                outcome_to_result(outcome)
+            },
+            |r| Message::Calendar(Box::new(CalendarMessage::EventSaved(r))),
+        )
+    } else {
+        // Create new
+        let cal_id = event.calendar_id.clone().unwrap_or_default();
+        Task::perform(
+            async move {
+                let outcome = ratatoskr_core::actions::calendar::create_calendar_event(
+                    &ctx, &aid, &cal_id, input,
+                ).await;
+                outcome_to_result(outcome)
+            },
+            |r| Message::Calendar(Box::new(CalendarMessage::EventSaved(r))),
+        )
+    }
+}
+
+/// Map ActionOutcome to the Result<(), String> that CalendarMessage::EventSaved expects.
+fn outcome_to_result(outcome: ActionOutcome) -> Result<(), String> {
+    match outcome {
+        ActionOutcome::Success | ActionOutcome::LocalOnly { .. } => Ok(()),
+        ActionOutcome::Failed { error } => Err(error),
+    }
+}
+```
+
+`LocalOnly` maps to `Ok(())` — the overlay closes and events reload. The event is visible locally. A warning is logged by the action function. Phase 3 can add richer outcome reporting.
+
+**Delete handler becomes similar** — calls `actions::calendar::delete_calendar_event()`, maps outcome to `CalendarMessage::EventDeleted(Result<(), String>)`.
 
 ### Step 9: Verify
 
@@ -219,25 +304,25 @@ Replace `DeleteEvent` handler:
 
 ## What This Produces
 
-- `crates/core/src/actions/calendar.rs` — `create_calendar_event()`, `update_calendar_event()`, `delete_calendar_event()`, `CalendarEventInput`, `CalendarProvider`, provider dispatch helpers
+- `crates/core/src/actions/calendar.rs` — `create_calendar_event()`, `update_calendar_event()`, `delete_calendar_event()`, `CalendarEventInput`, `CalendarProvider`, `create_calendar_provider()`, provider dispatch helpers
 - Modified `crates/core/src/actions/mod.rs` — registers calendar module
-- Modified `crates/app/src/handlers/calendar.rs` — delegates to action service
-- Modified `crates/app/src/db/calendar.rs` — async wrappers may become unused (check)
+- Modified `crates/app/src/handlers/calendar.rs` — delegates to action service via existing `CalendarMessage` completion callbacks
 
 ## Exit Criteria
 
-1. `create_calendar_event()` inserts locally then dispatches to the provider. Provider-returned `remote_event_id` is stored on the local row.
-2. `update_calendar_event()` dispatches to the provider (if `remote_event_id` exists) then updates locally. Local-only events are updated locally without provider dispatch.
-3. `delete_calendar_event()` dispatches to the provider (if `remote_event_id` exists) then deletes locally. Local-only events are deleted locally without provider dispatch.
-4. All three providers are wired: Google (via `GmailClient`), Graph (via `GraphClient`), JMAP (via `JmapClient`), CalDAV (via `db + encryption_key + account_id`).
-5. The app handler delegates to the action service — no direct `calendar_events` DB writes for create/update/delete.
-6. `CalendarEventInput` provides a provider-agnostic interface — provider-specific serialization is internal to the action module.
+1. `create_calendar_event()` inserts locally (instant feedback) then dispatches to the provider. Provider-returned `remote_event_id` and `etag` stored on the local row. Returns `LocalOnly` (not `Success`) if provider fails.
+2. `update_calendar_event()` looks up `remote_event_id`, `etag`, and `calendar_remote_id`. Dispatches to provider (if synced) then updates locally. Local-only events updated locally without provider dispatch.
+3. `delete_calendar_event()` looks up `remote_event_id`, `etag`, and `calendar_remote_id`. Dispatches to provider (if synced) then deletes locally. Local-only events deleted locally without provider dispatch.
+4. `calendar_remote_id` is resolved for all operations — Google update/delete needs it.
+5. All four providers are wired: Google (`GmailClient`), Graph (`GraphClient`), JMAP (`JmapClient`), CalDAV (`db + encryption_key + account_id`).
+6. The app handler delegates to the action service. Existing `CalendarMessage::EventSaved`/`EventDeleted` completion callbacks are reused.
 7. Workspace compiles and passes clippy.
 
 ## What Phase 2.5 Does NOT Do
 
-- **Attendee/reminder write-back.** `CalendarEventInput` carries the core event fields. Attendees and reminders are managed by separate DB tables (`calendar_attendees`, `calendar_reminders`) and are not yet propagated to providers.
-- **Recurrence expansion.** `recurrence_rule` is stored and passed through to providers. Instance generation and series editing (this-event vs all-events) are separate features.
+- **Attendee/reminder write-back.** `CalendarEventInput` carries the core event fields. Attendees and reminders are managed by separate DB tables and are not yet propagated to providers.
+- **Recurrence expansion.** `recurrence_rule` is stored and passed through to providers. Instance generation and series editing are separate features.
 - **Etag conflict resolution.** CalDAV and Graph support optimistic concurrency via etag. The action function passes the etag through but does not handle 412 Precondition Failed with retry/merge. That's Phase 3 territory.
-- **IMAP calendar.** IMAP has no calendar API. IMAP accounts that use CalDAV for calendar are handled via the `calendar_provider` column on the account.
-- **Calendar RSVP.** Responding to event invitations is a separate write operation with different provider APIs.
+- **IMAP calendar.** IMAP has no calendar API. IMAP accounts that use CalDAV for calendar are handled via the `calendar_provider` column.
+- **Calendar RSVP.** Responding to event invitations is a separate write operation.
+- **Automatic retry for failed creates.** `LocalOnly` events (local-only due to provider failure) have no retry mechanism. A future sync-up worker or Phase 3 retry infrastructure could handle this.
