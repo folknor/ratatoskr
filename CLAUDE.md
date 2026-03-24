@@ -104,6 +104,11 @@ These are non-obvious behaviors of the `jmap-client` crate that will matter if t
 - Rewriting entire files instead of making targeted edits
 - Claiming features are "done" when only the types exist but call sites are missing
 
+## Commit rules
+
+- Don't commit pure markdown changes on their own. Bundle them with the code change they relate to, or skip them. Unless the markdown update is substantive.
+- Has Cargo.lock changed? Commit it.
+
 ## Encryption
 
 AES-256-GCM (`core/src/provider/crypto.rs`). Key file: `ratatoskr.key` (or legacy `velo.key`) in app data dir. Format: `base64(iv):base64(ct+tag)`. Falls back to zero-key if missing.

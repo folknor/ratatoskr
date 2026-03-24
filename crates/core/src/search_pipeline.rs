@@ -306,7 +306,7 @@ mod tests {
         let params = build_tantivy_params(&parsed);
         assert_eq!(params.free_text.as_deref(), Some("hello world"));
         assert!(params.account_ids.is_none());
-        assert!(params.from.is_none());
+        assert!(params.from.is_empty());
     }
 
     #[test]
@@ -322,7 +322,7 @@ mod tests {
         let parsed = parse_query("hello from:alice has:attachment is:unread");
         let params = build_tantivy_params(&parsed);
         assert_eq!(params.free_text.as_deref(), Some("hello"));
-        assert_eq!(params.from.as_deref(), Some("alice"));
+        assert_eq!(params.from.first().map(String::as_str), Some("alice"));
         assert_eq!(params.has_attachment, Some(true));
         assert_eq!(params.is_unread, Some(true));
     }
@@ -336,7 +336,7 @@ mod tests {
             account_id: "acc1".to_owned(),
             subject: Some("Test subject".to_owned()),
             snippet: Some("Test snippet".to_owned()),
-            last_message_at: Some("1700000000".to_owned()),
+            last_message_at: Some(1_700_000_000),
             message_count: 3,
             is_read: true,
             is_starred: false,
@@ -426,7 +426,7 @@ mod tests {
             account_id: "acc1".to_owned(),
             subject: Some("SQL subject".to_owned()),
             snippet: Some("SQL snippet".to_owned()),
-            last_message_at: Some("1700000000".to_owned()),
+            last_message_at: Some(1_700_000_000),
             message_count: 5,
             is_read: true,
             is_starred: true,

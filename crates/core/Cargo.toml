@@ -65,3 +65,6 @@ css-inline = "0.20"
 lol_html = "2"
 ammonia = "4"
 calcard = "0.3"
+
+[dev-dependencies]
+tempfile = "3"

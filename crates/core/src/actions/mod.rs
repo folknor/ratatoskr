@@ -7,6 +7,8 @@
 
 mod archive;
 pub mod batch;
+#[cfg(test)]
+mod tests;
 mod context;
 pub mod contacts;
 mod folder;
