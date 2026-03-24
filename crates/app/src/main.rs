@@ -160,6 +160,8 @@ pub enum CompletedAction {
     MarkRead,
     Pin,
     Mute,
+    AddLabel,
+    RemoveLabel,
 }
 
 impl CompletedAction {
@@ -181,6 +183,8 @@ impl CompletedAction {
             Self::MarkRead => "Read status toggled",
             Self::Pin => "Pin toggled",
             Self::Mute => "Mute toggled",
+            Self::AddLabel => "Label applied",
+            Self::RemoveLabel => "Label removed",
         }
     }
 }

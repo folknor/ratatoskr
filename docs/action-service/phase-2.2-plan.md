@@ -37,24 +37,68 @@ Key observations:
 - **Containers use ID-based dispatch** (`add_tag`/`remove_tag`). The label ID is passed directly.
 - **IMAP `add_tag`/`remove_tag` are no-ops.** IMAP folders can't be manipulated via tag semantics — they use `move_to_folder` (already handled by Phase 2.1). This is correct behavior, not a gap. But it means a container-type label apply on IMAP will succeed locally and "succeed" remotely (the no-op returns `Ok(())`). The service should return `Success`, not `LocalOnly` — the provider accepted the call.
 - **`apply_category`/`remove_category` have default no-op implementations** on the trait. Providers that don't support categories silently succeed. Same reasoning applies — `Success`, not `LocalOnly`.
+- **thread_id/message_id mismatch.** `apply_category`/`remove_category` declare their second parameter as `message_id` in the trait signature, but the existing app code (and this plan) passes `thread_id`. This works because all four providers resolve thread-level operations internally: Gmail finds messages by thread, Graph/JMAP iterate over messages in the thread, IMAP parses a provider-specific format. The service preserves this existing behavior. Fixing the trait contract is a Phase 6 concern.
 
 ## Design Decisions
 
 ### Label actions are a third interaction pattern
 
-Labels are not removes-from-view (no auto-advance) and not toggles (no optimistic UI flip). They are fire-and-report: do local DB + provider dispatch, then surface the outcome. The existing `handle_action_completed` already handles this correctly — a non-removes-from-view, non-toggle action with no rollback data just surfaces the toast. No new handler logic needed.
+Labels are not removes-from-view (no auto-advance) and not toggles (no optimistic UI flip). They are fire-and-report: do local DB + provider dispatch, then surface the outcome.
+
+**The existing `handle_action_completed` does NOT handle this pattern.** The current handler has two paths: removes-from-view (toast + auto-advance) and toggle (rollback + optional nav refresh). A label action with `removes_from_view = false` and empty rollback falls through both paths silently — no toast is shown. This must be fixed.
+
+The fix: add a feedback section for non-toggle, non-removes-from-view actions. After the removes-from-view early return and before the toggle rollback logic, check for empty rollback (meaning: not a toggle). If the action is not a toggle, show outcome-based feedback:
+
+```rust
+// ── Non-toggle, non-removes-from-view actions (labels) ──
+// Toggle actions have rollback data; their optimistic UI IS the feedback.
+// Label-type actions have no rollback and need an explicit toast.
+if rollback.is_empty() {
+    if all_failed {
+        let errors: Vec<&str> = outcomes
+            .iter()
+            .filter_map(|o| match o {
+                ActionOutcome::Failed { error } => Some(error.as_str()),
+                _ => None,
+            })
+            .collect();
+        self.status_bar.show_confirmation(
+            format!("\u{26A0} {} failed: {}", action.success_label(), errors.join("; ")),
+        );
+    } else if any_local_only {
+        self.status_bar.show_confirmation(
+            format!("\u{26A0} {} locally \u{2014} sync may revert this", action.success_label()),
+        );
+    } else {
+        self.status_bar.show_confirmation(action.success_label().to_string());
+    }
+    return Task::none();
+}
+```
+
+This goes in `handle_action_completed` immediately after the `removes_from_view()` early return (before the toggle rollback section). The condition `rollback.is_empty()` distinguishes labels from toggles — toggles always have rollback data, labels never do. This is a general mechanism, not label-specific — any future fire-and-report action gets feedback automatically.
 
 ### The service owns the label_kind lookup
 
 The caller passes `label_id`. The service looks up `(name, label_kind)` from the `labels` table inside `spawn_blocking`, then uses that to route the provider call. The app crate never sees `label_kind`.
 
-This is one DB query per action call (not per thread — the label metadata is the same for all threads in a batch). The lookup happens once per function call. Phase 5 addresses batching.
+The label metadata lookup happens once per action function call. Since the caller loops over threads and calls `add_label`/`remove_label` per thread, this means one lookup per thread — not one per batch. The label metadata is identical across all threads in a batch (it's a property of the label, not the thread), so this is redundant work. Acceptable for now; Phase 5 batching can hoist the lookup.
+
+If the label ID doesn't exist in the `labels` table for the given account, `query_row` fails and the action returns `ActionOutcome::Failed`. The error message will be rusqlite's "query returned no rows" — not a friendly label-not-found message. This is acceptable for Phase 2.2; Phase 3 introduces structured error types.
 
 ### Account-scoped label resolution
 
 A label ID is scoped to an account (`(account_id, label_id)` is the canonical identity per the glossary). The current code queries `SELECT name, label_kind FROM labels WHERE id = ?1 LIMIT 1` — this is wrong for cross-account scenarios where the same label ID could exist on multiple accounts with different kinds. The correct query is `WHERE id = ?1 AND account_id = ?2`.
 
 However: in practice, label IDs are globally unique because they carry provider prefixes (`cat:`, `kw:`, `graph-`, `jmap-`, `folder-`). The current query works by accident. The service should still scope by account for correctness, since the label is always applied in the context of a specific account.
+
+### Mixed-account selections
+
+`ActionParams::Label { label_id }` carries a single label ID. If the selected threads span multiple accounts, the same label ID is used for all threads. Since label identity is `(account_id, label_id)`, the label may not exist on every account — a Gmail label ID won't be found in an Exchange account's `labels` rows.
+
+**The service treats this as partial failure per thread.** The account-scoped query (`WHERE id = ?1 AND account_id = ?2`) will return "no rows" for accounts that don't have this label. Those threads get `ActionOutcome::Failed`. Threads on the correct account succeed. The completion handler shows mixed-outcome feedback: "⚠ Label applied 3 of 5 threads — 2 failed."
+
+This is the correct behavior — the service does not need to pre-partition by account or reject mixed selections. The per-thread outcome reporting already handles it. The label picker UI (not yet built) should ideally only offer labels applicable to the selected threads' accounts, but that's a UI concern outside this phase.
 
 ### No consolidation of apply_category/add_tag yet
 
@@ -270,13 +314,17 @@ EmailAction::RemoveLabel { label_id } => {
 
 No premature toast. Feedback comes from `handle_action_completed`.
 
-### Step 7: Delete legacy code
+### Step 7: Add feedback path to `handle_action_completed`
+
+Insert the non-toggle, non-removes-from-view feedback section (described in the design decisions) into `handle_action_completed`, immediately after the `removes_from_view()` early return. This is the `rollback.is_empty()` guard that shows outcome-based toasts for label actions. Without this, label operations complete silently.
+
+### Step 8: Delete legacy code
 
 - Delete `apply_label_to_selected_threads` (lines 521-592)
 - Delete `remove_label_from_selected_threads` (lines 597-665)
 - Delete `provider_label_write_back` (lines 676-723)
 
-### Step 8: Verify
+### Step 9: Verify
 
 - `cargo check --workspace`
 - `cargo clippy -p app -p ratatoskr-core`
@@ -288,7 +336,7 @@ No premature toast. Feedback comes from `handle_action_completed`.
 - `crates/core/src/actions/label.rs` — `add_label()` and `remove_label()`
 - Modified `crates/core/src/actions/mod.rs` — registers label module
 - Modified `crates/app/src/main.rs` — `CompletedAction::AddLabel`, `CompletedAction::RemoveLabel`
-- Modified `crates/app/src/handlers/commands.rs` — label dispatch through service, legacy code deleted
+- Modified `crates/app/src/handlers/commands.rs` — label dispatch through service, feedback path for non-toggle/non-removes-from-view actions, legacy code deleted
 
 ## Exit Criteria
 
@@ -296,12 +344,14 @@ No premature toast. Feedback comes from `handle_action_completed`.
 2. The app crate does not contain `label_kind` string comparisons.
 3. `provider_label_write_back`, `apply_label_to_selected_threads`, and `remove_label_from_selected_threads` are deleted.
 4. Label operations surface outcomes via `handle_action_completed` — no premature confirmation toast.
-5. The label metadata query is scoped by `account_id` for correctness.
-6. `apply_category`/`remove_category` and `add_tag`/`remove_tag` on `ProviderOps` are unchanged — consolidation deferred.
-7. Workspace compiles and passes clippy.
+5. `handle_action_completed` shows outcome-based feedback for label actions (not silent). The feedback path is generic (keyed on empty rollback), not label-specific.
+6. The label metadata query is scoped by `account_id` for correctness.
+7. Mixed-account selections produce partial failure — threads on accounts without the label get `Failed`, others succeed.
+8. `apply_category`/`remove_category` and `add_tag`/`remove_tag` on `ProviderOps` are unchanged — consolidation deferred.
+9. Workspace compiles and passes clippy.
 
 ## What Phase 2.2 Does NOT Do
 
 - **Consolidate `apply_category`/`remove_category` into `add_tag`/`remove_tag`.** That's a provider trait refactor (labels unification Phase 6).
-- **Batch optimization.** Label metadata lookup happens once per `(thread, label)` call. Batching across threads deferred to Phase 5.
+- **Batch optimization.** Label metadata lookup happens per thread (redundant — metadata is per-label, not per-thread). Hoisting the lookup and batching dispatch across threads deferred to Phase 5.
 - **IMAP no-op representation.** IMAP's `add_tag`/`remove_tag` return `Ok(())` (no-op). The service reports `Success`. Making this explicit (e.g., `ActionOutcome::NoOp` or a `local_only_by_design` flag) is deferred — same limitation as pin/mute in Phase 2.1.

@@ -35,17 +35,11 @@ Phase 2 is decomposed into sub-phases because provider write operations are not 
 
 **Exit criteria:** All thread-level email actions go through the service. `dispatch_email_db_action` is deleted. `handlers/commands.rs` contains only service calls + UI state management for these actions.
 
-### Phase 2.2: Label routing
+### Phase 2.2: Label routing ✅
 
-**Goal:** Migrate label apply/remove into the service, owning the `label_kind` dispatch.
+**Status:** Complete. See `phase-2.2-plan.md`.
 
-**Scope:**
-- Move `provider_label_write_back` from the app crate into the service.
-- The service owns the routing decision: `label_kind = 'tag'` → `apply_category`/`remove_category`, `label_kind = 'container'` → `add_tag`/`remove_tag`.
-- IMAP's intentional no-op on `add_tag`/`remove_tag` must be represented explicitly (not silently swallowed).
-- Address the labels unification spec's direction: `apply_category`/`remove_category` are supposed to become redundant in favor of `add_tag`/`remove_tag`. Decide whether Phase 2.2 consolidates them or preserves the current split for now.
-
-**Exit criteria:** Label apply/remove goes through the service. The app crate no longer contains `label_kind` branches or `provider_label_write_back`.
+Label apply/remove flows through `actions::add_label()`/`actions::remove_label()`. The service owns the `label_kind` routing (tag → `apply_category`/`remove_category`, container → `add_tag`/`remove_tag`). `provider_label_write_back` and all `label_kind` branches deleted from the app crate. `apply_category`/`remove_category` consolidation deferred to labels unification Phase 6. `handle_action_completed` extended with a generic non-toggle/non-removes-from-view feedback path.
 
 ### Phase 2.3: Drafts and send
 
@@ -191,7 +185,7 @@ Each phase is designed to be independently valuable:
 
 - **After Phase 1:** One action works end-to-end. The pattern is proven. ✅
 - **After Phase 2.1:** All thread-level email actions go through the service.
-- **After Phase 2.2:** Label routing is centralized. No `label_kind` branches in the app crate.
+- **After Phase 2.2:** Label routing is centralized. No `label_kind` branches in the app crate. ✅
 - **After Phase 2.3:** Draft and send lifecycle goes through the service.
 - **After Phase 2.4–2.6:** Folder, calendar, and contact writes go through the service.
 - **After Phase 3:** The service is trustworthy. Failure handling is consistent, observable, and explicitly defined.
