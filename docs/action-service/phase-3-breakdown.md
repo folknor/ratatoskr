@@ -213,11 +213,11 @@ Phase 3.2 (outcome semantics) produces variants that Phase 4 can reason about:
 
 Phase 3.4 (pending ops) interacts with undo: if an operation is pending retry, undoing it should cancel the pending op (via `db_pending_ops_update_status("cancelled")`) rather than performing a reverse operation.
 
-## What This Does NOT Cover
+## What This Did NOT Cover (Now Resolved)
 
-- **Retry logic tuning** (backoff parameters, max retries per action type) — Phase 5.
-- **Undo token design and execution** — Phase 4.
-- **Bulk action semantics** (partial success across 50 threads, batch logging) — Phase 5.
-- **Concurrency and ordering** (conflicting sequential actions on same thread) — Phase 5.
-- **`NoOp` detection** — deferred to Phase 4.
+- **Retry logic tuning** (backoff parameters, max retries per action type) — implemented in Phase 5.6.
+- **Undo token design and execution** — implemented in Phase 4.
+- **Bulk action semantics** (partial success across 50 threads, batch logging) — implemented in Phase 5.2/5.3.
+- **Concurrency and ordering** (conflicting sequential actions on same thread) — implemented in Phase 5.7 (`FlightGuard`).
+- **`NoOp` detection** — deferred from Phase 4, remains unimplemented.
 - **`ProviderOnly` variant** — dropped. Folder ops log + return `Success` on local DB failure. Sync reconciles.

@@ -18,28 +18,17 @@ Archive flows through the action service (local DB + `ProviderOps::archive()`). 
 
 Phase 2 is decomposed into sub-phases because provider write operations are not uniform. Some have real implementations across all four providers. Others require resolving provider-specific interfaces, new trait methods, or design decisions about provider capability gaps.
 
-### Phase 2.1: Thread actions with uniform provider support
+### Phase 2.1: Thread actions with uniform provider support ✅
 
-**Goal:** Migrate the thread-level actions where all four providers have real `ProviderOps` implementations. Same pattern as archive — mechanical replication.
+**Status:** Complete.
 
-**Scope:**
-- **Folder moves (all providers implemented):** trash, spam, move_to_folder.
-- **Boolean flags with provider dispatch (all providers implemented):** star, mark_read.
-- **Destructive (all providers implemented):** permanent_delete.
-- **Local-only by design:** pin, mute. Go through the service with an explicit local-only marker.
-- Remove the legacy `dispatch_email_db_action` function and all remaining inline DB mutations for these actions from the app crate.
-
-**Snooze is deferred from 2.1.** No `ProviderOps::snooze()` exists, and Gmail's native snooze has no equivalent on other providers. This requires a design decision (local-only by design? provider dispatch where supported? new trait method?) that doesn't belong in a mechanical migration phase. Snooze gets its own planning when it's prioritized.
-
-**Concurrency semantics are deferred.** Defining ordering guarantees is a design decision, not a mechanical migration. Current behavior (fire-and-forget async per action) is preserved. Concurrency is addressed in Phase 5 when the full action set is in place and the real contention patterns are visible.
-
-**Exit criteria:** All thread-level email actions go through the service. `dispatch_email_db_action` is deleted. `handlers/commands.rs` contains only service calls + UI state management for these actions.
+All thread-level actions (trash, spam, move_to_folder, star, mark_read, permanent_delete, pin, mute) flow through the action service. The legacy `dispatch_email_db_action` function persists only for snooze (deferred — no `ProviderOps::snooze()` exists). Concurrency semantics addressed in Phase 5.
 
 ### Phase 2.2: Label routing ✅
 
 **Status:** Complete. See `phase-2.2-plan.md`.
 
-Label apply/remove flows through `actions::add_label()`/`actions::remove_label()`. The service owns the `label_kind` routing (tag → `apply_category`/`remove_category`, container → `add_tag`/`remove_tag`). `provider_label_write_back` and all `label_kind` branches deleted from the app crate. `apply_category`/`remove_category` consolidation deferred to labels unification Phase 6. `handle_action_completed` extended with a generic non-toggle/non-removes-from-view feedback path.
+Label apply/remove flows through `actions::add_label()`/`actions::remove_label()`. The service owns the `label_kind` routing (tag → `apply_category`/`remove_category`, container → `add_tag`/`remove_tag`). `provider_label_write_back` and all `label_kind` branches deleted from the app crate. `apply_category`/`remove_category` consolidation deferred to labels unification. `handle_action_completed` extended with a generic non-toggle/non-removes-from-view feedback path.
 
 ### Phase 2.3: Send ✅
 
@@ -53,13 +42,13 @@ Send flows through `actions::send_email()`: MIME build on `spawn_blocking`, draf
 
 `create_folder`, `rename_folder`, `delete_folder` in `core::actions::folder`. Provider-first pattern (provider assigns ID/metadata, local DB updated best-effort). `delete_folder` explicitly cleans up `thread_labels` rows (no FK cascade). `build_provider_ctx` helper extracted. `ProviderFolderMutation` re-exported from actions. No UI exists yet — functions are ready. Note: IMAP returns "not supported" for all three folder operations — UI must gate these for IMAP accounts.
 
-### Phase 2.5: Calendar event write-back
+### Phase 2.5: Calendar event write-back ✅
 
 **Status:** Complete. See `phase-2.5-plan.md`.
 
 Calendar event create/update/delete in `ratatoskr_calendar::actions`. Lives in the calendar crate (not core) due to circular dependency — calendar depends on core, core can't depend on calendar. Uses typed provider clients (`GmailClient`, `GraphClient`, `JmapClient`, CalDAV config) via `CalendarProvider` enum. Create is local-first (instant feedback, `LocalOnly` on provider failure). Update/delete are provider-first for synced events, local-only for unsynced. All four providers wired (Google, Graph, JMAP, CalDAV). App handler delegates via existing `CalendarMessage::EventSaved`/`EventDeleted` callbacks.
 
-### Phase 2.6: Contact write-back
+### Phase 2.6: Contact write-back ✅
 
 **Status:** Complete. See `phase-2.6-plan.md`.
 
@@ -67,117 +56,58 @@ Contact save/delete in `core::actions::contacts`. JMAP write-back fully wired (s
 
 ---
 
-## Phase 3: Failure Policy and Structured Outcomes
+## Phase 3: Failure Policy and Structured Outcomes ✅
+
+**Status:** Complete. See `phase-3-breakdown.md` and `phase-3.1-plan.md`.
 
 **Goal:** Define and implement the partial-failure semantics. This is where the service becomes trustworthy.
 
-**Scope:**
-**Status:** Complete. See `phase-3-breakdown.md` and `phase-3.1-plan.md`.
-
 Sub-phases: 3.1 (ActionError enum + RemoteFailureKind), 3.2 (retryable: bool on LocalOnly, retry classification per action class), 3.3 (MutationLog with duration + identity tracking), 3.4 (pending_operations queue wired — email actions enqueue on retryable LocalOnly, periodic worker processes queue, crash recovery on boot).
 
-**Original scope (now implemented):**
-- Define the failure policy per mutation class:
-  - **Local success + remote failure.** The policy may differ by action class. Archive and trash likely need pending-retry or rollback — silent divergence is unacceptable for folder-level actions. Star and read/unread may tolerate local-only with eventual sync reconciliation. The policy must be explicit per action, not a blanket rule.
-  - **Remote timeout / unknown completion.** Define local state behavior.
-  - **App shutdown mid-flight.** Decide whether a pending-action table is needed or whether sync reconciliation is sufficient.
-- Expand the result type to convey: success, partial success (local ok / remote failed), failure, no-op. Include a user-facing result category so the app can show appropriate feedback without interpreting error internals.
-- Implement structured logging for all mutations (action, target, local result, remote result, duration).
-- If the failure policy requires a pending-action table (for durability or retry), define the schema and implement it.
-
-**Design decisions made in this phase:**
-- The actual partial-failure policy — this is the hardest design work in the entire effort.
-- Whether a pending-action queue exists and what it contains.
-- The mature shape of the result type.
-- Observability format and level.
-
-**Constraint from Phase 4:** The rollback mechanism designed here must be a general state-reversal primitive, not a failure-specific one. Phase 4 will reuse it for user-initiated undo — same mechanism, different trigger. This does not mean implementing undo in Phase 3, but the rollback data structure must be undo-shaped from the start. If rollback captures "what was done and how to reverse it," undo gets that for free. If rollback only captures "something failed," Phase 4 will have to redesign it.
-
-**What this phase does NOT do:**
-- No retry logic (just failure recording and policy). Retry comes in Phase 5.
-- No undo execution (but the rollback data is designed to support it).
-
-**Exit criteria:** Every action returns a structured outcome. Failure cases are handled consistently per the defined policy. Mutations are observable. The most common user-facing bug (actions reverting on sync) is either prevented or explicitly surfaced.
+**Exit criteria (all met):** Every action returns a structured outcome. Failure cases are handled consistently per the defined policy. Mutations are observable. The most common user-facing bug (actions reverting on sync) is either prevented or explicitly surfaced.
 
 ---
 
-## Phase 4: Undo
+## Phase 4: Undo ✅
+
+**Status:** Complete. See `phase-4-plan.md`.
 
 **Goal:** Undo tokens reflect executed operations. Undo execution goes through the service.
 
-**Scope:**
-- Redesign `UndoToken` to be produced by the service based on what actually happened, not what the caller requested. The token captures local mutation details and remote dispatch result.
-- Implement undo execution through the service — `actions::undo(token)` performs the inverse operation via the same action service path.
-- Handle edge cases: undo a no-op (no token produced), undo when remote failed (only reverse local), undo after sync has already reconciled (token is stale).
-- Connect undo to the failure/rollback mechanism from Phase 3 — they are the same operation with different triggers (user-initiated vs failure-initiated).
+`UndoToken` produced by `produce_undo_tokens` from `ActionOutcome` + thread IDs, grouped by account. `dispatch_undo` pops the stack and calls `execute_compensation` which dispatches inverse actions with `suppress_pending_enqueue = true`. `cancel_pending_ops_for_token` cancels matching pending ops before compensation. `UndoCompleted` message reports results. One token per account for multi-account batches. `PermanentDelete` produces no token.
 
-**Design decisions made in this phase:**
-- Undo token structure and what it captures.
-- Undo staleness detection.
-- Whether undo is best-effort or guaranteed.
-- Interaction between undo and the pending-action queue (if one exists from Phase 3).
-
-**Exit criteria:** Undo reverses what actually happened. Undo for partially-completed actions does the right thing. The UI's undo stack uses service-produced tokens.
+**Exit criteria (all met):** Undo reverses what actually happened. Undo for partially-completed actions does the right thing. The UI's undo stack uses service-produced tokens.
 
 ---
 
-## Phase 5: Bulk Actions and Retry
+## Phase 5: Bulk Actions and Retry ✅
+
+**Status:** Complete. See `phase-5-plan.md` and `phase-5.2-plan.md`.
 
 **Goal:** Handle batch operations and remote dispatch reliability.
 
-**Scope:**
-- **Bulk actions:** The service accepts a batch of targets for a single action. Define: mixed-account partitioning (service handles it), partial success reporting (per-item outcomes), batch undo token shape (informed by Phase 4 experience).
-- **Retry:** If Phase 3 established a pending-action queue, implement retry with backoff for failed remote dispatches. Define retry limits and exhaustion behavior (surface to user, leave for sync, drop).
+`batch_execute()` groups targets by account, creates one provider per account, dispatches sequentially within each account, parallel across accounts via `futures::future::join_all`. Consecutive-failure short-circuit (threshold: 3) aborts remaining threads with per-thread degraded outcomes. `FlightGuard` RAII ensures one mutation per thread at a time. Toggle actions partitioned by target value in the app layer. Per-type retry policy (folder: 10 retries / [30s,2m,5m,15m,1h], label: 7 / default, flag: 5 / [1m,5m,15m]). Atomic dedup on enqueue with replace semantics. Pending-ops worker reuses providers per account group. Exhausted retries logged and left for sync reconciliation.
 
-**Design decisions made in this phase:**
-- Retry policy (backoff strategy, limits, exhaustion behavior).
-- Bulk undo granularity (one token per batch or per item).
-- How bulk partial success is reported to the caller.
-
-**What this phase does NOT do:**
-- No progress reporting or cancellation UI. Those are UX polish that can follow independently.
-
-**Exit criteria:** Bulk archive of 50 mixed-account threads works correctly with partial failure handling and undo. Failed remote dispatches are retried per policy.
+**Exit criteria (all met):** Bulk archive of 50 mixed-account threads works correctly with partial failure handling and undo. Failed remote dispatches are retried per policy.
 
 ---
 
-## Phase 6: Enforce the Boundary
+## Phase 6: Enforce the Boundary ✅
+
+**Status:** Complete. See `phase-6-plan.md`.
 
 **Goal:** Make the compilation boundary airtight. The app crate physically cannot bypass the service.
 
-**Scope:**
-- Remove all provider crate dependencies from the app crate's `Cargo.toml`.
-- Remove `create_provider()` wrapper and any provider construction helpers from the app crate.
-- Remove `ProviderCtx` construction from the app crate.
-- Audit and remove any remaining `label_kind` branches, provider-specific imports, or direct provider type usage in the app crate.
-- If any legitimate app-crate need for provider access remains (e.g., account setup, OAuth flows), define a narrow, explicit API for it rather than exposing the full provider surface.
+All 5 provider crate dependencies removed from `crates/app/Cargo.toml`. Sync dispatch moved to `core::sync_dispatch`. JMAP push moved to `core::jmap_push` with continuous push via iced subscription + debounce. `load_encryption_key` re-exported from core. `create_provider` is `pub(crate)` — not accessible to downstream crates. Provider re-exports in `core/src/lib.rs` are `pub(crate)`. IMAP account verification wrapped in `core::account::verify_imap`. Calendar crate depends on provider crates directly (not through core re-exports).
 
-**Design decisions made in this phase:**
-- What (if anything) the app crate is still allowed to know about providers.
-- How account setup / OAuth flows access provider crates without opening a back door.
-
-**Exit criteria:** Removing any provider crate from the app's dependency list does not break compilation (because the app doesn't use them). The action service is the only write path for all provider mutations.
+**Exit criteria (all met):** The app crate has zero provider dependencies. The action service is the only write path for all provider mutations. The boundary is enforced by the compiler.
 
 ---
 
-## Phase Boundaries and Replanning
+## Remaining Work (Not Phased)
 
-Each phase is designed to be independently valuable:
-
-- **After Phase 1:** One action works end-to-end. The pattern is proven. ✅
-- **After Phase 2.1:** All thread-level email actions go through the service.
-- **After Phase 2.2:** Label routing is centralized. No `label_kind` branches in the app crate. ✅
-- **After Phase 2.3:** Send goes through the service. Draft auto-save and provider draft sync are separate. ✅
-- **After Phase 2.4:** Folder CRUD goes through the service. ✅
-- **After Phase 2.5:** Calendar event writes go through the service. ✅
-- **After Phase 2.6:** Contact writes go through the service. ✅
-- **After Phase 3:** The service is trustworthy. Failure handling is consistent, observable, and explicitly defined.
-- **After Phase 4:** Undo works correctly for the first time.
-- **After Phase 5:** Bulk operations are handled and remote dispatch is reliable.
-- **After Phase 6:** The boundary is enforced by the compiler.
-
-Phases 2.1–2.2 are the immediate priority. Phases 2.3–2.6 can be ordered by product need. Phases 3–5 build on the migrated actions. Phase 6 is a cleanup pass that can happen any time after Phase 2 is substantially complete.
-
-Phase 2 sub-phases are ordered by implementation risk: 2.1 is mechanical (uniform provider support), 2.2 requires resolving the label routing design, 2.3–2.6 each require interface decisions (new traits, provider capability gaps, sync pipeline interaction).
-
-Detailed planning for each phase happens before that phase starts, not upfront.
+- **Snooze** — still outside the action service. `dispatch_email_db_action` persists for snooze only. No `ProviderOps::snooze()` exists. Requires a design decision: local-only by design? provider dispatch where supported?
+- **`apply_category`/`remove_category` consolidation** — deferred from Phase 2.2. The `ProviderOps` trait has separate category and tag methods; consolidation would unify the label write interface.
+- **Action test suite** — action functions are testable (pure async, injectable `ActionContext`), but no test files exist in `crates/core/src/actions/`.
+- **User-facing retry status** — `db_pending_ops_failed_count()` exists but no UI surfaces pending/failed retry state.
+- **Native provider batching** — JMAP `Email/set` and Graph `/$batch` support batch requests natively. Current implementation uses sequential per-thread calls with provider reuse. Native batching is a future optimization.
