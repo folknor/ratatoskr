@@ -143,7 +143,10 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
             match dispatch_delete(ctx, source_str, aid, sid).await {
                 Ok(()) => {}
                 Err(e) => {
-                    // JMAP failure → don't delete locally (provider-first)
+                    // JMAP failure → don't delete locally (provider-first).
+                    // When Google/Graph/CardDAV HTTP delete is wired, extend
+                    // this check to include them (all synced providers should
+                    // be provider-first once their HTTP calls are real).
                     if source_str == "jmap" {
                         return ActionOutcome::Failed { error: e };
                     }
