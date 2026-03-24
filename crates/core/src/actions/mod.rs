@@ -15,6 +15,7 @@ mod outcome;
 mod permanent_delete;
 mod pin;
 mod provider;
+mod send;
 mod spam;
 mod star;
 mod trash;
@@ -23,6 +24,9 @@ pub use archive::archive;
 pub use context::ActionContext;
 pub use label::{add_label, remove_label};
 pub use mark_read::mark_read;
+// Re-export SendRequest so callers can build it without importing crate::send directly.
+pub use crate::send::SendRequest;
+pub use send::{delete_draft, send_email};
 pub use move_to_folder::move_to_folder;
 pub use mute::mute;
 pub use outcome::ActionOutcome;

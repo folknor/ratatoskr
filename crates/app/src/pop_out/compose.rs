@@ -376,6 +376,9 @@ pub struct ComposeState {
 
     // Draft auto-save
     pub draft_dirty: bool,
+
+    // Send in progress — disables Send button, shows "Sending..." status
+    pub sending: bool,
 }
 
 impl ComposeState {
@@ -414,6 +417,7 @@ impl ComposeState {
             width: COMPOSE_DEFAULT_WIDTH,
             height: COMPOSE_DEFAULT_HEIGHT,
             draft_dirty: false,
+            sending: false,
         }
     }
 

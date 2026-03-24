@@ -162,6 +162,7 @@ pub enum CompletedAction {
     Mute,
     AddLabel,
     RemoveLabel,
+    DeleteDraft,
 }
 
 impl CompletedAction {
@@ -185,6 +186,7 @@ impl CompletedAction {
             Self::Mute => "Mute toggled",
             Self::AddLabel => "Label applied",
             Self::RemoveLabel => "Label removed",
+            Self::DeleteDraft => "Draft discarded",
         }
     }
 }
@@ -232,6 +234,13 @@ pub enum Message {
         outcomes: Vec<ratatoskr_core::actions::ActionOutcome>,
         /// For toggle actions: (account_id, thread_id, previous_value) for rollback on failure.
         rollback: Vec<(String, String, bool)>,
+    },
+    /// Send completed — carries compose window ID and outcome.
+    /// Separate from ActionCompleted because send operates on a compose window,
+    /// not a thread list selection.
+    SendCompleted {
+        window_id: iced::window::Id,
+        outcome: ratatoskr_core::actions::ActionOutcome,
     },
     ComposeAction(ComposeAction),
     TaskAction(TaskAction),
@@ -548,6 +557,20 @@ impl App {
         };
 
         // Restore pop-out windows from previous session
+        // Resurface orphaned 'queued' drafts from the old send path.
+        // These were never sent — transition to 'failed' so they're visible
+        // to future outbox UI rather than silently deleting user data.
+        if let Err(e) = app.db.with_conn_sync(|conn| {
+            conn.execute(
+                "UPDATE local_drafts SET sync_status = 'failed' WHERE sync_status = 'queued'",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        }) {
+            log::warn!("Failed to resurface orphaned queued drafts: {e}");
+        }
+
         let mut session_tasks = app.restore_pop_out_windows(&session);
 
         let load_gen = app.nav_generation;
@@ -878,6 +901,9 @@ impl App {
             Message::EmailAction(action) => self.handle_email_action(action),
             Message::ActionCompleted { action, ref outcomes, ref rollback } => {
                 self.handle_action_completed(action, outcomes, rollback)
+            }
+            Message::SendCompleted { window_id, ref outcome } => {
+                self.handle_send_completed(window_id, outcome)
             }
             Message::ComposeAction(ref action) => self.handle_compose_action(action),
             Message::TaskAction(_action) => Task::none(),

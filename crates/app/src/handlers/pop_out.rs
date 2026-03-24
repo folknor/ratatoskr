@@ -31,7 +31,7 @@ use crate::ui::layout::{
 };
 use crate::{App, Message, APP_DATA_DIR};
 
-use ratatoskr_core::send::{SendAttachment, SendRequest};
+use ratatoskr_core::send::SendAttachment;
 
 // ── Pop-out message dispatch ────────────────────────────
 
@@ -942,10 +942,9 @@ impl App {
 
     /// Build a MIME message from the compose state, save it to the draft row
     /// as base64url in the `attachments` column, mark the draft `'queued'`,
-    /// close the compose window, and show a status bar confirmation.
-    ///
-    /// The sync pipeline will pick up queued drafts and send them via the
-    /// provider — this is the standard outbox pattern.
+    /// Validate compose state, build a SendRequest, and dispatch to the
+    /// action service. The compose window stays open with a "Sending..." status
+    /// until SendCompleted arrives.
     fn handle_compose_send(
         &mut self,
         window_id: iced::window::Id,
@@ -955,6 +954,11 @@ impl App {
         else {
             return Task::none();
         };
+
+        // Prevent double-send
+        if state.sending {
+            return Task::none();
+        }
 
         // ── Validate recipients ─────────────────────────
         let has_recipients = !state.to.tokens.is_empty()
@@ -1022,91 +1026,91 @@ impl App {
 
         let draft_id = uuid::Uuid::new_v4().to_string();
 
-        let send_req = SendRequest {
-            draft_id: draft_id.clone(),
+        let send_req = ratatoskr_core::actions::SendRequest {
+            draft_id,
             account_id: account_info.id.clone(),
             from,
             to,
             cc,
             bcc,
-            subject: subject.clone(),
-            body_html: body_html.clone(),
-            body_text: body_text.clone(),
+            subject,
+            body_html,
+            body_text,
             attachments,
             in_reply_to: state.reply_message_id.clone(),
             references: state.reply_message_id.clone(),
             thread_id: state.reply_thread_id.clone(),
         };
 
-        // ── Build MIME (synchronous) ────────────────────
-        let mime_base64url =
-            match ratatoskr_core::send::build_mime_message_base64url(&send_req) {
-                Ok(encoded) => encoded,
-                Err(e) => {
-                    state.status = Some(format!("Failed to build message: {e}"));
-                    return Task::none();
+        // ── Set sending state and dispatch ──────────────
+        state.sending = true;
+        state.status = Some("Sending\u{2026}".to_string());
+
+        self.dispatch_send(window_id, send_req)
+    }
+
+    /// Dispatch send_email through the action service.
+    fn dispatch_send(
+        &mut self,
+        window_id: iced::window::Id,
+        request: ratatoskr_core::actions::SendRequest,
+    ) -> Task<Message> {
+        let Some(ref action_ctx) = self.action_ctx else {
+            if let Some(PopOutWindow::Compose(state)) =
+                self.pop_out_windows.get_mut(&window_id)
+            {
+                state.sending = false;
+                state.status = Some(
+                    "Send unavailable \u{2014} action service not initialized"
+                        .to_string(),
+                );
+            }
+            return Task::none();
+        };
+        let ctx = action_ctx.clone();
+        Task::perform(
+            async move {
+                let outcome =
+                    ratatoskr_core::actions::send_email(&ctx, request).await;
+                (window_id, outcome)
+            },
+            move |(window_id, outcome)| Message::SendCompleted {
+                window_id,
+                outcome,
+            },
+        )
+    }
+
+    /// Handle send completion: close compose on success, restore on failure.
+    pub(crate) fn handle_send_completed(
+        &mut self,
+        window_id: iced::window::Id,
+        outcome: &ratatoskr_core::actions::ActionOutcome,
+    ) -> Task<Message> {
+        match outcome {
+            ratatoskr_core::actions::ActionOutcome::Success => {
+                self.pop_out_windows.remove(&window_id);
+                self.composer_is_open = false;
+                self.status_bar
+                    .show_confirmation("Message sent".to_string());
+                iced::window::close(window_id)
+            }
+            // LocalOnly should not occur for send (send uses Failed for all
+            // failures), but handle it defensively as failure for safety.
+            ratatoskr_core::actions::ActionOutcome::Failed { error }
+            | ratatoskr_core::actions::ActionOutcome::LocalOnly {
+                remote_error: error,
+            } => {
+                if let Some(PopOutWindow::Compose(state)) =
+                    self.pop_out_windows.get_mut(&window_id)
+                {
+                    state.sending = false;
+                    state.status =
+                        Some(format!("Send failed: {error}"));
                 }
-            };
-
-        // ── Persist finalized draft + queued MIME ───────
-        let account_id = account_info.id.clone();
-        let to_csv = tokens_to_csv(&state.to.tokens);
-        let cc_csv = tokens_to_csv(&state.cc.tokens);
-        let bcc_csv = tokens_to_csv(&state.bcc.tokens);
-        let from_email = Some(account_info.email.clone());
-        let reply_to_message_id = state.reply_message_id.clone();
-        let thread_id = state.reply_thread_id.clone();
-
-        let db = Arc::clone(&self.db);
-
-        // Close the compose window immediately (optimistic).
-        self.pop_out_windows.remove(&window_id);
-        self.composer_is_open = false;
-        self.status_bar.show_confirmation(
-            "Message queued for sending".to_string(),
-        );
-
-        Task::batch([
-            iced::window::close(window_id),
-            Task::perform(
-                async move {
-                    db.with_write_conn(move |conn| {
-                        conn.execute(
-                            "INSERT INTO local_drafts \
-                             (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
-                              subject, body_html, reply_to_message_id, thread_id, \
-                              from_email, attachments, updated_at, sync_status) \
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, \
-                                     unixepoch(), 'queued')",
-                            rusqlite::params![
-                                draft_id,
-                                account_id,
-                                to_csv,
-                                cc_csv,
-                                bcc_csv,
-                                subject,
-                                body_html,
-                                reply_to_message_id,
-                                thread_id,
-                                from_email,
-                                mime_base64url,
-                            ],
-                        )
-                        .map_err(|e| e.to_string())?;
-                        Ok(())
-                    })
-                    .await
-                },
-                move |result| {
-                    if let Err(e) = result {
-                        log::error!(
-                            "Failed to save queued draft for sending: {e}"
-                        );
-                    }
-                    Message::Noop
-                },
-            ),
-        ])
+                Task::none()
+            }
+        }
     }
 
     // ── Compose signature account-switching ──────────────
