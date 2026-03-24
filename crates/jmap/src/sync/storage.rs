@@ -106,7 +106,7 @@ fn store_thread_to_db(
     upsert_attachments(tx, account_id, messages)?;
     upsert_thread_record(tx, account_id, thread_id, messages)?;
     set_thread_labels(tx, account_id, thread_id, messages)?;
-    sync_keyword_categories(tx, account_id, thread_id, messages)?;
+    sync_keyword_labels(tx, account_id, thread_id, messages)?;
     Ok(())
 }
 
@@ -244,18 +244,16 @@ fn upsert_attachments(
 // Keyword -> category sync
 // ---------------------------------------------------------------------------
 
-/// Ensure non-system JMAP keywords exist in the `categories` table and link
-/// the thread to the first keyword category found across its messages.
+/// Ensure non-system JMAP keywords exist in the unified labels system.
 ///
-/// JMAP keywords have no color metadata, so colors are left NULL.
-/// Only updates `thread_categories` when the existing assignment is not manual.
-fn sync_keyword_categories(
+/// Upserts each keyword as a `label_kind = 'tag'` label with a `kw:` prefix
+/// and links it to the thread via `thread_labels`.
+fn sync_keyword_labels(
     tx: &rusqlite::Transaction,
     account_id: &str,
     thread_id: &str,
     messages: &[ParsedJmapMessage],
 ) -> Result<(), String> {
-    // Collect all unique keyword categories across messages in this thread
     let mut unique_keywords: Vec<String> = messages
         .iter()
         .flat_map(|msg| msg.keyword_categories.iter().cloned())
@@ -267,25 +265,7 @@ fn sync_keyword_categories(
         return Ok(());
     }
 
-    // Upsert each keyword into the categories table (legacy) and labels table (unified)
     for keyword in &unique_keywords {
-        ratatoskr_db::db::queries::upsert_category(
-            tx,
-            &format!("kw_{keyword}"),
-            account_id,
-            keyword,
-            &ratatoskr_db::db::queries::CategoryColors {
-                preset: None,
-                bg: None,
-                fg: None,
-            },
-            keyword,
-            0,
-            false,
-            ratatoskr_db::db::queries::CategorySortOnConflict::Keep,
-        )?;
-
-        // Also upsert as a tag-type label for the unified labels system.
         let label_id = format!("kw:{keyword}");
         tx.execute(
             "INSERT OR IGNORE INTO labels (id, account_id, name, type, label_kind) \
@@ -300,29 +280,6 @@ fn sync_keyword_categories(
         )
         .map_err(|e| format!("insert jmap keyword thread_label: {e}"))?;
     }
-
-    // Link thread to the first keyword category (don't overwrite manual assignments)
-    let first_category = &unique_keywords[0];
-    tx.execute(
-        "INSERT INTO thread_categories (account_id, thread_id, category, is_manual) \
-         VALUES (?1, ?2, ?3, 0) \
-         ON CONFLICT(account_id, thread_id) DO UPDATE SET \
-           category = ?3 \
-         WHERE is_manual = 0",
-        rusqlite::params![account_id, thread_id, first_category],
-    )
-    .map_err(|e| format!("upsert jmap thread keyword category: {e}"))?;
-
-    // Link each message to its keyword categories
-    sync_persistence::insert_message_categories(
-        tx,
-        account_id,
-        messages.iter().flat_map(|msg| {
-            msg.keyword_categories
-                .iter()
-                .map(move |kw| (msg.base.id.as_str(), kw.as_str()))
-        }),
-    )?;
 
     Ok(())
 }

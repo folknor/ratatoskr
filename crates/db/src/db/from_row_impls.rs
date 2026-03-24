@@ -100,20 +100,6 @@ impl_from_row!(DbLabel {
     optbool is_subscribed,
 });
 
-// ── Category ────────────────────────────────────────────────
-
-impl_from_row!(DbCategory {
-    id,
-    account_id,
-    display_name,
-    color_preset,
-    color_bg,
-    color_fg,
-    provider_id,
-    sync_state,
-    sort_order,
-});
-
 // ── Contact ─────────────────────────────────────────────────
 
 impl_from_row!(DbContact {

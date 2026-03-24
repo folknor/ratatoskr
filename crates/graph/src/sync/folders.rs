@@ -79,8 +79,12 @@ async fn persist_labels(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Result
                 .map_err(|e| format!("begin tx: {e}"))?;
             for (label_id, account_id, name, label_type, parent_label_id) in &label_rows {
                 tx.execute(
-                    "INSERT OR REPLACE INTO labels (id, account_id, name, type, parent_label_id) \
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    "INSERT INTO labels (id, account_id, name, type, parent_label_id) \
+                     VALUES (?1, ?2, ?3, ?4, ?5) \
+                     ON CONFLICT(account_id, id) DO UPDATE SET \
+                       name = excluded.name, \
+                       type = excluded.type, \
+                       parent_label_id = excluded.parent_label_id",
                     rusqlite::params![label_id, account_id, name, label_type, parent_label_id],
                 )
                 .map_err(|e| format!("upsert label: {e}"))?;

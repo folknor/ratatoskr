@@ -578,8 +578,17 @@ pub fn remove_thread_label(
 
 pub fn upsert_label(conn: &Connection, label: &DbLabel) -> Result<(), String> {
     conn.execute(
-        "INSERT OR REPLACE INTO labels (account_id, id, name, type, color_bg, color_fg, visible, sort_order, imap_folder_path, imap_special_use)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        "INSERT INTO labels (account_id, id, name, type, color_bg, color_fg, visible, sort_order, imap_folder_path, imap_special_use)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(account_id, id) DO UPDATE SET
+           name = excluded.name,
+           type = excluded.type,
+           color_bg = excluded.color_bg,
+           color_fg = excluded.color_fg,
+           visible = excluded.visible,
+           sort_order = excluded.sort_order,
+           imap_folder_path = excluded.imap_folder_path,
+           imap_special_use = excluded.imap_special_use",
         params![
             label.account_id,
             label.id,

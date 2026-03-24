@@ -150,21 +150,6 @@ pub struct DbLabel {
     pub is_subscribed: Option<bool>,
 }
 
-// ── Category ─────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DbCategory {
-    pub id: String,
-    pub account_id: String,
-    pub display_name: String,
-    pub color_preset: Option<String>,
-    pub color_bg: Option<String>,
-    pub color_fg: Option<String>,
-    pub provider_id: Option<String>,
-    pub sync_state: String,
-    pub sort_order: i64,
-}
-
 // ── Setting ──────────────────────────────────────────────────
 
 // ── Thread category ──────────────────────────────────────────

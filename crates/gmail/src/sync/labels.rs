@@ -14,10 +14,7 @@ pub(super) async fn sync_labels(ctx: &SyncCtx<'_>) -> Result<(), String> {
 
     let aid = ctx.account_id.to_string();
     ctx.db
-        .with_conn(move |conn| {
-            persist_labels(conn, &aid, &labels)?;
-            sync_labels_to_categories(conn, &aid, &labels)
-        })
+        .with_conn(move |conn| persist_labels(conn, &aid, &labels))
         .await
 }
 
@@ -30,82 +27,26 @@ fn persist_labels(
         let color_bg = label.color.as_ref().map(|c| c.background_color.clone());
         let color_fg = label.color.as_ref().map(|c| c.text_color.clone());
         let label_type = label.label_type.as_deref().unwrap_or("user");
+        let label_kind = if label_type == "system" {
+            "container"
+        } else {
+            "tag"
+        };
 
         conn.execute(
-            "INSERT OR REPLACE INTO labels \
-             (id, account_id, name, type, color_bg, color_fg) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO labels (id, account_id, name, type, color_bg, color_fg, label_kind) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+             ON CONFLICT(account_id, id) DO UPDATE SET \
+               name = excluded.name, \
+               type = excluded.type, \
+               color_bg = excluded.color_bg, \
+               color_fg = excluded.color_fg, \
+               label_kind = excluded.label_kind",
             rusqlite::params![
-                label.id, account_id, label.name, label_type, color_bg, color_fg,
+                label.id, account_id, label.name, label_type, color_bg, color_fg, label_kind,
             ],
         )
         .map_err(|e| format!("upsert label: {e}"))?;
-    }
-    Ok(())
-}
-
-/// Sync user labels with colors into the categories table for unified category display.
-///
-/// Only user-created labels that look like "categories" (flat, tag-like) are
-/// synced. Labels that look like folders (nested hierarchy, hidden from message
-/// or label lists) stay as mailbox folders only.
-///
-/// Classification heuristic:
-/// - System labels (type = "system") are never categories.
-/// - `CATEGORY_*` labels (inbox tabs) are already handled separately.
-/// - Folder-like: contains `/` (nested), OR `messageListVisibility = "hide"`,
-///   OR `labelListVisibility = "labelHide"`.
-/// - Category-like: everything else (flat name, visible or null visibility).
-///
-/// Gmail colors are hex strings — they go directly into color_bg/color_fg.
-fn sync_labels_to_categories(
-    conn: &rusqlite::Connection,
-    account_id: &str,
-    labels: &[GmailLabel],
-) -> Result<(), String> {
-    let mut sort = 0i64;
-    for label in labels {
-        // Only user labels are categories — skip system labels
-        if label.label_type.as_deref() == Some("system") {
-            continue;
-        }
-        // Skip CATEGORY_* labels (automated inbox tabs, not user categories)
-        if label.id.starts_with("CATEGORY_") {
-            continue;
-        }
-        // Folder-like: nested hierarchy (contains `/`)
-        if label.name.contains('/') {
-            continue;
-        }
-        // Folder-like: hidden from message list
-        if label.message_list_visibility.as_deref() == Some("hide") {
-            continue;
-        }
-        // Folder-like: hidden from label list
-        if label.label_list_visibility.as_deref() == Some("labelHide") {
-            continue;
-        }
-
-        let color_bg = label.color.as_ref().map(|c| c.background_color.as_str());
-        let color_fg = label.color.as_ref().map(|c| c.text_color.as_str());
-
-        ratatoskr_db::db::queries::upsert_category(
-            conn,
-            &label.id,
-            account_id,
-            &label.name,
-            &ratatoskr_db::db::queries::CategoryColors {
-                preset: None,
-                bg: color_bg,
-                fg: color_fg,
-            },
-            &label.id,
-            sort,
-            true,
-            ratatoskr_db::db::queries::CategorySortOnConflict::Keep,
-        )?;
-
-        sort += 1;
     }
     Ok(())
 }

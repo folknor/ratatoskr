@@ -340,12 +340,37 @@ impl ProviderOps for JmapOps {
         tag_id: &str,
     ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
+
+        // Keywords use kw: prefix — set the keyword flag on all thread messages
+        if let Some(keyword) = tag_id.strip_prefix("kw:") {
+            let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
+            let client = self.client.inner();
+            let mut request = client.build();
+            let jmap_account_id = request.default_account_id().to_string();
+            let mut email_set = EmailSet::new(&jmap_account_id);
+            for eid in &email_ids {
+                email_set.update(eid).keyword(keyword, true);
+            }
+            let handle = request
+                .call(email_set)
+                .map_err(|e| ProviderError::Server(format!("add keyword: {e}")))?;
+            let mut response = request
+                .send()
+                .await
+                .map_err(|e| ProviderError::Server(format!("add keyword: {e}")))?;
+            response
+                .get(&handle)
+                .map_err(|e| ProviderError::Server(format!("add keyword: {e}")))?;
+            return Ok(());
+        }
+
+        // Non-keyword tags are mailbox operations
         let mailbox_id = resolve_mailbox_id(&self.client, tag_id).await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
         let mut request = client.build();
-        let account_id = request.default_account_id().to_string();
-        let mut email_set = EmailSet::new(&account_id);
+        let jmap_account_id = request.default_account_id().to_string();
+        let mut email_set = EmailSet::new(&jmap_account_id);
         for eid in &email_ids {
             email_set.update(eid).mailbox_id(&mailbox_id, true);
         }
@@ -369,12 +394,37 @@ impl ProviderOps for JmapOps {
         tag_id: &str,
     ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
+
+        // Keywords use kw: prefix — remove the keyword flag from all thread messages
+        if let Some(keyword) = tag_id.strip_prefix("kw:") {
+            let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
+            let client = self.client.inner();
+            let mut request = client.build();
+            let jmap_account_id = request.default_account_id().to_string();
+            let mut email_set = EmailSet::new(&jmap_account_id);
+            for eid in &email_ids {
+                email_set.update(eid).keyword(keyword, false);
+            }
+            let handle = request
+                .call(email_set)
+                .map_err(|e| ProviderError::Server(format!("remove keyword: {e}")))?;
+            let mut response = request
+                .send()
+                .await
+                .map_err(|e| ProviderError::Server(format!("remove keyword: {e}")))?;
+            response
+                .get(&handle)
+                .map_err(|e| ProviderError::Server(format!("remove keyword: {e}")))?;
+            return Ok(());
+        }
+
+        // Non-keyword tags are mailbox operations
         let mailbox_id = resolve_mailbox_id(&self.client, tag_id).await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
         let mut request = client.build();
-        let account_id = request.default_account_id().to_string();
-        let mut email_set = EmailSet::new(&account_id);
+        let jmap_account_id = request.default_account_id().to_string();
+        let mut email_set = EmailSet::new(&jmap_account_id);
         for eid in &email_ids {
             email_set.update(eid).mailbox_id(&mailbox_id, false);
         }
@@ -388,56 +438,6 @@ impl ProviderOps for JmapOps {
         response
             .get(&handle)
             .map_err(|e| ProviderError::Server(format!("remove tag: {e}")))?;
-        Ok(())
-    }
-
-    async fn apply_category(
-        &self,
-        _ctx: &ProviderCtx<'_>,
-        message_id: &str,
-        category_name: &str,
-    ) -> Result<(), ProviderError> {
-        self.client.ensure_valid_token().await?;
-        let client = self.client.inner();
-        let mut request = client.build();
-        let account_id = request.default_account_id().to_string();
-        let mut email_set = EmailSet::new(&account_id);
-        email_set.update(message_id).keyword(category_name, true);
-        let handle = request
-            .call(email_set)
-            .map_err(|e| ProviderError::Server(format!("apply category: {e}")))?;
-        let mut response = request
-            .send()
-            .await
-            .map_err(|e| ProviderError::Server(format!("apply category: {e}")))?;
-        response
-            .get(&handle)
-            .map_err(|e| ProviderError::Server(format!("apply category: {e}")))?;
-        Ok(())
-    }
-
-    async fn remove_category(
-        &self,
-        _ctx: &ProviderCtx<'_>,
-        message_id: &str,
-        category_name: &str,
-    ) -> Result<(), ProviderError> {
-        self.client.ensure_valid_token().await?;
-        let client = self.client.inner();
-        let mut request = client.build();
-        let account_id = request.default_account_id().to_string();
-        let mut email_set = EmailSet::new(&account_id);
-        email_set.update(message_id).keyword(category_name, false);
-        let handle = request
-            .call(email_set)
-            .map_err(|e| ProviderError::Server(format!("remove category: {e}")))?;
-        let mut response = request
-            .send()
-            .await
-            .map_err(|e| ProviderError::Server(format!("remove category: {e}")))?;
-        response
-            .get(&handle)
-            .map_err(|e| ProviderError::Server(format!("remove category: {e}")))?;
         Ok(())
     }
 

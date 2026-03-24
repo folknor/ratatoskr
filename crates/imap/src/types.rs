@@ -154,6 +154,8 @@ pub struct DeltaCheckResult {
     /// flag resync — otherwise CHANGEDSINCE with the stale cached value would
     /// return no results, silently missing all updates.
     pub modseq_reset: bool,
+    /// Whether PERMANENTFLAGS for this folder includes `\*` (arbitrary keywords).
+    pub supports_custom_keywords: bool,
 }
 
 /// A flag change for a single message, returned by CHANGEDSINCE fetch.

@@ -175,34 +175,6 @@ impl ProviderOps for GmailOps {
         Ok(())
     }
 
-    async fn apply_category(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        message_id: &str,
-        category_name: &str,
-    ) -> Result<(), ProviderError> {
-        let label_id = find_label_id_by_name(&self.client, ctx, category_name).await?;
-        let add = vec![label_id];
-        self.client
-            .modify_message(message_id, &add, &[], ctx.db)
-            .await?;
-        Ok(())
-    }
-
-    async fn remove_category(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        message_id: &str,
-        category_name: &str,
-    ) -> Result<(), ProviderError> {
-        let label_id = find_label_id_by_name(&self.client, ctx, category_name).await?;
-        let remove = vec![label_id];
-        self.client
-            .modify_message(message_id, &[], &remove, ctx.db)
-            .await?;
-        Ok(())
-    }
-
     async fn send_email(
         &self,
         ctx: &ProviderCtx<'_>,
@@ -396,20 +368,6 @@ impl ProviderOps for GmailOps {
 // ── Helpers ──────────────────────────────────────────────────
 
 /// Find a Gmail label ID by its display name (case-insensitive).
-async fn find_label_id_by_name(
-    client: &GmailClient,
-    ctx: &ProviderCtx<'_>,
-    name: &str,
-) -> Result<String, ProviderError> {
-    let labels = client.list_labels(ctx.db).await?;
-    let lower = name.to_lowercase();
-    labels
-        .into_iter()
-        .find(|l| l.name.to_lowercase() == lower)
-        .map(|l| l.id)
-        .ok_or_else(|| ProviderError::NotFound(format!("No Gmail label found matching category name '{name}'")))
-}
-
 // ── Gmail-specific operations (not part of ProviderOps) ─────
 
 /// The MIME type Gmail uses to identify emoji reaction messages.

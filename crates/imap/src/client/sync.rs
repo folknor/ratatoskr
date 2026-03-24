@@ -41,6 +41,7 @@ pub async fn delta_check_folders(
 
         let current_uidvalidity = mailbox.uid_validity.unwrap_or(0);
         let server_modseq = mailbox.highest_modseq;
+        let kw_cap = mailbox_supports_custom_keywords(&mailbox);
         let uidvalidity_changed = req.uidvalidity != 0 && current_uidvalidity != req.uidvalidity;
 
         if uidvalidity_changed {
@@ -52,6 +53,7 @@ pub async fn delta_check_folders(
                 highest_modseq: server_modseq,
                 modseq_unchanged: false,
                 modseq_reset: false,
+                supports_custom_keywords: kw_cap,
             });
             continue;
         }
@@ -90,6 +92,7 @@ pub async fn delta_check_folders(
                 highest_modseq: server_modseq,
                 modseq_unchanged: true,
                 modseq_reset: false,
+                supports_custom_keywords: kw_cap,
             });
             continue;
         }
@@ -126,6 +129,7 @@ pub async fn delta_check_folders(
             highest_modseq: server_modseq,
             modseq_unchanged: false,
             modseq_reset,
+            supports_custom_keywords: kw_cap,
         });
     }
 

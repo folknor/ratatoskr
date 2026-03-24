@@ -197,41 +197,6 @@ impl ProviderOps for GraphOps {
         Ok(batch_set_categories(&self.client, ctx, &patches).await?)
     }
 
-    async fn apply_category(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        message_id: &str,
-        category_name: &str,
-    ) -> Result<(), ProviderError> {
-        let _guard = self.client.lock_categories().await;
-        let current = batch_get_categories(&self.client, ctx, &[message_id.to_string()]).await?;
-        let (_, mut cats) = current.into_iter().next()
-            .ok_or_else(|| ProviderError::NotFound("No category data returned".to_string()))?;
-        if !cats.iter().any(|c| c == category_name) {
-            cats.push(category_name.to_string());
-            batch_set_categories(&self.client, ctx, &[(message_id.to_string(), cats)]).await?;
-        }
-        Ok(())
-    }
-
-    async fn remove_category(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        message_id: &str,
-        category_name: &str,
-    ) -> Result<(), ProviderError> {
-        let _guard = self.client.lock_categories().await;
-        let current = batch_get_categories(&self.client, ctx, &[message_id.to_string()]).await?;
-        let (_, mut cats) = current.into_iter().next()
-            .ok_or_else(|| ProviderError::NotFound("No category data returned".to_string()))?;
-        let before_len = cats.len();
-        cats.retain(|c| c != category_name);
-        if cats.len() != before_len {
-            batch_set_categories(&self.client, ctx, &[(message_id.to_string(), cats)]).await?;
-        }
-        Ok(())
-    }
-
     async fn send_email(
         &self,
         ctx: &ProviderCtx<'_>,

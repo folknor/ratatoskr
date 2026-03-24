@@ -104,13 +104,7 @@ pub(crate) async fn sync_mailboxes(
         is_subscribed: None,
     });
 
-    // Persist labels + categories to DB
-    let category_rows: Vec<(String, String)> = label_rows
-        .iter()
-        .filter(|r| r.label_type == "user")
-        .map(|r| (r.label_id.clone(), r.label_name.clone()))
-        .collect();
-
+    // Persist labels to DB
     ctx.db
         .with_conn(move |conn| {
             let tx = conn
@@ -120,12 +114,26 @@ pub(crate) async fn sync_mailboxes(
                 let (r_read, r_add, r_remove, r_seen, r_kw, r_child, r_rename, r_del, r_submit) =
                     rights_to_ints(row.rights.as_ref());
                 tx.execute(
-                    "INSERT OR REPLACE INTO labels \
+                    "INSERT INTO labels \
                      (id, account_id, name, type, parent_label_id, \
                       right_read, right_add, right_remove, right_set_seen, \
                       right_set_keywords, right_create_child, right_rename, \
                       right_delete, right_submit, is_subscribed) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15) \
+                     ON CONFLICT(account_id, id) DO UPDATE SET \
+                       name = excluded.name, \
+                       type = excluded.type, \
+                       parent_label_id = excluded.parent_label_id, \
+                       right_read = excluded.right_read, \
+                       right_add = excluded.right_add, \
+                       right_remove = excluded.right_remove, \
+                       right_set_seen = excluded.right_set_seen, \
+                       right_set_keywords = excluded.right_set_keywords, \
+                       right_create_child = excluded.right_create_child, \
+                       right_rename = excluded.right_rename, \
+                       right_delete = excluded.right_delete, \
+                       right_submit = excluded.right_submit, \
+                       is_subscribed = excluded.is_subscribed",
                     rusqlite::params![
                         row.label_id, row.account_id, row.label_name, row.label_type,
                         row.parent_label_id,
@@ -134,24 +142,6 @@ pub(crate) async fn sync_mailboxes(
                     ],
                 )
                 .map_err(|e| format!("upsert label: {e}"))?;
-            }
-            // Sync user mailboxes into categories table (no colors in JMAP)
-            for (i, (provider_id, name)) in category_rows.iter().enumerate() {
-                ratatoskr_db::db::queries::upsert_category(
-                    &tx,
-                    provider_id,
-                    &aid,
-                    name,
-                    &ratatoskr_db::db::queries::CategoryColors {
-                        preset: None,
-                        bg: None,
-                        fg: None,
-                    },
-                    provider_id,
-                    i64::try_from(i).unwrap_or(0),
-                    false,
-                    ratatoskr_db::db::queries::CategorySortOnConflict::Keep,
-                )?;
             }
             tx.commit().map_err(|e| format!("commit labels: {e}"))?;
             Ok(())

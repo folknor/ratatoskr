@@ -541,54 +541,62 @@ impl ProviderOps for ImapOps {
 
     async fn add_tag(
         &self,
-        _ctx: &ProviderCtx<'_>,
-        _thread_id: &str,
-        _tag_id: &str,
+        ctx: &ProviderCtx<'_>,
+        thread_id: &str,
+        tag_id: &str,
     ) -> Result<(), ProviderError> {
-        // IMAP doesn't have native labels/tags.
-        // This is a no-op, matching the existing TS ImapSmtpProvider behavior.
-        log::debug!("IMAP: add_tag is a no-op (IMAP has no native labels)");
+        // Keywords use kw: prefix — set the keyword flag on all thread messages
+        let Some(keyword) = tag_id.strip_prefix("kw:") else {
+            // IMAP has no native non-keyword tags — no-op for other tag types
+            log::debug!("IMAP: add_tag is a no-op for non-keyword tag {tag_id}");
+            return Ok(());
+        };
+
+        let account_id = ctx.account_id.to_string();
+        let tid = thread_id.to_string();
+        let config = self.load_config(ctx).await?;
+
+        let refs = ctx.db
+            .with_conn(move |conn| get_thread_message_refs(conn, &account_id, &tid))
+            .await?;
+
+        for msg_ref in &refs {
+            with_session!(&config, session => {
+                imap_client::set_keyword_if_supported(
+                    &mut session, &msg_ref.folder, msg_ref.uid, "+FLAGS", keyword,
+                ).await
+            })?;
+        }
         Ok(())
     }
 
     async fn remove_tag(
         &self,
-        _ctx: &ProviderCtx<'_>,
-        _thread_id: &str,
-        _tag_id: &str,
-    ) -> Result<(), ProviderError> {
-        // IMAP doesn't have native labels/tags.
-        log::debug!("IMAP: remove_tag is a no-op (IMAP has no native labels)");
-        Ok(())
-    }
-
-    async fn apply_category(
-        &self,
         ctx: &ProviderCtx<'_>,
-        message_id: &str,
-        category_name: &str,
+        thread_id: &str,
+        tag_id: &str,
     ) -> Result<(), ProviderError> {
-        let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
+        // Keywords use kw: prefix — remove the keyword flag from all thread messages
+        let Some(keyword) = tag_id.strip_prefix("kw:") else {
+            log::debug!("IMAP: remove_tag is a no-op for non-keyword tag {tag_id}");
+            return Ok(());
+        };
+
+        let account_id = ctx.account_id.to_string();
+        let tid = thread_id.to_string();
         let config = self.load_config(ctx).await?;
 
-        with_session!(&config, session => {
-            imap_client::set_keyword_if_supported(&mut session, &folder, uid, "+FLAGS", category_name).await
-        })?;
-        Ok(())
-    }
+        let refs = ctx.db
+            .with_conn(move |conn| get_thread_message_refs(conn, &account_id, &tid))
+            .await?;
 
-    async fn remove_category(
-        &self,
-        ctx: &ProviderCtx<'_>,
-        message_id: &str,
-        category_name: &str,
-    ) -> Result<(), ProviderError> {
-        let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
-        let config = self.load_config(ctx).await?;
-
-        with_session!(&config, session => {
-            imap_client::set_keyword_if_supported(&mut session, &folder, uid, "-FLAGS", category_name).await
-        })?;
+        for msg_ref in &refs {
+            with_session!(&config, session => {
+                imap_client::set_keyword_if_supported(
+                    &mut session, &msg_ref.folder, msg_ref.uid, "-FLAGS", keyword,
+                ).await
+            })?;
+        }
         Ok(())
     }
 

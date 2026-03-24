@@ -17,12 +17,12 @@ struct CategoryListResponse {
     value: Vec<OutlookCategory>,
 }
 
-/// Sync the Exchange master category list from Graph API.
+/// Sync the Exchange master category list from Graph API into the unified
+/// labels system.
 ///
-/// Fetches `GET /me/outlook/masterCategories` and upserts into the
-/// `categories` table. Categories removed from the server are marked
-/// but not deleted locally (they may still be referenced by messages).
-pub async fn graph_categories_sync(
+/// Fetches `GET /me/outlook/masterCategories` and upserts into the `labels`
+/// table as `label_kind = 'tag'` entries with a `cat:` ID prefix.
+pub async fn graph_label_sync(
     client: &GraphClient,
     account_id: &str,
     db: &DbState,
@@ -34,12 +34,12 @@ pub async fn graph_categories_sync(
     let aid = account_id.to_string();
     let categories = response.value;
     let count = categories.len();
-    log::info!("[Graph] Category sync for account {account_id}: {count} categories fetched");
+    log::info!("[Graph] Label sync for account {account_id}: {count} categories fetched");
 
     db.with_conn(move |conn| {
         let tx = conn
             .unchecked_transaction()
-            .map_err(|e| format!("category sync tx: {e}"))?;
+            .map_err(|e| format!("label sync tx: {e}"))?;
 
         for (i, cat) in categories.iter().enumerate() {
             let color_preset = cat.color.as_deref().unwrap_or("None");
@@ -52,25 +52,6 @@ pub async fn graph_categories_sync(
                 }
             };
 
-            ratatoskr_db::db::queries::upsert_category(
-                &tx,
-                &cat.id,
-                &aid,
-                &cat.display_name,
-                &ratatoskr_db::db::queries::CategoryColors {
-                    preset: Some(color_preset),
-                    bg: color_bg,
-                    fg: color_fg,
-                },
-                &cat.id,
-                i64::try_from(i).unwrap_or(0),
-                true,
-                ratatoskr_db::db::queries::CategorySortOnConflict::Update,
-            )?;
-
-            // Also upsert as a tag-type label for the unified labels system.
-            // The label ID uses a "cat:" prefix to avoid collisions with
-            // folder-type labels on the same account.
             let label_id = format!("cat:{}", cat.display_name);
             tx.execute(
                 "INSERT INTO labels (id, account_id, name, type, label_kind, color_bg, color_fg, sort_order)
@@ -93,7 +74,7 @@ pub async fn graph_categories_sync(
         }
 
         tx.commit()
-            .map_err(|e| format!("category sync commit: {e}"))?;
+            .map_err(|e| format!("label sync commit: {e}"))?;
         Ok(count)
     })
     .await

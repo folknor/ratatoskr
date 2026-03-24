@@ -115,19 +115,8 @@ fn store_thread_to_db(
     upsert_thread_record(tx, account_id, thread_id, messages)?;
     set_thread_labels(tx, account_id, thread_id, messages)?;
     insert_exchange_reactions(tx, account_id, messages)?;
-    sync_persistence::insert_message_categories(
-        tx,
-        account_id,
-        messages
-            .iter()
-            .flat_map(|msg| {
-                msg.categories
-                    .iter()
-                    .map(move |cat| (msg.base.id.as_str(), cat.as_str()))
-            }),
-    )?;
 
-    // Also add category-backed labels to thread_labels for the unified labels system.
+    // Add category-backed labels to thread_labels for the unified labels system.
     let mut seen_cats = std::collections::HashSet::new();
     for msg in messages {
         for cat in &msg.categories {

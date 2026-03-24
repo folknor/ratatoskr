@@ -404,9 +404,15 @@ pub fn sync_folders_to_labels(
         );
 
         conn.execute(
-            "INSERT OR REPLACE INTO labels \
+            "INSERT INTO labels \
              (id, account_id, name, type, imap_folder_path, imap_special_use, parent_label_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+             ON CONFLICT(account_id, id) DO UPDATE SET \
+               name = excluded.name, \
+               type = excluded.type, \
+               imap_folder_path = excluded.imap_folder_path, \
+               imap_special_use = excluded.imap_special_use, \
+               parent_label_id = excluded.parent_label_id",
             rusqlite::params![
                 mapping.label_id,
                 account_id,
@@ -426,29 +432,6 @@ pub fn sync_folders_to_labels(
         rusqlite::params!["UNREAD", account_id],
     )
     .map_err(|e| format!("upsert UNREAD label: {e}"))?;
-
-    // Sync user folders into categories table (no colors for IMAP)
-    for (i, folder) in folders.iter().enumerate() {
-        let mapping = map_folder_to_label(folder);
-        if mapping.label_type != "user" {
-            continue;
-        }
-        ratatoskr_db::db::queries::upsert_category(
-            conn,
-            &mapping.label_id,
-            account_id,
-            &mapping.label_name,
-            &ratatoskr_db::db::queries::CategoryColors {
-                preset: None,
-                bg: None,
-                fg: None,
-            },
-            &folder.raw_path,
-            i64::try_from(i).unwrap_or(0),
-            false,
-            ratatoskr_db::db::queries::CategorySortOnConflict::Keep,
-        )?;
-    }
 
     Ok(())
 }

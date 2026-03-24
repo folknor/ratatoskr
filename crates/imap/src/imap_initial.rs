@@ -133,6 +133,7 @@ pub async fn imap_initial_sync(
     let mut total_messages_found: u64 = 0;
     let mut consecutive_failures: u32 = 0;
     let mut folder_errors: Vec<String> = Vec::new();
+    let mut keyword_caps: Vec<bool> = Vec::new();
 
     let cutoff_seconds = chrono::Utc::now().timestamp() - days_back * 86400;
     let now_seconds = chrono::Utc::now().timestamp();
@@ -187,11 +188,12 @@ pub async fn imap_initial_sync(
         )
         .await
         {
-            Ok((folder_fetched, folder_stored, folder_uid_count)) => {
+            Ok((folder_fetched, folder_stored, folder_uid_count, folder_kw_cap)) => {
                 consecutive_failures = 0;
                 total_messages_found += folder_fetched;
                 stored_count += folder_stored;
                 fetched_total += folder_uid_count;
+                keyword_caps.push(folder_kw_cap);
             }
             Err(e) => {
                 let err_str = e.clone();
@@ -206,6 +208,23 @@ pub async fn imap_initial_sync(
 
     if stored_count == 0 && !folder_errors.is_empty() {
         return Err(format!("All folders failed: {}", folder_errors[0]));
+    }
+
+    // Persist IMAP keyword capability (conservative: all folders must support it)
+    if !keyword_caps.is_empty() {
+        let all_support = keyword_caps.iter().all(|&cap| cap);
+        let cap_val = i64::from(all_support);
+        let aid = account_id.to_string();
+        let db2 = db.clone();
+        let _ = db2
+            .with_conn(move |conn| {
+                conn.execute(
+                    "UPDATE accounts SET supports_keywords = ?1 WHERE id = ?2",
+                    rusqlite::params![cap_val, aid],
+                )
+                .map_err(|e| format!("persist keyword cap: {e}"))
+            })
+            .await;
     }
 
     // Phase 3: Threading
@@ -353,16 +372,17 @@ async fn sync_single_folder(
     all_threadable: &mut Vec<threading::ThreadableMessage>,
     all_meta: &mut HashMap<String, MessageMeta>,
     labels_by_rfc_id: &mut HashMap<String, HashSet<String>>,
-) -> Result<(u64, u64, u64), String> {
+) -> Result<(u64, u64, u64, bool), String> {
     let mut session = connect(config).await?;
 
     let search_result =
         client::search_folder(&mut session, &folder.raw_path, Some(since_date.to_string())).await?;
 
     let uids = search_result.uids;
+    let kw_cap = search_result.folder_status.supports_custom_keywords;
     if uids.is_empty() {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
-        return Ok((0, 0, 0));
+        return Ok((0, 0, 0, kw_cap));
     }
 
     let uidvalidity = search_result.folder_status.uidvalidity;
@@ -496,5 +516,5 @@ async fn sync_single_folder(
 
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
 
-    Ok((folder_fetched, folder_stored, uids.len() as u64))
+    Ok((folder_fetched, folder_stored, uids.len() as u64, kw_cap))
 }

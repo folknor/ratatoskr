@@ -298,7 +298,7 @@ pub(crate) async fn graph_delta_sync(
             log::warn!("Contact delta sync failed (non-fatal): {e}");
         }
         if let Err(e) =
-            super::category_sync::graph_categories_sync(client, ctx.account_id, ctx.db).await
+            super::category_sync::graph_label_sync(client, ctx.account_id, ctx.db).await
         {
             log::warn!("Category delta sync failed (non-fatal): {e}");
         }

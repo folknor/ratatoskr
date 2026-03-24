@@ -1471,6 +1471,19 @@ static MIGRATIONS: &[Migration] = &[
             ALTER TABLE shared_mailbox_sync_state ADD COLUMN email_address TEXT;
         "#,
     },
+    Migration {
+        version: 72,
+        description: "Drop legacy categories and message_categories tables (labels unification Phase 6)",
+        sql: r#"
+            DROP TABLE IF EXISTS message_categories;
+            DROP TABLE IF EXISTS categories;
+        "#,
+    },
+    Migration {
+        version: 73,
+        description: "IMAP keyword capability flag on accounts (labels unification Phase 6)",
+        sql: "ALTER TABLE accounts ADD COLUMN supports_keywords INTEGER;",
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

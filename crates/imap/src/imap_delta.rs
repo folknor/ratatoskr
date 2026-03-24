@@ -195,6 +195,27 @@ pub async fn imap_delta_sync(
                 delta_errors.push(format!("{}: {s}", folder.path));
             }
         }
+
+        // Persist IMAP keyword capability from delta check results
+        let keyword_caps: Vec<bool> = result_map
+            .values()
+            .map(|r| r.supports_custom_keywords)
+            .collect();
+        if !keyword_caps.is_empty() {
+            let all_support = keyword_caps.iter().all(|&cap| cap);
+            let cap_val = i64::from(all_support);
+            let aid = account_id.to_string();
+            let db2 = db.clone();
+            let _ = db2
+                .with_conn(move |conn| {
+                    conn.execute(
+                        "UPDATE accounts SET supports_keywords = ?1 WHERE id = ?2",
+                        rusqlite::params![cap_val, aid],
+                    )
+                    .map_err(|e| format!("persist keyword cap: {e}"))
+                })
+                .await;
+        }
     }
 
     // Run deletion detection (throttled per-folder, only checks every 10 min)
@@ -343,6 +364,7 @@ async fn per_folder_check(
             highest_modseq: status.highest_modseq,
             modseq_unchanged: false,
             modseq_reset: false,
+            supports_custom_keywords: status.supports_custom_keywords,
         });
     }
 
@@ -367,6 +389,7 @@ async fn per_folder_check(
         highest_modseq: status.highest_modseq,
         modseq_unchanged: false,
         modseq_reset,
+        supports_custom_keywords: status.supports_custom_keywords,
     })
 }
 
