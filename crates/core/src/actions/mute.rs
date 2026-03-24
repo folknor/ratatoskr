@@ -1,4 +1,5 @@
 use super::context::ActionContext;
+use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use crate::db::queries::set_thread_muted;
 
@@ -10,6 +11,8 @@ pub async fn mute(
     thread_id: &str,
     muted: bool,
 ) -> ActionOutcome {
+    let mlog = MutationLog::begin("mute", account_id, thread_id);
+
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
@@ -22,8 +25,10 @@ pub async fn mute(
     .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
     .and_then(|r| r.map_err(ActionError::db));
 
-    match local_result {
+    let outcome = match local_result {
         Ok(()) => ActionOutcome::Success,
         Err(e) => ActionOutcome::Failed { error: e },
-    }
+    };
+    mlog.emit(&outcome);
+    outcome
 }

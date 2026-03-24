@@ -1,4 +1,5 @@
 use super::context::ActionContext;
+use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
 use crate::progress::NoopProgressReporter;
@@ -16,6 +17,8 @@ use ratatoskr_provider_utils::types::ProviderCtx;
 /// not used for send — the desired outcome is delivery, not local
 /// persistence.
 pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutcome {
+    let mlog = MutationLog::begin("send_email", &request.account_id, &request.draft_id);
+
     // 1. Build MIME + persist draft in one spawn_blocking call.
     //    MIME build is CPU-bound (large attachments); draft persist is DB I/O.
     //    Both are sync — combine them to avoid two spawn_blocking round-trips.
@@ -100,18 +103,23 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
 
     let mime_base64url = match local_result {
         Ok(mime) => mime,
-        Err(e) => return ActionOutcome::Failed { error: e },
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: e };
+            mlog.emit(&outcome);
+            return outcome;
+        }
     };
 
     // 2. Provider dispatch
     let provider = match create_provider(&ctx.db, &account_id_outer, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
-            log::warn!("Send failed (provider create): {e}");
             let _ = mark_draft_failed(&ctx.db, draft_id_outer).await;
-            return ActionOutcome::Failed {
+            let outcome = ActionOutcome::Failed {
                 error: ActionError::remote(e),
             };
+            mlog.emit(&outcome);
+            return outcome;
         }
     };
 
@@ -125,7 +133,7 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
     };
 
     // Mentions are empty until @-autocomplete is built
-    match provider
+    let outcome = match provider
         .send_email(
             &provider_ctx,
             &mime_base64url,
@@ -140,13 +148,14 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
         }
         Err(e) => {
             let msg = e.to_string();
-            log::warn!("Send failed for {account_id_outer}: {msg}");
             let _ = mark_draft_failed(&ctx.db, draft_id_outer).await;
             ActionOutcome::Failed {
                 error: ActionError::remote(msg),
             }
         }
-    }
+    };
+    mlog.emit(&outcome);
+    outcome
 }
 
 /// Delete a local draft. If it has a `remote_draft_id`, also deletes
@@ -159,6 +168,8 @@ pub async fn delete_draft(
     account_id: &str,
     draft_id: &str,
 ) -> ActionOutcome {
+    let mlog = MutationLog::begin("delete_draft", account_id, draft_id);
+
     // 1. Look up remote_draft_id and delete locally in one spawn_blocking call
     let db = ctx.db.clone();
     let did = draft_id.to_string();
@@ -190,7 +201,11 @@ pub async fn delete_draft(
 
     let remote_id = match local_result {
         Ok(id) => id,
-        Err(e) => return ActionOutcome::Failed { error: e },
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: e };
+            mlog.emit(&outcome);
+            return outcome;
+        }
     };
 
     // 2. Provider delete (best-effort, only if remote_draft_id exists)
@@ -204,16 +219,15 @@ pub async fn delete_draft(
                 search: &ctx.search,
                 progress: &NoopProgressReporter,
             };
-            if let Err(e) = provider
+            // Best-effort: don't fail if remote delete fails.
+            // The orphaned server draft will be cleaned up by sync.
+            let _ = provider
                 .delete_draft(&provider_ctx, &remote_draft_id)
-                .await
-            {
-                log::warn!("Remote draft delete failed for {account_id}/{draft_id}: {e}");
-                // Don't return Failed — the local delete succeeded and that's
-                // what matters. The orphaned server draft will be cleaned up by sync.
-            }
+                .await;
         }
     }
 
-    ActionOutcome::Success
+    let outcome = ActionOutcome::Success;
+    mlog.emit(&outcome);
+    outcome
 }

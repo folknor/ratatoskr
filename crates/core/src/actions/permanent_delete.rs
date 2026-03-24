@@ -1,4 +1,5 @@
 use super::context::ActionContext;
+use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
 use crate::db::queries::delete_thread;
@@ -11,6 +12,8 @@ pub async fn permanent_delete(
     account_id: &str,
     thread_id: &str,
 ) -> ActionOutcome {
+    let mlog = MutationLog::begin("permanent_delete", account_id, thread_id);
+
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
@@ -24,14 +27,17 @@ pub async fn permanent_delete(
     .and_then(|r| r.map_err(ActionError::db));
 
     if let Err(e) = local_result {
-        return ActionOutcome::Failed { error: e };
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
     }
 
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
-            log::warn!("Delete local-only (provider create failed): {e}");
-            return ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            mlog.emit(&outcome);
+            return outcome;
         }
     };
 
@@ -44,12 +50,13 @@ pub async fn permanent_delete(
         progress: &NoopProgressReporter,
     };
 
-    match provider.permanent_delete(&provider_ctx, thread_id).await {
+    let outcome = match provider.permanent_delete(&provider_ctx, thread_id).await {
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             let msg = e.to_string();
-            log::warn!("Delete remote failed for {account_id}/{thread_id}: {msg}");
             ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
         }
-    }
+    };
+    mlog.emit(&outcome);
+    outcome
 }

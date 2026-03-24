@@ -4,6 +4,7 @@
 //! `LocalOnly` with a descriptive reason until their HTTP calls are implemented.
 
 use super::context::ActionContext;
+use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use crate::db::queries_extra::contacts::{db_delete_contact, db_upsert_contact_full};
 
@@ -38,6 +39,8 @@ pub struct ContactSaveInput {
 /// Returns `Success` if local + provider both succeeded, `LocalOnly` if
 /// local succeeded but provider failed/stubbed, `Failed` if local failed.
 pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> ActionOutcome {
+    let mlog = MutationLog::begin("save_contact", input.account_id.as_deref().unwrap_or(""), &input.id);
+
     // 1. Local DB save
     let db = ctx.db.clone();
     let inp = input.clone();
@@ -64,13 +67,17 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
     .and_then(|r| r);
 
     if let Err(e) = local_result {
-        return ActionOutcome::Failed { error: e };
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
     }
 
     // 2. Provider write-back for synced contacts
     let source = input.source.as_deref().unwrap_or("user");
     if source == "user" {
-        return ActionOutcome::Success;
+        let outcome = ActionOutcome::Success;
+        mlog.emit(&outcome);
+        return outcome;
     }
 
     // Need both account_id and server_id for provider dispatch
@@ -82,11 +89,12 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
             "Synced contact {} has source={source} but missing account_id or server_id",
             input.email
         );
-        log::warn!("{msg}");
-        return ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: false };
+        let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: false };
+        mlog.emit(&outcome);
+        return outcome;
     };
 
-    match dispatch_write_back(
+    let outcome = match dispatch_write_back(
         ctx,
         source,
         account_id,
@@ -98,11 +106,10 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
     .await
     {
         Ok(()) => ActionOutcome::Success,
-        Err(e) => {
-            log::warn!("Contact write-back failed for {}: {e}", input.email);
-            ActionOutcome::LocalOnly { reason: e, retryable: false }
-        }
-    }
+        Err(e) => ActionOutcome::LocalOnly { reason: e, retryable: false },
+    };
+    mlog.emit(&outcome);
+    outcome
 }
 
 /// Delete a contact. For synced contacts with provider support, dispatches
@@ -110,6 +117,8 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
 /// For local contacts or providers without delete support, deletes locally
 /// and returns `LocalOnly` for unimplemented providers.
 pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutcome {
+    let mlog = MutationLog::begin("delete_contact", "", contact_id);
+
     // 1. Look up contact identity from DB
     let db = ctx.db.clone();
     let cid = contact_id.to_string();
@@ -140,7 +149,11 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
 
     let (source, server_id, account_id) = match meta_result {
         Ok(m) => m,
-        Err(e) => return ActionOutcome::Failed { error: e },
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: e };
+            mlog.emit(&outcome);
+            return outcome;
+        }
     };
 
     let source_str = source.as_deref().unwrap_or("user");
@@ -157,7 +170,9 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
                     // this check to include them (all synced providers should
                     // be provider-first once their HTTP calls are real).
                     if source_str == "jmap" {
-                        return ActionOutcome::Failed { error: e };
+                        let outcome = ActionOutcome::Failed { error: e };
+                        mlog.emit(&outcome);
+                        return outcome;
                     }
                     // Unimplemented providers → delete locally, report LocalOnly
                     provider_outcome = Some(e);
@@ -168,13 +183,17 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
 
     // 3. Delete locally
     if let Err(e) = db_delete_contact(&ctx.db, contact_id.to_string()).await {
-        return ActionOutcome::Failed { error: ActionError::db(e) };
+        let outcome = ActionOutcome::Failed { error: ActionError::db(e) };
+        mlog.emit(&outcome);
+        return outcome;
     }
 
-    match provider_outcome {
+    let outcome = match provider_outcome {
         Some(reason) => ActionOutcome::LocalOnly { reason, retryable: false },
         None => ActionOutcome::Success,
-    }
+    };
+    mlog.emit(&outcome);
+    outcome
 }
 
 // ── Provider dispatch ────────────────────────────────────

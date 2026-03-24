@@ -7,7 +7,7 @@
 //! `ActionOutcome`, `DbState`) and has access to all provider write functions.
 //! Adding `calendar` as a dependency of `core` would create a circular dep.
 
-use ratatoskr_core::actions::{ActionContext, ActionError, ActionOutcome};
+use ratatoskr_core::actions::{ActionContext, ActionError, ActionOutcome, MutationLog};
 use ratatoskr_core::db::DbState;
 use ratatoskr_core::gmail::client::GmailClient;
 use ratatoskr_core::graph::client::GraphClient;
@@ -358,6 +358,8 @@ pub async fn create_calendar_event(
     calendar_id: &str,
     input: CalendarEventInput,
 ) -> ActionOutcome {
+    let mlog = MutationLog::begin("create_calendar_event", account_id, calendar_id);
+
     // 1. Look up calendar_remote_id + local insert in one spawn_blocking
     let db = ctx.db.clone();
     let aid = account_id.to_string();
@@ -396,19 +398,24 @@ pub async fn create_calendar_event(
 
     let (event_id, calendar_remote_id) = match local_result {
         Ok(ids) => ids,
-        Err(e) => return ActionOutcome::Failed { error: e },
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: e };
+            mlog.emit(&outcome);
+            return outcome;
+        }
     };
 
     // 2. Provider dispatch (best-effort for create)
     let provider = match create_calendar_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
-            log::warn!("Calendar create local-only (provider create failed): {e}");
-            return ActionOutcome::LocalOnly { reason: e, retryable: false };
+            let outcome = ActionOutcome::LocalOnly { reason: e, retryable: false };
+            mlog.emit(&outcome);
+            return outcome;
         }
     };
 
-    match dispatch_create(&provider, ctx, &calendar_remote_id, &input).await {
+    let outcome = match dispatch_create(&provider, ctx, &calendar_remote_id, &input).await {
         Ok(dto) => {
             // Store provider-assigned remote_event_id and etag
             let db = ctx.db.clone();
@@ -425,11 +432,10 @@ pub async fn create_calendar_event(
             .await;
             ActionOutcome::Success
         }
-        Err(e) => {
-            log::warn!("Calendar create provider failed for {account_id}: {e}");
-            ActionOutcome::LocalOnly { reason: e, retryable: false }
-        }
-    }
+        Err(e) => ActionOutcome::LocalOnly { reason: e, retryable: false },
+    };
+    mlog.emit(&outcome);
+    outcome
 }
 
 /// Update a calendar event. Provider-first for synced events, local-only for unsynced.
@@ -443,6 +449,8 @@ pub async fn update_calendar_event(
     event_id: &str,
     input: CalendarEventInput,
 ) -> ActionOutcome {
+    let mlog = MutationLog::begin("update_calendar_event", _account_id, event_id);
+
     // 1. Look up event metadata — use the event's own account_id, not the caller's
     let db = ctx.db.clone();
     let eid = event_id.to_string();
@@ -465,7 +473,11 @@ pub async fn update_calendar_event(
 
     let (meta, calendar_remote_id) = match meta_result {
         Ok(m) => m,
-        Err(e) => return ActionOutcome::Failed { error: e },
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: e };
+            mlog.emit(&outcome);
+            return outcome;
+        }
     };
 
     // 2. If no remote_event_id, this is a local-only event — update locally
@@ -498,27 +510,35 @@ pub async fn update_calendar_event(
         .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
         .and_then(|r| r);
 
-        return match local_result {
+        let outcome = match local_result {
             Ok(()) => ActionOutcome::Success,
             Err(e) => ActionOutcome::Failed { error: e },
         };
+        mlog.emit(&outcome);
+        return outcome;
     };
 
     // 3. Synced event — provider-first (use event's own account_id)
     let provider =
         match create_calendar_provider(&ctx.db, &meta.account_id, ctx.encryption_key).await {
             Ok(p) => p,
-            Err(e) => return ActionOutcome::Failed { error: e },
+            Err(e) => {
+                let outcome = ActionOutcome::Failed { error: e };
+                mlog.emit(&outcome);
+                return outcome;
+            }
         };
 
     let Some(cal_remote) = calendar_remote_id else {
-        return ActionOutcome::Failed {
+        let outcome = ActionOutcome::Failed {
             error: ActionError::not_found(
                 "Synced event has no resolvable calendar remote ID",
             ),
         };
+        mlog.emit(&outcome);
+        return outcome;
     };
-    match dispatch_update(
+    let outcome = match dispatch_update(
         &provider,
         ctx,
         &cal_remote,
@@ -567,11 +587,10 @@ pub async fn update_calendar_event(
             .await;
             ActionOutcome::Success
         }
-        Err(e) => {
-            log::warn!("Calendar update failed for {}/{event_id}: {e}", meta.account_id);
-            ActionOutcome::Failed { error: e }
-        }
-    }
+        Err(e) => ActionOutcome::Failed { error: e },
+    };
+    mlog.emit(&outcome);
+    outcome
 }
 
 /// Delete a calendar event. Provider-first for synced events, local-only for unsynced.
@@ -580,6 +599,8 @@ pub async fn delete_calendar_event(
     _account_id: &str,
     event_id: &str,
 ) -> ActionOutcome {
+    let mlog = MutationLog::begin("delete_calendar_event", _account_id, event_id);
+
     // 1. Look up event metadata — use the event's own account_id
     let db = ctx.db.clone();
     let eid = event_id.to_string();
@@ -599,7 +620,11 @@ pub async fn delete_calendar_event(
 
     let (meta, calendar_remote_id) = match meta_result {
         Ok(m) => m,
-        Err(e) => return ActionOutcome::Failed { error: e },
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: e };
+            mlog.emit(&outcome);
+            return outcome;
+        }
     };
 
     // 2. If no remote_event_id, local-only delete
@@ -616,25 +641,33 @@ pub async fn delete_calendar_event(
         .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
         .and_then(|r| r);
 
-        return match local_result {
+        let outcome = match local_result {
             Ok(()) => ActionOutcome::Success,
             Err(e) => ActionOutcome::Failed { error: e },
         };
+        mlog.emit(&outcome);
+        return outcome;
     };
 
     // 3. Synced event — provider-first (use event's own account_id)
     let provider =
         match create_calendar_provider(&ctx.db, &meta.account_id, ctx.encryption_key).await {
             Ok(p) => p,
-            Err(e) => return ActionOutcome::Failed { error: e },
+            Err(e) => {
+                let outcome = ActionOutcome::Failed { error: e };
+                mlog.emit(&outcome);
+                return outcome;
+            }
         };
 
     let Some(cal_remote) = calendar_remote_id else {
-        return ActionOutcome::Failed {
+        let outcome = ActionOutcome::Failed {
             error: ActionError::not_found(
                 "Synced event has no resolvable calendar remote ID",
             ),
         };
+        mlog.emit(&outcome);
+        return outcome;
     };
     if let Err(e) = dispatch_delete(
         &provider,
@@ -645,8 +678,9 @@ pub async fn delete_calendar_event(
     )
     .await
     {
-        log::warn!("Calendar delete failed for {}/{event_id}: {e}", meta.account_id);
-        return ActionOutcome::Failed { error: e };
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
     }
 
     // 4. Provider succeeded — delete locally
@@ -666,5 +700,7 @@ pub async fn delete_calendar_event(
         log::warn!("Calendar delete local cleanup failed (provider succeeded): {e}");
     }
 
-    ActionOutcome::Success
+    let outcome = ActionOutcome::Success;
+    mlog.emit(&outcome);
+    outcome
 }

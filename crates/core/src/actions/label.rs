@@ -1,4 +1,5 @@
 use super::context::ActionContext;
+use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
 use crate::progress::NoopProgressReporter;
@@ -19,6 +20,8 @@ pub async fn add_label(
     thread_id: &str,
     label_id: &str,
 ) -> ActionOutcome {
+    let mlog = MutationLog::begin("add_label", account_id, thread_id);
+
     // 1. Look up label metadata + local DB mutation in one spawn_blocking call
     let db = ctx.db.clone();
     let aid = account_id.to_string();
@@ -56,18 +59,23 @@ pub async fn add_label(
 
     let (label_name, label_kind) = match local_result {
         Ok(info) => info,
-        Err(e) => return ActionOutcome::Failed { error: e },
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: e };
+            mlog.emit(&outcome);
+            return outcome;
+        }
     };
 
     // 2. Provider dispatch
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
-            log::warn!("AddLabel local-only (provider create failed): {e}");
-            return ActionOutcome::LocalOnly {
+            let outcome = ActionOutcome::LocalOnly {
                 reason: ActionError::remote(e),
                 retryable: true,
             };
+            mlog.emit(&outcome);
+            return outcome;
         }
     };
 
@@ -92,17 +100,18 @@ pub async fn add_label(
             .await
     };
 
-    match result {
+    let outcome = match result {
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             let msg = e.to_string();
-            log::warn!("AddLabel remote failed for {account_id}/{thread_id}: {msg}");
             ActionOutcome::LocalOnly {
                 reason: ActionError::remote(msg),
                 retryable: true,
             }
         }
-    }
+    };
+    mlog.emit(&outcome);
+    outcome
 }
 
 /// Remove a label from a single thread.
@@ -115,6 +124,8 @@ pub async fn remove_label(
     thread_id: &str,
     label_id: &str,
 ) -> ActionOutcome {
+    let mlog = MutationLog::begin("remove_label", account_id, thread_id);
+
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
@@ -149,17 +160,22 @@ pub async fn remove_label(
 
     let (label_name, label_kind) = match local_result {
         Ok(info) => info,
-        Err(e) => return ActionOutcome::Failed { error: e },
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: e };
+            mlog.emit(&outcome);
+            return outcome;
+        }
     };
 
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
-            log::warn!("RemoveLabel local-only (provider create failed): {e}");
-            return ActionOutcome::LocalOnly {
+            let outcome = ActionOutcome::LocalOnly {
                 reason: ActionError::remote(e),
                 retryable: true,
             };
+            mlog.emit(&outcome);
+            return outcome;
         }
     };
 
@@ -182,15 +198,16 @@ pub async fn remove_label(
             .await
     };
 
-    match result {
+    let outcome = match result {
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             let msg = e.to_string();
-            log::warn!("RemoveLabel remote failed for {account_id}/{thread_id}: {msg}");
             ActionOutcome::LocalOnly {
                 reason: ActionError::remote(msg),
                 retryable: true,
             }
         }
-    }
+    };
+    mlog.emit(&outcome);
+    outcome
 }

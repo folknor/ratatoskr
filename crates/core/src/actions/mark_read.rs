@@ -1,4 +1,5 @@
 use super::context::ActionContext;
+use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
 use crate::db::queries::set_thread_read;
@@ -14,6 +15,8 @@ pub async fn mark_read(
     thread_id: &str,
     read: bool,
 ) -> ActionOutcome {
+    let mlog = MutationLog::begin("mark_read", account_id, thread_id);
+
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
@@ -27,14 +30,17 @@ pub async fn mark_read(
     .and_then(|r| r.map_err(ActionError::db));
 
     if let Err(e) = local_result {
-        return ActionOutcome::Failed { error: e };
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
     }
 
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
-            log::warn!("Mark read local-only (provider create failed): {e}");
-            return ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            mlog.emit(&outcome);
+            return outcome;
         }
     };
 
@@ -47,12 +53,13 @@ pub async fn mark_read(
         progress: &NoopProgressReporter,
     };
 
-    match provider.mark_read(&provider_ctx, thread_id, read).await {
+    let outcome = match provider.mark_read(&provider_ctx, thread_id, read).await {
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             let msg = e.to_string();
-            log::warn!("Mark read remote failed for {account_id}/{thread_id}: {msg}");
             ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
         }
-    }
+    };
+    mlog.emit(&outcome);
+    outcome
 }

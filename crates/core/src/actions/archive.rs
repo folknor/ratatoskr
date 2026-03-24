@@ -1,4 +1,5 @@
 use super::context::ActionContext;
+use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
 use crate::email_actions::remove_inbox_label;
@@ -18,6 +19,8 @@ pub async fn archive(
     account_id: &str,
     thread_id: &str,
 ) -> ActionOutcome {
+    let mlog = MutationLog::begin("archive", account_id, thread_id);
+
     // 1. Local DB mutation (on blocking thread — DB connections are sync)
     let db = ctx.db.clone();
     let aid = account_id.to_string();
@@ -32,15 +35,18 @@ pub async fn archive(
     .and_then(|r| r.map_err(ActionError::db));
 
     if let Err(e) = local_result {
-        return ActionOutcome::Failed { error: e };
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
     }
 
     // 2. Provider dispatch
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
-            log::warn!("Archive local-only (provider create failed): {e}");
-            return ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            mlog.emit(&outcome);
+            return outcome;
         }
     };
 
@@ -53,12 +59,13 @@ pub async fn archive(
         progress: &NoopProgressReporter,
     };
 
-    match provider.archive(&provider_ctx, thread_id).await {
+    let outcome = match provider.archive(&provider_ctx, thread_id).await {
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             let msg = e.to_string();
-            log::warn!("Archive remote failed for {account_id}/{thread_id}: {msg}");
             ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
         }
-    }
+    };
+    mlog.emit(&outcome);
+    outcome
 }

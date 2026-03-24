@@ -1,4 +1,5 @@
 use super::context::ActionContext;
+use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
 use crate::progress::NoopProgressReporter;
@@ -44,10 +45,16 @@ pub async fn create_folder(
     text_color: Option<&str>,
     bg_color: Option<&str>,
 ) -> (ActionOutcome, Option<ProviderFolderMutation>) {
+    let mlog = MutationLog::begin("create_folder", account_id, "");
+
     // 1. Provider dispatch first — we need the provider-assigned ID
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
-        Err(e) => return (ActionOutcome::Failed { error: ActionError::remote(e) }, None),
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: ActionError::remote(e) };
+            mlog.emit(&outcome);
+            return (outcome, None);
+        }
     };
 
     let provider_ctx = build_provider_ctx(ctx, account_id);
@@ -59,8 +66,9 @@ pub async fn create_folder(
         Ok(m) => m,
         Err(e) => {
             let msg = e.to_string();
-            log::warn!("create_folder failed for {account_id}: {msg}");
-            return (ActionOutcome::Failed { error: ActionError::remote(msg) }, None);
+            let outcome = ActionOutcome::Failed { error: ActionError::remote(msg) };
+            mlog.emit(&outcome);
+            return (outcome, None);
         }
     };
 
@@ -105,7 +113,9 @@ pub async fn create_folder(
         log::warn!("create_folder local insert failed (provider succeeded): {e}");
     }
 
-    (ActionOutcome::Success, Some(mutation))
+    let outcome = ActionOutcome::Success;
+    mlog.emit(&outcome);
+    (outcome, Some(mutation))
 }
 
 /// Rename a folder on the provider, then update the local `labels` row.
@@ -121,9 +131,15 @@ pub async fn rename_folder(
     text_color: Option<&str>,
     bg_color: Option<&str>,
 ) -> (ActionOutcome, Option<ProviderFolderMutation>) {
+    let mlog = MutationLog::begin("rename_folder", account_id, folder_id);
+
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
-        Err(e) => return (ActionOutcome::Failed { error: ActionError::remote(e) }, None),
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: ActionError::remote(e) };
+            mlog.emit(&outcome);
+            return (outcome, None);
+        }
     };
 
     let provider_ctx = build_provider_ctx(ctx, account_id);
@@ -135,8 +151,9 @@ pub async fn rename_folder(
         Ok(m) => m,
         Err(e) => {
             let msg = e.to_string();
-            log::warn!("rename_folder failed for {account_id}/{folder_id}: {msg}");
-            return (ActionOutcome::Failed { error: ActionError::remote(msg) }, None);
+            let outcome = ActionOutcome::Failed { error: ActionError::remote(msg) };
+            mlog.emit(&outcome);
+            return (outcome, None);
         }
     };
 
@@ -174,7 +191,9 @@ pub async fn rename_folder(
         log::warn!("rename_folder local update failed (provider succeeded): {e}");
     }
 
-    (ActionOutcome::Success, Some(mutation))
+    let outcome = ActionOutcome::Success;
+    mlog.emit(&outcome);
+    (outcome, Some(mutation))
 }
 
 /// Delete a folder on the provider, then remove it from the local DB.
@@ -188,17 +207,24 @@ pub async fn delete_folder(
     account_id: &str,
     folder_id: &str,
 ) -> ActionOutcome {
+    let mlog = MutationLog::begin("delete_folder", account_id, folder_id);
+
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
-        Err(e) => return ActionOutcome::Failed { error: ActionError::remote(e) },
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: ActionError::remote(e) };
+            mlog.emit(&outcome);
+            return outcome;
+        }
     };
 
     let provider_ctx = build_provider_ctx(ctx, account_id);
 
     if let Err(e) = provider.delete_folder(&provider_ctx, folder_id).await {
         let msg = e.to_string();
-        log::warn!("delete_folder failed for {account_id}/{folder_id}: {msg}");
-        return ActionOutcome::Failed { error: ActionError::remote(msg) };
+        let outcome = ActionOutcome::Failed { error: ActionError::remote(msg) };
+        mlog.emit(&outcome);
+        return outcome;
     }
 
     // Provider succeeded — remove local rows (best-effort)
@@ -229,5 +255,7 @@ pub async fn delete_folder(
         log::warn!("delete_folder local delete failed (provider succeeded): {e}");
     }
 
-    ActionOutcome::Success
+    let outcome = ActionOutcome::Success;
+    mlog.emit(&outcome);
+    outcome
 }
