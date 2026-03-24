@@ -41,18 +41,11 @@ Phase 2 is decomposed into sub-phases because provider write operations are not 
 
 Label apply/remove flows through `actions::add_label()`/`actions::remove_label()`. The service owns the `label_kind` routing (tag → `apply_category`/`remove_category`, container → `add_tag`/`remove_tag`). `provider_label_write_back` and all `label_kind` branches deleted from the app crate. `apply_category`/`remove_category` consolidation deferred to labels unification Phase 6. `handle_action_completed` extended with a generic non-toggle/non-removes-from-view feedback path.
 
-### Phase 2.3: Drafts and send
+### Phase 2.3: Send ✅
 
-**Goal:** Bring draft lifecycle and send into the action service.
+**Status:** Complete. See `phase-2.3-plan.md`.
 
-**Scope:**
-- send_email, create_draft, update_draft, delete_draft.
-- Currently, send is deferred to the sync pipeline (local_drafts queue). The action service may own the local staging and let sync handle dispatch, or take over dispatch entirely. This is a design decision for this sub-phase.
-- Draft auto-save is currently local-only. Decide whether provider draft sync goes through the service or remains in the sync pipeline.
-
-**Note:** If the local staging vs remote dispatch semantics prove entangled with failure policy, this sub-phase may be better sequenced after Phase 3 rather than before it.
-
-**Exit criteria:** The app crate's compose send and draft save paths go through the service. The local_drafts staging pattern is either owned by the service or explicitly delegated to sync with a documented rationale.
+Send flows through `actions::send_email()`: MIME build on `spawn_blocking`, draft persisted as `'pending'` → `'sending'` (state-machine validated), `ProviderOps::send_email()` dispatched, `mark_draft_sent`/`mark_draft_failed` on completion. Compose window stays open during send with dedicated `Message::SendCompleted` and `dispatch_send`. `delete_draft()` exists for future use (no call site yet). Orphaned `'queued'` drafts resurfaced as `'failed'` on boot. Draft auto-save and provider draft sync (`create_draft`/`update_draft`) deferred — separate features.
 
 ### Phase 2.4: Folder management
 
@@ -186,7 +179,7 @@ Each phase is designed to be independently valuable:
 - **After Phase 1:** One action works end-to-end. The pattern is proven. ✅
 - **After Phase 2.1:** All thread-level email actions go through the service.
 - **After Phase 2.2:** Label routing is centralized. No `label_kind` branches in the app crate. ✅
-- **After Phase 2.3:** Draft and send lifecycle goes through the service.
+- **After Phase 2.3:** Send goes through the service. Draft auto-save and provider draft sync are separate. ✅
 - **After Phase 2.4–2.6:** Folder, calendar, and contact writes go through the service.
 - **After Phase 3:** The service is trustworthy. Failure handling is consistent, observable, and explicitly defined.
 - **After Phase 4:** Undo works correctly for the first time.
