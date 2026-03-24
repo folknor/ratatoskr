@@ -483,6 +483,16 @@ impl App {
                 self.status_bar.show_confirmation(
                     format!("\u{26A0} {} failed: {}", action.success_label(), errors.join("; ")),
                 );
+            } else if any_failed {
+                let succeeded = outcomes.iter().filter(|o| !o.is_failed()).count();
+                let total = outcomes.len();
+                self.status_bar.show_confirmation(
+                    format!(
+                        "\u{26A0} {} {succeeded} of {total} threads \u{2014} {} failed",
+                        action.success_label(),
+                        total - succeeded
+                    ),
+                );
             } else if any_local_only {
                 self.status_bar.show_confirmation(
                     format!(
