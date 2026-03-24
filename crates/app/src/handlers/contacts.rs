@@ -73,12 +73,11 @@ impl App {
                         Message::Settings(SettingsMessage::ContactSaved(Err(error.user_message())))
                     }
                     ActionOutcome::LocalOnly { reason, .. } => {
+                        // Local save succeeded — reload list so the contact appears.
+                        // The degraded state (provider not notified) is logged.
+                        // When Settings UI gains a status area, surface reason.user_message().
                         log::warn!("Contact save local-only: {reason}");
-                        // Reload list (local save succeeded) but also surface
-                        // the degraded state via ContactSaved
-                        Message::Settings(SettingsMessage::ContactSaved(
-                            Err(format!("Saved locally \u{2014} {}", reason.user_message())),
-                        ))
+                        Message::Settings(SettingsMessage::ContactsLoaded(contacts))
                     }
                     ActionOutcome::Success => {
                         Message::Settings(SettingsMessage::ContactsLoaded(contacts))
@@ -121,14 +120,14 @@ impl App {
                         Message::Settings(SettingsMessage::ContactDeleted(Err(error.user_message())))
                     }
                     ActionOutcome::LocalOnly { reason, .. } => {
+                        // Local delete succeeded — reload list so the contact disappears.
+                        // The degraded state (provider not notified) is logged.
+                        // When Settings UI gains a status area, surface reason.user_message().
                         log::warn!("Contact delete local-only: {reason}");
-                        // Reload list (local delete succeeded) and surface degraded state
                         if let Some(list) = contacts {
                             Message::Settings(SettingsMessage::ContactsLoaded(Ok(list)))
                         } else {
-                            Message::Settings(SettingsMessage::ContactDeleted(
-                                Err(format!("Deleted locally \u{2014} {}", reason.user_message())),
-                            ))
+                            Message::Settings(SettingsMessage::ContactDeleted(Ok(())))
                         }
                     }
                     ActionOutcome::Success => {
