@@ -80,6 +80,16 @@ The app changes `ratatoskr_provider_utils::crypto::load_encryption_key` to `rata
 
 After all usages are migrated, remove all 5 provider crate lines from `crates/app/Cargo.toml`. The `ratatoskr-provider-utils` re-export of `load_encryption_key` through core means the app doesn't need provider-utils directly either.
 
+### Harden core's public API
+
+Removing provider crates from the app's `Cargo.toml` prevents direct provider imports. But core still publicly re-exports provider-adjacent types:
+
+1. **`create_provider`** (`core::actions::create_provider`) — returns `Box<dyn ProviderOps>`. This is the main back door: the app could call it and use the returned trait object directly. **Fix:** make `create_provider` `pub(crate)` instead of `pub`. It's only called by action functions, the sync dispatch helper, and the JMAP push helper — all within core.
+
+2. **`ProviderFolderMutation`** (`core::actions::ProviderFolderMutation`) — re-exported from `provider-utils`. This is a data type returned by folder action functions, not a provider call entry point. The app needs it to receive results from `create_folder`/`rename_folder`. **Decision:** keep as `pub`. It's a data type, not an operational back door. If it needs to be core-owned in the future, it can be wrapped.
+
+After this: the app can import `ActionContext`, `ActionOutcome`, `ActionError`, `ProviderFolderMutation` etc. from core — but cannot construct providers or call provider operations directly.
+
 ## Implementation Steps
 
 ### Step 1: Re-export `load_encryption_key` from core
@@ -134,7 +144,11 @@ Delete the `create_provider` function in `handlers/provider.rs:22-29`. It was a 
 
 Remove all `use ratatoskr_provider_utils::*`, `use ratatoskr_jmap::*`, etc. from `handlers/provider.rs`. The module becomes a thin layer of `Task::perform` calls to core functions.
 
-### Step 6: Remove provider crate dependencies from `Cargo.toml`
+### Step 6: Harden core's public API
+
+Change `create_provider` in `core::actions::provider.rs` from `pub` to `pub(crate)`. Remove the `pub use provider::create_provider;` line from `core::actions::mod.rs`. This function is only called within core (action functions, sync dispatch, JMAP push).
+
+### Step 7: Remove provider crate dependencies from `Cargo.toml`
 
 Remove these 5 lines from `crates/app/Cargo.toml`:
 ```toml
@@ -145,7 +159,7 @@ ratatoskr-jmap = { path = "../jmap" }
 ratatoskr-imap = { path = "../imap" }
 ```
 
-### Step 7: Verify
+### Step 8: Verify
 
 - `cargo check --workspace` — the app compiles without provider crates
 - `cargo clippy -p app`
@@ -158,7 +172,8 @@ ratatoskr-imap = { path = "../imap" }
 3. Sync dispatch works through `core::sync_dispatch`.
 4. JMAP push works through core.
 5. `load_encryption_key` is re-exported from core.
-6. The compilation boundary is enforced — adding a provider import to the app crate is a build error.
+6. `create_provider` is `pub(crate)` in core — not accessible to downstream crates.
+7. The compilation boundary is enforced — adding a provider import to the app crate is a build error, and `create_provider` is not available to bypass the service.
 
 ## What Phase 6 Does NOT Do
 
