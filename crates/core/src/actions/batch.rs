@@ -123,11 +123,21 @@ async fn execute_account_group(
 ) -> Vec<(usize, ActionOutcome)> {
     let mut results = Vec::with_capacity(thread_indices.len());
 
-    // Pin/mute are local-only — no provider needed
+    // Pin/mute are local-only — no provider needed, still guarded
     if matches!(action, BatchAction::Pin { .. } | BatchAction::Mute { .. }) {
         for (idx, thread_id) in thread_indices {
+            let _guard = match ctx.try_acquire_flight(account_id, &thread_id) {
+                Some(g) => g,
+                None => {
+                    results.push((idx, ActionOutcome::Failed {
+                        error: ActionError::invalid_state("action already in flight for this thread"),
+                    }));
+                    continue;
+                }
+            };
             let outcome = dispatch_local_only(ctx, action, account_id, &thread_id).await;
             results.push((idx, outcome));
+            // _guard dropped here — key removed
         }
         return results;
     }
@@ -136,8 +146,6 @@ async fn execute_account_group(
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
-            // Classify the error — permanent failures (unknown provider, missing
-            // account) should not spam the retry queue.
             let kind = classify_provider_error(&e);
             return degraded_fallback(ctx, action, account_id, &e, kind, thread_indices).await;
         }
@@ -147,21 +155,18 @@ async fn execute_account_group(
     let mut consecutive_remote_failures: u32 = 0;
 
     for (idx, thread_id) in &thread_indices {
-        // In-flight guard: one mutation at a time per thread
-        let flight_key = format!("{account_id}:{thread_id}");
-        let already_in_flight = {
-            let mut guard = ctx.in_flight.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            !guard.insert(flight_key.clone())
+        // Scoped in-flight guard — released on drop (end of iteration or continue)
+        let _guard = match ctx.try_acquire_flight(account_id, thread_id) {
+            Some(g) => g,
+            None => {
+                results.push((*idx, ActionOutcome::Failed {
+                    error: ActionError::invalid_state("action already in flight for this thread"),
+                }));
+                continue;
+            }
         };
-        if already_in_flight {
-            results.push((*idx, ActionOutcome::Failed {
-                error: ActionError::invalid_state("action already in flight for this thread"),
-            }));
-            continue;
-        }
 
         let outcome = if consecutive_remote_failures >= MAX_CONSECUTIVE_FAILURES {
-            // Short-circuit: per-thread degraded path
             handle_thread_degraded(
                 ctx, action, account_id, thread_id,
                 "provider presumed unavailable after consecutive failures",
@@ -181,20 +186,15 @@ async fn execute_account_group(
             o
         };
 
-        // Release in-flight guard
-        {
-            let mut guard = ctx.in_flight.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            guard.remove(&flight_key);
-        }
-
         results.push((*idx, outcome));
+        // _guard dropped here — key removed
     }
 
     results
 }
 
 /// Degraded fallback when provider creation fails.
-/// Each thread gets its own _local call and per-thread outcome.
+/// Each thread gets its own _local call, per-thread outcome, and flight guard.
 async fn degraded_fallback(
     ctx: &ActionContext,
     action: &BatchAction,
@@ -205,9 +205,19 @@ async fn degraded_fallback(
 ) -> Vec<(usize, ActionOutcome)> {
     let mut results = Vec::with_capacity(thread_indices.len());
     for (idx, thread_id) in thread_indices {
+        let _guard = match ctx.try_acquire_flight(account_id, &thread_id) {
+            Some(g) => g,
+            None => {
+                results.push((idx, ActionOutcome::Failed {
+                    error: ActionError::invalid_state("action already in flight for this thread"),
+                }));
+                continue;
+            }
+        };
         let outcome =
             handle_thread_degraded(ctx, action, account_id, &thread_id, provider_error, error_kind).await;
         results.push((idx, outcome));
+        // _guard dropped — key removed
     }
     results
 }

@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
@@ -26,7 +26,48 @@ pub struct ActionContext {
     /// Tracks threads with in-flight mutations. Key: `"{account_id}:{thread_id}"`.
     ///
     /// Policy: one mutation at a time per thread, regardless of action type.
-    /// batch_execute checks+inserts before dispatch, removes after.
-    /// process_pending_ops skips in-flight threads without incrementing retry.
+    /// Use `try_acquire_flight` to check+insert atomically; the returned
+    /// `FlightGuard` removes the key on drop.
     pub in_flight: Arc<Mutex<HashSet<String>>>,
+}
+
+impl ActionContext {
+    /// Try to acquire the in-flight guard for a thread. Returns `Some(FlightGuard)`
+    /// if the thread was not already in flight (guard inserted). Returns `None` if
+    /// the thread is already in flight. The guard removes the key on drop.
+    pub fn try_acquire_flight(&self, account_id: &str, thread_id: &str) -> Option<FlightGuard> {
+        let key = format!("{account_id}:{thread_id}");
+        let mut set = self.in_flight.lock().unwrap_or_else(PoisonError::into_inner);
+        if set.insert(key.clone()) {
+            Some(FlightGuard {
+                set: Arc::clone(&self.in_flight),
+                key,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Check if a thread is currently in flight (read-only, no insertion).
+    pub fn is_in_flight(&self, account_id: &str, thread_id: &str) -> bool {
+        let key = format!("{account_id}:{thread_id}");
+        self.in_flight
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(&key)
+    }
+}
+
+/// RAII guard that removes the in-flight key on drop.
+/// Guarantees cleanup even on early returns or panics.
+pub struct FlightGuard {
+    set: Arc<Mutex<HashSet<String>>>,
+    key: String,
+}
+
+impl Drop for FlightGuard {
+    fn drop(&mut self) {
+        let mut set = self.set.lock().unwrap_or_else(PoisonError::into_inner);
+        set.remove(&self.key);
+    }
 }

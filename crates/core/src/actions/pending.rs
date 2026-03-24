@@ -137,20 +137,18 @@ async fn process_account_group(
     };
 
     for op in ops {
-        // In-flight guard: skip threads with active user mutations
-        let flight_key = format!("{}:{}", op.account_id, op.resource_id);
-        let is_in_flight = ctx
-            .in_flight
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .contains(&flight_key);
-        if is_in_flight {
-            log::debug!(
-                "[pending_ops] Skipping {} for {}/{} — in flight",
-                op.operation_type, op.account_id, op.resource_id
-            );
-            continue; // Leave pending, don't increment retry
-        }
+        // In-flight guard: acquire to block concurrent user mutations,
+        // or skip if already in flight from a user action.
+        let _guard = match ctx.try_acquire_flight(&op.account_id, &op.resource_id) {
+            Some(g) => g,
+            None => {
+                log::debug!(
+                    "[pending_ops] Skipping {} for {}/{} — in flight",
+                    op.operation_type, op.account_id, op.resource_id
+                );
+                continue; // Leave pending, don't increment retry
+            }
+        };
 
         // Mark as executing
         if let Err(e) = db_pending_ops_update_status(
