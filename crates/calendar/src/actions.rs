@@ -9,9 +9,9 @@
 
 use ratatoskr_core::actions::{ActionContext, ActionError, ActionOutcome, MutationLog};
 use ratatoskr_core::db::DbState;
-use ratatoskr_core::gmail::client::GmailClient;
-use ratatoskr_core::graph::client::GraphClient;
-use ratatoskr_core::jmap::client::JmapClient;
+use ratatoskr_gmail::client::GmailClient;
+use ratatoskr_graph::client::GraphClient;
+use ratatoskr_jmap::client::JmapClient;
 
 use super::google::{
     google_calendar_create_event_impl, google_calendar_delete_event_impl,
@@ -154,7 +154,7 @@ async fn dispatch_create(
                 .map_err(|e| ActionError::remote(e))
         }
         CalendarProvider::Jmap(client) => {
-            let remote_id = ratatoskr_core::jmap::calendar_sync::create_event_remote(
+            let remote_id = ratatoskr_jmap::calendar_sync::create_event_remote(
                 client,
                 calendar_remote_id,
                 &input.title,
@@ -212,7 +212,7 @@ async fn dispatch_update(
                 .map_err(|e| ActionError::remote(e))
         }
         CalendarProvider::Jmap(client) => {
-            ratatoskr_core::jmap::calendar_sync::update_event_remote(
+            ratatoskr_jmap::calendar_sync::update_event_remote(
                 client,
                 remote_event_id,
                 &input.title,
@@ -273,7 +273,7 @@ async fn dispatch_delete(
                 .map_err(|e| ActionError::remote(e))
         }
         CalendarProvider::Jmap(client) => {
-            ratatoskr_core::jmap::calendar_sync::delete_event_remote(client, remote_event_id)
+            ratatoskr_jmap::calendar_sync::delete_event_remote(client, remote_event_id)
                 .await
                 .map_err(|e| ActionError::remote(e))
         }

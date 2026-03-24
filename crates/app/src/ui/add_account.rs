@@ -1390,20 +1390,15 @@ async fn validate_imap_connection(
 
     let security_str = security.to_db_string().to_string();
 
-    let config = ratatoskr_core::imap::types::ImapConfig {
-        host: host.to_string(),
+    ratatoskr_core::account::verify_imap::verify_imap_credentials(
+        host,
         port,
-        security: security_str,
-        username: username.to_string(),
-        password: password.to_string(),
-        auth_method: "password".to_string(),
+        &security_str,
+        username,
+        password,
         accept_invalid_certs,
-    };
-
-    // Connect and immediately close — we just want to verify credentials
-    let session = ratatoskr_core::imap::connection::connect(&config).await?;
-    drop(session);
-    Ok(())
+    )
+    .await
 }
 
 // ── DiscoverySource extension ────────────────────────────

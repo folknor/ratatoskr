@@ -71,6 +71,9 @@ use ui::status_bar::{
     SyncProgressReceiver, WarningKind, create_sync_progress_channel, shared_receiver,
     sync_progress_subscription,
 };
+use handlers::provider::{
+    JmapPushReceiver, create_jmap_push_channel, jmap_push_subscription,
+};
 use ui::thread_list::{ThreadList, ThreadListEvent, ThreadListMessage};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -407,6 +410,10 @@ struct App {
     #[allow(dead_code)]
     sync_reporter: Arc<ui::status_bar::IcedProgressReporter>,
 
+    // JMAP push notification pipeline
+    jmap_push_tx: tokio::sync::mpsc::UnboundedSender<String>,
+    jmap_push_receiver: JmapPushReceiver,
+
     /// Body store for loading decompressed message bodies via core.
     body_store: Option<ratatoskr_core::body_store::BodyStoreState>,
     /// Inline image store for CID image resolution.
@@ -449,6 +456,8 @@ impl App {
         let (rx, reporter) = create_sync_progress_channel();
         let sync_receiver = shared_receiver(rx);
         let sync_reporter = Arc::new(reporter);
+
+        let (jmap_push_tx, jmap_push_receiver) = create_jmap_push_channel();
 
         let body_store = match db::threads::init_body_store() {
             Ok(bs) => Some(bs),
@@ -560,6 +569,8 @@ impl App {
             navigation_target: None,
             sync_receiver,
             sync_reporter,
+            jmap_push_tx,
+            jmap_push_receiver,
             body_store,
             inline_image_store,
             encryption_key,
@@ -702,6 +713,8 @@ impl App {
             self.status_bar.subscription().map(Message::StatusBar),
             sync_progress_subscription(&self.sync_receiver)
                 .map(Message::SyncProgress),
+            jmap_push_subscription(&self.jmap_push_receiver)
+                .map(|account_id| Message::SyncComplete(account_id, Ok(()))),
         ];
 
         if self.pending_chord.is_some() {

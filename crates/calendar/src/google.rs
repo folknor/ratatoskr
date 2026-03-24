@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use ratatoskr_core::db::DbState;
-use ratatoskr_core::gmail::client::GmailClient;
+use ratatoskr_gmail::client::GmailClient;
 use ratatoskr_core::provider::http;
 
 use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};

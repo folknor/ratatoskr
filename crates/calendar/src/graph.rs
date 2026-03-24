@@ -1,9 +1,9 @@
 use ratatoskr_core::db::DbState;
-use ratatoskr_core::graph::calendar_sync::{
+use ratatoskr_graph::calendar_sync::{
     graph_create_event, graph_delete_event, graph_list_calendars, graph_sync_calendar_events,
     graph_update_event, GraphDateTimeTimeZone, GraphEventCreate,
 };
-use ratatoskr_core::graph::client::GraphClient;
+use ratatoskr_graph::client::GraphClient;
 
 use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
 
@@ -87,7 +87,7 @@ pub async fn graph_calendar_delete_event_impl(
 // ── Conversion helpers ────────────────────────────────────
 
 fn graph_event_to_dto(
-    event: ratatoskr_core::graph::calendar_sync::GraphCalendarEvent,
+    event: ratatoskr_graph::calendar_sync::GraphCalendarEvent,
 ) -> Result<CalendarEventDto, String> {
     Ok(CalendarEventDto {
         remote_event_id: event.remote_event_id,
@@ -120,7 +120,7 @@ fn json_to_graph_event_create(value: &serde_json::Value) -> Result<GraphEventCre
         .map(String::from);
 
     let body = description.map(|desc| {
-        ratatoskr_core::graph::calendar_sync::GraphEventBodyInput {
+        ratatoskr_graph::calendar_sync::GraphEventBodyInput {
             content_type: "text".to_string(),
             content: desc,
         }
@@ -136,7 +136,7 @@ fn json_to_graph_event_create(value: &serde_json::Value) -> Result<GraphEventCre
     let location = value.get("location")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
-        .map(|s| ratatoskr_core::graph::calendar_sync::GraphLocationInput {
+        .map(|s| ratatoskr_graph::calendar_sync::GraphLocationInput {
             display_name: s.to_string(),
         });
 

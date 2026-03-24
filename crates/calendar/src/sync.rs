@@ -2,8 +2,8 @@ use rusqlite::{OptionalExtension, Row, params};
 
 use ratatoskr_core::db::DbState;
 use ratatoskr_core::db::types::DbCalendar;
-use ratatoskr_core::gmail::client::GmailState;
-use ratatoskr_core::graph::client::GraphState;
+use ratatoskr_gmail::client::GmailState;
+use ratatoskr_graph::client::GraphState;
 
 use super::caldav::{caldav_list_calendars_impl, caldav_sync_events_impl};
 use super::google::{google_calendar_list_calendars_impl, google_calendar_sync_events_impl};
