@@ -35,10 +35,42 @@ async fn move_local(
     .and_then(|r| r.map_err(ActionError::db))
 }
 
+/// Provider dispatch for move-to-folder (assumes local mutation already applied).
+async fn move_dispatch(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
+    account_id: &str,
+    thread_id: &str,
+    folder_id: &str,
+) -> ActionOutcome {
+    let mlog = MutationLog::begin("move_to_folder", account_id, thread_id);
+    let params_json = serde_json::json!({
+        "folderId": folder_id,
+    })
+    .to_string();
+
+    let provider_ctx = ProviderCtx {
+        account_id,
+        db: &ctx.db,
+        body_store: &ctx.body_store,
+        inline_images: &ctx.inline_images,
+        search: &ctx.search,
+        progress: &NoopProgressReporter,
+    };
+
+    let outcome = match provider.move_to_folder(&provider_ctx, thread_id, folder_id).await {
+        Ok(()) => ActionOutcome::Success,
+        Err(e) => {
+            let msg = e.to_string();
+            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
+        }
+    };
+    enqueue_if_retryable(ctx, &outcome, account_id, "moveToFolder", thread_id, &params_json).await;
+    mlog.emit(&outcome);
+    outcome
+}
+
 /// Move a single thread to a different folder.
-///
-/// `folder_id` is the target folder's label ID. `source_label_id` is the
-/// folder to remove from (`None` means just add to target).
 pub async fn move_to_folder(
     ctx: &ActionContext,
     account_id: &str,
@@ -60,9 +92,7 @@ pub async fn move_to_folder(
     }
 
     match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(provider) => {
-            move_to_folder_with_provider(ctx, &*provider, account_id, thread_id, folder_id, source_label_id).await
-        }
+        Ok(provider) => move_dispatch(ctx, &*provider, account_id, thread_id, folder_id).await,
         Err(e) => {
             let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
             enqueue_if_retryable(ctx, &outcome, account_id, "moveToFolder", thread_id, &params_json).await;
@@ -83,11 +113,6 @@ pub(crate) async fn move_to_folder_with_provider(
     source_label_id: Option<&str>,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("move_to_folder", account_id, thread_id);
-    let params_json = serde_json::json!({
-        "folderId": folder_id,
-        "sourceLabelId": source_label_id,
-    })
-    .to_string();
 
     if let Err(e) = move_local(ctx, account_id, thread_id, folder_id, source_label_id).await {
         let outcome = ActionOutcome::Failed { error: e };
@@ -95,23 +120,5 @@ pub(crate) async fn move_to_folder_with_provider(
         return outcome;
     }
 
-    let provider_ctx = ProviderCtx {
-        account_id,
-        db: &ctx.db,
-        body_store: &ctx.body_store,
-        inline_images: &ctx.inline_images,
-        search: &ctx.search,
-        progress: &NoopProgressReporter,
-    };
-
-    let outcome = match provider.move_to_folder(&provider_ctx, thread_id, folder_id).await {
-        Ok(()) => ActionOutcome::Success,
-        Err(e) => {
-            let msg = e.to_string();
-            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
-        }
-    };
-    enqueue_if_retryable(ctx, &outcome, account_id, "moveToFolder", thread_id, &params_json).await;
-    mlog.emit(&outcome);
-    outcome
+    move_dispatch(ctx, provider, account_id, thread_id, folder_id).await
 }

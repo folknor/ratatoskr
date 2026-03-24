@@ -25,8 +25,37 @@ async fn trash_local(ctx: &ActionContext, account_id: &str, thread_id: &str) -> 
     .and_then(|r| r.map_err(ActionError::db))
 }
 
-/// Trash a single thread: remove from inbox, add to trash locally, then
-/// dispatch to provider.
+/// Provider dispatch for trash (assumes local mutation already applied).
+async fn trash_dispatch(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
+    account_id: &str,
+    thread_id: &str,
+) -> ActionOutcome {
+    let mlog = MutationLog::begin("trash", account_id, thread_id);
+
+    let provider_ctx = ProviderCtx {
+        account_id,
+        db: &ctx.db,
+        body_store: &ctx.body_store,
+        inline_images: &ctx.inline_images,
+        search: &ctx.search,
+        progress: &NoopProgressReporter,
+    };
+
+    let outcome = match provider.trash(&provider_ctx, thread_id).await {
+        Ok(()) => ActionOutcome::Success,
+        Err(e) => {
+            let msg = e.to_string();
+            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
+        }
+    };
+    enqueue_if_retryable(ctx, &outcome, account_id, "trash", thread_id, "{}").await;
+    mlog.emit(&outcome);
+    outcome
+}
+
+/// Trash a single thread.
 pub async fn trash(
     ctx: &ActionContext,
     account_id: &str,
@@ -41,7 +70,7 @@ pub async fn trash(
     }
 
     match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(provider) => trash_with_provider(ctx, &*provider, account_id, thread_id).await,
+        Ok(provider) => trash_dispatch(ctx, &*provider, account_id, thread_id).await,
         Err(e) => {
             let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
             enqueue_if_retryable(ctx, &outcome, account_id, "trash", thread_id, "{}").await;
@@ -66,23 +95,5 @@ pub(crate) async fn trash_with_provider(
         return outcome;
     }
 
-    let provider_ctx = ProviderCtx {
-        account_id,
-        db: &ctx.db,
-        body_store: &ctx.body_store,
-        inline_images: &ctx.inline_images,
-        search: &ctx.search,
-        progress: &NoopProgressReporter,
-    };
-
-    let outcome = match provider.trash(&provider_ctx, thread_id).await {
-        Ok(()) => ActionOutcome::Success,
-        Err(e) => {
-            let msg = e.to_string();
-            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
-        }
-    };
-    enqueue_if_retryable(ctx, &outcome, account_id, "trash", thread_id, "{}").await;
-    mlog.emit(&outcome);
-    outcome
+    trash_dispatch(ctx, provider, account_id, thread_id).await
 }

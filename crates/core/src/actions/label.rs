@@ -48,10 +48,47 @@ async fn add_label_local(
     .and_then(|r| r)
 }
 
+/// Provider dispatch for add-label (assumes local mutation already applied).
+async fn add_label_dispatch(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
+    account_id: &str,
+    thread_id: &str,
+    label_id: &str,
+    label_name: &str,
+    label_kind: &str,
+) -> ActionOutcome {
+    let mlog = MutationLog::begin("add_label", account_id, thread_id);
+    let params_json = serde_json::json!({"labelId": label_id}).to_string();
+
+    let provider_ctx = ProviderCtx {
+        account_id,
+        db: &ctx.db,
+        body_store: &ctx.body_store,
+        inline_images: &ctx.inline_images,
+        search: &ctx.search,
+        progress: &NoopProgressReporter,
+    };
+
+    let result = if label_kind == "tag" {
+        provider.apply_category(&provider_ctx, thread_id, label_name).await
+    } else {
+        provider.add_tag(&provider_ctx, thread_id, label_id).await
+    };
+
+    let outcome = match result {
+        Ok(()) => ActionOutcome::Success,
+        Err(e) => {
+            let msg = e.to_string();
+            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
+        }
+    };
+    enqueue_if_retryable(ctx, &outcome, account_id, "addLabel", thread_id, &params_json).await;
+    mlog.emit(&outcome);
+    outcome
+}
+
 /// Apply a label to a single thread.
-///
-/// The service owns the `label_kind` routing: tags use name-based category ops
-/// (`apply_category`), containers use ID-based tag ops (`add_tag`).
 pub async fn add_label(
     ctx: &ActionContext,
     account_id: &str,
@@ -61,15 +98,18 @@ pub async fn add_label(
     let mlog = MutationLog::begin("add_label", account_id, thread_id);
     let params_json = serde_json::json!({"labelId": label_id}).to_string();
 
-    if let Err(e) = add_label_local(ctx, account_id, thread_id, label_id).await {
-        let outcome = ActionOutcome::Failed { error: e };
-        mlog.emit(&outcome);
-        return outcome;
-    }
+    let (label_name, label_kind) = match add_label_local(ctx, account_id, thread_id, label_id).await {
+        Ok(info) => info,
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: e };
+            mlog.emit(&outcome);
+            return outcome;
+        }
+    };
 
     match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(provider) => {
-            add_label_with_provider(ctx, &*provider, account_id, thread_id, label_id).await
+            add_label_dispatch(ctx, &*provider, account_id, thread_id, label_id, &label_name, &label_kind).await
         }
         Err(e) => {
             let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
@@ -89,7 +129,6 @@ pub(crate) async fn add_label_with_provider(
     label_id: &str,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("add_label", account_id, thread_id);
-    let params_json = serde_json::json!({"labelId": label_id}).to_string();
 
     let (label_name, label_kind) = match add_label_local(ctx, account_id, thread_id, label_id).await {
         Ok(info) => info,
@@ -100,31 +139,7 @@ pub(crate) async fn add_label_with_provider(
         }
     };
 
-    let provider_ctx = ProviderCtx {
-        account_id,
-        db: &ctx.db,
-        body_store: &ctx.body_store,
-        inline_images: &ctx.inline_images,
-        search: &ctx.search,
-        progress: &NoopProgressReporter,
-    };
-
-    let result = if label_kind == "tag" {
-        provider.apply_category(&provider_ctx, thread_id, &label_name).await
-    } else {
-        provider.add_tag(&provider_ctx, thread_id, label_id).await
-    };
-
-    let outcome = match result {
-        Ok(()) => ActionOutcome::Success,
-        Err(e) => {
-            let msg = e.to_string();
-            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
-        }
-    };
-    enqueue_if_retryable(ctx, &outcome, account_id, "addLabel", thread_id, &params_json).await;
-    mlog.emit(&outcome);
-    outcome
+    add_label_dispatch(ctx, provider, account_id, thread_id, label_id, &label_name, &label_kind).await
 }
 
 /// Local DB mutation for remove-label: look up label metadata + remove (idempotent).
@@ -167,10 +182,47 @@ async fn remove_label_local(
     .and_then(|r| r)
 }
 
+/// Provider dispatch for remove-label (assumes local mutation already applied).
+async fn remove_label_dispatch(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
+    account_id: &str,
+    thread_id: &str,
+    label_id: &str,
+    label_name: &str,
+    label_kind: &str,
+) -> ActionOutcome {
+    let mlog = MutationLog::begin("remove_label", account_id, thread_id);
+    let params_json = serde_json::json!({"labelId": label_id}).to_string();
+
+    let provider_ctx = ProviderCtx {
+        account_id,
+        db: &ctx.db,
+        body_store: &ctx.body_store,
+        inline_images: &ctx.inline_images,
+        search: &ctx.search,
+        progress: &NoopProgressReporter,
+    };
+
+    let result = if label_kind == "tag" {
+        provider.remove_category(&provider_ctx, thread_id, label_name).await
+    } else {
+        provider.remove_tag(&provider_ctx, thread_id, label_id).await
+    };
+
+    let outcome = match result {
+        Ok(()) => ActionOutcome::Success,
+        Err(e) => {
+            let msg = e.to_string();
+            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
+        }
+    };
+    enqueue_if_retryable(ctx, &outcome, account_id, "removeLabel", thread_id, &params_json).await;
+    mlog.emit(&outcome);
+    outcome
+}
+
 /// Remove a label from a single thread.
-///
-/// Same routing as `add_label`: tags use `remove_category` (name-based),
-/// containers use `remove_tag` (ID-based).
 pub async fn remove_label(
     ctx: &ActionContext,
     account_id: &str,
@@ -180,15 +232,18 @@ pub async fn remove_label(
     let mlog = MutationLog::begin("remove_label", account_id, thread_id);
     let params_json = serde_json::json!({"labelId": label_id}).to_string();
 
-    if let Err(e) = remove_label_local(ctx, account_id, thread_id, label_id).await {
-        let outcome = ActionOutcome::Failed { error: e };
-        mlog.emit(&outcome);
-        return outcome;
-    }
+    let (label_name, label_kind) = match remove_label_local(ctx, account_id, thread_id, label_id).await {
+        Ok(info) => info,
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: e };
+            mlog.emit(&outcome);
+            return outcome;
+        }
+    };
 
     match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(provider) => {
-            remove_label_with_provider(ctx, &*provider, account_id, thread_id, label_id).await
+            remove_label_dispatch(ctx, &*provider, account_id, thread_id, label_id, &label_name, &label_kind).await
         }
         Err(e) => {
             let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
@@ -208,7 +263,6 @@ pub(crate) async fn remove_label_with_provider(
     label_id: &str,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("remove_label", account_id, thread_id);
-    let params_json = serde_json::json!({"labelId": label_id}).to_string();
 
     let (label_name, label_kind) = match remove_label_local(ctx, account_id, thread_id, label_id).await {
         Ok(info) => info,
@@ -219,29 +273,5 @@ pub(crate) async fn remove_label_with_provider(
         }
     };
 
-    let provider_ctx = ProviderCtx {
-        account_id,
-        db: &ctx.db,
-        body_store: &ctx.body_store,
-        inline_images: &ctx.inline_images,
-        search: &ctx.search,
-        progress: &NoopProgressReporter,
-    };
-
-    let result = if label_kind == "tag" {
-        provider.remove_category(&provider_ctx, thread_id, &label_name).await
-    } else {
-        provider.remove_tag(&provider_ctx, thread_id, label_id).await
-    };
-
-    let outcome = match result {
-        Ok(()) => ActionOutcome::Success,
-        Err(e) => {
-            let msg = e.to_string();
-            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
-        }
-    };
-    enqueue_if_retryable(ctx, &outcome, account_id, "removeLabel", thread_id, &params_json).await;
-    mlog.emit(&outcome);
-    outcome
+    remove_label_dispatch(ctx, provider, account_id, thread_id, label_id, &label_name, &label_kind).await
 }

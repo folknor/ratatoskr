@@ -24,37 +24,8 @@ async fn mark_read_local(ctx: &ActionContext, account_id: &str, thread_id: &str,
     .and_then(|r| r.map_err(ActionError::db))
 }
 
-/// Set read/unread state on a single thread.
-///
-/// `read` is the target value.
-pub async fn mark_read(
-    ctx: &ActionContext,
-    account_id: &str,
-    thread_id: &str,
-    read: bool,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("mark_read", account_id, thread_id);
-    let params_json = format!(r#"{{"read":{read}}}"#);
-
-    if let Err(e) = mark_read_local(ctx, account_id, thread_id, read).await {
-        let outcome = ActionOutcome::Failed { error: e };
-        mlog.emit(&outcome);
-        return outcome;
-    }
-
-    match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(provider) => mark_read_with_provider(ctx, &*provider, account_id, thread_id, read).await,
-        Err(e) => {
-            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
-            enqueue_if_retryable(ctx, &outcome, account_id, "markRead", thread_id, &params_json).await;
-            mlog.emit(&outcome);
-            outcome
-        }
-    }
-}
-
-/// Mark read with a pre-constructed provider (for batch reuse).
-pub(crate) async fn mark_read_with_provider(
+/// Provider dispatch for mark-read (assumes local mutation already applied).
+async fn mark_read_dispatch(
     ctx: &ActionContext,
     provider: &dyn ProviderOps,
     account_id: &str,
@@ -63,12 +34,6 @@ pub(crate) async fn mark_read_with_provider(
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("mark_read", account_id, thread_id);
     let params_json = format!(r#"{{"read":{read}}}"#);
-
-    if let Err(e) = mark_read_local(ctx, account_id, thread_id, read).await {
-        let outcome = ActionOutcome::Failed { error: e };
-        mlog.emit(&outcome);
-        return outcome;
-    }
 
     let provider_ctx = ProviderCtx {
         account_id,
@@ -89,4 +54,50 @@ pub(crate) async fn mark_read_with_provider(
     enqueue_if_retryable(ctx, &outcome, account_id, "markRead", thread_id, &params_json).await;
     mlog.emit(&outcome);
     outcome
+}
+
+/// Set read/unread state on a single thread.
+pub async fn mark_read(
+    ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+    read: bool,
+) -> ActionOutcome {
+    let mlog = MutationLog::begin("mark_read", account_id, thread_id);
+    let params_json = format!(r#"{{"read":{read}}}"#);
+
+    if let Err(e) = mark_read_local(ctx, account_id, thread_id, read).await {
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
+    match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+        Ok(provider) => mark_read_dispatch(ctx, &*provider, account_id, thread_id, read).await,
+        Err(e) => {
+            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            enqueue_if_retryable(ctx, &outcome, account_id, "markRead", thread_id, &params_json).await;
+            mlog.emit(&outcome);
+            outcome
+        }
+    }
+}
+
+/// Mark read with a pre-constructed provider (for batch reuse).
+pub(crate) async fn mark_read_with_provider(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
+    account_id: &str,
+    thread_id: &str,
+    read: bool,
+) -> ActionOutcome {
+    let mlog = MutationLog::begin("mark_read", account_id, thread_id);
+
+    if let Err(e) = mark_read_local(ctx, account_id, thread_id, read).await {
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
+    mark_read_dispatch(ctx, provider, account_id, thread_id, read).await
 }

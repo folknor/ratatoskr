@@ -24,6 +24,36 @@ async fn permanent_delete_local(ctx: &ActionContext, account_id: &str, thread_id
     .and_then(|r| r.map_err(ActionError::db))
 }
 
+/// Provider dispatch for permanent delete (assumes local mutation already applied).
+async fn permanent_delete_dispatch(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
+    account_id: &str,
+    thread_id: &str,
+) -> ActionOutcome {
+    let mlog = MutationLog::begin("permanent_delete", account_id, thread_id);
+
+    let provider_ctx = ProviderCtx {
+        account_id,
+        db: &ctx.db,
+        body_store: &ctx.body_store,
+        inline_images: &ctx.inline_images,
+        search: &ctx.search,
+        progress: &NoopProgressReporter,
+    };
+
+    let outcome = match provider.permanent_delete(&provider_ctx, thread_id).await {
+        Ok(()) => ActionOutcome::Success,
+        Err(e) => {
+            let msg = e.to_string();
+            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
+        }
+    };
+    enqueue_if_retryable(ctx, &outcome, account_id, "permanentDelete", thread_id, "{}").await;
+    mlog.emit(&outcome);
+    outcome
+}
+
 /// Permanently delete a single thread. Irreversible.
 pub async fn permanent_delete(
     ctx: &ActionContext,
@@ -39,7 +69,7 @@ pub async fn permanent_delete(
     }
 
     match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(provider) => permanent_delete_with_provider(ctx, &*provider, account_id, thread_id).await,
+        Ok(provider) => permanent_delete_dispatch(ctx, &*provider, account_id, thread_id).await,
         Err(e) => {
             let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
             enqueue_if_retryable(ctx, &outcome, account_id, "permanentDelete", thread_id, "{}").await;
@@ -64,23 +94,5 @@ pub(crate) async fn permanent_delete_with_provider(
         return outcome;
     }
 
-    let provider_ctx = ProviderCtx {
-        account_id,
-        db: &ctx.db,
-        body_store: &ctx.body_store,
-        inline_images: &ctx.inline_images,
-        search: &ctx.search,
-        progress: &NoopProgressReporter,
-    };
-
-    let outcome = match provider.permanent_delete(&provider_ctx, thread_id).await {
-        Ok(()) => ActionOutcome::Success,
-        Err(e) => {
-            let msg = e.to_string();
-            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
-        }
-    };
-    enqueue_if_retryable(ctx, &outcome, account_id, "permanentDelete", thread_id, "{}").await;
-    mlog.emit(&outcome);
-    outcome
+    permanent_delete_dispatch(ctx, provider, account_id, thread_id).await
 }

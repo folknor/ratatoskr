@@ -24,38 +24,8 @@ async fn star_local(ctx: &ActionContext, account_id: &str, thread_id: &str, star
     .and_then(|r| r.map_err(ActionError::db))
 }
 
-/// Toggle star on a single thread.
-///
-/// `starred` is the target value (not "toggle" — the caller resolves
-/// current state and passes the new value to avoid TOCTOU issues).
-pub async fn star(
-    ctx: &ActionContext,
-    account_id: &str,
-    thread_id: &str,
-    starred: bool,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("star", account_id, thread_id);
-    let params_json = format!(r#"{{"starred":{starred}}}"#);
-
-    if let Err(e) = star_local(ctx, account_id, thread_id, starred).await {
-        let outcome = ActionOutcome::Failed { error: e };
-        mlog.emit(&outcome);
-        return outcome;
-    }
-
-    match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(provider) => star_with_provider(ctx, &*provider, account_id, thread_id, starred).await,
-        Err(e) => {
-            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
-            enqueue_if_retryable(ctx, &outcome, account_id, "star", thread_id, &params_json).await;
-            mlog.emit(&outcome);
-            outcome
-        }
-    }
-}
-
-/// Star with a pre-constructed provider (for batch reuse).
-pub(crate) async fn star_with_provider(
+/// Provider dispatch for star (assumes local mutation already applied).
+async fn star_dispatch(
     ctx: &ActionContext,
     provider: &dyn ProviderOps,
     account_id: &str,
@@ -64,12 +34,6 @@ pub(crate) async fn star_with_provider(
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("star", account_id, thread_id);
     let params_json = format!(r#"{{"starred":{starred}}}"#);
-
-    if let Err(e) = star_local(ctx, account_id, thread_id, starred).await {
-        let outcome = ActionOutcome::Failed { error: e };
-        mlog.emit(&outcome);
-        return outcome;
-    }
 
     let provider_ctx = ProviderCtx {
         account_id,
@@ -90,4 +54,50 @@ pub(crate) async fn star_with_provider(
     enqueue_if_retryable(ctx, &outcome, account_id, "star", thread_id, &params_json).await;
     mlog.emit(&outcome);
     outcome
+}
+
+/// Toggle star on a single thread.
+pub async fn star(
+    ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+    starred: bool,
+) -> ActionOutcome {
+    let mlog = MutationLog::begin("star", account_id, thread_id);
+    let params_json = format!(r#"{{"starred":{starred}}}"#);
+
+    if let Err(e) = star_local(ctx, account_id, thread_id, starred).await {
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
+    match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+        Ok(provider) => star_dispatch(ctx, &*provider, account_id, thread_id, starred).await,
+        Err(e) => {
+            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            enqueue_if_retryable(ctx, &outcome, account_id, "star", thread_id, &params_json).await;
+            mlog.emit(&outcome);
+            outcome
+        }
+    }
+}
+
+/// Star with a pre-constructed provider (for batch reuse).
+pub(crate) async fn star_with_provider(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
+    account_id: &str,
+    thread_id: &str,
+    starred: bool,
+) -> ActionOutcome {
+    let mlog = MutationLog::begin("star", account_id, thread_id);
+
+    if let Err(e) = star_local(ctx, account_id, thread_id, starred).await {
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
+    star_dispatch(ctx, provider, account_id, thread_id, starred).await
 }

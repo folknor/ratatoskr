@@ -30,37 +30,8 @@ async fn spam_local(ctx: &ActionContext, account_id: &str, thread_id: &str, is_s
     .and_then(|r| r.map_err(ActionError::db))
 }
 
-/// Mark or unmark a single thread as spam.
-///
-/// `is_spam` is the target state (true = mark as spam, false = un-spam).
-pub async fn spam(
-    ctx: &ActionContext,
-    account_id: &str,
-    thread_id: &str,
-    is_spam: bool,
-) -> ActionOutcome {
-    let mlog = MutationLog::begin("spam", account_id, thread_id);
-    let params_json = format!(r#"{{"isSpam":{is_spam}}}"#);
-
-    if let Err(e) = spam_local(ctx, account_id, thread_id, is_spam).await {
-        let outcome = ActionOutcome::Failed { error: e };
-        mlog.emit(&outcome);
-        return outcome;
-    }
-
-    match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(provider) => spam_with_provider(ctx, &*provider, account_id, thread_id, is_spam).await,
-        Err(e) => {
-            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
-            enqueue_if_retryable(ctx, &outcome, account_id, "spam", thread_id, &params_json).await;
-            mlog.emit(&outcome);
-            outcome
-        }
-    }
-}
-
-/// Spam with a pre-constructed provider (for batch reuse).
-pub(crate) async fn spam_with_provider(
+/// Provider dispatch for spam (assumes local mutation already applied).
+async fn spam_dispatch(
     ctx: &ActionContext,
     provider: &dyn ProviderOps,
     account_id: &str,
@@ -69,12 +40,6 @@ pub(crate) async fn spam_with_provider(
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("spam", account_id, thread_id);
     let params_json = format!(r#"{{"isSpam":{is_spam}}}"#);
-
-    if let Err(e) = spam_local(ctx, account_id, thread_id, is_spam).await {
-        let outcome = ActionOutcome::Failed { error: e };
-        mlog.emit(&outcome);
-        return outcome;
-    }
 
     let provider_ctx = ProviderCtx {
         account_id,
@@ -95,4 +60,50 @@ pub(crate) async fn spam_with_provider(
     enqueue_if_retryable(ctx, &outcome, account_id, "spam", thread_id, &params_json).await;
     mlog.emit(&outcome);
     outcome
+}
+
+/// Mark or unmark a single thread as spam.
+pub async fn spam(
+    ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+    is_spam: bool,
+) -> ActionOutcome {
+    let mlog = MutationLog::begin("spam", account_id, thread_id);
+    let params_json = format!(r#"{{"isSpam":{is_spam}}}"#);
+
+    if let Err(e) = spam_local(ctx, account_id, thread_id, is_spam).await {
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
+    match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+        Ok(provider) => spam_dispatch(ctx, &*provider, account_id, thread_id, is_spam).await,
+        Err(e) => {
+            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            enqueue_if_retryable(ctx, &outcome, account_id, "spam", thread_id, &params_json).await;
+            mlog.emit(&outcome);
+            outcome
+        }
+    }
+}
+
+/// Spam with a pre-constructed provider (for batch reuse).
+pub(crate) async fn spam_with_provider(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
+    account_id: &str,
+    thread_id: &str,
+    is_spam: bool,
+) -> ActionOutcome {
+    let mlog = MutationLog::begin("spam", account_id, thread_id);
+
+    if let Err(e) = spam_local(ctx, account_id, thread_id, is_spam).await {
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
+    spam_dispatch(ctx, provider, account_id, thread_id, is_spam).await
 }
