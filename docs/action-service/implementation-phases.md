@@ -51,7 +51,7 @@ Send flows through `actions::send_email()`: MIME build on `spawn_blocking`, draf
 
 **Status:** Complete. See `phase-2.4-plan.md`.
 
-`create_folder`, `rename_folder`, `delete_folder` in `core::actions::folder`. Provider-first pattern (provider assigns ID/metadata, local DB updated best-effort). `delete_folder` explicitly cleans up `thread_labels` rows (no FK cascade). `build_provider_ctx` helper extracted. `ProviderFolderMutation` re-exported from actions. No UI exists yet — functions are ready.
+`create_folder`, `rename_folder`, `delete_folder` in `core::actions::folder`. Provider-first pattern (provider assigns ID/metadata, local DB updated best-effort). `delete_folder` explicitly cleans up `thread_labels` rows (no FK cascade). `build_provider_ctx` helper extracted. `ProviderFolderMutation` re-exported from actions. No UI exists yet — functions are ready. Note: IMAP returns "not supported" for all three folder operations — UI must gate these for IMAP accounts.
 
 ### Phase 2.5: Calendar event write-back
 

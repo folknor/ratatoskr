@@ -25,6 +25,15 @@ fn build_provider_ctx<'a>(ctx: &'a ActionContext, account_id: &'a str) -> Provid
 /// The local DB is updated best-effort — if it fails, the action still returns
 /// `Success` because the provider state is canonical and sync will reconcile.
 ///
+/// **Limitation:** `Success` after a local DB failure means the caller cannot
+/// rely on local state being current. The sidebar won't reflect the new folder
+/// until the next sync. Phase 3 (structured outcomes) should introduce a
+/// distinct outcome for "provider succeeded, local stale" so the caller can
+/// trigger an immediate sync or nav refresh.
+///
+/// **IMAP:** Returns `Failed` — IMAP does not support folder creation via
+/// the current `ProviderOps` implementation. UI must gate this for IMAP accounts.
+///
 /// Returns `(ActionOutcome, Option<ProviderFolderMutation>)` so the caller
 /// has the provider-assigned metadata (e.g., to navigate to the new folder).
 pub async fn create_folder(
@@ -101,8 +110,9 @@ pub async fn create_folder(
 
 /// Rename a folder on the provider, then update the local `labels` row.
 ///
-/// Provider-first, same pattern as `create_folder`. All provider-returned
-/// metadata is persisted locally (name, type, colors, path, special_use).
+/// Provider-first, same pattern and limitations as `create_folder`.
+/// All provider-returned metadata is persisted locally (name, type,
+/// colors, path, special_use). IMAP: returns `Failed` (not supported).
 pub async fn rename_folder(
     ctx: &ActionContext,
     account_id: &str,
@@ -169,9 +179,10 @@ pub async fn rename_folder(
 
 /// Delete a folder on the provider, then remove it from the local DB.
 ///
-/// Provider-first: the local row is only deleted if the provider succeeded.
+/// Provider-first, same limitations as `create_folder` re: local DB failure.
 /// `thread_labels` rows for this folder are explicitly cleaned up (there is
 /// no FK cascade from `labels` to `thread_labels`).
+/// IMAP: returns `Failed` (not supported).
 pub async fn delete_folder(
     ctx: &ActionContext,
     account_id: &str,
