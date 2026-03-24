@@ -18,7 +18,7 @@ mod mute;
 mod outcome;
 mod permanent_delete;
 mod pin;
-mod provider;
+pub(crate) mod provider;
 mod send;
 mod spam;
 mod star;
@@ -39,7 +39,8 @@ pub use log::MutationLog;
 pub use outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 pub use permanent_delete::permanent_delete;
 pub use pin::pin;
-pub use provider::create_provider;
+// create_provider is pub(crate) — only accessible within core, not to downstream crates.
+// The app must use action functions or sync_dispatch/jmap_push helpers.
 pub use spam::spam;
 pub use star::star;
 pub use trash::trash;

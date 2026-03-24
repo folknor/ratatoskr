@@ -41,8 +41,3 @@ mundy = { version = "0.2", default-features = false, features = ["color-scheme",
 display-info = "0.5"
 rfd = "0.15"
 ratatoskr-stores = { path = "../stores" }
-ratatoskr-provider-utils = { path = "../provider-utils" }
-ratatoskr-gmail = { path = "../gmail" }
-ratatoskr-graph = { path = "../graph" }
-ratatoskr-jmap = { path = "../jmap" }
-ratatoskr-imap = { path = "../imap" }

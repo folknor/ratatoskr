@@ -466,7 +466,7 @@ impl App {
             }
         };
 
-        let encryption_key = match ratatoskr_provider_utils::crypto::load_encryption_key(data_dir) {
+        let encryption_key = match ratatoskr_core::load_encryption_key(data_dir) {
             Ok(key) => Some(key),
             Err(e) => {
                 log::error!("Failed to load encryption key: {e}");

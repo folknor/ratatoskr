@@ -21,6 +21,7 @@ pub use ratatoskr_imap as imap;
 pub use ratatoskr_label_colors as label_colors;
 pub use ratatoskr_stores::inline_image_store;
 pub use ratatoskr_jmap as jmap;
+pub mod jmap_push;
 pub mod mdn;
 pub mod oauth;
 pub mod mentions;
@@ -37,4 +38,8 @@ pub use ratatoskr_sync::smart_labels;
 pub use ratatoskr_smtp as smtp;
 pub use ratatoskr_sync as sync;
 pub use ratatoskr_sync::threading;
+pub mod sync_dispatch;
 pub mod url_cleaning;
+
+// Re-exports for app-layer convenience — avoids direct provider-utils dependency.
+pub use ratatoskr_provider_utils::crypto::load_encryption_key;
