@@ -1,5 +1,5 @@
 use super::context::ActionContext;
-use super::outcome::ActionOutcome;
+use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
 use crate::db::queries::delete_thread;
 use crate::progress::NoopProgressReporter;
@@ -20,8 +20,8 @@ pub async fn permanent_delete(
         delete_thread(&conn, &aid, &tid)
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))
-    .and_then(|r| r);
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
+    .and_then(|r| r.map_err(ActionError::db));
 
     if let Err(e) = local_result {
         return ActionOutcome::Failed { error: e };
@@ -31,7 +31,7 @@ pub async fn permanent_delete(
         Ok(p) => p,
         Err(e) => {
             log::warn!("Delete local-only (provider create failed): {e}");
-            return ActionOutcome::LocalOnly { remote_error: e };
+            return ActionOutcome::LocalOnly { reason: ActionError::remote(e) };
         }
     };
 
@@ -49,7 +49,7 @@ pub async fn permanent_delete(
         Err(e) => {
             let msg = e.to_string();
             log::warn!("Delete remote failed for {account_id}/{thread_id}: {msg}");
-            ActionOutcome::LocalOnly { remote_error: msg }
+            ActionOutcome::LocalOnly { reason: ActionError::remote(msg) }
         }
     }
 }

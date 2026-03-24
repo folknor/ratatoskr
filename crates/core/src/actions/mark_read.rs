@@ -1,5 +1,5 @@
 use super::context::ActionContext;
-use super::outcome::ActionOutcome;
+use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
 use crate::db::queries::set_thread_read;
 use crate::progress::NoopProgressReporter;
@@ -23,8 +23,8 @@ pub async fn mark_read(
         set_thread_read(&conn, &aid, &tid, read)
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))
-    .and_then(|r| r);
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
+    .and_then(|r| r.map_err(ActionError::db));
 
     if let Err(e) = local_result {
         return ActionOutcome::Failed { error: e };
@@ -34,7 +34,7 @@ pub async fn mark_read(
         Ok(p) => p,
         Err(e) => {
             log::warn!("Mark read local-only (provider create failed): {e}");
-            return ActionOutcome::LocalOnly { remote_error: e };
+            return ActionOutcome::LocalOnly { reason: ActionError::remote(e) };
         }
     };
 
@@ -52,7 +52,7 @@ pub async fn mark_read(
         Err(e) => {
             let msg = e.to_string();
             log::warn!("Mark read remote failed for {account_id}/{thread_id}: {msg}");
-            ActionOutcome::LocalOnly { remote_error: msg }
+            ActionOutcome::LocalOnly { reason: ActionError::remote(msg) }
         }
     }
 }

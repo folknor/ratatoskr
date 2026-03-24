@@ -4,7 +4,7 @@
 //! `LocalOnly` with a descriptive reason until their HTTP calls are implemented.
 
 use super::context::ActionContext;
-use super::outcome::ActionOutcome;
+use super::outcome::{ActionError, ActionOutcome};
 use crate::db::queries_extra::contacts::{db_delete_contact, db_upsert_contact_full};
 
 // ── Public types ─────────────────────────────────────────
@@ -43,7 +43,7 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
     let inp = input.clone();
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         let source = inp.source.as_deref().unwrap_or("user");
         db_upsert_contact_full(
             &conn,
@@ -57,9 +57,10 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
             inp.account_id.as_deref(),
             source,
         )
+        .map_err(ActionError::db)
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
     .and_then(|r| r);
 
     if let Err(e) = local_result {
@@ -82,7 +83,7 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
             input.email
         );
         log::warn!("{msg}");
-        return ActionOutcome::LocalOnly { remote_error: msg };
+        return ActionOutcome::LocalOnly { reason: ActionError::remote(msg) };
     };
 
     match dispatch_write_back(
@@ -99,7 +100,7 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             log::warn!("Contact write-back failed for {}: {e}", input.email);
-            ActionOutcome::LocalOnly { remote_error: e }
+            ActionOutcome::LocalOnly { reason: e }
         }
     }
 }
@@ -114,7 +115,7 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
     let cid = contact_id.to_string();
     let meta_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         conn.query_row(
             "SELECT source, server_id, account_id FROM contacts WHERE id = ?1",
             rusqlite::params![cid],
@@ -126,10 +127,15 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
                 ))
             },
         )
-        .map_err(|e| format!("contact lookup: {e}"))
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                ActionError::not_found(format!("contact lookup: {e}"))
+            }
+            _ => ActionError::db(format!("contact lookup: {e}")),
+        })
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
     .and_then(|r| r);
 
     let (source, server_id, account_id) = match meta_result {
@@ -162,13 +168,11 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
 
     // 3. Delete locally
     if let Err(e) = db_delete_contact(&ctx.db, contact_id.to_string()).await {
-        return ActionOutcome::Failed { error: e };
+        return ActionOutcome::Failed { error: ActionError::db(e) };
     }
 
     match provider_outcome {
-        Some(reason) => ActionOutcome::LocalOnly {
-            remote_error: reason,
-        },
+        Some(reason) => ActionOutcome::LocalOnly { reason },
         None => ActionOutcome::Success,
     }
 }
@@ -187,7 +191,7 @@ async fn dispatch_write_back(
     phone: Option<&str>,
     company: Option<&str>,
     notes: Option<&str>,
-) -> Result<(), String> {
+) -> Result<(), ActionError> {
     match source {
         "jmap" => {
             let client = ratatoskr_jmap::client::JmapClient::from_account(
@@ -195,19 +199,21 @@ async fn dispatch_write_back(
                 account_id,
                 &ctx.encryption_key,
             )
-            .await?;
+            .await
+            .map_err(ActionError::remote)?;
             ratatoskr_jmap::contacts_sync::jmap_contacts_push_update(
                 &client, server_id, phone, company, notes,
             )
             .await
+            .map_err(ActionError::remote)
         }
         "google" => {
             // Scaffolding ready (build_google_contact_update_body,
             // get_google_contact_server_info). HTTP PATCH not wired.
-            Err("Google contact write-back not yet wired to HTTP".to_string())
+            Err(ActionError::not_implemented("Google contact write-back not yet wired to HTTP"))
         }
-        "graph" => Err("Graph contact write-back not yet wired to HTTP".to_string()),
-        "carddav" => Err("CardDAV contact write-back not implemented (PUT + vCard needed)".to_string()),
+        "graph" => Err(ActionError::not_implemented("Graph contact write-back not yet wired to HTTP")),
+        "carddav" => Err(ActionError::not_implemented("CardDAV contact write-back not implemented (PUT + vCard needed)")),
         "user" => Ok(()),
         other => {
             log::warn!("Unknown contact source for write-back: {other}");
@@ -222,7 +228,7 @@ async fn dispatch_delete(
     source: &str,
     account_id: &str,
     server_id: &str,
-) -> Result<(), String> {
+) -> Result<(), ActionError> {
     match source {
         "jmap" => {
             let client = ratatoskr_jmap::client::JmapClient::from_account(
@@ -230,12 +236,15 @@ async fn dispatch_delete(
                 account_id,
                 &ctx.encryption_key,
             )
-            .await?;
-            jmap_contact_delete(&client, server_id).await
+            .await
+            .map_err(ActionError::remote)?;
+            jmap_contact_delete(&client, server_id)
+                .await
+                .map_err(ActionError::remote)
         }
-        "google" => Err("Google contact delete not yet wired to HTTP".to_string()),
-        "graph" => Err("Graph contact delete not yet wired to HTTP".to_string()),
-        "carddav" => Err("CardDAV contact delete not implemented".to_string()),
+        "google" => Err(ActionError::not_implemented("Google contact delete not yet wired to HTTP")),
+        "graph" => Err(ActionError::not_implemented("Graph contact delete not yet wired to HTTP")),
+        "carddav" => Err(ActionError::not_implemented("CardDAV contact delete not implemented")),
         _ => Ok(()),
     }
 }

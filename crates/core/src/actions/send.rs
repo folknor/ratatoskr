@@ -1,5 +1,5 @@
 use super::context::ActionContext;
-use super::outcome::ActionOutcome;
+use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
 use crate::progress::NoopProgressReporter;
 use crate::send::{build_mime_message_base64url, mark_draft_failed, mark_draft_sent, SendRequest};
@@ -33,11 +33,11 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
     let account_id_outer = account_id.clone();
     let thread_id_outer = thread_id.clone();
     let local_result = tokio::task::spawn_blocking(move || {
-        let mime_base64url =
-            build_mime_message_base64url(&request).map_err(|e| format!("MIME build: {e}"))?;
+        let mime_base64url = build_mime_message_base64url(&request)
+            .map_err(|e| ActionError::build(format!("{e}")))?;
 
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
         // Persist draft as 'pending'.
         // Field mapping: SendRequest → local_drafts columns
@@ -75,7 +75,7 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
                 mime_base64url,
             ],
         )
-        .map_err(|e| format!("draft persist: {e}"))?;
+        .map_err(|e| ActionError::db(format!("draft persist: {e}")))?;
 
         // Transition to 'sending' — same state-machine validation as
         // mark_draft_sending(): rejects already-sent/sending drafts.
@@ -85,17 +85,17 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
                  WHERE id = ?1 AND sync_status IN ('pending', 'synced', 'finalized', 'failed')",
                 rusqlite::params![draft_id],
             )
-            .map_err(|e| format!("mark sending: {e}"))?;
+            .map_err(|e| ActionError::db(format!("mark sending: {e}")))?;
         if rows == 0 {
-            return Err(format!(
+            return Err(ActionError::invalid_state(format!(
                 "Draft {draft_id} not found or already sending/sent"
-            ));
+            )));
         }
 
         Ok(mime_base64url)
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
     .and_then(|r| r);
 
     let mime_base64url = match local_result {
@@ -109,7 +109,9 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
         Err(e) => {
             log::warn!("Send failed (provider create): {e}");
             let _ = mark_draft_failed(&ctx.db, draft_id_outer).await;
-            return ActionOutcome::Failed { error: e };
+            return ActionOutcome::Failed {
+                error: ActionError::remote(e),
+            };
         }
     };
 
@@ -140,7 +142,9 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
             let msg = e.to_string();
             log::warn!("Send failed for {account_id_outer}: {msg}");
             let _ = mark_draft_failed(&ctx.db, draft_id_outer).await;
-            ActionOutcome::Failed { error: msg }
+            ActionOutcome::Failed {
+                error: ActionError::remote(msg),
+            }
         }
     }
 }
@@ -160,7 +164,7 @@ pub async fn delete_draft(
     let did = draft_id.to_string();
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
         let remote_id: Option<String> = match conn.query_row(
             "SELECT remote_draft_id FROM local_drafts WHERE id = ?1",
@@ -168,22 +172,20 @@ pub async fn delete_draft(
             |row| row.get(0),
         ) {
             Ok(id) => id,
-            // No row found — draft doesn't exist locally, nothing to delete
             Err(rusqlite::Error::QueryReturnedNoRows) => None,
-            // Actual DB error — propagate
-            Err(e) => return Err(format!("draft lookup: {e}")),
+            Err(e) => return Err(ActionError::db(format!("draft lookup: {e}"))),
         };
 
         conn.execute(
             "DELETE FROM local_drafts WHERE id = ?1",
             rusqlite::params![did],
         )
-        .map_err(|e| format!("draft delete: {e}"))?;
+        .map_err(|e| ActionError::db(format!("draft delete: {e}")))?;
 
         Ok(remote_id)
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
     .and_then(|r| r);
 
     let remote_id = match local_result {

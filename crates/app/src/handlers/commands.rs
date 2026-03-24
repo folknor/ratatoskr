@@ -299,7 +299,9 @@ impl App {
                             ratatoskr_core::actions::remove_label(&ctx, account_id, thread_id, label_id).await
                         }
                         _ => ActionOutcome::Failed {
-                            error: format!("{action:?} not yet migrated to action service"),
+                            error: ratatoskr_core::actions::ActionError::invalid_state(
+                                format!("{action:?} not yet migrated to action service"),
+                            ),
                         },
                     };
                     outcomes.push(outcome);
@@ -373,7 +375,9 @@ impl App {
                             ratatoskr_core::actions::mute(&ctx, account_id, thread_id, *new_value).await
                         }
                         _ => ActionOutcome::Failed {
-                            error: format!("{action:?} is not a toggle action"),
+                            error: ratatoskr_core::actions::ActionError::invalid_state(
+                                format!("{action:?} is not a toggle action"),
+                            ),
                         },
                     };
                     outcomes.push(outcome);
@@ -430,10 +434,10 @@ impl App {
 
         if action.removes_from_view() {
             if all_failed {
-                let errors: Vec<&str> = outcomes
+                let errors: Vec<String> = outcomes
                     .iter()
                     .filter_map(|o| match o {
-                        ActionOutcome::Failed { error } => Some(error.as_str()),
+                        ActionOutcome::Failed { error } => Some(error.user_message()),
                         _ => None,
                     })
                     .collect();
@@ -473,10 +477,10 @@ impl App {
         // Label-type actions have no rollback and need an explicit toast.
         if rollback.is_empty() {
             if all_failed {
-                let errors: Vec<&str> = outcomes
+                let errors: Vec<String> = outcomes
                     .iter()
                     .filter_map(|o| match o {
-                        ActionOutcome::Failed { error } => Some(error.as_str()),
+                        ActionOutcome::Failed { error } => Some(error.user_message()),
                         _ => None,
                     })
                     .collect();

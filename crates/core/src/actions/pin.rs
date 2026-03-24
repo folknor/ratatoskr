@@ -1,5 +1,5 @@
 use super::context::ActionContext;
-use super::outcome::ActionOutcome;
+use super::outcome::{ActionError, ActionOutcome};
 use crate::db::queries::set_thread_pinned;
 
 /// Set pin state on a single thread. Local-only by design — no provider
@@ -19,8 +19,8 @@ pub async fn pin(
         set_thread_pinned(&conn, &aid, &tid, pinned)
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))
-    .and_then(|r| r);
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
+    .and_then(|r| r.map_err(ActionError::db));
 
     match local_result {
         Ok(()) => ActionOutcome::Success,

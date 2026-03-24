@@ -1,5 +1,5 @@
 use super::context::ActionContext;
-use super::outcome::ActionOutcome;
+use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
 use crate::progress::NoopProgressReporter;
 use ratatoskr_provider_utils::types::{ProviderCtx, ProviderFolderMutation};
@@ -47,7 +47,7 @@ pub async fn create_folder(
     // 1. Provider dispatch first — we need the provider-assigned ID
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
-        Err(e) => return (ActionOutcome::Failed { error: e }, None),
+        Err(e) => return (ActionOutcome::Failed { error: ActionError::remote(e) }, None),
     };
 
     let provider_ctx = build_provider_ctx(ctx, account_id);
@@ -60,7 +60,7 @@ pub async fn create_folder(
         Err(e) => {
             let msg = e.to_string();
             log::warn!("create_folder failed for {account_id}: {msg}");
-            return (ActionOutcome::Failed { error: msg }, None);
+            return (ActionOutcome::Failed { error: ActionError::remote(msg) }, None);
         }
     };
 
@@ -71,7 +71,7 @@ pub async fn create_folder(
     let parent_id_for_db = parent_id.map(str::to_string);
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         conn.execute(
             "INSERT INTO labels (id, account_id, name, type, color_bg, color_fg, \
              imap_folder_path, imap_special_use, parent_label_id, label_kind) \
@@ -92,11 +92,11 @@ pub async fn create_folder(
                 parent_id_for_db,
             ],
         )
-        .map_err(|e| format!("local insert: {e}"))?;
+        .map_err(|e| ActionError::db(format!("local insert: {e}")))?;
         Ok(())
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
     .and_then(|r| r);
 
     if let Err(e) = local_result {
@@ -123,7 +123,7 @@ pub async fn rename_folder(
 ) -> (ActionOutcome, Option<ProviderFolderMutation>) {
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
-        Err(e) => return (ActionOutcome::Failed { error: e }, None),
+        Err(e) => return (ActionOutcome::Failed { error: ActionError::remote(e) }, None),
     };
 
     let provider_ctx = build_provider_ctx(ctx, account_id);
@@ -136,7 +136,7 @@ pub async fn rename_folder(
         Err(e) => {
             let msg = e.to_string();
             log::warn!("rename_folder failed for {account_id}/{folder_id}: {msg}");
-            return (ActionOutcome::Failed { error: msg }, None);
+            return (ActionOutcome::Failed { error: ActionError::remote(msg) }, None);
         }
     };
 
@@ -147,7 +147,7 @@ pub async fn rename_folder(
     let m = mutation.clone();
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         conn.execute(
             "UPDATE labels SET name = ?1, type = ?2, color_bg = ?3, color_fg = ?4, \
              imap_folder_path = ?5, imap_special_use = ?6 \
@@ -163,11 +163,11 @@ pub async fn rename_folder(
                 fid,
             ],
         )
-        .map_err(|e| format!("local update: {e}"))?;
+        .map_err(|e| ActionError::db(format!("local update: {e}")))?;
         Ok(())
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
     .and_then(|r| r);
 
     if let Err(e) = local_result {
@@ -190,7 +190,7 @@ pub async fn delete_folder(
 ) -> ActionOutcome {
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
-        Err(e) => return ActionOutcome::Failed { error: e },
+        Err(e) => return ActionOutcome::Failed { error: ActionError::remote(e) },
     };
 
     let provider_ctx = build_provider_ctx(ctx, account_id);
@@ -198,7 +198,7 @@ pub async fn delete_folder(
     if let Err(e) = provider.delete_folder(&provider_ctx, folder_id).await {
         let msg = e.to_string();
         log::warn!("delete_folder failed for {account_id}/{folder_id}: {msg}");
-        return ActionOutcome::Failed { error: msg };
+        return ActionOutcome::Failed { error: ActionError::remote(msg) };
     }
 
     // Provider succeeded — remove local rows (best-effort)
@@ -207,22 +207,22 @@ pub async fn delete_folder(
     let fid = folder_id.to_string();
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         // Delete thread_labels first — no FK cascade from labels to thread_labels.
         conn.execute(
             "DELETE FROM thread_labels WHERE account_id = ?1 AND label_id = ?2",
             rusqlite::params![aid, fid],
         )
-        .map_err(|e| format!("thread_labels cleanup: {e}"))?;
+        .map_err(|e| ActionError::db(format!("thread_labels cleanup: {e}")))?;
         conn.execute(
             "DELETE FROM labels WHERE account_id = ?1 AND id = ?2",
             rusqlite::params![aid, fid],
         )
-        .map_err(|e| format!("local delete: {e}"))?;
+        .map_err(|e| ActionError::db(format!("local delete: {e}")))?;
         Ok(())
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
     .and_then(|r| r);
 
     if let Err(e) = local_result {

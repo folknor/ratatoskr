@@ -33,7 +33,7 @@ pub use crate::send::{SendAttachment, SendRequest};
 pub use send::{delete_draft, send_email};
 pub use move_to_folder::move_to_folder;
 pub use mute::mute;
-pub use outcome::ActionOutcome;
+pub use outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 pub use permanent_delete::permanent_delete;
 pub use pin::pin;
 pub use provider::create_provider;

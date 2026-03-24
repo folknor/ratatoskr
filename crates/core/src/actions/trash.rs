@@ -1,5 +1,5 @@
 use super::context::ActionContext;
-use super::outcome::ActionOutcome;
+use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
 use crate::email_actions::{insert_label, remove_label};
 use crate::progress::NoopProgressReporter;
@@ -22,8 +22,8 @@ pub async fn trash(
         insert_label(&conn, &aid, &tid, "TRASH")
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))
-    .and_then(|r| r);
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
+    .and_then(|r| r.map_err(ActionError::db));
 
     if let Err(e) = local_result {
         return ActionOutcome::Failed { error: e };
@@ -33,7 +33,7 @@ pub async fn trash(
         Ok(p) => p,
         Err(e) => {
             log::warn!("Trash local-only (provider create failed): {e}");
-            return ActionOutcome::LocalOnly { remote_error: e };
+            return ActionOutcome::LocalOnly { reason: ActionError::remote(e) };
         }
     };
 
@@ -51,7 +51,7 @@ pub async fn trash(
         Err(e) => {
             let msg = e.to_string();
             log::warn!("Trash remote failed for {account_id}/{thread_id}: {msg}");
-            ActionOutcome::LocalOnly { remote_error: msg }
+            ActionOutcome::LocalOnly { reason: ActionError::remote(msg) }
         }
     }
 }

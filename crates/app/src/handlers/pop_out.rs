@@ -1104,14 +1104,14 @@ impl App {
             // failures), but handle it defensively as failure for safety.
             ratatoskr_core::actions::ActionOutcome::Failed { error }
             | ratatoskr_core::actions::ActionOutcome::LocalOnly {
-                remote_error: error,
+                reason: error,
             } => {
                 if let Some(PopOutWindow::Compose(state)) =
                     self.pop_out_windows.get_mut(&window_id)
                 {
                     state.sending = false;
                     state.status =
-                        Some(format!("Send failed: {error}"));
+                        Some(format!("Send failed: {}", error.user_message()));
                 }
                 Task::none()
             }

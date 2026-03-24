@@ -1,5 +1,5 @@
 use super::context::ActionContext;
-use super::outcome::ActionOutcome;
+use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
 use crate::progress::NoopProgressReporter;
 use ratatoskr_provider_utils::types::ProviderCtx;
@@ -26,12 +26,10 @@ pub async fn add_label(
     let lid = label_id.to_string();
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
         // Look up label metadata (name + kind) for provider routing.
         // Scoped by account_id — label identity is (account_id, label_id).
-        // If the label doesn't exist for this account, query_row fails and
-        // the action returns Failed.
         let (label_name, label_kind) = conn
             .query_row(
                 "SELECT name, label_kind FROM labels \
@@ -39,15 +37,21 @@ pub async fn add_label(
                 rusqlite::params![lid, aid],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
-            .map_err(|e| format!("label lookup: {e}"))?;
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    ActionError::not_found("label not found for this account")
+                }
+                other => ActionError::db(format!("label lookup: {other}")),
+            })?;
 
         // Local DB mutation (INSERT OR IGNORE — idempotent)
-        crate::email_actions::insert_label(&conn, &aid, &tid, &lid)?;
+        crate::email_actions::insert_label(&conn, &aid, &tid, &lid)
+            .map_err(ActionError::db)?;
 
         Ok((label_name, label_kind))
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
     .and_then(|r| r);
 
     let (label_name, label_kind) = match local_result {
@@ -60,7 +64,9 @@ pub async fn add_label(
         Ok(p) => p,
         Err(e) => {
             log::warn!("AddLabel local-only (provider create failed): {e}");
-            return ActionOutcome::LocalOnly { remote_error: e };
+            return ActionOutcome::LocalOnly {
+                reason: ActionError::remote(e),
+            };
         }
     };
 
@@ -90,7 +96,9 @@ pub async fn add_label(
         Err(e) => {
             let msg = e.to_string();
             log::warn!("AddLabel remote failed for {account_id}/{thread_id}: {msg}");
-            ActionOutcome::LocalOnly { remote_error: msg }
+            ActionOutcome::LocalOnly {
+                reason: ActionError::remote(msg),
+            }
         }
     }
 }
@@ -111,7 +119,7 @@ pub async fn remove_label(
     let lid = label_id.to_string();
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
         let (label_name, label_kind) = conn
             .query_row(
@@ -120,15 +128,21 @@ pub async fn remove_label(
                 rusqlite::params![lid, aid],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
-            .map_err(|e| format!("label lookup: {e}"))?;
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    ActionError::not_found("label not found for this account")
+                }
+                other => ActionError::db(format!("label lookup: {other}")),
+            })?;
 
         // Local DB mutation
-        crate::email_actions::remove_label(&conn, &aid, &tid, &lid)?;
+        crate::email_actions::remove_label(&conn, &aid, &tid, &lid)
+            .map_err(ActionError::db)?;
 
         Ok((label_name, label_kind))
     })
     .await
-    .map_err(|e| format!("spawn_blocking: {e}"))
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
     .and_then(|r| r);
 
     let (label_name, label_kind) = match local_result {
@@ -140,7 +154,9 @@ pub async fn remove_label(
         Ok(p) => p,
         Err(e) => {
             log::warn!("RemoveLabel local-only (provider create failed): {e}");
-            return ActionOutcome::LocalOnly { remote_error: e };
+            return ActionOutcome::LocalOnly {
+                reason: ActionError::remote(e),
+            };
         }
     };
 
@@ -168,7 +184,9 @@ pub async fn remove_label(
         Err(e) => {
             let msg = e.to_string();
             log::warn!("RemoveLabel remote failed for {account_id}/{thread_id}: {msg}");
-            ActionOutcome::LocalOnly { remote_error: msg }
+            ActionOutcome::LocalOnly {
+                reason: ActionError::remote(msg),
+            }
         }
     }
 }

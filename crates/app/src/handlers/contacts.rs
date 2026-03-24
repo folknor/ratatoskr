@@ -70,7 +70,7 @@ impl App {
                 match outcome {
                     ActionOutcome::Failed { error } => {
                         log::error!("Contact save failed: {error}");
-                        Message::Settings(SettingsMessage::ContactSaved(Err(error)))
+                        Message::Settings(SettingsMessage::ContactSaved(Err(error.user_message())))
                     }
                     _ => Message::Settings(SettingsMessage::ContactsLoaded(contacts)),
                 }
@@ -108,7 +108,7 @@ impl App {
                 match outcome {
                     ActionOutcome::Failed { error } => {
                         log::error!("Contact delete failed: {error}");
-                        Message::Settings(SettingsMessage::ContactDeleted(Err(error)))
+                        Message::Settings(SettingsMessage::ContactDeleted(Err(error.user_message())))
                     }
                     _ => {
                         if let Some(list) = contacts {
