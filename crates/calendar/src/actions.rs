@@ -119,6 +119,8 @@ fn input_to_json(input: &CalendarEventInput) -> serde_json::Value {
         "isAllDay": input.is_all_day,
         "timezone": input.timezone,
         "recurrenceRule": input.recurrence_rule,
+        "availability": input.availability,
+        "visibility": input.visibility,
     })
 }
 
@@ -282,6 +284,7 @@ fn lookup_calendar_remote_id(
 
 /// Look up event metadata needed for provider dispatch.
 struct EventMeta {
+    account_id: String,
     remote_event_id: Option<String>,
     etag: Option<String>,
     calendar_id: Option<String>,
@@ -292,13 +295,14 @@ fn lookup_event_meta(
     event_id: &str,
 ) -> Result<EventMeta, String> {
     conn.query_row(
-        "SELECT remote_event_id, etag, calendar_id FROM calendar_events WHERE id = ?1",
+        "SELECT account_id, remote_event_id, etag, calendar_id FROM calendar_events WHERE id = ?1",
         rusqlite::params![event_id],
         |row| {
             Ok(EventMeta {
-                remote_event_id: row.get(0)?,
-                etag: row.get(1)?,
-                calendar_id: row.get(2)?,
+                account_id: row.get(0)?,
+                remote_event_id: row.get(1)?,
+                etag: row.get(2)?,
+                calendar_id: row.get(3)?,
             })
         },
     )
@@ -393,27 +397,29 @@ pub async fn create_calendar_event(
 }
 
 /// Update a calendar event. Provider-first for synced events, local-only for unsynced.
+///
+/// The `account_id` parameter is used as a fallback only. The event's own
+/// `account_id` from the DB is authoritative for provider resolution, preventing
+/// wrong-account dispatch in multi-account setups.
 pub async fn update_calendar_event(
     ctx: &ActionContext,
-    account_id: &str,
+    _account_id: &str,
     event_id: &str,
     input: CalendarEventInput,
 ) -> ActionOutcome {
-    // 1. Look up event metadata
+    // 1. Look up event metadata — use the event's own account_id, not the caller's
     let db = ctx.db.clone();
     let eid = event_id.to_string();
-    let aid = account_id.to_string();
-    let aid_outer = aid.clone();
     let meta_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
         let meta = lookup_event_meta(&conn, &eid)?;
 
-        // Also look up calendar_remote_id if we have a calendar_id
+        // Use the event's own account_id for calendar lookup
         let calendar_remote_id = meta
             .calendar_id
             .as_deref()
-            .and_then(|cid| lookup_calendar_remote_id(&conn, &aid, cid).ok());
+            .and_then(|cid| lookup_calendar_remote_id(&conn, &meta.account_id, cid).ok());
 
         Ok((meta, calendar_remote_id))
     })
@@ -434,7 +440,7 @@ pub async fn update_calendar_event(
             let conn = db.conn();
             let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
             let params = ratatoskr_core::db::queries_extra::calendars::LocalCalendarEventParams {
-                account_id: aid_outer,
+                account_id: meta.account_id.clone(),
                 summary: input.title,
                 description: input.description,
                 location: input.location,
@@ -461,13 +467,18 @@ pub async fn update_calendar_event(
         };
     };
 
-    // 3. Synced event — provider-first
-    let provider = match create_calendar_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(p) => p,
-        Err(e) => return ActionOutcome::Failed { error: e },
-    };
+    // 3. Synced event — provider-first (use event's own account_id)
+    let provider =
+        match create_calendar_provider(&ctx.db, &meta.account_id, ctx.encryption_key).await {
+            Ok(p) => p,
+            Err(e) => return ActionOutcome::Failed { error: e },
+        };
 
-    let cal_remote = calendar_remote_id.unwrap_or_default();
+    let Some(cal_remote) = calendar_remote_id else {
+        return ActionOutcome::Failed {
+            error: "Synced event has no resolvable calendar remote ID".to_string(),
+        };
+    };
     match dispatch_update(
         &provider,
         ctx,
@@ -479,28 +490,38 @@ pub async fn update_calendar_event(
     .await
     {
         Ok(dto) => {
-            // Update local DB with provider-returned metadata
+            // Update local DB with all edited fields + provider-returned etag.
+            // Use input values (what the user edited) for all fields, plus etag
+            // from the DTO for concurrency control.
             let db = ctx.db.clone();
             let eid = event_id.to_string();
+            let event_account_id = meta.account_id.clone();
+            let cal_id = meta.calendar_id.clone();
             let _ = tokio::task::spawn_blocking(move || {
                 let conn = db.conn();
                 if let Ok(conn) = conn.lock() {
+                    let params =
+                        ratatoskr_core::db::queries_extra::calendars::LocalCalendarEventParams {
+                            account_id: event_account_id,
+                            summary: input.title,
+                            description: input.description,
+                            location: input.location,
+                            start_time: input.start_time,
+                            end_time: input.end_time,
+                            is_all_day: input.is_all_day,
+                            calendar_id: cal_id,
+                            timezone: input.timezone,
+                            recurrence_rule: input.recurrence_rule,
+                            availability: input.availability,
+                            visibility: input.visibility,
+                        };
+                    let _ = ratatoskr_core::db::queries_extra::calendars::update_calendar_event_sync(
+                        &conn, &eid, &params,
+                    );
+                    // Also update etag from provider response
                     let _ = conn.execute(
-                        "UPDATE calendar_events SET \
-                         summary = ?1, description = ?2, location = ?3, \
-                         start_time = ?4, end_time = ?5, is_all_day = ?6, \
-                         etag = ?7 \
-                         WHERE id = ?8",
-                        rusqlite::params![
-                            dto.summary,
-                            dto.description,
-                            dto.location,
-                            dto.start_time,
-                            dto.end_time,
-                            dto.is_all_day,
-                            dto.etag,
-                            eid,
-                        ],
+                        "UPDATE calendar_events SET etag = ?1 WHERE id = ?2",
+                        rusqlite::params![dto.etag, eid],
                     );
                 }
             })
@@ -508,7 +529,7 @@ pub async fn update_calendar_event(
             ActionOutcome::Success
         }
         Err(e) => {
-            log::warn!("Calendar update failed for {account_id}/{event_id}: {e}");
+            log::warn!("Calendar update failed for {}/{event_id}: {e}", meta.account_id);
             ActionOutcome::Failed { error: e }
         }
     }
@@ -517,13 +538,12 @@ pub async fn update_calendar_event(
 /// Delete a calendar event. Provider-first for synced events, local-only for unsynced.
 pub async fn delete_calendar_event(
     ctx: &ActionContext,
-    account_id: &str,
+    _account_id: &str,
     event_id: &str,
 ) -> ActionOutcome {
-    // 1. Look up event metadata
+    // 1. Look up event metadata — use the event's own account_id
     let db = ctx.db.clone();
     let eid = event_id.to_string();
-    let aid = account_id.to_string();
     let meta_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
@@ -531,7 +551,7 @@ pub async fn delete_calendar_event(
         let calendar_remote_id = meta
             .calendar_id
             .as_deref()
-            .and_then(|cid| lookup_calendar_remote_id(&conn, &aid, cid).ok());
+            .and_then(|cid| lookup_calendar_remote_id(&conn, &meta.account_id, cid).ok());
         Ok((meta, calendar_remote_id))
     })
     .await
@@ -562,13 +582,18 @@ pub async fn delete_calendar_event(
         };
     };
 
-    // 3. Synced event — provider-first
-    let provider = match create_calendar_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(p) => p,
-        Err(e) => return ActionOutcome::Failed { error: e },
-    };
+    // 3. Synced event — provider-first (use event's own account_id)
+    let provider =
+        match create_calendar_provider(&ctx.db, &meta.account_id, ctx.encryption_key).await {
+            Ok(p) => p,
+            Err(e) => return ActionOutcome::Failed { error: e },
+        };
 
-    let cal_remote = calendar_remote_id.unwrap_or_default();
+    let Some(cal_remote) = calendar_remote_id else {
+        return ActionOutcome::Failed {
+            error: "Synced event has no resolvable calendar remote ID".to_string(),
+        };
+    };
     if let Err(e) = dispatch_delete(
         &provider,
         ctx,
@@ -578,7 +603,7 @@ pub async fn delete_calendar_event(
     )
     .await
     {
-        log::warn!("Calendar delete failed for {account_id}/{event_id}: {e}");
+        log::warn!("Calendar delete failed for {}/{event_id}: {e}", meta.account_id);
         return ActionOutcome::Failed { error: e };
     }
 
