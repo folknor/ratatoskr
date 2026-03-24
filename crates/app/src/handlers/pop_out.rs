@@ -31,7 +31,7 @@ use crate::ui::layout::{
 };
 use crate::{App, Message, APP_DATA_DIR};
 
-use ratatoskr_core::send::SendAttachment;
+use ratatoskr_core::actions::SendAttachment;
 
 // ── Pop-out message dispatch ────────────────────────────
 

@@ -24,8 +24,8 @@ pub use archive::archive;
 pub use context::ActionContext;
 pub use label::{add_label, remove_label};
 pub use mark_read::mark_read;
-// Re-export SendRequest so callers can build it without importing crate::send directly.
-pub use crate::send::SendRequest;
+// Re-export send types so callers import from actions, not crate::send directly.
+pub use crate::send::{SendAttachment, SendRequest};
 pub use send::{delete_draft, send_email};
 pub use move_to_folder::move_to_folder;
 pub use mute::mute;
