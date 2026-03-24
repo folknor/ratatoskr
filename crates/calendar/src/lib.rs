@@ -1,6 +1,7 @@
 pub(crate) use ratatoskr_core::provider::http::shared_http_client;
 use ratatoskr_core::provider::http::RetryConfig;
 
+pub mod actions;
 pub mod caldav;
 pub mod google;
 pub mod graph;

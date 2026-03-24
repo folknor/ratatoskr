@@ -31,6 +31,7 @@ ratatoskr-smart-folder = { path = "../smart-folder" }
 ratatoskr-label-colors = { path = "../label-colors" }
 iced-drop = { path = "../iced-drop" }
 ratatoskr-rich-text-editor = { path = "../rich-text-editor" }
+ratatoskr-calendar = { path = "../calendar" }
 ratatoskr-contact-import = { path = "../contact-import" }
 env_logger = "0.11"
 log = "0.4"

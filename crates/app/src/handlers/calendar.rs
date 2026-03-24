@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use chrono::{Datelike, NaiveDate, Timelike};
 use iced::Task;
-use ratatoskr_core::db::queries_extra::calendars::LocalCalendarEventParams;
 
 use crate::ui::calendar::{
     AttendeeEntry, CalendarEventData, CalendarMessage, CalendarOverlay, EventField,
@@ -191,10 +190,35 @@ impl App {
                     self.calendar.overlay = CalendarOverlay::None;
                     return Task::none();
                 }
-                let db = Arc::clone(&self.db);
+                let Some(ref action_ctx) = self.action_ctx else {
+                    return Task::none();
+                };
+                let ctx = action_ctx.clone();
+                // Resolve account_id from the event editor overlay if available,
+                // fall back to first account.
+                let account_id = match &self.calendar.overlay {
+                    CalendarOverlay::ConfirmDelete { .. } | CalendarOverlay::EventEditor { .. } => {
+                        // Try to get account_id from the event data
+                        if let CalendarOverlay::EventEditor { event, .. } = &self.calendar.overlay {
+                            event.account_id.clone()
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                }
+                .or_else(|| self.sidebar.accounts.first().map(|a| a.id.clone()))
+                .unwrap_or_default();
+
                 self.calendar.overlay = CalendarOverlay::None;
                 Task::perform(
-                    async move { db.delete_calendar_event(event_id).await },
+                    async move {
+                        let outcome = ratatoskr_calendar::actions::delete_calendar_event(
+                            &ctx, &account_id, &event_id,
+                        )
+                        .await;
+                        calendar_outcome_to_result(outcome)
+                    },
                     |r| Message::Calendar(Box::new(CalendarMessage::EventDeleted(r))),
                 )
             }
@@ -363,7 +387,11 @@ impl App {
             _ => return Task::none(),
         };
 
-        let db = Arc::clone(&self.db);
+        let Some(ref action_ctx) = self.action_ctx else {
+            return Task::none();
+        };
+        let ctx = action_ctx.clone();
+
         let start_ts = calendar_data_to_timestamp(
             event.start_date,
             event.start_hour_u32(),
@@ -383,15 +411,13 @@ impl App {
             })
             .unwrap_or_default();
 
-        let params = LocalCalendarEventParams {
-            account_id,
-            summary: event.title.clone(),
+        let input = ratatoskr_calendar::actions::CalendarEventInput {
+            title: event.title.clone(),
             description: event.description.clone(),
             location: event.location.clone(),
             start_time: start_ts,
             end_time: end_ts,
             is_all_day: event.all_day,
-            calendar_id: event.calendar_id.clone(),
             timezone: event.timezone.clone(),
             recurrence_rule: event.recurrence_rule.clone(),
             availability: event.availability.clone(),
@@ -399,14 +425,27 @@ impl App {
         };
 
         if let Some(id) = event.id.clone() {
+            let aid = account_id.clone();
             Task::perform(
-                async move { db.update_calendar_event(id, params).await },
+                async move {
+                    let outcome = ratatoskr_calendar::actions::update_calendar_event(
+                        &ctx, &aid, &id, input,
+                    )
+                    .await;
+                    calendar_outcome_to_result(outcome)
+                },
                 |r| Message::Calendar(Box::new(CalendarMessage::EventSaved(r))),
             )
         } else {
+            let cal_id = event.calendar_id.clone().unwrap_or_default();
+            let aid = account_id.clone();
             Task::perform(
                 async move {
-                    db.create_calendar_event(params).await.map(|_id| ())
+                    let outcome = ratatoskr_calendar::actions::create_calendar_event(
+                        &ctx, &aid, &cal_id, input,
+                    )
+                    .await;
+                    calendar_outcome_to_result(outcome)
                 },
                 |r| Message::Calendar(Box::new(CalendarMessage::EventSaved(r))),
             )
@@ -432,6 +471,20 @@ impl App {
                 move |r| Message::Calendar(Box::new(CalendarMessage::CalendarsLoaded(load_generation, r))),
             ),
         ])
+    }
+}
+
+/// Map ActionOutcome to the Result<(), String> that CalendarMessage expects.
+///
+/// LocalOnly maps to Ok(()) — the event is visible locally, the overlay closes.
+/// Phase 3 can add richer outcome reporting for the "saved locally, not synced" case.
+fn calendar_outcome_to_result(
+    outcome: ratatoskr_core::actions::ActionOutcome,
+) -> Result<(), String> {
+    match outcome {
+        ratatoskr_core::actions::ActionOutcome::Success
+        | ratatoskr_core::actions::ActionOutcome::LocalOnly { .. } => Ok(()),
+        ratatoskr_core::actions::ActionOutcome::Failed { error } => Err(error),
     }
 }
 

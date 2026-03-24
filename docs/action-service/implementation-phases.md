@@ -55,16 +55,9 @@ Send flows through `actions::send_email()`: MIME build on `spawn_blocking`, draf
 
 ### Phase 2.5: Calendar event write-back
 
-**Goal:** Wire calendar event mutations through an authoritative write path.
+**Status:** Complete. See `phase-2.5-plan.md`.
 
-**Scope:**
-- Create, update, delete calendar events.
-- Provider implementations exist for Graph, Gmail, and JMAP but are never called from app handlers. Events are local DB only today.
-- Calendar write operations are not on `ProviderOps` — they use separate per-provider APIs.
-
-**Note:** Calendar and contact writes are different domains from email actions. They may warrant their own service modules (`core::calendar_actions`, `core::contact_actions`) rather than expanding `core::actions` into a grab-bag. The shared infrastructure (context, outcome types, provider resolution pattern) should be reusable, but the domain logic should not be forced into the same module. Decide during planning.
-
-**Exit criteria:** Calendar event save/delete goes through a centralized write path with provider dispatch where supported.
+Calendar event create/update/delete in `ratatoskr_calendar::actions`. Lives in the calendar crate (not core) due to circular dependency — calendar depends on core, core can't depend on calendar. Uses typed provider clients (`GmailClient`, `GraphClient`, `JmapClient`, CalDAV config) via `CalendarProvider` enum. Create is local-first (instant feedback, `LocalOnly` on provider failure). Update/delete are provider-first for synced events, local-only for unsynced. All four providers wired (Google, Graph, JMAP, CalDAV). App handler delegates via existing `CalendarMessage::EventSaved`/`EventDeleted` callbacks.
 
 ### Phase 2.6: Contact write-back
 
@@ -176,7 +169,8 @@ Each phase is designed to be independently valuable:
 - **After Phase 2.2:** Label routing is centralized. No `label_kind` branches in the app crate. ✅
 - **After Phase 2.3:** Send goes through the service. Draft auto-save and provider draft sync are separate. ✅
 - **After Phase 2.4:** Folder CRUD goes through the service. ✅
-- **After Phase 2.5–2.6:** Calendar and contact writes go through the service.
+- **After Phase 2.5:** Calendar event writes go through the service. ✅
+- **After Phase 2.6:** Contact writes go through the service.
 - **After Phase 3:** The service is trustworthy. Failure handling is consistent, observable, and explicitly defined.
 - **After Phase 4:** Undo works correctly for the first time.
 - **After Phase 5:** Bulk operations are handled and remote dispatch is reliable.
