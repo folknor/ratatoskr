@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
 use crate::search::SearchState;
@@ -20,4 +23,10 @@ pub struct ActionContext {
     /// pending-ops worker to prevent retried actions from re-enqueuing
     /// themselves (which would create duplicate pending ops).
     pub suppress_pending_enqueue: bool,
+    /// Tracks threads with in-flight mutations. Key: `"{account_id}:{thread_id}"`.
+    ///
+    /// Policy: one mutation at a time per thread, regardless of action type.
+    /// batch_execute checks+inserts before dispatch, removes after.
+    /// process_pending_ops skips in-flight threads without incrementing retry.
+    pub in_flight: Arc<Mutex<HashSet<String>>>,
 }

@@ -147,28 +147,44 @@ async fn execute_account_group(
     let mut consecutive_remote_failures: u32 = 0;
 
     for (idx, thread_id) in &thread_indices {
-        if consecutive_remote_failures >= MAX_CONSECUTIVE_FAILURES {
-            // Short-circuit: per-thread degraded path (retryable — provider was
-            // reachable but failing on consecutive operations)
-            let outcome = handle_thread_degraded(
-                ctx, action, account_id, thread_id,
-                "provider presumed unavailable after consecutive failures",
-                RemoteFailureKind::Unknown,
-            ).await;
-            results.push((*idx, outcome));
+        // In-flight guard: one mutation at a time per thread
+        let flight_key = format!("{account_id}:{thread_id}");
+        let already_in_flight = {
+            let mut guard = ctx.in_flight.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            !guard.insert(flight_key.clone())
+        };
+        if already_in_flight {
+            results.push((*idx, ActionOutcome::Failed {
+                error: ActionError::invalid_state("action already in flight for this thread"),
+            }));
             continue;
         }
 
-        let outcome = dispatch_with_provider(ctx, &*provider, action, account_id, thread_id).await;
-
-        if let ActionOutcome::LocalOnly { reason, .. } = &outcome {
-            if reason.is_retryable() {
-                consecutive_remote_failures += 1;
+        let outcome = if consecutive_remote_failures >= MAX_CONSECUTIVE_FAILURES {
+            // Short-circuit: per-thread degraded path
+            handle_thread_degraded(
+                ctx, action, account_id, thread_id,
+                "provider presumed unavailable after consecutive failures",
+                RemoteFailureKind::Unknown,
+            ).await
+        } else {
+            let o = dispatch_with_provider(ctx, &*provider, action, account_id, thread_id).await;
+            if let ActionOutcome::LocalOnly { reason, .. } = &o {
+                if reason.is_retryable() {
+                    consecutive_remote_failures += 1;
+                } else {
+                    consecutive_remote_failures = 0;
+                }
             } else {
                 consecutive_remote_failures = 0;
             }
-        } else {
-            consecutive_remote_failures = 0;
+            o
+        };
+
+        // Release in-flight guard
+        {
+            let mut guard = ctx.in_flight.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            guard.remove(&flight_key);
         }
 
         results.push((*idx, outcome));

@@ -498,6 +498,9 @@ impl App {
                     search: (**ss).clone(),
                     encryption_key: key,
                     suppress_pending_enqueue: false,
+                    in_flight: std::sync::Arc::new(std::sync::Mutex::new(
+                        std::collections::HashSet::new(),
+                    )),
                 })
             }
             _ => {
