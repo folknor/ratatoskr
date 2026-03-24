@@ -131,8 +131,16 @@ impl ActionError {
 }
 
 impl std::fmt::Display for ActionError {
+    /// Display preserves the internal detail (variant + message) for logging.
+    /// Use `user_message()` for UI-facing text.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.user_message())
+        match self {
+            Self::Db(msg) => write!(f, "Db: {msg}"),
+            Self::Remote { kind, message } => write!(f, "Remote({kind:?}): {message}"),
+            Self::NotFound(what) => write!(f, "NotFound: {what}"),
+            Self::InvalidState(msg) => write!(f, "InvalidState: {msg}"),
+            Self::Build(msg) => write!(f, "Build: {msg}"),
+        }
     }
 }
 

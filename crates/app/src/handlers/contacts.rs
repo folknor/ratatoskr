@@ -72,7 +72,17 @@ impl App {
                         log::error!("Contact save failed: {error}");
                         Message::Settings(SettingsMessage::ContactSaved(Err(error.user_message())))
                     }
-                    _ => Message::Settings(SettingsMessage::ContactsLoaded(contacts)),
+                    ActionOutcome::LocalOnly { reason } => {
+                        log::warn!("Contact save local-only: {reason}");
+                        // Reload list (local save succeeded) but also surface
+                        // the degraded state via ContactSaved
+                        Message::Settings(SettingsMessage::ContactSaved(
+                            Err(format!("Saved locally \u{2014} {}", reason.user_message())),
+                        ))
+                    }
+                    ActionOutcome::Success => {
+                        Message::Settings(SettingsMessage::ContactsLoaded(contacts))
+                    }
                 }
             },
         )
@@ -110,7 +120,18 @@ impl App {
                         log::error!("Contact delete failed: {error}");
                         Message::Settings(SettingsMessage::ContactDeleted(Err(error.user_message())))
                     }
-                    _ => {
+                    ActionOutcome::LocalOnly { reason } => {
+                        log::warn!("Contact delete local-only: {reason}");
+                        // Reload list (local delete succeeded) and surface degraded state
+                        if let Some(list) = contacts {
+                            Message::Settings(SettingsMessage::ContactsLoaded(Ok(list)))
+                        } else {
+                            Message::Settings(SettingsMessage::ContactDeleted(
+                                Err(format!("Deleted locally \u{2014} {}", reason.user_message())),
+                            ))
+                        }
+                    }
+                    ActionOutcome::Success => {
                         if let Some(list) = contacts {
                             Message::Settings(SettingsMessage::ContactsLoaded(Ok(list)))
                         } else {
