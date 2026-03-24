@@ -1,3 +1,6 @@
+use ratatoskr_provider_utils::ops::ProviderOps;
+use ratatoskr_provider_utils::types::ProviderCtx;
+
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
@@ -5,13 +8,34 @@ use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
 use crate::db::queries::set_thread_read;
 use crate::progress::NoopProgressReporter;
-use ratatoskr_provider_utils::types::ProviderCtx;
 
 /// Set read/unread state on a single thread.
 ///
 /// `read` is the target value.
 pub async fn mark_read(
     ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+    read: bool,
+) -> ActionOutcome {
+    let params_json = format!(r#"{{"read":{read}}}"#);
+    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+        Ok(p) => p,
+        Err(e) => {
+            let mlog = MutationLog::begin("mark_read", account_id, thread_id);
+            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            enqueue_if_retryable(ctx, &outcome, account_id, "markRead", thread_id, &params_json).await;
+            mlog.emit(&outcome);
+            return outcome;
+        }
+    };
+    mark_read_with_provider(ctx, &*provider, account_id, thread_id, read).await
+}
+
+/// Mark read with a pre-constructed provider (for batch reuse).
+pub(crate) async fn mark_read_with_provider(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
     account_id: &str,
     thread_id: &str,
     read: bool,
@@ -36,16 +60,6 @@ pub async fn mark_read(
         mlog.emit(&outcome);
         return outcome;
     }
-
-    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(p) => p,
-        Err(e) => {
-            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
-            enqueue_if_retryable(ctx, &outcome, account_id, "markRead", thread_id, &params_json).await;
-            mlog.emit(&outcome);
-            return outcome;
-        }
-    };
 
     let provider_ctx = ProviderCtx {
         account_id,

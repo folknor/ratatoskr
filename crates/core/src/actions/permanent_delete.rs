@@ -1,3 +1,6 @@
+use ratatoskr_provider_utils::ops::ProviderOps;
+use ratatoskr_provider_utils::types::ProviderCtx;
+
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
@@ -5,11 +8,30 @@ use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
 use crate::db::queries::delete_thread;
 use crate::progress::NoopProgressReporter;
-use ratatoskr_provider_utils::types::ProviderCtx;
 
 /// Permanently delete a single thread. Irreversible.
 pub async fn permanent_delete(
     ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+) -> ActionOutcome {
+    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+        Ok(p) => p,
+        Err(e) => {
+            let mlog = MutationLog::begin("permanent_delete", account_id, thread_id);
+            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            enqueue_if_retryable(ctx, &outcome, account_id, "permanentDelete", thread_id, "{}").await;
+            mlog.emit(&outcome);
+            return outcome;
+        }
+    };
+    permanent_delete_with_provider(ctx, &*provider, account_id, thread_id).await
+}
+
+/// Permanent delete with a pre-constructed provider (for batch reuse).
+pub(crate) async fn permanent_delete_with_provider(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
     account_id: &str,
     thread_id: &str,
 ) -> ActionOutcome {
@@ -32,16 +54,6 @@ pub async fn permanent_delete(
         mlog.emit(&outcome);
         return outcome;
     }
-
-    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(p) => p,
-        Err(e) => {
-            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
-            enqueue_if_retryable(ctx, &outcome, account_id, "permanentDelete", thread_id, "{}").await;
-            mlog.emit(&outcome);
-            return outcome;
-        }
-    };
 
     let provider_ctx = ProviderCtx {
         account_id,

@@ -1,3 +1,6 @@
+use ratatoskr_provider_utils::ops::ProviderOps;
+use ratatoskr_provider_utils::types::ProviderCtx;
+
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
@@ -5,7 +8,6 @@ use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
 use crate::db::queries::set_thread_starred;
 use crate::progress::NoopProgressReporter;
-use ratatoskr_provider_utils::types::ProviderCtx;
 
 /// Toggle star on a single thread.
 ///
@@ -13,6 +15,28 @@ use ratatoskr_provider_utils::types::ProviderCtx;
 /// current state and passes the new value to avoid TOCTOU issues).
 pub async fn star(
     ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+    starred: bool,
+) -> ActionOutcome {
+    let params_json = format!(r#"{{"starred":{starred}}}"#);
+    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+        Ok(p) => p,
+        Err(e) => {
+            let mlog = MutationLog::begin("star", account_id, thread_id);
+            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            enqueue_if_retryable(ctx, &outcome, account_id, "star", thread_id, &params_json).await;
+            mlog.emit(&outcome);
+            return outcome;
+        }
+    };
+    star_with_provider(ctx, &*provider, account_id, thread_id, starred).await
+}
+
+/// Star with a pre-constructed provider (for batch reuse).
+pub(crate) async fn star_with_provider(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
     account_id: &str,
     thread_id: &str,
     starred: bool,
@@ -37,16 +61,6 @@ pub async fn star(
         mlog.emit(&outcome);
         return outcome;
     }
-
-    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(p) => p,
-        Err(e) => {
-            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
-            enqueue_if_retryable(ctx, &outcome, account_id, "star", thread_id, &params_json).await;
-            mlog.emit(&outcome);
-            return outcome;
-        }
-    };
 
     let provider_ctx = ProviderCtx {
         account_id,

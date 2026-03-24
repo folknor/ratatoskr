@@ -1,3 +1,6 @@
+use ratatoskr_provider_utils::ops::ProviderOps;
+use ratatoskr_provider_utils::types::ProviderCtx;
+
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
@@ -5,24 +8,35 @@ use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
 use crate::email_actions::remove_inbox_label;
 use crate::progress::NoopProgressReporter;
-use ratatoskr_provider_utils::types::ProviderCtx;
 
 /// Archive a single thread: remove from inbox locally, then dispatch to provider.
-///
-/// This is the first action migrated to the action service. All four
-/// providers implement `ProviderOps::archive()` with real API calls:
-/// - Gmail: remove INBOX label via modify_thread
-/// - Graph: move messages to archive folder
-/// - JMAP: update mailbox memberships (remove inbox, add archive)
-/// - IMAP: COPY to archive folder + flag delete from inbox
 pub async fn archive(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,
 ) -> ActionOutcome {
+    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+        Ok(p) => p,
+        Err(e) => {
+            let mlog = MutationLog::begin("archive", account_id, thread_id);
+            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            enqueue_if_retryable(ctx, &outcome, account_id, "archive", thread_id, "{}").await;
+            mlog.emit(&outcome);
+            return outcome;
+        }
+    };
+    archive_with_provider(ctx, &*provider, account_id, thread_id).await
+}
+
+/// Archive with a pre-constructed provider (for batch reuse).
+pub(crate) async fn archive_with_provider(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
+    account_id: &str,
+    thread_id: &str,
+) -> ActionOutcome {
     let mlog = MutationLog::begin("archive", account_id, thread_id);
 
-    // 1. Local DB mutation (on blocking thread — DB connections are sync)
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
@@ -40,17 +54,6 @@ pub async fn archive(
         mlog.emit(&outcome);
         return outcome;
     }
-
-    // 2. Provider dispatch
-    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(p) => p,
-        Err(e) => {
-            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
-            enqueue_if_retryable(ctx, &outcome, account_id, "archive", thread_id, "{}").await;
-            mlog.emit(&outcome);
-            return outcome;
-        }
-    };
 
     let provider_ctx = ProviderCtx {
         account_id,

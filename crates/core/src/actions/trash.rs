@@ -1,3 +1,6 @@
+use ratatoskr_provider_utils::ops::ProviderOps;
+use ratatoskr_provider_utils::types::ProviderCtx;
+
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
@@ -5,12 +8,31 @@ use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
 use crate::email_actions::{insert_label, remove_label};
 use crate::progress::NoopProgressReporter;
-use ratatoskr_provider_utils::types::ProviderCtx;
 
 /// Trash a single thread: remove from inbox, add to trash locally, then
 /// dispatch to provider.
 pub async fn trash(
     ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+) -> ActionOutcome {
+    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+        Ok(p) => p,
+        Err(e) => {
+            let mlog = MutationLog::begin("trash", account_id, thread_id);
+            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            enqueue_if_retryable(ctx, &outcome, account_id, "trash", thread_id, "{}").await;
+            mlog.emit(&outcome);
+            return outcome;
+        }
+    };
+    trash_with_provider(ctx, &*provider, account_id, thread_id).await
+}
+
+/// Trash with a pre-constructed provider (for batch reuse).
+pub(crate) async fn trash_with_provider(
+    ctx: &ActionContext,
+    provider: &dyn ProviderOps,
     account_id: &str,
     thread_id: &str,
 ) -> ActionOutcome {
@@ -34,16 +56,6 @@ pub async fn trash(
         mlog.emit(&outcome);
         return outcome;
     }
-
-    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(p) => p,
-        Err(e) => {
-            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
-            enqueue_if_retryable(ctx, &outcome, account_id, "trash", thread_id, "{}").await;
-            mlog.emit(&outcome);
-            return outcome;
-        }
-    };
 
     let provider_ctx = ProviderCtx {
         account_id,
