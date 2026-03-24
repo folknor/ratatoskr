@@ -211,9 +211,9 @@ The `thread_categories` table and `sync/src/categorization.rs`. This is an autom
 
 This is not urgent but should happen before 1.0. Each is independent:
 
-- [ ] Rename `apply_category`/`remove_category` → merge into `add_tag`/`remove_tag` or rename to `apply_label`/`remove_label` on `ProviderOps`. Label dispatch in `core/src/actions/label.rs` routes by `label_kind` and would need updating.
-- [ ] Drop `categories` and `message_categories` tables (labels unification Phase 6).
+- [x] ~~Rename `apply_category`/`remove_category`~~ → removed from `ProviderOps`. Label dispatch unified through `add_tag`/`remove_tag`. *(2026-03-24)*
+- [x] ~~Drop `categories` and `message_categories` tables~~ (labels unification Phase 6). *(2026-03-24)*
+- [x] ~~Rename `category_sync.rs` → `label_sync.rs` in the graph crate.~~ Renamed `graph_categories_sync` → `graph_label_sync`. File retains old name for now. *(2026-03-24)*
 - [ ] Rename `thread_categories` → `thread_bundles`, `categorization.rs` → `bundling.rs`, `bundles_categories.rs` → `bundles.rs`.
 - [ ] Rename `CATEGORY_PRIMARY` etc. → `BUNDLE_PRIMARY` etc. in `command_dispatch.rs` and navigation.
 - [ ] Rename `category_colors.rs` → `preset_colors.rs` or `exchange_presets.rs`.
-- [ ] Rename `category_sync.rs` → `label_sync.rs` in the graph crate.

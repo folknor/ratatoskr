@@ -289,9 +289,9 @@ Note: `apply_category()`/`remove_category()` not yet removed from ProviderOps as
 
 `FolderKind::AccountTag` variant added. `build_account_labels` routes by `label_kind`. New `build_all_account_tags` loads tag-type labels from all accounts with cross-account unread aggregation. Sidebar renders tags in section 4 ("LABELS"), always visible.
 
-### Phase 6: Deprecate old tables
+### Phase 6: Deprecate old tables ✅
 
-Deferred. Once all sync paths are verified on the unified system, drop `categories` and `message_categories` tables.
+`categories` and `message_categories` tables dropped (migration 72). `apply_category`/`remove_category` removed from `ProviderOps`. All label dispatch unified through `add_tag`/`remove_tag`. IMAP/JMAP `add_tag` enhanced with `kw:` prefix detection for keyword operations. `INSERT OR REPLACE` bug fixed across all label sync paths (→ `ON CONFLICT DO UPDATE` preserving `label_kind`). IMAP keyword capability persisted on `accounts.supports_keywords` (migration 73) with action service preflight rejecting unsupported accounts.
 
 ## Accepted Trade-offs
 

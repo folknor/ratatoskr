@@ -1,0 +1,225 @@
+# Codebase Contracts: Problem Statement
+
+## The Problem
+
+Ratatoskr has implicit contracts — behaviors where correctness depends on every developer remembering to follow a multi-step protocol that nothing in the compiler, type system, or API surface enforces. A new developer adding a feature can silently break an invariant because the protocol exists only in convention.
+
+The action service (Phases 1–6) proved this is solvable: provider dispatch is now a compile-time boundary. The app crate physically cannot bypass the action service. This document catalogues every remaining implicit contract in the codebase, prioritized by risk.
+
+## What Makes a Contract Implicit
+
+1. Multiple call sites must follow the same protocol, but nothing enforces it
+2. Adding a new call site can silently break existing behavior
+3. The pattern relies on "every developer knows to..." rather than "the API makes it impossible not to..."
+
+The structural fix for each is the same principle: make the right thing the only thing. A single entry point, a type that enforces the invariant, or a compiler error when the protocol is violated.
+
+---
+
+## Critical — Fix Before Adding Features
+
+### 1. Mail mutations must go through the action service
+
+**Contract:** Every email state mutation must flow through `core::actions::*` for local DB + provider dispatch + pending-ops + undo + in-flight guard.
+
+**Currently enforced by:** Documentation. The Phase 6 compilation boundary prevents the app from importing provider crates, but it does not prevent direct DB label writes.
+
+**Already violated:** Pop-out archive (`handlers/pop_out.rs:80`) and delete (`handlers/pop_out.rs:107`) do raw `remove_thread_label`/`add_thread_label` DB calls, bypassing provider dispatch, undo, pending-ops, and the in-flight guard. The user archives from a pop-out — the thread disappears locally, the server is never notified, next sync may bring it back.
+
+**Structural fix:** Hide raw mutating mail DB helpers (`insert_label`, `remove_label`, `remove_inbox_label`, `delete_thread`, `set_thread_starred`, `set_thread_read`, `set_thread_pinned`, `set_thread_muted`) from the app crate. Make them `pub(crate)` in `ratatoskr-core` or move them into the actions module. The app can only call `actions::archive()`, `actions::trash()`, etc. Same principle as Phase 6's provider boundary — compile-time enforcement.
+
+### 2. Account deletion leaks external stores
+
+**Contract:** Deleting an account must clean up: main DB rows (CASCADE), body store entries, inline image store entries, cached attachment files, search index entries, and pending ops.
+
+**Currently enforced by:** `delete_account_row()` cascades FK-linked tables in the main DB. But `gather_deletion_data()` — which collects data needed for external store cleanup — exists and is never called from the app's `handle_delete_account`.
+
+**Already violated:** Deleting an account leaves orphaned data in bodies.db, inline images, and the attachment file cache. This is dead storage that accumulates forever.
+
+**Structural fix:** Make account deletion a single `core::account::delete::delete_account_full()` function that runs `gather_deletion_data`, cleans external stores, then deletes the DB row. The app calls this instead of the raw row delete.
+
+### 3. Compose window close loses dirty drafts
+
+**Contract:** Closing a compose window must persist any dirty draft before destroying the window.
+
+**Currently enforced by:** A 30-second auto-save timer. The OS close button path (`handle_window_close` in `main.rs`) removes the window immediately without checking for dirty state.
+
+**Already violated:** User types a reply, closes the compose window via the OS close button — draft is lost if the last auto-save was >0 seconds ago.
+
+**Structural fix:** `handle_window_close` for Compose windows must check `draft_dirty` and either force a synchronous save or show a "Save draft?" confirmation before removing the window.
+
+### 4. New CommandId variants silently ignored
+
+**Contract:** Every `CommandId` variant must have a dispatch arm that produces a `Message`. Currently, `dispatch_command` and `dispatch_other` have wildcard `_ => None` catch-alls.
+
+**Currently enforced by:** A test (`table_covers_all_variants`) checks the string mapping table, but no test verifies dispatch produces `Some(msg)` for every variant.
+
+**Violation scenario:** Developer adds `CommandId::EmailDeleteDraft`, registers it in the palette — the command appears, the user selects it, nothing happens. The wildcard swallows it.
+
+**Structural fix:** Remove `_ => None` catch-alls in dispatch functions. The compiler will then force a match arm for every variant. Or add a test asserting `dispatch_command` returns `Some` for every `CommandId` in `ALL_IDS`.
+
+---
+
+## High — Fix to Prevent New-Developer Mistakes
+
+### 5. Navigation state reset protocol
+
+**Contract:** Every "show this view" transition (account switch, label select, search clear, pinned search select, navigate-to) must: clear search state, clear pinned search, set navigation_target, clear selected_thread + reading pane, bump nav_generation + thread_generation, and reload threads.
+
+**Currently enforced by:** Copy-paste. At least 5 call sites in `main.rs` and `handlers/navigation.rs` each do a different subset of these 7 steps.
+
+**Violation scenario:** `SharedMailboxSelected` and `PublicFolderSelected` are currently stubs returning `Task::none()`. When implemented, the developer must replicate the exact protocol with no guide.
+
+**Structural fix:** `fn switch_view(&mut self, target: ViewTarget) -> Task<Message>` that encapsulates the entire reset/reload sequence. All navigation paths call this.
+
+### 6. Settings open/close protocol
+
+**Contract:** Opening settings requires: `show_settings = true`, `overlay = None`, `overlay_anim` reset, `active_tab` set, `begin_editing()`. Closing requires: commit or discard, `show_settings = false`, reset animation.
+
+**Currently enforced by:** Manual field writes at 3+ call sites. `open_contact_editor_for_email` already violates it — sets `show_settings = true` and `active_tab = People` but skips `overlay = None`, `overlay_anim`, and `begin_editing()`.
+
+**Structural fix:** `fn open_settings(&mut self, tab: Tab, overlay: Option<SettingsOverlay>)` and `fn close_settings(&mut self, commit: bool)`.
+
+### 7. Thread selection + reading pane consistency
+
+**Contract:** Clearing thread selection must also clear the reading pane. Setting a new selection must load the reading pane.
+
+**Currently enforced by:** Convention. At least 6 code paths set `selected_thread = None` without calling `reading_pane.set_thread(None)`, leaving stale message content visible.
+
+**Structural fix:** `fn clear_selection(&mut self)` and `fn select_thread(&mut self, idx: usize) -> Task<Message>` that keep both in sync.
+
+### 8. Compose routing deduplication
+
+**Contract:** Opening a compose window should check for an existing window for the same draft/thread and focus it instead of creating a duplicate.
+
+**Currently enforced by:** Nothing. All compose entry points (sidebar button, Reply, Forward, command palette, keyboard shortcut) call raw window-open helpers without dedup checks.
+
+**Structural fix:** `fn compose_target(&self, draft_id: Option<&str>, thread_id: Option<&str>) -> ComposeTarget { New | Existing(window_id) }`.
+
+### 9. New email actions require 8 parallel edits
+
+**Contract:** Adding a new email action requires: `EmailAction` variant, `CompletedAction` variant (with `removes_from_view`, `success_label`), `BatchAction` variant, `to_batch_action` mapping, `handle_action_completed` arm, `UndoToken` variant, undo dispatch arm, `handle_email_action` arm. Missing any one silently degrades (no undo, wrong toast, etc.).
+
+**Currently enforced by:** Convention. Wildcard arms in `to_batch_action` and undo dispatch return `None`/empty instead of failing, so missing arms are silent.
+
+**Structural fix:** A single action descriptor table (or derive macro) that generates the classification, batch mapping, rollback policy, and undo mapping from one definition.
+
+### 10. Scope state is split and partially ignored
+
+**Contract:** The active scope (which account/shared mailbox/public folder) must be consistent across the sidebar, navigation context, and all DB queries.
+
+**Currently enforced by:** Ad-hoc fields: `selected_account`, `selected_shared_mailbox`, `navigation_target`, `selected_label`. `current_scope()` only reads `selected_account` — shared mailbox and public folder selection is ignored.
+
+**Violation scenario:** Developer adds a scoped feature assuming the sidebar's selected shared mailbox affects queries. It doesn't — all loads use `AccountScope` from the plain account selector.
+
+**Structural fix:** A single `Scope` enum (`All`, `Account(id)`, `SharedMailbox(id)`, `PublicFolder(id)`) consumed by all query/context builders.
+
+---
+
+## Medium — Quality Improvements
+
+### 11. Overlay exclusivity
+
+**Contract:** Mutually exclusive overlays (command palette, calendar overlays, settings overlays, add-account wizard) must dismiss each other.
+
+**Currently enforced by:** Ad-hoc per-caller checks. Opening a calendar overlay doesn't close the palette. Opening settings doesn't dismiss calendar overlays.
+
+**Structural fix:** `fn request_overlay(&mut self, kind: OverlayKind) -> bool` that dismisses conflicting overlays.
+
+### 12. Calendar pop-out awareness
+
+**Contract:** When calendar is popped out, calendar actions must route to the pop-out, not flip the main window to calendar mode.
+
+**Currently enforced by:** Ad-hoc `.find(Calendar)` checks at 2 of 6+ calendar entry points. `SetAppMode(Calendar)`, `SetCalendarView`, `CalendarToday`, `CalendarCreateEvent` all bypass.
+
+**Structural fix:** `fn calendar_target(&self) -> CalendarTarget { PopOut(window_id) | Inline }`.
+
+### 13. Search state is a multi-field protocol
+
+**Contract:** `search_query`, `thread_list.search_query`, `search_generation`, `debounce_deadline`, `thread_list.mode`, `was_in_folder_view`, and pinned search state must move together.
+
+**Currently enforced by:** Two partial helper methods. Other paths modify individual fields directly.
+
+**Structural fix:** `SearchContext` struct with `enter_search()`, `clear_search()`, `select_pinned_search()`.
+
+### 14. `composer_is_open` boolean vs reality
+
+**Contract:** Must be `true` iff at least one `PopOutWindow::Compose` exists. Used to gate the auto-save subscription.
+
+**Currently enforced by:** Manual writes at 4 sites. With multiple compose windows, closing one could incorrectly set it false.
+
+**Structural fix:** Computed property: `fn composer_is_open(&self) -> bool { self.pop_out_windows.values().any(|w| matches!(w, PopOutWindow::Compose(_))) }`.
+
+### 15. Generation counter ordering
+
+**Contract:** Async loads must capture the right generation counter, and callers must bump before dispatching.
+
+**Currently enforced by:** Convention across 5+ generation counters (`nav_generation`, `thread_generation`, `search_generation`, etc.).
+
+**Structural fix:** Typed loader helpers that allocate and validate generations automatically.
+
+### 16. Pinned search state duplication
+
+**Contract:** `active_pinned_search` on App and `sidebar.active_pinned_search` must always agree.
+
+**Currently enforced by:** `clear_pinned_search_context()` clears both. Selection paths must set both.
+
+**Structural fix:** Store in one place, derive the other.
+
+### 17. Pop-out window lifecycle gaps
+
+**Contract:** Adding a new `PopOutWindow` variant requires handling in 7 code sites (title, view, resize, move, close, save session, message routing). 4 of 7 sites use wildcards/catch-alls that silently ignore new variants.
+
+**Structural fix:** Remove wildcards in window management code, or a trait on `PopOutWindow` variants.
+
+### 18. Action context degraded-mode boilerplate
+
+**Contract:** Every action dispatch must check `action_ctx.is_some()` and show a degraded-mode message.
+
+**Currently enforced by:** 9 identical `let Some(ref action_ctx) = self.action_ctx else { ... }` blocks.
+
+**Structural fix:** `fn require_action_ctx(&self) -> Result<&ActionContext, Task<Message>>`.
+
+### 19. Provider APIs are stringly typed
+
+**Contract:** `move_to_folder(&str)`, `add_tag(&str)`, and `apply_category(&str)` all take raw `&str`. Callers must know whether they're passing a folder ID, tag ID, or category name. `apply_category`/`remove_category` silently no-op on providers that don't support them.
+
+**Currently enforced by:** Nothing in types. Wrong string kind compiles and may do the wrong thing or nothing.
+
+**Structural fix:** Typed IDs (`FolderId`, `TagId`) and capability markers (`SupportsCategories`) instead of raw `&str` plus no-op defaults.
+
+### 20. Tables missing CASCADE foreign keys
+
+**Contract:** All tables with `account_id` should cascade on account deletion. 20+ tables added in later migrations have `account_id TEXT NOT NULL` without the foreign key constraint, leaving orphan rows on account deletion.
+
+**Structural fix:** Migration adding FK constraints (requires table recreation in SQLite).
+
+### 21. Add-account wizard vs settings exclusivity
+
+**Contract:** The wizard and settings cannot both be active. Opening settings while the wizard is open leaves `show_settings = true` — when the wizard completes, settings immediately appears.
+
+**Structural fix:** Handled by the overlay exclusivity system (#11).
+
+### 22. Reading pane star state manual sync
+
+**Contract:** Toggling star optimistically must update both the thread list and the reading pane's star state.
+
+**Currently enforced by:** Manual `reading_pane.update_star()` calls alongside the thread list toggle.
+
+**Structural fix:** Unified state-sync method called by both optimistic toggle and rollback.
+
+---
+
+## Implementation Strategy
+
+The action service effort proved the pattern: identify the invariant, make it structural, enforce at compile time where possible. For UI contracts, compile-time enforcement isn't always possible, but centralizing behind a single function eliminates the "forgot a step" failure mode.
+
+**Recommended order:**
+1. **#1** (action service boundary for DB writes) — same pattern as Phase 6, highest leverage
+2. **#3** (draft save on close) — user data loss
+3. **#4** (CommandId dispatch) — one-line fix, prevents silent failures
+4. **#5 + #7** (navigation + selection reset) — highest-frequency developer touchpoint
+5. **#6** (settings protocol) — already violated
+6. The rest can be prioritized by product need
+
+Each contract should be its own commit (or small series), following the same plan → implement → review cycle used for the action service phases.
