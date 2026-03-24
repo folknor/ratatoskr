@@ -83,7 +83,7 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
             input.email
         );
         log::warn!("{msg}");
-        return ActionOutcome::LocalOnly { reason: ActionError::remote(msg) };
+        return ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: false };
     };
 
     match dispatch_write_back(
@@ -100,7 +100,7 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             log::warn!("Contact write-back failed for {}: {e}", input.email);
-            ActionOutcome::LocalOnly { reason: e }
+            ActionOutcome::LocalOnly { reason: e, retryable: false }
         }
     }
 }
@@ -172,7 +172,7 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
     }
 
     match provider_outcome {
-        Some(reason) => ActionOutcome::LocalOnly { reason },
+        Some(reason) => ActionOutcome::LocalOnly { reason, retryable: false },
         None => ActionOutcome::Success,
     }
 }

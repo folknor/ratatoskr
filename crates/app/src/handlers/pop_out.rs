@@ -1104,7 +1104,7 @@ impl App {
             // failures), but handle it defensively as failure for safety.
             ratatoskr_core::actions::ActionOutcome::Failed { error }
             | ratatoskr_core::actions::ActionOutcome::LocalOnly {
-                reason: error,
+                reason: error, ..
             } => {
                 if let Some(PopOutWindow::Compose(state)) =
                     self.pop_out_windows.get_mut(&window_id)

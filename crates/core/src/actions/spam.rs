@@ -41,7 +41,7 @@ pub async fn spam(
         Ok(p) => p,
         Err(e) => {
             log::warn!("Spam local-only (provider create failed): {e}");
-            return ActionOutcome::LocalOnly { reason: ActionError::remote(e) };
+            return ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
         }
     };
 
@@ -59,7 +59,7 @@ pub async fn spam(
         Err(e) => {
             let msg = e.to_string();
             log::warn!("Spam remote failed for {account_id}/{thread_id}: {msg}");
-            ActionOutcome::LocalOnly { reason: ActionError::remote(msg) }
+            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
         }
     }
 }

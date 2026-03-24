@@ -5,7 +5,15 @@ pub enum ActionOutcome {
     Success,
     /// Local succeeded, remote dispatch failed or was skipped.
     /// The action took effect locally but may revert on next sync.
-    LocalOnly { reason: ActionError },
+    ///
+    /// `retryable` indicates whether this failure is a candidate for
+    /// automatic retry via the pending-ops queue (Phase 3.4). Classified
+    /// per action class at the call site:
+    /// - `true`: email actions (archive, trash, spam, move, star, mark_read,
+    ///   label) with Transient or Unknown remote errors.
+    /// - `false`: calendar create, contact save/delete (low priority),
+    ///   NotImplemented stubs, Permanent errors.
+    LocalOnly { reason: ActionError, retryable: bool },
     /// The action failed entirely (local not applied).
     Failed { error: ActionError },
 }
@@ -106,6 +114,20 @@ impl ActionError {
 
     pub fn build(msg: impl Into<String>) -> Self {
         Self::Build(msg.into())
+    }
+
+    /// Whether this error is worth retrying (Transient or Unknown remote).
+    /// Used by action functions to set `retryable` on `LocalOnly`.
+    /// Permanent, NotImplemented, Db, NotFound, InvalidState, and Build
+    /// errors are never retryable.
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::Remote {
+                kind: RemoteFailureKind::Transient | RemoteFailureKind::Unknown,
+                ..
+            }
+        )
     }
 
     /// User-facing summary for toast/status display.

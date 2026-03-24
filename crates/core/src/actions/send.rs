@@ -82,7 +82,7 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
         let rows = conn
             .execute(
                 "UPDATE local_drafts SET sync_status = 'sending' \
-                 WHERE id = ?1 AND sync_status IN ('pending', 'synced', 'finalized', 'failed')",
+                 WHERE id = ?1 AND sync_status IN ('pending', 'synced', 'failed')",
                 rusqlite::params![draft_id],
             )
             .map_err(|e| ActionError::db(format!("mark sending: {e}")))?;

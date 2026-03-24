@@ -72,7 +72,7 @@ impl App {
                         log::error!("Contact save failed: {error}");
                         Message::Settings(SettingsMessage::ContactSaved(Err(error.user_message())))
                     }
-                    ActionOutcome::LocalOnly { reason } => {
+                    ActionOutcome::LocalOnly { reason, .. } => {
                         log::warn!("Contact save local-only: {reason}");
                         // Reload list (local save succeeded) but also surface
                         // the degraded state via ContactSaved
@@ -120,7 +120,7 @@ impl App {
                         log::error!("Contact delete failed: {error}");
                         Message::Settings(SettingsMessage::ContactDeleted(Err(error.user_message())))
                     }
-                    ActionOutcome::LocalOnly { reason } => {
+                    ActionOutcome::LocalOnly { reason, .. } => {
                         log::warn!("Contact delete local-only: {reason}");
                         // Reload list (local delete succeeded) and surface degraded state
                         if let Some(list) = contacts {

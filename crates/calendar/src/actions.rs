@@ -404,7 +404,7 @@ pub async fn create_calendar_event(
         Ok(p) => p,
         Err(e) => {
             log::warn!("Calendar create local-only (provider create failed): {e}");
-            return ActionOutcome::LocalOnly { reason: e };
+            return ActionOutcome::LocalOnly { reason: e, retryable: false };
         }
     };
 
@@ -427,7 +427,7 @@ pub async fn create_calendar_event(
         }
         Err(e) => {
             log::warn!("Calendar create provider failed for {account_id}: {e}");
-            ActionOutcome::LocalOnly { reason: e }
+            ActionOutcome::LocalOnly { reason: e, retryable: false }
         }
     }
 }

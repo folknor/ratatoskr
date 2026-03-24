@@ -66,6 +66,7 @@ pub async fn add_label(
             log::warn!("AddLabel local-only (provider create failed): {e}");
             return ActionOutcome::LocalOnly {
                 reason: ActionError::remote(e),
+                retryable: true,
             };
         }
     };
@@ -98,6 +99,7 @@ pub async fn add_label(
             log::warn!("AddLabel remote failed for {account_id}/{thread_id}: {msg}");
             ActionOutcome::LocalOnly {
                 reason: ActionError::remote(msg),
+                retryable: true,
             }
         }
     }
@@ -156,6 +158,7 @@ pub async fn remove_label(
             log::warn!("RemoveLabel local-only (provider create failed): {e}");
             return ActionOutcome::LocalOnly {
                 reason: ActionError::remote(e),
+                retryable: true,
             };
         }
     };
@@ -186,6 +189,7 @@ pub async fn remove_label(
             log::warn!("RemoveLabel remote failed for {account_id}/{thread_id}: {msg}");
             ActionOutcome::LocalOnly {
                 reason: ActionError::remote(msg),
+                retryable: true,
             }
         }
     }

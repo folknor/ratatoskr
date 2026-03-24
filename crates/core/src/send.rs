@@ -222,7 +222,7 @@ pub async fn mark_draft_sending(db: &DbState, draft_id: String) -> Result<(), St
         let rows = conn
             .execute(
                 "UPDATE local_drafts SET sync_status = 'sending' \
-                 WHERE id = ?1 AND sync_status IN ('pending', 'synced', 'finalized', 'failed')",
+                 WHERE id = ?1 AND sync_status IN ('pending', 'synced', 'failed')",
                 params![draft_id],
             )
             .map_err(|e| e.to_string())?;

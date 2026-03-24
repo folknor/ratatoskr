@@ -35,7 +35,7 @@ pub async fn star(
         Ok(p) => p,
         Err(e) => {
             log::warn!("Star local-only (provider create failed): {e}");
-            return ActionOutcome::LocalOnly { reason: ActionError::remote(e) };
+            return ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
         }
     };
 
@@ -53,7 +53,7 @@ pub async fn star(
         Err(e) => {
             let msg = e.to_string();
             log::warn!("Star remote failed for {account_id}/{thread_id}: {msg}");
-            ActionOutcome::LocalOnly { reason: ActionError::remote(msg) }
+            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
         }
     }
 }
