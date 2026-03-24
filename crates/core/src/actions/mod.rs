@@ -7,6 +7,7 @@
 
 mod archive;
 mod context;
+pub mod contacts;
 mod folder;
 mod label;
 mod mark_read;

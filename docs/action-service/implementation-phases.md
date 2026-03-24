@@ -61,14 +61,9 @@ Calendar event create/update/delete in `ratatoskr_calendar::actions`. Lives in t
 
 ### Phase 2.6: Contact write-back
 
-**Goal:** Wire contact mutations through an authoritative write path.
+**Status:** Complete. See `phase-2.6-plan.md`.
 
-**Scope:**
-- Save/delete contacts to providers.
-- JMAP is furthest along (full implementation exists). Google and Graph have scaffolding but need HTTP calls wired. CardDAV needs PUT support.
-- Same module placement question as 2.5 — likely `core::contact_actions` or similar, not `core::actions`.
-
-**Exit criteria:** Contact save for synced contacts goes through a centralized write path with provider dispatch where supported.
+Contact save/delete in `core::actions::contacts`. JMAP write-back fully wired (save + delete via `ContactCard/set`). Google/Graph/CardDAV return `LocalOnly` with descriptive errors (scaffolding exists, HTTP not wired). Save is local-first with best-effort write-back. Delete is provider-first for JMAP, degraded local-only for others. Settings UI source bug fixed (synced identity preserved through save path). `server_id` added to `ContactEntry`/`ContactEditorState` for unambiguous provider dispatch. `db_upsert_contact_full` extracted to core.
 
 ---
 
@@ -170,7 +165,7 @@ Each phase is designed to be independently valuable:
 - **After Phase 2.3:** Send goes through the service. Draft auto-save and provider draft sync are separate. ✅
 - **After Phase 2.4:** Folder CRUD goes through the service. ✅
 - **After Phase 2.5:** Calendar event writes go through the service. ✅
-- **After Phase 2.6:** Contact writes go through the service.
+- **After Phase 2.6:** Contact writes go through the service. ✅
 - **After Phase 3:** The service is trustworthy. Failure handling is consistent, observable, and explicitly defined.
 - **After Phase 4:** Undo works correctly for the first time.
 - **After Phase 5:** Bulk operations are handled and remote dispatch is reliable.

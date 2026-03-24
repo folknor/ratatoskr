@@ -422,6 +422,8 @@ pub struct ContactEditorState {
     /// Contact source: "user" (local), "google", "graph", "carddav", etc.
     /// None for newly created contacts (treated as local).
     pub source: Option<String>,
+    /// Provider-assigned server ID for synced contacts.
+    pub server_id: Option<String>,
     /// Whether fields have been modified since opening the editor.
     pub dirty: bool,
 }

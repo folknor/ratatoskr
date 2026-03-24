@@ -802,6 +802,7 @@ impl Settings {
                 company: contact.company.clone().unwrap_or_default(),
                 notes: contact.notes.clone().unwrap_or_default(),
                 source: contact.source.clone(),
+                server_id: contact.server_id.clone(),
                 dirty: false,
             });
             self.overlay = Some(SettingsOverlay::EditContact {
@@ -822,6 +823,7 @@ impl Settings {
             company: String::new(),
             notes: String::new(),
             source: None,
+            server_id: None,
             dirty: false,
         });
         self.overlay = Some(SettingsOverlay::EditContact { contact_id: None });
@@ -847,7 +849,8 @@ impl Settings {
             account_id: editor.account_id.clone(),
             account_color: None,
             groups: Vec::new(),
-            source: Some("user".to_string()),
+            source: editor.source.clone().or_else(|| Some("user".to_string())),
+            server_id: editor.server_id.clone(),
         };
         self.overlay = None;
         self.overlay_anim.go_mut(false, Instant::now());

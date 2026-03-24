@@ -36,31 +36,34 @@ impl App {
     }
 
     pub(crate) fn handle_save_contact(&self, entry: ContactEntry) -> Task<Message> {
+        let Some(ref action_ctx) = self.action_ctx else {
+            return Task::none();
+        };
+        let ctx = action_ctx.clone();
         let db = Arc::clone(&self.db);
         let filter = self.settings.contact_filter.clone();
-        let source = entry.source.clone();
-        let email = entry.email.clone();
-        let phone = entry.phone.clone();
-        let company = entry.company.clone();
-        let notes = entry.notes.clone();
 
-        // Save locally first, then attempt provider write-back for synced contacts
+        let input = ratatoskr_core::actions::contacts::ContactSaveInput {
+            id: entry.id,
+            email: entry.email,
+            display_name: entry.display_name,
+            email2: entry.email2,
+            phone: entry.phone,
+            company: entry.company,
+            notes: entry.notes,
+            account_id: entry.account_id,
+            source: entry.source,
+            server_id: entry.server_id,
+        };
+
         Task::perform(
             async move {
-                db.save_contact(entry).await?;
-
-                // Provider write-back (best-effort — errors logged, not surfaced)
-                if let Some(ref src) = source {
-                    let wb_result = dispatch_provider_write_back(
-                        &db, src, &email, phone.as_deref(),
-                        company.as_deref(), notes.as_deref(),
-                    )
-                    .await;
-                    if let Err(e) = wb_result {
-                        log::warn!("Contact write-back failed for {email}: {e}");
-                    }
+                let outcome =
+                    ratatoskr_core::actions::contacts::save_contact(&ctx, input).await;
+                if let ratatoskr_core::actions::ActionOutcome::Failed { ref error } = outcome {
+                    log::error!("Contact save failed: {error}");
                 }
-
+                // Reload contacts regardless of outcome (local save may have succeeded)
                 db.get_contacts_for_settings(filter).await
             },
             |result| Message::Settings(SettingsMessage::ContactsLoaded(result)),
@@ -68,11 +71,20 @@ impl App {
     }
 
     pub(crate) fn handle_delete_contact(&self, id: String) -> Task<Message> {
+        let Some(ref action_ctx) = self.action_ctx else {
+            return Task::none();
+        };
+        let ctx = action_ctx.clone();
         let db = Arc::clone(&self.db);
         let filter = self.settings.contact_filter.clone();
+
         Task::perform(
             async move {
-                db.delete_contact(id).await?;
+                let outcome =
+                    ratatoskr_core::actions::contacts::delete_contact(&ctx, &id).await;
+                if let ratatoskr_core::actions::ActionOutcome::Failed { ref error } = outcome {
+                    log::error!("Contact delete failed: {error}");
+                }
                 db.get_contacts_for_settings(filter).await
             },
             |result| Message::Settings(SettingsMessage::ContactsLoaded(result)),
@@ -304,66 +316,7 @@ fn build_contact_entry(
         account_color: None,
         groups: contact.groups.clone(),
         source: None,
-    }
-}
-
-// ── Provider write-back ─────────────────────────────────
-
-/// Dispatch a contact write-back to the appropriate provider.
-///
-/// This is called after the local save completes. It's best-effort —
-/// errors are returned for logging but do not prevent the local save.
-/// Display name changes are NOT pushed (local-only override per spec).
-async fn dispatch_provider_write_back(
-    db: &Arc<Db>,
-    source: &str,
-    email: &str,
-    phone: Option<&str>,
-    company: Option<&str>,
-    notes: Option<&str>,
-) -> Result<(), String> {
-    match source {
-        "google" => {
-            // Google People API write-back: scaffolding exists in
-            // core::contacts::sync_google but HTTP push not yet wired.
-            // The body builder and server info lookup are ready — once
-            // GmailClient is available at this layer, wire:
-            //   1. get_google_contact_server_info(db, email)
-            //   2. build_google_contact_update_body(phone, company, etag)
-            //   3. client.patch_absolute(url, body)
-            log::info!("Google contact write-back queued for {email} (not yet wired to HTTP)");
-            Ok(())
-        }
-        "graph" => {
-            // Microsoft Graph write-back: scaffolding exists in
-            // core::contacts::sync_graph but HTTP push not yet wired.
-            //   1. get_graph_contact_server_info(db, email)
-            //   2. build_graph_contact_update_body(phone, company)
-            //   3. client.patch(url, body)
-            log::info!("Graph contact write-back queued for {email} (not yet wired to HTTP)");
-            Ok(())
-        }
-        "jmap" => {
-            // JMAP ContactCard/set is fully implemented in
-            // crates/jmap/src/contacts_sync.rs::jmap_contacts_push_update.
-            // Need JmapClient instance to call it. When sync orchestrator
-            // provides client access, wire:
-            //   1. get_jmap_contact_server_info(db, email)
-            //   2. jmap_contacts_push_update(client, server_id, phone, company, notes)
-            log::info!("JMAP contact write-back queued for {email} (not yet wired to client)");
-            Ok(())
-        }
-        "carddav" => {
-            // CardDAV PUT is not yet implemented in the CardDavClient.
-            // Needs: vCard builder + PUT method on client.
-            log::info!("CardDAV contact write-back not yet supported for {email}");
-            Ok(())
-        }
-        "user" => Ok(()), // Local contacts don't need write-back
-        other => {
-            log::warn!("Unknown contact source '{other}' for write-back");
-            Ok(())
-        }
+        server_id: None,
     }
 }
 

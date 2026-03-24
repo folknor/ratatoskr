@@ -3,7 +3,7 @@ use crate::db::FromRow;
 use super::super::types::{
     ContactAttachmentRow, ContactStats, DbContact, RecentThread, SameDomainContact,
 };
-use rusqlite::params;
+use rusqlite::{params, Connection};
 
 pub async fn db_get_all_contacts(
     db: &DbState,
@@ -90,6 +90,43 @@ pub async fn db_update_contact_notes(
         Ok(())
     })
     .await
+}
+
+/// Upsert a contact with all mutable fields.
+///
+/// Used by the contact action service. The app-crate `save_contact_inner`
+/// has equivalent SQL — this is the core-accessible version.
+pub fn db_upsert_contact_full(
+    conn: &Connection,
+    id: &str,
+    email: &str,
+    display_name: Option<&str>,
+    email2: Option<&str>,
+    phone: Option<&str>,
+    company: Option<&str>,
+    notes: Option<&str>,
+    account_id: Option<&str>,
+    source: &str,
+) -> Result<(), String> {
+    let now = chrono::Utc::now().timestamp();
+    conn.execute(
+        "INSERT INTO contacts (id, email, display_name, email2, phone,
+                               company, notes, account_id, source,
+                               created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)
+         ON CONFLICT(id) DO UPDATE SET
+             email = excluded.email,
+             display_name = excluded.display_name,
+             email2 = excluded.email2,
+             phone = excluded.phone,
+             company = excluded.company,
+             notes = excluded.notes,
+             account_id = excluded.account_id,
+             updated_at = excluded.updated_at",
+        params![id, email, display_name, email2, phone, company, notes, account_id, source, now],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 pub async fn db_delete_contact(db: &DbState, id: String) -> Result<(), String> {
