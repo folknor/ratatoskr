@@ -31,7 +31,7 @@ Phase 2.3 closes the gap: the action service owns staging (validation, MIME buil
 
 ### Orphaned `'queued'` drafts
 
-The old path sets `sync_status = 'queued'`. After this migration, no code will ever set that status or poll for it. Existing `'queued'` rows from previous app runs are orphaned. A startup cleanup should delete or resurface them — see Step 8.
+The old path sets `sync_status = 'queued'`. After this migration, no code will ever set that status or poll for it. Existing `'queued'` rows from previous app runs are orphaned. These may be the only persisted copy of messages users believed were sent — deleting them silently would be data loss. They must be resurfaced, not discarded — see Step 8.
 
 ## Design Decisions
 
@@ -309,7 +309,7 @@ pub async fn send_email(
 }
 ```
 
-**Note on lifecycle helpers vs raw SQL:** The `mark_draft_sending` helper in `send.rs` is async and takes `&DbState`. Inside `spawn_blocking` we already hold the `Mutex<Connection>` lock, so we inline the state-machine SQL (`UPDATE ... WHERE sync_status IN (...)`) rather than calling the async helper. The validation logic is identical — same SQL, same state check. `mark_draft_sent` and `mark_draft_failed` are called outside `spawn_blocking` and use the existing async helpers directly.
+**Note on lifecycle helpers vs raw SQL:** Both `db_save_local_draft` and `mark_draft_sending` are async functions that take `&DbState`. Inside `spawn_blocking` we already hold the `Mutex<Connection>` lock, so we cannot call either async helper. The initial INSERT and the state-machine UPDATE are inlined with identical logic to their helper counterparts — same SQL, same state check, same column mapping. `mark_draft_sent` and `mark_draft_failed` are called outside `spawn_blocking` and use the existing async helpers directly.
 
 `delete_draft` — lookup and delete in a single `spawn_blocking`:
 
@@ -470,7 +470,8 @@ pub(crate) fn handle_send_completed(
             iced::window::close(window_id)
         }
         ActionOutcome::Failed { error } | ActionOutcome::LocalOnly { remote_error: error } => {
-            // Re-enable compose, show error
+            // LocalOnly should not occur for send (send uses Failed for all
+            // failures), but handle it defensively as failure for safety.
             if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id) {
                 state.sending = false;
                 state.status = Some(format!("Send failed: {error}"));
@@ -481,15 +482,15 @@ pub(crate) fn handle_send_completed(
 }
 ```
 
-### Step 8: Clean up orphaned `'queued'` drafts
+### Step 8: Resurface orphaned `'queued'` drafts
 
-Add a startup cleanup that deletes `'queued'` drafts from the old code path. These were never sent and never will be:
+Existing `'queued'` rows from the old code path were never sent. They may contain messages users believed were sent. On startup, transition them to `'failed'` so they're visible to the future outbox/failed-send UI:
 
 ```sql
-DELETE FROM local_drafts WHERE sync_status = 'queued'
+UPDATE local_drafts SET sync_status = 'failed' WHERE sync_status = 'queued'
 ```
 
-This runs once during app boot, alongside other startup initialization. Not a migration — just a cleanup of dead state.
+This runs once during app boot. The drafts are preserved with their full content (MIME in `attachments`, structured fields in other columns). When outbox UI is built, these will appear as failed sends that the user can retry or discard.
 
 ### Step 9: Delete legacy send code
 
@@ -508,7 +509,7 @@ Register `delete_draft` in the action service. No call site in Phase 2.3. It bec
 - Manual smoke test: send an email, verify it reaches the provider (check sent folder on server).
 - Verify failed send re-enables the compose window (simulate by disconnecting network).
 - Verify `mark_draft_sent`/`mark_draft_failed` are called (log output).
-- Verify orphaned `'queued'` drafts are cleaned up on boot.
+- Verify orphaned `'queued'` drafts are transitioned to `'failed'` on boot (not deleted).
 
 ## What This Produces
 
@@ -526,7 +527,7 @@ Register `delete_draft` in the action service. No call site in Phase 2.3. It bec
 4. `local_drafts` rows transition through `'pending'` → `'sending'` → `'sent'`/`'failed'` lifecycle using existing helpers.
 5. Send failure returns `ActionOutcome::Failed`, not `LocalOnly`.
 6. MIME build runs on `spawn_blocking` (not on the async runtime).
-7. Orphaned `'queued'` drafts from the old path are cleaned up on boot.
+7. Orphaned `'queued'` drafts from the old path are transitioned to `'failed'` on boot (preserved, not deleted).
 8. The app crate no longer builds MIME or inserts into `local_drafts` directly.
 9. Workspace compiles and passes clippy.
 
