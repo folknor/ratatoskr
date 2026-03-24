@@ -9,6 +9,21 @@ use super::provider::create_provider;
 use crate::db::queries::set_thread_read;
 use crate::progress::NoopProgressReporter;
 
+/// Local DB mutation for mark-read (idempotent).
+async fn mark_read_local(ctx: &ActionContext, account_id: &str, thread_id: &str, read: bool) -> Result<(), ActionError> {
+    let db = ctx.db.clone();
+    let aid = account_id.to_string();
+    let tid = thread_id.to_string();
+    tokio::task::spawn_blocking(move || {
+        let conn = db.conn();
+        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        set_thread_read(&conn, &aid, &tid, read)
+    })
+    .await
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
+    .and_then(|r| r.map_err(ActionError::db))
+}
+
 /// Set read/unread state on a single thread.
 ///
 /// `read` is the target value.
@@ -18,18 +33,24 @@ pub async fn mark_read(
     thread_id: &str,
     read: bool,
 ) -> ActionOutcome {
+    let mlog = MutationLog::begin("mark_read", account_id, thread_id);
     let params_json = format!(r#"{{"read":{read}}}"#);
-    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(p) => p,
+
+    if let Err(e) = mark_read_local(ctx, account_id, thread_id, read).await {
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
+    match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+        Ok(provider) => mark_read_with_provider(ctx, &*provider, account_id, thread_id, read).await,
         Err(e) => {
-            let mlog = MutationLog::begin("mark_read", account_id, thread_id);
             let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
             enqueue_if_retryable(ctx, &outcome, account_id, "markRead", thread_id, &params_json).await;
             mlog.emit(&outcome);
-            return outcome;
+            outcome
         }
-    };
-    mark_read_with_provider(ctx, &*provider, account_id, thread_id, read).await
+    }
 }
 
 /// Mark read with a pre-constructed provider (for batch reuse).
@@ -43,19 +64,7 @@ pub(crate) async fn mark_read_with_provider(
     let mlog = MutationLog::begin("mark_read", account_id, thread_id);
     let params_json = format!(r#"{{"read":{read}}}"#);
 
-    let db = ctx.db.clone();
-    let aid = account_id.to_string();
-    let tid = thread_id.to_string();
-    let local_result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        set_thread_read(&conn, &aid, &tid, read)
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r.map_err(ActionError::db));
-
-    if let Err(e) = local_result {
+    if let Err(e) = mark_read_local(ctx, account_id, thread_id, read).await {
         let outcome = ActionOutcome::Failed { error: e };
         mlog.emit(&outcome);
         return outcome;

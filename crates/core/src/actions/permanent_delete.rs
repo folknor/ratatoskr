@@ -9,23 +9,44 @@ use super::provider::create_provider;
 use crate::db::queries::delete_thread;
 use crate::progress::NoopProgressReporter;
 
+/// Local DB mutation for permanent delete (idempotent).
+async fn permanent_delete_local(ctx: &ActionContext, account_id: &str, thread_id: &str) -> Result<(), ActionError> {
+    let db = ctx.db.clone();
+    let aid = account_id.to_string();
+    let tid = thread_id.to_string();
+    tokio::task::spawn_blocking(move || {
+        let conn = db.conn();
+        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        delete_thread(&conn, &aid, &tid)
+    })
+    .await
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
+    .and_then(|r| r.map_err(ActionError::db))
+}
+
 /// Permanently delete a single thread. Irreversible.
 pub async fn permanent_delete(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,
 ) -> ActionOutcome {
-    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(p) => p,
+    let mlog = MutationLog::begin("permanent_delete", account_id, thread_id);
+
+    if let Err(e) = permanent_delete_local(ctx, account_id, thread_id).await {
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
+    match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+        Ok(provider) => permanent_delete_with_provider(ctx, &*provider, account_id, thread_id).await,
         Err(e) => {
-            let mlog = MutationLog::begin("permanent_delete", account_id, thread_id);
             let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
             enqueue_if_retryable(ctx, &outcome, account_id, "permanentDelete", thread_id, "{}").await;
             mlog.emit(&outcome);
-            return outcome;
+            outcome
         }
-    };
-    permanent_delete_with_provider(ctx, &*provider, account_id, thread_id).await
+    }
 }
 
 /// Permanent delete with a pre-constructed provider (for batch reuse).
@@ -37,19 +58,7 @@ pub(crate) async fn permanent_delete_with_provider(
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("permanent_delete", account_id, thread_id);
 
-    let db = ctx.db.clone();
-    let aid = account_id.to_string();
-    let tid = thread_id.to_string();
-    let local_result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        delete_thread(&conn, &aid, &tid)
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r.map_err(ActionError::db));
-
-    if let Err(e) = local_result {
+    if let Err(e) = permanent_delete_local(ctx, account_id, thread_id).await {
         let outcome = ActionOutcome::Failed { error: e };
         mlog.emit(&outcome);
         return outcome;

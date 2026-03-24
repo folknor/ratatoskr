@@ -9,6 +9,21 @@ use super::provider::create_provider;
 use crate::db::queries::set_thread_starred;
 use crate::progress::NoopProgressReporter;
 
+/// Local DB mutation for star (idempotent).
+async fn star_local(ctx: &ActionContext, account_id: &str, thread_id: &str, starred: bool) -> Result<(), ActionError> {
+    let db = ctx.db.clone();
+    let aid = account_id.to_string();
+    let tid = thread_id.to_string();
+    tokio::task::spawn_blocking(move || {
+        let conn = db.conn();
+        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        set_thread_starred(&conn, &aid, &tid, starred)
+    })
+    .await
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
+    .and_then(|r| r.map_err(ActionError::db))
+}
+
 /// Toggle star on a single thread.
 ///
 /// `starred` is the target value (not "toggle" — the caller resolves
@@ -19,18 +34,24 @@ pub async fn star(
     thread_id: &str,
     starred: bool,
 ) -> ActionOutcome {
+    let mlog = MutationLog::begin("star", account_id, thread_id);
     let params_json = format!(r#"{{"starred":{starred}}}"#);
-    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(p) => p,
+
+    if let Err(e) = star_local(ctx, account_id, thread_id, starred).await {
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
+    match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+        Ok(provider) => star_with_provider(ctx, &*provider, account_id, thread_id, starred).await,
         Err(e) => {
-            let mlog = MutationLog::begin("star", account_id, thread_id);
             let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
             enqueue_if_retryable(ctx, &outcome, account_id, "star", thread_id, &params_json).await;
             mlog.emit(&outcome);
-            return outcome;
+            outcome
         }
-    };
-    star_with_provider(ctx, &*provider, account_id, thread_id, starred).await
+    }
 }
 
 /// Star with a pre-constructed provider (for batch reuse).
@@ -44,19 +65,7 @@ pub(crate) async fn star_with_provider(
     let mlog = MutationLog::begin("star", account_id, thread_id);
     let params_json = format!(r#"{{"starred":{starred}}}"#);
 
-    let db = ctx.db.clone();
-    let aid = account_id.to_string();
-    let tid = thread_id.to_string();
-    let local_result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        set_thread_starred(&conn, &aid, &tid, starred)
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r.map_err(ActionError::db));
-
-    if let Err(e) = local_result {
+    if let Err(e) = star_local(ctx, account_id, thread_id, starred).await {
         let outcome = ActionOutcome::Failed { error: e };
         mlog.emit(&outcome);
         return outcome;

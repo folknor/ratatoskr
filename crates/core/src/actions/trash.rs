@@ -9,6 +9,22 @@ use super::provider::create_provider;
 use crate::email_actions::{insert_label, remove_label};
 use crate::progress::NoopProgressReporter;
 
+/// Local DB mutation for trash (idempotent).
+async fn trash_local(ctx: &ActionContext, account_id: &str, thread_id: &str) -> Result<(), ActionError> {
+    let db = ctx.db.clone();
+    let aid = account_id.to_string();
+    let tid = thread_id.to_string();
+    tokio::task::spawn_blocking(move || {
+        let conn = db.conn();
+        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        remove_label(&conn, &aid, &tid, "INBOX")?;
+        insert_label(&conn, &aid, &tid, "TRASH")
+    })
+    .await
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
+    .and_then(|r| r.map_err(ActionError::db))
+}
+
 /// Trash a single thread: remove from inbox, add to trash locally, then
 /// dispatch to provider.
 pub async fn trash(
@@ -16,17 +32,23 @@ pub async fn trash(
     account_id: &str,
     thread_id: &str,
 ) -> ActionOutcome {
-    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(p) => p,
+    let mlog = MutationLog::begin("trash", account_id, thread_id);
+
+    if let Err(e) = trash_local(ctx, account_id, thread_id).await {
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
+    match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+        Ok(provider) => trash_with_provider(ctx, &*provider, account_id, thread_id).await,
         Err(e) => {
-            let mlog = MutationLog::begin("trash", account_id, thread_id);
             let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
             enqueue_if_retryable(ctx, &outcome, account_id, "trash", thread_id, "{}").await;
             mlog.emit(&outcome);
-            return outcome;
+            outcome
         }
-    };
-    trash_with_provider(ctx, &*provider, account_id, thread_id).await
+    }
 }
 
 /// Trash with a pre-constructed provider (for batch reuse).
@@ -38,20 +60,7 @@ pub(crate) async fn trash_with_provider(
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("trash", account_id, thread_id);
 
-    let db = ctx.db.clone();
-    let aid = account_id.to_string();
-    let tid = thread_id.to_string();
-    let local_result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        remove_label(&conn, &aid, &tid, "INBOX")?;
-        insert_label(&conn, &aid, &tid, "TRASH")
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r.map_err(ActionError::db));
-
-    if let Err(e) = local_result {
+    if let Err(e) = trash_local(ctx, account_id, thread_id).await {
         let outcome = ActionOutcome::Failed { error: e };
         mlog.emit(&outcome);
         return outcome;

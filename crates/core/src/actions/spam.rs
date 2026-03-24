@@ -9,6 +9,27 @@ use super::provider::create_provider;
 use crate::email_actions::{insert_label, remove_label};
 use crate::progress::NoopProgressReporter;
 
+/// Local DB mutation for spam (idempotent).
+async fn spam_local(ctx: &ActionContext, account_id: &str, thread_id: &str, is_spam: bool) -> Result<(), ActionError> {
+    let db = ctx.db.clone();
+    let aid = account_id.to_string();
+    let tid = thread_id.to_string();
+    tokio::task::spawn_blocking(move || {
+        let conn = db.conn();
+        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        if is_spam {
+            remove_label(&conn, &aid, &tid, "INBOX")?;
+            insert_label(&conn, &aid, &tid, "SPAM")
+        } else {
+            remove_label(&conn, &aid, &tid, "SPAM")?;
+            insert_label(&conn, &aid, &tid, "INBOX")
+        }
+    })
+    .await
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
+    .and_then(|r| r.map_err(ActionError::db))
+}
+
 /// Mark or unmark a single thread as spam.
 ///
 /// `is_spam` is the target state (true = mark as spam, false = un-spam).
@@ -18,18 +39,24 @@ pub async fn spam(
     thread_id: &str,
     is_spam: bool,
 ) -> ActionOutcome {
+    let mlog = MutationLog::begin("spam", account_id, thread_id);
     let params_json = format!(r#"{{"isSpam":{is_spam}}}"#);
-    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(p) => p,
+
+    if let Err(e) = spam_local(ctx, account_id, thread_id, is_spam).await {
+        let outcome = ActionOutcome::Failed { error: e };
+        mlog.emit(&outcome);
+        return outcome;
+    }
+
+    match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+        Ok(provider) => spam_with_provider(ctx, &*provider, account_id, thread_id, is_spam).await,
         Err(e) => {
-            let mlog = MutationLog::begin("spam", account_id, thread_id);
             let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
             enqueue_if_retryable(ctx, &outcome, account_id, "spam", thread_id, &params_json).await;
             mlog.emit(&outcome);
-            return outcome;
+            outcome
         }
-    };
-    spam_with_provider(ctx, &*provider, account_id, thread_id, is_spam).await
+    }
 }
 
 /// Spam with a pre-constructed provider (for batch reuse).
@@ -43,25 +70,7 @@ pub(crate) async fn spam_with_provider(
     let mlog = MutationLog::begin("spam", account_id, thread_id);
     let params_json = format!(r#"{{"isSpam":{is_spam}}}"#);
 
-    let db = ctx.db.clone();
-    let aid = account_id.to_string();
-    let tid = thread_id.to_string();
-    let local_result = tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        if is_spam {
-            remove_label(&conn, &aid, &tid, "INBOX")?;
-            insert_label(&conn, &aid, &tid, "SPAM")
-        } else {
-            remove_label(&conn, &aid, &tid, "SPAM")?;
-            insert_label(&conn, &aid, &tid, "INBOX")
-        }
-    })
-    .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r.map_err(ActionError::db));
-
-    if let Err(e) = local_result {
+    if let Err(e) = spam_local(ctx, account_id, thread_id, is_spam).await {
         let outcome = ActionOutcome::Failed { error: e };
         mlog.emit(&outcome);
         return outcome;
