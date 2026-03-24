@@ -1,0 +1,222 @@
+use super::context::ActionContext;
+use super::outcome::ActionOutcome;
+use super::provider::create_provider;
+use crate::progress::NoopProgressReporter;
+use ratatoskr_provider_utils::types::{ProviderCtx, ProviderFolderMutation};
+
+/// Build a `ProviderCtx` from an `ActionContext` and account ID.
+///
+/// Shared across all folder operations. Also usable by other action
+/// functions — existing ones can be refactored to use this in a cleanup pass.
+fn build_provider_ctx<'a>(ctx: &'a ActionContext, account_id: &'a str) -> ProviderCtx<'a> {
+    ProviderCtx {
+        account_id,
+        db: &ctx.db,
+        body_store: &ctx.body_store,
+        inline_images: &ctx.inline_images,
+        search: &ctx.search,
+        progress: &NoopProgressReporter,
+    }
+}
+
+/// Create a folder on the provider, then insert it into the local `labels` table.
+///
+/// Provider-first: the provider assigns the folder ID, path, and metadata.
+/// The local DB is updated best-effort — if it fails, the action still returns
+/// `Success` because the provider state is canonical and sync will reconcile.
+///
+/// Returns `(ActionOutcome, Option<ProviderFolderMutation>)` so the caller
+/// has the provider-assigned metadata (e.g., to navigate to the new folder).
+pub async fn create_folder(
+    ctx: &ActionContext,
+    account_id: &str,
+    name: &str,
+    parent_id: Option<&str>,
+    text_color: Option<&str>,
+    bg_color: Option<&str>,
+) -> (ActionOutcome, Option<ProviderFolderMutation>) {
+    // 1. Provider dispatch first — we need the provider-assigned ID
+    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+        Ok(p) => p,
+        Err(e) => return (ActionOutcome::Failed { error: e }, None),
+    };
+
+    let provider_ctx = build_provider_ctx(ctx, account_id);
+
+    let mutation = match provider
+        .create_folder(&provider_ctx, name, parent_id, text_color, bg_color)
+        .await
+    {
+        Ok(m) => m,
+        Err(e) => {
+            let msg = e.to_string();
+            log::warn!("create_folder failed for {account_id}: {msg}");
+            return (ActionOutcome::Failed { error: msg }, None);
+        }
+    };
+
+    // 2. Local DB — insert the new folder into labels (best-effort)
+    let db = ctx.db.clone();
+    let aid = account_id.to_string();
+    let m = mutation.clone();
+    let parent_id_for_db = parent_id.map(str::to_string);
+    let local_result = tokio::task::spawn_blocking(move || {
+        let conn = db.conn();
+        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        conn.execute(
+            "INSERT INTO labels (id, account_id, name, type, color_bg, color_fg, \
+             imap_folder_path, imap_special_use, parent_label_id, label_kind) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'container') \
+             ON CONFLICT(account_id, id) DO UPDATE SET \
+               name = ?3, type = ?4, color_bg = ?5, color_fg = ?6, \
+               imap_folder_path = ?7, imap_special_use = ?8, \
+               parent_label_id = ?9, label_kind = 'container'",
+            rusqlite::params![
+                m.id,
+                aid,
+                m.name,
+                m.folder_type,
+                m.color_bg,
+                m.color_fg,
+                m.path,
+                m.special_use,
+                parent_id_for_db,
+            ],
+        )
+        .map_err(|e| format!("local insert: {e}"))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking: {e}"))
+    .and_then(|r| r);
+
+    if let Err(e) = local_result {
+        // Provider succeeded but local DB failed — unusual but possible.
+        // The folder exists on the server; next sync will pick it up.
+        log::warn!("create_folder local insert failed (provider succeeded): {e}");
+    }
+
+    (ActionOutcome::Success, Some(mutation))
+}
+
+/// Rename a folder on the provider, then update the local `labels` row.
+///
+/// Provider-first, same pattern as `create_folder`. All provider-returned
+/// metadata is persisted locally (name, type, colors, path, special_use).
+pub async fn rename_folder(
+    ctx: &ActionContext,
+    account_id: &str,
+    folder_id: &str,
+    new_name: &str,
+    text_color: Option<&str>,
+    bg_color: Option<&str>,
+) -> (ActionOutcome, Option<ProviderFolderMutation>) {
+    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+        Ok(p) => p,
+        Err(e) => return (ActionOutcome::Failed { error: e }, None),
+    };
+
+    let provider_ctx = build_provider_ctx(ctx, account_id);
+
+    let mutation = match provider
+        .rename_folder(&provider_ctx, folder_id, new_name, text_color, bg_color)
+        .await
+    {
+        Ok(m) => m,
+        Err(e) => {
+            let msg = e.to_string();
+            log::warn!("rename_folder failed for {account_id}/{folder_id}: {msg}");
+            return (ActionOutcome::Failed { error: msg }, None);
+        }
+    };
+
+    // Local DB update (best-effort)
+    let db = ctx.db.clone();
+    let aid = account_id.to_string();
+    let fid = folder_id.to_string();
+    let m = mutation.clone();
+    let local_result = tokio::task::spawn_blocking(move || {
+        let conn = db.conn();
+        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        conn.execute(
+            "UPDATE labels SET name = ?1, type = ?2, color_bg = ?3, color_fg = ?4, \
+             imap_folder_path = ?5, imap_special_use = ?6 \
+             WHERE account_id = ?7 AND id = ?8",
+            rusqlite::params![
+                m.name,
+                m.folder_type,
+                m.color_bg,
+                m.color_fg,
+                m.path,
+                m.special_use,
+                aid,
+                fid,
+            ],
+        )
+        .map_err(|e| format!("local update: {e}"))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking: {e}"))
+    .and_then(|r| r);
+
+    if let Err(e) = local_result {
+        log::warn!("rename_folder local update failed (provider succeeded): {e}");
+    }
+
+    (ActionOutcome::Success, Some(mutation))
+}
+
+/// Delete a folder on the provider, then remove it from the local DB.
+///
+/// Provider-first: the local row is only deleted if the provider succeeded.
+/// `thread_labels` rows for this folder are explicitly cleaned up (there is
+/// no FK cascade from `labels` to `thread_labels`).
+pub async fn delete_folder(
+    ctx: &ActionContext,
+    account_id: &str,
+    folder_id: &str,
+) -> ActionOutcome {
+    let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
+        Ok(p) => p,
+        Err(e) => return ActionOutcome::Failed { error: e },
+    };
+
+    let provider_ctx = build_provider_ctx(ctx, account_id);
+
+    if let Err(e) = provider.delete_folder(&provider_ctx, folder_id).await {
+        let msg = e.to_string();
+        log::warn!("delete_folder failed for {account_id}/{folder_id}: {msg}");
+        return ActionOutcome::Failed { error: msg };
+    }
+
+    // Provider succeeded — remove local rows (best-effort)
+    let db = ctx.db.clone();
+    let aid = account_id.to_string();
+    let fid = folder_id.to_string();
+    let local_result = tokio::task::spawn_blocking(move || {
+        let conn = db.conn();
+        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        // Delete thread_labels first — no FK cascade from labels to thread_labels.
+        conn.execute(
+            "DELETE FROM thread_labels WHERE account_id = ?1 AND label_id = ?2",
+            rusqlite::params![aid, fid],
+        )
+        .map_err(|e| format!("thread_labels cleanup: {e}"))?;
+        conn.execute(
+            "DELETE FROM labels WHERE account_id = ?1 AND id = ?2",
+            rusqlite::params![aid, fid],
+        )
+        .map_err(|e| format!("local delete: {e}"))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking: {e}"))
+    .and_then(|r| r);
+
+    if let Err(e) = local_result {
+        log::warn!("delete_folder local delete failed (provider succeeded): {e}");
+    }
+
+    ActionOutcome::Success
+}

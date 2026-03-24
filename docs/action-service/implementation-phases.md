@@ -47,16 +47,11 @@ Label apply/remove flows through `actions::add_label()`/`actions::remove_label()
 
 Send flows through `actions::send_email()`: MIME build on `spawn_blocking`, draft persisted as `'pending'` → `'sending'` (state-machine validated), `ProviderOps::send_email()` dispatched, `mark_draft_sent`/`mark_draft_failed` on completion. Compose window stays open during send with dedicated `Message::SendCompleted` and `dispatch_send`. `delete_draft()` exists for future use (no call site yet). Orphaned `'queued'` drafts resurfaced as `'failed'` on boot. Draft auto-save and provider draft sync (`create_draft`/`update_draft`) deferred — separate features.
 
-### Phase 2.4: Folder management
+### Phase 2.4: Folder management ✅
 
-**Goal:** Bring folder CRUD into the action service.
+**Status:** Complete. See `phase-2.4-plan.md`.
 
-**Scope:**
-- create_folder, rename_folder, delete_folder.
-- All four providers have real implementations on `ProviderOps`.
-- Not yet wired from any UI — this phase defines the service API and wires it so that when folder management UI is built, it goes through the service from day one.
-
-**Exit criteria:** Folder CRUD functions exist in the action service. When folder management UI is built, it calls the service.
+`create_folder`, `rename_folder`, `delete_folder` in `core::actions::folder`. Provider-first pattern (provider assigns ID/metadata, local DB updated best-effort). `delete_folder` explicitly cleans up `thread_labels` rows (no FK cascade). `build_provider_ctx` helper extracted. `ProviderFolderMutation` re-exported from actions. No UI exists yet — functions are ready.
 
 ### Phase 2.5: Calendar event write-back
 
@@ -180,7 +175,8 @@ Each phase is designed to be independently valuable:
 - **After Phase 2.1:** All thread-level email actions go through the service.
 - **After Phase 2.2:** Label routing is centralized. No `label_kind` branches in the app crate. ✅
 - **After Phase 2.3:** Send goes through the service. Draft auto-save and provider draft sync are separate. ✅
-- **After Phase 2.4–2.6:** Folder, calendar, and contact writes go through the service.
+- **After Phase 2.4:** Folder CRUD goes through the service. ✅
+- **After Phase 2.5–2.6:** Calendar and contact writes go through the service.
 - **After Phase 3:** The service is trustworthy. Failure handling is consistent, observable, and explicitly defined.
 - **After Phase 4:** Undo works correctly for the first time.
 - **After Phase 5:** Bulk operations are handled and remote dispatch is reliable.

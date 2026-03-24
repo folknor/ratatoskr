@@ -7,6 +7,7 @@
 
 mod archive;
 mod context;
+mod folder;
 mod label;
 mod mark_read;
 mod move_to_folder;
@@ -22,6 +23,8 @@ mod trash;
 
 pub use archive::archive;
 pub use context::ActionContext;
+pub use folder::{create_folder, delete_folder, rename_folder};
+pub use ratatoskr_provider_utils::types::ProviderFolderMutation;
 pub use label::{add_label, remove_label};
 pub use mark_read::mark_read;
 // Re-export send types so callers import from actions, not crate::send directly.
