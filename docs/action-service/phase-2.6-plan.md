@@ -55,19 +55,22 @@ Unlike calendar (which lives in a separate crate due to circular dependency), th
 
 Google, Graph, and CardDAV write-back branches return `ActionOutcome::LocalOnly` with a descriptive reason ("Google contact write-back not yet wired to HTTP") instead of `Ok(())` mapped to `Success`. This is honest: the local save succeeded but the provider was not notified. The caller (Settings UI) maps `LocalOnly` to `Ok(())` for the reload callback (same as calendar), but the outcome is truthful in logs and for Phase 3 structured reporting.
 
-### Delete is provider-first for synced contacts
+### Delete semantics depend on provider readiness
 
-Delete for synced contacts (those with a `server_id` and non-user `source`) dispatches to the provider first, then deletes locally on success. Rationale: if the provider delete fails, you don't want to delete locally and orphan the server record — the contact would reappear on next sync. Same logic as calendar and folder delete.
+Delete for local contacts (`source = 'user'` or no `server_id`) is always local-only.
 
-Delete for local contacts (`source = 'user'` or no `server_id`) is local-only.
+Delete for synced contacts has two behaviors in Phase 2.6:
 
-For Phase 2.6: only JMAP delete is wired. Google, Graph, and CardDAV delete return `LocalOnly` — the contact is deleted locally but remains on the server until the HTTP calls are wired.
+- **JMAP: provider-first.** Dispatch `ContactCard/set destroy` to the provider, then delete locally on success. If the provider fails, return `Failed` — the contact is not deleted locally (it would reappear on next sync). Same logic as calendar and folder delete.
+- **Google/Graph/CardDAV: degraded local-only fallback.** The HTTP delete calls are not wired. The contact is deleted locally and the action returns `LocalOnly` with a descriptive reason ("Google contact delete not yet wired to HTTP"). The server record is orphaned until the HTTP calls are wired — it will reappear on next sync. This is a known limitation, not silent success.
+
+When Google/Graph/CardDAV HTTP delete calls are wired, they switch to provider-first (same as JMAP).
 
 ### Contact identity for provider dispatch uses `(source, server_id, account_id)`, not email
 
 The existing server-info lookups (`get_google_contact_server_info`, `get_graph_contact_server_info`, `get_jmap_contact_server_info`) resolve by email with `LIMIT 1`. This is fragile for cross-account contacts where the same email exists on multiple providers.
 
-For the save path: the action uses the contact's own `source` and `account_id` (from `ContactSaveInput`) to determine which provider to dispatch to. The server-info lookup by email is still used to find the provider-specific ID (`resource_name`, `graph_contact_id`, `server_id`) — but the provider selection is not ambiguous because `source` is authoritative.
+For the save path: the action uses `source`, `account_id`, and `server_id` directly from `ContactSaveInput`. No email-based server-info lookup is needed — the editor carries all three from the DB through the save path. This eliminates cross-account ambiguity entirely.
 
 For the delete path: the action looks up `source`, `server_id`, and `account_id` from the `contacts` table by the contact's local `id`. No email-based lookup needed.
 
@@ -115,13 +118,15 @@ pub struct ContactSaveInput {
     pub phone: Option<String>,
     pub company: Option<String>,
     pub notes: Option<String>,
-    /// Used for local save. NOT used for provider routing — provider is
-    /// determined by `source`. This field is informational for the local
-    /// DB row; provider dispatch resolves the account via server-info lookup.
+    /// Used for local save and for scoping provider lookups.
     pub account_id: Option<String>,
     /// Provider source: "user", "google", "graph", "jmap", "carddav".
     /// Determines whether and where write-back is dispatched.
     pub source: Option<String>,
+    /// Provider-assigned server ID for synced contacts. Carried from the
+    /// DB through the editor so the action can dispatch write-back without
+    /// an ambiguous email-based lookup. None for local ("user") contacts.
+    pub server_id: Option<String>,
 }
 ```
 
@@ -157,19 +162,18 @@ In `crates/core/src/actions/contacts.rs`:
 async fn dispatch_write_back(
     ctx: &ActionContext,
     source: &str,
-    email: &str,
+    account_id: &str,
+    server_id: &str,
     phone: Option<&str>,
     company: Option<&str>,
     notes: Option<&str>,
 ) -> Result<(), String> {
     match source {
         "jmap" => {
-            let info = get_jmap_contact_server_info(&ctx.db, email.to_string()).await?;
-            let Some(info) = info else { return Ok(()) };
             let client = JmapClient::from_account(
-                &ctx.db, &info.account_id, &ctx.encryption_key,
+                &ctx.db, account_id, &ctx.encryption_key,
             ).await?;
-            jmap_contacts_push_update(&client, &info.server_id, phone, company, notes).await
+            jmap_contacts_push_update(&client, server_id, phone, company, notes).await
         }
         "google" => {
             // Scaffolding ready (build_google_contact_update_body,
@@ -182,10 +186,16 @@ async fn dispatch_write_back(
         "carddav" => {
             Err("CardDAV contact write-back not implemented (PUT + vCard needed)".to_string())
         }
-        _ => Ok(()),
+        "user" => Ok(()),
+        other => {
+            log::warn!("Unknown contact source for write-back: {other}");
+            Ok(())
+        }
     }
 }
 ```
+
+The dispatcher takes `account_id` and `server_id` directly from `ContactSaveInput` — no email-based server-info lookup needed. This eliminates the cross-account ambiguity where the same email exists on multiple JMAP/Google/Graph accounts. When Google/Graph HTTP calls are wired, they receive the correct `server_id` and `account_id` without a `LIMIT 1` query.
 
 Unimplemented providers return `Err` — the action maps this to `LocalOnly { remote_error }`. This is honest: the local save succeeded, the provider was not notified.
 
@@ -239,7 +249,7 @@ Delete `dispatch_provider_write_back` from the app crate.
 1. `save_contact()` saves locally then dispatches write-back. JMAP write-back is functional — `jmap_contacts_push_update()` is called with a real `JmapClient`.
 2. `delete_contact()` looks up contact identity by local `id` (not email). For synced JMAP contacts, dispatches `ContactCard/set destroy`. For local contacts, deletes locally only.
 3. Google, Graph, and CardDAV write-back return `LocalOnly` with descriptive error — not fake `Success`.
-4. Google/Graph/CardDAV delete return `LocalOnly` — contact is deleted locally but remains on server.
+4. JMAP delete is provider-first. Google/Graph/CardDAV delete are degraded local-only fallback — contact is deleted locally, returns `LocalOnly`, server record orphaned until HTTP calls are wired.
 5. `dispatch_provider_write_back` no longer exists in the app crate.
 6. Settings UI preserves synced contact `source` through the save path (the `source: "user"` bug is fixed).
 7. Contact groups save/delete are unchanged (local-only, stay in app handler).
