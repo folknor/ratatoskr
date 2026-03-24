@@ -45,7 +45,7 @@ pub async fn create_folder(
     text_color: Option<&str>,
     bg_color: Option<&str>,
 ) -> (ActionOutcome, Option<ProviderFolderMutation>) {
-    let mlog = MutationLog::begin("create_folder", account_id, "");
+    let mut mlog = MutationLog::begin("create_folder", account_id, "(pending)");
 
     // 1. Provider dispatch first — we need the provider-assigned ID
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
@@ -71,6 +71,9 @@ pub async fn create_folder(
             return (outcome, None);
         }
     };
+
+    mlog.set_local_id(&mutation.id);
+    mlog.set_remote_id(&mutation.id);
 
     // 2. Local DB — insert the new folder into labels (best-effort)
     let db = ctx.db.clone();

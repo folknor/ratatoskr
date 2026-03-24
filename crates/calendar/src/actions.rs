@@ -358,7 +358,7 @@ pub async fn create_calendar_event(
     calendar_id: &str,
     input: CalendarEventInput,
 ) -> ActionOutcome {
-    let mlog = MutationLog::begin("create_calendar_event", account_id, calendar_id);
+    let mut mlog = MutationLog::begin("create_calendar_event", account_id, calendar_id);
 
     // 1. Look up calendar_remote_id + local insert in one spawn_blocking
     let db = ctx.db.clone();
@@ -397,7 +397,10 @@ pub async fn create_calendar_event(
     .and_then(|r| r);
 
     let (event_id, calendar_remote_id) = match local_result {
-        Ok(ids) => ids,
+        Ok(ids) => {
+            mlog.set_local_id(&ids.0);
+            ids
+        }
         Err(e) => {
             let outcome = ActionOutcome::Failed { error: e };
             mlog.emit(&outcome);
@@ -417,6 +420,7 @@ pub async fn create_calendar_event(
 
     let outcome = match dispatch_create(&provider, ctx, &calendar_remote_id, &input).await {
         Ok(dto) => {
+            mlog.set_remote_id(&dto.remote_event_id);
             // Store provider-assigned remote_event_id and etag
             let db = ctx.db.clone();
             let eid = event_id.clone();
@@ -449,7 +453,7 @@ pub async fn update_calendar_event(
     event_id: &str,
     input: CalendarEventInput,
 ) -> ActionOutcome {
-    let mlog = MutationLog::begin("update_calendar_event", _account_id, event_id);
+    let mut mlog = MutationLog::begin("update_calendar_event", "", event_id);
 
     // 1. Look up event metadata — use the event's own account_id, not the caller's
     let db = ctx.db.clone();
@@ -479,6 +483,10 @@ pub async fn update_calendar_event(
             return outcome;
         }
     };
+    mlog.set_account_id(&meta.account_id);
+    if let Some(ref rid) = meta.remote_event_id {
+        mlog.set_remote_id(rid);
+    }
 
     // 2. If no remote_event_id, this is a local-only event — update locally
     let Some(ref remote_event_id) = meta.remote_event_id else {
@@ -599,7 +607,7 @@ pub async fn delete_calendar_event(
     _account_id: &str,
     event_id: &str,
 ) -> ActionOutcome {
-    let mlog = MutationLog::begin("delete_calendar_event", _account_id, event_id);
+    let mut mlog = MutationLog::begin("delete_calendar_event", "", event_id);
 
     // 1. Look up event metadata — use the event's own account_id
     let db = ctx.db.clone();
@@ -626,6 +634,10 @@ pub async fn delete_calendar_event(
             return outcome;
         }
     };
+    mlog.set_account_id(&meta.account_id);
+    if let Some(ref rid) = meta.remote_event_id {
+        mlog.set_remote_id(rid);
+    }
 
     // 2. If no remote_event_id, local-only delete
     let Some(ref remote_event_id) = meta.remote_event_id else {

@@ -17,7 +17,7 @@ use ratatoskr_provider_utils::types::ProviderCtx;
 /// not used for send — the desired outcome is delivery, not local
 /// persistence.
 pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutcome {
-    let mlog = MutationLog::begin("send_email", &request.account_id, &request.draft_id);
+    let mut mlog = MutationLog::begin("send_email", &request.account_id, &request.draft_id);
 
     // 1. Build MIME + persist draft in one spawn_blocking call.
     //    MIME build is CPU-bound (large attachments); draft persist is DB I/O.
@@ -143,6 +143,7 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
         .await
     {
         Ok(sent_message_id) => {
+            mlog.set_remote_id(&sent_message_id);
             let _ = mark_draft_sent(&ctx.db, draft_id_outer, sent_message_id).await;
             ActionOutcome::Success
         }
@@ -221,9 +222,9 @@ pub async fn delete_draft(
             };
             // Best-effort: don't fail if remote delete fails.
             // The orphaned server draft will be cleaned up by sync.
-            let _ = provider
-                .delete_draft(&provider_ctx, &remote_draft_id)
-                .await;
+            if let Err(e) = provider.delete_draft(&provider_ctx, &remote_draft_id).await {
+                log::warn!("Remote draft delete failed for {account_id}/{draft_id}: {e}");
+            }
         }
     }
 

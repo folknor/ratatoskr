@@ -36,9 +36,18 @@ impl MutationLog {
     }
 
     /// Set the remote resource ID (if known after provider dispatch).
-    pub fn with_remote_id(mut self, id: impl Into<String>) -> Self {
+    pub fn set_remote_id(&mut self, id: impl Into<String>) {
         self.remote_id = Some(id.into());
-        self
+    }
+
+    /// Set the local resource ID (if not known at begin() time).
+    pub fn set_local_id(&mut self, id: impl Into<String>) {
+        self.local_id = id.into();
+    }
+
+    /// Set the account ID (if not known at begin() time).
+    pub fn set_account_id(&mut self, id: impl Into<String>) {
+        self.account_id = id.into();
     }
 
     /// Emit the structured log entry based on the action outcome.

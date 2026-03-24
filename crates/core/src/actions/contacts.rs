@@ -117,7 +117,7 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
 /// For local contacts or providers without delete support, deletes locally
 /// and returns `LocalOnly` for unimplemented providers.
 pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutcome {
-    let mlog = MutationLog::begin("delete_contact", "", contact_id);
+    let mut mlog = MutationLog::begin("delete_contact", "", contact_id);
 
     // 1. Look up contact identity from DB
     let db = ctx.db.clone();
@@ -155,6 +155,12 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
             return outcome;
         }
     };
+    if let Some(ref aid) = account_id {
+        mlog.set_account_id(aid);
+    }
+    if let Some(ref sid) = server_id {
+        mlog.set_remote_id(sid);
+    }
 
     let source_str = source.as_deref().unwrap_or("user");
 
