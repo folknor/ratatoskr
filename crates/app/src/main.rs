@@ -1145,6 +1145,9 @@ impl App {
                 Task::none()
             }
             Message::UndoCompleted { desc, ref outcomes } => {
+                if outcomes.is_empty() {
+                    return Task::none();
+                }
                 let all_failed = outcomes.iter().all(ratatoskr_core::actions::ActionOutcome::is_failed);
                 let any_failed = outcomes.iter().any(ratatoskr_core::actions::ActionOutcome::is_failed);
                 if all_failed {

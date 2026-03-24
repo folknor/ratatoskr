@@ -582,19 +582,19 @@ impl App {
         }
 
         if !rollback.is_empty() {
-            // Toggle actions: use rollback data (filtered to non-failed)
-            let mut by_account: HashMap<&str, Vec<(String, bool)>> = HashMap::new();
+            // Toggle actions: use rollback data (filtered to non-failed).
+            // Group by (account_id, previous_value) — threads with different
+            // prior states get separate tokens to avoid restoring the wrong state.
+            let mut by_key: HashMap<(&str, bool), Vec<String>> = HashMap::new();
             for ((aid, tid, prev), outcome) in rollback.iter().zip(outcomes.iter()) {
                 if !outcome.is_failed() {
-                    by_account
-                        .entry(aid.as_str())
+                    by_key
+                        .entry((aid.as_str(), *prev))
                         .or_default()
-                        .push((tid.clone(), *prev));
+                        .push(tid.clone());
                 }
             }
-            for (account_id, entries) in by_account {
-                let thread_ids: Vec<String> = entries.iter().map(|(t, _)| t.clone()).collect();
-                let prev = entries.first().map(|(_, p)| *p).unwrap_or(false);
+            for ((account_id, prev), thread_ids) in by_key {
                 let token = match action {
                     CompletedAction::Star => UndoToken::ToggleStar {
                         account_id: account_id.to_string(),
@@ -644,10 +644,15 @@ impl App {
                             }
                             _ => None,
                         };
+                        // No token if source is unknown — incorrect undo
+                        // (moving to INBOX) is worse than no undo.
+                        let Some(original_folder_id) = source else {
+                            continue;
+                        };
                         UndoToken::Trash {
                             account_id: account_id.to_string(),
                             thread_ids,
-                            original_folder_id: source,
+                            original_folder_id: Some(original_folder_id),
                         }
                     }
                     CompletedAction::Spam => {
