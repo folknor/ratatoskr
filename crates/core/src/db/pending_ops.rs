@@ -35,9 +35,26 @@ fn row_to_pending_op(row: &rusqlite::Row<'_>) -> rusqlite::Result<PendingOperati
     })
 }
 
-// ── Backoff schedule (seconds) ───────────────────────────────
+// ── Backoff schedules (seconds) ──────────────────────────────
 
-const BACKOFF_SCHEDULE: &[i64] = &[60, 300, 900, 3600];
+/// Default backoff for most actions.
+const BACKOFF_DEFAULT: &[i64] = &[60, 300, 900, 3600];
+
+/// Aggressive backoff for folder-level actions (archive, trash, spam, move, delete).
+/// Silent divergence is the #1 user-visible bug, so retry sooner.
+const BACKOFF_FOLDER: &[i64] = &[30, 120, 300, 900, 3600];
+
+/// Light backoff for flag-level actions (star, read) — sync reconciles these.
+const BACKOFF_FLAG: &[i64] = &[60, 300, 900];
+
+/// Look up the backoff schedule for an operation type.
+fn backoff_schedule(operation_type: &str) -> &'static [i64] {
+    match operation_type {
+        "archive" | "trash" | "spam" | "moveToFolder" | "permanentDelete" => BACKOFF_FOLDER,
+        "star" | "markRead" => BACKOFF_FLAG,
+        _ => BACKOFF_DEFAULT,
+    }
+}
 
 // ── Commands ─────────────────────────────────────────────────
 
@@ -48,18 +65,41 @@ pub async fn db_pending_ops_enqueue(
     operation_type: String,
     resource_id: String,
     params_json: String,
+    max_retries: i64,
 ) -> Result<(), String> {
     db
         .with_conn(move |conn| {
             conn.execute(
-                "INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params, status)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'pending')",
-                params![id, account_id, operation_type, resource_id, params_json],
+                "INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params, status, max_retries)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6)",
+                params![id, account_id, operation_type, resource_id, params_json, max_retries],
             )
             .map_err(|e| format!("enqueue pending op: {e}"))?;
             Ok(())
         })
         .await
+}
+
+/// Check if a pending or executing op already exists for this resource.
+pub async fn db_pending_ops_exists(
+    db: &DbState,
+    account_id: String,
+    resource_id: String,
+    operation_type: String,
+) -> Result<bool, String> {
+    db.with_conn(move |conn| {
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pending_operations \
+                 WHERE account_id = ?1 AND resource_id = ?2 AND operation_type = ?3 \
+                   AND status IN ('pending', 'executing')",
+                params![account_id, resource_id, operation_type],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("check pending op exists: {e}"))?;
+        Ok(count > 0)
+    })
+    .await
 }
 
 pub async fn db_pending_ops_get(
@@ -159,11 +199,11 @@ pub async fn db_pending_ops_cancel_for_resource(
 
 pub async fn db_pending_ops_increment_retry(db: &DbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
-        let (retry_count, max_retries): (i64, i64) = conn
+        let (retry_count, max_retries, operation_type): (i64, i64, String) = conn
             .query_row(
-                "SELECT retry_count, max_retries FROM pending_operations WHERE id = ?1",
+                "SELECT retry_count, max_retries, operation_type FROM pending_operations WHERE id = ?1",
                 params![id],
-                |row| Ok((row.get("retry_count")?, row.get("max_retries")?)),
+                |row| Ok((row.get("retry_count")?, row.get("max_retries")?, row.get("operation_type")?)),
             )
             .map_err(|e| format!("get retry info: {e}"))?;
 
@@ -174,30 +214,39 @@ pub async fn db_pending_ops_increment_retry(db: &DbState, id: String) -> Result<
                 params![new_count, id],
             )
             .map_err(|e| format!("mark failed: {e}"))?;
+            log::warn!(
+                "[pending_ops] Exhausted retries for {operation_type} (op {id}): \
+                 {new_count}/{max_retries} — left for sync reconciliation"
+            );
             return Ok(());
         }
 
+        let schedule = backoff_schedule(&operation_type);
         let retry_idx = usize::try_from(new_count - 1)
             .map_err(|_| format!("invalid retry count for pending op {id}: {new_count}"))?;
-        let backoff_idx = std::cmp::min(retry_idx, BACKOFF_SCHEDULE.len() - 1);
-        let delay_sec = BACKOFF_SCHEDULE[backoff_idx];
-        let now = i64::try_from(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|e| e.to_string())?
-                .as_secs(),
-        )
-        .map_err(|_| "current time exceeds i64 range".to_string())?;
+        let backoff_idx = std::cmp::min(retry_idx, schedule.len() - 1);
+        let delay_sec = schedule[backoff_idx];
+        let now = now_epoch()?;
         let next_retry_at = now + delay_sec;
 
         conn.execute(
-            "UPDATE pending_operations SET retry_count = ?1, next_retry_at = ?2 WHERE id = ?3",
+            "UPDATE pending_operations SET retry_count = ?1, next_retry_at = ?2, status = 'pending' WHERE id = ?3",
             params![new_count, next_retry_at, id],
         )
         .map_err(|e| format!("increment retry: {e}"))?;
         Ok(())
     })
     .await
+}
+
+fn now_epoch() -> Result<i64, String> {
+    i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_secs(),
+    )
+    .map_err(|_| "current time exceeds i64 range".to_string())
 }
 
 pub async fn db_pending_ops_count(db: &DbState, account_id: Option<String>) -> Result<i64, String> {

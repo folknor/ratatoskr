@@ -7,16 +7,41 @@
 use super::context::ActionContext;
 use super::outcome::{ActionError, ActionOutcome};
 use crate::db::pending_ops::{
-    db_pending_ops_delete, db_pending_ops_enqueue, db_pending_ops_get,
-    db_pending_ops_increment_retry, db_pending_ops_recover_executing,
-    db_pending_ops_update_status,
+    db_pending_ops_delete, db_pending_ops_enqueue, db_pending_ops_exists,
+    db_pending_ops_get, db_pending_ops_increment_retry,
+    db_pending_ops_recover_executing, db_pending_ops_update_status,
 };
+
+/// Per-action-type retry policy.
+struct RetryPolicy {
+    max_retries: i64,
+}
+
+/// Look up retry policy by operation type.
+///
+/// Folder-level actions (archive, trash, spam, move, delete) get the most
+/// aggressive retry — silent divergence is the #1 user-visible bug.
+/// Label actions get moderate retry. Flag actions (star, read) get lighter
+/// retry since sync reconciles them within 5 minutes.
+fn retry_policy(operation_type: &str) -> RetryPolicy {
+    match operation_type {
+        "archive" | "trash" | "spam" | "moveToFolder" | "permanentDelete" => {
+            RetryPolicy { max_retries: 10 }
+        }
+        "addLabel" | "removeLabel" => RetryPolicy { max_retries: 7 },
+        "star" | "markRead" => RetryPolicy { max_retries: 5 },
+        _ => RetryPolicy { max_retries: 5 },
+    }
+}
 
 /// Enqueue a pending operation if the outcome is retryable LocalOnly.
 ///
 /// Called by action functions after determining the outcome. Only enqueues
 /// if `retryable` is true AND `reason.is_retryable()` (policy + capability).
-/// Returns the outcome unchanged — this is a side effect, not a transformation.
+///
+/// Deduplicates: skips enqueue if a pending or executing op already exists
+/// for the same (account_id, resource_id, operation_type). Failed ops are
+/// NOT checked — a new user action should supersede exhausted retries.
 pub async fn enqueue_if_retryable(
     ctx: &ActionContext,
     outcome: &ActionOutcome,
@@ -36,9 +61,32 @@ pub async fn enqueue_if_retryable(
     } = outcome
     {
         if !reason.is_retryable() {
-            // Policy says retry, but error kind says don't (Permanent/NotImplemented).
             return;
         }
+
+        // Dedup: skip if a pending or executing op already exists for this resource.
+        match db_pending_ops_exists(
+            &ctx.db,
+            account_id.to_string(),
+            resource_id.to_string(),
+            operation_type.to_string(),
+        )
+        .await
+        {
+            Ok(true) => {
+                log::debug!(
+                    "[pending_ops] Skipping duplicate enqueue: {operation_type} for {resource_id}"
+                );
+                return;
+            }
+            Err(e) => {
+                log::warn!("[pending_ops] Dedup check failed, proceeding with enqueue: {e}");
+                // Fall through — better to risk a duplicate than lose the op.
+            }
+            Ok(false) => {}
+        }
+
+        let policy = retry_policy(operation_type);
         let op_id = uuid::Uuid::new_v4().to_string();
         if let Err(e) = db_pending_ops_enqueue(
             &ctx.db,
@@ -47,6 +95,7 @@ pub async fn enqueue_if_retryable(
             operation_type.to_string(),
             resource_id.to_string(),
             params_json.to_string(),
+            policy.max_retries,
         )
         .await
         {
