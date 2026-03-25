@@ -1066,7 +1066,7 @@ impl App {
                 if due.is_empty() {
                     return Ok(0);
                 }
-                let count = due.len();
+                let mut success_count = 0usize;
                 for thread in &due {
                     let outcome = ratatoskr_core::actions::unsnooze(
                         &ctx,
@@ -1074,16 +1074,24 @@ impl App {
                         &thread.id,
                     )
                     .await;
-                    if let ratatoskr_core::actions::ActionOutcome::Failed { error } = outcome {
-                        log::error!(
-                            "Failed to unsnooze thread {}: {}",
-                            thread.id,
-                            error.user_message()
-                        );
+                    match outcome {
+                        ratatoskr_core::actions::ActionOutcome::Success => {
+                            success_count += 1;
+                        }
+                        ratatoskr_core::actions::ActionOutcome::Failed { error } => {
+                            log::error!(
+                                "Failed to unsnooze thread {}: {}",
+                                thread.id,
+                                error.user_message()
+                            );
+                        }
+                        _ => {}
                     }
                 }
-                log::info!("Snooze resurface: unsnoozed {count} thread(s)");
-                Ok(count)
+                if success_count > 0 {
+                    log::info!("Snooze resurface: unsnoozed {success_count} thread(s)");
+                }
+                Ok(success_count)
             },
             Message::SnoozeResurfaceComplete,
         )
