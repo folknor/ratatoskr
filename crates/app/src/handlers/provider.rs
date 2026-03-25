@@ -164,6 +164,57 @@ impl App {
         )
     }
 
+    /// Refresh GAL (Global Address List) caches for accounts that support it.
+    /// Only fetches if the cache is stale (>24h). Runs silently in the background.
+    pub(crate) fn refresh_gal_caches(&self) -> Task<Message> {
+        let Some(encryption_key) = self.encryption_key else {
+            return Task::none();
+        };
+
+        let account_ids: Vec<String> = self
+            .sidebar
+            .accounts
+            .iter()
+            .filter(|a| matches!(a.provider.as_str(), "graph" | "gmail_api"))
+            .map(|a| a.id.clone())
+            .collect();
+
+        if account_ids.is_empty() {
+            return Task::none();
+        }
+
+        let db = Arc::clone(&self.db);
+        Task::perform(
+            async move {
+                let core_db = ratatoskr_core::db::DbState::from_arc(db.write_conn_arc());
+                for account_id in &account_ids {
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(60),
+                        ratatoskr_core::contacts::gal::refresh_gal_for_account(
+                            &core_db,
+                            account_id,
+                            encryption_key,
+                        ),
+                    )
+                    .await
+                    {
+                        Ok(Ok(n)) if n > 0 => {
+                            log::info!("[GAL] Cached {n} entries for {account_id}");
+                        }
+                        Ok(Ok(_)) => {}
+                        Ok(Err(e)) => {
+                            log::warn!("[GAL] Refresh failed for {account_id}: {e}");
+                        }
+                        Err(_) => {
+                            log::warn!("[GAL] Refresh timed out for {account_id}");
+                        }
+                    }
+                }
+            },
+            |()| Message::Noop,
+        )
+    }
+
     /// Start JMAP push notification managers for all JMAP accounts.
     /// Call after accounts are loaded and encryption key is available.
     pub(crate) fn start_jmap_push(&self) -> Task<Message> {

@@ -968,7 +968,8 @@ impl App {
             Message::SyncTick => {
                 let sync_task = self.sync_all_accounts();
                 let pending_task = self.process_pending_ops();
-                Task::batch([sync_task, pending_task])
+                let gal_task = self.refresh_gal_caches();
+                Task::batch([sync_task, pending_task, gal_task])
             }
             Message::SyncComplete(account_id, result) => {
                 match result {

@@ -211,6 +211,63 @@ pub async fn fetch_google_gal(
     Ok(entries)
 }
 
+/// Refresh the GAL cache for a single account if stale (>24h).
+/// Determines the provider type from the DB and dispatches to the
+/// appropriate fetch function. Returns the number of entries cached,
+/// or 0 if the cache was fresh or the provider doesn't support GAL.
+pub async fn refresh_gal_for_account(
+    db: &DbState,
+    account_id: &str,
+    encryption_key: [u8; 32],
+) -> Result<usize, String> {
+    // Check cache age
+    let now = chrono::Utc::now().timestamp();
+    let stale_threshold = now - 86400; // 24 hours
+    if let Some(cached_at) = gal_cache_age(db, account_id.to_string()).await? {
+        if cached_at > stale_threshold {
+            return Ok(0); // cache is fresh
+        }
+    }
+
+    // Look up provider type
+    let aid = account_id.to_string();
+    let provider: String = db
+        .with_conn(move |conn| {
+            conn.query_row(
+                "SELECT provider FROM accounts WHERE id = ?1",
+                params![aid],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("lookup provider: {e}"))
+        })
+        .await?;
+
+    let entries = match provider.as_str() {
+        "graph" => {
+            let client = crate::graph::client::GraphClient::from_account(
+                db, account_id, encryption_key,
+            )
+            .await?;
+            fetch_graph_gal(&client, db).await?
+        }
+        "gmail_api" => {
+            let client =
+                crate::gmail::client::GmailClient::from_account(db, account_id, encryption_key)
+                    .await?;
+            fetch_google_gal(&client, db).await?
+        }
+        _ => return Ok(0), // IMAP/JMAP don't have organization directories
+    };
+
+    if entries.is_empty() {
+        return Ok(0);
+    }
+
+    let count = entries.len();
+    cache_gal_entries(db, account_id.to_string(), entries).await?;
+    Ok(count)
+}
+
 /// Get the timestamp of the last GAL cache refresh for an account.
 /// Returns None if no cache exists.
 pub async fn gal_cache_age(
