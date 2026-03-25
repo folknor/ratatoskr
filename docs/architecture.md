@@ -26,9 +26,7 @@ When evaluating a design: if adding a new call site can silently break existing 
 
 Every email state mutation (archive, delete, star, move, label, etc.) must flow through `core::actions::*`. This is the single path that coordinates local DB mutation + provider dispatch + pending-ops + undo tokens + in-flight guards.
 
-**Violation pattern:** Calling raw DB helpers (`insert_label`, `remove_label`, `delete_thread`, `set_thread_starred`) directly from the app crate. These bypass undo, pending-ops, and provider sync.
-
-**Target state:** Raw mutating DB helpers should be `pub(crate)` or internal to the actions module, giving compile-time enforcement.
+**Enforcement:** The 7 thread-action DB helpers (`set_thread_read`, `set_thread_starred`, `set_thread_pinned`, `set_thread_muted`, `delete_thread`, `add_thread_label`, `remove_thread_label`) are `pub(crate)` — the app crate cannot call them directly. New email-action DB helpers should follow the same pattern.
 
 ### Provider trait as abstraction layer
 

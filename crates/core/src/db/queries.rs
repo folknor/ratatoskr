@@ -501,7 +501,7 @@ fn set_thread_bool_field(
         .map_err(|e| e.to_string())
 }
 
-pub fn set_thread_read(
+pub(crate) fn set_thread_read(
     conn: &Connection,
     account_id: &str,
     thread_id: &str,
@@ -510,7 +510,7 @@ pub fn set_thread_read(
     set_thread_bool_field(conn, account_id, thread_id, "is_read", is_read)
 }
 
-pub fn set_thread_starred(
+pub(crate) fn set_thread_starred(
     conn: &Connection,
     account_id: &str,
     thread_id: &str,
@@ -519,7 +519,7 @@ pub fn set_thread_starred(
     set_thread_bool_field(conn, account_id, thread_id, "is_starred", is_starred)
 }
 
-pub fn set_thread_pinned(
+pub(crate) fn set_thread_pinned(
     conn: &Connection,
     account_id: &str,
     thread_id: &str,
@@ -528,7 +528,7 @@ pub fn set_thread_pinned(
     set_thread_bool_field(conn, account_id, thread_id, "is_pinned", is_pinned)
 }
 
-pub fn set_thread_muted(
+pub(crate) fn set_thread_muted(
     conn: &Connection,
     account_id: &str,
     thread_id: &str,
@@ -537,7 +537,7 @@ pub fn set_thread_muted(
     set_thread_bool_field(conn, account_id, thread_id, "is_muted", is_muted)
 }
 
-pub fn delete_thread(
+pub(crate) fn delete_thread(
     conn: &Connection,
     account_id: &str,
     thread_id: &str,
@@ -550,7 +550,7 @@ pub fn delete_thread(
     Ok(())
 }
 
-pub fn add_thread_label(
+pub(crate) fn add_thread_label(
     conn: &Connection,
     account_id: &str,
     thread_id: &str,
@@ -564,7 +564,7 @@ pub fn add_thread_label(
     Ok(())
 }
 
-pub fn remove_thread_label(
+pub(crate) fn remove_thread_label(
     conn: &Connection,
     account_id: &str,
     thread_id: &str,

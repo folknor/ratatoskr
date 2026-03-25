@@ -16,13 +16,7 @@ The structural fix for each was the same principle: make the right thing the onl
 
 ---
 
-## Remaining (4)
-
-### 1. Mail mutation DB boundary (partial)
-
-**Contract:** Every email state mutation must flow through `core::actions::*` for local DB + provider dispatch + pending-ops + undo + in-flight guard.
-
-**Status:** Known violations fixed — pop-out archive/delete now route through the action service. **Remaining:** raw mutating DB helpers (`insert_label`, `remove_label`, `delete_thread`, `set_thread_starred`, etc.) are still `pub` in `ratatoskr-core`. The app crate can still call them directly. Making them `pub(crate)` or moving them into the actions module would give compile-time enforcement, matching the Phase 6 provider boundary pattern.
+## Remaining (3)
 
 ### 9. New email actions require 8 parallel edits
 
@@ -64,10 +58,11 @@ The structural fix for each was the same principle: make the right thing the onl
 
 ---
 
-## Fixed (18)
+## Fixed (19)
 
 | # | Contract | Fix |
 |---|----------|-----|
+| 1 | Mail mutation DB boundary | 7 thread-action DB helpers (`set_thread_read/starred/pinned/muted`, `delete_thread`, `add/remove_thread_label`) changed to `pub(crate)`. App crate forced through action service at compile time. |
 | 2 | Account deletion leaks external stores | `delete_account_orchestrate()` — gather + ref-checks + delete in one call, async cleanup of body/inline/cache/search stores. 7 integration tests. |
 | 3 | Compose close loses dirty drafts | `save_compose_draft_sync()` — synchronous INSERT before window removal. Aborts close on failure. Stable `draft_id` per compose window. |
 | 4 | CommandId variants silently ignored | Inlined all sub-dispatchers into `dispatch_command` — 69 explicit arms, no wildcards. Compiler error on new variants. |
