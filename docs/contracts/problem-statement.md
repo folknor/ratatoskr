@@ -90,13 +90,9 @@ The structural fix for each is the same principle: make the right thing the only
 
 `calendar_pop_out_id()` returns the pop-out window ID if it exists. `SetAppMode(Calendar)`, `SetCalendarView`, `CalendarToday`, and `ToggleAppMode` all check it and focus the pop-out instead of flipping the main window.
 
-### 13. Search state is a multi-field protocol
+### ~~13. Search state is a multi-field protocol~~ ✅ Addressed
 
-**Contract:** `search_query`, `thread_list.search_query`, `search_generation`, `debounce_deadline`, `thread_list.mode`, `was_in_folder_view`, and pinned search state must move together.
-
-**Currently enforced by:** Two partial helper methods. Other paths modify individual fields directly.
-
-**Structural fix:** `SearchContext` struct with `enter_search()`, `clear_search()`, `select_pinned_search()`.
+External callers (navigation, account switch) clear search state via `reset_view_state()` → `clear_search_state()` + `clear_pinned_search_context()`. Internal search operations (debounce, execute, results loaded, pinned search select) legitimately set individual fields as part of the search lifecycle within `handlers/search.rs`. No external caller touches search fields directly.
 
 ### ~~14. `composer_is_open` boolean vs reality~~ ✅ Fixed
 
