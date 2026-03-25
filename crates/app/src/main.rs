@@ -1388,7 +1388,7 @@ impl App {
                 self.clear_search_state();
                 self.clear_pinned_search_context();
                 self.navigation_target = None;
-                self.thread_list.selected_thread = None;
+                self.clear_thread_selection();
                 self.nav_generation += 1;
                 self.thread_generation += 1;
                 self.update_thread_list_context_from_sidebar();
@@ -1398,7 +1398,7 @@ impl App {
                 self.clear_search_state();
                 self.clear_pinned_search_context();
                 self.navigation_target = None;
-                self.thread_list.selected_thread = None;
+                self.clear_thread_selection();
                 self.nav_generation += 1;
                 self.thread_generation += 1;
                 self.update_thread_list_context_from_sidebar();
@@ -1446,8 +1446,16 @@ impl App {
         }
     }
 
-    fn handle_label_selected(&mut self, _label_id: Option<String>) -> Task<Message> {
+    /// Clear thread selection and reading pane together. Every code path that
+    /// deselects threads must use this to prevent stale reading pane content.
+    fn clear_thread_selection(&mut self) {
         self.thread_list.selected_thread = None;
+        self.thread_list.clear_multi_select();
+        self.reading_pane.set_thread(None);
+    }
+
+    fn handle_label_selected(&mut self, _label_id: Option<String>) -> Task<Message> {
+        self.clear_thread_selection();
         self.nav_generation += 1;
         self.thread_generation += 1;
         self.load_threads_for_current_view()
@@ -1503,8 +1511,7 @@ impl App {
                 Task::none()
             }
             ThreadListEvent::ThreadDeselected => {
-                self.thread_list.selected_thread = None;
-                self.reading_pane.set_thread(None);
+                self.clear_thread_selection();
                 Task::none()
             }
             ThreadListEvent::WidenSearchScope => {
@@ -1528,8 +1535,7 @@ impl App {
                 if let Some(idx) = new_index {
                     self.handle_select_thread(idx)
                 } else {
-                    self.thread_list.selected_thread = None;
-                    self.reading_pane.set_thread(None);
+                    self.clear_thread_selection();
                     Task::none()
                 }
             }

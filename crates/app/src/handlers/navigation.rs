@@ -28,9 +28,8 @@ impl App {
         // Store the navigation target for view type derivation
         self.navigation_target = Some(target);
 
-        // Reset thread selection and bump generations
-        self.thread_list.selected_thread = None;
-        self.reading_pane.set_thread(None);
+        // Reset thread selection and reading pane together
+        self.clear_thread_selection();
         self.nav_generation += 1;
         self.thread_generation += 1;
 

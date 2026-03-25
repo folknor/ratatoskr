@@ -90,7 +90,7 @@ impl App {
                 let query = self.search_query.text().to_string();
 
                 self.thread_list.set_threads(threads);
-                self.thread_list.selected_thread = None;
+                self.clear_thread_selection();
 
                 // Create or update pinned search
                 if !query.trim().is_empty() {
@@ -354,7 +354,7 @@ impl App {
 
         self.nav_generation += 1;
         self.thread_generation += 1;
-        self.thread_list.selected_thread = None;
+        self.clear_thread_selection();
 
         // Update thread list context
         if let Some(ps) = self.pinned_searches.iter().find(|p| p.id == id) {
@@ -412,7 +412,7 @@ impl App {
                 self.thread_list.mode = ThreadListMode::Search;
                 self.status = format!("{} threads (pinned search)", threads.len());
                 self.thread_list.set_threads(threads);
-                self.thread_list.selected_thread = None;
+                self.clear_thread_selection();
                 Task::none()
             }
             Err(e) => {
@@ -530,10 +530,7 @@ impl App {
         self.thread_list.mode = ThreadListMode::Folder;
         self.search_query.reset(String::new());
         self.thread_list.search_query.clear();
-        self.thread_list.selected_thread = None;
-        self.reading_pane.thread_messages.clear();
-        self.reading_pane.thread_attachments.clear();
-        self.reading_pane.message_expanded.clear();
+        self.clear_thread_selection();
         if self.was_in_folder_view {
             self.was_in_folder_view = false;
             return self.load_threads_for_current_view();

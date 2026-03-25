@@ -62,13 +62,9 @@ The structural fix for each is the same principle: make the right thing the only
 
 **Structural fix:** `fn open_settings(&mut self, tab: Tab, overlay: Option<SettingsOverlay>)` and `fn close_settings(&mut self, commit: bool)`.
 
-### 7. Thread selection + reading pane consistency
+### ~~7. Thread selection + reading pane consistency~~ ✅ Fixed
 
-**Contract:** Clearing thread selection must also clear the reading pane. Setting a new selection must load the reading pane.
-
-**Currently enforced by:** Convention. At least 6 code paths set `selected_thread = None` without calling `reading_pane.set_thread(None)`, leaving stale message content visible.
-
-**Structural fix:** `fn clear_selection(&mut self)` and `fn select_thread(&mut self, idx: usize) -> Task<Message>` that keep both in sync.
+`fn clear_thread_selection(&mut self)` clears `selected_thread`, multi-select, and reading pane in one call. All 10 deselection sites in App-level code now use this helper. No more stale reading pane content after navigation, search, or account switch.
 
 ### 8. Compose routing deduplication
 
