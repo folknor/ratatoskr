@@ -25,7 +25,8 @@ struct OidcDiscoveryDocument {
 }
 
 /// Result of a successful OIDC discovery probe.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OidcEndpoints {
     pub issuer_url: String,
     pub auth_url: String,

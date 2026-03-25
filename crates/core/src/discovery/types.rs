@@ -12,6 +12,11 @@ pub struct DiscoveredConfig {
     pub options: Vec<ProtocolOption>,
     /// If MX lookup resolved to a different provider domain.
     pub resolved_domain: Option<String>,
+    /// OIDC discovery endpoints, if the domain serves an OpenID Connect
+    /// configuration. Present even when no IMAP/SMTP servers were found,
+    /// enabling manual server configuration with SSO authentication.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oidc_endpoints: Option<super::oidc::OidcEndpoints>,
     /// Per-stage diagnostics.
     pub diagnostics: Vec<StageDiagnostic>,
 }

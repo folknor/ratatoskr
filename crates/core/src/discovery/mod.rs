@@ -42,22 +42,77 @@ pub async fn discover(email: &str) -> Result<DiscoveredConfig, String> {
 
 async fn run_cascade(email: &str, domain: &str) -> Result<DiscoveredConfig, String> {
     let imap_found = Arc::new(Notify::new());
+
+    // Run OIDC probe in parallel with stages 1-4
+    let d_oidc = domain.to_string();
+    let oidc_handle = tokio::spawn(async move {
+        let start = Instant::now();
+        let result = oidc::probe(&d_oidc).await;
+        let diag = StageDiagnostic {
+            stage: "oidc_discovery",
+            duration_ms: elapsed_ms(start),
+            outcome: if result.is_some() {
+                StageOutcome::Found { count: 1 }
+            } else {
+                StageOutcome::NotFound
+            },
+        };
+        (result, diag)
+    });
+
     let (stages_1_4, resolved_domain) = run_stages(domain, email, &imap_found).await;
     let stage_5 = run_probe_stage(domain, &imap_found, &stages_1_4).await;
+
+    let (oidc_endpoints, oidc_diag) = oidc_handle
+        .await
+        .unwrap_or_else(|_| (None, err_diag("oidc_discovery")));
 
     let (mut all_results, mut diagnostics) = unpack_stages(stages_1_4);
     all_results.push(stage_5.0);
     diagnostics.push(stage_5.1);
+    diagnostics.push(oidc_diag);
 
-    let options = merge::merge_and_rank(all_results);
+    let mut options = merge::merge_and_rank(all_results);
+
+    // Post-process: upgrade OAuth2Unsupported results using OIDC endpoints
+    if let Some(ref endpoints) = oidc_endpoints {
+        upgrade_oauth2_unsupported(&mut options, endpoints);
+    }
 
     Ok(DiscoveredConfig {
         email: email.to_string(),
         domain: domain.to_string(),
         options,
         resolved_domain,
+        oidc_endpoints,
         diagnostics,
     })
+}
+
+/// Upgrade `AuthMethod::OAuth2Unsupported` to `AuthMethod::OAuth2` using
+/// the OIDC discovery endpoints. This bridges the gap where autoconfig or
+/// MX lookup found IMAP/SMTP servers with OAuth2 authentication but couldn't
+/// resolve the specific OAuth2 endpoints.
+fn upgrade_oauth2_unsupported(
+    options: &mut [ProtocolOption],
+    endpoints: &oidc::OidcEndpoints,
+) {
+    for opt in options.iter_mut() {
+        if matches!(opt.auth.method, types::AuthMethod::OAuth2Unsupported { .. }) {
+            log::info!(
+                "Upgrading OAuth2Unsupported to OAuth2 via OIDC discovery for {:?}",
+                opt.protocol
+            );
+            opt.auth.method = types::AuthMethod::OAuth2 {
+                provider_id: format!("oidc:{}", endpoints.issuer_url),
+                auth_url: endpoints.auth_url.clone(),
+                token_url: endpoints.token_url.clone(),
+                scopes: endpoints.scopes.clone(),
+                use_pkce: endpoints.supports_pkce_s256,
+            };
+            opt.source = types::DiscoverySource::OidcWellKnown;
+        }
+    }
 }
 
 fn extract_domain(email: &str) -> Result<String, String> {
