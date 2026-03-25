@@ -143,7 +143,7 @@ pub fn build_context(app: &App) -> CommandContext {
         thread_in_trash: thread_state.in_trash,
         thread_in_spam: thread_state.in_spam,
         is_online: app.is_online,
-        composer_is_open: app.composer_is_open,
+        composer_is_open: app.composer_is_open(),
         focused_region: app.focused_region,
         search_query,
     }

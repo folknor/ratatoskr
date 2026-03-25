@@ -101,7 +101,6 @@ impl App {
                 PopOutMessage::Compose(ComposeMessage::Discard),
             ) => {
                 self.pop_out_windows.remove(&window_id);
-                self.composer_is_open = false;
                 iced::window::close(window_id)
             }
             // Compose send — build MIME, queue for outbox, close window
@@ -397,7 +396,6 @@ impl App {
         let (window_id, open_task) = iced::window::open(settings);
         self.pop_out_windows
             .insert(window_id, PopOutWindow::Compose(Box::new(state)));
-        self.composer_is_open = true;
 
         open_task.discard()
     }
@@ -911,6 +909,14 @@ impl DraftData {
 }
 
 impl App {
+    /// Returns true if at least one compose pop-out window exists.
+    /// Computed from `pop_out_windows` — no manual bookkeeping needed.
+    pub(crate) fn composer_is_open(&self) -> bool {
+        self.pop_out_windows
+            .values()
+            .any(|w| matches!(w, PopOutWindow::Compose(_)))
+    }
+
     /// Returns true if any compose window has `draft_dirty` set.
     pub(crate) fn has_dirty_compose_drafts(&self) -> bool {
         self.pop_out_windows.values().any(|w| {
@@ -1131,7 +1137,6 @@ impl App {
         match outcome {
             ratatoskr_core::actions::ActionOutcome::Success => {
                 self.pop_out_windows.remove(&window_id);
-                self.composer_is_open = false;
                 self.status_bar
                     .show_confirmation("Message sent".to_string());
                 iced::window::close(window_id)

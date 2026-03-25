@@ -124,13 +124,9 @@ The structural fix for each is the same principle: make the right thing the only
 
 **Structural fix:** `SearchContext` struct with `enter_search()`, `clear_search()`, `select_pinned_search()`.
 
-### 14. `composer_is_open` boolean vs reality
+### ~~14. `composer_is_open` boolean vs reality~~ ✅ Fixed
 
-**Contract:** Must be `true` iff at least one `PopOutWindow::Compose` exists. Used to gate the auto-save subscription.
-
-**Currently enforced by:** Manual writes at 4 sites. With multiple compose windows, closing one could incorrectly set it false.
-
-**Structural fix:** Computed property: `fn composer_is_open(&self) -> bool { self.pop_out_windows.values().any(|w| matches!(w, PopOutWindow::Compose(_))) }`.
+Replaced the manually-synced `composer_is_open: bool` field with a computed `fn composer_is_open(&self) -> bool` that queries `pop_out_windows` directly. Removed all 4 manual write sites.
 
 ### 15. Generation counter ordering
 

@@ -378,7 +378,6 @@ struct App {
     binding_table: BindingTable,
     focused_region: Option<FocusedRegion>,
     is_online: bool,
-    composer_is_open: bool,
     pending_chord: Option<PendingChord>,
     palette: Palette,
     undo_stack: UndoStack,
@@ -555,7 +554,6 @@ impl App {
             binding_table,
             focused_region: None,
             is_online: true,
-            composer_is_open: false,
             pending_chord: None,
             palette: Palette::new(
                 CommandRegistry::new(),
@@ -750,7 +748,7 @@ impl App {
             );
         }
 
-        if self.composer_is_open && self.has_dirty_compose_drafts() {
+        if self.composer_is_open() && self.has_dirty_compose_drafts() {
             subs.push(
                 iced::time::every(handlers::pop_out::DRAFT_AUTO_SAVE_INTERVAL)
                     .map(|_| Message::ComposeDraftTick),
@@ -2338,7 +2336,6 @@ impl App {
                 log::warn!("Compose draft save failed, aborting window close");
                 return Task::none();
             }
-            self.composer_is_open = false;
         }
         // Calendar pop-out closing — calendar becomes available in main window again.
         // (No state change needed — mode toggle just works.)
