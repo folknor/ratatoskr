@@ -231,6 +231,18 @@ async fn dispatch_write_back(
             .map_err(ActionError::remote)
         }
         "google" => {
+            // Build the update field mask — early return if nothing to update
+            let mut update_fields = Vec::new();
+            if phone.is_some() {
+                update_fields.push("phoneNumbers");
+            }
+            if company.is_some() {
+                update_fields.push("organizations");
+            }
+            if update_fields.is_empty() {
+                return Ok(()); // nothing to push
+            }
+
             let client = ratatoskr_gmail::client::GmailClient::from_account(
                 &ctx.db,
                 account_id,
@@ -241,10 +253,10 @@ async fn dispatch_write_back(
             let body = crate::contacts::sync_google::build_google_contact_update_body(
                 phone, company, "*", // etag "*" = skip optimistic locking
             );
+            let field_mask = update_fields.join(",");
             let url = format!(
                 "https://people.googleapis.com/v1/{}:updateContact?updatePersonFields={}",
-                server_id,
-                body["updatePersonFields"].as_str().unwrap_or(""),
+                server_id, field_mask,
             );
             let _resp: serde_json::Value = client
                 .patch_absolute(&url, &body, &ctx.db)

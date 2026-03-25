@@ -130,6 +130,7 @@ pub struct GoogleOrganization {
 /// Build the People API update request body for a contact.
 ///
 /// Returns a JSON body suitable for `PATCH /v1/{resourceName}:updateContact`.
+/// The `updatePersonFields` mask goes in the query string, not the body.
 /// Display name changes are NOT included (they are local-only overrides).
 pub fn build_google_contact_update_body(
     phone: Option<&str>,
@@ -140,19 +141,14 @@ pub fn build_google_contact_update_body(
         "etag": etag,
     });
 
-    let mut update_fields = Vec::new();
-
     if let Some(phone_val) = phone {
         person["phoneNumbers"] = serde_json::json!([{"value": phone_val}]);
-        update_fields.push("phoneNumbers");
     }
 
     if let Some(company_val) = company {
         person["organizations"] = serde_json::json!([{"name": company_val}]);
-        update_fields.push("organizations");
     }
 
-    person["updatePersonFields"] = serde_json::Value::String(update_fields.join(","));
     person
 }
 
