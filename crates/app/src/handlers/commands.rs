@@ -144,10 +144,7 @@ impl App {
             // ── Toggle actions via action service (with optimistic UI) ──
             EmailAction::ToggleStar => {
                 let rollback = self.optimistic_toggle(&selected_threads, |t| &mut t.is_starred);
-                // Also update reading pane star state
-                for (_, tid, prev) in &rollback {
-                    self.reading_pane.update_star(tid, !prev);
-                }
+                self.sync_reading_pane_after_toggle(CompletedAction::Star, &rollback, true);
                 return self.dispatch_toggle_action(
                     CompletedAction::Star,
                     rollback,
@@ -306,6 +303,23 @@ impl App {
         )
     }
 
+    /// Sync reading pane state after a thread list toggle or rollback.
+    /// Ensures the reading pane reflects the same state as the thread list
+    /// for any toggle that has a reading pane counterpart.
+    fn sync_reading_pane_after_toggle(
+        &mut self,
+        action: CompletedAction,
+        threads: &[(String, String, bool)],
+        use_new_value: bool,
+    ) {
+        if matches!(action, CompletedAction::Star) {
+            for (_, tid, stored_val) in threads {
+                let star_val = if use_new_value { !stored_val } else { *stored_val };
+                self.reading_pane.update_star(tid, star_val);
+            }
+        }
+    }
+
     /// Apply optimistic UI toggle to selected threads. Returns rollback data
     /// keyed by (account_id, thread_id, previous_value).
     fn optimistic_toggle(
@@ -384,12 +398,9 @@ impl App {
                 }
             }
 
-            // Restore reading pane state regardless of thread list presence —
-            // the thread may have left the list but still be displayed.
-            if matches!(action, CompletedAction::Star) {
-                self.reading_pane.update_star(thread_id, *prev);
-            }
         }
+        // Sync reading pane after rollback (restoring old values)
+        self.sync_reading_pane_after_toggle(action, rollback, false);
     }
 
     /// Handle action service completion — map outcomes to user feedback,

@@ -170,13 +170,9 @@ Replaced 9 identical `let Some(ref action_ctx) = self.action_ctx else { ... }` b
 
 **Structural fix:** Handled by the overlay exclusivity system (#11).
 
-### 22. Reading pane star state manual sync
+### ~~22. Reading pane star state manual sync~~ ✅ Fixed
 
-**Contract:** Toggling star optimistically must update both the thread list and the reading pane's star state.
-
-**Currently enforced by:** Manual `reading_pane.update_star()` calls alongside the thread list toggle.
-
-**Structural fix:** Unified state-sync method called by both optimistic toggle and rollback.
+`sync_reading_pane_after_toggle()` handles reading pane sync for both optimistic toggles (`use_new_value: true`) and rollbacks (`use_new_value: false`). Centralized in one method — future toggles that affect the reading pane add one match arm here instead of manual calls at each site.
 
 ---
 
