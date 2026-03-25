@@ -104,6 +104,25 @@ These are non-obvious behaviors of the `jmap-client` crate that will matter if t
 - Rewriting entire files instead of making targeted edits
 - Claiming features are "done" when only the types exist but call sites are missing
 
+## Code Review (`review`)
+
+`review` is a CLI tool that fans out code review requests to persistent AI sessions. Each session is a long-lived Claude or Codex conversation that has already been onboarded with project context for a specific review lens. Configuration lives in `.review.md` at the repo root.
+
+Four archetypes are configured: `security`, `bugs`, `perf`, `arch`. The `sweep` group fans out to all four in parallel.
+
+Instructions are piped via stdin. Flags tell the reviewer what to look at:
+
+```bash
+echo "check the new sync logic" | review bugs --staged
+echo "review this change" | review arch --commit abc123
+echo "full review" | review sweep --general
+echo "look at stores" | review perf --document crates/stores/src/body_store.rs
+```
+
+Other flags: `--unstaged`, `--range <a..b>`. Use `--dry-run` to see the assembled prompt without sending.
+
+Prefer `--raw` for ongoing use — the sessions are already onboarded with project context and their review focus, so the generic archetype prefix is redundant. Omit `--raw` for the first review in a session or occasionally to re-anchor a stale session.
+
 ## Commit rules
 
 - Don't commit pure markdown changes on their own. Bundle them with the code change they relate to, or skip them. Unless the markdown update is substantive.
