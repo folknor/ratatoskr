@@ -168,7 +168,6 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **Signature: per-account default dropdown in Account Settings** — Account editor overlay has no signature dropdown for selecting the default signature for an account.
 - [ ] **GAL directory API calls** — `gal_cache` table and autocomplete integration exist. Missing: actual Graph `/users` and Google Directory API calls to populate the cache. Provider client access now available via `handlers::provider::create_provider()`. See `docs/contacts/problem-statement.md` § GAL Caching.
 - [ ] **CardDAV contact write-back** — CardDAV client supports PROPFIND/REPORT/GET but not PUT/DELETE. Need vCard generation + PUT method for pushing contact edits to CardDAV servers. See `docs/contacts/problem-statement.md`.
-- [ ] **Provider write-back HTTP calls** — `dispatch_provider_write_back()` scaffolded for Google/Graph (body builders + server info lookups exist). JMAP `ContactCard/set` fully implemented. Missing: actual HTTP dispatch for Google (`PATCH /v1/{resourceName}:updateContact`) and Graph (`PATCH /me/contacts/{id}`). Provider client access now available via `handlers::provider::create_provider()`.
 
 ## Cross-Cutting Architecture Patterns
 

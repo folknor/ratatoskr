@@ -171,11 +171,9 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
             match dispatch_delete(ctx, source_str, aid, sid).await {
                 Ok(()) => {}
                 Err(e) => {
-                    // JMAP failure → don't delete locally (provider-first).
-                    // When Google/Graph/CardDAV HTTP delete is wired, extend
-                    // this check to include them (all synced providers should
-                    // be provider-first once their HTTP calls are real).
-                    if source_str == "jmap" {
+                    // Provider-first: don't delete locally if provider fails.
+                    // CardDAV is still a stub — local-only until PUT is wired.
+                    if matches!(source_str, "jmap" | "google" | "graph") {
                         let outcome = ActionOutcome::Failed { error: e };
                         mlog.emit(&outcome);
                         return outcome;
@@ -233,11 +231,44 @@ async fn dispatch_write_back(
             .map_err(ActionError::remote)
         }
         "google" => {
-            // Scaffolding ready (build_google_contact_update_body,
-            // get_google_contact_server_info). HTTP PATCH not wired.
-            Err(ActionError::not_implemented("Google contact write-back not yet wired to HTTP"))
+            let client = ratatoskr_gmail::client::GmailClient::from_account(
+                &ctx.db,
+                account_id,
+                ctx.encryption_key,
+            )
+            .await
+            .map_err(ActionError::remote)?;
+            let body = crate::contacts::sync_google::build_google_contact_update_body(
+                phone, company, "*", // etag "*" = skip optimistic locking
+            );
+            let url = format!(
+                "https://people.googleapis.com/v1/{}:updateContact?updatePersonFields={}",
+                server_id,
+                body["updatePersonFields"].as_str().unwrap_or(""),
+            );
+            let _resp: serde_json::Value = client
+                .patch_absolute(&url, &body, &ctx.db)
+                .await
+                .map_err(ActionError::remote)?;
+            log::info!("[Google-Contacts] Updated contact {server_id}");
+            Ok(())
         }
-        "graph" => Err(ActionError::not_implemented("Graph contact write-back not yet wired to HTTP")),
+        "graph" => {
+            let client = ratatoskr_graph::client::GraphClient::from_account(
+                &ctx.db,
+                account_id,
+                ctx.encryption_key,
+            )
+            .await
+            .map_err(ActionError::remote)?;
+            let body = crate::contacts::sync_graph::build_graph_contact_update_body(phone, company);
+            client
+                .patch(&format!("/me/contacts/{server_id}"), &body, &ctx.db)
+                .await
+                .map_err(ActionError::remote)?;
+            log::info!("[Graph-Contacts] Updated contact {server_id}");
+            Ok(())
+        }
         "carddav" => Err(ActionError::not_implemented("CardDAV contact write-back not implemented (PUT + vCard needed)")),
         "user" => Ok(()),
         other => {
@@ -267,8 +298,40 @@ async fn dispatch_delete(
                 .await
                 .map_err(ActionError::remote)
         }
-        "google" => Err(ActionError::not_implemented("Google contact delete not yet wired to HTTP")),
-        "graph" => Err(ActionError::not_implemented("Graph contact delete not yet wired to HTTP")),
+        "google" => {
+            let client = ratatoskr_gmail::client::GmailClient::from_account(
+                &ctx.db,
+                account_id,
+                ctx.encryption_key,
+            )
+            .await
+            .map_err(ActionError::remote)?;
+            let url = format!(
+                "https://people.googleapis.com/v1/{}:deleteContact",
+                server_id,
+            );
+            client
+                .delete_absolute(&url, &ctx.db)
+                .await
+                .map_err(ActionError::remote)?;
+            log::info!("[Google-Contacts] Deleted contact {server_id}");
+            Ok(())
+        }
+        "graph" => {
+            let client = ratatoskr_graph::client::GraphClient::from_account(
+                &ctx.db,
+                account_id,
+                ctx.encryption_key,
+            )
+            .await
+            .map_err(ActionError::remote)?;
+            client
+                .delete(&format!("/me/contacts/{server_id}"), &ctx.db)
+                .await
+                .map_err(ActionError::remote)?;
+            log::info!("[Graph-Contacts] Deleted contact {server_id}");
+            Ok(())
+        }
         "carddav" => Err(ActionError::not_implemented("CardDAV contact delete not implemented")),
         _ => Ok(()),
     }
