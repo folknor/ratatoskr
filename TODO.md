@@ -166,7 +166,7 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **Pop-out default rendering mode from settings** — `MessageViewState` hardcodes `RenderingMode::default()` (SimpleHtml). Should load from a system-wide user preference. Needs a settings field + plumbing to pass it into `from_thread_message()` and `from_session_entry()`.
 - [ ] **Signature: draft restoration with signature state** — Draft save does not persist `signature_separator_index` or `active_signature_id`. On draft reopen, signature position in the document is not reconstructed.
 - [ ] **Signature: per-account default dropdown in Account Settings** — Account editor overlay has no signature dropdown for selecting the default signature for an account.
-- [ ] **GAL directory API calls** — `gal_cache` table and autocomplete integration exist. Missing: actual Graph `/users` and Google Directory API calls to populate the cache. Provider client access now available via `handlers::provider::create_provider()`. See `docs/contacts/problem-statement.md` § GAL Caching.
+- [ ] **GAL sync trigger** — `fetch_graph_gal()` and `fetch_google_gal()` exist in `core/contacts/gal.rs` but aren't called from the sync pipeline yet. Need: trigger on initial sync + periodic refresh (e.g. daily), wire through `SyncTick`, and handle 403 gracefully for non-Workspace Google accounts.
 - [ ] **CardDAV contact write-back** — CardDAV client supports PROPFIND/REPORT/GET but not PUT/DELETE. Need vCard generation + PUT method for pushing contact edits to CardDAV servers. See `docs/contacts/problem-statement.md`.
 
 ## Cross-Cutting Architecture Patterns
