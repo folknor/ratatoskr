@@ -1,9 +1,5 @@
 # TODO
 
-## Dead Code Removal
-
-- [x] **Nuke all backend mention code** — *(2026-03-24)* Removed: `crates/core/src/mentions.rs`, `crates/graph/src/mentions.rs`, `MentionsPreview`/`GraphMention` types, `is_mentioned` column + `mentions` table (migration 74), `mentionsPreview` in `$select`, mention params from `ProviderOps::send_email`/`create_draft` and all 4 provider impls, beta endpoint branching in `create_draft_impl`. @-autocomplete (compose-only) tracked separately under Mentions roadmap.
-
 ## Remaining Work
 
 - [ ] **Better MIME handling** - for example in app/src/pop_out_compose.rs mime_from_extension, hardcoded things like this.
@@ -18,29 +14,19 @@
 
 - [ ] **Email body background override setting** — Email body areas are always rendered on a white background for fidelity (HTML emails are authored against white). Users should be able to override this to use the theme's background instead, for a fully immersive dark mode experience at the cost of email rendering accuracy. Setting in Preferences with three options: "Always white" (default), "Match theme", "Auto" (white in light themes, theme bg in dark themes).
 
-- [ ] **Codebase contracts** — 22 implicit contracts identified. See `docs/contracts/problem-statement.md` for the full catalogue with priorities, violation examples, and structural fix sketches.
+- [ ] **Codebase contracts** — 21 remaining implicit contracts (1 fixed). See `docs/contracts/problem-statement.md` for the full catalogue with priorities, violation examples, and structural fix sketches.
 
 - [ ] **App logo in first-launch modal + about page** — `assets/icon.svg` exists but isn't rendered anywhere. Needs iced `svg` feature enabled to use `iced::widget::svg`. SVG preferred over PNG because the icon should be re-colored to match the active theme (e.g. primary color tint). Requires adding `"svg"` to the iced features list in `crates/app/Cargo.toml`.
-
-- [x] **Wire email actions to DB + provider write-back** — *(2026-03-24)* All email actions (archive, trash, spam, move, star, read, pin, mute, snooze, permanent delete, label add/remove) flow through the action service (`core::actions::*`). Local DB + provider dispatch + structured outcomes + pending-ops retry queue + undo compensation all wired. Batch executor (`batch_execute`) groups by account for provider reuse. `FlightGuard` RAII prevents concurrent mutations on the same thread. Per-type retry policy (folder: 10 retries, label: 7, flag: 5). `dispatch_email_db_action` deleted.
 
 - [ ] **Action service: NoOp detection** *(Deferred)* — Action functions currently return `Success` even when the state didn't change (e.g., archiving a thread already not in inbox). This means undo tokens are produced for no-ops — undoing would restore a state that was never there. Detecting no-ops requires either pre-checking state before mutation (doubles DB reads) or checking SQL affected row counts (`DELETE WHERE` returns 0 if already absent). The affected-rows approach is cheaper: `rusqlite::Connection::execute()` returns `usize` affected rows, which the `_local` helpers could return as `bool` (changed/unchanged). `_dispatch` would skip provider dispatch and return a `NoOp` variant (new `ActionOutcome` variant) or `Success` with a flag. `produce_undo_tokens` would skip threads with no-op outcomes. Impact is minor — worst case is undo restoring an already-correct state (idempotent). UX polish, not a correctness bug. Deferred from Phase 4 (`docs/action-service/phase-4-plan.md` line 417).
 
 - [ ] **Action service: user-facing retry status** *(Deferred)* — When an action fails remotely and gets enqueued for pending-ops retry, the user has no visibility. The thread disappears from inbox (local mutation applied), the status bar says "Archived", but there's no persistent indicator that actions are waiting for retry or have exhausted retries. The infrastructure exists: `db_pending_ops_count()` returns pending count, `db_pending_ops_failed_count()` returns exhausted count, `db_pending_ops_retry_failed()` resets failed ops for manual retry. What's missing is UI: a status bar badge or indicator showing "N actions pending retry", a section in settings listing pending/failed ops with operation details and a "retry now" button, and a notification when retries exhaust ("Archive failed after 10 retries — will resolve on next sync"). Without this, the user has no way to know their actions are silently diverged from the server until sync reconciles (or doesn't, if the sync pipeline doesn't cover that state).
 
-- [x] **Snooze resurface mechanism** — *(2026-03-24)* `SnoozeTick` subscription (60s interval) calls `db_get_snoozed_threads_due()` and `unsnooze()` for each due thread. Boot-time check via `Task::done(Message::SnoozeTick)`. On resurface, reloads navigation + thread list. Snooze remains local-only by design.
-
 - [ ] **Action service: native provider batching** *(Deferred)* — Currently `batch_execute` reuses one provider per account but still makes one HTTP request per thread (sequential `provider.archive()` calls). Some providers support batching natively: Gmail batch API (up to 100 requests in one HTTP multipart request), Graph `/$batch` endpoint (up to 20 per batch), JMAP `Email/set` can modify multiple emails in one method call, IMAP `STORE` can set flags on multiple UIDs in one command. Native batching would reduce 50 HTTP round-trips to 1-3 for bulk operations. Requires adding batch methods to `ProviderOps` (e.g., `archive_batch(&self, ctx, thread_ids: &[&str]) -> Vec<Result<(), ProviderError>>`), implementing per provider (IMAP would need UID set formatting, Gmail needs multipart boundary encoding, Graph needs JSON batch request assembly, JMAP needs method call batching), and updating `batch.rs` to prefer batch methods when available and fall back to sequential for providers that don't implement them. The per-account sequential approach works fine for now — provider reuse eliminated the construction overhead, and the remaining latency is network-bound.
 
 - [ ] **Hardcoded values** - We need to do a sweep of the codebase for hardcoded values that shouldn't be. These need to be extracted to a common location so that we can keep track of them and decide whether or not to make them configurable.
 
-- [x] **Wire command palette extended labels to UI** — *(2026-03-23)* `CommandMatch` now carries `palette_label` from `resolved_palette_label()`. Palette rendering uses the longer label. `description` field still not rendered (for future help/shortcut reference panel).
-
 - [ ] **Crate structure and dependency graph** - So much has been implemented without any real consideration for what kind of code lives where. It might be time to get a grip on things.
-
-- [x] **Pop-out body loading uses BodyStore** — *(2026-03-23)* `dispatch_message_view_loads()` now tries `BodyStoreState::get()` first for full zstd-decompressed bodies, falling back to DB snippet if body store is unavailable.
-
-- [x] ~~**JMAP for Calendars**~~ — Wired: `crates/jmap/src/calendar_sync.rs` (Calendar/get, CalendarEvent/get+changes+set), called from JMAP sync pipeline. Calendar sync orchestrator (`crates/calendar/src/sync.rs`) handles JMAP alongside Google and Graph.
 
 - [ ] **Scroll virtualization** — Thread list renders all cards in `column![]` inside `scrollable`. Needs iced-level virtual scrolling for large mailboxes.
 
@@ -68,9 +54,6 @@ Phases 1-5 complete (schema, Exchange/IMAP/JMAP sync, local dispatch + provider 
 
 - [ ] **Label pills in reading pane** — Display tag-type labels as colored pills on expanded message headers. Data now in `thread_labels` via unified sync.
 - [ ] **Label picker overlay** — Triggered from reading pane or command palette. Lists all available tag-type labels with colors for apply/remove.
-- [x] ~~**Provider write-back for label operations**~~ — Wired: apply/remove dispatches to provider APIs via unified `add_tag`/`remove_tag`. Best-effort, non-blocking.
-- [x] **Phase 6: Deprecate old tables** — *(2026-03-24)* Dropped `categories` and `message_categories` tables (migration 72). Removed `apply_category`/`remove_category` from `ProviderOps` trait. All label dispatch through `add_tag`/`remove_tag` with `label_kind = 'tag'` guard. Fixed `INSERT OR REPLACE` → `ON CONFLICT DO UPDATE` across all 5 label sync paths. IMAP/JMAP `add_tag` enhanced with `kw:` prefix detection for keyword operations.
-- [x] **IMAP PERMANENTFLAGS graceful degradation** — *(2026-03-24)* `supports_keywords` column on `accounts` (migration 73), persisted during initial + delta sync (conservative: all folders must support). `set_keyword_if_supported` handles per-folder rejection at the protocol level. `supports_keywords` is advisory for future UI gating only — no hard-reject preflight (fixed-keyword servers need writeback too).
 - [ ] **IMAP keyword add_tag/remove_tag per-folder batching** — Currently creates a session per message instead of grouping by folder and batching UIDs like `mark_read`/`star` do. Performance concern for threads with many messages.
 
 ### Tracking Blocking — `docs/roadmap/tracking-blocking.md`
@@ -79,25 +62,18 @@ Sanitization pipeline, MDN detection, tracking pixel detection, URL cleaning all
 
 - [ ] **Read receipt prompt UI** — `read_receipt_policy` table and `mdn.rs` policy resolution exist. Need UI prompt when opening a message with `mdn_requested=true`: "Send read receipt?" with per-sender/per-account policy options (ask/always/never).
 - [ ] **Read receipt policy management in Settings** — Settings panel for configuring default MDN policy per account and per-sender overrides.
-- [x] **Remote image strip in sanitizer** — `sanitize_html_body_with_image_policy()` strips remote `<img src="http(s)://...">` unless sender is allowlisted. Preserves cid:/data: URIs. *(2026-03-22)*
-- [x] **Link tracking visual indicators** — `is_known_tracker()` exported from tracking_pixels, `has_tracking_params()` added to url_cleaning. UI renderer can annotate links. *(2026-03-22)*
-- [x] **AMP HTML blocking** — `strip_amp_elements()` removes 14 amp-* elements and amp4email attribute. Integrated into `sanitize_html_body_with_image_policy()`. *(2026-03-22)*
 
 ### Cloud Attachments — `docs/roadmap/cloud-attachments.md`
 
 OneDrive and Google Drive upload both implemented. Remaining:
 
-- [x] **Incoming cloud link detection** — `detect_cloud_links()` already exists in `core/cloud_attachments.rs` with full pattern matching for OneDrive, GDrive, Dropbox, Box. 12 tests. Needs wiring to sync pipeline via `insert_incoming_cloud_links()`. *(verified 2026-03-22)*
 - [ ] **Compose UI for cloud attachment flow** — Size threshold detection in compose, prompt to upload to cloud, upload progress indicator, insert link into message body. Orchestration logic exists in `core/cloud_attachments.rs`.
 - [ ] **Offline upload queue** — Queue uploads when offline, retry when connectivity returns.
-- [x] **JMAP/IMAP graceful degradation** — `supports_cloud_upload()` + `large_attachment_warning()` + `LARGE_ATTACHMENT_THRESHOLD` (25 MB) in `core/cloud_attachments.rs`. UI needs to call these during compose attach flow. *(2026-03-22)*
-- [x] **`cloud_attachments` DB table** — Already exists (migration 39). 14 columns, 2 indexes, full CRUD in `core/cloud_attachments.rs`. *(verified 2026-03-22)*
 
 ### Public Folders — `docs/roadmap/public-folders.md`
 
 EWS SOAP client, autodiscover routing, offline sync, IMAP NAMESPACE public folders, DB schema all done. Sidebar pins done (2026-03-22). Remaining:
 
-- [x] **Sidebar pin rendering** — "PUBLIC FOLDERS" section with folder icon, unread count, loaded at boot from `public_folder_pins`. *(2026-03-22)*
 - [ ] **Thread loading on selection** — App handler for `PublicFolderSelected` event to load threads from `public_folder_items` into thread list.
 - [ ] **Public folder browser** — Lazy-load tree widget for browsing the hierarchy and pinning folders. Uses existing `browse_public_folders()` API.
 - [ ] **Reply/post wiring** — Connect compose to `CreateItem` EWS operation for replies and posts to public folders.
@@ -106,7 +82,6 @@ EWS SOAP client, autodiscover routing, offline sync, IMAP NAMESPACE public folde
 
 Exchange Graph sync + Autodiscover + sidebar integration done. Remaining:
 
-- [x] **Sidebar scope dropdown** — Shared mailboxes auto-populate from Autodiscover results, rendered with users icon. *(2026-03-22)*
 - [ ] **Thread loading on selection** — App handler for `SharedMailboxSelected` event to load navigation and threads for the selected shared mailbox.
 - [ ] **Compose identity auto-selection** — When replying from shared mailbox context, auto-set From to shared mailbox address. `send_as_shared_mailbox()` and `send_on_behalf_of()` APIs exist.
 - [ ] **Gmail delegation support** — Blocked (API limitation). Send-As aliases work.
@@ -187,14 +162,11 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **Inline image store eviction UI** — Settings control for store size (128 MB hardcoded).
 
 - [ ] **Provider push notifications (remaining)** — JMAP WebSocket push is wired. Still missing: IMAP IDLE (persistent connection per folder), Graph/Gmail (poll-based, needs tuning — true push requires cloud infrastructure).
-- [x] ~~**Connect sync orchestrator to IcedProgressReporter**~~ — Sync dispatch wired: initial sync on boot, periodic delta sync every 5 min, `IcedProgressReporter` passed via `ProviderCtx`. `begin_sync_generation`/`prune_stale_sync` still not called (low priority — sync progress display works without them).
-- [x] ~~**Token expiry → status bar warning**~~ — SyncComplete handler detects auth errors (401, unauthorized, token, expired, invalid_grant) and sets `WarningKind::TokenExpiry`. Connection failures set `WarningKind::ConnectionFailure`. Successful sync clears warnings.
 - [ ] **Pop-out HTML rendering** — SimpleHtml/OriginalHtml modes in message view pop-out fall back to plain text. Depends on the DOM-to-widget pipeline (`html_render.rs`) being wired into the pop-out view. Tracked separately in the HTML rendering section above.
 - [ ] **Pop-out Print** — OS print dialog integration for message view and compose pop-out windows. Platform-specific, no iced precedent. Needs investigation.
 - [ ] **Pop-out default rendering mode from settings** — `MessageViewState` hardcodes `RenderingMode::default()` (SimpleHtml). Should load from a system-wide user preference. Needs a settings field + plumbing to pass it into `from_thread_message()` and `from_session_entry()`.
 - [ ] **Signature: draft restoration with signature state** — Draft save does not persist `signature_separator_index` or `active_signature_id`. On draft reopen, signature position in the document is not reconstructed.
 - [ ] **Signature: per-account default dropdown in Account Settings** — Account editor overlay has no signature dropdown for selecting the default signature for an account.
-- [x] ~~**Signature: edit detection flag**~~ — `dirty: bool` added to `SignatureEditorState`, set on name/body/default edits.
 - [ ] **GAL directory API calls** — `gal_cache` table and autocomplete integration exist. Missing: actual Graph `/users` and Google Directory API calls to populate the cache. Provider client access now available via `handlers::provider::create_provider()`. See `docs/contacts/problem-statement.md` § GAL Caching.
 - [ ] **CardDAV contact write-back** — CardDAV client supports PROPFIND/REPORT/GET but not PUT/DELETE. Need vCard generation + PUT method for pushing contact edits to CardDAV servers. See `docs/contacts/problem-statement.md`.
 - [ ] **Provider write-back HTTP calls** — `dispatch_provider_write_back()` scaffolded for Google/Graph (body builders + server info lookups exist). JMAP `ContactCard/set` fully implemented. Missing: actual HTTP dispatch for Google (`PATCH /v1/{resourceName}:updateContact`) and Graph (`PATCH /me/contacts/{id}`). Provider client access now available via `handlers::provider::create_provider()`.

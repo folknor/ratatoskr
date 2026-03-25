@@ -92,3 +92,23 @@ pub struct AccountDeletionData {
     pub cached_files: Vec<(String, String)>,
     pub inline_hashes: Vec<String>,
 }
+
+/// Result of the synchronous phase of account deletion: gathered data plus
+/// the sets of hashes that are still referenced by other accounts.
+pub struct AccountDeletionPlan {
+    pub data: AccountDeletionData,
+    /// Cached-file content hashes referenced by at least one other account.
+    pub shared_cache_hashes: std::collections::HashSet<String>,
+    /// Inline-image content hashes referenced by at least one other account.
+    pub shared_inline_hashes: std::collections::HashSet<String>,
+}
+
+/// Report of best-effort cleanup after account deletion.
+#[derive(Debug, Default)]
+pub struct AccountDeletionCleanupReport {
+    pub bodies_deleted: u64,
+    pub inline_images_deleted: u64,
+    pub cache_files_deleted: u64,
+    pub cache_file_errors: Vec<(String, String)>,
+    pub search_cleaned: bool,
+}

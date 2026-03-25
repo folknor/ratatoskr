@@ -28,15 +28,9 @@ The structural fix for each is the same principle: make the right thing the only
 
 **Structural fix:** Hide raw mutating mail DB helpers (`insert_label`, `remove_label`, `remove_inbox_label`, `delete_thread`, `set_thread_starred`, `set_thread_read`, `set_thread_pinned`, `set_thread_muted`) from the app crate. Make them `pub(crate)` in `ratatoskr-core` or move them into the actions module. The app can only call `actions::archive()`, `actions::trash()`, etc. Same principle as Phase 6's provider boundary — compile-time enforcement.
 
-### 2. Account deletion leaks external stores
+### ~~2. Account deletion leaks external stores~~ ✅ Fixed
 
-**Contract:** Deleting an account must clean up: main DB rows (CASCADE), body store entries, inline image store entries, cached attachment files, search index entries, and pending ops.
-
-**Currently enforced by:** `delete_account_row()` cascades FK-linked tables in the main DB. But `gather_deletion_data()` — which collects data needed for external store cleanup — exists and is never called from the app's `handle_delete_account`.
-
-**Already violated:** Deleting an account leaves orphaned data in bodies.db, inline images, and the attachment file cache. This is dead storage that accumulates forever.
-
-**Structural fix:** Make account deletion a single `core::account::delete::delete_account_full()` function that runs `gather_deletion_data`, cleans external stores, then deletes the DB row. The app calls this instead of the raw row delete.
+`delete_account_orchestrate()` gathers cleanup data + shared-ref checks + deletes the account row in one synchronous connection call. The app handler then does best-effort async cleanup of body store, inline image store (with separate `inline_hashes_referenced_by_other_accounts` check), attachment cache files, and search index. 6 integration tests cover the orchestration contract. Pending ops are CASCADE-deleted via FK.
 
 ### 3. Compose window close loses dirty drafts
 

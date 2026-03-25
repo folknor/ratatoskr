@@ -1894,12 +1894,103 @@ impl App {
         }
 
         let db = Arc::clone(&self.db);
+        let body_store = self.body_store.clone();
+        let inline_image_store = self.inline_image_store.clone();
+        let search = self.search_state.clone();
+        let app_data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set").clone();
+
         Task::perform(
             async move {
-                db.with_write_conn(move |conn| {
-                    ratatoskr_core::account::delete::delete_account_row(conn, &account_id)
-                })
-                .await
+                // Phase 1: gather cleanup data + ref-checks + delete account row
+                // (synchronous, inside one write-connection call so CASCADE hasn't
+                // fired yet when we query attachment rows)
+                let plan = db
+                    .with_write_conn(move |conn| {
+                        ratatoskr_core::account::delete::delete_account_orchestrate(
+                            conn,
+                            &account_id,
+                        )
+                    })
+                    .await?;
+
+                // Phase 2: best-effort cleanup of external stores
+                let mut report =
+                    ratatoskr_core::account::types::AccountDeletionCleanupReport::default();
+
+                // Body store
+                if let Some(ref bs) = body_store {
+                    match bs.delete(plan.data.message_ids.clone()).await {
+                        Ok(n) => report.bodies_deleted = n,
+                        Err(e) => log::error!("Account deletion: body store cleanup failed: {e}"),
+                    }
+                } else {
+                    log::warn!("Account deletion: body store unavailable, skipping cleanup");
+                }
+
+                // Inline image store — only delete hashes not shared with other accounts
+                if let Some(ref iis) = inline_image_store {
+                    let to_delete: Vec<String> = plan
+                        .data
+                        .inline_hashes
+                        .into_iter()
+                        .filter(|h| !plan.shared_inline_hashes.contains(h))
+                        .collect();
+                    if !to_delete.is_empty() {
+                        match iis.delete_hashes(to_delete).await {
+                            Ok(n) => report.inline_images_deleted = n,
+                            Err(e) => {
+                                log::error!(
+                                    "Account deletion: inline image cleanup failed: {e}"
+                                );
+                            }
+                        }
+                    }
+                } else {
+                    log::warn!(
+                        "Account deletion: inline image store unavailable, skipping cleanup"
+                    );
+                }
+
+                // Attachment file cache — only delete files not shared with other accounts
+                for (path, hash) in &plan.data.cached_files {
+                    if plan.shared_cache_hashes.contains(hash) {
+                        continue;
+                    }
+                    match ratatoskr_core::attachment_cache::remove_cached_relative(
+                        &app_data_dir,
+                        path,
+                    ) {
+                        Ok(()) => report.cache_files_deleted += 1,
+                        Err(e) => report.cache_file_errors.push((path.clone(), e)),
+                    }
+                }
+
+                // Search index
+                if let Some(ref ss) = search {
+                    let refs: Vec<&str> =
+                        plan.data.message_ids.iter().map(String::as_str).collect();
+                    match ss.delete_messages_batch(&refs).await {
+                        Ok(()) => report.search_cleaned = true,
+                        Err(e) => {
+                            log::error!("Account deletion: search index cleanup failed: {e}");
+                        }
+                    }
+                }
+
+                log::info!(
+                    "Account deleted: {} bodies, {} inline images, {} cache files cleaned",
+                    report.bodies_deleted,
+                    report.inline_images_deleted,
+                    report.cache_files_deleted,
+                );
+                if !report.cache_file_errors.is_empty() {
+                    log::warn!(
+                        "Account deletion: {} cache files failed to delete",
+                        report.cache_file_errors.len()
+                    );
+                }
+
+                Ok(())
             },
             Message::AccountDeleted,
         )
