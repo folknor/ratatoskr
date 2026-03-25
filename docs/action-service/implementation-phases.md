@@ -22,7 +22,7 @@ Phase 2 is decomposed into sub-phases because provider write operations are not 
 
 **Status:** Complete.
 
-All thread-level actions (trash, spam, move_to_folder, star, mark_read, permanent_delete, pin, mute) flow through the action service. The legacy `dispatch_email_db_action` function persists only for snooze (deferred — no `ProviderOps::snooze()` exists). Concurrency semantics addressed in Phase 5.
+All thread-level actions (trash, spam, move_to_folder, star, mark_read, permanent_delete, pin, mute, snooze) flow through the action service. Snooze is local-only by design (no `ProviderOps::snooze()`). Concurrency semantics addressed in Phase 5.
 
 ### Phase 2.2: Label routing ✅
 
@@ -106,8 +106,8 @@ All 5 provider crate dependencies removed from `crates/app/Cargo.toml`. Sync dis
 
 ## Remaining Work (Not Phased)
 
-- **Snooze** — still outside the action service. `dispatch_email_db_action` persists for snooze only. No `ProviderOps::snooze()` exists. Requires a design decision: local-only by design? provider dispatch where supported?
-- **`apply_category`/`remove_category` consolidation** — deferred from Phase 2.2. The `ProviderOps` trait has separate category and tag methods; consolidation would unify the label write interface.
-- **Action test suite** — action functions are testable (pure async, injectable `ActionContext`), but no test files exist in `crates/core/src/actions/`.
+- ~~**Snooze**~~ — Wired to action service (local-only by design). `SnoozeTick` subscription + boot-time check unsnooze due threads.
+- **`apply_category`/`remove_category` consolidation** — deferred from Phase 2.2. Categories dropped in labels unification Phase 6; only `add_tag`/`remove_tag` remain.
+- **Action test suite** — action functions are testable (pure async, injectable `ActionContext`), but test coverage is minimal.
 - **User-facing retry status** — `db_pending_ops_failed_count()` exists but no UI surfaces pending/failed retry state.
-- **Native provider batching** — JMAP `Email/set` and Graph `/$batch` support batch requests natively. Current implementation uses sequential per-thread calls with provider reuse. Native batching is a future optimization.
+- **Native provider batching** — JMAP `Email/set` and Graph `/$batch` support batch requests natively. Current implementation uses sequential per-thread calls with provider reuse. IMAP keyword operations are batched by folder. Native HTTP batching for other actions is a future optimization.

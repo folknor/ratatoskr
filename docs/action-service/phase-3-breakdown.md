@@ -121,11 +121,9 @@ Default: `retryable = false` unless the action class is in the "Yes" list AND th
 
 Reviewer 2 is right — `ProviderOnly` would add a variant used by only three folder functions in a rare edge case. The current behavior (log + return `Success`) is acceptable: the provider state is canonical, sync reconciles quickly, and the sidebar refreshes on next nav load. The log warning is sufficient observability for this case. Not worth the match-arm cost across all consumers.
 
-**Drop `NoOp` from Phase 3.2:**
+**`NoOp` — deferred from Phase 3.2, implemented later:**
 
-Both reviewers flagged this as underspecified. Current actions use idempotent writes (`INSERT OR IGNORE`, `DELETE WHERE`) and dispatch to providers regardless of whether the state was already correct. Detecting true no-ops would require pre-checking at both local and remote layers — significant refactoring for marginal value.
-
-`NoOp` is primarily needed for Phase 4 (undo token suppression — "don't produce an undo token if nothing changed"). Defer to Phase 4 where the undo design can define the precise detection criteria.
+`ActionOutcome::NoOp` was added after Phase 4. Uses SQL affected-row counts (`DELETE` returns 0 if label wasn't present, `UPDATE WHERE col != ?` returns 0 if already set). Archive and star detect NoOp; other actions have the infrastructure but don't use it yet. Provider dispatch and undo token production are skipped for NoOp outcomes.
 
 **Remove `'finalized'` draft status:**
 
@@ -209,7 +207,7 @@ Phase 3.2 (outcome semantics) produces variants that Phase 4 can reason about:
 - `LocalOnly { retryable: false }` → produce undo token for local reversal only
 - `Failed` → no undo token (nothing happened)
 
-`NoOp` detection (suppressing undo tokens for actions that didn't change state) is deferred to Phase 4 where the undo design defines the precise criteria.
+`NoOp` detection is implemented — archive and star use SQL affected-row counts. Undo tokens are suppressed for `NoOp` outcomes.
 
 Phase 3.4 (pending ops) interacts with undo: if an operation is pending retry, undoing it should cancel the pending op (via `db_pending_ops_update_status("cancelled")`) rather than performing a reverse operation.
 
@@ -219,5 +217,5 @@ Phase 3.4 (pending ops) interacts with undo: if an operation is pending retry, u
 - **Undo token design and execution** — implemented in Phase 4.
 - **Bulk action semantics** (partial success across 50 threads, batch logging) — implemented in Phase 5.2/5.3.
 - **Concurrency and ordering** (conflicting sequential actions on same thread) — implemented in Phase 5.7 (`FlightGuard`).
-- **`NoOp` detection** — deferred from Phase 4, remains unimplemented.
+- **`NoOp` detection** — implemented. Archive and star use affected-row counts. Undo tokens suppressed for NoOp.
 - **`ProviderOnly` variant** — dropped. Folder ops log + return `Success` on local DB failure. Sync reconciles.

@@ -414,4 +414,4 @@ pub async fn db_pending_ops_cancel_for_resource(
 - **Undo for non-email actions.** Send, folder, calendar, contact undo are not in scope.
 - **Multi-level undo audit.** No verification that the 20-deep stack is sufficient.
 - **Undo staleness detection.** Compensation actions are valid regardless of sync state.
-- **NoOp suppression.** If an action was a no-op, it still gets a token. Detecting no-ops is deferred.
+- ~~**NoOp suppression.**~~ Implemented. `ActionOutcome::NoOp` skips undo token production. Archive and star use affected-row counts for detection.
