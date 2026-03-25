@@ -62,13 +62,9 @@ The structural fix for each is the same principle: make the right thing the only
 
 `fn clear_thread_selection(&mut self)` clears `selected_thread`, multi-select, and reading pane in one call. All 10 deselection sites in App-level code now use this helper. No more stale reading pane content after navigation, search, or account switch.
 
-### 8. Compose routing deduplication
+### ~~8. Compose routing deduplication~~ ✅ Fixed
 
-**Contract:** Opening a compose window should check for an existing window for the same draft/thread and focus it instead of creating a duplicate.
-
-**Currently enforced by:** Nothing. All compose entry points (sidebar button, Reply, Forward, command palette, keyboard shortcut) call raw window-open helpers without dedup checks.
-
-**Structural fix:** `fn compose_target(&self, draft_id: Option<&str>, thread_id: Option<&str>) -> ComposeTarget { New | Existing(window_id) }`.
+`open_compose_window_with_state` now checks if a compose window already exists for the same `reply_thread_id` and focuses it instead of opening a duplicate. Applies to all entry points (Reply, Reply All, Forward, command palette, keyboard shortcut) since they all go through this function.
 
 ### 9. New email actions require 8 parallel edits
 
@@ -124,11 +120,9 @@ Replaced the manually-synced `composer_is_open: bool` field with a computed `fn 
 
 Removed `active_pinned_search` from App. The single source of truth is now `sidebar.active_pinned_search`. All 7 read/write sites updated. Impossible to desync.
 
-### 17. Pop-out window lifecycle gaps
+### ~~17. Pop-out window lifecycle gaps~~ ✅ Already clean
 
-**Contract:** Adding a new `PopOutWindow` variant requires handling in 7 code sites (title, view, resize, move, close, save session, message routing). 4 of 7 sites use wildcards/catch-alls that silently ignore new variants.
-
-**Structural fix:** Remove wildcards in window management code, or a trait on `PopOutWindow` variants.
+All 7 window management sites (title, view, resize, move, close, save session, message routing) use explicit variant matches with no wildcards. Adding a new `PopOutWindow` variant already produces compiler errors at each site.
 
 ### ~~18. Action context degraded-mode boilerplate~~ ✅ Fixed
 

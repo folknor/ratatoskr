@@ -378,11 +378,22 @@ impl App {
     }
 
     /// Open a compose window with pre-built state and mode.
+    /// If a compose window already exists for the same reply thread,
+    /// focuses it instead of opening a duplicate.
     pub(crate) fn open_compose_window_with_state(
         &mut self,
         mut state: ComposeState,
         mode: ComposeMode,
     ) -> Task<Message> {
+        // Dedup: if replying to a thread that already has a compose window, focus it
+        if let Some(ref tid) = state.reply_thread_id {
+            if let Some((&existing_id, _)) = self.pop_out_windows.iter().find(|(_, w)| {
+                matches!(w, PopOutWindow::Compose(s) if s.reply_thread_id.as_deref() == Some(tid))
+            }) {
+                return iced::window::gain_focus(existing_id);
+            }
+        }
+
         state.mode = mode;
         state.subject = state.mode.prefixed_subject();
 
