@@ -127,9 +127,9 @@ Backend complete (DNS + SVG + cache). Missing UI wiring.
 
 Not yet implemented. Full read/write API available on Exchange, Gmail, and JMAP.
 
-- [ ] **Exchange auto-reply read/write** — `GET/PATCH /me/mailboxSettings/automaticRepliesSetting`. Internal/external messages, scheduling, audience control.
-- [ ] **Gmail vacation settings read/write** — `users.settings.getVacation` / `updateVacation`. Single message, contact/domain restrictions.
-- [ ] **JMAP VacationResponse read/write** — `VacationResponse/get` / `VacationResponse/set` (RFC 8621). May need manual JMAP calls if `jmap-client` lacks support.
+- [x] **Exchange auto-reply read/write** — *(2026-03-25)* `fetch_graph_auto_response` / `push_graph_auto_response` in `core/auto_responses.rs`. Internal/external messages, scheduling, audience control.
+- [x] **Gmail vacation settings read/write** — *(2026-03-25)* `fetch_gmail_auto_response` / `push_gmail_auto_response`. Epoch ms timestamps converted to RFC 3339.
+- [x] **JMAP VacationResponse read/write** — *(2026-03-25)* `fetch_jmap_auto_response` / `push_jmap_auto_response` using `jmap-client` fork's VacationResponse support.
 - [ ] **Auto-reply settings UI** — Per-account editor in settings. Toggle, date pickers, message editor, audience selector. Internal/external tabs for Exchange only.
 - [ ] **Active auto-reply status indicator** — Status bar or sidebar indicator when any account has active auto-replies.
 

@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod account;
 pub use ratatoskr_stores::attachment_cache;
+pub mod auto_responses;
 pub mod bimi;
 pub use ratatoskr_stores::body_store;
 pub mod caldav;

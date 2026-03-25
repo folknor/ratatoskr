@@ -1493,6 +1493,23 @@ static MIGRATIONS: &[Migration] = &[
             ALTER TABLE messages DROP COLUMN is_mentioned;
         "#,
     },
+    Migration {
+        version: 75,
+        description: "Auto-response settings cache (vacation/out-of-office per account)",
+        sql: r#"
+            CREATE TABLE IF NOT EXISTS auto_responses (
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                start_date TEXT,
+                end_date TEXT,
+                internal_message_html TEXT,
+                external_message_html TEXT,
+                external_audience TEXT NOT NULL DEFAULT 'all',
+                last_synced_at INTEGER DEFAULT (unixepoch()),
+                PRIMARY KEY (account_id)
+            );
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
