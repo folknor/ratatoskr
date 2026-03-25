@@ -78,7 +78,7 @@ impl App {
                         log::warn!("Contact save local-only: {reason}");
                         Message::Settings(SettingsMessage::ContactsLoaded(contacts))
                     }
-                    ActionOutcome::Success => {
+                    ActionOutcome::Success | ActionOutcome::NoOp => {
                         Message::Settings(SettingsMessage::ContactsLoaded(contacts))
                     }
                 }
@@ -128,7 +128,7 @@ impl App {
                             Message::Settings(SettingsMessage::ContactDeleted(Ok(())))
                         }
                     }
-                    ActionOutcome::Success => {
+                    ActionOutcome::Success | ActionOutcome::NoOp => {
                         if let Some(list) = contacts {
                             Message::Settings(SettingsMessage::ContactsLoaded(Ok(list)))
                         } else {

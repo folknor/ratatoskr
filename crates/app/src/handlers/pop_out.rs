@@ -1145,7 +1145,8 @@ impl App {
         outcome: &ratatoskr_core::actions::ActionOutcome,
     ) -> Task<Message> {
         match outcome {
-            ratatoskr_core::actions::ActionOutcome::Success => {
+            ratatoskr_core::actions::ActionOutcome::Success
+            | ratatoskr_core::actions::ActionOutcome::NoOp => {
                 self.pop_out_windows.remove(&window_id);
                 self.status_bar
                     .show_confirmation("Message sent".to_string());

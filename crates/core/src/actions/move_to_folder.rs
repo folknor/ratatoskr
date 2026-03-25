@@ -28,7 +28,7 @@ pub(crate) async fn move_local(
         if let Some(ref src) = source {
             remove_label(&conn, &aid, &tid, src)?;
         }
-        insert_label(&conn, &aid, &tid, &fid)
+        insert_label(&conn, &aid, &tid, &fid).map(|_| ())
     })
     .await
     .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))

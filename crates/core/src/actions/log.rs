@@ -56,6 +56,14 @@ impl MutationLog {
         let remote = self.remote_id.as_deref().unwrap_or("-");
 
         match outcome {
+            ActionOutcome::NoOp => {
+                log::debug!(
+                    "[action] {action} noop | account={account} local={local} | {duration_ms}ms",
+                    action = self.action,
+                    account = self.account_id,
+                    local = self.local_id,
+                );
+            }
             ActionOutcome::Success => {
                 log::info!(
                     "[action] {action} ok | account={account} local={local} remote={remote} | {duration_ms}ms",

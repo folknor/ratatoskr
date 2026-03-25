@@ -9,8 +9,8 @@ use super::provider::create_provider;
 use crate::email_actions::remove_inbox_label;
 use crate::progress::NoopProgressReporter;
 
-/// Local DB mutation for archive (idempotent).
-pub(crate) async fn archive_local(ctx: &ActionContext, account_id: &str, thread_id: &str) -> Result<(), ActionError> {
+/// Local DB mutation for archive. Returns true if state changed.
+pub(crate) async fn archive_local(ctx: &ActionContext, account_id: &str, thread_id: &str) -> Result<bool, ActionError> {
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
@@ -21,7 +21,7 @@ pub(crate) async fn archive_local(ctx: &ActionContext, account_id: &str, thread_
     })
     .await
     .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r.map_err(ActionError::db))
+    .and_then(|r| r.map(|n| n > 0).map_err(ActionError::db))
 }
 
 /// Provider dispatch for archive (assumes local mutation already applied).
@@ -62,10 +62,14 @@ pub async fn archive(
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("archive", account_id, thread_id);
 
-    if let Err(e) = archive_local(ctx, account_id, thread_id).await {
-        let outcome = ActionOutcome::Failed { error: e };
-        mlog.emit(&outcome);
-        return outcome;
+    match archive_local(ctx, account_id, thread_id).await {
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: e };
+            mlog.emit(&outcome);
+            return outcome;
+        }
+        Ok(false) => return ActionOutcome::NoOp,
+        Ok(true) => {}
     }
 
     match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
@@ -88,10 +92,14 @@ pub(crate) async fn archive_with_provider(
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("archive", account_id, thread_id);
 
-    if let Err(e) = archive_local(ctx, account_id, thread_id).await {
-        let outcome = ActionOutcome::Failed { error: e };
-        mlog.emit(&outcome);
-        return outcome;
+    match archive_local(ctx, account_id, thread_id).await {
+        Err(e) => {
+            let outcome = ActionOutcome::Failed { error: e };
+            mlog.emit(&outcome);
+            return outcome;
+        }
+        Ok(false) => return ActionOutcome::NoOp,
+        Ok(true) => {}
     }
 
     archive_dispatch(ctx, provider, account_id, thread_id).await

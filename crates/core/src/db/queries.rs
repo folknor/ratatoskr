@@ -483,20 +483,22 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), Stri
     Ok(())
 }
 
-/// Update a boolean column on a thread row. The column name is validated against
-/// an allowlist to prevent SQL injection.
+/// Update a boolean column on a thread row. Returns the number of rows
+/// actually changed (0 = value was already set, 1 = updated).
+/// The column name is validated against an allowlist to prevent SQL injection.
 fn set_thread_bool_field(
     conn: &Connection,
     account_id: &str,
     thread_id: &str,
     column: &str,
     value: bool,
-) -> Result<(), String> {
+) -> Result<usize, String> {
     let column = validate_thread_bool_column(column)?;
-    let sql = format!("UPDATE threads SET {column} = ?3 WHERE account_id = ?1 AND id = ?2");
+    let sql = format!(
+        "UPDATE threads SET {column} = ?3 WHERE account_id = ?1 AND id = ?2 AND {column} != ?3"
+    );
     conn.execute(&sql, params![account_id, thread_id, value])
-        .map_err(|e| e.to_string())?;
-    Ok(())
+        .map_err(|e| e.to_string())
 }
 
 pub fn set_thread_read(
@@ -504,7 +506,7 @@ pub fn set_thread_read(
     account_id: &str,
     thread_id: &str,
     is_read: bool,
-) -> Result<(), String> {
+) -> Result<usize, String> {
     set_thread_bool_field(conn, account_id, thread_id, "is_read", is_read)
 }
 
@@ -513,7 +515,7 @@ pub fn set_thread_starred(
     account_id: &str,
     thread_id: &str,
     is_starred: bool,
-) -> Result<(), String> {
+) -> Result<usize, String> {
     set_thread_bool_field(conn, account_id, thread_id, "is_starred", is_starred)
 }
 
@@ -522,7 +524,7 @@ pub fn set_thread_pinned(
     account_id: &str,
     thread_id: &str,
     is_pinned: bool,
-) -> Result<(), String> {
+) -> Result<usize, String> {
     set_thread_bool_field(conn, account_id, thread_id, "is_pinned", is_pinned)
 }
 
@@ -531,7 +533,7 @@ pub fn set_thread_muted(
     account_id: &str,
     thread_id: &str,
     is_muted: bool,
-) -> Result<(), String> {
+) -> Result<usize, String> {
     set_thread_bool_field(conn, account_id, thread_id, "is_muted", is_muted)
 }
 

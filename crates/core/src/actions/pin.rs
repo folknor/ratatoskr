@@ -19,7 +19,7 @@ pub async fn pin(
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        set_thread_pinned(&conn, &aid, &tid, pinned)
+        set_thread_pinned(&conn, &aid, &tid, pinned).map(|_| ())
     })
     .await
     .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))

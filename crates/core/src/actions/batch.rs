@@ -313,13 +313,13 @@ async fn action_local(
     thread_id: &str,
 ) -> Result<(), ActionError> {
     match action {
-        BatchAction::Archive => archive::archive_local(ctx, account_id, thread_id).await,
+        BatchAction::Archive => archive::archive_local(ctx, account_id, thread_id).await.map(|_| ()),
         BatchAction::Trash => trash::trash_local(ctx, account_id, thread_id).await,
         BatchAction::Spam { is_spam } => spam::spam_local(ctx, account_id, thread_id, *is_spam).await,
         BatchAction::MoveToFolder { folder_id, source_label_id } => {
             move_to_folder::move_local(ctx, account_id, thread_id, folder_id, source_label_id.as_deref()).await
         }
-        BatchAction::Star { starred } => star::star_local(ctx, account_id, thread_id, *starred).await,
+        BatchAction::Star { starred } => star::star_local(ctx, account_id, thread_id, *starred).await.map(|_| ()),
         BatchAction::MarkRead { read } => mark_read::mark_read_local(ctx, account_id, thread_id, *read).await,
         BatchAction::PermanentDelete => permanent_delete::permanent_delete_local(ctx, account_id, thread_id).await,
         BatchAction::AddLabel { label_id } => {

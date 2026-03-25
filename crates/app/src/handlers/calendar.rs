@@ -481,6 +481,7 @@ fn calendar_outcome_to_result(
 ) -> Result<(), String> {
     match outcome {
         ratatoskr_core::actions::ActionOutcome::Success
+        | ratatoskr_core::actions::ActionOutcome::NoOp
         | ratatoskr_core::actions::ActionOutcome::LocalOnly { .. } => Ok(()),
         ratatoskr_core::actions::ActionOutcome::Failed { error } => Err(error.user_message()),
     }

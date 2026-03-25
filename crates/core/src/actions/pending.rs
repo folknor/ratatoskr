@@ -177,7 +177,7 @@ async fn process_account_group(
         };
 
         match outcome {
-            ActionOutcome::Success => {
+            ActionOutcome::Success | ActionOutcome::NoOp => {
                 let _ = db_pending_ops_delete(&ctx.db, op.id.clone()).await;
                 log::info!(
                     "[pending_ops] Completed {} for {}/{}",

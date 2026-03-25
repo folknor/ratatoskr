@@ -3,6 +3,9 @@
 pub enum ActionOutcome {
     /// Local and remote both succeeded (or local-only-by-design succeeded).
     Success,
+    /// The action was a no-op — state didn't change (e.g., archiving a thread
+    /// already not in inbox). Provider dispatch and undo token skipped.
+    NoOp,
     /// Local succeeded, remote dispatch failed or was skipped.
     /// The action took effect locally but may revert on next sync.
     ///
@@ -23,6 +26,10 @@ impl ActionOutcome {
 
     pub fn is_local_only(&self) -> bool {
         matches!(self, Self::LocalOnly { .. })
+    }
+
+    pub fn is_noop(&self) -> bool {
+        matches!(self, Self::NoOp)
     }
 
     pub fn is_failed(&self) -> bool {

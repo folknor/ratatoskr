@@ -552,12 +552,11 @@ impl App {
         }
 
         if !rollback.is_empty() {
-            // Toggle actions: use rollback data (filtered to non-failed).
-            // Group by (account_id, previous_value) — threads with different
-            // prior states get separate tokens to avoid restoring the wrong state.
+            // Toggle actions: use rollback data (filtered to actually changed).
+            // Skip Failed (local didn't apply) and NoOp (state didn't change).
             let mut by_key: HashMap<(&str, bool), Vec<String>> = HashMap::new();
             for ((aid, tid, prev), outcome) in rollback.iter().zip(outcomes.iter()) {
-                if !outcome.is_failed() {
+                if outcome.is_success() || outcome.is_local_only() {
                     by_key
                         .entry((aid.as_str(), *prev))
                         .or_default()
@@ -594,7 +593,7 @@ impl App {
             // Non-toggle actions: use threads + outcomes (filtered to non-failed)
             let mut by_account: HashMap<&str, Vec<String>> = HashMap::new();
             for ((aid, tid), outcome) in threads.iter().zip(outcomes.iter()) {
-                if !outcome.is_failed() {
+                if outcome.is_success() || outcome.is_local_only() {
                     by_account
                         .entry(aid.as_str())
                         .or_default()

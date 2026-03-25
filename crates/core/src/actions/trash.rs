@@ -18,7 +18,7 @@ pub(crate) async fn trash_local(ctx: &ActionContext, account_id: &str, thread_id
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
         remove_label(&conn, &aid, &tid, "INBOX")?;
-        insert_label(&conn, &aid, &tid, "TRASH")
+        insert_label(&conn, &aid, &tid, "TRASH").map(|_| ())
     })
     .await
     .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))

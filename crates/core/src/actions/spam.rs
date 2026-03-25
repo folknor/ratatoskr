@@ -19,10 +19,10 @@ pub(crate) async fn spam_local(ctx: &ActionContext, account_id: &str, thread_id:
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
         if is_spam {
             remove_label(&conn, &aid, &tid, "INBOX")?;
-            insert_label(&conn, &aid, &tid, "SPAM")
+            insert_label(&conn, &aid, &tid, "SPAM").map(|_| ())
         } else {
             remove_label(&conn, &aid, &tid, "SPAM")?;
-            insert_label(&conn, &aid, &tid, "INBOX")
+            insert_label(&conn, &aid, &tid, "INBOX").map(|_| ())
         }
     })
     .await

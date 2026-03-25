@@ -17,7 +17,7 @@ pub(crate) async fn mark_read_local(ctx: &ActionContext, account_id: &str, threa
     tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        set_thread_read(&conn, &aid, &tid, read)
+        set_thread_read(&conn, &aid, &tid, read).map(|_| ())
     })
     .await
     .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
