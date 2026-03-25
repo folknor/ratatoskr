@@ -154,6 +154,27 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] Table rendering (table-for-layout is the hardest — no `<table>`/`<tr>`/`<td>` handling at all)
 - [ ] Image caching (`HashMap<String, image::Handle>`) — no `iced::widget::image` usage in app crate
 
+## Performance Findings (review agent, 2026-03-25)
+
+- [ ] **Body store zstd under lock** — Zstd compress/decompress runs inside the Mutex lock closure. Should compress/decompress outside the lock and only hold it for the DB read/write. `body_store.rs:108-110, 171-172, 225-226`
+- [ ] **IMAP per-folder connections** — Flag sync and deletion detection open a separate TLS connection per folder. 50 folders = 50 handshakes. Should reuse a single connection with SELECT. `imap_delta.rs:817-894, 988-1031`
+- [ ] **Reading pane rebuild on expand/collapse** — All message widgets are rebuilt on any expand/collapse toggle. Should diff and rebuild only the affected message. `reading_pane.rs:565-602`
+- [ ] **Attachment dedup in view()** — HashMap allocation for attachment dedup runs every `view()` cycle, not memoized. `reading_pane.rs:606-626`
+- [ ] **get_thread_detail lock span** — Holds the DB lock across 7 sequential queries. Should batch or reduce lock scope. `thread_detail.rs:524-575`
+- [ ] **Contact autocomplete LIKE %pattern%** — No FTS index; uses LIKE with leading wildcard which can't use indexes. `contacts.rs:43-46`
+- [ ] **JWZ is_ancestor() quadratic** — `is_ancestor()` is O(depth) per link, O(n²) on deep linear threads. `threading.rs:63-72`
+- [ ] **Attachment cache eviction lock churn** — Deletes one file per loop iteration with 2+ lock acquisitions each. Should collect files to delete, release the lock, then delete in batch. `attachment_cache.rs:188-262`
+- [ ] **Navigation tag unread counts** — 3-table LEFT JOIN with `LOWER(TRIM())` in GROUP BY for tag unread counts. `navigation.rs:325-339`
+
+## Security Findings (review agent, 2026-03-25)
+
+- [ ] **`decrypt_or_raw` silent plaintext fallback** — On decryption failure, silently returns the raw ciphertext as if it were plaintext. Masks key corruption or rotation issues — credentials could pass through as garbage strings with no error signal. `crypto.rs:141`
+- [ ] **Microsoft ID token not signature-verified** — JWT payload is base64-decoded and trusted for email/name claims without verifying the signature. Token comes over TLS from Microsoft, but a MITM or compromised endpoint could inject arbitrary identity claims. `oauth.rs:735-771`
+- [ ] **`data:` URI allowed beyond images in sanitizer** — `data:` scheme is generically permitted. Allows `data:text/html,...` in `<a href>` which can be used for phishing. Should restrict `data:` to `<img src>` only or limit to image MIME types. `html_sanitizer.rs:170`
+- [ ] **CSS `url()` bypasses remote image blocking** — Remote image blocking only covers `<img src>`. A `<div style="background:url(https://tracker/pixel.gif)">` delivers a tracking pixel uncaught. `html_sanitizer.rs:147`
+- [ ] **Path traversal in `remove_cached_relative`** — Checks for `attachment_cache/` prefix but doesn't canonicalize the path. Should canonicalize before the prefix check. `attachment_cache.rs:67`
+- [ ] **Hand-rolled `parse_query_string`** — Custom URL query parsing instead of using `form_urlencoded` crate. Unnecessary attack surface. `oauth.rs:513`
+
 ## Remaining Enhancements (other)
 
 - [ ] **iced_drop for cross-container DnD** — Custom DragState works for list reorder. iced_drop needed for: compose token DnD, label drag-to-file, calendar event dragging, attachment drag zones.
