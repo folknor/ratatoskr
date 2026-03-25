@@ -149,8 +149,6 @@ Phases 1-2 complete. Phase 3 blocked on upstream.
 The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has significant fidelity gaps. Remaining:
 - [ ] **Inline text formatting** — `<strong>`, `<b>`, `<em>`, `<i>`, `<u>`, `<s>`, `<code>` (inline) all ignored. Everything renders as plain text. Needs a `Vec<Span>` model per block or `iced::widget::rich_text`.
 - [ ] **Link rendering + click handling** — `<a href>` tags treated as plain text. URLs not extracted. Need `href` extraction, visual link styling, and `LinkClicked(url)` message emission.
-- [ ] **`<br>` handling** — Currently splits into separate paragraphs (extra vertical spacing). Should insert a line break within the current paragraph.
-- [ ] **HTML entity decoding** — Only 8 named entities decoded. Missing: numeric entities (`&#123;`, `&#x7B;`), common named entities (`&mdash;`, `&ndash;`, `&hellip;`, `&copy;`, etc.).
 - [ ] CID image loading from inline image store (`InlineImageStoreState` exists in stores crate, not wired to renderer)
 - [ ] Remote image loading with user consent (`block_remote_images` setting exists but disconnected from `render_html` — function signature needs context parameter)
 - [ ] Table rendering (table-for-layout is the hardest — no `<table>`/`<tr>`/`<td>` handling at all)

@@ -74,65 +74,19 @@ impl App {
                     MessageViewMessage::SetRenderingMode(RenderingMode::Source),
                 ),
             ) => self.handle_set_source_mode(window_id),
-            // Archive — remove from inbox via label manipulation
+            // Archive — route through action service for DB + provider dispatch
             (
-                PopOutWindow::MessageView(state),
+                PopOutWindow::MessageView(_),
                 PopOutMessage::MessageView(MessageViewMessage::Archive),
             ) => {
-                let account_id = state.account_id.clone();
-                let thread_id = state.thread_id.clone();
-                let db = Arc::clone(&self.db);
-                state.overflow_menu_open = false;
-                Task::perform(
-                    async move {
-                        db.with_write_conn(move |conn| {
-                            ratatoskr_core::db::queries::remove_thread_label(
-                                conn,
-                                &account_id,
-                                &thread_id,
-                                "INBOX",
-                            )
-                        })
-                        .await
-                    },
-                    move |_| Message::PopOut(
-                        window_id,
-                        PopOutMessage::MessageView(MessageViewMessage::Noop),
-                    ),
-                )
+                return self.dispatch_pop_out_action(window_id, crate::CompletedAction::Archive);
             }
-            // Delete — move to trash
+            // Delete — route through action service for DB + provider dispatch
             (
-                PopOutWindow::MessageView(state),
+                PopOutWindow::MessageView(_),
                 PopOutMessage::MessageView(MessageViewMessage::Delete),
             ) => {
-                let account_id = state.account_id.clone();
-                let thread_id = state.thread_id.clone();
-                let db = Arc::clone(&self.db);
-                state.overflow_menu_open = false;
-                Task::perform(
-                    async move {
-                        db.with_write_conn(move |conn| {
-                            ratatoskr_core::db::queries::add_thread_label(
-                                conn,
-                                &account_id,
-                                &thread_id,
-                                "TRASH",
-                            )?;
-                            ratatoskr_core::db::queries::remove_thread_label(
-                                conn,
-                                &account_id,
-                                &thread_id,
-                                "INBOX",
-                            )
-                        })
-                        .await
-                    },
-                    move |_| Message::PopOut(
-                        window_id,
-                        PopOutMessage::MessageView(MessageViewMessage::Noop),
-                    ),
-                )
+                return self.dispatch_pop_out_action(window_id, crate::CompletedAction::Trash);
             }
             // All other message view messages
             (PopOutWindow::MessageView(state), PopOutMessage::MessageView(_)) => {
@@ -384,7 +338,8 @@ impl App {
         };
 
         let generation = self.next_pop_out_generation();
-        let state = MessageViewState::from_thread_message(&msg, generation);
+        let source_label_id = self.sidebar.selected_label.clone();
+        let state = MessageViewState::from_thread_message(&msg, generation, source_label_id);
         let account_id = state.account_id.clone();
         let message_id = state.message_id.clone();
 
@@ -636,6 +591,34 @@ impl App {
             )
         } else {
             Task::none()
+        }
+    }
+
+    /// Dispatch an action-service operation for the thread shown in a pop-out
+    /// message view. Extracts thread context from the pop-out state, closes the
+    /// overflow menu, then delegates to the action service.
+    fn dispatch_pop_out_action(
+        &mut self,
+        window_id: iced::window::Id,
+        action: crate::CompletedAction,
+    ) -> Task<Message> {
+        let Some(PopOutWindow::MessageView(state)) = self.pop_out_windows.get_mut(&window_id)
+        else {
+            return Task::none();
+        };
+        let threads = vec![(state.account_id.clone(), state.thread_id.clone())];
+        let source_label_id = state.source_label_id.clone();
+        state.overflow_menu_open = false;
+        // Drop the borrow on self.pop_out_windows before calling dispatch.
+        drop(state);
+
+        match action {
+            crate::CompletedAction::Trash => self.dispatch_action_service_with_params(
+                action,
+                &threads,
+                &super::commands::ActionParams::Trash { source_label_id },
+            ),
+            _ => self.dispatch_action_service(action, &threads),
         }
     }
 

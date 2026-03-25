@@ -90,6 +90,12 @@ pub struct MessageViewState {
     pub remote_content_loaded: bool,
     pub error_banner: Option<String>,
 
+    // ── Action context ──
+    /// The folder label the thread was viewed in when the pop-out was opened.
+    /// Used as `source_label_id` for trash undo so the thread restores to
+    /// the correct folder, not whatever the main window happens to show later.
+    pub source_label_id: Option<String>,
+
     // ── Window geometry ──
     pub width: f32,
     pub height: f32,
@@ -102,7 +108,11 @@ pub struct MessageViewState {
 }
 
 impl MessageViewState {
-    pub fn from_thread_message(msg: &ThreadMessage, generation: u64) -> Self {
+    pub fn from_thread_message(
+        msg: &ThreadMessage,
+        generation: u64,
+        source_label_id: Option<String>,
+    ) -> Self {
         Self {
             message_id: msg.id.clone(),
             thread_id: msg.thread_id.clone(),
@@ -123,6 +133,7 @@ impl MessageViewState {
             overflow_menu_open: false,
             remote_content_loaded: false,
             error_banner: None,
+            source_label_id,
             width: MESSAGE_VIEW_DEFAULT_WIDTH,
             height: MESSAGE_VIEW_DEFAULT_HEIGHT,
             x: None,
@@ -156,6 +167,7 @@ impl MessageViewState {
             overflow_menu_open: false,
             remote_content_loaded: false,
             error_banner: None,
+            source_label_id: None, // not available on session restore
             width: entry.width,
             height: entry.height,
             x: entry.x,

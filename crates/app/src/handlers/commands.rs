@@ -244,7 +244,7 @@ impl App {
     /// before the thread list advances. The old path advanced immediately.
     /// The proper fix is splitting local mutation from provider dispatch so
     /// advance fires after local success — that's Phase 3 optimistic UI.
-    fn dispatch_action_service(
+    pub(crate) fn dispatch_action_service(
         &mut self,
         action: CompletedAction,
         threads: &[(String, String)],
@@ -252,7 +252,7 @@ impl App {
         self.dispatch_action_service_with_params(action, threads, &ActionParams::None)
     }
 
-    fn dispatch_action_service_with_params(
+    pub(crate) fn dispatch_action_service_with_params(
         &mut self,
         action: CompletedAction,
         threads: &[(String, String)],

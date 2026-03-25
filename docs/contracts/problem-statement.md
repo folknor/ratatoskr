@@ -24,9 +24,9 @@ The structural fix for each is the same principle: make the right thing the only
 
 **Currently enforced by:** Documentation. The Phase 6 compilation boundary prevents the app from importing provider crates, but it does not prevent direct DB label writes.
 
-**Already violated:** Pop-out archive (`handlers/pop_out.rs:80`) and delete (`handlers/pop_out.rs:107`) do raw `remove_thread_label`/`add_thread_label` DB calls, bypassing provider dispatch, undo, pending-ops, and the in-flight guard. The user archives from a pop-out — the thread disappears locally, the server is never notified, next sync may bring it back.
+**Known violations fixed:** Pop-out archive and delete now route through `dispatch_action_service` / `dispatch_action_service_with_params` — same path as the main reading pane. Provider dispatch, pending-ops, undo, and in-flight guard all apply.
 
-**Structural fix:** Hide raw mutating mail DB helpers (`insert_label`, `remove_label`, `remove_inbox_label`, `delete_thread`, `set_thread_starred`, `set_thread_read`, `set_thread_pinned`, `set_thread_muted`) from the app crate. Make them `pub(crate)` in `ratatoskr-core` or move them into the actions module. The app can only call `actions::archive()`, `actions::trash()`, etc. Same principle as Phase 6's provider boundary — compile-time enforcement.
+**Structural fix (remaining):** Hide raw mutating mail DB helpers (`insert_label`, `remove_label`, `remove_inbox_label`, `delete_thread`, `set_thread_starred`, `set_thread_read`, `set_thread_pinned`, `set_thread_muted`) from the app crate. Make them `pub(crate)` in `ratatoskr-core` or move them into the actions module. The app can only call `actions::archive()`, `actions::trash()`, etc. Same principle as Phase 6's provider boundary — compile-time enforcement.
 
 ### ~~2. Account deletion leaks external stores~~ ✅ Fixed
 
