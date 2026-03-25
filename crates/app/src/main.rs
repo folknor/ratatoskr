@@ -1068,11 +1068,9 @@ impl App {
             // Calendar — delegated to handlers/calendar.rs
             Message::Calendar(cal_msg) => self.handle_calendar(*cal_msg),
             Message::ToggleAppMode => {
-                // If calendar is popped out and we're in mail, focus the pop-out window
+                // If calendar is popped out, focus the pop-out instead of toggling
                 if self.app_mode == AppMode::Mail {
-                    if let Some((&win_id, _)) = self.pop_out_windows.iter().find(|(_, w)| {
-                        matches!(w, PopOutWindow::Calendar)
-                    }) {
+                    if let Some(win_id) = self.calendar_pop_out_id() {
                         return iced::window::gain_focus(win_id);
                     }
                 }
@@ -1083,6 +1081,12 @@ impl App {
                 self.update(Message::SetAppMode(target))
             }
             Message::SetAppMode(mode) => {
+                // If switching to calendar while it's popped out, focus the pop-out
+                if mode == AppMode::Calendar {
+                    if let Some(win_id) = self.calendar_pop_out_id() {
+                        return iced::window::gain_focus(win_id);
+                    }
+                }
                 if self.app_mode == mode {
                     return Task::none();
                 }
@@ -1093,12 +1097,20 @@ impl App {
                 Task::none()
             }
             Message::SetCalendarView(view) => {
+                // Route to pop-out if calendar is popped out
+                if let Some(win_id) = self.calendar_pop_out_id() {
+                    return iced::window::gain_focus(win_id);
+                }
                 if self.app_mode != AppMode::Calendar {
                     self.app_mode = AppMode::Calendar;
                 }
                 self.update(Message::Calendar(Box::new(CalendarMessage::SetView(view))))
             }
             Message::CalendarToday => {
+                // Route to pop-out if calendar is popped out
+                if let Some(win_id) = self.calendar_pop_out_id() {
+                    return iced::window::gain_focus(win_id);
+                }
                 self.update(Message::Calendar(Box::new(CalendarMessage::Today)))
             }
 
@@ -1650,6 +1662,14 @@ impl App {
         // Otherwise switch to calendar mode to show the editor.
         self.app_mode = AppMode::Calendar;
         self.reload_calendar_events()
+    }
+
+    /// Returns the window ID of the calendar pop-out, if one exists.
+    fn calendar_pop_out_id(&self) -> Option<iced::window::Id> {
+        self.pop_out_windows
+            .iter()
+            .find(|(_, w)| matches!(w, PopOutWindow::Calendar))
+            .map(|(&id, _)| id)
     }
 
     /// Dismiss all mutually exclusive overlays (palette, settings, calendar

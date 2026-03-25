@@ -96,13 +96,9 @@ The structural fix for each is the same principle: make the right thing the only
 
 `dismiss_overlays()` closes all mutually exclusive overlays (palette, settings, calendar overlays, add-account wizard). Called at the start of every overlay open path: `open_settings()`, palette `Open`, add-account wizard, re-auth wizard. Replaces ad-hoc per-caller checks.
 
-### 12. Calendar pop-out awareness
+### ~~12. Calendar pop-out awareness~~ ✅ Fixed
 
-**Contract:** When calendar is popped out, calendar actions must route to the pop-out, not flip the main window to calendar mode.
-
-**Currently enforced by:** Ad-hoc `.find(Calendar)` checks at 2 of 6+ calendar entry points. `SetAppMode(Calendar)`, `SetCalendarView`, `CalendarToday`, `CalendarCreateEvent` all bypass.
-
-**Structural fix:** `fn calendar_target(&self) -> CalendarTarget { PopOut(window_id) | Inline }`.
+`calendar_pop_out_id()` returns the pop-out window ID if it exists. `SetAppMode(Calendar)`, `SetCalendarView`, `CalendarToday`, and `ToggleAppMode` all check it and focus the pop-out instead of flipping the main window.
 
 ### 13. Search state is a multi-field protocol
 
