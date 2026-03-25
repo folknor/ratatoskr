@@ -19,6 +19,18 @@ pub fn merge_and_rank(stage_results: Vec<Vec<ProtocolOption>>) -> Vec<ProtocolOp
     all
 }
 
+/// Re-sort options after post-processing mutations (e.g., OIDC upgrade
+/// changes the source, which affects confidence ranking).
+pub fn re_rank(options: &mut [ProtocolOption]) {
+    options.sort_by(|a, b| {
+        let proto_cmp = a.protocol.priority().cmp(&b.protocol.priority());
+        if proto_cmp != std::cmp::Ordering::Equal {
+            return proto_cmp;
+        }
+        a.source.confidence().cmp(&b.source.confidence())
+    });
+}
+
 fn dedup(options: &mut Vec<ProtocolOption>) {
     let mut seen: Vec<String> = Vec::new();
 

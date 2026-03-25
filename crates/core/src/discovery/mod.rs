@@ -76,7 +76,11 @@ async fn run_cascade(email: &str, domain: &str) -> Result<DiscoveredConfig, Stri
 
     // Post-process: upgrade OAuth2Unsupported results using OIDC endpoints
     if let Some(ref endpoints) = oidc_endpoints {
-        upgrade_oauth2_unsupported(&mut options, endpoints);
+        if upgrade_oauth2_unsupported(&mut options, endpoints) {
+            // Re-sort: upgraded options now have OidcWellKnown source
+            // (confidence 1) which may change their ranking.
+            merge::re_rank(&mut options);
+        }
     }
 
     Ok(DiscoveredConfig {
@@ -100,7 +104,8 @@ async fn run_cascade(email: &str, domain: &str) -> Result<DiscoveredConfig, Stri
 fn upgrade_oauth2_unsupported(
     options: &mut [ProtocolOption],
     endpoints: &oidc::OidcEndpoints,
-) {
+) -> bool {
+    let mut upgraded = false;
     let issuer_domain = endpoints
         .issuer_url
         .strip_prefix("https://")
@@ -130,8 +135,10 @@ fn upgrade_oauth2_unsupported(
                 use_pkce: endpoints.supports_pkce_s256,
             };
             opt.source = types::DiscoverySource::OidcWellKnown;
+            upgraded = true;
         }
     }
+    upgraded
 }
 
 /// Check if two domains are related (same domain or one is a subdomain of the other).
