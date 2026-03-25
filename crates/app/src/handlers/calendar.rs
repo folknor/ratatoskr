@@ -190,10 +190,9 @@ impl App {
                     self.calendar.overlay = CalendarOverlay::None;
                     return Task::none();
                 }
-                let Some(ref action_ctx) = self.action_ctx else {
+                let Some(ctx) = self.action_ctx() else {
                     return Task::none();
                 };
-                let ctx = action_ctx.clone();
                 // Resolve account_id from the event editor overlay if available,
                 // fall back to first account.
                 let account_id = match &self.calendar.overlay {
@@ -387,10 +386,9 @@ impl App {
             _ => return Task::none(),
         };
 
-        let Some(ref action_ctx) = self.action_ctx else {
+        let Some(ctx) = self.action_ctx() else {
             return Task::none();
         };
-        let ctx = action_ctx.clone();
 
         let start_ts = calendar_data_to_timestamp(
             event.start_date,

@@ -36,10 +36,9 @@ impl App {
     }
 
     pub(crate) fn handle_save_contact(&self, entry: ContactEntry) -> Task<Message> {
-        let Some(ref action_ctx) = self.action_ctx else {
+        let Some(ctx) = self.action_ctx() else {
             return Task::none();
         };
-        let ctx = action_ctx.clone();
         let db = Arc::clone(&self.db);
         let filter = self.settings.contact_filter.clone();
 
@@ -88,10 +87,9 @@ impl App {
     }
 
     pub(crate) fn handle_delete_contact(&self, id: String) -> Task<Message> {
-        let Some(ref action_ctx) = self.action_ctx else {
+        let Some(ctx) = self.action_ctx() else {
             return Task::none();
         };
-        let ctx = action_ctx.clone();
         let db = Arc::clone(&self.db);
         let filter = self.settings.contact_filter.clone();
 

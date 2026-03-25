@@ -1102,7 +1102,7 @@ impl App {
         window_id: iced::window::Id,
         request: ratatoskr_core::actions::SendRequest,
     ) -> Task<Message> {
-        let Some(ref action_ctx) = self.action_ctx else {
+        let Some(ctx) = self.action_ctx() else {
             if let Some(PopOutWindow::Compose(state)) =
                 self.pop_out_windows.get_mut(&window_id)
             {
@@ -1114,7 +1114,6 @@ impl App {
             }
             return Task::none();
         };
-        let ctx = action_ctx.clone();
         Task::perform(
             async move {
                 let outcome =

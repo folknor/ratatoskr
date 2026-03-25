@@ -150,13 +150,9 @@ Replaced the manually-synced `composer_is_open: bool` field with a computed `fn 
 
 **Structural fix:** Remove wildcards in window management code, or a trait on `PopOutWindow` variants.
 
-### 18. Action context degraded-mode boilerplate
+### ~~18. Action context degraded-mode boilerplate~~ ✅ Fixed
 
-**Contract:** Every action dispatch must check `action_ctx.is_some()` and show a degraded-mode message.
-
-**Currently enforced by:** 9 identical `let Some(ref action_ctx) = self.action_ctx else { ... }` blocks.
-
-**Structural fix:** `fn require_action_ctx(&self) -> Result<&ActionContext, Task<Message>>`.
+Replaced 9 identical `let Some(ref action_ctx) = self.action_ctx else { ... }` blocks with `fn action_ctx(&self) -> Option<ActionContext>`. All call sites now use `let Some(ctx) = self.action_ctx() else { return ... }`. Two sites with custom degraded-mode messages keep their custom logic in the else branch.
 
 ### 19. Provider APIs are stringly typed
 

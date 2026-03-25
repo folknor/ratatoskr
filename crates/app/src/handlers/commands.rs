@@ -101,6 +101,12 @@ impl App {
         }
     }
 
+    /// Get a clone of the action context, or `None` if the action service
+    /// is not initialized (degraded mode — stores failed at boot).
+    pub(crate) fn action_ctx(&self) -> Option<ratatoskr_core::actions::ActionContext> {
+        self.action_ctx.as_ref().cloned()
+    }
+
     pub(crate) fn handle_email_action(
         &mut self,
         action: EmailAction,
@@ -258,14 +264,13 @@ impl App {
         threads: &[(String, String)],
         params: &ActionParams,
     ) -> Task<Message> {
-        let Some(ref action_ctx) = self.action_ctx else {
+        let Some(ctx) = self.action_ctx() else {
             self.status_bar.show_confirmation(
                 format!("\u{26A0} {} unavailable \u{2014} action service not initialized", action.success_label()),
             );
             return Task::none();
         };
 
-        let ctx = action_ctx.clone();
         let threads = threads.to_vec();
         let params_clone = params.clone();
         let Some(batch_action) = to_batch_action(action, params) else {
@@ -332,7 +337,7 @@ impl App {
         action: CompletedAction,
         rollback: Vec<(String, String, bool)>,
     ) -> Task<Message> {
-        let Some(ref action_ctx) = self.action_ctx else {
+        let Some(ctx) = self.action_ctx() else {
             self.rollback_toggles(&rollback, action);
             self.status_bar.show_confirmation(
                 format!("\u{26A0} {} unavailable \u{2014} action service not initialized", action.success_label()),
@@ -340,7 +345,6 @@ impl App {
             return Task::none();
         };
 
-        let ctx = action_ctx.clone();
         Task::perform(
             async move {
                 let outcomes = dispatch_toggle_batch(&ctx, action, &rollback).await;
@@ -679,10 +683,9 @@ impl App {
         &mut self,
         token: ratatoskr_command_palette::UndoToken,
     ) -> Task<Message> {
-        let Some(ref action_ctx) = self.action_ctx else {
+        let Some(mut ctx) = self.action_ctx() else {
             return Task::none();
         };
-        let mut ctx = action_ctx.clone();
         ctx.suppress_pending_enqueue = true;
         let desc = token.description();
 
@@ -1039,10 +1042,9 @@ fn to_toggle_batch(action: CompletedAction, value: bool) -> Option<BatchAction> 
 impl App {
     /// Check for snoozed threads that are due and unsnooze them.
     pub(crate) fn handle_snooze_tick(&self) -> Task<Message> {
-        let Some(ref action_ctx) = self.action_ctx else {
+        let Some(ctx) = self.action_ctx() else {
             return Task::none();
         };
-        let ctx = action_ctx.clone();
         Task::perform(
             async move {
                 let now = chrono::Utc::now().timestamp();

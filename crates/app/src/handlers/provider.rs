@@ -153,10 +153,9 @@ impl App {
     /// Process pending operations from the retry queue.
     /// Called on SyncTick alongside delta sync.
     pub(crate) fn process_pending_ops(&self) -> Task<Message> {
-        let Some(ref action_ctx) = self.action_ctx else {
+        let Some(ctx) = self.action_ctx() else {
             return Task::none();
         };
-        let ctx = action_ctx.clone();
         Task::perform(
             async move {
                 ratatoskr_core::actions::pending::process_pending_ops(&ctx).await;
