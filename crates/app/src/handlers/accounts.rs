@@ -44,7 +44,7 @@ impl App {
             .collect();
         self.add_account_wizard =
             Some(AddAccountWizard::new_add_account(used_colors, Arc::clone(&self.db)));
-        self.show_settings = false;
+        self.close_settings();
         Task::none()
     }
 
@@ -61,7 +61,7 @@ impl App {
         ) {
             Ok((wizard, task)) => {
                 self.add_account_wizard = Some(wizard);
-                self.show_settings = false;
+                self.close_settings();
                 task.map(Message::AddAccount)
             }
             Err(e) => {

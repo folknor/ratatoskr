@@ -54,13 +54,9 @@ The structural fix for each is the same principle: make the right thing the only
 
 **Structural fix:** `fn switch_view(&mut self, target: ViewTarget) -> Task<Message>` that encapsulates the entire reset/reload sequence. All navigation paths call this.
 
-### 6. Settings open/close protocol
+### ~~6. Settings open/close protocol~~ ✅ Fixed
 
-**Contract:** Opening settings requires: `show_settings = true`, `overlay = None`, `overlay_anim` reset, `active_tab` set, `begin_editing()`. Closing requires: commit or discard, `show_settings = false`, reset animation.
-
-**Currently enforced by:** Manual field writes at 3+ call sites. `open_contact_editor_for_email` already violates it — sets `show_settings = true` and `active_tab = People` but skips `overlay = None`, `overlay_anim`, and `begin_editing()`.
-
-**Structural fix:** `fn open_settings(&mut self, tab: Tab, overlay: Option<SettingsOverlay>)` and `fn close_settings(&mut self, commit: bool)`.
+`open_settings(tab)` handles the full open protocol (show, overlay reset, animation, tab, begin_editing). `close_settings()` commits preferences and hides. All 6 open/close sites now use these helpers. Fixed the existing violation where `open_contact_editor_for_email` skipped overlay reset and `begin_editing()`.
 
 ### ~~7. Thread selection + reading pane consistency~~ ✅ Fixed
 

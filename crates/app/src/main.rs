@@ -865,12 +865,10 @@ impl App {
 
             // Settings and UI toggles
             Message::ToggleSettings => {
-                self.show_settings = !self.show_settings;
                 if self.show_settings {
-                    self.settings.overlay = None;
-                    self.settings.overlay_anim.go_mut(false, iced::time::Instant::now());
-                    self.settings.active_tab = crate::ui::settings::Tab::General;
-                    self.settings.begin_editing();
+                    self.close_settings();
+                } else {
+                    self.open_settings(crate::ui::settings::Tab::General);
                 }
                 Task::none()
             }
@@ -938,8 +936,7 @@ impl App {
                     return Task::none();
                 }
                 if self.show_settings {
-                    self.settings.commit_preferences();
-                    self.show_settings = false;
+                    self.close_settings();
                     return Task::none();
                 }
                 if !self.search_query.text().is_empty()
@@ -1655,15 +1652,31 @@ impl App {
         self.reload_calendar_events()
     }
 
+    /// Open settings to a specific tab. Handles the full protocol:
+    /// show_settings, overlay reset, animation reset, tab, begin_editing.
+    fn open_settings(&mut self, tab: crate::ui::settings::Tab) {
+        self.show_settings = true;
+        self.settings.overlay = None;
+        self.settings
+            .overlay_anim
+            .go_mut(false, iced::time::Instant::now());
+        self.settings.active_tab = tab;
+        self.settings.begin_editing();
+    }
+
+    /// Close settings, committing preference changes.
+    fn close_settings(&mut self) {
+        self.settings.commit_preferences();
+        self.show_settings = false;
+    }
+
     /// Open the contact editor in settings for a specific email address.
     /// Navigates to Settings > People and opens the editor, creating a
     /// new local contact if none exists for that email.
     fn open_contact_editor_for_email(&mut self, email: String) -> Task<Message> {
         use crate::ui::settings::SettingsMessage;
 
-        // Open settings and switch to People tab
-        self.show_settings = true;
-        self.settings.active_tab = crate::ui::settings::types::Tab::People;
+        self.open_settings(crate::ui::settings::types::Tab::People);
 
         // Look up existing contact or create new editor state
         let found = self.settings.contacts.iter().find(|c| {
@@ -1802,7 +1815,7 @@ impl App {
     fn handle_settings_event(&mut self, event: SettingsEvent) -> Task<Message> {
         match event {
             SettingsEvent::Closed => {
-                self.show_settings = false;
+                self.close_settings();
                 Task::none()
             }
             SettingsEvent::PreferencesCommitted | SettingsEvent::PreferencesDiscarded => {
