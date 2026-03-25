@@ -33,15 +33,16 @@ pub(crate) fn configure_tcp_socket(stream: &TcpStream) {
     }
 }
 
-// ---------- XOAUTH2 authenticator ----------
+// ---------- SASL authenticators ----------
 
+/// XOAUTH2 authenticator (Google-style).
+/// Format: `user={user}\x01auth=Bearer {token}\x01\x01`
 struct XOAuth2 {
     response: Vec<u8>,
 }
 
 impl XOAuth2 {
     fn new(user: &str, access_token: &str) -> Self {
-        // XOAUTH2 format: "user=" {user} "\x01auth=Bearer " {token} "\x01\x01"
         let s = format!("user={user}\x01auth=Bearer {access_token}\x01\x01");
         Self {
             response: s.into_bytes(),
@@ -52,9 +53,31 @@ impl XOAuth2 {
 impl Authenticator for XOAuth2 {
     type Response = Vec<u8>;
     fn process(&mut self, _challenge: &[u8]) -> Self::Response {
-        // Return the initial XOAUTH2 string on the first (empty) challenge.
-        // If the server sends a second challenge it means auth failed; we send
-        // an empty response to let the server return a proper error.
+        std::mem::take(&mut self.response)
+    }
+}
+
+/// OAUTHBEARER authenticator (RFC 7628).
+/// Format: `n,a={user},\x01auth=Bearer {token}\x01\x01`
+///
+/// Preferred over XOAUTH2 for modern on-prem servers (Dovecot, Cyrus)
+/// and standards-compliant OIDC deployments.
+struct OAuthBearer {
+    response: Vec<u8>,
+}
+
+impl OAuthBearer {
+    fn new(user: &str, access_token: &str) -> Self {
+        let s = format!("n,a={user},\x01auth=Bearer {access_token}\x01\x01");
+        Self {
+            response: s.into_bytes(),
+        }
+    }
+}
+
+impl Authenticator for OAuthBearer {
+    type Response = Vec<u8>;
+    fn process(&mut self, _challenge: &[u8]) -> Self::Response {
         std::mem::take(&mut self.response)
     }
 }
@@ -283,12 +306,28 @@ async fn connect_starttls(config: &ImapConfig) -> Result<ImapSession, String> {
         ))?
 }
 
-/// Authenticate with the IMAP server (LOGIN or XOAUTH2).
+/// Authenticate with the IMAP server.
+///
+/// Auth methods:
+/// - `"oauth2"` — XOAUTH2 (Google/Microsoft legacy)
+/// - `"oauthbearer"` — OAUTHBEARER RFC 7628 (modern on-prem OIDC)
+/// - anything else — LOGIN (password)
 async fn authenticate(
     client: Client<ImapStream>,
     config: &ImapConfig,
 ) -> Result<ImapSession, String> {
     match config.auth_method.as_str() {
+        "oauthbearer" => {
+            log::debug!("[IMAP] Authenticating with OAUTHBEARER as {}", config.username);
+            let auth = OAuthBearer::new(&config.username, &config.password);
+            client
+                .authenticate("OAUTHBEARER", auth)
+                .await
+                .map_err(|(e, _)| {
+                    log::error!("[IMAP] OAUTHBEARER authentication failed for {}: {e}", config.username);
+                    format!("OAUTHBEARER authentication failed: {e}")
+                })
+        }
         "oauth2" => {
             log::debug!("[IMAP] Authenticating with XOAUTH2 as {}", config.username);
             let auth = XOAuth2::new(&config.username, &config.password);
