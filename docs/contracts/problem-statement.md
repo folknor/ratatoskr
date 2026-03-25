@@ -32,15 +32,9 @@ The structural fix for each is the same principle: make the right thing the only
 
 `delete_account_orchestrate()` gathers cleanup data + shared-ref checks + deletes the account row in one synchronous connection call. The app handler then does best-effort async cleanup of body store, inline image store (with separate `inline_hashes_referenced_by_other_accounts` check), attachment cache files, and search index. 6 integration tests cover the orchestration contract. Pending ops are CASCADE-deleted via FK.
 
-### 3. Compose window close loses dirty drafts
+### ~~3. Compose window close loses dirty drafts~~ ✅ Fixed
 
-**Contract:** Closing a compose window must persist any dirty draft before destroying the window.
-
-**Currently enforced by:** A 30-second auto-save timer. The OS close button path (`handle_window_close` in `main.rs`) removes the window immediately without checking for dirty state.
-
-**Already violated:** User types a reply, closes the compose window via the OS close button — draft is lost if the last auto-save was >0 seconds ago.
-
-**Structural fix:** `handle_window_close` for Compose windows must check `draft_dirty` and either force a synchronous save or show a "Save draft?" confirmation before removing the window.
+`save_compose_draft_sync()` does a synchronous single-row INSERT before the window is removed from the map. Called in both the pop-out close path and the main window exit path (before `iced::exit()`). Synchronous write avoids the async-vs-exit race. Skips save when `from_account` is None (unattributable draft).
 
 ### ~~4. New CommandId variants silently ignored~~ ✅ Fixed
 

@@ -852,6 +852,81 @@ fn tokens_to_csv(tokens: &[crate::ui::token_input::Token]) -> Option<String> {
     )
 }
 
+/// Data extracted from a `ComposeState` for draft persistence.
+struct DraftData {
+    draft_id: String,
+    account_id: String,
+    to_csv: Option<String>,
+    cc_csv: Option<String>,
+    bcc_csv: Option<String>,
+    subject: Option<String>,
+    body_html: Option<String>,
+    from_email: Option<String>,
+    reply_to_message_id: Option<String>,
+    thread_id: Option<String>,
+}
+
+impl DraftData {
+    fn from_compose(state: &crate::pop_out::compose::ComposeState) -> Self {
+        let account_id = state
+            .from_account
+            .as_ref()
+            .map(|a| a.id.clone())
+            .unwrap_or_default();
+        let body_text = state.body.to_html();
+        Self {
+            draft_id: state.draft_id.clone(),
+            account_id,
+            to_csv: tokens_to_csv(&state.to.tokens),
+            cc_csv: tokens_to_csv(&state.cc.tokens),
+            bcc_csv: tokens_to_csv(&state.bcc.tokens),
+            subject: if state.subject.is_empty() {
+                None
+            } else {
+                Some(state.subject.clone())
+            },
+            body_html: if body_text.trim().is_empty() {
+                None
+            } else {
+                Some(body_text)
+            },
+            from_email: state.from_account.as_ref().map(|a| a.email.clone()),
+            reply_to_message_id: state.reply_message_id.clone(),
+            thread_id: state.reply_thread_id.clone(),
+        }
+    }
+
+    fn execute(self, conn: &rusqlite::Connection) -> Result<(), String> {
+        conn.execute(
+            "INSERT INTO local_drafts \
+             (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
+              subject, body_html, reply_to_message_id, thread_id, \
+              from_email, updated_at, sync_status) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, unixepoch(), 'pending') \
+             ON CONFLICT(id) DO UPDATE SET \
+               account_id = ?2, \
+               to_addresses = ?3, cc_addresses = ?4, bcc_addresses = ?5, \
+               subject = ?6, body_html = ?7, reply_to_message_id = ?8, \
+               thread_id = ?9, from_email = ?10, \
+               updated_at = unixepoch(), sync_status = 'pending'",
+            rusqlite::params![
+                self.draft_id,
+                self.account_id,
+                self.to_csv,
+                self.cc_csv,
+                self.bcc_csv,
+                self.subject,
+                self.body_html,
+                self.reply_to_message_id,
+                self.thread_id,
+                self.from_email,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
+
 impl App {
     /// Returns true if any compose window has `draft_dirty` set.
     pub(crate) fn has_dirty_compose_drafts(&self) -> bool {
@@ -860,75 +935,21 @@ impl App {
         })
     }
 
-    /// Save a single compose window's state as a local draft.
+    /// Save a single compose window's state as a local draft (async).
+    /// Used by the periodic auto-save timer.
     fn save_compose_draft(&mut self, window_id: iced::window::Id) -> Task<Message> {
-        let Some(PopOutWindow::Compose(state)) =
-            self.pop_out_windows.get_mut(&window_id)
-        else {
+        let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id) else {
             return Task::none();
         };
+        if state.from_account.is_none() {
+            return Task::none();
+        }
         state.draft_dirty = false;
-
-        let account_id = state
-            .from_account
-            .as_ref()
-            .map(|a| a.id.clone())
-            .unwrap_or_default();
-
-        let to_csv = tokens_to_csv(&state.to.tokens);
-        let cc_csv = tokens_to_csv(&state.cc.tokens);
-        let bcc_csv = tokens_to_csv(&state.bcc.tokens);
-
-        let subject = if state.subject.is_empty() {
-            None
-        } else {
-            Some(state.subject.clone())
-        };
-        let body_text = state.body.to_html();
-        let body_html = if body_text.trim().is_empty() {
-            None
-        } else {
-            Some(body_text)
-        };
-        let from_email = state.from_account.as_ref().map(|a| a.email.clone());
-        let reply_to_message_id = state.reply_message_id.clone();
-        let thread_id = state.reply_thread_id.clone();
-
-        let draft_id = uuid::Uuid::new_v4().to_string();
+        let data = DraftData::from_compose(state);
         let db = Arc::clone(&self.db);
 
         Task::perform(
-            async move {
-                db.with_write_conn(move |conn| {
-                    conn.execute(
-                        "INSERT INTO local_drafts \
-                         (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
-                          subject, body_html, reply_to_message_id, thread_id, \
-                          from_email, updated_at, sync_status) \
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, unixepoch(), 'pending') \
-                         ON CONFLICT(id) DO UPDATE SET \
-                           to_addresses = ?3, cc_addresses = ?4, bcc_addresses = ?5, \
-                           subject = ?6, body_html = ?7, reply_to_message_id = ?8, \
-                           thread_id = ?9, from_email = ?10, \
-                           updated_at = unixepoch(), sync_status = 'pending'",
-                        rusqlite::params![
-                            draft_id,
-                            account_id,
-                            to_csv,
-                            cc_csv,
-                            bcc_csv,
-                            subject,
-                            body_html,
-                            reply_to_message_id,
-                            thread_id,
-                            from_email,
-                        ],
-                    )
-                    .map_err(|e| e.to_string())?;
-                    Ok(())
-                })
-                .await
-            },
+            async move { db.with_write_conn(move |conn| data.execute(&conn)).await },
             move |result| {
                 if let Err(e) = result {
                     log::error!("Failed to auto-save compose draft: {e}");
@@ -936,6 +957,38 @@ impl App {
                 Message::Noop
             },
         )
+    }
+
+    /// Synchronously save a compose window's draft before the window is
+    /// destroyed. Used on window close where an async Task would race
+    /// against `iced::exit()`. A single-row INSERT is sub-millisecond.
+    ///
+    /// Returns `true` if the draft was saved (or didn't need saving),
+    /// `false` if the write failed and the draft is still dirty.
+    pub(crate) fn save_compose_draft_sync(&mut self, window_id: iced::window::Id) -> bool {
+        let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id) else {
+            return true;
+        };
+        if !state.draft_dirty || state.from_account.is_none() {
+            return true;
+        }
+        let data = DraftData::from_compose(state);
+
+        let result = self.db.with_write_conn_sync(|conn| data.execute(conn));
+        match result {
+            Ok(()) => {
+                if let Some(PopOutWindow::Compose(state)) =
+                    self.pop_out_windows.get_mut(&window_id)
+                {
+                    state.draft_dirty = false;
+                }
+                true
+            }
+            Err(e) => {
+                log::error!("Failed to save compose draft on close: {e}");
+                false
+            }
+        }
     }
 
     // ── Compose send ─────────────────────────────────────

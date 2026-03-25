@@ -2310,6 +2310,17 @@ impl App {
             self.window.right_sidebar_open = self.right_sidebar_open;
             self.window.save(data_dir);
             self.save_session_state();
+            // Save dirty compose drafts synchronously before destroying windows
+            let compose_ids: Vec<_> = self
+                .pop_out_windows
+                .iter()
+                .filter_map(|(&win_id, w)| {
+                    matches!(w, PopOutWindow::Compose(s) if s.draft_dirty).then_some(win_id)
+                })
+                .collect();
+            for win_id in compose_ids {
+                self.save_compose_draft_sync(win_id);
+            }
             let mut tasks: Vec<Task<Message>> = self
                 .pop_out_windows
                 .keys()
@@ -2322,6 +2333,11 @@ impl App {
         }
 
         if matches!(self.pop_out_windows.get(&id), Some(PopOutWindow::Compose(_))) {
+            if !self.save_compose_draft_sync(id) {
+                // Save failed — keep the window open so the user doesn't lose work
+                log::warn!("Compose draft save failed, aborting window close");
+                return Task::none();
+            }
             self.composer_is_open = false;
         }
         // Calendar pop-out closing — calendar becomes available in main window again.

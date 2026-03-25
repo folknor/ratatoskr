@@ -375,6 +375,7 @@ pub struct ComposeState {
     pub signature_separator_index: Option<usize>,
 
     // Draft auto-save
+    pub draft_id: String,
     pub draft_dirty: bool,
 
     // Send in progress — disables Send button, shows "Sending..." status
@@ -421,6 +422,7 @@ impl ComposeState {
             signature_separator_index: None,
             width: COMPOSE_DEFAULT_WIDTH,
             height: COMPOSE_DEFAULT_HEIGHT,
+            draft_id: uuid::Uuid::new_v4().to_string(),
             draft_dirty: false,
             sending: false,
             send_draft_id: None,
