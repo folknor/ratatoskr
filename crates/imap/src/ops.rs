@@ -58,6 +58,7 @@ impl ImapOps {
         crate::account_config::load_imap_config(ctx.db, ctx.account_id, &self.encryption_key)
             .await
     }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +265,51 @@ enum FolderAction {
     Move(String),
     /// Permanently delete messages (no destination).
     Delete,
+}
+
+/// Batch keyword set/remove: groups thread messages by folder and issues
+/// one IMAP session per folder with a batched UID set, matching the pattern
+/// used by `mark_read` and `star`.
+async fn set_keyword_batched(
+    config: &super::types::ImapConfig,
+    ctx: &ProviderCtx<'_>,
+    thread_id: &str,
+    tag_id: &str,
+    flag_op: &str,
+) -> Result<(), ProviderError> {
+    let Some(keyword) = tag_id.strip_prefix("kw:") else {
+        log::debug!("IMAP: keyword op is a no-op for non-keyword tag {tag_id}");
+        return Ok(());
+    };
+
+    let account_id = ctx.account_id.to_string();
+    let tid = thread_id.to_string();
+
+    let refs = ctx
+        .db
+        .with_conn(move |conn| get_thread_message_refs(conn, &account_id, &tid))
+        .await?;
+
+    let grouped = group_by_folder(&refs);
+    let futs: Vec<_> = grouped
+        .iter()
+        .map(|(folder, uids)| {
+            let config = config.clone();
+            let folder = folder.to_string();
+            let uids = uid_set(uids);
+            let keyword = keyword.to_string();
+            let flag_op = flag_op.to_string();
+            async move {
+                with_session!(&config, session => {
+                    imap_client::set_keyword_batch_if_supported(
+                        &mut session, &folder, &uids, &flag_op, &keyword,
+                    ).await
+                })
+            }
+        })
+        .collect();
+    futures::future::try_join_all(futs).await?;
+    Ok(())
 }
 
 /// Group thread message refs by folder and execute move/delete in parallel sessions.
@@ -545,29 +591,8 @@ impl ProviderOps for ImapOps {
         thread_id: &str,
         tag_id: &str,
     ) -> Result<(), ProviderError> {
-        // Keywords use kw: prefix — set the keyword flag on all thread messages
-        let Some(keyword) = tag_id.strip_prefix("kw:") else {
-            // IMAP has no native non-keyword tags — no-op for other tag types
-            log::debug!("IMAP: add_tag is a no-op for non-keyword tag {tag_id}");
-            return Ok(());
-        };
-
-        let account_id = ctx.account_id.to_string();
-        let tid = thread_id.to_string();
         let config = self.load_config(ctx).await?;
-
-        let refs = ctx.db
-            .with_conn(move |conn| get_thread_message_refs(conn, &account_id, &tid))
-            .await?;
-
-        for msg_ref in &refs {
-            with_session!(&config, session => {
-                imap_client::set_keyword_if_supported(
-                    &mut session, &msg_ref.folder, msg_ref.uid, "+FLAGS", keyword,
-                ).await
-            })?;
-        }
-        Ok(())
+        set_keyword_batched(&config, ctx, thread_id, tag_id, "+FLAGS").await
     }
 
     async fn remove_tag(
@@ -576,28 +601,8 @@ impl ProviderOps for ImapOps {
         thread_id: &str,
         tag_id: &str,
     ) -> Result<(), ProviderError> {
-        // Keywords use kw: prefix — remove the keyword flag from all thread messages
-        let Some(keyword) = tag_id.strip_prefix("kw:") else {
-            log::debug!("IMAP: remove_tag is a no-op for non-keyword tag {tag_id}");
-            return Ok(());
-        };
-
-        let account_id = ctx.account_id.to_string();
-        let tid = thread_id.to_string();
         let config = self.load_config(ctx).await?;
-
-        let refs = ctx.db
-            .with_conn(move |conn| get_thread_message_refs(conn, &account_id, &tid))
-            .await?;
-
-        for msg_ref in &refs {
-            with_session!(&config, session => {
-                imap_client::set_keyword_if_supported(
-                    &mut session, &msg_ref.folder, msg_ref.uid, "-FLAGS", keyword,
-                ).await
-            })?;
-        }
-        Ok(())
+        set_keyword_batched(&config, ctx, thread_id, tag_id, "-FLAGS").await
     }
 
     // ── Send + Drafts ───────────────────────────────────────────────────

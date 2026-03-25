@@ -119,6 +119,42 @@ pub async fn set_keyword_if_supported(
     .map_err(|_| timeout_err("UID STORE", IMAP_CMD_TIMEOUT))?
 }
 
+/// Set a custom keyword flag on multiple messages (by UID set), but only if
+/// the folder's PERMANENTFLAGS includes `\*` (custom keywords allowed).
+///
+/// Returns `Ok(())` silently if the server does not support custom keywords.
+pub async fn set_keyword_batch_if_supported(
+    session: &mut ImapSession,
+    folder: &str,
+    uid_set: &str,
+    flag_op: &str,
+    keyword: &str,
+) -> Result<(), String> {
+    let mailbox = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
+        .await
+        .map_err(|_| timeout_err(&format!("SELECT {folder}"), IMAP_CMD_TIMEOUT))?
+        .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
+
+    if !mailbox_supports_custom_keywords(&mailbox) {
+        log::debug!(
+            "IMAP: folder {folder} does not support custom keywords, skipping keyword {keyword}"
+        );
+        return Ok(());
+    }
+
+    let query = format!("{flag_op} ({keyword})");
+    tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
+        let stream = session
+            .uid_store(uid_set, &query)
+            .await
+            .map_err(|e| format!("UID STORE failed: {e}"))?;
+        let _: Vec<_> = stream.collect().await;
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|_| timeout_err("UID STORE", IMAP_CMD_TIMEOUT))?
+}
+
 /// Move messages between folders.
 ///
 /// Tries MOVE first; falls back to COPY + flag Deleted + EXPUNGE.

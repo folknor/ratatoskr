@@ -56,7 +56,6 @@ Phases 1-5 complete (schema, Exchange/IMAP/JMAP sync, local dispatch + provider 
 
 - [ ] **Label pills in reading pane** — Display tag-type labels as colored pills on expanded message headers. Data now in `thread_labels` via unified sync.
 - [ ] **Label picker overlay** — Triggered from reading pane or command palette. Lists all available tag-type labels with colors for apply/remove.
-- [ ] **IMAP keyword add_tag/remove_tag per-folder batching** — Currently creates a session per message instead of grouping by folder and batching UIDs like `mark_read`/`star` do. Performance concern for threads with many messages.
 
 ### Tracking Blocking — `docs/roadmap/tracking-blocking.md`
 
