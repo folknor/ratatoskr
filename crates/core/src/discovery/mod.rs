@@ -93,12 +93,31 @@ async fn run_cascade(email: &str, domain: &str) -> Result<DiscoveredConfig, Stri
 /// the OIDC discovery endpoints. This bridges the gap where autoconfig or
 /// MX lookup found IMAP/SMTP servers with OAuth2 authentication but couldn't
 /// resolve the specific OAuth2 endpoints.
+///
+/// Only upgrades when the `provider_domain` from the OAuth2Unsupported result
+/// matches the OIDC issuer domain — prevents assigning wrong OIDC endpoints
+/// to third-party IMAP servers discovered via autoconfig.
 fn upgrade_oauth2_unsupported(
     options: &mut [ProtocolOption],
     endpoints: &oidc::OidcEndpoints,
 ) {
+    let issuer_domain = endpoints
+        .issuer_url
+        .strip_prefix("https://")
+        .unwrap_or(&endpoints.issuer_url)
+        .split('/')
+        .next()
+        .unwrap_or("");
+
     for opt in options.iter_mut() {
-        if matches!(opt.auth.method, types::AuthMethod::OAuth2Unsupported { .. }) {
+        if let types::AuthMethod::OAuth2Unsupported { ref provider_domain } = opt.auth.method {
+            if !domains_related(provider_domain, issuer_domain) {
+                log::debug!(
+                    "OIDC upgrade skipped: provider_domain={provider_domain} \
+                     does not match issuer={issuer_domain}"
+                );
+                continue;
+            }
             log::info!(
                 "Upgrading OAuth2Unsupported to OAuth2 via OIDC discovery for {:?}",
                 opt.protocol
@@ -113,6 +132,14 @@ fn upgrade_oauth2_unsupported(
             opt.source = types::DiscoverySource::OidcWellKnown;
         }
     }
+}
+
+/// Check if two domains are related (same domain or one is a subdomain of the other).
+/// e.g., "auth.corp.example.com" and "corp.example.com" are related.
+fn domains_related(a: &str, b: &str) -> bool {
+    let a = a.to_lowercase();
+    let b = b.to_lowercase();
+    a == b || a.ends_with(&format!(".{b}")) || b.ends_with(&format!(".{a}"))
 }
 
 fn extract_domain(email: &str) -> Result<String, String> {
