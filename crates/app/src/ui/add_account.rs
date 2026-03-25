@@ -1335,6 +1335,7 @@ fn source_display(source: &DiscoverySource) -> &str {
         DiscoverySource::AutoconfigXml { .. } => "Auto-detected",
         DiscoverySource::MxLookup { .. } => "MX lookup",
         DiscoverySource::JmapWellKnown => "JMAP discovery",
+        DiscoverySource::OidcWellKnown => "OIDC discovery",
         DiscoverySource::PortProbe => "Port scan",
     }
 }
@@ -1412,7 +1413,9 @@ impl HighConfidence for DiscoverySource {
     fn is_high_confidence(&self) -> bool {
         matches!(
             self,
-            DiscoverySource::Registry | DiscoverySource::JmapWellKnown
+            DiscoverySource::Registry
+                | DiscoverySource::JmapWellKnown
+                | DiscoverySource::OidcWellKnown
         )
     }
 }

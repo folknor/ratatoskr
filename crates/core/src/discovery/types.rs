@@ -110,6 +110,7 @@ pub enum DiscoverySource {
         mx_domain: String,
     },
     JmapWellKnown,
+    OidcWellKnown,
     PortProbe,
 }
 
@@ -151,6 +152,7 @@ impl DiscoverySource {
             Self::AutoconfigXml { .. } => 1,
             Self::MxLookup { .. } => 2,
             Self::JmapWellKnown => 1,
+            Self::OidcWellKnown => 1,
             Self::PortProbe => 4,
         }
     }

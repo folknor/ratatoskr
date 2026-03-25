@@ -2,6 +2,7 @@ pub mod autoconfig;
 pub mod jmap_wellknown;
 pub mod merge;
 pub mod mx;
+pub mod oidc;
 pub mod probe;
 pub mod registry;
 pub mod types;
