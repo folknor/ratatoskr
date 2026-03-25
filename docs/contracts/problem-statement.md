@@ -44,15 +44,9 @@ The structural fix for each is the same principle: make the right thing the only
 
 ## High — Fix to Prevent New-Developer Mistakes
 
-### 5. Navigation state reset protocol
+### ~~5. Navigation state reset protocol~~ ✅ Fixed
 
-**Contract:** Every "show this view" transition (account switch, label select, search clear, pinned search select, navigate-to) must: clear search state, clear pinned search, set navigation_target, clear selected_thread + reading pane, bump nav_generation + thread_generation, and reload threads.
-
-**Currently enforced by:** Copy-paste. At least 5 call sites in `main.rs` and `handlers/navigation.rs` each do a different subset of these 7 steps.
-
-**Violation scenario:** `SharedMailboxSelected` and `PublicFolderSelected` are currently stubs returning `Task::none()`. When implemented, the developer must replicate the exact protocol with no guide.
-
-**Structural fix:** `fn switch_view(&mut self, target: ViewTarget) -> Task<Message>` that encapsulates the entire reset/reload sequence. All navigation paths call this.
+`reset_view_state(navigation_target)` encapsulates the full 7-step transition: clear search, clear pinned search, set navigation_target, clear thread selection + reading pane, bump both generation counters, update thread list context. All 4 view-transition sites (AccountSelected, AllAccountsSelected, LabelSelected, NavigateTo) now call this single function. Also fixed sidebar ToggleSettings bypassing the `open_settings()` protocol.
 
 ### ~~6. Settings open/close protocol~~ ✅ Fixed
 

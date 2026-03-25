@@ -13,10 +13,6 @@ impl App {
         &mut self,
         target: NavigationTarget,
     ) -> Task<Message> {
-        // Clear search and pinned search state on any navigation
-        self.clear_search_state();
-        self.clear_pinned_search_context();
-
         // For Label targets, scope to the correct account
         if let NavigationTarget::Label { ref account_id, .. } = target {
             self.select_account_by_id(account_id);
@@ -25,18 +21,8 @@ impl App {
         // Update sidebar selected_label from the target
         self.sidebar.selected_label = target.to_label_id();
 
-        // Store the navigation target for view type derivation
-        self.navigation_target = Some(target);
-
-        // Reset thread selection and reading pane together
-        self.clear_thread_selection();
-        self.nav_generation += 1;
-        self.thread_generation += 1;
-
-        // Update thread list header context
-        self.update_thread_list_context_from_sidebar();
-
-        // Load threads for the new view
+        // Full view reset + load
+        self.reset_view_state(Some(target));
         self.load_threads_for_current_view()
     }
 

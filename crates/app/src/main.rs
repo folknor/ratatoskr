@@ -1393,42 +1393,20 @@ impl App {
     fn handle_sidebar_event(&mut self, event: SidebarEvent) -> Task<Message> {
         match event {
             SidebarEvent::AccountSelected(_idx) => {
-                self.clear_search_state();
-                self.clear_pinned_search_context();
-                self.navigation_target = None;
-                self.clear_thread_selection();
-                self.nav_generation += 1;
-                self.thread_generation += 1;
-                self.update_thread_list_context_from_sidebar();
+                self.reset_view_state(None);
                 self.load_navigation_and_threads()
             }
             SidebarEvent::AllAccountsSelected => {
-                self.clear_search_state();
-                self.clear_pinned_search_context();
-                self.navigation_target = None;
-                self.clear_thread_selection();
-                self.nav_generation += 1;
-                self.thread_generation += 1;
-                self.update_thread_list_context_from_sidebar();
+                self.reset_view_state(None);
                 self.load_navigation_and_threads()
             }
-            SidebarEvent::LabelSelected(label_id) => {
-                self.clear_search_state();
-                self.clear_pinned_search_context();
-                self.navigation_target = None;
-                self.update_thread_list_context_from_sidebar();
-                self.handle_label_selected(label_id)
+            SidebarEvent::LabelSelected(_label_id) => {
+                self.reset_view_state(None);
+                self.load_threads_for_current_view()
             }
             SidebarEvent::Compose => self.update(Message::Compose),
             SidebarEvent::ToggleSettings => {
-                self.show_settings = !self.show_settings;
-                if self.show_settings {
-                    self.settings.overlay = None;
-                    self.settings.overlay_anim.go_mut(false, iced::time::Instant::now());
-                    self.settings.active_tab = crate::ui::settings::Tab::General;
-                    self.settings.begin_editing();
-                }
-                Task::none()
+                self.update(Message::ToggleSettings)
             }
             SidebarEvent::PinnedSearchSelected(id) => {
                 self.update(Message::SelectPinnedSearch(id))
@@ -1454,19 +1432,28 @@ impl App {
         }
     }
 
+    /// Full view-transition reset: clear search, pinned search, thread
+    /// selection, bump generations, and update thread list context.
+    /// Call before loading threads/navigation for the new view.
+    ///
+    /// `navigation_target` is set to the provided value (Some for folder
+    /// navigation, None for account/label switch).
+    fn reset_view_state(&mut self, navigation_target: Option<crate::command_dispatch::NavigationTarget>) {
+        self.clear_search_state();
+        self.clear_pinned_search_context();
+        self.navigation_target = navigation_target;
+        self.clear_thread_selection();
+        self.nav_generation += 1;
+        self.thread_generation += 1;
+        self.update_thread_list_context_from_sidebar();
+    }
+
     /// Clear thread selection and reading pane together. Every code path that
     /// deselects threads must use this to prevent stale reading pane content.
     fn clear_thread_selection(&mut self) {
         self.thread_list.selected_thread = None;
         self.thread_list.clear_multi_select();
         self.reading_pane.set_thread(None);
-    }
-
-    fn handle_label_selected(&mut self, _label_id: Option<String>) -> Task<Message> {
-        self.clear_thread_selection();
-        self.nav_generation += 1;
-        self.thread_generation += 1;
-        self.load_threads_for_current_view()
     }
 
     fn handle_thread_list(&mut self, msg: ThreadListMessage) -> Task<Message> {
