@@ -119,7 +119,7 @@ impl Palette {
     }
 
     /// Reset all palette state to closed defaults.
-    fn close(&mut self) {
+    pub fn close(&mut self) {
         self.open = false;
         self.query.clear();
         self.results.clear();

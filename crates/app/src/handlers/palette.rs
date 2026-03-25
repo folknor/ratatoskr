@@ -11,9 +11,9 @@ impl App {
     /// Before dispatching, injects the current `CommandContext` into message
     /// variants that carry a placeholder context (from the view closures).
     pub(crate) fn handle_palette(&mut self, msg: PaletteMessage) -> Task<Message> {
-        // Don't open palette when settings overlay is showing
-        if matches!(msg, PaletteMessage::Open(_)) && self.show_settings {
-            return Task::none();
+        // Dismiss conflicting overlays when opening the palette
+        if matches!(msg, PaletteMessage::Open(_)) {
+            self.dismiss_overlays();
         }
 
         // Inject the current command context into messages that need it

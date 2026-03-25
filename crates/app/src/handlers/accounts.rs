@@ -39,12 +39,12 @@ impl App {
     }
 
     pub(crate) fn handle_open_add_account_wizard(&mut self) -> Task<Message> {
+        self.dismiss_overlays();
         let used_colors = self.sidebar.accounts.iter()
             .filter_map(|a| a.account_color.clone())
             .collect();
         self.add_account_wizard =
             Some(AddAccountWizard::new_add_account(used_colors, Arc::clone(&self.db)));
-        self.close_settings();
         Task::none()
     }
 
@@ -60,8 +60,8 @@ impl App {
             Arc::clone(&self.db),
         ) {
             Ok((wizard, task)) => {
+                self.dismiss_overlays();
                 self.add_account_wizard = Some(wizard);
-                self.close_settings();
                 task.map(Message::AddAccount)
             }
             Err(e) => {

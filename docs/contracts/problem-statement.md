@@ -92,13 +92,9 @@ The structural fix for each is the same principle: make the right thing the only
 
 ## Medium — Quality Improvements
 
-### 11. Overlay exclusivity
+### ~~11. Overlay exclusivity~~ ✅ Fixed
 
-**Contract:** Mutually exclusive overlays (command palette, calendar overlays, settings overlays, add-account wizard) must dismiss each other.
-
-**Currently enforced by:** Ad-hoc per-caller checks. Opening a calendar overlay doesn't close the palette. Opening settings doesn't dismiss calendar overlays.
-
-**Structural fix:** `fn request_overlay(&mut self, kind: OverlayKind) -> bool` that dismisses conflicting overlays.
+`dismiss_overlays()` closes all mutually exclusive overlays (palette, settings, calendar overlays, add-account wizard). Called at the start of every overlay open path: `open_settings()`, palette `Open`, add-account wizard, re-auth wizard. Replaces ad-hoc per-caller checks.
 
 ### 12. Calendar pop-out awareness
 
@@ -156,11 +152,9 @@ Replaced 9 identical `let Some(ref action_ctx) = self.action_ctx else { ... }` b
 
 **Structural fix:** Migration adding FK constraints (requires table recreation in SQLite).
 
-### 21. Add-account wizard vs settings exclusivity
+### ~~21. Add-account wizard vs settings exclusivity~~ ✅ Fixed
 
-**Contract:** The wizard and settings cannot both be active. Opening settings while the wizard is open leaves `show_settings = true` — when the wizard completes, settings immediately appears.
-
-**Structural fix:** Handled by the overlay exclusivity system (#11).
+Handled by the overlay exclusivity system (#11). `dismiss_overlays()` closes settings before opening the wizard, and vice versa.
 
 ### ~~22. Reading pane star state manual sync~~ ✅ Fixed
 

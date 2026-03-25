@@ -1652,9 +1652,24 @@ impl App {
         self.reload_calendar_events()
     }
 
+    /// Dismiss all mutually exclusive overlays (palette, settings, calendar
+    /// overlays, add-account wizard). Call before opening a new overlay.
+    fn dismiss_overlays(&mut self) {
+        if self.palette.is_open() {
+            self.palette.close();
+        }
+        if self.show_settings {
+            self.close_settings();
+        }
+        self.calendar.overlay = crate::ui::calendar::CalendarOverlay::None;
+        self.add_account_wizard = None;
+    }
+
     /// Open settings to a specific tab. Handles the full protocol:
-    /// show_settings, overlay reset, animation reset, tab, begin_editing.
+    /// dismiss conflicting overlays, show_settings, overlay reset, animation
+    /// reset, tab, begin_editing.
     fn open_settings(&mut self, tab: crate::ui::settings::Tab) {
+        self.dismiss_overlays();
         self.show_settings = true;
         self.settings.overlay = None;
         self.settings
