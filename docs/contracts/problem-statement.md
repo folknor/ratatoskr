@@ -42,15 +42,9 @@ The structural fix for each is the same principle: make the right thing the only
 
 **Structural fix:** `handle_window_close` for Compose windows must check `draft_dirty` and either force a synchronous save or show a "Save draft?" confirmation before removing the window.
 
-### 4. New CommandId variants silently ignored
+### ~~4. New CommandId variants silently ignored~~ ✅ Fixed
 
-**Contract:** Every `CommandId` variant must have a dispatch arm that produces a `Message`. Currently, `dispatch_command` and `dispatch_other` have wildcard `_ => None` catch-alls.
-
-**Currently enforced by:** A test (`table_covers_all_variants`) checks the string mapping table, but no test verifies dispatch produces `Some(msg)` for every variant.
-
-**Violation scenario:** Developer adds `CommandId::EmailDeleteDraft`, registers it in the palette — the command appears, the user selects it, nothing happens. The wildcard swallows it.
-
-**Structural fix:** Remove `_ => None` catch-alls in dispatch functions. The compiler will then force a match arm for every variant. Or add a test asserting `dispatch_command` returns `Some` for every `CommandId` in `ALL_IDS`.
+`dispatch_other` inlined into `dispatch_command` — all 69 variants have explicit match arms, no wildcard. Adding a new `CommandId` variant without a dispatch arm is now a compiler error. Also fixed 3 variants (`CalendarPopOut`, `SwitchToCalendar`, `SwitchToMail`) missing from `ALL_IDS`/`TABLE`.
 
 ---
 

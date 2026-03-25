@@ -376,11 +376,14 @@ fn selected_thread_state(app: &App) -> ThreadState {
 
 /// Map a direct (non-parameterized) command to an iced Message.
 ///
-/// Returns `None` for commands that are not yet implemented,
-/// allowing incremental rollout.
+/// Returns `None` for parameterized commands (handled by
+/// `dispatch_parameterized`) and for `AppAskAi` (not yet implemented).
+///
+/// **No wildcard catch-all.** Every `CommandId` variant has an explicit arm
+/// so that adding a new variant without wiring dispatch is a compiler error.
 pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
     match id {
-        // Navigation
+        // Navigation — direct
         CommandId::NavNext => dispatch_nav_next(app),
         CommandId::NavPrev => dispatch_nav_prev(app),
         CommandId::NavOpen => dispatch_nav_open(app),
@@ -390,50 +393,8 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
         CommandId::NavMsgPrev => Some(Message::ReadingPane(
             crate::ui::reading_pane::ReadingPaneMessage::PrevMessage,
         )),
-        CommandId::NavGoInbox
-        | CommandId::NavGoStarred
-        | CommandId::NavGoSent
-        | CommandId::NavGoDrafts
-        | CommandId::NavGoSnoozed
-        | CommandId::NavGoTrash
-        | CommandId::NavGoAllMail
-        | CommandId::NavGoPrimary
-        | CommandId::NavGoUpdates
-        | CommandId::NavGoPromotions
-        | CommandId::NavGoSocial
-        | CommandId::NavGoNewsletters
-        | CommandId::NavGoTasks
-        | CommandId::NavGoAttachments
-        | CommandId::NavEscape => dispatch_navigation(id),
 
-        // Email
-        CommandId::EmailArchive
-        | CommandId::EmailTrash
-        | CommandId::EmailPermanentDelete
-        | CommandId::EmailSpam
-        | CommandId::EmailMarkRead
-        | CommandId::EmailStar
-        | CommandId::EmailPin
-        | CommandId::EmailMute
-        | CommandId::EmailUnsubscribe
-        | CommandId::EmailSelectAll
-        | CommandId::EmailSelectFromHere => dispatch_email(id),
-
-        // Parameterized — stage 2
-        CommandId::EmailMoveToFolder
-        | CommandId::EmailAddLabel
-        | CommandId::EmailRemoveLabel
-        | CommandId::EmailSnooze
-        | CommandId::NavigateToLabel
-        | CommandId::SmartFolderSave => None,
-
-        // Compose / Tasks / View / Calendar / App
-        _ => dispatch_other(id),
-    }
-}
-
-fn dispatch_navigation(id: CommandId) -> Option<Message> {
-    match id {
+        // Navigation — folder/view targets
         CommandId::NavGoInbox => Some(Message::NavigateTo(NavigationTarget::Inbox)),
         CommandId::NavGoStarred => Some(Message::NavigateTo(NavigationTarget::Starred)),
         CommandId::NavGoSent => Some(Message::NavigateTo(NavigationTarget::Sent)),
@@ -449,12 +410,8 @@ fn dispatch_navigation(id: CommandId) -> Option<Message> {
         CommandId::NavGoTasks => Some(Message::NavigateTo(NavigationTarget::Tasks)),
         CommandId::NavGoAttachments => Some(Message::NavigateTo(NavigationTarget::Attachments)),
         CommandId::NavEscape => Some(Message::Escape),
-        _ => None,
-    }
-}
 
-fn dispatch_email(id: CommandId) -> Option<Message> {
-    match id {
+        // Email actions
         CommandId::EmailArchive => Some(Message::EmailAction(EmailAction::Archive)),
         CommandId::EmailTrash => Some(Message::EmailAction(EmailAction::Trash)),
         CommandId::EmailPermanentDelete => Some(Message::EmailAction(EmailAction::PermanentDelete)),
@@ -470,20 +427,28 @@ fn dispatch_email(id: CommandId) -> Option<Message> {
         CommandId::EmailSelectFromHere => Some(Message::ThreadList(
             crate::ui::thread_list::ThreadListMessage::SelectFromHere,
         )),
-        _ => None,
-    }
-}
 
-fn dispatch_other(id: CommandId) -> Option<Message> {
-    match id {
+        // Parameterized — handled by dispatch_parameterized, not here
+        CommandId::EmailMoveToFolder
+        | CommandId::EmailAddLabel
+        | CommandId::EmailRemoveLabel
+        | CommandId::EmailSnooze
+        | CommandId::NavigateToLabel
+        | CommandId::SmartFolderSave => None,
+
+        // Compose
         CommandId::ComposeNew => Some(Message::Compose),
         CommandId::ComposeReply => Some(Message::ComposeAction(ComposeAction::Reply)),
         CommandId::ComposeReplyAll => Some(Message::ComposeAction(ComposeAction::ReplyAll)),
         CommandId::ComposeForward => Some(Message::ComposeAction(ComposeAction::Forward)),
+
+        // Tasks
         CommandId::TaskCreate => Some(Message::TaskAction(TaskAction::Create)),
         CommandId::TaskCreateFromEmail => Some(Message::TaskAction(TaskAction::CreateFromEmail)),
         CommandId::TaskTogglePanel => Some(Message::TaskAction(TaskAction::TogglePanel)),
         CommandId::TaskViewAll => Some(Message::NavigateTo(NavigationTarget::Tasks)),
+
+        // View
         CommandId::ViewToggleSidebar => Some(Message::ToggleSidebar),
         CommandId::ViewSetThemeLight => Some(Message::SetTheme("Light".to_string())),
         CommandId::ViewSetThemeDark => Some(Message::SetTheme("Dark".to_string())),
@@ -492,6 +457,8 @@ fn dispatch_other(id: CommandId) -> Option<Message> {
         CommandId::ViewReadingPaneRight => Some(Message::SetReadingPanePosition(ReadingPanePosition::Right)),
         CommandId::ViewReadingPaneBottom => Some(Message::SetReadingPanePosition(ReadingPanePosition::Bottom)),
         CommandId::ViewReadingPaneHidden => Some(Message::SetReadingPanePosition(ReadingPanePosition::Hidden)),
+
+        // Calendar
         CommandId::CalendarToggle => Some(Message::ToggleAppMode),
         CommandId::SwitchToCalendar => Some(Message::SetAppMode(crate::AppMode::Calendar)),
         CommandId::SwitchToMail => Some(Message::SetAppMode(crate::AppMode::Mail)),
@@ -502,8 +469,10 @@ fn dispatch_other(id: CommandId) -> Option<Message> {
         CommandId::CalendarToday => Some(Message::CalendarToday),
         CommandId::CalendarCreateEvent => Some(Message::Calendar(Box::new(crate::ui::calendar::CalendarMessage::CreateEvent))),
         CommandId::CalendarPopOut => Some(Message::Calendar(Box::new(crate::ui::calendar::CalendarMessage::PopOutCalendar))),
+
+        // App
         CommandId::AppSearch => Some(Message::FocusSearch),
-        CommandId::AppAskAi => None,
+        CommandId::AppAskAi => None, // not yet implemented
         CommandId::AppHelp => Some(Message::ShowHelp),
         CommandId::AppSyncFolder => Some(Message::SyncCurrentFolder),
         CommandId::AppOpenPalette => Some(Message::Palette(
@@ -511,8 +480,9 @@ fn dispatch_other(id: CommandId) -> Option<Message> {
                 ratatoskr_command_palette::CommandContext::default(),
             ),
         )),
+
+        // Undo
         CommandId::Undo => Some(Message::Undo),
-        _ => None,
     }
 }
 
@@ -595,7 +565,10 @@ pub fn dispatch_parameterized(
             CommandId::SmartFolderSave,
             CommandArgs::SmartFolderSave { name },
         ) => Some(Message::SaveAsSmartFolder(name)),
-        _ => None,
+        (other_id, other_args) => {
+            log::warn!("unhandled parameterized dispatch: {other_id:?} with {other_args:?}");
+            None
+        }
     }
 }
 
