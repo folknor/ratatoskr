@@ -173,7 +173,7 @@ fn current_view_and_label(app: &App) -> (ViewType, Option<String>) {
     }
 
     // Active pinned search
-    if app.active_pinned_search.is_some() {
+    if app.sidebar.active_pinned_search.is_some() {
         return (ViewType::PinnedSearch, None);
     }
 

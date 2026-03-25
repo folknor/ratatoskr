@@ -397,7 +397,6 @@ struct App {
 
     // Pinned searches
     pinned_searches: Vec<db::PinnedSearch>,
-    active_pinned_search: Option<i64>,
     editing_pinned_search: Option<i64>,
     expiry_ran: bool,
 
@@ -567,7 +566,6 @@ impl App {
             was_in_folder_view: false,
             search_history: Vec::new(),
             pinned_searches: Vec::new(),
-            active_pinned_search: None,
             editing_pinned_search: None,
             expiry_ran: false,
             no_accounts: false,
@@ -944,8 +942,9 @@ impl App {
                     self.show_settings = false;
                     return Task::none();
                 }
-                if !self.search_query.text().is_empty() || self.active_pinned_search.is_some() {
-                    self.active_pinned_search = None;
+                if !self.search_query.text().is_empty()
+                    || self.sidebar.active_pinned_search.is_some()
+                {
                     self.sidebar.active_pinned_search = None;
                     self.editing_pinned_search = None;
                     return self.update(Message::SearchClear);
@@ -2288,7 +2287,6 @@ impl App {
 
     fn handle_clear_all_pinned_searches(&mut self) -> Task<Message> {
         self.pinned_searches.clear();
-        self.active_pinned_search = None;
         self.sidebar.active_pinned_search = None;
         self.sidebar.pinned_searches.clear();
         let db = Arc::clone(&self.db);

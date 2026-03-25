@@ -132,13 +132,9 @@ Replaced the manually-synced `composer_is_open: bool` field with a computed `fn 
 
 **Structural fix:** Typed loader helpers that allocate and validate generations automatically.
 
-### 16. Pinned search state duplication
+### ~~16. Pinned search state duplication~~ ✅ Fixed
 
-**Contract:** `active_pinned_search` on App and `sidebar.active_pinned_search` must always agree.
-
-**Currently enforced by:** `clear_pinned_search_context()` clears both. Selection paths must set both.
-
-**Structural fix:** Store in one place, derive the other.
+Removed `active_pinned_search` from App. The single source of truth is now `sidebar.active_pinned_search`. All 7 read/write sites updated. Impossible to desync.
 
 ### 17. Pop-out window lifecycle gaps
 

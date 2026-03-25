@@ -341,13 +341,12 @@ impl App {
 
     pub(crate) fn handle_select_pinned_search(&mut self, id: i64) -> Task<Message> {
         // Remember that we were in folder mode before switching to pinned search
-        if self.active_pinned_search.is_none()
+        if self.sidebar.active_pinned_search.is_none()
             && self.thread_list.mode == ThreadListMode::Folder
         {
             self.was_in_folder_view = true;
         }
 
-        self.active_pinned_search = Some(id);
         self.sidebar.active_pinned_search = Some(id);
         self.editing_pinned_search = Some(id);
         self.sidebar.selected_label = None;
@@ -442,8 +441,7 @@ impl App {
             Ok(()) => {
                 self.pinned_searches.retain(|ps| ps.id != id);
                 self.sidebar.pinned_searches.retain(|ps| ps.id != id);
-                if self.active_pinned_search == Some(id) {
-                    self.active_pinned_search = None;
+                if self.sidebar.active_pinned_search == Some(id) {
                     self.sidebar.active_pinned_search = None;
                     self.editing_pinned_search = None;
                     return self.restore_folder_view();
@@ -463,7 +461,6 @@ impl App {
     ) -> Task<Message> {
         match result {
             Ok(id) => {
-                self.active_pinned_search = Some(id);
                 self.sidebar.active_pinned_search = Some(id);
                 self.editing_pinned_search = Some(id);
 
@@ -505,7 +502,6 @@ impl App {
 
     /// Clear pinned search context on navigate-away.
     pub(crate) fn clear_pinned_search_context(&mut self) {
-        self.active_pinned_search = None;
         self.sidebar.active_pinned_search = None;
         self.editing_pinned_search = None;
     }
