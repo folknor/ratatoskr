@@ -239,6 +239,9 @@ async fn dispatch_write_back(
             if company.is_some() {
                 update_fields.push("organizations");
             }
+            if notes.is_some() {
+                update_fields.push("biographies");
+            }
             if update_fields.is_empty() {
                 return Ok(()); // nothing to push
             }
@@ -251,7 +254,7 @@ async fn dispatch_write_back(
             .await
             .map_err(ActionError::remote)?;
             let body = crate::contacts::sync_google::build_google_contact_update_body(
-                phone, company, "*", // etag "*" = skip optimistic locking
+                phone, company, notes, "*", // etag "*" = skip optimistic locking
             );
             let field_mask = update_fields.join(",");
             let url = format!(
@@ -273,7 +276,7 @@ async fn dispatch_write_back(
             )
             .await
             .map_err(ActionError::remote)?;
-            let body = crate::contacts::sync_graph::build_graph_contact_update_body(phone, company);
+            let body = crate::contacts::sync_graph::build_graph_contact_update_body(phone, company, notes);
             client
                 .patch(&format!("/me/contacts/{server_id}"), &body, &ctx.db)
                 .await

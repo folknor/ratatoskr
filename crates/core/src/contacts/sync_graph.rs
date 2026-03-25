@@ -66,6 +66,7 @@ pub async fn enrich_graph_contacts(
 pub fn build_graph_contact_update_body(
     phone: Option<&str>,
     company: Option<&str>,
+    notes: Option<&str>,
 ) -> serde_json::Value {
     let mut body = serde_json::json!({});
 
@@ -76,6 +77,10 @@ pub fn build_graph_contact_update_body(
 
     if let Some(company_val) = company {
         body["companyName"] = serde_json::Value::String(company_val.to_string());
+    }
+
+    if let Some(notes_val) = notes {
+        body["personalNotes"] = serde_json::Value::String(notes_val.to_string());
     }
 
     body

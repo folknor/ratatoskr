@@ -135,6 +135,7 @@ pub struct GoogleOrganization {
 pub fn build_google_contact_update_body(
     phone: Option<&str>,
     company: Option<&str>,
+    notes: Option<&str>,
     etag: &str,
 ) -> serde_json::Value {
     let mut person = serde_json::json!({
@@ -147,6 +148,10 @@ pub fn build_google_contact_update_body(
 
     if let Some(company_val) = company {
         person["organizations"] = serde_json::json!([{"name": company_val}]);
+    }
+
+    if let Some(notes_val) = notes {
+        person["biographies"] = serde_json::json!([{"value": notes_val}]);
     }
 
     person
