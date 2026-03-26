@@ -841,7 +841,7 @@ impl ProviderOps for ImapOps {
         &self,
         _ctx: &ProviderCtx<'_>,
         _name: &str,
-        _parent_id: Option<&str>,
+        _parent_id: Option<&FolderId>,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
     ) -> Result<ProviderFolderMutation, ProviderError> {

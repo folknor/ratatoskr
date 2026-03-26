@@ -454,7 +454,7 @@ pub enum CalendarMessage {
     /// Event detail was loaded from DB after clicking an event.
     EventLoaded(Result<CalendarEventData, String>),
     /// Calendar events loaded from DB for view rendering.
-    /// The `u64` is the load generation — stale results are discarded.
+    /// The token is a generation guard — stale results are discarded.
     EventsLoaded(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::Calendar>, Result<Vec<calendar_time_grid::TimeGridEvent>, String>),
     /// Switch back to mail mode.
     SwitchToMail,
@@ -463,7 +463,7 @@ pub enum CalendarMessage {
     /// Toggle visibility of a calendar (checkbox in sidebar).
     ToggleCalendarVisibility(String, bool),
     /// Calendars loaded from DB for sidebar list.
-    /// The `u64` is the load generation — stale results are discarded.
+    /// The token is a generation guard — stale results are discarded.
     CalendarsLoaded(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::Calendar>, Result<Vec<CalendarListEntry>, String>),
 }
 

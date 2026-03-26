@@ -288,11 +288,11 @@ impl ProviderOps for GmailOps {
         &self,
         ctx: &ProviderCtx<'_>,
         name: &str,
-        parent_id: Option<&str>,
+        parent_id: Option<&FolderId>,
         text_color: Option<&str>,
         bg_color: Option<&str>,
     ) -> Result<ProviderFolderMutation, ProviderError> {
-        let full_name = parent_id.map_or_else(|| name.to_string(), |p| format!("{p}/{name}"));
+        let full_name = parent_id.map_or_else(|| name.to_string(), |p| format!("{}/{name}", p.as_str()));
         let color = match (text_color, bg_color) {
             (Some(tc), Some(bc)) => Some((tc, bc)),
             _ => None,

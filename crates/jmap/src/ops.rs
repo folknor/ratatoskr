@@ -631,14 +631,14 @@ impl ProviderOps for JmapOps {
         &self,
         _ctx: &ProviderCtx<'_>,
         name: &str,
-        parent_id: Option<&str>,
+        parent_id: Option<&FolderId>,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
     ) -> Result<ProviderFolderMutation, ProviderError> {
         self.client.ensure_valid_token().await?;
         let client = self.client.inner();
         let mut mb = client
-            .mailbox_create(name, parent_id.map(ToOwned::to_owned), Role::None)
+            .mailbox_create(name, parent_id.map(|p| p.as_str().to_owned()), Role::None)
             .await
             .map_err(|e| ProviderError::Server(format!("Mailbox/set create: {e}")))?;
 

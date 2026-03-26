@@ -335,13 +335,13 @@ impl ProviderOps for GraphOps {
         &self,
         ctx: &ProviderCtx<'_>,
         name: &str,
-        parent_id: Option<&str>,
+        parent_id: Option<&FolderId>,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
     ) -> Result<ProviderFolderMutation, ProviderError> {
         let parent_graph_id = match parent_id {
             Some(parent_id) => {
-                Some(resolve_graph_folder_id(&self.client, ctx, parent_id, false).await?)
+                Some(resolve_graph_folder_id(&self.client, ctx, parent_id.as_str(), false).await?)
             }
             None => None,
         };

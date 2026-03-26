@@ -131,7 +131,7 @@ pub trait ProviderOps: Send + Sync {
         &self,
         ctx: &ProviderCtx<'_>,
         name: &str,
-        parent_id: Option<&str>,
+        parent_id: Option<&FolderId>,
         text_color: Option<&str>,
         bg_color: Option<&str>,
     ) -> Result<ProviderFolderMutation, ProviderError>;

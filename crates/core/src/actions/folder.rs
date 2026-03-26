@@ -62,7 +62,7 @@ pub async fn create_folder(
     let provider_ctx = build_provider_ctx(ctx, account_id);
 
     let mutation = match provider
-        .create_folder(&provider_ctx, name, parent_id, text_color, bg_color)
+        .create_folder(&provider_ctx, name, parent_id.map(FolderId::from).as_ref(), text_color, bg_color)
         .await
     {
         Ok(m) => m,
