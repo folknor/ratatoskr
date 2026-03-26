@@ -1524,6 +1524,26 @@ static MIGRATIONS: &[Migration] = &[
         version: 77,
         description: "Add CASCADE foreign keys on account_id to 16 tables missing them",
         sql: r#"
+            -- Clean up orphan rows from account deletions that predated
+            -- these FK constraints. Without this, the INSERT into the new
+            -- tables would fail with foreign_keys = ON.
+            DELETE FROM link_scan_results WHERE account_id NOT IN (SELECT id FROM accounts);
+            DELETE FROM phishing_allowlist WHERE account_id NOT IN (SELECT id FROM accounts);
+            DELETE FROM quick_steps WHERE account_id NOT IN (SELECT id FROM accounts);
+            DELETE FROM read_receipt_policy WHERE account_id NOT IN (SELECT id FROM accounts);
+            DELETE FROM message_reactions WHERE account_id NOT IN (SELECT id FROM accounts);
+            DELETE FROM cloud_attachments WHERE account_id NOT IN (SELECT id FROM accounts);
+            DELETE FROM send_identities WHERE account_id NOT IN (SELECT id FROM accounts);
+            DELETE FROM public_folders WHERE account_id NOT IN (SELECT id FROM accounts);
+            DELETE FROM public_folder_items WHERE account_id NOT IN (SELECT id FROM accounts);
+            DELETE FROM public_folder_pins WHERE account_id NOT IN (SELECT id FROM accounts);
+            DELETE FROM public_folder_sync_state WHERE account_id NOT IN (SELECT id FROM accounts);
+            DELETE FROM contact_photo_cache WHERE account_id NOT IN (SELECT id FROM accounts);
+            DELETE FROM thread_ui_state WHERE account_id NOT IN (SELECT id FROM accounts);
+            DELETE FROM calendar_attendees WHERE account_id NOT IN (SELECT id FROM accounts);
+            DELETE FROM calendar_reminders WHERE account_id NOT IN (SELECT id FROM accounts);
+            DELETE FROM gal_cache WHERE account_id NOT IN (SELECT id FROM accounts);
+
             -- link_scan_results
             CREATE TABLE link_scan_results_new (
                 message_id TEXT NOT NULL,
