@@ -534,7 +534,8 @@ impl App {
 
         // Refresh nav state for read status changes (updates unread counts).
         if matches!(action, CompletedAction::MarkRead) && !all_failed {
-            return self.fire_navigation_load();
+            let token = self.nav_generation.next();
+            return self.fire_navigation_load(token);
         }
 
         Task::none()

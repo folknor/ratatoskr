@@ -13,6 +13,7 @@ pub mod ops;
 pub mod parsed_message;
 pub mod signature_images;
 pub mod text;
+pub mod typed_ids;
 pub mod token;
 pub mod tracking_pixels;
 pub mod types;

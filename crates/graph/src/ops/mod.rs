@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use ratatoskr_db::db::DbState;
 use ratatoskr_provider_utils::error::ProviderError;
 use ratatoskr_provider_utils::ops::ProviderOps;
+use ratatoskr_provider_utils::typed_ids::{FolderId, TagId};
 use ratatoskr_provider_utils::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
     ProviderTestResult, SyncResult,
@@ -143,13 +144,14 @@ impl ProviderOps for GraphOps {
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
-        folder_id: &str,
+        folder_id: &FolderId,
     ) -> Result<(), ProviderError> {
         // folder_id could be a label_id — resolve to opaque Graph folder ID
+        let folder_id_str = folder_id.as_str();
         let folder_map = require_folder_map(&self.client).await?;
         let target = folder_map
-            .resolve_folder_id(folder_id)
-            .unwrap_or(folder_id)
+            .resolve_folder_id(folder_id_str)
+            .unwrap_or(folder_id_str)
             .to_string();
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
         Ok(move_messages(&self.client, ctx, &msg_ids, &target).await?)
@@ -159,9 +161,10 @@ impl ProviderOps for GraphOps {
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &str,
+        tag_id: &TagId,
     ) -> Result<(), ProviderError> {
-        let category = tag_id.strip_prefix("cat:").unwrap_or(tag_id);
+        let tag_id_str = tag_id.as_str();
+        let category = tag_id_str.strip_prefix("cat:").unwrap_or(tag_id_str);
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
         // Hold category lock for the entire read-modify-write to prevent clobber
         let _guard = self.client.lock_categories().await;
@@ -180,9 +183,10 @@ impl ProviderOps for GraphOps {
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &str,
+        tag_id: &TagId,
     ) -> Result<(), ProviderError> {
-        let category = tag_id.strip_prefix("cat:").unwrap_or(tag_id);
+        let tag_id_str = tag_id.as_str();
+        let category = tag_id_str.strip_prefix("cat:").unwrap_or(tag_id_str);
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
         let _guard = self.client.lock_categories().await;
         let current = batch_get_categories(&self.client, ctx, &msg_ids).await?;
@@ -367,12 +371,12 @@ impl ProviderOps for GraphOps {
     async fn rename_folder(
         &self,
         ctx: &ProviderCtx<'_>,
-        folder_id: &str,
+        folder_id: &FolderId,
         new_name: &str,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
     ) -> Result<ProviderFolderMutation, ProviderError> {
-        let graph_folder_id = resolve_graph_folder_id(&self.client, ctx, folder_id, true).await?;
+        let graph_folder_id = resolve_graph_folder_id(&self.client, ctx, folder_id.as_str(), true).await?;
         let enc_folder_id = urlencoding::encode(&graph_folder_id);
         let body = GraphRenameFolderRequest {
             display_name: new_name.to_string(),
@@ -384,7 +388,7 @@ impl ProviderOps for GraphOps {
 
         refresh_folder_map(&self.client, ctx).await?;
         Ok(ProviderFolderMutation {
-            id: folder_id.to_string(),
+            id: folder_id.as_str().to_string(),
             name: new_name.to_string(),
             path: new_name.to_string(),
             folder_type: "user".to_string(),
@@ -395,8 +399,8 @@ impl ProviderOps for GraphOps {
         })
     }
 
-    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), ProviderError> {
-        let graph_folder_id = resolve_graph_folder_id(&self.client, ctx, folder_id, true).await?;
+    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &FolderId) -> Result<(), ProviderError> {
+        let graph_folder_id = resolve_graph_folder_id(&self.client, ctx, folder_id.as_str(), true).await?;
         let enc_folder_id = urlencoding::encode(&graph_folder_id);
         let me = self.me();
         self.client

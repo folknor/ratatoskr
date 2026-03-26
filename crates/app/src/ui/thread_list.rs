@@ -38,13 +38,13 @@ pub enum TypeaheadDirection {
 }
 
 /// State for the typeahead suggestion dropdown.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TypeaheadState {
     pub visible: bool,
     pub items: Vec<TypeaheadItem>,
     pub selected: usize,
     /// Generation counter for stale typeahead result detection.
-    pub generation: u64,
+    pub generation: ratatoskr_core::generation::GenerationCounter<ratatoskr_core::generation::Typeahead>,
 }
 
 impl Default for TypeaheadState {
@@ -53,7 +53,7 @@ impl Default for TypeaheadState {
             visible: false,
             items: Vec::new(),
             selected: 0,
-            generation: 0,
+            generation: ratatoskr_core::generation::GenerationCounter::new(),
         }
     }
 }
@@ -96,7 +96,7 @@ pub enum ThreadListMessage {
     /// Navigate typeahead suggestions up or down.
     TypeaheadNavigate(TypeaheadDirection),
     /// Typeahead suggestion items loaded from async query (carries generation).
-    TypeaheadItemsLoaded(u64, Vec<TypeaheadItem>),
+    TypeaheadItemsLoaded(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::Typeahead>, Vec<TypeaheadItem>),
     /// User selected a typeahead suggestion by index.
     TypeaheadSelect(usize),
     /// Dismiss the typeahead dropdown.
@@ -464,7 +464,7 @@ impl Component for ThreadList {
                 (Task::none(), None)
             }
             ThreadListMessage::TypeaheadItemsLoaded(load_gen, items) => {
-                if load_gen != self.typeahead.generation {
+                if !self.typeahead.generation.is_current(load_gen) {
                     return (Task::none(), None); // stale
                 }
                 self.typeahead.items = items;

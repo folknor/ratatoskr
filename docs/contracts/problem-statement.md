@@ -16,20 +16,17 @@ The structural fix for each was the same principle: make the right thing the onl
 
 ---
 
-## Remaining (1)
+## Remaining (0)
 
-### 19. Provider APIs are stringly typed
-
-**Contract:** `move_to_folder(&str)`, `add_tag(&str)` all take raw `&str`. Callers must know whether they're passing a folder ID or tag ID. Wrong string kind compiles and may do the wrong thing or nothing.
-
-**Structural fix:** Typed IDs (`FolderId`, `TagId`) and capability markers instead of raw `&str` plus no-op defaults.
+All 24 contracts have been fixed.
 
 ---
 
-## Fixed (23)
+## Fixed (24)
 
 | # | Contract | Fix |
 |---|----------|-----|
+| 19 | Provider APIs stringly typed | `FolderId` and `TagId` newtypes in `crates/provider-utils/src/typed_ids.rs`. `ProviderOps` trait uses typed parameters. Passing a folder ID where a tag ID is expected (or vice versa) is a compile error. |
 | 15 | Generation counter ordering | `GenerationCounter` / `GenerationToken` types replace raw `u64`. `next()` bumps + returns token, `is_current()` checks freshness. Message variants carry `GenerationToken` — impossible to forget the bump or check. |
 | 20 | Tables missing CASCADE FKs | Migration 77 recreates 16 tables with `REFERENCES accounts(id) ON DELETE CASCADE`. All `account_id` columns now cascade on account deletion. |
 | 9 | 8-edit action protocol | All 5 wildcard arms in action dispatch replaced with exhaustive matches on `CompletedAction`. Adding a new variant now produces compiler errors at every site. Dead `DeleteDraft` variant removed. |

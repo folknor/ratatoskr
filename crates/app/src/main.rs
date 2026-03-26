@@ -57,7 +57,9 @@ use ratatoskr_core::db::queries_extra::{
     get_threads_scoped, get_threads_for_shared_mailbox, get_public_folder_items,
 };
 use ratatoskr_core::db::types::{AccountScope, DbThread};
-use ratatoskr_core::generation::{GenerationCounter, GenerationToken};
+use ratatoskr_core::generation::{
+    GenerationCounter, GenerationToken, Nav, ThreadDetail, Search, PopOut,
+};
 use ratatoskr_core::scope::ViewScope;
 use ui::layout::{
     RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH,
@@ -208,9 +210,9 @@ pub enum Message {
     StatusBar(StatusBarMessage),
 
     // Existing data loading
-    AccountsLoaded(GenerationToken, Result<Vec<db::Account>, String>),
-    NavigationLoaded(GenerationToken, Result<NavigationState, String>),
-    ThreadsLoaded(GenerationToken, Result<Vec<Thread>, String>),
+    AccountsLoaded(GenerationToken<Nav>, Result<Vec<db::Account>, String>),
+    NavigationLoaded(GenerationToken<Nav>, Result<NavigationState, String>),
+    ThreadsLoaded(GenerationToken<Nav>, Result<Vec<Thread>, String>),
 
     // Existing UI
     Compose,
@@ -272,7 +274,7 @@ pub enum Message {
     // Search
     SearchQueryChanged(String),
     SearchExecute,
-    SearchResultsLoaded(GenerationToken, Result<Vec<Thread>, String>),
+    SearchResultsLoaded(GenerationToken<Search>, Result<Vec<Thread>, String>),
     SearchClear,
     FocusSearchBar,
     SearchBlur,
@@ -281,8 +283,8 @@ pub enum Message {
     // Pinned searches
     PinnedSearchesLoaded(Result<Vec<db::PinnedSearch>, String>),
     SelectPinnedSearch(i64),
-    PinnedSearchThreadIdsLoaded(GenerationToken, i64, Result<Vec<(String, String)>, String>),
-    PinnedSearchThreadsLoaded(GenerationToken, Result<Vec<Thread>, String>),
+    PinnedSearchThreadIdsLoaded(GenerationToken<Nav>, i64, Result<Vec<(String, String)>, String>),
+    PinnedSearchThreadsLoaded(GenerationToken<Nav>, Result<Vec<Thread>, String>),
     DismissPinnedSearch(i64),
     PinnedSearchDismissed(i64, Result<(), String>),
     PinnedSearchSaved(Result<i64, String>),
@@ -315,7 +317,7 @@ pub enum Message {
     ComposeDraftTick,
 
     // Thread detail via core
-    ThreadDetailLoaded(GenerationToken, Result<db::AppThreadDetail, String>),
+    ThreadDetailLoaded(GenerationToken<ThreadDetail>, Result<db::AppThreadDetail, String>),
 
     // Pinned search management
     ClearAllPinnedSearches,
@@ -371,9 +373,9 @@ struct App {
 
     main_window_id: iced::window::Id,
     pop_out_windows: HashMap<iced::window::Id, PopOutWindow>,
-    pop_out_generation: GenerationCounter,
-    nav_generation: GenerationCounter,
-    thread_generation: GenerationCounter,
+    pop_out_generation: GenerationCounter<PopOut>,
+    nav_generation: GenerationCounter<Nav>,
+    thread_generation: GenerationCounter<ThreadDetail>,
 
     // Command palette infrastructure
     registry: CommandRegistry,
@@ -386,7 +388,7 @@ struct App {
 
     // Search state
     search_state: Option<Arc<ratatoskr_core::search::SearchState>>,
-    search_generation: GenerationCounter,
+    search_generation: GenerationCounter<Search>,
     search_query: UndoableText,
     search_debounce_deadline: Option<iced::time::Instant>,
     /// Whether the user was in a folder view before entering search.
@@ -601,7 +603,7 @@ impl App {
         // Restore pop-out windows from previous session
         let mut session_tasks = app.restore_pop_out_windows(&session);
 
-        let load_gen = app.nav_generation.current();
+        let load_gen = app.nav_generation.next();
         let mut boot_tasks = vec![
             open_task.discard(),
             Task::perform(
@@ -1204,10 +1206,13 @@ impl App {
                     self.status_bar
                         .show_confirmation(format!("Undone: {desc}"));
                 }
-                Task::batch([
-                    self.fire_navigation_load(),
-                    self.load_threads_for_current_view(),
-                ])
+                {
+                    let token = self.nav_generation.next();
+                    Task::batch([
+                        self.fire_navigation_load(token),
+                        self.load_threads_for_current_view(token),
+                    ])
+                }
             }
             Message::SharedMailboxesLoaded(Ok(mailboxes)) => {
                 self.sidebar.shared_mailboxes = mailboxes;
@@ -1404,7 +1409,8 @@ impl App {
             }
             SidebarEvent::LabelSelected(_label_id) => {
                 self.reset_view_state(None);
-                self.load_threads_for_current_view()
+                let token = self.nav_generation.next();
+                self.load_threads_for_current_view(token)
             }
             SidebarEvent::Compose => self.update(Message::Compose),
             SidebarEvent::ToggleSettings => {
@@ -2111,10 +2117,9 @@ impl App {
         }
     }
 
-    fn fire_navigation_load(&self) -> Task<Message> {
+    fn fire_navigation_load(&self, load_gen: GenerationToken<Nav>) -> Task<Message> {
         let db = Arc::clone(&self.db);
         let view_scope = self.sidebar.selected_scope.clone();
-        let load_gen = self.nav_generation.current();
         Task::perform(
             async move {
                 let r = match &view_scope {
@@ -2143,11 +2148,10 @@ impl App {
         )
     }
 
-    pub(crate) fn load_threads_for_current_view(&self) -> Task<Message> {
+    pub(crate) fn load_threads_for_current_view(&self, load_gen: GenerationToken<Nav>) -> Task<Message> {
         let db = Arc::clone(&self.db);
         let view_scope = self.sidebar.selected_scope.clone();
         let label_id = self.sidebar.selected_label.clone();
-        let load_gen = self.nav_generation.current();
         Task::perform(
             async move {
                 let r = match &view_scope {
@@ -2173,10 +2177,11 @@ impl App {
         )
     }
 
-    fn load_navigation_and_threads(&self) -> Task<Message> {
+    fn load_navigation_and_threads(&mut self) -> Task<Message> {
+        let token = self.nav_generation.next();
         Task::batch([
-            self.fire_navigation_load(),
-            self.load_threads_for_current_view(),
+            self.fire_navigation_load(token),
+            self.load_threads_for_current_view(token),
         ])
     }
 

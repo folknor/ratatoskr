@@ -514,7 +514,7 @@ impl App {
     fn dispatch_message_view_loads(
         &self,
         window_id: iced::window::Id,
-        generation: ratatoskr_core::generation::GenerationToken,
+        generation: ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::PopOut>,
         account_id: String,
         message_id: String,
         open_task: Task<iced::window::Id>,
@@ -664,7 +664,7 @@ impl App {
     }
 
     /// Increment and return the next pop-out generation token.
-    fn next_pop_out_generation(&mut self) -> ratatoskr_core::generation::GenerationToken {
+    fn next_pop_out_generation(&mut self) -> ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::PopOut> {
         self.pop_out_generation.next()
     }
 }

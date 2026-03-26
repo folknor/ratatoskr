@@ -1,4 +1,5 @@
 use ratatoskr_provider_utils::ops::ProviderOps;
+use ratatoskr_provider_utils::typed_ids::FolderId;
 use ratatoskr_provider_utils::types::ProviderCtx;
 
 use super::context::ActionContext;
@@ -60,7 +61,8 @@ async fn move_dispatch(
         progress: &NoopProgressReporter,
     };
 
-    let outcome = match provider.move_to_folder(&provider_ctx, thread_id, folder_id).await {
+    let typed_folder = FolderId::from(folder_id);
+    let outcome = match provider.move_to_folder(&provider_ctx, thread_id, &typed_folder).await {
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             let msg = e.to_string();

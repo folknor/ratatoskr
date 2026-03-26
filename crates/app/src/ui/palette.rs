@@ -37,8 +37,8 @@ pub enum PaletteMessage {
     /// Mouse click on a stage 2 option row.
     ClickOption(usize),
     /// Stage 2: option list loaded from resolver.
-    /// The `u64` is the generation counter to discard stale results.
-    OptionsLoaded(u64, CommandId, Result<Vec<OptionItem>, String>),
+    /// The token is a generation guard to discard stale results.
+    OptionsLoaded(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::PaletteOptions>, CommandId, Result<Vec<OptionItem>, String>),
 }
 
 /// Events the palette emits upward to the App.
@@ -90,7 +90,7 @@ pub struct Palette {
     /// The param label to display in the placeholder (e.g., "Folder", "Label").
     stage2_label: String,
     /// Generation counter to discard stale resolver results.
-    option_load_generation: u64,
+    option_load_generation: ratatoskr_core::generation::GenerationCounter<ratatoskr_core::generation::PaletteOptions>,
     /// Whether the resolver is currently loading options.
     options_loading: bool,
 }
@@ -109,7 +109,7 @@ impl Palette {
             option_matches: Vec::new(),
             stage2_command_id: None,
             stage2_label: String::new(),
-            option_load_generation: 0,
+            option_load_generation: ratatoskr_core::generation::GenerationCounter::new(),
             options_loading: false,
         }
     }
@@ -205,8 +205,7 @@ impl Palette {
         self.option_items.clear();
         self.option_matches.clear();
         self.options_loading = true;
-        self.option_load_generation += 1;
-        let generation = self.option_load_generation;
+        let generation = self.option_load_generation.next();
 
         let resolver = Arc::clone(&self.resolver);
         let ctx = ctx.clone();
@@ -272,12 +271,12 @@ impl Palette {
 
     fn handle_options_loaded(
         &mut self,
-        generation: u64,
+        generation: ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::PaletteOptions>,
         command_id: CommandId,
         result: Result<Vec<OptionItem>, String>,
     ) -> (Task<PaletteMessage>, Option<PaletteEvent>) {
         // Discard stale results
-        if generation < self.option_load_generation {
+        if !self.option_load_generation.is_current(generation) {
             return (Task::none(), None);
         }
         // Verify we're still in the right stage for this command

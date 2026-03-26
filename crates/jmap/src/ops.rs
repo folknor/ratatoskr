@@ -9,6 +9,7 @@ use jmap_client::Set;
 
 use ratatoskr_provider_utils::error::ProviderError;
 use ratatoskr_provider_utils::ops::ProviderOps;
+use ratatoskr_provider_utils::typed_ids::{FolderId, TagId};
 use ratatoskr_provider_utils::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
     ProviderTestResult, SyncResult,
@@ -308,10 +309,10 @@ impl ProviderOps for JmapOps {
         &self,
         _ctx: &ProviderCtx<'_>,
         thread_id: &str,
-        folder_id: &str,
+        folder_id: &FolderId,
     ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
-        let target_id = resolve_mailbox_id(&self.client, folder_id).await?;
+        let target_id = resolve_mailbox_id(&self.client, folder_id.as_str()).await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
         let mut request = client.build();
@@ -337,12 +338,12 @@ impl ProviderOps for JmapOps {
         &self,
         _ctx: &ProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &str,
+        tag_id: &TagId,
     ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
 
         // Keywords use kw: prefix — set the keyword flag on all thread messages
-        if let Some(keyword) = tag_id.strip_prefix("kw:") {
+        if let Some(keyword) = tag_id.as_str().strip_prefix("kw:") {
             let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
             let client = self.client.inner();
             let mut request = client.build();
@@ -365,7 +366,7 @@ impl ProviderOps for JmapOps {
         }
 
         // Non-keyword tags are mailbox operations
-        let mailbox_id = resolve_mailbox_id(&self.client, tag_id).await?;
+        let mailbox_id = resolve_mailbox_id(&self.client, tag_id.as_str()).await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
         let mut request = client.build();
@@ -391,12 +392,12 @@ impl ProviderOps for JmapOps {
         &self,
         _ctx: &ProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &str,
+        tag_id: &TagId,
     ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
 
         // Keywords use kw: prefix — remove the keyword flag from all thread messages
-        if let Some(keyword) = tag_id.strip_prefix("kw:") {
+        if let Some(keyword) = tag_id.as_str().strip_prefix("kw:") {
             let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
             let client = self.client.inner();
             let mut request = client.build();
@@ -419,7 +420,7 @@ impl ProviderOps for JmapOps {
         }
 
         // Non-keyword tags are mailbox operations
-        let mailbox_id = resolve_mailbox_id(&self.client, tag_id).await?;
+        let mailbox_id = resolve_mailbox_id(&self.client, tag_id.as_str()).await?;
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
         let mut request = client.build();
@@ -658,13 +659,13 @@ impl ProviderOps for JmapOps {
     async fn rename_folder(
         &self,
         _ctx: &ProviderCtx<'_>,
-        folder_id: &str,
+        folder_id: &FolderId,
         new_name: &str,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
     ) -> Result<ProviderFolderMutation, ProviderError> {
         self.client.ensure_valid_token().await?;
-        let mailbox_id = resolve_mailbox_id(&self.client, folder_id).await?;
+        let mailbox_id = resolve_mailbox_id(&self.client, folder_id.as_str()).await?;
         let client = self.client.inner();
         client
             .mailbox_rename(&mailbox_id, new_name)
@@ -673,7 +674,7 @@ impl ProviderOps for JmapOps {
         self.client.invalidate_mailbox_cache().await;
 
         Ok(ProviderFolderMutation {
-            id: folder_id.to_string(),
+            id: folder_id.as_str().to_string(),
             name: new_name.to_string(),
             path: new_name.to_string(),
             folder_type: "user".to_string(),
@@ -684,9 +685,9 @@ impl ProviderOps for JmapOps {
         })
     }
 
-    async fn delete_folder(&self, _ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), ProviderError> {
+    async fn delete_folder(&self, _ctx: &ProviderCtx<'_>, folder_id: &FolderId) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
-        let mailbox_id = resolve_mailbox_id(&self.client, folder_id).await?;
+        let mailbox_id = resolve_mailbox_id(&self.client, folder_id.as_str()).await?;
         let client = self.client.inner();
         client
             .mailbox_destroy(&mailbox_id, true)

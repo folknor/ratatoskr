@@ -24,7 +24,8 @@ impl App {
 
         // Full view reset + load
         self.reset_view_state(Some(target));
-        self.load_threads_for_current_view()
+        let token = self.nav_generation.next();
+        self.load_threads_for_current_view(token)
     }
 
     /// Select an account by its ID, updating the sidebar scope.

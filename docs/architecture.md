@@ -32,9 +32,7 @@ Every email state mutation (archive, delete, star, move, label, etc.) must flow 
 
 The four providers are unified behind `ProviderOps`. All provider-specific behavior is behind this trait — callers should never branch on provider type.
 
-**Current weakness:** Provider APIs are stringly typed. `move_to_folder(&str)`, `add_tag(&str)` take raw strings — callers must know whether they're passing a folder ID or tag ID. Wrong string kind compiles fine and may silently do the wrong thing.
-
-**Target state:** Typed IDs (`FolderId`, `TagId`) and capability markers instead of raw `&str`.
+**Enforcement:** `FolderId` and `TagId` newtypes in `crates/provider-utils/src/typed_ids.rs`. The `ProviderOps` trait uses `&FolderId` for `move_to_folder`, `rename_folder`, `delete_folder` and `&TagId` for `add_tag`, `remove_tag`. Passing a folder ID where a tag ID is expected is a compile error. The action layer constructs typed IDs at the provider call boundary.
 
 ### Scope as a single source of truth
 

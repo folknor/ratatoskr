@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 
 use super::error::ProviderError;
+use super::typed_ids::{FolderId, TagId};
 use super::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderParsedMessage, ProviderProfile, ProviderTestResult, SyncResult,
@@ -53,19 +54,19 @@ pub trait ProviderOps: Send + Sync {
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
-        folder_id: &str,
+        folder_id: &FolderId,
     ) -> Result<(), ProviderError>;
     async fn add_tag(
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &str,
+        tag_id: &TagId,
     ) -> Result<(), ProviderError>;
     async fn remove_tag(
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &str,
+        tag_id: &TagId,
     ) -> Result<(), ProviderError>;
 
     // ── Send + Drafts ───────────────────────────────────────────
@@ -137,12 +138,12 @@ pub trait ProviderOps: Send + Sync {
     async fn rename_folder(
         &self,
         ctx: &ProviderCtx<'_>,
-        folder_id: &str,
+        folder_id: &FolderId,
         new_name: &str,
         text_color: Option<&str>,
         bg_color: Option<&str>,
     ) -> Result<ProviderFolderMutation, ProviderError>;
-    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), ProviderError>;
+    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &FolderId) -> Result<(), ProviderError>;
 
     // ── Connection / Profile ────────────────────────────────────
 

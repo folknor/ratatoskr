@@ -225,7 +225,7 @@ pub struct CalendarState {
     /// Generation counter for async load staleness detection.
     /// Incremented before each load dispatch; results carry the generation
     /// they were dispatched with and are dropped if it no longer matches.
-    pub load_generation: u64,
+    pub load_generation: ratatoskr_core::generation::GenerationCounter<ratatoskr_core::generation::Calendar>,
 }
 
 impl CalendarState {
@@ -261,7 +261,7 @@ impl CalendarState {
             editor_undo_description: UndoableText::new(),
             calendars: Vec::new(),
             dates_with_events: HashSet::new(),
-            load_generation: 0,
+            load_generation: ratatoskr_core::generation::GenerationCounter::new(),
         }
     }
 
@@ -455,7 +455,7 @@ pub enum CalendarMessage {
     EventLoaded(Result<CalendarEventData, String>),
     /// Calendar events loaded from DB for view rendering.
     /// The `u64` is the load generation — stale results are discarded.
-    EventsLoaded(u64, Result<Vec<calendar_time_grid::TimeGridEvent>, String>),
+    EventsLoaded(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::Calendar>, Result<Vec<calendar_time_grid::TimeGridEvent>, String>),
     /// Switch back to mail mode.
     SwitchToMail,
     /// Pop out the calendar into a separate window.
@@ -464,7 +464,7 @@ pub enum CalendarMessage {
     ToggleCalendarVisibility(String, bool),
     /// Calendars loaded from DB for sidebar list.
     /// The `u64` is the load generation — stale results are discarded.
-    CalendarsLoaded(u64, Result<Vec<CalendarListEntry>, String>),
+    CalendarsLoaded(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::Calendar>, Result<Vec<CalendarListEntry>, String>),
 }
 
 // ── View ───────────────────────────────────────────────

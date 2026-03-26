@@ -1,4 +1,5 @@
 use ratatoskr_provider_utils::ops::ProviderOps;
+use ratatoskr_provider_utils::typed_ids::TagId;
 use ratatoskr_provider_utils::types::ProviderCtx;
 
 use super::context::ActionContext;
@@ -76,7 +77,8 @@ async fn add_label_dispatch(
         progress: &NoopProgressReporter,
     };
 
-    let result = provider.add_tag(&provider_ctx, thread_id, label_id).await;
+    let typed_tag = TagId::from(label_id);
+    let result = provider.add_tag(&provider_ctx, thread_id, &typed_tag).await;
 
     let outcome = match result {
         Ok(()) => ActionOutcome::Success,
@@ -206,7 +208,8 @@ async fn remove_label_dispatch(
         progress: &NoopProgressReporter,
     };
 
-    let result = provider.remove_tag(&provider_ctx, thread_id, label_id).await;
+    let typed_tag = TagId::from(label_id);
+    let result = provider.remove_tag(&provider_ctx, thread_id, &typed_tag).await;
 
     let outcome = match result {
         Ok(()) => ActionOutcome::Success,

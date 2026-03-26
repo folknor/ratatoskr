@@ -1,3 +1,5 @@
+use ratatoskr_provider_utils::typed_ids::FolderId;
+
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
@@ -148,7 +150,7 @@ pub async fn rename_folder(
     let provider_ctx = build_provider_ctx(ctx, account_id);
 
     let mutation = match provider
-        .rename_folder(&provider_ctx, folder_id, new_name, text_color, bg_color)
+        .rename_folder(&provider_ctx, &FolderId::from(folder_id), new_name, text_color, bg_color)
         .await
     {
         Ok(m) => m,
@@ -223,7 +225,7 @@ pub async fn delete_folder(
 
     let provider_ctx = build_provider_ctx(ctx, account_id);
 
-    if let Err(e) = provider.delete_folder(&provider_ctx, folder_id).await {
+    if let Err(e) = provider.delete_folder(&provider_ctx, &FolderId::from(folder_id)).await {
         let msg = e.to_string();
         let outcome = ActionOutcome::Failed { error: ActionError::remote(msg) };
         mlog.emit(&outcome);

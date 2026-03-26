@@ -385,8 +385,7 @@ pub fn dispatch_autocomplete_search(
         return Task::none();
     }
 
-    state.autocomplete.search_generation += 1;
-    let generation = state.autocomplete.search_generation;
+    let generation = state.autocomplete.search_generation.next();
     let db = Arc::clone(db);
 
     Task::perform(

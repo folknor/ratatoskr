@@ -2,6 +2,7 @@ use ratatoskr_db::db::DbState;
 use ratatoskr_provider_utils::encoding::encode_base64url_nopad;
 use ratatoskr_provider_utils::error::ProviderError;
 use ratatoskr_provider_utils::ops::ProviderOps;
+use ratatoskr_provider_utils::typed_ids::{FolderId, TagId};
 use ratatoskr_provider_utils::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
     ProviderTestResult, SyncResult,
@@ -140,9 +141,9 @@ impl ProviderOps for GmailOps {
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
-        folder_id: &str,
+        folder_id: &FolderId,
     ) -> Result<(), ProviderError> {
-        let add = vec![folder_id.to_string()];
+        let add = vec![folder_id.as_str().to_string()];
         self.client
             .modify_thread(thread_id, &add, &[], ctx.db)
             .await?;
@@ -153,9 +154,9 @@ impl ProviderOps for GmailOps {
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &str,
+        tag_id: &TagId,
     ) -> Result<(), ProviderError> {
-        let add = vec![tag_id.to_string()];
+        let add = vec![tag_id.as_str().to_string()];
         self.client
             .modify_thread(thread_id, &add, &[], ctx.db)
             .await?;
@@ -166,9 +167,9 @@ impl ProviderOps for GmailOps {
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &str,
+        tag_id: &TagId,
     ) -> Result<(), ProviderError> {
-        let remove = vec![tag_id.to_string()];
+        let remove = vec![tag_id.as_str().to_string()];
         self.client
             .modify_thread(thread_id, &[], &remove, ctx.db)
             .await?;
@@ -312,7 +313,7 @@ impl ProviderOps for GmailOps {
     async fn rename_folder(
         &self,
         ctx: &ProviderCtx<'_>,
-        folder_id: &str,
+        folder_id: &FolderId,
         new_name: &str,
         text_color: Option<&str>,
         bg_color: Option<&str>,
@@ -323,7 +324,7 @@ impl ProviderOps for GmailOps {
         };
         let label = self
             .client
-            .update_label(folder_id, Some(new_name), color, ctx.db)
+            .update_label(folder_id.as_str(), Some(new_name), color, ctx.db)
             .await?;
         Ok(ProviderFolderMutation {
             id: label.id,
@@ -341,8 +342,8 @@ impl ProviderOps for GmailOps {
         })
     }
 
-    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &str) -> Result<(), ProviderError> {
-        self.client.delete_label(folder_id, ctx.db).await?;
+    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &FolderId) -> Result<(), ProviderError> {
+        self.client.delete_label(folder_id.as_str(), ctx.db).await?;
         Ok(())
     }
 

@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use rusqlite::Connection;
 
 use ratatoskr_provider_utils::error::ProviderError;
+use ratatoskr_provider_utils::typed_ids::{FolderId, TagId};
 use ratatoskr_provider_utils::folder_roles::{imap_name_to_special_use, imap_special_use_to_label_id};
 use ratatoskr_provider_utils::ops::ProviderOps;
 use ratatoskr_provider_utils::types::{
@@ -569,11 +570,11 @@ impl ProviderOps for ImapOps {
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
-        folder_id: &str,
+        folder_id: &FolderId,
     ) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let dest = folder_id.to_string();
+        let dest = folder_id.as_str().to_string();
         let config = self.load_config(ctx).await?;
 
         let refs = ctx
@@ -589,20 +590,20 @@ impl ProviderOps for ImapOps {
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &str,
+        tag_id: &TagId,
     ) -> Result<(), ProviderError> {
         let config = self.load_config(ctx).await?;
-        set_keyword_batched(&config, ctx, thread_id, tag_id, "+FLAGS").await
+        set_keyword_batched(&config, ctx, thread_id, tag_id.as_str(), "+FLAGS").await
     }
 
     async fn remove_tag(
         &self,
         ctx: &ProviderCtx<'_>,
         thread_id: &str,
-        tag_id: &str,
+        tag_id: &TagId,
     ) -> Result<(), ProviderError> {
         let config = self.load_config(ctx).await?;
-        set_keyword_batched(&config, ctx, thread_id, tag_id, "-FLAGS").await
+        set_keyword_batched(&config, ctx, thread_id, tag_id.as_str(), "-FLAGS").await
     }
 
     // ── Send + Drafts ───────────────────────────────────────────────────
@@ -853,7 +854,7 @@ impl ProviderOps for ImapOps {
     async fn rename_folder(
         &self,
         _ctx: &ProviderCtx<'_>,
-        _folder_id: &str,
+        _folder_id: &FolderId,
         _new_name: &str,
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
@@ -864,7 +865,7 @@ impl ProviderOps for ImapOps {
         ))
     }
 
-    async fn delete_folder(&self, _ctx: &ProviderCtx<'_>, _folder_id: &str) -> Result<(), ProviderError> {
+    async fn delete_folder(&self, _ctx: &ProviderCtx<'_>, _folder_id: &FolderId) -> Result<(), ProviderError> {
         Err(ProviderError::Client(
             "Deleting folders is not supported for IMAP accounts via the current provider API."
                 .to_string(),

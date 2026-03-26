@@ -179,8 +179,7 @@ impl App {
     ) -> Task<Message> {
         use crate::ui::thread_list::{TypeaheadItem, ThreadListMessage};
 
-        self.thread_list.typeahead.generation += 1;
-        let load_gen = self.thread_list.typeahead.generation;
+        let load_gen = self.thread_list.typeahead.generation.next();
 
         // Static operators — resolve immediately
         let static_items: Option<Vec<TypeaheadItem>> = match operator {
@@ -361,7 +360,7 @@ impl App {
         }
 
         let db = Arc::clone(&self.db);
-        let load_gen = self.nav_generation.current();
+        let load_gen = self.nav_generation.next();
         Task::perform(
             async move {
                 let ids = db.get_pinned_search_thread_ids(id).await;
@@ -384,7 +383,7 @@ impl App {
                 }
 
                 let db = Arc::clone(&self.db);
-                let load_gen = self.nav_generation.current();
+                let load_gen = self.nav_generation.next();
                 Task::perform(
                     async move {
                         let result = db.get_threads_by_ids(ids).await;
@@ -527,7 +526,8 @@ impl App {
         self.clear_thread_selection();
         if self.was_in_folder_view {
             self.was_in_folder_view = false;
-            return self.load_threads_for_current_view();
+            let token = self.nav_generation.next();
+            return self.load_threads_for_current_view(token);
         }
         Task::none()
     }
@@ -693,8 +693,8 @@ impl App {
         match result {
             Ok(_id) => {
                 log::info!("Smart folder saved");
-                let _ = self.nav_generation.next();
-                self.fire_navigation_load()
+                let token = self.nav_generation.next();
+                self.fire_navigation_load(token)
             }
             Err(e) => {
                 log::error!("Save smart folder error: {e}");

@@ -259,7 +259,7 @@ impl App {
                 open_task.discard()
             }
             CalendarMessage::EventsLoaded(load_generation, result) => {
-                if load_generation != self.calendar.load_generation {
+                if !self.calendar.load_generation.is_current(load_generation) {
                     // Stale result from a previous load — discard.
                     return Task::none();
                 }
@@ -290,7 +290,7 @@ impl App {
                 )
             }
             CalendarMessage::CalendarsLoaded(load_generation, result) => {
-                if load_generation != self.calendar.load_generation {
+                if !self.calendar.load_generation.is_current(load_generation) {
                     // Stale result from a previous load — discard.
                     return Task::none();
                 }
@@ -455,8 +455,7 @@ impl App {
     /// Increments the load generation counter so that results from
     /// previously-dispatched (now stale) loads are discarded.
     pub(crate) fn reload_calendar_events(&mut self) -> Task<Message> {
-        self.calendar.load_generation = self.calendar.load_generation.wrapping_add(1);
-        let load_generation = self.calendar.load_generation;
+        let load_generation = self.calendar.load_generation.next();
         let db = Arc::clone(&self.db);
         let db2 = Arc::clone(&self.db);
         Task::batch([

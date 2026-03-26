@@ -214,7 +214,7 @@ pub enum AddAccountMessage {
     SubmitEmail,
 
     // Step 2: Discovery result
-    DiscoveryComplete(u64, Result<DiscoveredConfig, String>),
+    DiscoveryComplete(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::AddAccount>, Result<DiscoveredConfig, String>),
     SelectProtocol(usize),
     ConfirmProtocol,
 
@@ -232,7 +232,7 @@ pub enum AddAccountMessage {
 
     // Step 3: Authentication
     // OAuth
-    OAuthComplete(u64, Result<OAuthSuccess, String>),
+    OAuthComplete(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::AddAccount>, Result<OAuthSuccess, String>),
     CancelOAuth,
     RetryOAuth,
 
@@ -250,7 +250,7 @@ pub enum AddAccountMessage {
     AuthSmtpPortChanged(String),
     AuthSmtpSecurityChanged(SecurityOption),
     SubmitCredentials,
-    ValidationComplete(u64, Result<(), String>),
+    ValidationComplete(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::AddAccount>, Result<(), String>),
 
     // Step 4: Identity
     AccountNameChanged(String),
@@ -258,10 +258,10 @@ pub enum AddAccountMessage {
     SubmitIdentity,
 
     // Step 5: Creation
-    AccountCreated(u64, Result<String, String>),
+    AccountCreated(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::AddAccount>, Result<String, String>),
 
     // Re-auth: token/credential update
-    ReauthTokensSaved(u64, Result<(), String>),
+    ReauthTokensSaved(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::AddAccount>, Result<(), String>),
 
     // General
     Cancel,
@@ -287,7 +287,7 @@ pub struct AddAccountWizard {
     pub is_first_launch: bool,
     pub email: String,
     pub error: Option<String>,
-    pub generation: u64,
+    pub generation: ratatoskr_core::generation::GenerationCounter<ratatoskr_core::generation::AddAccount>,
     // Discovery result
     pub discovery: Option<DiscoveredConfig>,
     pub selected_option: Option<usize>,
@@ -395,7 +395,7 @@ impl AddAccountWizard {
             is_first_launch,
             email: String::new(),
             error: None,
-            generation: 0,
+            generation: ratatoskr_core::generation::GenerationCounter::new(),
             discovery: None,
             selected_option: None,
             manual_config: ManualConfig::default(),
@@ -441,7 +441,7 @@ impl Component for AddAccountWizard {
                 (Task::none(), None)
             }
             AddAccountMessage::SubmitEmail => self.handle_submit_email(),
-            AddAccountMessage::DiscoveryComplete(g, _) if g != self.generation => {
+            AddAccountMessage::DiscoveryComplete(g, _) if !self.generation.is_current(g) => {
                 (Task::none(), None)
             }
             AddAccountMessage::DiscoveryComplete(_, Ok(config)) => {
@@ -468,7 +468,7 @@ impl Component for AddAccountWizard {
             AddAccountMessage::ConfirmProtocol => self.handle_confirm_protocol(),
             AddAccountMessage::SubmitManualConfig => self.handle_submit_manual_config(),
             AddAccountMessage::SubmitCredentials => self.handle_submit_credentials(),
-            AddAccountMessage::ValidationComplete(g, _) if g != self.generation => {
+            AddAccountMessage::ValidationComplete(g, _) if !self.generation.is_current(g) => {
                 (Task::none(), None)
             }
             AddAccountMessage::ValidationComplete(_, Ok(())) => {
@@ -485,8 +485,7 @@ impl Component for AddAccountWizard {
                             None
                         },
                     };
-                    self.generation += 1;
-                    let generation = self.generation;
+                    let generation = self.generation.next();
                     let db = Arc::clone(&self.db);
                     let aid = account_id.clone();
                     let task = Task::perform(
@@ -511,7 +510,7 @@ impl Component for AddAccountWizard {
                 self.step = AddAccountStep::PasswordAuth;
                 (Task::none(), None)
             }
-            AddAccountMessage::OAuthComplete(g, _) if g != self.generation => {
+            AddAccountMessage::OAuthComplete(g, _) if !self.generation.is_current(g) => {
                 (Task::none(), None)
             }
             AddAccountMessage::OAuthComplete(_, Ok(success)) => {
@@ -523,7 +522,7 @@ impl Component for AddAccountWizard {
             }
             AddAccountMessage::RetryOAuth => self.handle_retry_oauth(),
             AddAccountMessage::SubmitIdentity => self.handle_submit_identity(),
-            AddAccountMessage::AccountCreated(g, _) if g != self.generation => {
+            AddAccountMessage::AccountCreated(g, _) if !self.generation.is_current(g) => {
                 (Task::none(), None)
             }
             AddAccountMessage::AccountCreated(_, Ok(account_id)) => {
@@ -534,7 +533,7 @@ impl Component for AddAccountWizard {
                 self.step = AddAccountStep::Identity;
                 (Task::none(), None)
             }
-            AddAccountMessage::ReauthTokensSaved(g, _) if g != self.generation => {
+            AddAccountMessage::ReauthTokensSaved(g, _) if !self.generation.is_current(g) => {
                 (Task::none(), None)
             }
             AddAccountMessage::ReauthTokensSaved(_, Ok(())) => {
@@ -593,8 +592,7 @@ impl AddAccountWizard {
         self.email = email.clone();
         self.step = AddAccountStep::Discovering;
         self.error = None;
-        self.generation += 1;
-        let generation = self.generation;
+        let generation = self.generation.next();
         let db = Arc::clone(&self.db);
 
         let task = Task::perform(
@@ -687,8 +685,7 @@ impl AddAccountWizard {
                 self.resolved_auth_method = "oauth".to_string();
                 self.step = AddAccountStep::OAuthWaiting;
                 self.error = None;
-                self.generation += 1;
-                let generation = self.generation;
+                let generation = self.generation.next();
 
                 let request = ratatoskr_core::oauth::OAuthProviderAuthorizationRequest {
                     provider_id: provider_id.clone(),
@@ -796,8 +793,7 @@ impl AddAccountWizard {
 
         self.step = AddAccountStep::OAuthWaiting;
         self.error = None;
-        self.generation += 1;
-        let generation = self.generation;
+        let generation = self.generation.next();
         let provider_id_clone = provider_id.clone();
         let client_id_clone = client_id.clone();
 
@@ -880,8 +876,7 @@ impl AddAccountWizard {
                 imap_password: None,
                 smtp_password: None,
             };
-            self.generation += 1;
-            let generation = self.generation;
+            let generation = self.generation.next();
             let db = Arc::clone(&self.db);
             let aid = account_id.clone();
             let task = Task::perform(
@@ -1024,8 +1019,7 @@ impl AddAccountWizard {
         // Wire credential validation — test IMAP connection
         self.step = AddAccountStep::Validating;
         self.error = None;
-        self.generation += 1;
-        let generation = self.generation;
+        let generation = self.generation.next();
 
         let host = self.auth_state.imap_host.clone();
         let port_str = self.auth_state.imap_port.clone();
@@ -1061,8 +1055,7 @@ impl AddAccountWizard {
         }
         self.step = AddAccountStep::Creating;
         self.error = None;
-        self.generation += 1;
-        let generation = self.generation;
+        let generation = self.generation.next();
 
         let create_params = self.build_create_params();
         let db = Arc::clone(&self.db);
@@ -1079,7 +1072,7 @@ impl AddAccountWizard {
                     Err(e) => (generation, Err(e)),
                 }
             },
-            |(g, result): (u64, Result<String, String>)| {
+            |(g, result)| {
                 AddAccountMessage::AccountCreated(g, result)
             },
         );

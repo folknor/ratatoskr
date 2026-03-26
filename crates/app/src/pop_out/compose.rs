@@ -152,7 +152,7 @@ pub enum ComposeMessage {
     /// Toggle discard confirmation dialog.
     ToggleDiscardConfirm,
     /// Autocomplete results arrived from the database.
-    AutocompleteResults(u64, Result<Vec<ContactMatch>, String>),
+    AutocompleteResults(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::Autocomplete>, Result<Vec<ContactMatch>, String>),
     /// User selected an autocomplete suggestion.
     AutocompleteSelect(usize),
     /// User navigated the autocomplete list (up/down).
@@ -263,7 +263,7 @@ pub struct AutocompleteState {
     /// Currently highlighted index in the results list.
     pub highlighted: Option<usize>,
     /// Generation counter to discard stale results.
-    pub search_generation: u64,
+    pub search_generation: ratatoskr_core::generation::GenerationCounter<ratatoskr_core::generation::Autocomplete>,
     /// Which recipient field is currently active.
     pub active_field: RecipientField,
 }
@@ -274,7 +274,7 @@ impl AutocompleteState {
             query: String::new(),
             results: Vec::new(),
             highlighted: None,
-            search_generation: 0,
+            search_generation: ratatoskr_core::generation::GenerationCounter::new(),
             active_field: RecipientField::To,
         }
     }
@@ -584,7 +584,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         }
         // Autocomplete
         ComposeMessage::AutocompleteResults(generation, Ok(results)) => {
-            if generation == state.autocomplete.search_generation {
+            if state.autocomplete.search_generation.is_current(generation) {
                 state.autocomplete.results = results;
                 state.autocomplete.highlighted = if state.autocomplete.results.is_empty() {
                     None
