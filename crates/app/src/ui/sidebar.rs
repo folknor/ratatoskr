@@ -6,6 +6,7 @@ use iced::{Alignment, Element, Length, Task};
 use crate::component::Component;
 use crate::db::{Account, PinnedPublicFolder, PinnedSearch, SharedMailbox};
 use crate::icon;
+use ratatoskr_core::scope::ViewScope;
 use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets::{self, DropdownEntry, DropdownIcon};
@@ -36,9 +37,11 @@ pub enum SidebarMessage {
     /// Click a smart folder — execute its query via the unified search pipeline.
     SelectSmartFolder { id: String, query: String },
     /// Select a shared/delegated mailbox in the scope dropdown.
-    SelectSharedMailbox(String),
+    /// Carries (account_id, mailbox_id).
+    SelectSharedMailbox(String, String),
     /// Select a pinned public folder.
-    SelectPublicFolder(String),
+    /// Carries (account_id, folder_id).
+    SelectPublicFolder(String, String),
 }
 
 /// Events the sidebar emits upward to the App.
@@ -58,9 +61,11 @@ pub enum SidebarEvent {
     /// Smart folder selected — execute its query via the unified search pipeline.
     SmartFolderSelected { id: String, query: String },
     /// Shared mailbox selected in scope dropdown.
-    SharedMailboxSelected(String),
+    /// Carries (account_id, mailbox_id).
+    SharedMailboxSelected { account_id: String, mailbox_id: String },
     /// Pinned public folder selected.
-    PublicFolderSelected(String),
+    /// Carries (account_id, folder_id).
+    PublicFolderSelected { account_id: String, folder_id: String },
 }
 
 // ── Sidebar layout constants ─────────────────────────────
@@ -73,7 +78,7 @@ const PINNED_SEARCH_QUERY_MAX_CHARS: usize = 28;
 pub struct Sidebar {
     pub accounts: Vec<Account>,
     pub nav_state: Option<NavigationState>,
-    pub selected_account: Option<usize>,
+    pub selected_scope: ViewScope,
     pub selected_label: Option<String>,
     pub scope_dropdown_open: bool,
     pub labels_expanded: bool,
@@ -88,8 +93,6 @@ pub struct Sidebar {
     pub shared_mailboxes: Vec<SharedMailbox>,
     /// Pinned public folders.
     pub pinned_public_folders: Vec<PinnedPublicFolder>,
-    /// Currently selected shared mailbox (by mailbox_id), if any.
-    pub selected_shared_mailbox: Option<String>,
 }
 
 impl Sidebar {
@@ -97,7 +100,7 @@ impl Sidebar {
         Self {
             accounts: Vec::new(),
             nav_state: None,
-            selected_account: None,
+            selected_scope: ViewScope::AllAccounts,
             selected_label: None,
             scope_dropdown_open: false,
             labels_expanded: true,
@@ -107,12 +110,20 @@ impl Sidebar {
             active_pinned_search: None,
             shared_mailboxes: Vec::new(),
             pinned_public_folders: Vec::new(),
-            selected_shared_mailbox: None,
         }
     }
 
     pub fn is_all_accounts(&self) -> bool {
-        self.selected_account.is_none()
+        matches!(self.selected_scope, ViewScope::AllAccounts)
+    }
+
+    /// Return the selected account index, if scope is a single account.
+    pub fn selected_account_index(&self) -> Option<usize> {
+        if let ViewScope::Account(ref id) = self.selected_scope {
+            self.accounts.iter().position(|a| a.id == *id)
+        } else {
+            None
+        }
     }
 }
 
@@ -128,24 +139,31 @@ impl Component for Sidebar {
     ) -> (Task<SidebarMessage>, Option<SidebarEvent>) {
         match message {
             SidebarMessage::SelectAccount(idx) => {
-                self.selected_account = Some(idx);
+                let account_id = self
+                    .accounts
+                    .get(idx)
+                    .map(|a| a.id.clone())
+                    .unwrap_or_default();
+                self.selected_scope = ViewScope::Account(account_id);
                 self.selected_label = None;
                 self.scope_dropdown_open = false;
                 (Task::none(), Some(SidebarEvent::AccountSelected(idx)))
             }
             SidebarMessage::SelectAllAccounts => {
-                self.selected_account = None;
+                self.selected_scope = ViewScope::AllAccounts;
                 self.selected_label = None;
                 self.scope_dropdown_open = false;
                 (Task::none(), Some(SidebarEvent::AllAccountsSelected))
             }
             SidebarMessage::CycleAccount => {
                 if self.accounts.len() > 1 {
-                    let next = match self.selected_account {
+                    let current_idx = self.selected_account_index();
+                    let next = match current_idx {
                         Some(idx) => (idx + 1) % self.accounts.len(),
                         None => 0,
                     };
-                    self.selected_account = Some(next);
+                    let account_id = self.accounts[next].id.clone();
+                    self.selected_scope = ViewScope::Account(account_id);
                     self.selected_label = None;
                     self.scope_dropdown_open = false;
                     (Task::none(), Some(SidebarEvent::AccountSelected(next)))
@@ -200,21 +218,38 @@ impl Component for Sidebar {
                 self.selected_label = Some(id.clone());
                 (Task::none(), Some(SidebarEvent::SmartFolderSelected { id, query }))
             }
-            SidebarMessage::SelectSharedMailbox(mailbox_id) => {
-                self.selected_shared_mailbox = Some(mailbox_id.clone());
-                self.selected_account = None;
+            SidebarMessage::SelectSharedMailbox(account_id, mailbox_id) => {
+                self.selected_scope = ViewScope::SharedMailbox {
+                    account_id: account_id.clone(),
+                    mailbox_id: mailbox_id.clone(),
+                };
                 self.selected_label = None;
                 self.scope_dropdown_open = false;
-                (Task::none(), Some(SidebarEvent::SharedMailboxSelected(mailbox_id)))
+                (Task::none(), Some(SidebarEvent::SharedMailboxSelected {
+                    account_id,
+                    mailbox_id,
+                }))
             }
-            SidebarMessage::SelectPublicFolder(folder_id) => {
-                (Task::none(), Some(SidebarEvent::PublicFolderSelected(folder_id)))
+            SidebarMessage::SelectPublicFolder(account_id, folder_id) => {
+                self.selected_scope = ViewScope::PublicFolder {
+                    account_id: account_id.clone(),
+                    folder_id: folder_id.clone(),
+                };
+                self.selected_label = None;
+                self.scope_dropdown_open = false;
+                (Task::none(), Some(SidebarEvent::PublicFolderSelected {
+                    account_id,
+                    folder_id,
+                }))
             }
         }
     }
 
     fn view(&self) -> Element<'_, SidebarMessage> {
-        let show_labels = self.selected_account.is_some();
+        let show_labels = matches!(
+            self.selected_scope,
+            ViewScope::Account(_) | ViewScope::SharedMailbox { .. }
+        );
 
         // Mode toggle button (tall square spanning dropdown + compose height)
         let mode_btn = container(
@@ -311,19 +346,43 @@ impl Component for Sidebar {
 
 fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
     let (trigger_icon, trigger_label): (DropdownIcon<'_>, &str) =
-        match sidebar.selected_account {
-            Some(idx) if sidebar.accounts.get(idx).is_some() => {
-                let acc = &sidebar.accounts[idx];
-                let name = acc.account_name.as_deref()
-                    .or(acc.display_name.as_deref())
-                    .unwrap_or(&acc.email);
-                let icon = match acc.account_color.as_deref() {
-                    Some(hex) => DropdownIcon::ColorDot(theme::hex_to_color(hex)),
-                    None => DropdownIcon::Avatar(name),
-                };
-                (icon, name)
+        match &sidebar.selected_scope {
+            ViewScope::Account(id) => {
+                let acc = sidebar.accounts.iter().find(|a| a.id == *id);
+                if let Some(acc) = acc {
+                    let name = acc.account_name.as_deref()
+                        .or(acc.display_name.as_deref())
+                        .unwrap_or(&acc.email);
+                    let icon = match acc.account_color.as_deref() {
+                        Some(hex) => DropdownIcon::ColorDot(theme::hex_to_color(hex)),
+                        None => DropdownIcon::Avatar(name),
+                    };
+                    (icon, name)
+                } else {
+                    (DropdownIcon::Icon(icon::INBOX_CODEPOINT), "All Accounts")
+                }
             }
-            _ => (DropdownIcon::Icon(icon::INBOX_CODEPOINT), "All Accounts"),
+            ViewScope::SharedMailbox { mailbox_id, .. } => {
+                let name = sidebar
+                    .shared_mailboxes
+                    .iter()
+                    .find(|sm| sm.mailbox_id == *mailbox_id)
+                    .and_then(|sm| sm.display_name.as_deref())
+                    .unwrap_or(mailbox_id.as_str());
+                (DropdownIcon::Icon('\u{e1a4}'), name)
+            }
+            ViewScope::PublicFolder { folder_id, .. } => {
+                let name = sidebar
+                    .pinned_public_folders
+                    .iter()
+                    .find(|pf| pf.folder_id == *folder_id)
+                    .map(|pf| pf.display_name.as_str())
+                    .unwrap_or(folder_id.as_str());
+                (DropdownIcon::Icon('\u{e0d7}'), name)
+            }
+            ViewScope::AllAccounts => {
+                (DropdownIcon::Icon(icon::INBOX_CODEPOINT), "All Accounts")
+            }
         };
 
     let mut entries: Vec<DropdownEntry<'_, SidebarMessage>> = Vec::new();
@@ -331,7 +390,7 @@ fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
     entries.push(DropdownEntry {
         icon: DropdownIcon::Icon(icon::INBOX_CODEPOINT),
         label: "All Accounts",
-        selected: sidebar.selected_account.is_none(),
+        selected: matches!(sidebar.selected_scope, ViewScope::AllAccounts),
         on_press: SidebarMessage::SelectAllAccounts,
     });
 
@@ -346,7 +405,7 @@ fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         entries.push(DropdownEntry {
             icon,
             label: name,
-            selected: sidebar.selected_account == Some(idx),
+            selected: matches!(&sidebar.selected_scope, ViewScope::Account(id) if *id == acc.id),
             on_press: SidebarMessage::SelectAccount(idx),
         });
     }
@@ -357,15 +416,17 @@ fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
             .display_name
             .as_deref()
             .unwrap_or(&sm.mailbox_id);
-        let selected = sidebar
-            .selected_shared_mailbox
-            .as_deref()
-            == Some(&sm.mailbox_id);
+        let selected = matches!(
+            &sidebar.selected_scope,
+            ViewScope::SharedMailbox { account_id, mailbox_id }
+                if *account_id == sm.account_id && *mailbox_id == sm.mailbox_id
+        );
         entries.push(DropdownEntry {
             icon: DropdownIcon::Icon('\u{e1a4}'), // users icon
             label: name,
             selected,
             on_press: SidebarMessage::SelectSharedMailbox(
+                sm.account_id.clone(),
                 sm.mailbox_id.clone(),
             ),
         });
@@ -505,7 +566,10 @@ fn pinned_public_folders_section(
         .pinned_public_folders
         .iter()
         .map(|pf| {
-            let active = false; // TODO: track active public folder selection
+            let active = matches!(
+                &sidebar.selected_scope,
+                ViewScope::PublicFolder { folder_id, .. } if *folder_id == pf.folder_id
+            );
             let label = &pf.display_name;
             let count = pf.unread_count;
 
@@ -539,6 +603,7 @@ fn pinned_public_folders_section(
                     .width(Length::Fill),
             )
             .on_press(SidebarMessage::SelectPublicFolder(
+                pf.account_id.clone(),
                 pf.folder_id.clone(),
             ))
             .padding(0)
@@ -923,20 +988,19 @@ fn render_flat_labels<'a>(
 
 /// Build a scope query prefix for "Search here" from a label/folder name.
 fn build_search_here_prefix(name: &str, sidebar: &Sidebar) -> String {
-    match sidebar.selected_account {
-        Some(idx) => {
-            let account_name = sidebar
-                .accounts
-                .get(idx)
-                .map(|a| a.display_name.as_deref().unwrap_or(&a.email))
-                .unwrap_or("Unknown");
-            format!(
-                "account:{} label:{} ",
-                quote_if_needed(account_name),
-                quote_if_needed(name),
-            )
-        }
-        None => format!("label:{} ", quote_if_needed(name)),
+    if let Some(idx) = sidebar.selected_account_index() {
+        let account_name = sidebar
+            .accounts
+            .get(idx)
+            .map(|a| a.display_name.as_deref().unwrap_or(&a.email))
+            .unwrap_or("Unknown");
+        format!(
+            "account:{} label:{} ",
+            quote_if_needed(account_name),
+            quote_if_needed(name),
+        )
+    } else {
+        format!("label:{} ", quote_if_needed(name))
     }
 }
 
@@ -945,20 +1009,19 @@ fn build_search_here_folder_prefix(
     folder_name: &str,
     sidebar: &Sidebar,
 ) -> String {
-    match sidebar.selected_account {
-        Some(idx) => {
-            let account_name = sidebar
-                .accounts
-                .get(idx)
-                .map(|a| a.display_name.as_deref().unwrap_or(&a.email))
-                .unwrap_or("Unknown");
-            format!(
-                "account:{} in:{} ",
-                quote_if_needed(account_name),
-                folder_name.to_lowercase(),
-            )
-        }
-        None => format!("in:{} ", folder_name.to_lowercase()),
+    if let Some(idx) = sidebar.selected_account_index() {
+        let account_name = sidebar
+            .accounts
+            .get(idx)
+            .map(|a| a.display_name.as_deref().unwrap_or(&a.email))
+            .unwrap_or("Unknown");
+        format!(
+            "account:{} in:{} ",
+            quote_if_needed(account_name),
+            folder_name.to_lowercase(),
+        )
+    } else {
+        format!("in:{} ", folder_name.to_lowercase())
     }
 }
 

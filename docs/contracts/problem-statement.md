@@ -16,7 +16,7 @@ The structural fix for each was the same principle: make the right thing the onl
 
 ---
 
-## Remaining (3)
+## Remaining (2)
 
 ### 9. New email actions require 8 parallel edits
 
@@ -25,14 +25,6 @@ The structural fix for each was the same principle: make the right thing the onl
 **Currently enforced by:** Convention. Wildcard arms in `to_batch_action` and undo dispatch return `None`/empty instead of failing, so missing arms are silent.
 
 **Structural fix:** A single action descriptor table (or derive macro) that generates the classification, batch mapping, rollback policy, and undo mapping from one definition.
-
-### 10. Scope state is split and partially ignored
-
-**Contract:** The active scope (which account/shared mailbox/public folder) must be consistent across the sidebar, navigation context, and all DB queries.
-
-**Currently enforced by:** Ad-hoc fields: `selected_account`, `selected_shared_mailbox`, `navigation_target`, `selected_label`. `current_scope()` only reads `selected_account` — shared mailbox and public folder selection is ignored.
-
-**Structural fix:** A single `Scope` enum (`All`, `Account(id)`, `SharedMailbox(id)`, `PublicFolder(id)`) consumed by all query/context builders.
 
 ### 15. Generation counter ordering
 
@@ -58,10 +50,11 @@ The structural fix for each was the same principle: make the right thing the onl
 
 ---
 
-## Fixed (19)
+## Fixed (20)
 
 | # | Contract | Fix |
 |---|----------|-----|
+| 10 | Scope state split | `ViewScope` enum (`AllAccounts`, `Account`, `SharedMailbox`, `PublicFolder`) replaces split fields. `selected_scope` is single source of truth. Dedicated query paths for shared mailbox threads (CTE-scoped) and public folder items. Personal queries filter `shared_mailbox_id IS NULL`. Actions gated for public folder scope. |
 | 1 | Mail mutation DB boundary | 7 thread-action DB helpers (`set_thread_read/starred/pinned/muted`, `delete_thread`, `add/remove_thread_label`) changed to `pub(crate)`. App crate forced through action service at compile time. |
 | 2 | Account deletion leaks external stores | `delete_account_orchestrate()` — gather + ref-checks + delete in one call, async cleanup of body/inline/cache/search stores. 7 integration tests. |
 | 3 | Compose close loses dirty drafts | `save_compose_draft_sync()` — synchronous INSERT before window removal. Aborts close on failure. Stable `draft_id` per compose window. |

@@ -1510,6 +1510,16 @@ static MIGRATIONS: &[Migration] = &[
             );
         "#,
     },
+    Migration {
+        version: 76,
+        description: "Add shared_mailbox_id column to threads for scope filtering",
+        sql: r#"
+            ALTER TABLE threads ADD COLUMN shared_mailbox_id TEXT;
+            -- NULL = primary account thread; non-NULL = shared mailbox thread.
+            CREATE INDEX idx_threads_shared_mailbox
+                ON threads(account_id, shared_mailbox_id, last_message_at DESC);
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

@@ -51,10 +51,13 @@ use ratatoskr_command_palette::{
     FocusedRegion, UndoStack, current_platform,
 };
 use ratatoskr_core::db::queries_extra::navigation::{
-    NavigationState, get_navigation_state,
+    NavigationState, get_navigation_state, get_shared_mailbox_navigation,
 };
-use ratatoskr_core::db::queries_extra::get_threads_scoped;
+use ratatoskr_core::db::queries_extra::{
+    get_threads_scoped, get_threads_for_shared_mailbox, get_public_folder_items,
+};
 use ratatoskr_core::db::types::{AccountScope, DbThread};
+use ratatoskr_core::scope::ViewScope;
 use ui::layout::{
     RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH,
 };
@@ -1427,8 +1430,13 @@ impl App {
             SidebarEvent::PinnedSearchRefreshed(id) => {
                 self.update(Message::RefreshPinnedSearch(id))
             }
-            SidebarEvent::SharedMailboxSelected(_) | SidebarEvent::PublicFolderSelected(_) => {
-                Task::none()
+            SidebarEvent::SharedMailboxSelected { .. } => {
+                self.reset_view_state(None);
+                self.load_navigation_and_threads()
+            }
+            SidebarEvent::PublicFolderSelected { .. } => {
+                self.reset_view_state(None);
+                self.load_navigation_and_threads()
             }
         }
     }
@@ -1512,7 +1520,7 @@ impl App {
             }
             ThreadListEvent::WidenSearchScope => {
                 // Widen search scope to all accounts
-                self.sidebar.selected_account = None;
+                self.sidebar.selected_scope = ViewScope::AllAccounts;
                 self.nav_generation += 1;
                 self.update_thread_list_context_from_sidebar();
                 self.update(Message::SearchExecute)
@@ -1925,11 +1933,15 @@ impl App {
     }
 
     fn handle_delete_account(&mut self, account_id: String) -> Task<Message> {
-        // If this was the selected account, revert to All Accounts
-        if let Some(idx) = self.sidebar.selected_account {
-            if self.sidebar.accounts.get(idx).is_some_and(|a| a.id == account_id) {
-                self.sidebar.selected_account = None;
-            }
+        // If the deleted account is referenced by the current scope, revert to All Accounts
+        let scope_references_account = match &self.sidebar.selected_scope {
+            ViewScope::Account(id) => *id == account_id,
+            ViewScope::SharedMailbox { account_id: aid, .. }
+            | ViewScope::PublicFolder { account_id: aid, .. } => *aid == account_id,
+            ViewScope::AllAccounts => false,
+        };
+        if scope_references_account {
+            self.sidebar.selected_scope = ViewScope::AllAccounts;
         }
 
         let db = Arc::clone(&self.db);
@@ -2083,25 +2095,50 @@ impl App {
 // ── Helper methods ─────────────────────────────────────
 
 impl App {
-    fn current_scope(&self) -> AccountScope {
-        match self.sidebar.selected_account {
-            Some(idx) => {
-                let Some(account) = self.sidebar.accounts.get(idx) else {
-                    return AccountScope::All;
-                };
-                AccountScope::Single(account.id.clone())
+    fn current_scope(&self) -> &ViewScope {
+        &self.sidebar.selected_scope
+    }
+
+    /// Convert the current view scope to an `AccountScope` for query functions
+    /// that only understand personal accounts. For shared mailbox / public
+    /// folder scopes, falls back to the parent account (not `All`).
+    fn current_account_scope(&self) -> AccountScope {
+        match &self.sidebar.selected_scope {
+            ViewScope::AllAccounts => AccountScope::All,
+            ViewScope::Account(id) => AccountScope::Single(id.clone()),
+            ViewScope::SharedMailbox { account_id, .. }
+            | ViewScope::PublicFolder { account_id, .. } => {
+                AccountScope::Single(account_id.clone())
             }
-            None => AccountScope::All,
         }
     }
 
     fn fire_navigation_load(&self) -> Task<Message> {
         let db = Arc::clone(&self.db);
-        let scope = self.current_scope();
+        let view_scope = self.sidebar.selected_scope.clone();
         let load_gen = self.nav_generation;
         Task::perform(
             async move {
-                let r = load_navigation(db, scope).await;
+                let r = match &view_scope {
+                    ViewScope::SharedMailbox { account_id, mailbox_id } => {
+                        let aid = account_id.clone();
+                        let mid = mailbox_id.clone();
+                        load_shared_mailbox_navigation(db, aid, mid).await
+                    }
+                    ViewScope::PublicFolder { account_id, .. } => {
+                        // Public folders have no sub-navigation — return
+                        // an empty navigation state scoped to the parent account.
+                        Ok(NavigationState {
+                            scope: AccountScope::Single(account_id.clone()),
+                            folders: Vec::new(),
+                        })
+                    }
+                    _ => {
+                        let scope = view_scope.to_account_scope()
+                            .unwrap_or(AccountScope::All);
+                        load_navigation(db, scope).await
+                    }
+                };
                 (load_gen, r)
             },
             |(g, result)| Message::NavigationLoaded(g, result),
@@ -2110,12 +2147,28 @@ impl App {
 
     pub(crate) fn load_threads_for_current_view(&self) -> Task<Message> {
         let db = Arc::clone(&self.db);
-        let scope = self.current_scope();
+        let view_scope = self.sidebar.selected_scope.clone();
         let label_id = self.sidebar.selected_label.clone();
         let load_gen = self.nav_generation;
         Task::perform(
             async move {
-                let r = load_threads_scoped(db, scope, label_id).await;
+                let r = match &view_scope {
+                    ViewScope::SharedMailbox { account_id, mailbox_id } => {
+                        let aid = account_id.clone();
+                        let mid = mailbox_id.clone();
+                        load_shared_mailbox_threads(db, aid, mid, label_id).await
+                    }
+                    ViewScope::PublicFolder { account_id, folder_id } => {
+                        let aid = account_id.clone();
+                        let fid = folder_id.clone();
+                        load_public_folder_items(db, aid, fid).await
+                    }
+                    _ => {
+                        let scope = view_scope.to_account_scope()
+                            .unwrap_or(AccountScope::All);
+                        load_threads_scoped(db, scope, label_id).await
+                    }
+                };
                 (load_gen, r)
             },
             |(g, result)| Message::ThreadsLoaded(g, result),
@@ -2135,6 +2188,11 @@ impl App {
             log::debug!("Thread selected: {}", t.id);
         }
         self.reading_pane.set_thread(thread);
+
+        // Public folder items aren't real threads — skip detail loading.
+        if matches!(self.sidebar.selected_scope, ViewScope::PublicFolder { .. }) {
+            return Task::none();
+        }
 
         // Set search highlight terms when in search mode
         if self.thread_list.mode == ui::thread_list::ThreadListMode::Search {
@@ -2202,7 +2260,9 @@ impl App {
                 health: ui::settings::compute_health(a.last_sync_at, a.token_expires_at, a.is_active),
             })
             .collect();
-        self.sidebar.selected_account = Some(0);
+        if let Some(first) = self.sidebar.accounts.first() {
+            self.sidebar.selected_scope = ViewScope::Account(first.id.clone());
+        }
         self.status = format!("Loaded {} accounts", self.sidebar.accounts.len());
         let sig_task = handlers::signatures::load_signatures_async(&self.db)
             .map(Message::SignatureOp);
@@ -2419,13 +2479,30 @@ impl App {
                 })
             })
             .unwrap_or_else(|| "Inbox".to_string());
-        let scope_name = self
-            .sidebar
-            .selected_account
-            .and_then(|idx| self.sidebar.accounts.get(idx))
-            .and_then(|a| a.display_name.as_deref().or(Some(a.email.as_str())))
-            .unwrap_or("All")
-            .to_string();
+        let scope_name = match &self.sidebar.selected_scope {
+            ViewScope::AllAccounts => "All".to_string(),
+            ViewScope::Account(id) => {
+                self.sidebar.accounts.iter()
+                    .find(|a| a.id == *id)
+                    .and_then(|a| a.display_name.as_deref().or(Some(a.email.as_str())))
+                    .unwrap_or("Account")
+                    .to_string()
+            }
+            ViewScope::SharedMailbox { mailbox_id, .. } => {
+                self.sidebar.shared_mailboxes.iter()
+                    .find(|sm| sm.mailbox_id == *mailbox_id)
+                    .and_then(|sm| sm.display_name.as_deref())
+                    .unwrap_or(mailbox_id.as_str())
+                    .to_string()
+            }
+            ViewScope::PublicFolder { folder_id, .. } => {
+                self.sidebar.pinned_public_folders.iter()
+                    .find(|pf| pf.folder_id == *folder_id)
+                    .map(|pf| pf.display_name.as_str())
+                    .unwrap_or(folder_id.as_str())
+                    .to_string()
+            }
+        };
         self.thread_list.set_context(folder_name, scope_name);
     }
 }
@@ -2472,6 +2549,66 @@ async fn load_threads_scoped(
         }
 
         Ok(threads)
+    })
+    .await
+}
+
+async fn load_shared_mailbox_navigation(
+    db: Arc<Db>,
+    account_id: String,
+    mailbox_id: String,
+) -> Result<NavigationState, String> {
+    db.with_conn(move |conn| {
+        get_shared_mailbox_navigation(conn, &account_id, &mailbox_id)
+    })
+    .await
+}
+
+async fn load_shared_mailbox_threads(
+    db: Arc<Db>,
+    account_id: String,
+    mailbox_id: String,
+    label_id: Option<String>,
+) -> Result<Vec<Thread>, String> {
+    db.with_conn(move |conn| {
+        let db_threads = get_threads_for_shared_mailbox(
+            conn,
+            &account_id,
+            &mailbox_id,
+            label_id.as_deref(),
+            Some(1000),
+        )?;
+        Ok(db_threads.into_iter().map(db_thread_to_app_thread).collect())
+    })
+    .await
+}
+
+async fn load_public_folder_items(
+    db: Arc<Db>,
+    account_id: String,
+    folder_id: String,
+) -> Result<Vec<Thread>, String> {
+    db.with_conn(move |conn| {
+        let items = get_public_folder_items(conn, &account_id, &folder_id, Some(1000))?;
+        Ok(items
+            .into_iter()
+            .map(|item| Thread {
+                id: item.item_id,
+                account_id: item.account_id,
+                subject: item.subject,
+                snippet: item.body_preview,
+                last_message_at: item.received_at,
+                message_count: 1,
+                is_read: item.is_read,
+                is_starred: false,
+                is_pinned: false,
+                is_muted: false,
+                has_attachments: false,
+                from_name: item.sender_name,
+                from_address: item.sender_email,
+                is_local_draft: false,
+            })
+            .collect())
     })
     .await
 }

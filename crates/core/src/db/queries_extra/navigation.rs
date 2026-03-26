@@ -329,6 +329,7 @@ fn build_all_account_tags(
              LEFT JOIN threads t ON tl.thread_id = t.id AND tl.account_id = t.account_id
              WHERE l.label_kind = 'tag'
                AND l.visible = 1
+               AND (t.shared_mailbox_id IS NULL OR t.id IS NULL)
              GROUP BY LOWER(TRIM(l.name))
              ORDER BY l.name COLLATE NOCASE ASC",
         )
@@ -390,6 +391,7 @@ fn get_label_unread_counts(
              INNER JOIN thread_labels tl
                ON tl.account_id = t.account_id AND tl.thread_id = t.id
              WHERE t.account_id = ?1 AND t.is_read = 0
+               AND t.shared_mailbox_id IS NULL
              GROUP BY tl.label_id",
         )
         .map_err(|e| e.to_string())?;
@@ -406,6 +408,97 @@ fn get_label_unread_counts(
         counts.insert(label_id, count);
     }
     Ok(counts)
+}
+
+/// Navigation state for a shared mailbox scope.
+///
+/// Returns the shared mailbox's folder list with unread counts scoped to
+/// threads belonging to that mailbox.
+pub fn get_shared_mailbox_navigation(
+    conn: &Connection,
+    account_id: &str,
+    mailbox_id: &str,
+) -> Result<NavigationState, String> {
+    let all_labels = get_labels(conn, account_id)?;
+    let system_ids = system_label_ids();
+    let provider = get_account_provider(conn, account_id)?;
+    let semantics = label_semantics_for_provider(&provider);
+
+    // Unread counts for labels, scoped to this shared mailbox
+    let mut unread_stmt = conn
+        .prepare(
+            "SELECT tl.label_id, COUNT(*) AS unread_count
+             FROM threads t
+             INNER JOIN thread_labels tl
+               ON tl.account_id = t.account_id AND tl.thread_id = t.id
+             WHERE t.account_id = ?1 AND t.shared_mailbox_id = ?2
+               AND t.is_read = 0
+             GROUP BY tl.label_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let unread_by_label: HashMap<String, i64> = unread_stmt
+        .query_map(rusqlite::params![account_id, mailbox_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .collect();
+
+    // Universal folders with shared-mailbox-scoped unread counts
+    let mut folders: Vec<NavigationFolder> = SIDEBAR_UNIVERSAL_FOLDERS
+        .iter()
+        .map(|(id, name)| {
+            let unread = unread_by_label.get(*id).copied().unwrap_or(0);
+            NavigationFolder {
+                id: (*id).to_owned(),
+                name: (*name).to_owned(),
+                folder_kind: FolderKind::Universal,
+                unread_count: unread,
+                account_id: None,
+                parent_id: None,
+                label_semantics: None,
+                query: None,
+                rights: None,
+                is_subscribed: None,
+            }
+        })
+        .collect();
+
+    // Account labels (non-system, visible) with shared-mailbox-scoped counts
+    let label_folders: Vec<NavigationFolder> = all_labels
+        .into_iter()
+        .filter(|l| !system_ids.contains(&l.id.as_str()) && l.visible)
+        .map(|label| {
+            let unread = unread_by_label.get(&label.id).copied().unwrap_or(0);
+            let rights = rights_from_label(&label);
+            let parent_id = label
+                .parent_label_id
+                .filter(|pid| !system_ids.contains(&pid.as_str()));
+            let kind = if label.label_kind == "tag" {
+                FolderKind::AccountTag
+            } else {
+                FolderKind::AccountLabel
+            };
+            NavigationFolder {
+                is_subscribed: label.is_subscribed,
+                id: label.id,
+                name: label.name,
+                folder_kind: kind,
+                unread_count: unread,
+                account_id: Some(label.account_id),
+                parent_id,
+                label_semantics: Some(semantics.clone()),
+                query: None,
+                rights,
+            }
+        })
+        .collect();
+    folders.extend(label_folders);
+
+    Ok(NavigationState {
+        scope: AccountScope::Single(account_id.to_string()),
+        folders,
+    })
 }
 
 /// Extract mailbox rights from a `DbLabel` into a `MailboxRightsInfo`.

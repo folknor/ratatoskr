@@ -40,9 +40,7 @@ The four providers are unified behind `ProviderOps`. All provider-specific behav
 
 The active scope (which account, shared mailbox, or public folder the user is looking at) must be consistent across sidebar, navigation context, and all DB queries.
 
-**Current weakness:** Scope state is split across `selected_account`, `selected_shared_mailbox`, `navigation_target`, `selected_label`. The `current_scope()` function only reads `selected_account` — shared mailbox and public folder selection is ignored.
-
-**Target state:** A single `Scope` enum (`All`, `Account(id)`, `SharedMailbox(id)`, `PublicFolder(id)`) consumed by all query and context builders.
+**Enforcement:** `ViewScope` enum (`AllAccounts`, `Account`, `SharedMailbox`, `PublicFolder`) in `crates/core/src/scope.rs`. The sidebar stores `selected_scope: ViewScope` as the single source of truth. `fire_navigation_load()` and `load_threads_for_current_view()` dispatch on the enum — shared mailboxes and public folders use dedicated query paths, personal accounts use `AccountScope`-based queries. Shared mailbox threads are distinguished by `threads.shared_mailbox_id`; personal queries filter `shared_mailbox_id IS NULL`. Public folder items come from the separate `public_folder_items` table. Actions are gated for public folder scope.
 
 ### Generation counters for async safety
 

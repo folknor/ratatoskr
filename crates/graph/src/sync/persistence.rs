@@ -32,6 +32,7 @@ pub(super) async fn persist_messages(
 
     // 1. DB writes (metadata + thread aggregation)
     let aid = sctx.account_id.to_string();
+    let shared_mb_id = sctx.client.mailbox_id().map(String::from);
     let thread_groups: Vec<(String, Vec<ParsedGraphMessage>)> = threads
         .into_iter()
         .map(|(tid, msgs)| (tid.to_string(), msgs.into_iter().cloned().collect()))
@@ -43,7 +44,7 @@ pub(super) async fn persist_messages(
                 .unchecked_transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
             for (thread_id, msgs) in &thread_groups {
-                store_thread_to_db(&tx, &aid, thread_id, msgs)?;
+                store_thread_to_db(&tx, &aid, thread_id, msgs, shared_mb_id.as_deref())?;
             }
             tx.commit().map_err(|e| format!("commit: {e}"))?;
             Ok(())
@@ -109,10 +110,11 @@ fn store_thread_to_db(
     account_id: &str,
     thread_id: &str,
     messages: &[ParsedGraphMessage],
+    shared_mailbox_id: Option<&str>,
 ) -> Result<(), String> {
     // upsert_thread_record calls upsert_messages internally before aggregating
     upsert_attachments(tx, account_id, messages)?;
-    upsert_thread_record(tx, account_id, thread_id, messages)?;
+    upsert_thread_record(tx, account_id, thread_id, messages, shared_mailbox_id)?;
     set_thread_labels(tx, account_id, thread_id, messages)?;
     insert_exchange_reactions(tx, account_id, messages)?;
 
@@ -140,6 +142,7 @@ fn upsert_thread_record(
     account_id: &str,
     thread_id: &str,
     messages: &[ParsedGraphMessage],
+    shared_mailbox_id: Option<&str>,
 ) -> Result<(), String> {
     if messages.is_empty() {
         return Ok(());
@@ -160,6 +163,7 @@ fn upsert_thread_record(
         thread_id,
         &aggregate,
         Some(is_important),
+        shared_mailbox_id,
     )
 }
 

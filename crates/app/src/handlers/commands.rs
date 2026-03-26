@@ -7,6 +7,7 @@ use crate::db::Db;
 use crate::{APP_DATA_DIR, App, CompletedAction, Message};
 use ratatoskr_command_palette::{CommandArgs, CommandId, KeyBinding, OptionItem};
 use ratatoskr_core::actions::{ActionOutcome, BatchAction};
+use ratatoskr_core::scope::ViewScope;
 
 /// Parameters for actions that need more than account_id + thread_id.
 /// Also used by undo token construction to recover prior state.
@@ -111,6 +112,11 @@ impl App {
         &mut self,
         action: EmailAction,
     ) -> Task<Message> {
+        // Public folder items are not real threads — actions don't apply.
+        if matches!(self.sidebar.selected_scope, ViewScope::PublicFolder { .. }) {
+            return Task::none();
+        }
+
         let selection_count = self.thread_list.selection_count();
 
         // ── Actions through the action service ──────────────────

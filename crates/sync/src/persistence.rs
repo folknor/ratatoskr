@@ -101,6 +101,7 @@ pub fn upsert_thread_aggregate(
     thread_id: &str,
     aggregate: &ThreadAggregate,
     is_important: Option<bool>,
+    shared_mailbox_id: Option<&str>,
 ) -> Result<(), String> {
     let exists: bool = tx
         .query_row(
@@ -112,12 +113,16 @@ pub fn upsert_thread_aggregate(
         .map_err(|e| format!("check thread exists: {e}"))?;
 
     if exists {
+        // Use COALESCE so that NULL shared_mailbox_id param preserves the
+        // existing value — important for re-aggregation paths that don't
+        // know the mailbox context.
         match is_important {
             Some(is_important) => {
                 tx.execute(
                     "UPDATE threads SET subject = ?1, snippet = ?2, last_message_at = ?3, \
                      message_count = ?4, is_read = ?5, is_starred = ?6, is_important = ?7, \
-                     has_attachments = ?8 \
+                     has_attachments = ?8, \
+                     shared_mailbox_id = COALESCE(?11, shared_mailbox_id) \
                      WHERE id = ?9 AND account_id = ?10",
                     rusqlite::params![
                         aggregate.subject,
@@ -130,6 +135,7 @@ pub fn upsert_thread_aggregate(
                         aggregate.has_attachments,
                         thread_id,
                         account_id,
+                        shared_mailbox_id,
                     ],
                 )
                 .map_err(|e| format!("update thread: {e}"))?;
@@ -138,7 +144,8 @@ pub fn upsert_thread_aggregate(
                 tx.execute(
                     "UPDATE threads SET subject = ?1, snippet = ?2, last_message_at = ?3, \
                      message_count = ?4, is_read = ?5, is_starred = ?6, \
-                     has_attachments = ?7 \
+                     has_attachments = ?7, \
+                     shared_mailbox_id = COALESCE(?10, shared_mailbox_id) \
                      WHERE id = ?8 AND account_id = ?9",
                     rusqlite::params![
                         aggregate.subject,
@@ -150,6 +157,7 @@ pub fn upsert_thread_aggregate(
                         aggregate.has_attachments,
                         thread_id,
                         account_id,
+                        shared_mailbox_id,
                     ],
                 )
                 .map_err(|e| format!("update thread: {e}"))?;
@@ -159,8 +167,8 @@ pub fn upsert_thread_aggregate(
         tx.execute(
             "INSERT INTO threads \
              (id, account_id, subject, snippet, last_message_at, message_count, \
-              is_read, is_starred, is_important, has_attachments) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+              is_read, is_starred, is_important, has_attachments, shared_mailbox_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             rusqlite::params![
                 thread_id,
                 account_id,
@@ -172,6 +180,7 @@ pub fn upsert_thread_aggregate(
                 aggregate.is_starred,
                 is_important.unwrap_or(false),
                 aggregate.has_attachments,
+                shared_mailbox_id,
             ],
         )
         .map_err(|e| format!("insert thread: {e}"))?;
@@ -247,7 +256,7 @@ pub fn delete_messages_and_cleanup_threads(
         } else {
             // Re-aggregate thread fields from remaining messages
             let aggregate = compute_thread_aggregate(tx, account_id, tid)?;
-            upsert_thread_aggregate(tx, account_id, tid, &aggregate, None)?;
+            upsert_thread_aggregate(tx, account_id, tid, &aggregate, None, None)?;
         }
     }
 

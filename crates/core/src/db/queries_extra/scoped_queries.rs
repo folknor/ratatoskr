@@ -64,6 +64,7 @@ pub fn get_threads_scoped(
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
              WHERE {scope_clause} AND tl.label_id = ?{next_idx}
+               AND t.shared_mailbox_id IS NULL
              GROUP BY t.account_id, t.id
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?{limit_idx} OFFSET ?{offset_idx}",
@@ -76,7 +77,7 @@ pub fn get_threads_scoped(
             "SELECT t.*, m.from_name, m.from_address FROM threads t
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-             WHERE {scope_clause}
+             WHERE {scope_clause} AND t.shared_mailbox_id IS NULL
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?{limit_idx} OFFSET ?{offset_idx}",
             limit_idx = next_idx,
@@ -147,11 +148,15 @@ pub fn get_thread_count_scoped(
         let sql = format!(
             "SELECT COUNT(DISTINCT t.account_id || '/' || t.id) AS cnt FROM threads t
              INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-             WHERE {scope_clause} AND tl.label_id = ?{next_idx}"
+             WHERE {scope_clause} AND tl.label_id = ?{next_idx}
+               AND t.shared_mailbox_id IS NULL"
         );
         execute_count_query(conn, &sql, scope_params, Some(lid))
     } else {
-        let sql = format!("SELECT COUNT(*) AS cnt FROM threads t WHERE {scope_clause}");
+        let sql = format!(
+            "SELECT COUNT(*) AS cnt FROM threads t WHERE {scope_clause}
+               AND t.shared_mailbox_id IS NULL"
+        );
         execute_count_query(conn, &sql, scope_params, None)
     }
 }
@@ -166,7 +171,8 @@ pub fn get_unread_count_scoped(
     let sql = format!(
         "SELECT COUNT(*) AS cnt FROM threads t
          INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-         WHERE {scope_clause} AND tl.label_id = 'INBOX' AND t.is_read = 0"
+         WHERE {scope_clause} AND tl.label_id = 'INBOX' AND t.is_read = 0
+           AND t.shared_mailbox_id IS NULL"
     );
 
     execute_count_query(conn, &sql, scope_params, None)
@@ -236,6 +242,7 @@ fn get_label_folder_unread_counts(
         "SELECT tl.label_id AS folder_id, COUNT(*) AS unread_count FROM threads t
          INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
          WHERE {scope_clause} AND t.is_read = 0
+           AND t.shared_mailbox_id IS NULL
            AND tl.label_id IN ({})
          GROUP BY tl.label_id",
         placeholders.join(", ")
@@ -266,7 +273,8 @@ fn get_flag_folder_unread_count(
 
     let sql = format!(
         "SELECT COUNT(*) AS cnt FROM threads t
-         WHERE {scope_clause} AND t.is_read = 0 AND t.{flag_col} = 1"
+         WHERE {scope_clause} AND t.is_read = 0 AND t.{flag_col} = 1
+           AND t.shared_mailbox_id IS NULL"
     );
 
     let param_refs: Vec<&dyn rusqlite::types::ToSql> =
@@ -298,6 +306,7 @@ fn get_label_folder_unread_counts_by_account(
         "SELECT tl.label_id AS folder_id, t.account_id, COUNT(*) AS unread_count FROM threads t
          INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
          WHERE {scope_clause} AND t.is_read = 0
+           AND t.shared_mailbox_id IS NULL
            AND tl.label_id IN ({})
          GROUP BY tl.label_id, t.account_id",
         placeholders.join(", ")
@@ -329,6 +338,7 @@ fn get_flag_folder_unread_by_account(
     let sql = format!(
         "SELECT t.account_id, COUNT(*) AS unread_count FROM threads t
          WHERE {scope_clause} AND t.is_read = 0 AND t.{flag_col} = 1
+           AND t.shared_mailbox_id IS NULL
          GROUP BY t.account_id"
     );
 
@@ -392,6 +402,7 @@ pub fn get_draft_threads(
          LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
          ) m ON m.account_id = t.account_id AND m.thread_id = t.id
          WHERE {scope_clause} AND tl.label_id = ?{next_idx}
+           AND t.shared_mailbox_id IS NULL
          GROUP BY t.account_id, t.id
          ORDER BY t.is_pinned DESC, t.last_message_at DESC
          LIMIT ?{limit_idx} OFFSET ?{offset_idx}",
@@ -420,6 +431,7 @@ fn get_flag_threads(
          LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
          ) m ON m.account_id = t.account_id AND m.thread_id = t.id
          WHERE {scope_clause} AND t.{flag_col} = 1
+           AND t.shared_mailbox_id IS NULL
          ORDER BY t.is_pinned DESC, t.last_message_at DESC
          LIMIT ?{next_idx} OFFSET ?{offset_idx}",
         offset_idx = next_idx + 1,
@@ -546,6 +558,91 @@ pub fn get_local_draft_summaries(
     .map_err(|e| e.to_string())
 }
 
+/// Threads belonging to a specific shared mailbox.
+///
+/// Uses a CTE to pre-filter thread IDs by `shared_mailbox_id`, then scopes
+/// the latest-message subquery to only those threads (avoiding a full scan
+/// of the messages table).
+pub fn get_threads_for_shared_mailbox(
+    conn: &Connection,
+    account_id: &str,
+    mailbox_id: &str,
+    label_id: Option<&str>,
+    limit: Option<i64>,
+) -> Result<Vec<DbThread>, String> {
+    let lim = limit.unwrap_or(200);
+
+    let sql = if let Some(lid) = label_id {
+        format!(
+            "WITH mb_threads AS (
+               SELECT id FROM threads
+               WHERE account_id = ?1 AND shared_mailbox_id = ?2
+             )
+             SELECT t.*, m.from_name, m.from_address FROM threads t
+             INNER JOIN thread_labels tl
+               ON tl.account_id = t.account_id AND tl.thread_id = t.id
+             LEFT JOIN (
+               SELECT id, account_id, thread_id, from_name, from_address FROM (
+                 SELECT id, account_id, thread_id, from_name, from_address,
+                        ROW_NUMBER() OVER (
+                          PARTITION BY account_id, thread_id
+                          ORDER BY date DESC, id DESC
+                        ) AS rn
+                 FROM messages
+                 WHERE account_id = ?1 AND thread_id IN (SELECT id FROM mb_threads)
+               ) WHERE rn = 1
+             ) m ON m.account_id = t.account_id AND m.thread_id = t.id
+             WHERE t.account_id = ?1 AND t.shared_mailbox_id = ?2
+               AND tl.label_id = ?3
+             GROUP BY t.account_id, t.id
+             ORDER BY t.is_pinned DESC, t.last_message_at DESC
+             LIMIT ?4"
+        )
+    } else {
+        format!(
+            "WITH mb_threads AS (
+               SELECT id FROM threads
+               WHERE account_id = ?1 AND shared_mailbox_id = ?2
+             )
+             SELECT t.*, m.from_name, m.from_address FROM threads t
+             LEFT JOIN (
+               SELECT id, account_id, thread_id, from_name, from_address FROM (
+                 SELECT id, account_id, thread_id, from_name, from_address,
+                        ROW_NUMBER() OVER (
+                          PARTITION BY account_id, thread_id
+                          ORDER BY date DESC, id DESC
+                        ) AS rn
+                 FROM messages
+                 WHERE account_id = ?1 AND thread_id IN (SELECT id FROM mb_threads)
+               ) WHERE rn = 1
+             ) m ON m.account_id = t.account_id AND m.thread_id = t.id
+             WHERE t.account_id = ?1 AND t.shared_mailbox_id = ?2
+             ORDER BY t.is_pinned DESC, t.last_message_at DESC
+             LIMIT ?3"
+        )
+    };
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+
+    if label_id.is_some() {
+        stmt.query_map(
+            rusqlite::params![account_id, mailbox_id, label_id, lim],
+            DbThread::from_row,
+        )
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+    } else {
+        stmt.query_map(
+            rusqlite::params![account_id, mailbox_id, lim],
+            DbThread::from_row,
+        )
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+    }
+}
+
 /// Count local drafts that don't yet have a server-synced thread.
 fn count_local_drafts(
     conn: &Connection,
@@ -564,4 +661,57 @@ fn count_local_drafts(
 
     conn.query_row(&sql, param_refs.as_slice(), |row| row.get::<_, i64>("cnt"))
         .map_err(|e| e.to_string())
+}
+
+/// A single item from a public folder.
+#[derive(Debug, Clone)]
+pub struct PublicFolderItem {
+    pub item_id: String,
+    pub account_id: String,
+    pub folder_id: String,
+    pub subject: Option<String>,
+    pub sender_name: Option<String>,
+    pub sender_email: Option<String>,
+    pub received_at: Option<i64>,
+    pub body_preview: Option<String>,
+    pub is_read: bool,
+    pub item_class: String,
+}
+
+/// Items from a pinned public folder, ordered by received date.
+pub fn get_public_folder_items(
+    conn: &Connection,
+    account_id: &str,
+    folder_id: &str,
+    limit: Option<i64>,
+) -> Result<Vec<PublicFolderItem>, String> {
+    let lim = limit.unwrap_or(200);
+    let mut stmt = conn
+        .prepare(
+            "SELECT item_id, account_id, folder_id, subject, sender_name,
+                    sender_email, received_at, body_preview, is_read, item_class
+             FROM public_folder_items
+             WHERE account_id = ?1 AND folder_id = ?2
+             ORDER BY received_at DESC
+             LIMIT ?3",
+        )
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_map(rusqlite::params![account_id, folder_id, lim], |row| {
+        Ok(PublicFolderItem {
+            item_id: row.get("item_id")?,
+            account_id: row.get("account_id")?,
+            folder_id: row.get("folder_id")?,
+            subject: row.get("subject")?,
+            sender_name: row.get("sender_name")?,
+            sender_email: row.get("sender_email")?,
+            received_at: row.get("received_at")?,
+            body_preview: row.get("body_preview")?,
+            is_read: row.get::<_, i64>("is_read")? != 0,
+            item_class: row.get("item_class")?,
+        })
+    })
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
 }

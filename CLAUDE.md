@@ -54,7 +54,7 @@ Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 
 These are non-obvious behaviors of the `jmap-client` crate that will matter if the code is modified:
 
-- **Getting all mailboxes**: `mailbox_get(id, props)` fetches ONE mailbox. To get all, use the builder pattern: `request.get_mailbox()` with no ID set.
+- **Getting all mailboxes**: `mailbox_get(id, props)` fetches ONE mailbox. To get all, use the builder: `MailboxGet::new(&account_id)` with no IDs set, submitted via `request.call(get)`. See `sync/mailbox.rs:fetch_all_mailboxes_for()`.
 - **`mb.role()`** returns `Role` directly (not `Option<Role>`). Compare with `Role::None` to check if unset.
 - **`mb.total_emails()`** returns `usize` directly, not `Option<usize>`.
 - **`take_id()` / `take_list()`** require `let mut` on the response object.
@@ -106,22 +106,25 @@ These are non-obvious behaviors of the `jmap-client` crate that will matter if t
 
 ## Code Review (`review`)
 
-`review` is a CLI tool that fans out code review requests to persistent AI sessions. Each session is a long-lived Claude or Codex conversation that has already been onboarded with project context for a specific review lens. Configuration lives in `.review.md` at the repo root.
+`review` is a CLI tool that fans out code review requests to persistent AI sessions. Each session is a long-lived Claude or Codex conversation that has already been onboarded with project context for a specific review lens. Configuration lives in `.review.toml` at the repo root.
 
 Four archetypes are configured: `security`, `bugs`, `perf`, `arch`. The `sweep` group fans out to all four in parallel.
 
-Instructions are piped via stdin. Flags tell the reviewer what to look at:
+Instructions are piped via stdin. The agents fetch code themselves — just tell them what to look at:
 
 ```bash
-echo "check the new sync logic" | review bugs --staged
-echo "review this change" | review arch --commit abc123
-echo "full review" | review sweep --general
-echo "look at stores" | review perf --document crates/stores/src/body_store.rs
+echo "check the new sync logic" | review bugs
+echo "review this change" | review arch
+echo "full review" | review sweep
+echo "look at stores" | review perf
 ```
 
-Other flags: `--unstaged`, `--range <a..b>`. Use `--dry-run` to see the assembled prompt without sending.
+Without `--anchor`, stdin goes directly to the session — the sessions are already onboarded with project context and their review focus. Use `--anchor` for the first review in a session or to re-anchor a stale session. When using `--anchor`, reinforce the session's identity in your piped instructions:
 
-Prefer `--raw` for ongoing use — the sessions are already onboarded with project context and their review focus, so the generic archetype prefix is redundant. Omit `--raw` for the first review in a session or occasionally to re-anchor a stale session.
+- **security**: "Remember: you're our security auditor for ratatoskr."
+- **bugs**: "Remember: you're our QA engineer embedded on ratatoskr."
+- **perf**: "Remember: you're our performance engineer reviewing ratatoskr."
+- **arch**: "Remember: you're our software architect reviewing ratatoskr."
 
 ## Commit rules
 

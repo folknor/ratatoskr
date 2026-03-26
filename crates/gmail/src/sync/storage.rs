@@ -99,6 +99,7 @@ fn upsert_thread_record(
         thread_id,
         &aggregate,
         Some(is_important),
+        None,
     )
 }
 

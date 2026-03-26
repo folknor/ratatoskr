@@ -1,4 +1,5 @@
 use ratatoskr_command_palette::{CommandArgs, CommandContext, CommandId, ViewType};
+use ratatoskr_core::scope::ViewScope;
 
 use crate::App;
 use crate::Message;
@@ -268,14 +269,18 @@ fn view_type_from_label(app: &App, label_id: &str) -> (ViewType, Option<String>)
 fn active_account_info(
     app: &App,
 ) -> (Option<String>, Option<ratatoskr_command_palette::ProviderKind>) {
-    // 1. If sidebar is scoped to a single account, use that.
-    if let Some(account) = app
-        .sidebar
-        .selected_account
-        .and_then(|idx| app.sidebar.accounts.get(idx))
-    {
-        let pk = provider_str_to_kind(&account.provider);
-        return (Some(account.id.clone()), pk);
+    // 1. Derive account from the current view scope.
+    let scope_account: Option<&str> = match &app.sidebar.selected_scope {
+        ViewScope::Account(id) => Some(id.as_str()),
+        ViewScope::SharedMailbox { account_id, .. }
+        | ViewScope::PublicFolder { account_id, .. } => Some(account_id.as_str()),
+        ViewScope::AllAccounts => None,
+    };
+    if let Some(aid) = scope_account {
+        if let Some(account) = app.sidebar.accounts.iter().find(|a| a.id == aid) {
+            let pk = provider_str_to_kind(&account.provider);
+            return (Some(account.id.clone()), pk);
+        }
     }
     // 2. If in unified view but a thread is selected, derive account
     //    from the selected thread. Look up provider from account list.

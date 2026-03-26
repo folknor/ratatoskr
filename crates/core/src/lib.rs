@@ -28,6 +28,7 @@ pub mod oauth;
 pub use ratatoskr_db::progress;
 pub mod provider;
 pub mod scheduled_send;
+pub mod scope;
 pub mod send;
 pub use ratatoskr_search as search;
 pub mod search_pipeline;

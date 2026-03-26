@@ -2,6 +2,7 @@ use iced::Task;
 
 use crate::command_dispatch::NavigationTarget;
 use crate::{App, Message};
+use ratatoskr_core::scope::ViewScope;
 
 impl App {
     /// Handle navigation to a specific target.
@@ -28,13 +29,6 @@ impl App {
 
     /// Select an account by its ID, updating the sidebar scope.
     fn select_account_by_id(&mut self, account_id: &str) {
-        let idx = self
-            .sidebar
-            .accounts
-            .iter()
-            .position(|a| a.id == account_id);
-        if let Some(idx) = idx {
-            self.sidebar.selected_account = Some(idx);
-        }
+        self.sidebar.selected_scope = ViewScope::Account(account_id.to_string());
     }
 }
