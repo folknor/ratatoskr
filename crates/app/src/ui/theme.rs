@@ -286,6 +286,10 @@ pub enum ContainerClass {
     TimeGridNowLine,
     /// Floating chord indicator badge (bottom-right).
     ChordIndicator,
+    /// Chat bubble — sent by user (accent background).
+    ChatBubbleSent,
+    /// Chat bubble — received from contact (surface background).
+    ChatBubbleReceived,
 }
 
 impl ContainerClass {
@@ -322,6 +326,8 @@ impl ContainerClass {
             Self::TimeGridTodayHeader => style_time_grid_today_header_container,
             Self::TimeGridNowLine => style_time_grid_now_line_container,
             Self::ChordIndicator => style_chord_indicator_container,
+            Self::ChatBubbleSent => style_chat_bubble_sent,
+            Self::ChatBubbleReceived => style_chat_bubble_received,
         }
     }
 }
@@ -1278,6 +1284,24 @@ fn style_chord_indicator_container(theme: &Theme) -> container::Style {
             offset: iced::Vector::new(0.0, 2.0),
             blur_radius: 4.0,
         },
+        ..Default::default()
+    }
+}
+
+fn style_chat_bubble_sent(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.primary.weak.color.into()),
+        border: border::rounded(super::layout::CHAT_BUBBLE_RADIUS),
+        ..Default::default()
+    }
+}
+
+fn style_chat_bubble_received(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.background.weakest.color.into()),
+        border: border::rounded(super::layout::CHAT_BUBBLE_RADIUS),
         ..Default::default()
     }
 }

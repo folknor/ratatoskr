@@ -27,6 +27,7 @@ pub enum NavigationTarget {
     Label { label_id: String, account_id: String },
     Search { query: String },
     PinnedSearch { id: i64 },
+    Chat { email: String },
 }
 
 impl NavigationTarget {
@@ -55,7 +56,7 @@ impl NavigationTarget {
             Self::Attachments => Some("ATTACHMENTS".to_string()),
             Self::SmartFolder { id } => Some(id.clone()),
             Self::Label { label_id, .. } => Some(label_id.clone()),
-            Self::Search { .. } | Self::PinnedSearch { .. } => None,
+            Self::Search { .. } | Self::PinnedSearch { .. } | Self::Chat { .. } => None,
         }
     }
 }
@@ -223,6 +224,7 @@ fn view_type_from_target(
         }
         NavigationTarget::Search { .. } => (ViewType::Search, None),
         NavigationTarget::PinnedSearch { .. } => (ViewType::PinnedSearch, None),
+        NavigationTarget::Chat { .. } => (ViewType::Inbox, None), // Chat view doesn't map to a ViewType
     }
 }
 

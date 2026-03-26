@@ -107,3 +107,7 @@ pub enum AddAccount {}
 /// Brand for compose contact autocomplete.
 #[derive(Debug)]
 pub enum Autocomplete {}
+
+/// Brand for chat timeline loads.
+#[derive(Debug)]
+pub enum Chat {}

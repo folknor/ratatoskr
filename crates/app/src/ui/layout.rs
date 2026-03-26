@@ -479,3 +479,22 @@ pub const EMOJI_BUTTON_SIZE: f32 = 36.0;
 pub const EMOJI_GRID_COLUMNS: usize = 8;
 /// Font size for emoji glyphs in the picker grid.
 pub const EMOJI_FONT_SIZE: f32 = 20.0;
+
+// ── Chat timeline ───────────────────────────────────────
+/// Maximum width for a chat bubble (prevents full-width stretch).
+pub const CHAT_BUBBLE_MAX_WIDTH: f32 = 480.0;
+/// Border radius for chat bubbles (larger than card radius).
+pub const CHAT_BUBBLE_RADIUS: f32 = 12.0;
+/// Internal padding for chat bubble content.
+pub const PAD_CHAT_BUBBLE: Padding = Padding {
+    top: 8.0,
+    right: 12.0,
+    bottom: 8.0,
+    left: 12.0,
+};
+/// Spacing between consecutive same-sender bubbles.
+pub const CHAT_BUBBLE_SPACING: f32 = 4.0;
+/// Spacing between sender changes (larger gap).
+pub const CHAT_GROUP_SPACING: f32 = 12.0;
+/// Spacing around date separator lines.
+pub const CHAT_DATE_SEPARATOR_SPACING: f32 = 16.0;
