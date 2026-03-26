@@ -1012,7 +1012,7 @@ impl App {
                     }
                 }
                 // Reload navigation + threads to reflect any changes from sync
-                self.nav_generation.next();
+                let _ = self.nav_generation.next();
                 self.load_navigation_and_threads()
             }
             Message::SetReadingPanePosition(_pos) => Task::none(),
@@ -1122,8 +1122,7 @@ impl App {
             Message::AccountDeleted(Ok(())) | Message::AccountUpdated(Ok(())) => {
                 // Reload accounts after delete or update
                 let db = Arc::clone(&self.db);
-                self.nav_generation.next();
-                let load_gen = self.nav_generation.current();
+                let load_gen = self.nav_generation.next();
                 Task::perform(
                     async move { (load_gen, load_accounts(db).await) },
                     |(g, result)| Message::AccountsLoaded(g, result),
@@ -1451,8 +1450,8 @@ impl App {
         self.clear_pinned_search_context();
         self.navigation_target = navigation_target;
         self.clear_thread_selection();
-        self.nav_generation.next();
-        self.thread_generation.next();
+        let _ = self.nav_generation.next();
+        let _ = self.thread_generation.next();
         self.update_thread_list_context_from_sidebar();
     }
 
@@ -1520,7 +1519,7 @@ impl App {
             ThreadListEvent::WidenSearchScope => {
                 // Widen search scope to all accounts
                 self.sidebar.selected_scope = ViewScope::AllAccounts;
-                self.nav_generation.next();
+                let _ = self.nav_generation.next();
                 self.update_thread_list_context_from_sidebar();
                 self.update(Message::SearchExecute)
             }
@@ -2206,11 +2205,11 @@ impl App {
             self.reading_pane.search_highlight_terms.clear();
         }
 
-        self.thread_generation.next();
+        let thread_gen = self.thread_generation.next();
         if let Some(thread) = thread {
             let account_id = thread.account_id.clone();
             let thread_id = thread.id.clone();
-            let load_gen = self.thread_generation.current();
+            let load_gen = thread_gen;
 
             // Use core's thread detail if body store is available,
             // otherwise fall back to the old separate queries.

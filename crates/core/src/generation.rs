@@ -1,7 +1,8 @@
 /// A monotonically increasing counter for guarding async loads against
-/// stale results. The only way to get a token is to bump the counter,
-/// and the only way to check freshness is to compare a token — this
-/// makes it impossible to forget the bump or the check.
+/// stale results. `next()` bumps and returns a token in one step,
+/// making it hard to forget the bump. `is_current()` is the only way
+/// to check freshness. `current()` reads without bumping — use only
+/// when capturing after an earlier `next()` in the same logical operation.
 #[derive(Debug)]
 pub struct GenerationCounter {
     value: u64,
@@ -13,7 +14,8 @@ impl GenerationCounter {
     }
 
     /// Bump the counter and return a token capturing the new value.
-    /// This is the only way to obtain a token.
+    /// Prefer `let token = counter.next()` over `counter.next(); counter.current()`.
+    #[must_use = "use the returned token, or `let _ = counter.next()` to invalidate without capturing"]
     pub fn next(&mut self) -> GenerationToken {
         self.value = self.value.wrapping_add(1);
         GenerationToken(self.value)

@@ -30,9 +30,9 @@ pub enum RenderingMode {
 
 #[derive(Debug, Clone)]
 pub enum MessageViewMessage {
-    /// Body content loaded from the body store. u64 is generation counter.
+    /// Body content loaded from the body store.
     BodyLoaded(ratatoskr_core::generation::GenerationToken, Result<(Option<String>, Option<String>), String>),
-    /// Attachments loaded for this message. u64 is generation counter.
+    /// Attachments loaded for this message.
     AttachmentsLoaded(ratatoskr_core::generation::GenerationToken, Result<Vec<MessageViewAttachment>, String>),
     /// Raw source loaded (for Source rendering mode).
     RawSourceLoaded(Result<String, String>),
