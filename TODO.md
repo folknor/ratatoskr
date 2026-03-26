@@ -192,14 +192,14 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 ## Review Findings — Yesterday's Commits (review agent, 2026-03-27)
 
 ### Auto-responses (8d04916)
-- [ ] **Graph push sends wrong JSON shape for reply messages** — `internalReplyMessage` wrapped in `{ "message": ... }` object instead of plain string. Will fail or corrupt reply text on push. `auto_responses.rs:200`
-- [ ] **Graph schedule discards timezone on fetch** — Reads `dateTime` but drops `timeZone`. Pushes back with hardcoded `"UTC"`. Round-trip shifts out-of-office window for non-UTC mailboxes. `auto_responses.rs:155, 205`
+- [x] **Graph push sends wrong JSON shape for reply messages** — `internalReplyMessage` wrapped in `{ "message": ... }` object instead of plain string. Will fail or corrupt reply text on push. `auto_responses.rs:200`
+- [x] **Graph schedule discards timezone on fetch** — Reads `dateTime` but drops `timeZone`. Pushes back with hardcoded `"UTC"`. Round-trip shifts out-of-office window for non-UTC mailboxes. `auto_responses.rs:155, 205`
 - [ ] **JMAP enable + set_dates non-atomic** — Two separate `VacationResponse/set` requests. If second fails, vacation is enabled without schedule constraints. Should use a single set request. `auto_responses.rs:384-399`
 - [ ] **Gmail `restrictToDomain` mapped to `ContactsOnly`** — Lossy round-trip. Domain restriction becomes contacts restriction on push. Need `ExternalAudience::DomainOnly` variant or explicit handling. `auto_responses.rs:261, 290`
 - [ ] **Exchange dates not normalized to RFC 3339** — Cross-provider push (Exchange → Gmail) silently drops dates because `.NET` datetime format lacks timezone offset. `auto_responses.rs:155, 281`
 
 ### IMAP OAUTHBEARER (133fff2)
-- [ ] **Raw IMAP helpers not updated for `"oauthbearer"` auth method** — `raw_fetch_messages` and `raw_fetch_diagnostic` fall through to LOGIN, sending bearer token as password. `raw.rs:57, 190`
+- [x] **Raw IMAP helpers not updated for `"oauthbearer"` auth method** — `raw_fetch_messages` and `raw_fetch_diagnostic` fall through to LOGIN, sending bearer token as password. `raw.rs:57, 190`
 - [ ] **RFC 7628 GS2 header may need full email as authzid** — Current format uses bare username. Strict implementations may reject. `connection.rs:71`
 - [ ] **OAUTHBEARER error acknowledgment should be `\x01`** — Current implementation sends empty vec on second challenge instead of RFC 7628 §3.2.3 single `\x01` byte. `connection.rs:78`
 
