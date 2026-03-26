@@ -318,6 +318,11 @@ pub enum Message {
 
     // Thread detail via core
     ThreadDetailLoaded(GenerationToken<ThreadDetail>, Result<db::AppThreadDetail, String>),
+    // Chat
+    ChatTimeline(ui::chat_timeline::ChatTimelineMessage),
+    ChatTimelineLoaded(GenerationToken<ratatoskr_core::generation::Chat>, Result<Vec<ratatoskr_core::chat::ChatMessage>, String>),
+    ChatOlderLoaded(Result<Vec<ratatoskr_core::chat::ChatMessage>, String>),
+    ChatReadMarked,
 
     // Pinned search management
     ClearAllPinnedSearches,
@@ -385,6 +390,10 @@ struct App {
     pending_chord: Option<PendingChord>,
     palette: Palette,
     undo_stack: UndoStack,
+
+    // Chat state
+    chat_timeline: Option<ui::chat_timeline::ChatTimeline>,
+    chat_generation: GenerationCounter<ratatoskr_core::generation::Chat>,
 
     // Search state
     search_state: Option<Arc<ratatoskr_core::search::SearchState>>,
@@ -564,6 +573,8 @@ impl App {
             ),
             undo_stack: UndoStack::default(),
             search_state,
+            chat_timeline: None,
+            chat_generation: GenerationCounter::new(),
             search_generation: GenerationCounter::new(),
             search_query: UndoableText::new(),
             search_debounce_deadline: None,
@@ -1173,6 +1184,40 @@ impl App {
                 Task::none()
             }
 
+            // Chat timeline
+            Message::ChatTimeline(msg) => {
+                if let Some(ref mut timeline) = self.chat_timeline {
+                    let (task, event) = timeline.update(msg);
+                    let task = task.map(Message::ChatTimeline);
+                    if let Some(event) = event {
+                        return Task::batch([task, self.handle_chat_timeline_event(event)]);
+                    }
+                    return task;
+                }
+                Task::none()
+            }
+            Message::ChatTimelineLoaded(g, _) if !self.chat_generation.is_current(g) => {
+                Task::none()
+            }
+            Message::ChatTimelineLoaded(_, Ok(messages)) => {
+                self.handle_chat_timeline_loaded(messages)
+            }
+            Message::ChatTimelineLoaded(_, Err(e)) => {
+                log::error!("ChatTimelineLoaded error: {e}");
+                if let Some(ref mut tl) = self.chat_timeline {
+                    tl.loading = false;
+                }
+                Task::none()
+            }
+            Message::ChatOlderLoaded(Ok(messages)) => {
+                self.handle_chat_older_loaded(messages)
+            }
+            Message::ChatOlderLoaded(Err(e)) => {
+                log::error!("ChatOlderLoaded error: {e}");
+                Task::none()
+            }
+            Message::ChatReadMarked => Task::none(),
+
             // Clear all pinned searches
             Message::ClearAllPinnedSearches => self.handle_clear_all_pinned_searches(),
 
@@ -1305,33 +1350,65 @@ impl App {
                     .width(SIDEBAR_MIN_WIDTH)
                     .height(Length::Fill);
 
-                let thread_list = container(self.thread_list.view().map(Message::ThreadList))
-                    .width(self.thread_list_width)
+                let is_chat = matches!(
+                    self.navigation_target,
+                    Some(NavigationTarget::Chat { .. })
+                );
+
+                if is_chat {
+                    // Chat view: sidebar + full-width chat timeline
+                    let chat_view = if let Some(ref timeline) = self.chat_timeline {
+                        container(timeline.view().map(Message::ChatTimeline))
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                    } else {
+                        container(
+                            iced::widget::text("No chat selected")
+                                .style(ui::theme::TextClass::Muted.style()),
+                        )
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                    };
+
+                    let status_bar = self.status_bar_view();
+                    let content_area = column![
+                        chat_view,
+                        status_bar,
+                    ];
+
+                    row![sidebar, content_area].height(Length::Fill)
+                } else {
+                    // Normal mail view: sidebar + thread list + reading pane
+                    let thread_list = container(self.thread_list.view().map(Message::ThreadList))
+                        .width(self.thread_list_width)
+                        .height(Length::Fill);
+
+                    let divider_thread = self.build_divider(Divider::ThreadList);
+
+                    let ctx = command_dispatch::build_context(self);
+                    let reading_pane = container(
+                        self.reading_pane.view_with_commands(&self.registry, &self.binding_table, &ctx),
+                    )
+                    .width(Length::Fill)
                     .height(Length::Fill);
 
-                let divider_thread = self.build_divider(Divider::ThreadList);
+                    let rs_data = ui::right_sidebar::RightSidebarData {
+                        calendar: &self.calendar,
+                        threads: &self.thread_list.threads,
+                    };
+                    let right_sidebar = ui::right_sidebar::view(self.right_sidebar_open, &rs_data);
 
-                let ctx = command_dispatch::build_context(self);
-                let reading_pane = container(
-                    self.reading_pane.view_with_commands(&self.registry, &self.binding_table, &ctx),
-                )
-                .width(Length::Fill)
-                .height(Length::Fill);
+                    let status_bar = self.status_bar_view();
+                    let content_area = column![
+                        row![thread_list, divider_thread, reading_pane, right_sidebar]
+                            .height(Length::Fill),
+                        status_bar,
+                    ];
 
-                let rs_data = ui::right_sidebar::RightSidebarData {
-                    calendar: &self.calendar,
-                    threads: &self.thread_list.threads,
-                };
-                let right_sidebar = ui::right_sidebar::view(self.right_sidebar_open, &rs_data);
-
-                let status_bar = self.status_bar_view();
-                let content_area = column![
-                    row![thread_list, divider_thread, reading_pane, right_sidebar]
-                        .height(Length::Fill),
-                    status_bar,
-                ];
-
-                row![sidebar, content_area].height(Length::Fill)
+                    row![sidebar, content_area].height(Length::Fill)
+                }
             }
         };
 
@@ -1456,6 +1533,7 @@ impl App {
         self.clear_pinned_search_context();
         self.navigation_target = navigation_target;
         self.clear_thread_selection();
+        self.chat_timeline = None;
         let _ = self.nav_generation.next();
         let _ = self.thread_generation.next();
         self.update_thread_list_context_from_sidebar();

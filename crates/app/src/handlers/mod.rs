@@ -8,6 +8,7 @@
 
 mod accounts;
 mod calendar;
+mod chat;
 pub(crate) mod commands;
 mod contacts;
 mod keyboard;
