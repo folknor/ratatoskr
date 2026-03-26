@@ -329,7 +329,7 @@ fn build_all_account_tags(
              LEFT JOIN threads t ON tl.thread_id = t.id AND tl.account_id = t.account_id
              WHERE l.label_kind = 'tag'
                AND l.visible = 1
-               AND (t.shared_mailbox_id IS NULL OR t.id IS NULL)
+               AND (t.shared_mailbox_id IS NULL OR t.id IS NULL) AND (t.is_chat_thread = 0 OR t.id IS NULL)
              GROUP BY LOWER(TRIM(l.name))
              ORDER BY l.name COLLATE NOCASE ASC",
         )
@@ -391,7 +391,7 @@ fn get_label_unread_counts(
              INNER JOIN thread_labels tl
                ON tl.account_id = t.account_id AND tl.thread_id = t.id
              WHERE t.account_id = ?1 AND t.is_read = 0
-               AND t.shared_mailbox_id IS NULL
+               AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
              GROUP BY tl.label_id",
         )
         .map_err(|e| e.to_string())?;

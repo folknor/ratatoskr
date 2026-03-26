@@ -118,6 +118,20 @@ fn store_thread_to_db(
     set_thread_labels(tx, account_id, thread_id, messages)?;
     insert_exchange_reactions(tx, account_id, messages)?;
 
+    // Populate thread_participants from message address fields.
+    for msg in messages {
+        sync_persistence::upsert_thread_participants(
+            tx,
+            account_id,
+            thread_id,
+            msg.base.from_address.as_deref(),
+            msg.base.to_addresses.as_deref(),
+            msg.base.cc_addresses.as_deref(),
+            msg.base.bcc_addresses.as_deref(),
+        )?;
+    }
+    sync_persistence::maybe_update_chat_state(tx, account_id, thread_id)?;
+
     // Add category-backed labels to thread_labels for the unified labels system.
     let mut seen_cats = std::collections::HashSet::new();
     for msg in messages {

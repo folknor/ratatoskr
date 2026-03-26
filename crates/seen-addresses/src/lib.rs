@@ -1,6 +1,6 @@
 mod backfill;
 mod ingest;
-mod parse;
+pub mod parse;
 mod types;
 
 pub use backfill::backfill_seen_addresses;

@@ -5,6 +5,7 @@ pub mod auto_responses;
 pub mod bimi;
 pub use ratatoskr_stores::body_store;
 pub mod caldav;
+pub mod chat;
 pub mod carddav;
 pub mod cloud_attachments;
 pub mod contacts;

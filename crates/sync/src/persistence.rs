@@ -192,6 +192,163 @@ pub fn upsert_thread_aggregate(
 /// Delete messages from the `messages` table and clean up orphaned threads.
 ///
 /// For each deleted message, looks up its parent thread. After deletion:
+/// Populate the `thread_participants` table from a message's address fields.
+///
+/// Extracts unique lowercase email addresses from from_address, to_addresses,
+/// cc_addresses, and bcc_addresses. Uses INSERT OR IGNORE so duplicates are
+/// harmless.
+pub fn upsert_thread_participants(
+    tx: &Transaction,
+    account_id: &str,
+    thread_id: &str,
+    from_address: Option<&str>,
+    to_addresses: Option<&str>,
+    cc_addresses: Option<&str>,
+    bcc_addresses: Option<&str>,
+) -> Result<(), String> {
+    let mut emails = HashSet::new();
+
+    // from_address is a single email (possibly with display name)
+    if let Some(from) = from_address {
+        let parsed = ratatoskr_seen_addresses::parse::parse_address_list(from);
+        for (_, email) in parsed {
+            emails.insert(email.to_lowercase());
+        }
+    }
+
+    for field in [to_addresses, cc_addresses, bcc_addresses].into_iter().flatten() {
+        let parsed = ratatoskr_seen_addresses::parse::parse_address_list(field);
+        for (_, email) in parsed {
+            emails.insert(email.to_lowercase());
+        }
+    }
+
+    for email in &emails {
+        tx.execute(
+            "INSERT OR IGNORE INTO thread_participants (account_id, thread_id, email) \
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params![account_id, thread_id, email],
+        )
+        .map_err(|e| format!("insert thread_participant: {e}"))?;
+    }
+
+    Ok(())
+}
+
+/// Update `is_chat_thread` flag and chat contact summary after thread
+/// participants change. Called from sync paths after `upsert_thread_participants`.
+///
+/// `user_emails` should be all email addresses across all user accounts,
+/// lowercased.
+pub fn maybe_update_chat_state(
+    tx: &Transaction,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<(), String> {
+    // Resolve all user email addresses from accounts table
+    let mut email_stmt = tx
+        .prepare("SELECT email FROM accounts")
+        .map_err(|e| format!("prepare user emails: {e}"))?;
+    let user_emails: Vec<String> = email_stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("query user emails: {e}"))?
+        .filter_map(Result::ok)
+        .map(|e| e.to_lowercase())
+        .collect();
+    drop(email_stmt);
+    // Check if any participant in this thread is a designated chat contact
+    let chat_email: Option<String> = tx
+        .query_row(
+            "SELECT cc.email FROM chat_contacts cc \
+             INNER JOIN thread_participants tp ON LOWER(tp.email) = cc.email \
+             WHERE tp.account_id = ?1 AND tp.thread_id = ?2 \
+             LIMIT 1",
+            rusqlite::params![account_id, thread_id],
+            |row| row.get(0),
+        )
+        .ok();
+
+    let Some(ref chat_email) = chat_email else {
+        // No chat contact in this thread — ensure flag is cleared
+        tx.execute(
+            "UPDATE threads SET is_chat_thread = 0 \
+             WHERE account_id = ?1 AND id = ?2 AND is_chat_thread = 1",
+            rusqlite::params![account_id, thread_id],
+        )
+        .map_err(|e| format!("clear chat flag: {e}"))?;
+        return Ok(());
+    };
+
+    // Count distinct participants
+    let participant_count: i64 = tx
+        .query_row(
+            "SELECT COUNT(DISTINCT LOWER(email)) FROM thread_participants \
+             WHERE account_id = ?1 AND thread_id = ?2",
+            rusqlite::params![account_id, thread_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("count participants: {e}"))?;
+
+    // Check if one participant is the user
+    let has_user = user_emails.iter().any(|ue| {
+        tx.query_row(
+            "SELECT COUNT(*) FROM thread_participants \
+             WHERE account_id = ?1 AND thread_id = ?2 AND LOWER(email) = ?3",
+            rusqlite::params![account_id, thread_id, ue],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+            > 0
+    });
+
+    let is_chat = participant_count == 2 && has_user;
+
+    tx.execute(
+        "UPDATE threads SET is_chat_thread = ?3 \
+         WHERE account_id = ?1 AND id = ?2 AND is_chat_thread != ?3",
+        rusqlite::params![account_id, thread_id, i32::from(is_chat)],
+    )
+    .map_err(|e| format!("update chat flag: {e}"))?;
+
+    // Update summary if this is a chat thread
+    if is_chat {
+        // Latest message (from either direction)
+        let latest: Option<(Option<String>, i64)> = tx
+            .query_row(
+                "SELECT m.snippet, m.date FROM messages m \
+                 INNER JOIN threads t ON m.thread_id = t.id AND m.account_id = t.account_id \
+                 INNER JOIN thread_participants tp \
+                   ON tp.account_id = m.account_id AND tp.thread_id = m.thread_id \
+                 WHERE t.is_chat_thread = 1 AND LOWER(tp.email) = ?1 \
+                 ORDER BY m.date DESC LIMIT 1",
+                rusqlite::params![chat_email],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok();
+
+        let unread: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM messages m \
+                 INNER JOIN threads t ON m.thread_id = t.id AND m.account_id = t.account_id \
+                 WHERE t.is_chat_thread = 1 AND m.is_read = 0 \
+                   AND LOWER(m.from_address) = ?1",
+                rusqlite::params![chat_email],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if let Some((preview, ts)) = latest {
+            let _ = tx.execute(
+                "UPDATE chat_contacts SET latest_message_preview = ?2, \
+                 latest_message_at = ?3, unread_count = ?4 WHERE email = ?1",
+                rusqlite::params![chat_email, preview, ts, unread],
+            );
+        }
+    }
+
+    Ok(())
+}
+
 /// - Orphan threads (0 remaining messages) are removed along with their labels.
 /// - Surviving threads are reaggregated from their remaining messages.
 ///

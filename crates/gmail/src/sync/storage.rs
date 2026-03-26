@@ -69,6 +69,19 @@ fn store_thread_to_db(
     set_thread_labels(&tx, account_id, thread_id, messages)?;
     insert_reactions(&tx, account_id, messages)?;
 
+    for msg in messages {
+        sync_persistence::upsert_thread_participants(
+            &tx,
+            account_id,
+            thread_id,
+            msg.base.from_address.as_deref(),
+            msg.base.to_addresses.as_deref(),
+            msg.base.cc_addresses.as_deref(),
+            msg.base.bcc_addresses.as_deref(),
+        )?;
+    }
+    sync_persistence::maybe_update_chat_state(&tx, account_id, thread_id)?;
+
     tx.commit().map_err(|e| format!("commit: {e}"))?;
     Ok(())
 }

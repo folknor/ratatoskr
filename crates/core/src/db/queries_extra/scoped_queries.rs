@@ -64,7 +64,7 @@ pub fn get_threads_scoped(
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
              WHERE {scope_clause} AND tl.label_id = ?{next_idx}
-               AND t.shared_mailbox_id IS NULL
+               AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
              GROUP BY t.account_id, t.id
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?{limit_idx} OFFSET ?{offset_idx}",
@@ -77,7 +77,7 @@ pub fn get_threads_scoped(
             "SELECT t.*, m.from_name, m.from_address FROM threads t
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-             WHERE {scope_clause} AND t.shared_mailbox_id IS NULL
+             WHERE {scope_clause} AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?{limit_idx} OFFSET ?{offset_idx}",
             limit_idx = next_idx,
@@ -149,13 +149,13 @@ pub fn get_thread_count_scoped(
             "SELECT COUNT(DISTINCT t.account_id || '/' || t.id) AS cnt FROM threads t
              INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
              WHERE {scope_clause} AND tl.label_id = ?{next_idx}
-               AND t.shared_mailbox_id IS NULL"
+               AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0"
         );
         execute_count_query(conn, &sql, scope_params, Some(lid))
     } else {
         let sql = format!(
             "SELECT COUNT(*) AS cnt FROM threads t WHERE {scope_clause}
-               AND t.shared_mailbox_id IS NULL"
+               AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0"
         );
         execute_count_query(conn, &sql, scope_params, None)
     }
@@ -172,7 +172,7 @@ pub fn get_unread_count_scoped(
         "SELECT COUNT(*) AS cnt FROM threads t
          INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
          WHERE {scope_clause} AND tl.label_id = 'INBOX' AND t.is_read = 0
-           AND t.shared_mailbox_id IS NULL"
+           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0"
     );
 
     execute_count_query(conn, &sql, scope_params, None)
@@ -242,7 +242,7 @@ fn get_label_folder_unread_counts(
         "SELECT tl.label_id AS folder_id, COUNT(*) AS unread_count FROM threads t
          INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
          WHERE {scope_clause} AND t.is_read = 0
-           AND t.shared_mailbox_id IS NULL
+           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
            AND tl.label_id IN ({})
          GROUP BY tl.label_id",
         placeholders.join(", ")
@@ -274,7 +274,7 @@ fn get_flag_folder_unread_count(
     let sql = format!(
         "SELECT COUNT(*) AS cnt FROM threads t
          WHERE {scope_clause} AND t.is_read = 0 AND t.{flag_col} = 1
-           AND t.shared_mailbox_id IS NULL"
+           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0"
     );
 
     let param_refs: Vec<&dyn rusqlite::types::ToSql> =
@@ -306,7 +306,7 @@ fn get_label_folder_unread_counts_by_account(
         "SELECT tl.label_id AS folder_id, t.account_id, COUNT(*) AS unread_count FROM threads t
          INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
          WHERE {scope_clause} AND t.is_read = 0
-           AND t.shared_mailbox_id IS NULL
+           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
            AND tl.label_id IN ({})
          GROUP BY tl.label_id, t.account_id",
         placeholders.join(", ")
@@ -338,7 +338,7 @@ fn get_flag_folder_unread_by_account(
     let sql = format!(
         "SELECT t.account_id, COUNT(*) AS unread_count FROM threads t
          WHERE {scope_clause} AND t.is_read = 0 AND t.{flag_col} = 1
-           AND t.shared_mailbox_id IS NULL
+           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
          GROUP BY t.account_id"
     );
 
@@ -402,7 +402,7 @@ pub fn get_draft_threads(
          LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
          ) m ON m.account_id = t.account_id AND m.thread_id = t.id
          WHERE {scope_clause} AND tl.label_id = ?{next_idx}
-           AND t.shared_mailbox_id IS NULL
+           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
          GROUP BY t.account_id, t.id
          ORDER BY t.is_pinned DESC, t.last_message_at DESC
          LIMIT ?{limit_idx} OFFSET ?{offset_idx}",
@@ -431,7 +431,7 @@ fn get_flag_threads(
          LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
          ) m ON m.account_id = t.account_id AND m.thread_id = t.id
          WHERE {scope_clause} AND t.{flag_col} = 1
-           AND t.shared_mailbox_id IS NULL
+           AND t.shared_mailbox_id IS NULL AND t.is_chat_thread = 0
          ORDER BY t.is_pinned DESC, t.last_message_at DESC
          LIMIT ?{next_idx} OFFSET ?{offset_idx}",
         offset_idx = next_idx + 1,

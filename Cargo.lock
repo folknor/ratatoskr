@@ -5710,6 +5710,7 @@ dependencies = [
  "log",
  "ratatoskr-db",
  "ratatoskr-search",
+ "ratatoskr-seen-addresses",
  "ratatoskr-stores",
  "rusqlite",
  "serde",

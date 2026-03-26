@@ -143,6 +143,53 @@ pub fn store_threads(
                     .map_err(|e| format!("update message thread_ids: {e}"))?;
             }
 
+            // Populate thread_participants from the messages' address fields.
+            // IMAP messages were inserted earlier with placeholder thread IDs;
+            // now that JWZ assigned final IDs, we can read the address fields
+            // from the DB and populate participants for the real thread ID.
+            {
+                let mut addr_stmt = tx
+                    .prepare(
+                        "SELECT from_address, to_addresses, cc_addresses, bcc_addresses \
+                         FROM messages WHERE account_id = ?1 AND thread_id = ?2",
+                    )
+                    .map_err(|e| format!("prepare addr query: {e}"))?;
+                let rows: Vec<(
+                    Option<String>,
+                    Option<String>,
+                    Option<String>,
+                    Option<String>,
+                )> = addr_stmt
+                    .query_map(
+                        rusqlite::params![account_id, group.thread_id],
+                        |row| {
+                            Ok((
+                                row.get::<_, Option<String>>(0)?,
+                                row.get::<_, Option<String>>(1)?,
+                                row.get::<_, Option<String>>(2)?,
+                                row.get::<_, Option<String>>(3)?,
+                            ))
+                        },
+                    )
+                    .map_err(|e| format!("query addr: {e}"))?
+                    .filter_map(Result::ok)
+                    .collect();
+                for (from, to, cc, bcc) in &rows {
+                    super::persistence::upsert_thread_participants(
+                        &tx,
+                        account_id,
+                        &group.thread_id,
+                        from.as_deref(),
+                        to.as_deref(),
+                        cc.as_deref(),
+                        bcc.as_deref(),
+                    )?;
+                }
+            }
+            super::persistence::maybe_update_chat_state(
+                &tx, account_id, &group.thread_id,
+            )?;
+
             affected_thread_ids.push(group.thread_id.clone());
         }
 

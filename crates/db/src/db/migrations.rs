@@ -1799,6 +1799,36 @@ static MIGRATIONS: &[Migration] = &[
             CREATE INDEX idx_gal_cache_email ON gal_cache(email);
         "#,
     },
+    Migration {
+        version: 78,
+        description: "Chats Phase 1: thread_participants, chat_contacts, is_chat_thread",
+        sql: r#"
+            CREATE TABLE thread_participants (
+                account_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                email TEXT NOT NULL COLLATE NOCASE,
+                PRIMARY KEY (account_id, thread_id, email),
+                FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            );
+            CREATE INDEX idx_thread_participants_email
+                ON thread_participants(email, account_id);
+
+            CREATE TABLE chat_contacts (
+                email TEXT PRIMARY KEY COLLATE NOCASE,
+                designated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                display_name TEXT,
+                latest_message_at INTEGER,
+                latest_message_preview TEXT,
+                unread_count INTEGER NOT NULL DEFAULT 0,
+                contact_id TEXT
+            );
+
+            ALTER TABLE threads ADD COLUMN is_chat_thread INTEGER NOT NULL DEFAULT 0;
+            CREATE INDEX idx_threads_chat ON threads(account_id, is_chat_thread)
+                WHERE is_chat_thread = 1;
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
