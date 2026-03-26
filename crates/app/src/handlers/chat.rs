@@ -55,10 +55,11 @@ impl App {
                 let Some(before) = oldest else {
                     return Task::none();
                 };
-                let email = timeline.contact_email.clone();
+                let contact = timeline.contact_email.clone();
                 let db_state = ratatoskr_core::db::DbState::from_arc(self.db.conn_arc());
                 let user_emails = self.user_emails();
 
+                let email = contact.clone();
                 Task::perform(
                     async move {
                         ratatoskr_core::chat::get_chat_timeline(
@@ -66,7 +67,7 @@ impl App {
                         )
                         .await
                     },
-                    |result| Message::ChatOlderLoaded(result),
+                    move |result| Message::ChatOlderLoaded(contact, result),
                 )
             }
         }

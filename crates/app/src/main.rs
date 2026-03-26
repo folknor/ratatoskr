@@ -321,7 +321,7 @@ pub enum Message {
     // Chat
     ChatTimeline(ui::chat_timeline::ChatTimelineMessage),
     ChatTimelineLoaded(GenerationToken<ratatoskr_core::generation::Chat>, Result<Vec<ratatoskr_core::chat::ChatMessage>, String>),
-    ChatOlderLoaded(Result<Vec<ratatoskr_core::chat::ChatMessage>, String>),
+    ChatOlderLoaded(String, Result<Vec<ratatoskr_core::chat::ChatMessage>, String>),
     ChatReadMarked,
 
     // Pinned search management
@@ -1024,7 +1024,11 @@ impl App {
                         self.status_bar.clear_warning(&account_id);
                     }
                 }
-                // Reload navigation + threads to reflect any changes from sync
+                // Reload navigation + threads (or chat timeline) to reflect sync changes
+                if let Some(NavigationTarget::Chat { ref email }) = self.navigation_target {
+                    let email = email.clone();
+                    return self.enter_chat_view(email);
+                }
                 let _ = self.nav_generation.next();
                 self.load_navigation_and_threads()
             }
@@ -1209,10 +1213,14 @@ impl App {
                 }
                 Task::none()
             }
-            Message::ChatOlderLoaded(Ok(messages)) => {
-                self.handle_chat_older_loaded(messages)
+            Message::ChatOlderLoaded(ref email, Ok(ref messages))
+                if self.chat_timeline.as_ref().is_some_and(|t| t.contact_email == *email) =>
+            {
+                let msgs = messages.clone();
+                self.handle_chat_older_loaded(msgs)
             }
-            Message::ChatOlderLoaded(Err(e)) => {
+            Message::ChatOlderLoaded(_, Ok(_)) => Task::none(), // stale — different chat
+            Message::ChatOlderLoaded(_, Err(e)) => {
                 log::error!("ChatOlderLoaded error: {e}");
                 Task::none()
             }

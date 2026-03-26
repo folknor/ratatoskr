@@ -6,6 +6,7 @@ use iced::{Alignment, Element, Length};
 use crate::ui::layout::*;
 use crate::ui::theme;
 
+use chrono::TimeZone;
 use ratatoskr_core::chat::ChatMessage;
 
 // ── Messages & Events ──────────────────────────────────
@@ -202,7 +203,7 @@ fn date_separator<'a>(timestamp: i64) -> Element<'a, ChatTimelineMessage> {
 // ── Helpers ────────────────────────────────────────────
 
 fn needs_date_separator(prev: &ChatMessage, curr: &ChatMessage) -> bool {
-    date_day(prev.date) != date_day(curr.date)
+    local_date(prev.date) != local_date(curr.date)
 }
 
 fn needs_subject_indicator(prev: &ChatMessage, curr: &ChatMessage) -> bool {
@@ -210,32 +211,33 @@ fn needs_subject_indicator(prev: &ChatMessage, curr: &ChatMessage) -> bool {
         && curr.subject != prev.subject
 }
 
-fn date_day(timestamp: i64) -> i64 {
-    timestamp / 86400
+fn local_date(timestamp: i64) -> chrono::NaiveDate {
+    chrono::Local
+        .timestamp_opt(timestamp, 0)
+        .single()
+        .map(|dt| dt.date_naive())
+        .unwrap_or_default()
 }
 
 fn format_date_label(timestamp: i64) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
-    let today = now / 86400;
-    let msg_day = timestamp / 86400;
+    use chrono::TimeZone;
+    let today = chrono::Local::now().date_naive();
+    let msg_date = local_date(timestamp);
 
-    if msg_day == today {
+    if msg_date == today {
         "Today".to_string()
-    } else if msg_day == today - 1 {
+    } else if msg_date == today.pred_opt().unwrap_or(today) {
         "Yesterday".to_string()
     } else {
-        // Simple date format — month day
-        let dt = chrono::DateTime::from_timestamp(timestamp, 0);
-        dt.map(|d| d.format("%B %e").to_string())
-            .unwrap_or_else(|| "Unknown".to_string())
+        msg_date.format("%B %e").to_string()
     }
 }
 
 fn format_time(timestamp: i64) -> String {
-    let dt = chrono::DateTime::from_timestamp(timestamp, 0);
-    dt.map(|d| d.format("%H:%M").to_string())
+    use chrono::TimeZone;
+    chrono::Local
+        .timestamp_opt(timestamp, 0)
+        .single()
+        .map(|d| d.format("%H:%M").to_string())
         .unwrap_or_default()
 }

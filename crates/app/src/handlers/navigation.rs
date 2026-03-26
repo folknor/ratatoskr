@@ -14,6 +14,11 @@ impl App {
         &mut self,
         target: NavigationTarget,
     ) -> Task<Message> {
+        // Chat targets have their own entry path
+        if let NavigationTarget::Chat { ref email } = target {
+            return self.enter_chat_view(email.clone());
+        }
+
         // For Label targets, scope to the correct account
         if let NavigationTarget::Label { ref account_id, .. } = target {
             self.select_account_by_id(account_id);
