@@ -15,6 +15,7 @@ pub use ratatoskr_command_palette as command_palette;
 pub mod db;
 pub mod discovery;
 pub mod email_actions;
+pub mod generation;
 pub use ratatoskr_sync::filters;
 pub(crate) use ratatoskr_gmail as gmail;
 pub(crate) use ratatoskr_graph as graph;

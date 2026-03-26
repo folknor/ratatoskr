@@ -31,9 +31,9 @@ pub enum RenderingMode {
 #[derive(Debug, Clone)]
 pub enum MessageViewMessage {
     /// Body content loaded from the body store. u64 is generation counter.
-    BodyLoaded(u64, Result<(Option<String>, Option<String>), String>),
+    BodyLoaded(ratatoskr_core::generation::GenerationToken, Result<(Option<String>, Option<String>), String>),
     /// Attachments loaded for this message. u64 is generation counter.
-    AttachmentsLoaded(u64, Result<Vec<MessageViewAttachment>, String>),
+    AttachmentsLoaded(ratatoskr_core::generation::GenerationToken, Result<Vec<MessageViewAttachment>, String>),
     /// Raw source loaded (for Source rendering mode).
     RawSourceLoaded(Result<String, String>),
     /// User changed the rendering mode toggle.
@@ -103,14 +103,14 @@ pub struct MessageViewState {
     pub y: Option<f32>,
 
     // ── Generation tracking ──
-    /// Per-window generation counter to guard against stale data loads.
-    pub generation: u64,
+    /// Per-window generation token to guard against stale data loads.
+    pub generation: ratatoskr_core::generation::GenerationToken,
 }
 
 impl MessageViewState {
     pub fn from_thread_message(
         msg: &ThreadMessage,
-        generation: u64,
+        generation: ratatoskr_core::generation::GenerationToken,
         source_label_id: Option<String>,
     ) -> Self {
         Self {
@@ -145,7 +145,7 @@ impl MessageViewState {
     /// Construct state from a session restore entry (minimal data, body loaded async).
     pub fn from_session_entry(
         entry: &MessageViewSessionEntry,
-        generation: u64,
+        generation: ratatoskr_core::generation::GenerationToken,
     ) -> Self {
         Self {
             message_id: entry.message_id.clone(),
@@ -177,8 +177,8 @@ impl MessageViewState {
     }
 
     /// Check if a loaded result matches this window's current generation.
-    pub fn is_current_generation(&self, generation: u64) -> bool {
-        self.generation == generation
+    pub fn is_current_generation(&self, token: ratatoskr_core::generation::GenerationToken) -> bool {
+        self.generation == token
     }
 }
 

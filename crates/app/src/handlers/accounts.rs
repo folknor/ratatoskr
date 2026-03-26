@@ -13,8 +13,7 @@ impl App {
                 self.add_account_wizard = None;
                 self.no_accounts = false;
                 let db = Arc::clone(&self.db);
-                self.nav_generation += 1;
-                let load_gen = self.nav_generation;
+                let load_gen = self.nav_generation.next();
                 Task::perform(
                     async move { (load_gen, load_accounts(db).await) },
                     |(g, result)| Message::AccountsLoaded(g, result),

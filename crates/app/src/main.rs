@@ -57,6 +57,7 @@ use ratatoskr_core::db::queries_extra::{
     get_threads_scoped, get_threads_for_shared_mailbox, get_public_folder_items,
 };
 use ratatoskr_core::db::types::{AccountScope, DbThread};
+use ratatoskr_core::generation::{GenerationCounter, GenerationToken};
 use ratatoskr_core::scope::ViewScope;
 use ui::layout::{
     RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH,
@@ -207,9 +208,9 @@ pub enum Message {
     StatusBar(StatusBarMessage),
 
     // Existing data loading
-    AccountsLoaded(u64, Result<Vec<db::Account>, String>),
-    NavigationLoaded(u64, Result<NavigationState, String>),
-    ThreadsLoaded(u64, Result<Vec<Thread>, String>),
+    AccountsLoaded(GenerationToken, Result<Vec<db::Account>, String>),
+    NavigationLoaded(GenerationToken, Result<NavigationState, String>),
+    ThreadsLoaded(GenerationToken, Result<Vec<Thread>, String>),
 
     // Existing UI
     Compose,
@@ -271,7 +272,7 @@ pub enum Message {
     // Search
     SearchQueryChanged(String),
     SearchExecute,
-    SearchResultsLoaded(u64, Result<Vec<Thread>, String>),
+    SearchResultsLoaded(GenerationToken, Result<Vec<Thread>, String>),
     SearchClear,
     FocusSearchBar,
     SearchBlur,
@@ -280,8 +281,8 @@ pub enum Message {
     // Pinned searches
     PinnedSearchesLoaded(Result<Vec<db::PinnedSearch>, String>),
     SelectPinnedSearch(i64),
-    PinnedSearchThreadIdsLoaded(u64, i64, Result<Vec<(String, String)>, String>),
-    PinnedSearchThreadsLoaded(u64, Result<Vec<Thread>, String>),
+    PinnedSearchThreadIdsLoaded(GenerationToken, i64, Result<Vec<(String, String)>, String>),
+    PinnedSearchThreadsLoaded(GenerationToken, Result<Vec<Thread>, String>),
     DismissPinnedSearch(i64),
     PinnedSearchDismissed(i64, Result<(), String>),
     PinnedSearchSaved(Result<i64, String>),
@@ -314,7 +315,7 @@ pub enum Message {
     ComposeDraftTick,
 
     // Thread detail via core
-    ThreadDetailLoaded(u64, Result<db::AppThreadDetail, String>),
+    ThreadDetailLoaded(GenerationToken, Result<db::AppThreadDetail, String>),
 
     // Pinned search management
     ClearAllPinnedSearches,
@@ -370,9 +371,9 @@ struct App {
 
     main_window_id: iced::window::Id,
     pop_out_windows: HashMap<iced::window::Id, PopOutWindow>,
-    pop_out_generation: u64,
-    nav_generation: u64,
-    thread_generation: u64,
+    pop_out_generation: GenerationCounter,
+    nav_generation: GenerationCounter,
+    thread_generation: GenerationCounter,
 
     // Command palette infrastructure
     registry: CommandRegistry,
@@ -385,7 +386,7 @@ struct App {
 
     // Search state
     search_state: Option<Arc<ratatoskr_core::search::SearchState>>,
-    search_generation: u64,
+    search_generation: GenerationCounter,
     search_query: UndoableText,
     search_debounce_deadline: Option<iced::time::Instant>,
     /// Whether the user was in a folder view before entering search.
@@ -547,9 +548,9 @@ impl App {
             window,
             main_window_id,
             pop_out_windows: HashMap::new(),
-            pop_out_generation: 0,
-            nav_generation: 1,
-            thread_generation: 0,
+            pop_out_generation: GenerationCounter::new(),
+            nav_generation: GenerationCounter::new(),
+            thread_generation: GenerationCounter::new(),
             registry,
             binding_table,
             focused_region: None,
@@ -561,7 +562,7 @@ impl App {
             ),
             undo_stack: UndoStack::default(),
             search_state,
-            search_generation: 0,
+            search_generation: GenerationCounter::new(),
             search_query: UndoableText::new(),
             search_debounce_deadline: None,
             was_in_folder_view: false,
@@ -600,7 +601,7 @@ impl App {
         // Restore pop-out windows from previous session
         let mut session_tasks = app.restore_pop_out_windows(&session);
 
-        let load_gen = app.nav_generation;
+        let load_gen = app.nav_generation.current();
         let mut boot_tasks = vec![
             open_task.discard(),
             Task::perform(
@@ -812,7 +813,7 @@ impl App {
             }
 
             // Data loading with generation guards
-            Message::AccountsLoaded(g, _) if g != self.nav_generation => Task::none(),
+            Message::AccountsLoaded(g, _) if !self.nav_generation.is_current(g) => Task::none(),
             Message::AccountsLoaded(_, Ok(accounts)) => {
                 log::info!("Loaded {} accounts", accounts.len());
                 self.handle_accounts_loaded(accounts)
@@ -822,7 +823,7 @@ impl App {
                 self.status = format!("Error: {e}");
                 Task::none()
             }
-            Message::NavigationLoaded(g, _) if g != self.nav_generation => Task::none(),
+            Message::NavigationLoaded(g, _) if !self.nav_generation.is_current(g) => Task::none(),
             Message::NavigationLoaded(_, Ok(nav_state)) => {
                 self.sidebar.nav_state = Some(nav_state);
                 Task::none()
@@ -832,7 +833,7 @@ impl App {
                 self.status = format!("Navigation error: {e}");
                 Task::none()
             }
-            Message::ThreadsLoaded(g, _) if g != self.nav_generation => Task::none(),
+            Message::ThreadsLoaded(g, _) if !self.nav_generation.is_current(g) => Task::none(),
             Message::ThreadsLoaded(_, Ok(threads)) => {
                 log::info!("Loaded {} threads", threads.len());
                 self.status = format!("{} threads", threads.len());
@@ -1011,7 +1012,7 @@ impl App {
                     }
                 }
                 // Reload navigation + threads to reflect any changes from sync
-                self.nav_generation += 1;
+                self.nav_generation.next();
                 self.load_navigation_and_threads()
             }
             Message::SetReadingPanePosition(_pos) => Task::none(),
@@ -1020,7 +1021,7 @@ impl App {
             // Search — delegated to handlers/search.rs
             Message::SearchQueryChanged(query) => self.handle_search_query_changed(query),
             Message::SearchExecute => self.handle_search_execute(),
-            Message::SearchResultsLoaded(g, _) if g != self.search_generation => Task::none(),
+            Message::SearchResultsLoaded(g, _) if !self.search_generation.is_current(g) => Task::none(),
             Message::SearchResultsLoaded(_, result) => self.handle_search_results(result),
             Message::SearchClear => self.handle_search_clear(),
             Message::FocusSearchBar => self.handle_focus_search_bar(),
@@ -1041,13 +1042,13 @@ impl App {
             // Pinned searches — delegated to handlers/search.rs
             Message::PinnedSearchesLoaded(result) => self.handle_pinned_searches_loaded(result),
             Message::SelectPinnedSearch(id) => self.handle_select_pinned_search(id),
-            Message::PinnedSearchThreadIdsLoaded(g, _, _) if g != self.nav_generation => {
+            Message::PinnedSearchThreadIdsLoaded(g, _, _) if !self.nav_generation.is_current(g) => {
                 Task::none()
             }
             Message::PinnedSearchThreadIdsLoaded(_, ps_id, result) => {
                 self.handle_pinned_search_thread_ids_loaded(ps_id, result)
             }
-            Message::PinnedSearchThreadsLoaded(g, _) if g != self.nav_generation => {
+            Message::PinnedSearchThreadsLoaded(g, _) if !self.nav_generation.is_current(g) => {
                 Task::none()
             }
             Message::PinnedSearchThreadsLoaded(_, result) => {
@@ -1121,8 +1122,8 @@ impl App {
             Message::AccountDeleted(Ok(())) | Message::AccountUpdated(Ok(())) => {
                 // Reload accounts after delete or update
                 let db = Arc::clone(&self.db);
-                self.nav_generation += 1;
-                let load_gen = self.nav_generation;
+                self.nav_generation.next();
+                let load_gen = self.nav_generation.current();
                 Task::perform(
                     async move { (load_gen, load_accounts(db).await) },
                     |(g, result)| Message::AccountsLoaded(g, result),
@@ -1160,7 +1161,7 @@ impl App {
             Message::ComposeDraftTick => self.auto_save_compose_drafts(),
 
             // Thread detail via core (replaces separate messages/attachments loads)
-            Message::ThreadDetailLoaded(g, _) if g != self.thread_generation => Task::none(),
+            Message::ThreadDetailLoaded(g, _) if !self.thread_generation.is_current(g) => Task::none(),
             Message::ThreadDetailLoaded(_, Ok(detail)) => {
                 self.reading_pane.load_thread_detail(detail);
                 Task::none()
@@ -1450,8 +1451,8 @@ impl App {
         self.clear_pinned_search_context();
         self.navigation_target = navigation_target;
         self.clear_thread_selection();
-        self.nav_generation += 1;
-        self.thread_generation += 1;
+        self.nav_generation.next();
+        self.thread_generation.next();
         self.update_thread_list_context_from_sidebar();
     }
 
@@ -1519,7 +1520,7 @@ impl App {
             ThreadListEvent::WidenSearchScope => {
                 // Widen search scope to all accounts
                 self.sidebar.selected_scope = ViewScope::AllAccounts;
-                self.nav_generation += 1;
+                self.nav_generation.next();
                 self.update_thread_list_context_from_sidebar();
                 self.update(Message::SearchExecute)
             }
@@ -2114,7 +2115,7 @@ impl App {
     fn fire_navigation_load(&self) -> Task<Message> {
         let db = Arc::clone(&self.db);
         let view_scope = self.sidebar.selected_scope.clone();
-        let load_gen = self.nav_generation;
+        let load_gen = self.nav_generation.current();
         Task::perform(
             async move {
                 let r = match &view_scope {
@@ -2147,7 +2148,7 @@ impl App {
         let db = Arc::clone(&self.db);
         let view_scope = self.sidebar.selected_scope.clone();
         let label_id = self.sidebar.selected_label.clone();
-        let load_gen = self.nav_generation;
+        let load_gen = self.nav_generation.current();
         Task::perform(
             async move {
                 let r = match &view_scope {
@@ -2205,11 +2206,11 @@ impl App {
             self.reading_pane.search_highlight_terms.clear();
         }
 
-        self.thread_generation += 1;
+        self.thread_generation.next();
         if let Some(thread) = thread {
             let account_id = thread.account_id.clone();
             let thread_id = thread.id.clone();
-            let load_gen = self.thread_generation;
+            let load_gen = self.thread_generation.current();
 
             // Use core's thread detail if body store is available,
             // otherwise fall back to the old separate queries.

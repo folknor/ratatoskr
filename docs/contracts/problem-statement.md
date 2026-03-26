@@ -16,15 +16,7 @@ The structural fix for each was the same principle: make the right thing the onl
 
 ---
 
-## Remaining (2)
-
-### 15. Generation counter ordering
-
-**Contract:** Async loads must capture the right generation counter, and callers must bump before dispatching.
-
-**Currently enforced by:** Convention across 5+ generation counters (`nav_generation`, `thread_generation`, `search_generation`, etc.).
-
-**Structural fix:** Typed loader helpers that allocate and validate generations automatically.
+## Remaining (1)
 
 ### 19. Provider APIs are stringly typed
 
@@ -34,10 +26,11 @@ The structural fix for each was the same principle: make the right thing the onl
 
 ---
 
-## Fixed (22)
+## Fixed (23)
 
 | # | Contract | Fix |
 |---|----------|-----|
+| 15 | Generation counter ordering | `GenerationCounter` / `GenerationToken` types replace raw `u64`. `next()` bumps + returns token, `is_current()` checks freshness. Message variants carry `GenerationToken` — impossible to forget the bump or check. |
 | 20 | Tables missing CASCADE FKs | Migration 77 recreates 16 tables with `REFERENCES accounts(id) ON DELETE CASCADE`. All `account_id` columns now cascade on account deletion. |
 | 9 | 8-edit action protocol | All 5 wildcard arms in action dispatch replaced with exhaustive matches on `CompletedAction`. Adding a new variant now produces compiler errors at every site. Dead `DeleteDraft` variant removed. |
 | 10 | Scope state split | `ViewScope` enum (`AllAccounts`, `Account`, `SharedMailbox`, `PublicFolder`) replaces split fields. `selected_scope` is single source of truth. Dedicated query paths for shared mailbox threads (CTE-scoped) and public folder items. Personal queries filter `shared_mailbox_id IS NULL`. Actions gated for public folder scope. |

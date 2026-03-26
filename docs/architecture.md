@@ -46,9 +46,7 @@ The active scope (which account, shared mailbox, or public folder the user is lo
 
 Async loads (nav, threads, search, etc.) must not overwrite fresher state. Each load site captures a generation counter before dispatch and checks it on completion — stale results are discarded.
 
-**Current weakness:** The pattern is convention-based across 5+ counters (`nav_generation`, `thread_generation`, `search_generation`, etc.). Nothing prevents a new load site from forgetting to bump or check.
-
-**Target state:** Typed loader helpers that allocate and validate generations automatically.
+**Enforcement:** `GenerationCounter` and `GenerationToken` types in `crates/core/src/generation.rs`. The counter's `next()` method is the only way to get a token (forces the bump), and `is_current()` is the only way to check (forces the comparison). Message variants carry `GenerationToken` instead of raw `u64`, so the type system prevents mixing up counter values. The 4 App-level counters (`nav_generation`, `thread_generation`, `search_generation`, `pop_out_generation`) all use this type.
 
 ## Adding a New Email Action
 

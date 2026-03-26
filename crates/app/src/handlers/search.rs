@@ -18,8 +18,8 @@ impl App {
             self.thread_list.typeahead.visible = false;
             if self.thread_list.mode == ThreadListMode::Search {
                 self.clear_pinned_search_context();
-                self.nav_generation += 1;
-                self.search_generation += 1;
+                self.nav_generation.next();
+                self.search_generation.next();
                 return self.restore_folder_view();
             }
         } else {
@@ -60,8 +60,8 @@ impl App {
             self.was_in_folder_view = true;
         }
 
-        self.search_generation += 1;
-        let generation = self.search_generation;
+        self.search_generation.next();
+        let generation = self.search_generation.current();
         let db = Arc::clone(&self.db);
         let ss = self.search_state.clone();
 
@@ -136,7 +136,7 @@ impl App {
         self.search_query.reset(String::new());
         self.thread_list.search_query.clear();
         self.search_debounce_deadline = None;
-        self.search_generation += 1;
+        self.search_generation.next();
         self.restore_folder_view()
     }
 
@@ -158,8 +158,8 @@ impl App {
             self.was_in_folder_view = true;
         }
 
-        self.search_generation += 1;
-        let generation = self.search_generation;
+        self.search_generation.next();
+        let generation = self.search_generation.current();
         let db = Arc::clone(&self.db);
         let ss = self.search_state.clone();
 
@@ -351,8 +351,8 @@ impl App {
         self.editing_pinned_search = Some(id);
         self.sidebar.selected_label = None;
 
-        self.nav_generation += 1;
-        self.thread_generation += 1;
+        self.nav_generation.next();
+        self.thread_generation.next();
         self.clear_thread_selection();
 
         // Update thread list context
@@ -363,7 +363,7 @@ impl App {
         }
 
         let db = Arc::clone(&self.db);
-        let load_gen = self.nav_generation;
+        let load_gen = self.nav_generation.current();
         Task::perform(
             async move {
                 let ids = db.get_pinned_search_thread_ids(id).await;
@@ -386,7 +386,7 @@ impl App {
                 }
 
                 let db = Arc::clone(&self.db);
-                let load_gen = self.nav_generation;
+                let load_gen = self.nav_generation.current();
                 Task::perform(
                     async move {
                         let result = db.get_threads_by_ids(ids).await;
@@ -511,7 +511,7 @@ impl App {
         self.search_query.reset(String::new());
         self.thread_list.search_query.clear();
         self.search_debounce_deadline = None;
-        self.search_generation += 1;
+        self.search_generation.next();
         self.thread_list.mode = ThreadListMode::Folder;
         self.was_in_folder_view = false;
     }
@@ -695,7 +695,7 @@ impl App {
         match result {
             Ok(_id) => {
                 log::info!("Smart folder saved");
-                self.nav_generation += 1;
+                self.nav_generation.next();
                 self.fire_navigation_load()
             }
             Err(e) => {
