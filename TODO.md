@@ -189,6 +189,29 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **Path traversal in `remove_cached_relative`** — Checks for `attachment_cache/` prefix but doesn't canonicalize the path. Should canonicalize before the prefix check. `attachment_cache.rs:67`
 - [ ] **Hand-rolled `parse_query_string`** — Custom URL query parsing instead of using `form_urlencoded` crate. Unnecessary attack surface. `oauth.rs:513`
 
+## Review Findings — Yesterday's Commits (review agent, 2026-03-27)
+
+### Auto-responses (8d04916)
+- [ ] **Graph push sends wrong JSON shape for reply messages** — `internalReplyMessage` wrapped in `{ "message": ... }` object instead of plain string. Will fail or corrupt reply text on push. `auto_responses.rs:200`
+- [ ] **Graph schedule discards timezone on fetch** — Reads `dateTime` but drops `timeZone`. Pushes back with hardcoded `"UTC"`. Round-trip shifts out-of-office window for non-UTC mailboxes. `auto_responses.rs:155, 205`
+- [ ] **JMAP enable + set_dates non-atomic** — Two separate `VacationResponse/set` requests. If second fails, vacation is enabled without schedule constraints. Should use a single set request. `auto_responses.rs:384-399`
+- [ ] **Gmail `restrictToDomain` mapped to `ContactsOnly`** — Lossy round-trip. Domain restriction becomes contacts restriction on push. Need `ExternalAudience::DomainOnly` variant or explicit handling. `auto_responses.rs:261, 290`
+- [ ] **Exchange dates not normalized to RFC 3339** — Cross-provider push (Exchange → Gmail) silently drops dates because `.NET` datetime format lacks timezone offset. `auto_responses.rs:155, 281`
+
+### IMAP OAUTHBEARER (133fff2)
+- [ ] **Raw IMAP helpers not updated for `"oauthbearer"` auth method** — `raw_fetch_messages` and `raw_fetch_diagnostic` fall through to LOGIN, sending bearer token as password. `raw.rs:57, 190`
+- [ ] **RFC 7628 GS2 header may need full email as authzid** — Current format uses bare username. Strict implementations may reject. `connection.rs:71`
+- [ ] **OAUTHBEARER error acknowledgment should be `\x01`** — Current implementation sends empty vec on second challenge instead of RFC 7628 §3.2.3 single `\x01` byte. `connection.rs:78`
+
+### GAL sync (dd0c6e8)
+- [ ] **`cache_gal_entries` not transactional** — DELETE + N INSERTs without transaction. Crash between DELETE and final INSERT loses cache. Also N individual fsyncs. `gal.rs:34-62`
+- [ ] **Empty directory results don't update cache age** — Returns early on empty, `cached_at` never advances, retries every 5 minutes indefinitely. Also stale entries persist when directory access is revoked. `gal.rs:262, 273`
+
+### NoOp detection (69bf316)
+- [ ] **All-NoOp batch shows success toast + auto-advance** — "Archived" toast and selection advance when nothing changed. Should show no toast or "Already archived". `commands.rs:handle_action_completed`
+- [ ] **NoOp conflates "already in state" with "target missing"** — 0 affected rows for both cases. Can't distinguish no-op from invalid target. `archive.rs:12, star.rs:12`
+- [ ] **Degraded batch path erases NoOp signal** — `action_local()` discards the bool via `.map(|_| ())`, returns `LocalOnly` instead of `NoOp`. Causes spurious pending-ops enqueue and undo tokens. `batch.rs:316, 322`
+
 ## Remaining Enhancements (other)
 
 - [ ] **iced_drop for cross-container DnD** — Custom DragState works for list reorder. iced_drop needed for: compose token DnD, label drag-to-file, calendar event dragging, attachment drag zones.

@@ -128,6 +128,8 @@ Without `--anchor`, stdin goes directly to the session — the sessions are alre
 - **perf**: "Remember: you're our performance engineer reviewing ratatoskr."
 - **arch**: "Remember: you're our software architect reviewing ratatoskr."
 
+**Never run reviews in parallel to the same archetype.** Each archetype maps to a single persistent session — concurrent sends will race messages into the same conversation and corrupt context. Run sequentially, or only parallelize across different archetypes (e.g. `review bugs` and `review security` can run concurrently, but not two `review bugs` calls).
+
 ## Commit rules
 
 - Don't commit pure markdown changes on their own. Bundle them with the code change they relate to, or skip them. Unless the markdown update is substantive.
