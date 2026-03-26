@@ -179,6 +179,13 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **`get_threads_for_shared_mailbox` missing `is_chat_thread = 0`** — Shared mailbox thread query doesn't exclude chat threads. Low risk (shared mailboxes unlikely to have chat contacts). `scoped_queries.rs:get_threads_for_shared_mailbox`
 - [ ] **Self-to-self threads can misclassify as chat** — If user designates one of their own aliases, a thread between two of the user's own accounts could qualify as "1:1 chat". Edge case.
 - [ ] **`LOWER()` on NOCASE columns** — Several chat queries use `LOWER()` on columns already declared COLLATE NOCASE, defeating index use. Remove the redundant `LOWER()` calls.
+- [ ] **Chat timeline pagination cursor** — Currently timestamp-only (`date < ?`). Should use `(date, message_id)` tuple to avoid skipping/duplicating messages with equal timestamps. `chat.rs:get_chat_timeline`
+- [ ] **ChatTimeline should implement Component trait** — Currently has ad-hoc `update()`/`view()` methods. UI.md says components implement the shared Component trait. `chat_timeline.rs`
+- [ ] **Missing sidebar divider in chat layout** — Normal mail view has a draggable divider between sidebar and content. Chat view omits it. `main.rs` view branching
+- [ ] **Search state persists across chat entry/exit** — If user enters chat from search mode, search state persists. Exiting chat may return to stale search. `handlers/chat.rs:enter_chat_view`
+- [ ] **Subject change indicator triggers on Re: variations** — `needs_subject_indicator` compares raw subjects. Should normalize by stripping Re:/Fwd: prefixes. `chat_timeline.rs`
+- [ ] **`scroll_id` stored but never attached to scrollable** — Deferred scroll-to-bottom needs a usable hook. `chat_timeline.rs`
+- [ ] **Chat view command context classifies as Inbox** — `view_type_from_target` returns `ViewType::Inbox` for `Chat` target. Palette/command availability logic thinks user is in Inbox. `command_dispatch.rs`
 
 ## Security Findings (review agent, 2026-03-25)
 
