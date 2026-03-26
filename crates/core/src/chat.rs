@@ -24,7 +24,6 @@ pub struct ChatMessage {
     pub subject: Option<String>,
     pub is_read: bool,
     pub is_from_user: bool,
-    pub has_attachments: bool,
 }
 
 /// Designate an email address as a chat contact.
@@ -198,13 +197,13 @@ pub async fn get_chat_timeline(
         for (account_id, thread_id) in &thread_ids {
             let sql = if before.is_some() {
                 "SELECT id, account_id, thread_id, from_address, from_name, \
-                        date, is_read, has_attachments, subject \
+                        date, is_read, subject \
                  FROM messages \
                  WHERE account_id = ?1 AND thread_id = ?2 AND date < ?3 \
                  ORDER BY date ASC"
             } else {
                 "SELECT id, account_id, thread_id, from_address, from_name, \
-                        date, is_read, has_attachments, subject \
+                        date, is_read, subject \
                  FROM messages \
                  WHERE account_id = ?1 AND thread_id = ?2 \
                  ORDER BY date ASC"
@@ -384,6 +383,5 @@ fn chat_message_from_row(
         subject: row.get("subject")?,
         is_read: row.get::<_, i64>("is_read")? != 0,
         is_from_user,
-        has_attachments: row.get::<_, i64>("has_attachments")? != 0,
     })
 }

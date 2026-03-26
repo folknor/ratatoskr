@@ -310,8 +310,8 @@ pub fn maybe_update_chat_state(
     )
     .map_err(|e| format!("update chat flag: {e}"))?;
 
-    // Update summary if this is a chat thread
-    if is_chat {
+    // Always refresh summary — the thread may have just gained or lost chat status
+    {
         // Latest message (from either direction)
         let latest: Option<(Option<String>, i64)> = tx
             .query_row(
@@ -399,7 +399,7 @@ pub fn delete_messages_and_cleanup_threads(
             .map_err(|e| format!("count remaining: {e}"))?;
 
         if remaining == 0 {
-            // Orphan thread — remove it and its labels
+            // Orphan thread — remove it, its labels, and its participants
             tx.execute(
                 "DELETE FROM threads WHERE id = ?1 AND account_id = ?2",
                 rusqlite::params![tid, account_id],
@@ -410,10 +410,50 @@ pub fn delete_messages_and_cleanup_threads(
                 rusqlite::params![tid, account_id],
             )
             .map_err(|e| format!("delete orphan thread labels: {e}"))?;
+            tx.execute(
+                "DELETE FROM thread_participants WHERE thread_id = ?1 AND account_id = ?2",
+                rusqlite::params![tid, account_id],
+            )
+            .map_err(|e| format!("delete orphan thread participants: {e}"))?;
         } else {
             // Re-aggregate thread fields from remaining messages
             let aggregate = compute_thread_aggregate(tx, account_id, tid)?;
             upsert_thread_aggregate(tx, account_id, tid, &aggregate, None, None)?;
+
+            // Recompute thread_participants from remaining messages
+            tx.execute(
+                "DELETE FROM thread_participants WHERE account_id = ?1 AND thread_id = ?2",
+                rusqlite::params![account_id, tid],
+            )
+            .map_err(|e| format!("clear thread participants: {e}"))?;
+            let mut addr_stmt = tx
+                .prepare(
+                    "SELECT from_address, to_addresses, cc_addresses, bcc_addresses \
+                     FROM messages WHERE account_id = ?1 AND thread_id = ?2",
+                )
+                .map_err(|e| format!("prepare addr: {e}"))?;
+            let rows: Vec<(Option<String>, Option<String>, Option<String>, Option<String>)> =
+                addr_stmt
+                    .query_map(rusqlite::params![account_id, tid], |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                        ))
+                    })
+                    .map_err(|e| format!("query addr: {e}"))?
+                    .filter_map(Result::ok)
+                    .collect();
+            drop(addr_stmt);
+            for (from, to, cc, bcc) in &rows {
+                upsert_thread_participants(
+                    tx, account_id, tid,
+                    from.as_deref(), to.as_deref(), cc.as_deref(), bcc.as_deref(),
+                )?;
+            }
+            // Re-evaluate chat state after participant change
+            maybe_update_chat_state(tx, account_id, tid)?;
         }
     }
 
