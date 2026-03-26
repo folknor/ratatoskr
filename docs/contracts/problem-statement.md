@@ -16,7 +16,7 @@ The structural fix for each was the same principle: make the right thing the onl
 
 ---
 
-## Remaining (1)
+## Remaining (2)
 
 ### 15. Generation counter ordering
 
@@ -32,20 +32,13 @@ The structural fix for each was the same principle: make the right thing the onl
 
 **Structural fix:** Typed IDs (`FolderId`, `TagId`) and capability markers instead of raw `&str` plus no-op defaults.
 
-### 20. Tables missing CASCADE foreign keys
-
-**Contract:** All tables with `account_id` should cascade on account deletion. ~10 tables added in later migrations have `account_id TEXT NOT NULL` without the FK constraint, leaving orphan rows on account deletion.
-
-**Structural fix:** Migration adding FK constraints (requires table recreation in SQLite — `CREATE new; INSERT SELECT; DROP old; RENAME`).
-
-**Note:** Contract #2 (account deletion store cleanup) mitigates the worst effects by cleaning external stores explicitly. The missing CASCADEs only affect main-DB orphan rows in tables like `cloud_attachments`, `folder_sync_state`, `shared_mailbox_sync_state`, etc.
-
 ---
 
-## Fixed (21)
+## Fixed (22)
 
 | # | Contract | Fix |
 |---|----------|-----|
+| 20 | Tables missing CASCADE FKs | Migration 77 recreates 16 tables with `REFERENCES accounts(id) ON DELETE CASCADE`. All `account_id` columns now cascade on account deletion. |
 | 9 | 8-edit action protocol | All 5 wildcard arms in action dispatch replaced with exhaustive matches on `CompletedAction`. Adding a new variant now produces compiler errors at every site. Dead `DeleteDraft` variant removed. |
 | 10 | Scope state split | `ViewScope` enum (`AllAccounts`, `Account`, `SharedMailbox`, `PublicFolder`) replaces split fields. `selected_scope` is single source of truth. Dedicated query paths for shared mailbox threads (CTE-scoped) and public folder items. Personal queries filter `shared_mailbox_id IS NULL`. Actions gated for public folder scope. |
 | 1 | Mail mutation DB boundary | 7 thread-action DB helpers (`set_thread_read/starred/pinned/muted`, `delete_thread`, `add/remove_thread_label`) changed to `pub(crate)`. App crate forced through action service at compile time. |

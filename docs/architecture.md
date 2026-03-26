@@ -58,7 +58,7 @@ Adding a new action requires 8 coordinated edits: `EmailAction` variant, `Comple
 
 ## Database Integrity
 
-Tables with `account_id` should CASCADE on account deletion. ~10 tables added in later migrations have `account_id TEXT NOT NULL` without the FK constraint, leaving orphan rows on account deletion. The `delete_account_orchestrate()` function mitigates the worst effects by cleaning external stores explicitly, but the missing CASCADEs still leave main-DB orphans in tables like `cloud_attachments`, `folder_sync_state`, `shared_mailbox_sync_state`.
+All tables with `account_id` CASCADE on account deletion. Migration 77 recreated the 16 tables that were missing the constraint. `delete_account_orchestrate()` handles external store cleanup (body store, inline images, attachment cache, search index).
 
 ## Settled Patterns
 

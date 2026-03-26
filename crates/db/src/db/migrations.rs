@@ -1520,6 +1520,265 @@ static MIGRATIONS: &[Migration] = &[
                 ON threads(account_id, shared_mailbox_id, last_message_at DESC);
         "#,
     },
+    Migration {
+        version: 77,
+        description: "Add CASCADE foreign keys on account_id to 16 tables missing them",
+        sql: r#"
+            -- link_scan_results
+            CREATE TABLE link_scan_results_new (
+                message_id TEXT NOT NULL,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                result_json TEXT NOT NULL,
+                scanned_at INTEGER DEFAULT (unixepoch()),
+                PRIMARY KEY (account_id, message_id)
+            );
+            INSERT INTO link_scan_results_new SELECT * FROM link_scan_results;
+            DROP TABLE link_scan_results;
+            ALTER TABLE link_scan_results_new RENAME TO link_scan_results;
+
+            -- phishing_allowlist
+            CREATE TABLE phishing_allowlist_new (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                sender_address TEXT NOT NULL,
+                created_at INTEGER DEFAULT (unixepoch()),
+                UNIQUE(account_id, sender_address)
+            );
+            INSERT INTO phishing_allowlist_new SELECT * FROM phishing_allowlist;
+            DROP TABLE phishing_allowlist;
+            ALTER TABLE phishing_allowlist_new RENAME TO phishing_allowlist;
+
+            -- quick_steps
+            CREATE TABLE quick_steps_new (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                description TEXT,
+                shortcut TEXT,
+                actions_json TEXT NOT NULL,
+                icon TEXT,
+                is_enabled INTEGER DEFAULT 1,
+                continue_on_error INTEGER DEFAULT 0,
+                sort_order INTEGER DEFAULT 0,
+                created_at INTEGER DEFAULT (unixepoch())
+            );
+            INSERT INTO quick_steps_new SELECT * FROM quick_steps;
+            DROP TABLE quick_steps;
+            ALTER TABLE quick_steps_new RENAME TO quick_steps;
+            CREATE INDEX idx_quick_steps_account ON quick_steps(account_id);
+
+            -- read_receipt_policy
+            CREATE TABLE read_receipt_policy_new (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                scope TEXT NOT NULL,
+                policy TEXT NOT NULL DEFAULT 'never',
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                UNIQUE(account_id, scope)
+            );
+            INSERT INTO read_receipt_policy_new SELECT * FROM read_receipt_policy;
+            DROP TABLE read_receipt_policy;
+            ALTER TABLE read_receipt_policy_new RENAME TO read_receipt_policy;
+
+            -- message_reactions
+            CREATE TABLE message_reactions_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id TEXT NOT NULL,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                reactor_email TEXT NOT NULL,
+                reactor_name TEXT,
+                reaction_type TEXT NOT NULL,
+                reacted_at INTEGER,
+                source TEXT NOT NULL,
+                UNIQUE(message_id, account_id, reactor_email, reaction_type)
+            );
+            INSERT INTO message_reactions_new SELECT * FROM message_reactions;
+            DROP TABLE message_reactions;
+            ALTER TABLE message_reactions_new RENAME TO message_reactions;
+            CREATE INDEX idx_message_reactions_message ON message_reactions(message_id, account_id);
+
+            -- cloud_attachments
+            CREATE TABLE cloud_attachments_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id TEXT,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                direction TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                cloud_url TEXT,
+                file_name TEXT,
+                file_size INTEGER,
+                mime_type TEXT,
+                drive_item_id TEXT,
+                upload_session_url TEXT,
+                upload_status TEXT NOT NULL DEFAULT 'pending',
+                bytes_uploaded INTEGER NOT NULL DEFAULT 0,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+            );
+            INSERT INTO cloud_attachments_new SELECT * FROM cloud_attachments;
+            DROP TABLE cloud_attachments;
+            ALTER TABLE cloud_attachments_new RENAME TO cloud_attachments;
+            CREATE INDEX idx_cloud_attachments_message ON cloud_attachments(message_id);
+            CREATE INDEX idx_cloud_attachments_status ON cloud_attachments(upload_status) WHERE upload_status != 'sent';
+
+            -- send_identities
+            CREATE TABLE send_identities_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                email TEXT NOT NULL,
+                display_name TEXT,
+                mailbox_id TEXT,
+                send_mode TEXT NOT NULL DEFAULT 'send_as',
+                save_to_personal_sent INTEGER NOT NULL DEFAULT 1,
+                is_primary INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(account_id, email)
+            );
+            INSERT INTO send_identities_new SELECT * FROM send_identities;
+            DROP TABLE send_identities;
+            ALTER TABLE send_identities_new RENAME TO send_identities;
+            CREATE INDEX idx_send_identities_account ON send_identities(account_id);
+
+            -- public_folders
+            CREATE TABLE public_folders_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                folder_id TEXT NOT NULL,
+                parent_id TEXT,
+                display_name TEXT NOT NULL,
+                folder_class TEXT,
+                unread_count INTEGER NOT NULL DEFAULT 0,
+                total_count INTEGER NOT NULL DEFAULT 0,
+                can_create_items INTEGER NOT NULL DEFAULT 0,
+                can_modify INTEGER NOT NULL DEFAULT 0,
+                can_delete INTEGER NOT NULL DEFAULT 0,
+                can_read INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(account_id, folder_id)
+            );
+            INSERT INTO public_folders_new SELECT * FROM public_folders;
+            DROP TABLE public_folders;
+            ALTER TABLE public_folders_new RENAME TO public_folders;
+            CREATE INDEX idx_public_folders_parent ON public_folders(account_id, parent_id);
+
+            -- public_folder_items
+            CREATE TABLE public_folder_items_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                folder_id TEXT NOT NULL,
+                item_id TEXT NOT NULL,
+                change_key TEXT,
+                subject TEXT,
+                sender_email TEXT,
+                sender_name TEXT,
+                received_at INTEGER,
+                body_preview TEXT,
+                is_read INTEGER NOT NULL DEFAULT 0,
+                item_class TEXT NOT NULL DEFAULT 'IPM.Note',
+                UNIQUE(account_id, item_id)
+            );
+            INSERT INTO public_folder_items_new SELECT * FROM public_folder_items;
+            DROP TABLE public_folder_items;
+            ALTER TABLE public_folder_items_new RENAME TO public_folder_items;
+            CREATE INDEX idx_public_folder_items_folder ON public_folder_items(account_id, folder_id, received_at DESC);
+
+            -- public_folder_pins
+            CREATE TABLE public_folder_pins_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                folder_id TEXT NOT NULL,
+                sync_enabled INTEGER NOT NULL DEFAULT 1,
+                sync_depth_days INTEGER NOT NULL DEFAULT 30,
+                last_sync_at INTEGER,
+                UNIQUE(account_id, folder_id)
+            );
+            INSERT INTO public_folder_pins_new SELECT * FROM public_folder_pins;
+            DROP TABLE public_folder_pins;
+            ALTER TABLE public_folder_pins_new RENAME TO public_folder_pins;
+
+            -- public_folder_sync_state
+            CREATE TABLE public_folder_sync_state_new (
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                folder_id TEXT NOT NULL,
+                last_sync_timestamp INTEGER,
+                last_full_scan_at INTEGER,
+                PRIMARY KEY(account_id, folder_id)
+            );
+            INSERT INTO public_folder_sync_state_new SELECT * FROM public_folder_sync_state;
+            DROP TABLE public_folder_sync_state;
+            ALTER TABLE public_folder_sync_state_new RENAME TO public_folder_sync_state;
+
+            -- contact_photo_cache
+            CREATE TABLE contact_photo_cache_new (
+                email TEXT NOT NULL,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                content_hash TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                etag TEXT,
+                fetched_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                last_accessed_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                PRIMARY KEY (email, account_id)
+            );
+            INSERT INTO contact_photo_cache_new SELECT * FROM contact_photo_cache;
+            DROP TABLE contact_photo_cache;
+            ALTER TABLE contact_photo_cache_new RENAME TO contact_photo_cache;
+
+            -- thread_ui_state
+            CREATE TABLE thread_ui_state_new (
+                thread_id TEXT NOT NULL,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                attachments_collapsed INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (account_id, thread_id)
+            );
+            INSERT INTO thread_ui_state_new SELECT * FROM thread_ui_state;
+            DROP TABLE thread_ui_state;
+            ALTER TABLE thread_ui_state_new RENAME TO thread_ui_state;
+
+            -- calendar_attendees
+            CREATE TABLE calendar_attendees_new (
+                event_id TEXT NOT NULL,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                email TEXT NOT NULL,
+                name TEXT,
+                rsvp_status TEXT DEFAULT 'needs-action',
+                is_organizer INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (account_id, event_id, email)
+            );
+            INSERT INTO calendar_attendees_new SELECT * FROM calendar_attendees;
+            DROP TABLE calendar_attendees;
+            ALTER TABLE calendar_attendees_new RENAME TO calendar_attendees;
+            CREATE INDEX idx_calendar_attendees_event ON calendar_attendees(account_id, event_id);
+
+            -- calendar_reminders
+            CREATE TABLE calendar_reminders_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                minutes_before INTEGER NOT NULL,
+                method TEXT DEFAULT 'popup'
+            );
+            INSERT INTO calendar_reminders_new SELECT * FROM calendar_reminders;
+            DROP TABLE calendar_reminders;
+            ALTER TABLE calendar_reminders_new RENAME TO calendar_reminders;
+            CREATE INDEX idx_calendar_reminders_event ON calendar_reminders(account_id, event_id);
+
+            -- gal_cache
+            CREATE TABLE gal_cache_new (
+                email TEXT NOT NULL,
+                display_name TEXT,
+                phone TEXT,
+                company TEXT,
+                title TEXT,
+                department TEXT,
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                cached_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                PRIMARY KEY (account_id, email)
+            );
+            INSERT INTO gal_cache_new SELECT * FROM gal_cache;
+            DROP TABLE gal_cache;
+            ALTER TABLE gal_cache_new RENAME TO gal_cache;
+            CREATE INDEX idx_gal_cache_email ON gal_cache(email);
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
