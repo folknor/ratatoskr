@@ -166,6 +166,20 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **Attachment cache eviction lock churn** — Deletes one file per loop iteration with 2+ lock acquisitions each. Should collect files to delete, release the lock, then delete in batch. `attachment_cache.rs:188-262`
 - [ ] **Navigation tag unread counts** — 3-table LEFT JOIN with `LOWER(TRIM())` in GROUP BY for tag unread counts. `navigation.rs:325-339`
 
+## Chats Optimization Findings (review agent, 2026-03-27)
+
+- [ ] **`maybe_update_chat_state` queries ALL accounts per call** — Runs `SELECT email FROM accounts` on every sync-time call. Should cache user emails per sync batch or pass as parameter. `persistence.rs:maybe_update_chat_state`
+- [ ] **`set_chat_thread_flags` N+1 queries** — Iterates threads individually with per-thread participant count + user check. Should use a single SQL statement with HAVING clause per the plan. `chat.rs:set_chat_thread_flags`
+- [ ] **`get_chat_timeline` loads ALL messages then truncates** — Queries all messages across all threads, sorts in Rust, then takes last N. Should use SQL LIMIT + reverse, or paginate per-thread with a merge. `chat.rs:get_chat_timeline`
+- [ ] **Summary update scans ALL chat threads** — `update_chat_summary` joins across all `is_chat_thread = 1` threads for a contact. Could be scoped to the affected thread's data for incremental updates. `persistence.rs:maybe_update_chat_state`
+- [ ] **`contact_photo_cache` join uses LOWER()** — Defeats index on `cpc.email`. Cache table should use NOCASE collation or store normalized emails. `chat.rs:get_chat_contacts`
+
+- [ ] **IMAP re-threading can orphan `thread_participants`** — Delta re-threading is rare, but when it happens old participant rows for the previous thread ID are not cleaned up. Low impact, accumulates slowly.
+- [ ] **Legacy `queries.rs` helpers missing `is_chat_thread = 0`** — `get_threads`, `get_thread_count`, `get_unread_count` in `queries.rs` don't filter chat threads. No current call sites, but residual regression risk if reused. `queries.rs:155, 803, 840`
+- [ ] **`get_threads_for_shared_mailbox` missing `is_chat_thread = 0`** — Shared mailbox thread query doesn't exclude chat threads. Low risk (shared mailboxes unlikely to have chat contacts). `scoped_queries.rs:get_threads_for_shared_mailbox`
+- [ ] **Self-to-self threads can misclassify as chat** — If user designates one of their own aliases, a thread between two of the user's own accounts could qualify as "1:1 chat". Edge case.
+- [ ] **`LOWER()` on NOCASE columns** — Several chat queries use `LOWER()` on columns already declared COLLATE NOCASE, defeating index use. Remove the redundant `LOWER()` calls.
+
 ## Security Findings (review agent, 2026-03-25)
 
 - [ ] **`decrypt_or_raw` silent plaintext fallback** — On decryption failure, silently returns the raw ciphertext as if it were plaintext. Masks key corruption or rotation issues — credentials could pass through as garbage strings with no error signal. `crypto.rs:141`
