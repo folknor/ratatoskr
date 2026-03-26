@@ -2,27 +2,13 @@
 
 ## Overview
 
-Ratatoskr had 22 implicit contracts — behaviors where correctness depended on every developer remembering a multi-step protocol that nothing in the compiler, type system, or API surface enforced. A new developer adding a feature could silently break an invariant because the protocol existed only in convention.
+Ratatoskr had 24 implicit contracts — behaviors where correctness depended on every developer remembering a multi-step protocol that nothing in the compiler, type system, or API surface enforced. A new developer adding a feature could silently break an invariant because the protocol existed only in convention.
 
-**18 of 22 contracts have been fixed.** The remaining 4 are medium-to-large architectural refactors tracked below.
-
-### What Made a Contract Implicit
-
-1. Multiple call sites must follow the same protocol, but nothing enforces it
-2. Adding a new call site can silently break existing behavior
-3. The pattern relies on "every developer knows to..." rather than "the API makes it impossible not to..."
-
-The structural fix for each was the same principle: make the right thing the only thing. A single entry point, a type that enforces the invariant, or a compiler error when the protocol is violated.
+**All 24 contracts are now fixed.** Each was resolved by the same principle: make the right thing the only thing. A single entry point, a type that enforces the invariant, or a compiler error when the protocol is violated.
 
 ---
 
-## Remaining (0)
-
-All 24 contracts have been fixed.
-
----
-
-## Fixed (24)
+## All Contracts (24)
 
 | # | Contract | Fix |
 |---|----------|-----|

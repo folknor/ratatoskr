@@ -12,7 +12,7 @@ When evaluating a design: if adding a new call site can silently break existing 
 
 **`ratatoskr-core`** is the facade. All business logic lives here — accounts, OAuth, discovery, email actions, DB queries, cloud attachments. The app crate calls core functions directly.
 
-**Provider crates** (`gmail`, `jmap`, `graph`, `imap`) each implement the `ProviderOps` trait (`core/src/provider/ops.rs`). No provider-specific logic should leak into app or core beyond the trait surface.
+**Provider crates** (`gmail`, `jmap`, `graph`, `imap`) each implement the `ProviderOps` trait (`provider-utils/src/ops.rs`). No provider-specific logic should leak into app or core beyond the trait surface.
 
 **`ratatoskr-stores`** owns all content outside the main SQLite database: zstd-compressed body store (`bodies.db`), inline image store, attachment file cache. Never assume message content is in the main DB.
 
@@ -44,7 +44,7 @@ The active scope (which account, shared mailbox, or public folder the user is lo
 
 Async loads (nav, threads, search, etc.) must not overwrite fresher state. Each load site captures a generation counter before dispatch and checks it on completion — stale results are discarded.
 
-**Enforcement:** `GenerationCounter` and `GenerationToken` types in `crates/core/src/generation.rs`. The counter's `next()` method is the only way to get a token (forces the bump), and `is_current()` is the only way to check (forces the comparison). Message variants carry `GenerationToken` instead of raw `u64`, so the type system prevents mixing up counter values. The 4 App-level counters (`nav_generation`, `thread_generation`, `search_generation`, `pop_out_generation`) all use this type.
+**Enforcement:** `GenerationCounter<T>` and `GenerationToken<T>` types in `crates/core/src/generation.rs`. Phantom type brands prevent cross-counter token comparison at compile time. `next()` is the only way to get a token (`#[must_use]` — use `let _ =` for invalidation-only bumps). `is_current()` is the only way to check freshness. All 9 counters are migrated: App-level (`Nav`, `ThreadDetail`, `Search`, `PopOut`) and component-level (`Calendar`, `PaletteOptions`, `Typeahead`, `AddAccount`, `Autocomplete`).
 
 ## Adding a New Email Action
 
@@ -60,7 +60,7 @@ All tables with `account_id` CASCADE on account deletion. Migration 77 recreated
 
 These are verified, adopted project-wide, and should be followed for all new work.
 
-**Generational load tracking** — Applied to: nav, thread, search, palette, pop-out, sync, autocomplete, add-account wizard, calendar events, search typeahead.
+**Generational load tracking** — 9 branded `GenerationCounter<T>` instances across App and component levels. See "Generation counters for async safety" above.
 
 **Component trait** — 7 components: Sidebar, ThreadList, ReadingPane, Settings, StatusBar, AddAccountWizard, Palette. Non-components (Compose, Calendar, Pop-out windows) use free functions + App handler methods.
 
