@@ -20,6 +20,9 @@ pub struct AutoResponseConfig {
     /// ISO 8601 datetime string (nullable = no schedule).
     pub start_date: Option<String>,
     pub end_date: Option<String>,
+    /// IANA timezone for schedule dates (Graph only; defaults to UTC).
+    pub start_date_tz: Option<String>,
+    pub end_date_tz: Option<String>,
     /// Exchange supports separate internal/external messages.
     /// Gmail and JMAP only use `external_message_html`.
     pub internal_message_html: Option<String>,
@@ -78,6 +81,8 @@ pub async fn db_get_auto_response(
                     enabled: row.get::<_, i32>(0)? != 0,
                     start_date: row.get(1)?,
                     end_date: row.get(2)?,
+                    start_date_tz: None,
+                    end_date_tz: None,
                     internal_message_html: row.get(3)?,
                     external_message_html: row.get(4)?,
                     external_audience: ExternalAudience::parse(
@@ -158,6 +163,12 @@ pub async fn fetch_graph_auto_response(
         end_date: resp["scheduledEndDateTime"]["dateTime"]
             .as_str()
             .map(str::to_string),
+        start_date_tz: resp["scheduledStartDateTime"]["timeZone"]
+            .as_str()
+            .map(str::to_string),
+        end_date_tz: resp["scheduledEndDateTime"]["timeZone"]
+            .as_str()
+            .map(str::to_string),
         internal_message_html: resp["internalReplyMessage"]
             .as_str()
             .filter(|s| !s.is_empty())
@@ -197,18 +208,20 @@ pub async fn push_graph_auto_response(
     });
 
     if let Some(ref msg) = config.internal_message_html {
-        setting["internalReplyMessage"] = serde_json::json!({ "message": msg });
+        setting["internalReplyMessage"] = serde_json::Value::String(msg.clone());
     }
     if let Some(ref msg) = config.external_message_html {
-        setting["externalReplyMessage"] = serde_json::json!({ "message": msg });
+        setting["externalReplyMessage"] = serde_json::Value::String(msg.clone());
     }
     if let Some(ref start) = config.start_date {
+        let tz = config.start_date_tz.as_deref().unwrap_or("UTC");
         setting["scheduledStartDateTime"] =
-            serde_json::json!({ "dateTime": start, "timeZone": "UTC" });
+            serde_json::json!({ "dateTime": start, "timeZone": tz });
     }
     if let Some(ref end) = config.end_date {
+        let tz = config.end_date_tz.as_deref().unwrap_or("UTC");
         setting["scheduledEndDateTime"] =
-            serde_json::json!({ "dateTime": end, "timeZone": "UTC" });
+            serde_json::json!({ "dateTime": end, "timeZone": tz });
     }
 
     let body = serde_json::json!({ "automaticRepliesSetting": setting });
@@ -267,6 +280,8 @@ pub async fn fetch_gmail_auto_response(
         enabled,
         start_date,
         end_date,
+        start_date_tz: None,
+        end_date_tz: None,
         internal_message_html: None, // Gmail doesn't distinguish
         external_message_html: resp["responseBodyHtml"]
             .as_str()
@@ -351,6 +366,8 @@ pub async fn fetch_jmap_auto_response(
         enabled: vr.is_enabled(),
         start_date,
         end_date,
+        start_date_tz: None,
+        end_date_tz: None,
         internal_message_html: None,
         external_message_html: vr
             .html_body()

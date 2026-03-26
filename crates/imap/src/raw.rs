@@ -66,6 +66,17 @@ pub async fn raw_fetch_messages(
             xoauth2.as_bytes(),
         );
         format!("a1 AUTHENTICATE XOAUTH2 {b64}\r\n")
+    } else if config.auth_method == "oauthbearer" {
+        // OAUTHBEARER (RFC 7628): AUTHENTICATE OAUTHBEARER <base64>
+        let oauthbearer = format!(
+            "n,a={},\x01auth=Bearer {}\x01\x01",
+            config.username, config.password
+        );
+        let b64 = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            oauthbearer.as_bytes(),
+        );
+        format!("a1 AUTHENTICATE OAUTHBEARER {b64}\r\n")
     } else {
         format!(
             "a1 LOGIN \"{}\" \"{}\"\r\n",
@@ -187,19 +198,41 @@ pub async fn raw_fetch_diagnostic(
         output.push_str(&format!("S: {}", String::from_utf8_lossy(&buf[..n])));
     }
 
-    // LOGIN
-    let login_cmd = format!(
-        "a1 LOGIN \"{}\" \"{}\"\r\n",
-        config.username, config.password
-    );
+    // LOGIN / AUTHENTICATE
+    let login_cmd = if config.auth_method == "oauth2" {
+        let xoauth2 = format!(
+            "user={}\x01auth=Bearer {}\x01\x01",
+            config.username, config.password
+        );
+        let b64 = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            xoauth2.as_bytes(),
+        );
+        format!("a1 AUTHENTICATE XOAUTH2 {b64}\r\n")
+    } else if config.auth_method == "oauthbearer" {
+        let oauthbearer = format!(
+            "n,a={},\x01auth=Bearer {}\x01\x01",
+            config.username, config.password
+        );
+        let b64 = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            oauthbearer.as_bytes(),
+        );
+        format!("a1 AUTHENTICATE OAUTHBEARER {b64}\r\n")
+    } else {
+        format!(
+            "a1 LOGIN \"{}\" \"{}\"\r\n",
+            config.username, config.password
+        )
+    };
     stream
         .write_all(login_cmd.as_bytes())
         .await
-        .map_err(|e| format!("LOGIN: {e}"))?;
+        .map_err(|e| format!("AUTH: {e}"))?;
     let n = stream
         .read(&mut buf)
         .await
-        .map_err(|e| format!("LOGIN read: {e}"))?;
+        .map_err(|e| format!("AUTH read: {e}"))?;
     output.push_str(&format!("S: {}", String::from_utf8_lossy(&buf[..n])));
 
     // SELECT
