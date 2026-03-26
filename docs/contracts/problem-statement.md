@@ -16,15 +16,7 @@ The structural fix for each was the same principle: make the right thing the onl
 
 ---
 
-## Remaining (2)
-
-### 9. New email actions require 8 parallel edits
-
-**Contract:** Adding a new email action requires: `EmailAction` variant, `CompletedAction` variant (with `removes_from_view`, `success_label`), `BatchAction` variant, `to_batch_action` mapping, `handle_action_completed` arm, `UndoToken` variant, undo dispatch arm, `handle_email_action` arm. Missing any one silently degrades (no undo, wrong toast, etc.).
-
-**Currently enforced by:** Convention. Wildcard arms in `to_batch_action` and undo dispatch return `None`/empty instead of failing, so missing arms are silent.
-
-**Structural fix:** A single action descriptor table (or derive macro) that generates the classification, batch mapping, rollback policy, and undo mapping from one definition.
+## Remaining (1)
 
 ### 15. Generation counter ordering
 
@@ -50,10 +42,11 @@ The structural fix for each was the same principle: make the right thing the onl
 
 ---
 
-## Fixed (20)
+## Fixed (21)
 
 | # | Contract | Fix |
 |---|----------|-----|
+| 9 | 8-edit action protocol | All 5 wildcard arms in action dispatch replaced with exhaustive matches on `CompletedAction`. Adding a new variant now produces compiler errors at every site. Dead `DeleteDraft` variant removed. |
 | 10 | Scope state split | `ViewScope` enum (`AllAccounts`, `Account`, `SharedMailbox`, `PublicFolder`) replaces split fields. `selected_scope` is single source of truth. Dedicated query paths for shared mailbox threads (CTE-scoped) and public folder items. Personal queries filter `shared_mailbox_id IS NULL`. Actions gated for public folder scope. |
 | 1 | Mail mutation DB boundary | 7 thread-action DB helpers (`set_thread_read/starred/pinned/muted`, `delete_thread`, `add/remove_thread_label`) changed to `pub(crate)`. App crate forced through action service at compile time. |
 | 2 | Account deletion leaks external stores | `delete_account_orchestrate()` — gather + ref-checks + delete in one call, async cleanup of body/inline/cache/search stores. 7 integration tests. |

@@ -400,7 +400,15 @@ impl App {
                     CompletedAction::MarkRead => t.is_read = *prev,
                     CompletedAction::Pin => t.is_pinned = *prev,
                     CompletedAction::Mute => t.is_muted = *prev,
-                    _ => {}
+                    // Non-toggle actions don't have thread-list rollback fields.
+                    CompletedAction::Archive
+                    | CompletedAction::Trash
+                    | CompletedAction::Spam
+                    | CompletedAction::MoveToFolder
+                    | CompletedAction::PermanentDelete
+                    | CompletedAction::Snooze
+                    | CompletedAction::AddLabel
+                    | CompletedAction::RemoveLabel => {}
                 }
             }
 
@@ -591,7 +599,15 @@ impl App {
                         thread_ids,
                         was_muted: prev,
                     },
-                    _ => continue,
+                    // Non-toggle actions don't enter the rollback branch.
+                    CompletedAction::Archive
+                    | CompletedAction::Trash
+                    | CompletedAction::Spam
+                    | CompletedAction::MoveToFolder
+                    | CompletedAction::PermanentDelete
+                    | CompletedAction::Snooze
+                    | CompletedAction::AddLabel
+                    | CompletedAction::RemoveLabel => continue,
                 };
                 self.undo_stack.push(token);
             }
@@ -683,7 +699,13 @@ impl App {
                         account_id: account_id.to_string(),
                         thread_ids,
                     },
-                    _ => continue,
+                    // Toggle actions are handled in the rollback branch above.
+                    // PermanentDelete is irreversible (early return at line 556).
+                    CompletedAction::Star
+                    | CompletedAction::MarkRead
+                    | CompletedAction::Pin
+                    | CompletedAction::Mute
+                    | CompletedAction::PermanentDelete => continue,
                 };
                 self.undo_stack.push(token);
             }
@@ -964,8 +986,21 @@ fn to_batch_action(action: CompletedAction, params: &ActionParams) -> Option<Bat
         (CompletedAction::Snooze, ActionParams::Snooze { until }) => {
             Some(BatchAction::Snooze { until: *until })
         }
-        _ => {
-            log::error!("to_batch_action: unhandled {action:?} / {params:?}");
+        // Toggle actions go through dispatch_toggle_batch, not this path.
+        (CompletedAction::Star, _)
+        | (CompletedAction::MarkRead, _)
+        | (CompletedAction::Pin, _)
+        | (CompletedAction::Mute, _) => {
+            log::error!("to_batch_action: toggle action {action:?} should use dispatch_toggle_batch");
+            None
+        }
+        // Mismatched params for parameterized actions.
+        (CompletedAction::Spam, _)
+        | (CompletedAction::MoveToFolder, _)
+        | (CompletedAction::AddLabel, _)
+        | (CompletedAction::RemoveLabel, _)
+        | (CompletedAction::Snooze, _) => {
+            log::error!("to_batch_action: mismatched params for {action:?}: {params:?}");
             None
         }
     }
@@ -1046,7 +1081,15 @@ fn to_toggle_batch(action: CompletedAction, value: bool) -> Option<BatchAction> 
         CompletedAction::MarkRead => Some(BatchAction::MarkRead { read: value }),
         CompletedAction::Pin => Some(BatchAction::Pin { pinned: value }),
         CompletedAction::Mute => Some(BatchAction::Mute { muted: value }),
-        _ => {
+        // Non-toggle actions should never reach this function.
+        CompletedAction::Archive
+        | CompletedAction::Trash
+        | CompletedAction::Spam
+        | CompletedAction::MoveToFolder
+        | CompletedAction::PermanentDelete
+        | CompletedAction::Snooze
+        | CompletedAction::AddLabel
+        | CompletedAction::RemoveLabel => {
             log::error!("to_toggle_batch: {action:?} is not a toggle");
             None
         }

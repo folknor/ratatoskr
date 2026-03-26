@@ -52,20 +52,9 @@ Async loads (nav, threads, search, etc.) must not overwrite fresher state. Each 
 
 ## Adding a New Email Action
 
-Adding a new action currently requires 8 coordinated edits:
+Adding a new action requires 8 coordinated edits: `EmailAction` variant, `CompletedAction` variant (with `removes_from_view`, `success_label`), `BatchAction` variant, `to_batch_action` mapping, `handle_action_completed` arm, `UndoToken` variant, undo dispatch arm, `handle_email_action` arm.
 
-1. `EmailAction` variant
-2. `CompletedAction` variant (with `removes_from_view`, `success_label`)
-3. `BatchAction` variant
-4. `to_batch_action` mapping
-5. `handle_action_completed` arm
-6. `UndoToken` variant
-7. Undo dispatch arm
-8. `handle_email_action` arm
-
-Missing any one silently degrades (no undo, wrong toast, etc.) because wildcard arms return `None`/empty instead of failing.
-
-**Target state:** A single action descriptor (table or derive macro) that generates classification, batch mapping, rollback policy, and undo mapping from one definition.
+**Enforcement:** All match arms on `CompletedAction` are exhaustive — no wildcards. Adding a new variant produces compiler errors at every dispatch site (`to_batch_action`, `to_toggle_batch`, `rollback_toggles`, `produce_undo_tokens`, `success_label`, `removes_from_view`). The 8-edit protocol still exists, but you can't silently miss a step.
 
 ## Database Integrity
 

@@ -16,7 +16,7 @@
 
 - [ ] **Email body background override setting** — Email body areas are always rendered on a white background for fidelity (HTML emails are authored against white). Users should be able to override this to use the theme's background instead, for a fully immersive dark mode experience at the cost of email rendering accuracy. Setting in Preferences with three options: "Always white" (default), "Match theme", "Auto" (white in light themes, theme bg in dark themes).
 
-- [ ] **Codebase contracts** — 2 remaining implicit contracts (20 fixed). See `docs/architecture.md` for the principles, boundaries, and structural fix targets.
+- [ ] **Codebase contracts** — 1 remaining implicit contract (21 fixed). See `docs/architecture.md` for the principles, boundaries, and structural fix targets.
 
 - [ ] **App logo in first-launch modal + about page** — `assets/icon.svg` exists but isn't rendered anywhere. Needs iced `svg` feature enabled to use `iced::widget::svg`. SVG preferred over PNG because the icon should be re-colored to match the active theme (e.g. primary color tint). Requires adding `"svg"` to the iced features list in `crates/app/Cargo.toml`.
 

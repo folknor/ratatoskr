@@ -169,7 +169,6 @@ pub enum CompletedAction {
     Snooze,
     AddLabel,
     RemoveLabel,
-    DeleteDraft,
 }
 
 impl CompletedAction {
@@ -194,7 +193,6 @@ impl CompletedAction {
             Self::Snooze => "Snoozed",
             Self::AddLabel => "Label applied",
             Self::RemoveLabel => "Label removed",
-            Self::DeleteDraft => "Draft discarded",
         }
     }
 }
