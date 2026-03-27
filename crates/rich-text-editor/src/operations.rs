@@ -984,7 +984,16 @@ fn apply_set_block_type(doc: &mut Document, block_index: usize, new: BlockKind) 
         .block(block_index)
         .expect("SetBlockType: block out of bounds");
 
-    let runs = block.runs().unwrap_or(&[]).to_vec();
+    // Extract inline runs from the source block. For container blocks
+    // (BlockQuote) that have no direct runs, pull from the first child.
+    let runs = match block {
+        Block::BlockQuote { blocks } => blocks
+            .first()
+            .and_then(|b| b.runs())
+            .unwrap_or(&[])
+            .to_vec(),
+        _ => block.runs().unwrap_or(&[]).to_vec(),
+    };
     let flattened = block.flattened_text();
     let new_runs = if runs.is_empty() {
         vec![StyledRun::plain(String::new())]

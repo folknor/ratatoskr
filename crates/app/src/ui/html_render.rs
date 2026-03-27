@@ -7,7 +7,9 @@
 //! Includes a complexity heuristic for fallback detection — emails with deep
 //! table nesting (layout tables) or heavy style blocks fall back to plain text.
 
-use iced::widget::{column, container, row, text, Space};
+use std::collections::HashMap;
+
+use iced::widget::{button, column, container, image, row, text, Space};
 use iced::{Element, Length, Padding};
 
 use crate::ui::layout::*;
@@ -94,6 +96,8 @@ pub(super) fn preparse_html(html: &str) -> CachedHtmlBody {
 pub fn render_cached_html<'a, M: Clone + 'a>(
     cached: &CachedHtmlBody,
     fallback_text: Option<&str>,
+    on_link_click: impl Fn(String) -> M + 'a,
+    inline_images: &'a HashMap<String, Vec<u8>>,
 ) -> Element<'a, M> {
     match cached {
         CachedHtmlBody::Complex => {
@@ -112,9 +116,10 @@ pub fn render_cached_html<'a, M: Clone + 'a>(
                 .into()
         }
         CachedHtmlBody::Blocks(blocks) => {
+            let on_link = std::rc::Rc::new(on_link_click);
             let mut col = column![].spacing(SPACE_XS).width(Length::Fill);
             for block in blocks {
-                col = col.push(render_block_ref::<M>(block));
+                col = col.push(render_block_ref(block, on_link.clone(), inline_images));
             }
             col.into()
         }
@@ -128,6 +133,8 @@ pub fn render_cached_html<'a, M: Clone + 'a>(
 pub fn render_html<'a, M: Clone + 'a>(
     html: &str,
     fallback_text: Option<&str>,
+    on_link_click: impl Fn(String) -> M + 'a,
+    inline_images: &'a HashMap<String, Vec<u8>>,
 ) -> Element<'a, M> {
     if assess_complexity(html) == HtmlComplexity::Complex {
         let display = fallback_text
@@ -147,33 +154,100 @@ pub fn render_html<'a, M: Clone + 'a>(
             .into();
     }
 
+    let on_link = std::rc::Rc::new(on_link_click);
     let mut col = column![].spacing(SPACE_XS).width(Length::Fill);
     for block in blocks {
-        col = col.push(render_block::<M>(block));
+        col = col.push(render_block(block, on_link.clone(), inline_images));
     }
     col.into()
 }
 
 // ── Block model ─────────────────────────────────────────
 
+/// An inline segment within a paragraph or list item.
+#[derive(Clone)]
+pub(super) enum InlineSpan {
+    /// Plain text.
+    Text(String),
+    /// A hyperlink with display text and target URL.
+    Link { display: String, href: String },
+}
+
 pub(super) enum Block {
-    Paragraph(String),
+    /// A paragraph containing mixed text and link spans.
+    Paragraph(Vec<InlineSpan>),
     Heading(String, u8),
     Preformatted(String),
     Blockquote(String),
-    ListItem { prefix: String, content: String },
+    ListItem { prefix: String, content: Vec<InlineSpan> },
     HorizontalRule,
+    /// An inline image referenced by Content-ID (from `<img src="cid:...">`).
+    InlineImage { cid: String, alt: String },
+}
+
+/// Render inline spans as a row of text and link widgets.
+///
+/// When the spans contain only a single `Text` span, emits a plain text widget.
+/// When links are present, wraps everything in a wrapping row.
+fn render_spans<'a, M: Clone + 'a>(
+    spans: &[InlineSpan],
+    on_link_click: &std::rc::Rc<dyn Fn(String) -> M + 'a>,
+) -> Element<'a, M> {
+    // Fast path: single text-only span (the common case).
+    if spans.len() == 1 {
+        if let InlineSpan::Text(txt) = &spans[0] {
+            return text(txt.clone())
+                .size(TEXT_LG)
+                .style(text::secondary)
+                .into();
+        }
+    }
+
+    let mut elements: Vec<Element<'a, M>> = Vec::with_capacity(spans.len());
+    for span in spans {
+        match span {
+            InlineSpan::Text(txt) => {
+                elements.push(
+                    text(txt.clone())
+                        .size(TEXT_LG)
+                        .style(text::secondary)
+                        .into(),
+                );
+            }
+            InlineSpan::Link { display, href } => {
+                let url = href.clone();
+                let on_click = on_link_click.clone();
+                elements.push(
+                    button(
+                        text(display.clone())
+                            .size(TEXT_LG)
+                            .style(theme::TextClass::Accent.style()),
+                    )
+                    .on_press_with(move || (on_click)(url.clone()))
+                    .padding(0)
+                    .style(theme::ButtonClass::BareTransparent.style())
+                    .into(),
+                );
+            }
+        }
+    }
+
+    iced::widget::row(elements)
+        .spacing(0)
+        .wrap()
+        .into()
 }
 
 /// Render a block by reference (for cached rendering). Clones the owned
 /// strings inside the block — this is cheap compared to re-parsing HTML.
-fn render_block_ref<'a, M: Clone + 'a>(block: &Block) -> Element<'a, M> {
+fn render_block_ref<'a, M: Clone + 'a>(
+    block: &Block,
+    on_link_click: std::rc::Rc<dyn Fn(String) -> M + 'a>,
+    inline_images: &'a HashMap<String, Vec<u8>>,
+) -> Element<'a, M> {
     match block {
-        Block::Paragraph(txt) => {
-            text(txt.clone())
-                .size(TEXT_LG)
-                .style(text::secondary)
-                .into()
+        Block::Paragraph(spans) => {
+            render_spans(spans, &on_link_click)
         }
         Block::Heading(txt, level) => {
             let size = match level {
@@ -218,76 +292,50 @@ fn render_block_ref<'a, M: Clone + 'a>(block: &Block) -> Element<'a, M> {
                         .style(theme::TextClass::Tertiary.style()),
                 )
                 .width(Length::Fixed(SPACE_LG)),
-                text(content.clone()).size(TEXT_LG).style(text::secondary),
             ]
+            .push(render_spans(content, &on_link_click))
             .spacing(SPACE_XXS)
             .into()
         }
         Block::HorizontalRule => {
             iced::widget::rule::horizontal(1).into()
+        }
+        Block::InlineImage { cid, alt } => {
+            render_cid_image(cid, alt, inline_images)
         }
     }
 }
 
-pub(super) fn render_block<'a, M: Clone + 'a>(block: Block) -> Element<'a, M> {
-    match block {
-        Block::Paragraph(txt) => {
-            text(txt)
-                .size(TEXT_LG)
-                .style(text::secondary)
-                .into()
-        }
-        Block::Heading(txt, level) => {
-            let size = match level {
-                1 => TEXT_HEADING,
-                2 => TEXT_TITLE,
-                _ => TEXT_XL,
-            };
-            text(txt)
-                .size(size)
-                .font(crate::font::text_semibold())
-                .style(text::base)
-                .into()
-        }
-        Block::Preformatted(txt) => {
-            container(
-                text(txt)
-                    .size(TEXT_MD)
-                    .font(iced::Font::MONOSPACE)
-                    .style(text::secondary),
-            )
-            .padding(PAD_CARD)
-            .style(theme::ContainerClass::Elevated.style())
-            .width(Length::Fill)
+pub(super) fn render_block<'a, M: Clone + 'a>(
+    block: Block,
+    on_link_click: std::rc::Rc<dyn Fn(String) -> M + 'a>,
+    inline_images: &'a HashMap<String, Vec<u8>>,
+) -> Element<'a, M> {
+    // Delegate to the by-ref version — the block is consumed but
+    // render_block_ref only clones the inner strings anyway.
+    render_block_ref(&block, on_link_click, inline_images)
+}
+
+/// Render a CID-referenced inline image, or fall back to alt text.
+fn render_cid_image<'a, M: 'a>(
+    cid: &str,
+    alt: &str,
+    inline_images: &'a HashMap<String, Vec<u8>>,
+) -> Element<'a, M> {
+    if let Some(data) = inline_images.get(cid) {
+        let handle = image::Handle::from_bytes(data.clone());
+        image(handle)
+            .content_fit(iced::ContentFit::ScaleDown)
+            .width(Length::Shrink)
             .into()
-        }
-        Block::Blockquote(txt) => {
-            container(
-                text(txt)
-                    .size(TEXT_LG)
-                    .style(theme::TextClass::Tertiary.style()),
-            )
-            .padding(Padding { top: SPACE_XXS, right: SPACE_SM, bottom: SPACE_XXS, left: SPACE_MD })
-            .style(theme::ContainerClass::Elevated.style())
-            .width(Length::Fill)
+    } else if !alt.is_empty() {
+        text(format!("[{alt}]"))
+            .size(TEXT_LG)
+            .style(text::secondary)
             .into()
-        }
-        Block::ListItem { prefix, content } => {
-            row![
-                container(
-                    text(prefix)
-                        .size(TEXT_LG)
-                        .style(theme::TextClass::Tertiary.style()),
-                )
-                .width(Length::Fixed(SPACE_LG)),
-                text(content).size(TEXT_LG).style(text::secondary),
-            ]
-            .spacing(SPACE_XXS)
-            .into()
-        }
-        Block::HorizontalRule => {
-            iced::widget::rule::horizontal(1).into()
-        }
+    } else {
+        // No image data and no alt text — render nothing.
+        Space::new().width(0).height(0).into()
     }
 }
 
@@ -309,6 +357,10 @@ struct HtmlParser<'a> {
     source: &'a str,
     pos: usize,
     current_text: String,
+    /// Completed inline spans for the current paragraph/list-item.
+    current_spans: Vec<InlineSpan>,
+    /// When inside `<a href="...">`, holds the href URL.
+    current_link_href: Option<String>,
     in_pre: bool,
     in_blockquote: bool,
     blockquote_text: String,
@@ -329,6 +381,8 @@ impl<'a> HtmlParser<'a> {
             source,
             pos: 0,
             current_text: String::new(),
+            current_spans: Vec::new(),
+            current_link_href: None,
             in_pre: false,
             in_blockquote: false,
             blockquote_text: String::new(),
@@ -379,7 +433,7 @@ impl<'a> HtmlParser<'a> {
     }
 
     fn handle_tag(&mut self, blocks: &mut Vec<Block>) {
-        let tag_start = self.pos;
+        let _tag_start = self.pos;
         // Find end of tag
         if let Some(end_offset) = self.source[self.pos..].find('>') {
             let tag_end = self.pos + end_offset + 1;
@@ -461,17 +515,29 @@ impl<'a> HtmlParser<'a> {
                 self.skip_content = true;
             }
             "img" => {
-                // Extract alt text
-                let alt = extract_attr(_full_tag, "alt");
-                if let Some(alt_text) = alt {
-                    if !alt_text.is_empty() {
-                        self.current_text.push('[');
-                        self.current_text.push_str(&alt_text);
-                        self.current_text.push(']');
-                    }
+                let alt = extract_attr(_full_tag, "alt").unwrap_or_default();
+                let src = extract_attr(_full_tag, "src").unwrap_or_default();
+
+                // Check for CID-referenced inline image.
+                if let Some(cid) = src.strip_prefix("cid:") {
+                    self.flush_text(blocks);
+                    blocks.push(Block::InlineImage {
+                        cid: cid.to_string(),
+                        alt,
+                    });
+                } else if !alt.is_empty() {
+                    self.current_text.push('[');
+                    self.current_text.push_str(&alt);
+                    self.current_text.push(']');
                 }
             }
-            _ => {} // span, strong, b, em, i, a, etc. — inline, just consume text
+            "a" => {
+                // Flush accumulated plain text as a Text span before the link.
+                self.flush_text_span();
+                let href = extract_attr(_full_tag, "href").unwrap_or_default();
+                self.current_link_href = Some(href);
+            }
+            _ => {} // span, strong, b, em, i, etc. — inline, just consume text
         }
     }
 
@@ -505,9 +571,8 @@ impl<'a> HtmlParser<'a> {
                 self.list_counters.pop();
             }
             "li" => {
-                let content = std::mem::take(&mut self.current_text);
-                let trimmed = content.trim().to_string();
-                if !trimmed.is_empty() {
+                let spans = self.take_spans();
+                if !spans.is_empty() {
                     let prefix = match self.list_stack.last() {
                         Some(ListKind::Unordered) => "\u{2022}".to_string(),
                         Some(ListKind::Ordered) => {
@@ -522,8 +587,24 @@ impl<'a> HtmlParser<'a> {
                     };
                     blocks.push(Block::ListItem {
                         prefix,
-                        content: trimmed,
+                        content: spans,
                     });
+                }
+            }
+            "a" => {
+                // Close the link span: take the accumulated text as the link display text.
+                let link_text = std::mem::take(&mut self.current_text);
+                let trimmed = link_text.trim().to_string();
+                if let Some(href) = self.current_link_href.take() {
+                    if !trimmed.is_empty() {
+                        self.current_spans.push(InlineSpan::Link {
+                            display: trimmed,
+                            href,
+                        });
+                    }
+                } else if !trimmed.is_empty() {
+                    // Orphaned </a> — treat text as plain.
+                    self.current_spans.push(InlineSpan::Text(trimmed));
                 }
             }
             "style" | "script" | "head" => {
@@ -533,20 +614,43 @@ impl<'a> HtmlParser<'a> {
         }
     }
 
-    fn flush_text(&mut self, blocks: &mut Vec<Block>) {
+    /// Flush accumulated plain text into `current_spans` as a `Text` span.
+    /// Called before starting a link, so prior text is preserved.
+    fn flush_text_span(&mut self) {
         let text = std::mem::take(&mut self.current_text);
         let trimmed = text.trim().to_string();
-        if trimmed.is_empty() {
+        if !trimmed.is_empty() {
+            self.current_spans.push(InlineSpan::Text(trimmed));
+        }
+    }
+
+    /// Collect all pending spans (and any trailing text) into a completed
+    /// span list, draining the parser's inline state.
+    fn take_spans(&mut self) -> Vec<InlineSpan> {
+        // Flush any trailing plain text into a span.
+        self.flush_text_span();
+        // Also close any unclosed link (treat as plain text).
+        if let Some(_href) = self.current_link_href.take() {
+            // Link was never closed — the text was already flushed above.
+        }
+        std::mem::take(&mut self.current_spans)
+    }
+
+    fn flush_text(&mut self, blocks: &mut Vec<Block>) {
+        let spans = self.take_spans();
+        if spans.is_empty() {
             return;
         }
 
         if self.in_blockquote {
+            // Blockquotes flatten to plain text for now.
+            let plain = spans_to_plain_text(&spans);
             if !self.blockquote_text.is_empty() {
                 self.blockquote_text.push(' ');
             }
-            self.blockquote_text.push_str(&trimmed);
+            self.blockquote_text.push_str(&plain);
         } else {
-            blocks.push(Block::Paragraph(trimmed));
+            blocks.push(Block::Paragraph(spans));
         }
     }
 
@@ -677,6 +781,19 @@ fn decode_named_entity(name: &str) -> Option<&'static str> {
     })
 }
 
+/// Flatten a span list to plain text (for blockquotes and other contexts
+/// that don't support inline widgets).
+fn spans_to_plain_text(spans: &[InlineSpan]) -> String {
+    let mut out = String::new();
+    for span in spans {
+        match span {
+            InlineSpan::Text(t) => out.push_str(t),
+            InlineSpan::Link { display, .. } => out.push_str(display),
+        }
+    }
+    out
+}
+
 /// Extract an attribute value from a raw tag string.
 fn extract_attr(tag: &str, attr_name: &str) -> Option<String> {
     let lower = tag.to_lowercase();
@@ -704,12 +821,17 @@ fn extract_attr(tag: &str, attr_name: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// Helper: extract the plain text from a span list (for test assertions).
+    fn spans_text(spans: &[InlineSpan]) -> String {
+        spans_to_plain_text(spans)
+    }
+
     #[test]
     fn simple_paragraph() {
         let blocks = parse_html_to_blocks("<p>Hello world</p>");
         assert_eq!(blocks.len(), 1);
         match &blocks[0] {
-            Block::Paragraph(s) => assert_eq!(s, "Hello world"),
+            Block::Paragraph(spans) => assert_eq!(spans_text(spans), "Hello world"),
             _ => panic!("expected paragraph"),
         }
     }
@@ -731,7 +853,7 @@ mod tests {
         match &blocks[0] {
             Block::ListItem { prefix, content } => {
                 assert_eq!(prefix, "\u{2022}");
-                assert_eq!(content, "One");
+                assert_eq!(spans_text(content), "One");
             }
             _ => panic!("expected list item"),
         }
@@ -744,7 +866,7 @@ mod tests {
         match &blocks[0] {
             Block::ListItem { prefix, content } => {
                 assert_eq!(prefix, "1.");
-                assert_eq!(content, "First");
+                assert_eq!(spans_text(content), "First");
             }
             _ => panic!("expected ordered list item"),
         }
@@ -764,7 +886,7 @@ mod tests {
     fn entity_decoding() {
         let blocks = parse_html_to_blocks("<p>&amp; &lt; &gt; &quot;</p>");
         match &blocks[0] {
-            Block::Paragraph(s) => assert_eq!(s, "& < > \""),
+            Block::Paragraph(spans) => assert_eq!(spans_text(spans), "& < > \""),
             _ => panic!("expected paragraph"),
         }
     }
@@ -776,8 +898,79 @@ mod tests {
         );
         assert_eq!(blocks.len(), 1);
         match &blocks[0] {
-            Block::Paragraph(s) => assert_eq!(s, "visible"),
+            Block::Paragraph(spans) => assert_eq!(spans_text(spans), "visible"),
             _ => panic!("expected paragraph"),
+        }
+    }
+
+    #[test]
+    fn link_extraction() {
+        let blocks = parse_html_to_blocks(
+            "<p>Click <a href=\"https://example.com\">here</a> for more.</p>"
+        );
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            Block::Paragraph(spans) => {
+                assert_eq!(spans.len(), 3);
+                match &spans[0] {
+                    InlineSpan::Text(t) => assert_eq!(t, "Click"),
+                    _ => panic!("expected text span"),
+                }
+                match &spans[1] {
+                    InlineSpan::Link { display, href } => {
+                        assert_eq!(display, "here");
+                        assert_eq!(href, "https://example.com");
+                    }
+                    _ => panic!("expected link span"),
+                }
+                match &spans[2] {
+                    InlineSpan::Text(t) => assert_eq!(t, "for more."),
+                    _ => panic!("expected text span"),
+                }
+            }
+            _ => panic!("expected paragraph"),
+        }
+    }
+
+    #[test]
+    fn link_only_paragraph() {
+        let blocks = parse_html_to_blocks(
+            "<p><a href=\"https://example.com\">Example</a></p>"
+        );
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            Block::Paragraph(spans) => {
+                assert_eq!(spans.len(), 1);
+                match &spans[0] {
+                    InlineSpan::Link { display, href } => {
+                        assert_eq!(display, "Example");
+                        assert_eq!(href, "https://example.com");
+                    }
+                    _ => panic!("expected link span"),
+                }
+            }
+            _ => panic!("expected paragraph"),
+        }
+    }
+
+    #[test]
+    fn list_item_with_link() {
+        let blocks = parse_html_to_blocks(
+            "<ul><li>See <a href=\"https://example.com\">this</a></li></ul>"
+        );
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            Block::ListItem { content, .. } => {
+                assert_eq!(content.len(), 2);
+                match &content[1] {
+                    InlineSpan::Link { display, href } => {
+                        assert_eq!(display, "this");
+                        assert_eq!(href, "https://example.com");
+                    }
+                    _ => panic!("expected link in list item"),
+                }
+            }
+            _ => panic!("expected list item"),
         }
     }
 

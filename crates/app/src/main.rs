@@ -316,6 +316,8 @@ pub enum Message {
     PopOut(iced::window::Id, PopOutMessage),
     OpenMessageView(usize),
     ComposeDraftTick,
+    /// A local draft was loaded from DB — open it in a compose window.
+    LocalDraftLoaded(Result<Option<ratatoskr_core::db::types::DbLocalDraft>, String>),
 
     // Thread detail via core
     ThreadDetailLoaded(GenerationToken<ThreadDetail>, Result<db::AppThreadDetail, String>),
@@ -1186,6 +1188,24 @@ impl App {
                 self.open_message_view_window(message_index)
             }
             Message::ComposeDraftTick => self.auto_save_compose_drafts(),
+            Message::LocalDraftLoaded(Ok(Some(draft))) => {
+                let state = crate::pop_out::compose::ComposeState::from_local_draft(
+                    &self.sidebar.accounts,
+                    &draft,
+                );
+                self.open_compose_window_with_state(
+                    state,
+                    crate::pop_out::compose::ComposeMode::New,
+                )
+            }
+            Message::LocalDraftLoaded(Ok(None)) => {
+                log::warn!("Local draft not found in DB");
+                Task::none()
+            }
+            Message::LocalDraftLoaded(Err(e)) => {
+                log::error!("Failed to load local draft: {e}");
+                Task::none()
+            }
 
             // Thread detail via core (replaces separate messages/attachments loads)
             Message::ThreadDetailLoaded(g, _) if !self.thread_generation.is_current(g) => Task::none(),
@@ -2305,6 +2325,27 @@ impl App {
         if let Some(t) = thread {
             log::debug!("Thread selected: {}", t.id);
         }
+
+        // Local drafts open in a compose pop-out instead of the reading pane.
+        if let Some(t) = thread {
+            if t.is_local_draft {
+                let draft_id = t.id.clone();
+                let db = Arc::clone(&self.db);
+                return Task::perform(
+                    async move {
+                        let core_db =
+                            ratatoskr_core::db::DbState::from_arc(db.conn_arc());
+                        ratatoskr_core::db::queries_extra::db_get_local_draft(
+                            &core_db,
+                            draft_id,
+                        )
+                        .await
+                    },
+                    Message::LocalDraftLoaded,
+                );
+            }
+        }
+
         self.reading_pane.set_thread(thread);
 
         // Public folder items aren't real threads — skip detail loading.
@@ -2336,10 +2377,11 @@ impl App {
             if let Some(ref body_store) = self.body_store {
                 let db = Arc::clone(&self.db);
                 let bs = body_store.clone();
+                let iis = self.inline_image_store.clone();
                 return Task::perform(
                     async move {
                         let r = db::threads::load_thread_detail(
-                            &db, &bs, account_id, thread_id,
+                            &db, &bs, iis.as_ref(), account_id, thread_id,
                         )
                         .await;
                         (load_gen, r)

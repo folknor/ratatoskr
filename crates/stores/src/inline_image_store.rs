@@ -140,6 +140,43 @@ impl InlineImageStoreState {
         Ok(())
     }
 
+    /// Synchronous access to the underlying connection.
+    ///
+    /// Used by `spawn_blocking` callers that need to batch-fetch inline
+    /// images without going through the async `with_conn` path.
+    pub fn conn(&self) -> Arc<Mutex<Connection>> {
+        Arc::clone(&self.conn)
+    }
+
+    /// Synchronously retrieve multiple inline images by content hash.
+    ///
+    /// Returns a map from content hash to image bytes. Hashes not found
+    /// in the store are silently omitted. Designed for use inside
+    /// `spawn_blocking` where the caller already holds the connection.
+    pub fn get_batch_sync(
+        conn: &Connection,
+        content_hashes: &[(String, String)],
+    ) -> Result<std::collections::HashMap<String, Vec<u8>>, String> {
+        let mut result = std::collections::HashMap::new();
+        if content_hashes.is_empty() {
+            return Ok(result);
+        }
+
+        let mut stmt = conn
+            .prepare("SELECT data FROM inline_images WHERE content_hash = ?1")
+            .map_err(|e| format!("prepare inline image batch get: {e}"))?;
+
+        for (cid, content_hash) in content_hashes {
+            if let Ok(data) = stmt.query_row(params![content_hash], |row| {
+                row.get::<_, Vec<u8>>("data")
+            }) {
+                result.insert(cid.clone(), data);
+            }
+        }
+
+        Ok(result)
+    }
+
     /// Retrieve an inline image by content hash.
     pub async fn get(&self, content_hash: String) -> Result<Option<(Vec<u8>, String)>, String> {
         log::debug!("Retrieving inline image hash={content_hash}");

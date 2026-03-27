@@ -5,11 +5,15 @@
 //! detection, collapsed summaries, resolved label colors, and persisted
 //! attachment collapse state.
 
+use std::collections::HashMap;
+
 use ratatoskr_core::body_store::BodyStoreState;
 use ratatoskr_core::db::queries_extra::thread_detail::{
-    self, ThreadDetail, assemble_thread_detail, fetch_thread_bodies, query_thread_from_db,
+    self, ThreadDetail, assemble_thread_detail, fetch_thread_bodies, query_inline_cid_hashes,
+    query_thread_from_db,
 };
 use ratatoskr_core::db::queries_extra::set_attachments_collapsed;
+use ratatoskr_stores::inline_image_store::InlineImageStoreState;
 
 use super::connection::Db;
 use super::types::{ThreadAttachment, ThreadMessage};
@@ -36,6 +40,8 @@ pub struct AppThreadDetail {
     pub labels: Vec<ResolvedLabel>,
     pub attachments: Vec<ThreadAttachment>,
     pub attachments_collapsed: bool,
+    /// Pre-loaded CID-to-image-bytes map for inline `<img src="cid:...">` resolution.
+    pub inline_images: HashMap<String, Vec<u8>>,
 }
 
 /// Convert core's ThreadDetail into app display types.
@@ -73,6 +79,7 @@ fn convert_thread_detail(detail: ThreadDetail) -> AppThreadDetail {
         labels,
         attachments,
         attachments_collapsed: detail.attachments_collapsed,
+        inline_images: HashMap::new(),
     }
 }
 
@@ -119,19 +126,23 @@ fn convert_attachment(att: thread_detail::ThreadAttachment) -> ThreadAttachment 
 pub async fn load_thread_detail(
     db: &Db,
     body_store: &BodyStoreState,
+    inline_image_store: Option<&InlineImageStoreState>,
     account_id: String,
     thread_id: String,
 ) -> Result<AppThreadDetail, String> {
     let bs_conn = body_store.conn();
     let db_conn = db.conn_arc();
+    let iis_conn = inline_image_store.map(InlineImageStoreState::conn);
 
     tokio::task::spawn_blocking(move || {
         // Phase 1: hold main DB lock only for DB queries, then release.
-        let db_data = {
+        let (db_data, cid_hashes) = {
             let conn = db_conn
                 .lock()
                 .map_err(|e| format!("db lock: {e}"))?;
-            query_thread_from_db(&conn, &account_id, &thread_id)?
+            let data = query_thread_from_db(&conn, &account_id, &thread_id)?;
+            let cids = query_inline_cid_hashes(&conn, &account_id, &thread_id)?;
+            (data, cids)
         };
 
         // Phase 2: hold body store lock only for body fetches, then release.
@@ -142,9 +153,25 @@ pub async fn load_thread_detail(
             fetch_thread_bodies(&bs, &db_data.messages)?
         };
 
+        // Phase 2b: fetch inline images from the inline image store.
+        let inline_images = if let Some(ref iis_conn) = iis_conn {
+            if !cid_hashes.is_empty() {
+                let iis = iis_conn
+                    .lock()
+                    .map_err(|e| format!("inline image store lock: {e}"))?;
+                InlineImageStoreState::get_batch_sync(&iis, &cid_hashes)?
+            } else {
+                HashMap::new()
+            }
+        } else {
+            HashMap::new()
+        };
+
         // Phase 3: pure computation, no locks needed.
         let detail = assemble_thread_detail(db_data, body_map, &account_id, &thread_id);
-        Ok(convert_thread_detail(detail))
+        let mut app_detail = convert_thread_detail(detail);
+        app_detail.inline_images = inline_images;
+        Ok(app_detail)
     })
     .await
     .map_err(|e| format!("spawn_blocking: {e}"))?

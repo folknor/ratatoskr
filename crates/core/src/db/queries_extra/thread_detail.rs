@@ -518,6 +518,44 @@ fn query_thread_attachments(
     Ok(rows)
 }
 
+// ── Inline CID resolution ───────────────────────────────────
+
+/// Query inline attachment CID-to-content-hash mappings for a thread.
+///
+/// Returns `(content_id, content_hash)` pairs for inline attachments
+/// that have both a CID and a content hash stored. Used to resolve
+/// `<img src="cid:...">` references in HTML email bodies.
+pub fn query_inline_cid_hashes(
+    conn: &Connection,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT a.content_id, a.content_hash \
+             FROM attachments a \
+             JOIN messages m ON a.message_id = m.id AND a.account_id = m.account_id \
+             WHERE a.account_id = ?1 AND m.thread_id = ?2 \
+               AND a.is_inline = 1 \
+               AND a.content_id IS NOT NULL AND a.content_id != '' \
+               AND a.content_hash IS NOT NULL AND a.content_hash != ''",
+        )
+        .map_err(|e| format!("prepare inline CID query: {e}"))?;
+
+    let rows = stmt
+        .query_map(params![account_id, thread_id], |row| {
+            Ok((
+                row.get::<_, String>("content_id")?,
+                row.get::<_, String>("content_hash")?,
+            ))
+        })
+        .map_err(|e| format!("query inline CIDs: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("map inline CIDs: {e}"))?;
+
+    Ok(rows)
+}
+
 // ── Main entry point ────────────────────────────────────────
 
 /// Intermediate result from the main DB queries (phase 1).

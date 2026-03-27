@@ -32,7 +32,7 @@
 
 - [ ] **Scroll-to-selected in palette** — Arrow keys update `selected_index` but `scrollable::scroll_to` doesn't exist in our iced fork. Needs alternative approach.
 
-- [ ] **Compose block-type format toggles** — List and blockquote buttons in formatting toolbar are stubs.
+- [x] **Compose block-type format toggles** — List and blockquote buttons in formatting toolbar are stubs.
 
 - [ ] **`responsive` for adaptive layout** — Collapse panels at narrow window sizes.
 
@@ -146,8 +146,8 @@ Phases 1-2 complete. Phase 3 blocked on upstream.
 
 The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has significant fidelity gaps. Remaining:
 - [ ] **Inline text formatting** — `<strong>`, `<b>`, `<em>`, `<i>`, `<u>`, `<s>`, `<code>` (inline) all ignored. Everything renders as plain text. Needs a `Vec<Span>` model per block or `iced::widget::rich_text`.
-- [ ] **Link rendering + click handling** — `<a href>` tags treated as plain text. URLs not extracted. Need `href` extraction, visual link styling, and `LinkClicked(url)` message emission.
-- [ ] CID image loading from inline image store (`InlineImageStoreState` exists in stores crate, not wired to renderer)
+- [x] **Link rendering + click handling** — `<a href>` tags treated as plain text. URLs not extracted. Need `href` extraction, visual link styling, and `LinkClicked(url)` message emission.
+- [x] CID image loading from inline image store (`InlineImageStoreState` exists in stores crate, not wired to renderer)
 - [ ] Remote image loading with user consent (`block_remote_images` setting exists but disconnected from `render_html` — function signature needs context parameter)
 - [ ] Table rendering (table-for-layout is the hardest — no `<table>`/`<tr>`/`<td>` handling at all)
 - [ ] Image caching (`HashMap<String, image::Handle>`) — no `iced::widget::image` usage in app crate
@@ -234,7 +234,7 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **Pop-out HTML rendering** — SimpleHtml/OriginalHtml modes in message view pop-out fall back to plain text. Depends on the DOM-to-widget pipeline (`html_render.rs`) being wired into the pop-out view. Tracked separately in the HTML rendering section above.
 - [ ] **Pop-out Print** — OS print dialog integration for message view and compose pop-out windows. Platform-specific, no iced precedent. Needs investigation.
 - [x] **Pop-out default rendering mode from settings** — `MessageViewState` hardcodes `RenderingMode::default()` (SimpleHtml). Should load from a system-wide user preference. Needs a settings field + plumbing to pass it into `from_thread_message()` and `from_session_entry()`.
-- [ ] **Signature: draft restoration with signature state** — Draft save does not persist `signature_separator_index` or `active_signature_id`. On draft reopen, signature position in the document is not reconstructed.
+- [x] **Signature: draft restoration with signature state** — Draft save now persists `signature_separator_index` and `active_signature_id`. On draft reopen, signature position in the document is reconstructed.
 - [ ] **Signature: per-account default dropdown in Account Settings** — Account editor overlay has no signature dropdown for selecting the default signature for an account.
 - [x] **GAL sync trigger** — *(2026-03-25)* `refresh_gal_for_account()` in core, wired to `SyncTick`. Checks cache age (>24h stale threshold), creates provider client, fetches + caches. Runs alongside delta sync every 5 minutes.
 - [ ] **CardDAV contact write-back** — CardDAV client supports PROPFIND/REPORT/GET but not PUT/DELETE. Need vCard generation + PUT method for pushing contact edits to CardDAV servers. See `docs/contacts/problem-statement.md`.

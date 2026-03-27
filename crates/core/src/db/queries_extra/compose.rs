@@ -526,16 +526,20 @@ pub async fn db_save_local_draft(
     signature_id: Option<String>,
     remote_draft_id: Option<String>,
     attachments: Option<String>,
+    signature_separator_index: Option<i64>,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute(
-            "INSERT INTO local_drafts (id, account_id, to_addresses, cc_addresses, bcc_addresses, subject, body_html, reply_to_message_id, thread_id, from_email, signature_id, remote_draft_id, attachments, updated_at, sync_status)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, unixepoch(), 'pending')
+            "INSERT INTO local_drafts (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
+                subject, body_html, reply_to_message_id, thread_id, from_email, signature_id, \
+                remote_draft_id, attachments, signature_separator_index, updated_at, sync_status)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, unixepoch(), 'pending')
                  ON CONFLICT(id) DO UPDATE SET
                    to_addresses = ?3, cc_addresses = ?4, bcc_addresses = ?5,
                    subject = ?6, body_html = ?7, reply_to_message_id = ?8,
                    thread_id = ?9, from_email = ?10, signature_id = ?11,
                    remote_draft_id = ?12, attachments = ?13,
+                   signature_separator_index = ?14,
                    updated_at = unixepoch(), sync_status = 'pending'",
             params![
                 id,
@@ -551,6 +555,7 @@ pub async fn db_save_local_draft(
                 signature_id,
                 remote_draft_id,
                 attachments,
+                signature_separator_index,
             ],
         )
         .map_err(|e| e.to_string())?;

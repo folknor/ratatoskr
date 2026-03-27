@@ -400,6 +400,83 @@ impl ComposeState {
         }
     }
 
+    /// Restore a compose window from a persisted local draft.
+    ///
+    /// Reconstructs the body from saved HTML and restores the signature
+    /// separator index and active signature ID so the editor knows where
+    /// the signature boundary is.
+    pub fn from_local_draft(
+        accounts: &[db::Account],
+        draft: &ratatoskr_core::db::types::DbLocalDraft,
+    ) -> Self {
+        let from_accounts = accounts_to_info(accounts);
+        // Match the From account by email or fall back to first account.
+        let from_account = draft
+            .from_email
+            .as_ref()
+            .and_then(|email| {
+                from_accounts.iter().find(|a| &a.email == email).cloned()
+            })
+            .or_else(|| from_accounts.first().cloned());
+
+        // Parse recipient CSVs into tokens.
+        let to = csv_to_token_input(draft.to_addresses.as_deref());
+        let cc = csv_to_token_input(draft.cc_addresses.as_deref());
+        let bcc = csv_to_token_input(draft.bcc_addresses.as_deref());
+        let show_cc = !cc.tokens.is_empty();
+        let show_bcc = !bcc.tokens.is_empty();
+
+        let body = draft
+            .body_html
+            .as_deref()
+            .filter(|h| !h.trim().is_empty())
+            .map(EditorState::from_html)
+            .unwrap_or_else(EditorState::new);
+
+        #[allow(clippy::cast_sign_loss)]
+        let signature_separator_index = draft
+            .signature_separator_index
+            .filter(|&i| i >= 0)
+            .map(|i| i as usize);
+
+        Self {
+            to,
+            cc,
+            bcc,
+            show_cc,
+            show_bcc,
+            selected_to_token: None,
+            selected_cc_token: None,
+            selected_bcc_token: None,
+            from_account,
+            from_accounts,
+            subject: draft.subject.clone().unwrap_or_default(),
+            body,
+            mode: ComposeMode::New,
+            reply_thread_id: draft.thread_id.clone(),
+            reply_message_id: draft.reply_to_message_id.clone(),
+            status: None,
+            discard_confirm_open: false,
+            autocomplete: AutocompleteState::new(),
+            context_menu: None,
+            drag: None,
+            bcc_nudges: Vec::new(),
+            bulk_paste_banner: None,
+            attachments: Vec::new(),
+            link_dialog_open: false,
+            link_url: String::new(),
+            link_text: String::new(),
+            active_signature_id: draft.signature_id.clone(),
+            signature_separator_index,
+            width: COMPOSE_DEFAULT_WIDTH,
+            height: COMPOSE_DEFAULT_HEIGHT,
+            draft_id: draft.id.clone(),
+            draft_dirty: false,
+            sending: false,
+            send_draft_id: None,
+        }
+    }
+
     pub fn new_reply(
         accounts: &[db::Account],
         mode: &ComposeMode,
@@ -829,7 +906,10 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             state.draft_dirty = true;
         }
         ComposeMessage::FormatBlockquote => {
-            // BlockQuote toggle not yet supported via SetBlockType
+            state.body.perform(RteAction::Edit(
+                EditAction::SetBlockType(ratatoskr_rich_text_editor::BlockKind::BlockQuote),
+            ));
+            state.draft_dirty = true;
         }
         // Link dialog
         ComposeMessage::FormatLink | ComposeMessage::ToggleLinkDialog => {
@@ -1439,6 +1519,7 @@ fn formatting_toolbar<'a>(
         fmt_btn(icon::italic(), ComposeMessage::FormatItalic),
         fmt_btn(icon::underline(), ComposeMessage::FormatUnderline),
         fmt_btn(icon::list(), ComposeMessage::FormatList),
+        fmt_btn(icon::text_quote(), ComposeMessage::FormatBlockquote),
         fmt_btn(icon::link(), ComposeMessage::FormatLink),
     ]
     .spacing(SPACE_XXS)
@@ -1935,6 +2016,29 @@ fn link_dialog<'a>(
 }
 
 // ── Helpers ─────────────────────────────────────────────
+
+/// Parse a comma-separated address string into a `TokenInputValue`.
+fn csv_to_token_input(csv: Option<&str>) -> TokenInputValue {
+    let mut tiv = TokenInputValue::new();
+    let Some(s) = csv else { return tiv };
+    for addr in s.split(',') {
+        let addr = addr.trim();
+        if addr.is_empty() {
+            continue;
+        }
+        let id = token_input::TokenId(tiv.next_id);
+        tiv.next_id += 1;
+        tiv.tokens.push(token_input::Token {
+            id,
+            email: addr.to_string(),
+            label: addr.to_string(),
+            is_group: false,
+            group_id: None,
+            member_count: None,
+        });
+    }
+    tiv
+}
 
 fn accounts_to_info(accounts: &[db::Account]) -> Vec<AccountInfo> {
     accounts

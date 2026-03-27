@@ -1061,6 +1061,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     search_highlight_terms: &'a [String],
     cached_html: Option<&'a super::html_render::CachedHtmlBody>,
     thread_labels: &'a [ResolvedLabel],
+    inline_images: &'a std::collections::HashMap<String, Vec<u8>>,
     on_toggle: impl Fn(usize) -> M,
     on_pop_out: impl Fn(usize) -> M,
     on_reply: impl Fn(usize) -> M,
@@ -1068,6 +1069,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     on_forward: impl Fn(usize) -> M,
     on_edit_contact: impl Fn(String) -> M + 'a,
     on_create_event: impl Fn(usize) -> M,
+    on_link_click: impl Fn(String) -> M + 'a,
 ) -> Element<'a, M> {
     let sender_name = msg
         .from_name
@@ -1200,12 +1202,15 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         header = header.push(pills_row);
     }
 
+    let on_link = std::rc::Rc::new(on_link_click);
     let body_inner: Element<'_, M> = if msg.body_html.is_some() {
         // Use pre-parsed HTML cache when available to avoid re-parsing on every view.
+        let link_cb = on_link.clone();
         let rendered = if let Some(cached) = cached_html {
-            super::html_render::render_cached_html::<M>(cached, msg.body_text.as_deref())
+            super::html_render::render_cached_html(cached, msg.body_text.as_deref(), move |url| link_cb(url), inline_images)
         } else if let Some(html) = msg.body_html.as_deref() {
-            super::html_render::render_html::<M>(html, msg.body_text.as_deref())
+            let link_cb2 = on_link.clone();
+            super::html_render::render_html(html, msg.body_text.as_deref(), move |url| link_cb2(url), inline_images)
         } else {
             unreachable!()
         };

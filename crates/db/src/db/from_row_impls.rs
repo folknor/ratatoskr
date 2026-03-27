@@ -432,6 +432,7 @@ impl_from_row!(DbLocalDraft {
     signature_id,
     remote_draft_id,
     attachments,
+    signature_separator_index,
     created_at,
     updated_at,
     sync_status,

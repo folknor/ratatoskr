@@ -602,6 +602,7 @@ pub struct DbLocalDraft {
     pub signature_id: Option<String>,
     pub remote_draft_id: Option<String>,
     pub attachments: Option<String>,
+    pub signature_separator_index: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
     pub sync_status: String,

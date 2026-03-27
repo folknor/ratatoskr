@@ -881,6 +881,8 @@ struct DraftData {
     from_email: Option<String>,
     reply_to_message_id: Option<String>,
     thread_id: Option<String>,
+    signature_id: Option<String>,
+    signature_separator_index: Option<i64>,
 }
 
 impl DraftData {
@@ -891,6 +893,8 @@ impl DraftData {
             .map(|a| a.id.clone())
             .unwrap_or_default();
         let body_text = state.body.to_html();
+        #[allow(clippy::cast_possible_wrap)]
+        let sep_idx = state.signature_separator_index.map(|i| i as i64);
         Self {
             draft_id: state.draft_id.clone(),
             account_id,
@@ -910,6 +914,8 @@ impl DraftData {
             from_email: state.from_account.as_ref().map(|a| a.email.clone()),
             reply_to_message_id: state.reply_message_id.clone(),
             thread_id: state.reply_thread_id.clone(),
+            signature_id: state.active_signature_id.clone(),
+            signature_separator_index: sep_idx,
         }
     }
 
@@ -918,13 +924,16 @@ impl DraftData {
             "INSERT INTO local_drafts \
              (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
               subject, body_html, reply_to_message_id, thread_id, \
-              from_email, updated_at, sync_status) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, unixepoch(), 'pending') \
+              from_email, signature_id, signature_separator_index, \
+              updated_at, sync_status) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
+                     unixepoch(), 'pending') \
              ON CONFLICT(id) DO UPDATE SET \
                account_id = ?2, \
                to_addresses = ?3, cc_addresses = ?4, bcc_addresses = ?5, \
                subject = ?6, body_html = ?7, reply_to_message_id = ?8, \
-               thread_id = ?9, from_email = ?10, \
+               thread_id = ?9, from_email = ?10, signature_id = ?11, \
+               signature_separator_index = ?12, \
                updated_at = unixepoch(), sync_status = 'pending'",
             rusqlite::params![
                 self.draft_id,
@@ -937,6 +946,8 @@ impl DraftData {
                 self.reply_to_message_id,
                 self.thread_id,
                 self.from_email,
+                self.signature_id,
+                self.signature_separator_index,
             ],
         )
         .map_err(|e| e.to_string())?;

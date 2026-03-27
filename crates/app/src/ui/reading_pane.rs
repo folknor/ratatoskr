@@ -37,6 +37,8 @@ pub enum ReadingPaneMessage {
     /// Navigate to the previous message in the thread (expand it).
     PrevMessage,
     ToggleStar,
+    /// User clicked a hyperlink in the HTML body; open it in the system browser.
+    LinkClicked(String),
     Noop,
 }
 
@@ -82,6 +84,9 @@ pub struct ReadingPane {
     /// Pre-parsed HTML bodies, one per message. Avoids re-parsing HTML on every
     /// view cycle — only rebuilt when thread detail loads.
     cached_html: Vec<Option<super::html_render::CachedHtmlBody>>,
+    /// Pre-loaded inline images for CID resolution in HTML bodies.
+    /// Maps Content-ID to image bytes.
+    inline_images: HashMap<String, Vec<u8>>,
 }
 
 /// Minimal reference to the currently selected thread for display purposes.
@@ -108,6 +113,7 @@ impl ReadingPane {
             search_highlight_terms: Vec::new(),
             deduped_attachments: Vec::new(),
             cached_html: Vec::new(),
+            inline_images: HashMap::new(),
         }
     }
 
@@ -126,6 +132,7 @@ impl ReadingPane {
         self.focused_message = None;
         self.deduped_attachments.clear();
         self.cached_html.clear();
+        self.inline_images.clear();
         // Restore attachment collapse state from cache
         self.attachments_collapsed = thread
             .map(|t| {
@@ -211,6 +218,7 @@ impl ReadingPane {
         self.thread_messages = detail.messages;
         self.thread_attachments = detail.attachments;
         self.thread_labels = detail.labels;
+        self.inline_images = detail.inline_images;
         self.recompute_deduped_attachments();
     }
 
@@ -352,6 +360,10 @@ impl Component for ReadingPane {
             }
             ReadingPaneMessage::ToggleStar => {
                 (Task::none(), Some(ReadingPaneEvent::ToggleStar))
+            }
+            ReadingPaneMessage::LinkClicked(url) => {
+                open_url_in_browser(&url);
+                (Task::none(), None)
             }
             ReadingPaneMessage::Noop => (Task::none(), None),
         }
@@ -628,6 +640,7 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
                 &pane.search_highlight_terms,
                 cached_html,
                 &pane.thread_labels,
+                &pane.inline_images,
                 ReadingPaneMessage::ToggleMessageExpanded,
                 ReadingPaneMessage::PopOut,
                 ReadingPaneMessage::Reply,
@@ -635,6 +648,7 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
                 ReadingPaneMessage::Forward,
                 ReadingPaneMessage::EditContact,
                 ReadingPaneMessage::CreateEventFromEmail,
+                ReadingPaneMessage::LinkClicked,
             ));
         } else {
             msg_col = msg_col.push(widgets::collapsed_message_row(
@@ -711,4 +725,26 @@ fn attachment_group<'a>(
     .padding(PAD_CONTENT)
     .width(Length::Fill)
     .into()
+}
+
+/// Open a URL in the system default browser.
+fn open_url_in_browser(url: &str) {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open")
+            .arg(url)
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg(url)
+            .spawn();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/c", "start", url])
+            .spawn();
+    }
 }

@@ -1865,6 +1865,13 @@ static MIGRATIONS: &[Migration] = &[
             END;
         "#,
     },
+    Migration {
+        version: 80,
+        description: "Add signature_separator_index to local_drafts for draft reopen",
+        sql: r#"
+            ALTER TABLE local_drafts ADD COLUMN signature_separator_index INTEGER;
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
