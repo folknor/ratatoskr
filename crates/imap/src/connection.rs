@@ -53,7 +53,13 @@ impl XOAuth2 {
 impl Authenticator for XOAuth2 {
     type Response = Vec<u8>;
     fn process(&mut self, _challenge: &[u8]) -> Self::Response {
-        std::mem::take(&mut self.response)
+        let resp = std::mem::take(&mut self.response);
+        if resp.is_empty() {
+            // Error acknowledgment: respond with \x01 per protocol spec
+            vec![0x01]
+        } else {
+            resp
+        }
     }
 }
 
@@ -78,7 +84,13 @@ impl OAuthBearer {
 impl Authenticator for OAuthBearer {
     type Response = Vec<u8>;
     fn process(&mut self, _challenge: &[u8]) -> Self::Response {
-        std::mem::take(&mut self.response)
+        let resp = std::mem::take(&mut self.response);
+        if resp.is_empty() {
+            // Error acknowledgment: respond with \x01 per RFC 7628 §3.2.3
+            vec![0x01]
+        } else {
+            resp
+        }
     }
 }
 

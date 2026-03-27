@@ -379,48 +379,51 @@ pub async fn fetch_jmap_auto_response(
 
 /// Update vacation response on JMAP server.
 /// Uses `jmap-client` VacationResponse/set to update the singleton.
+///
+/// All fields are set in a single JMAP request to avoid partial-update
+/// failures (e.g. enabling the vacation without schedule dates).
 pub async fn push_jmap_auto_response(
     client: &ratatoskr_jmap::client::JmapClient,
     config: &AutoResponseConfig,
 ) -> Result<(), String> {
+    use jmap_client::vacation_response::VacationResponseSet;
+
     client.ensure_valid_token().await?;
     let inner = client.inner();
 
-    if config.enabled {
-        let from_ts = config.start_date.as_ref().and_then(|s| {
-            chrono::DateTime::parse_from_rfc3339(s)
-                .ok()
-                .map(|dt| dt.timestamp())
-        });
-        let to_ts = config.end_date.as_ref().and_then(|s| {
-            chrono::DateTime::parse_from_rfc3339(s)
-                .ok()
-                .map(|dt| dt.timestamp())
-        });
+    let from_ts = config.start_date.as_ref().and_then(|s| {
+        chrono::DateTime::parse_from_rfc3339(s)
+            .ok()
+            .map(|dt| dt.timestamp())
+    });
+    let to_ts = config.end_date.as_ref().and_then(|s| {
+        chrono::DateTime::parse_from_rfc3339(s)
+            .ok()
+            .map(|dt| dt.timestamp())
+    });
 
-        // Use vacation_response_enable for the full update
-        inner
-            .vacation_response_enable(
-                "", // subject (unused by most servers)
-                None::<String>,
-                config.external_message_html.clone(),
-            )
-            .await
-            .map_err(|e| format!("VacationResponse/set (enable): {e}"))?;
+    // Build a single VacationResponse/set request with all fields so that
+    // enabling + body + dates are applied atomically.
+    let mut request = inner.build();
+    let account_id = request.default_account_id().to_string();
+    let mut set = VacationResponseSet::new(&account_id);
+    set.update("singleton")
+        .is_enabled(config.enabled)
+        .subject(Some(""))
+        .text_body(None::<String>)
+        .html_body(config.external_message_html.clone())
+        .from_date(from_ts)
+        .to_date(to_ts);
 
-        // Set dates if provided
-        if from_ts.is_some() || to_ts.is_some() {
-            inner
-                .vacation_response_set_dates(from_ts, to_ts)
-                .await
-                .map_err(|e| format!("VacationResponse/set (dates): {e}"))?;
-        }
-    } else {
-        inner
-            .vacation_response_disable()
-            .await
-            .map_err(|e| format!("VacationResponse/set (disable): {e}"))?;
-    }
+    let handle = request
+        .call(set)
+        .map_err(|e| format!("VacationResponse/set build: {e}"))?;
+    request
+        .send_single(&handle)
+        .await
+        .map_err(|e| format!("VacationResponse/set: {e}"))?
+        .updated("singleton")
+        .map_err(|e| format!("VacationResponse/set: {e}"))?;
 
     log::info!("[JMAP] Updated VacationResponse (enabled={})", config.enabled);
     Ok(())

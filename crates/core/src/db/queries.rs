@@ -169,6 +169,7 @@ pub fn get_threads(
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
              WHERE t.account_id = ?1 AND tl.label_id = ?2
+               AND t.is_chat_thread = 0
              GROUP BY t.account_id, t.id
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?3 OFFSET ?4"
@@ -179,7 +180,7 @@ pub fn get_threads(
             "SELECT t.*, m.from_name, m.from_address FROM threads t
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-             WHERE t.account_id = ?1
+             WHERE t.account_id = ?1 AND t.is_chat_thread = 0
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?2 OFFSET ?3"
         );
@@ -206,6 +207,7 @@ pub fn get_threads_for_category(
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
              WHERE t.account_id = ?1 AND tl.label_id = 'INBOX'
                AND (tc.category IS NULL OR tc.category = 'Primary')
+               AND t.is_chat_thread = 0
              GROUP BY t.account_id, t.id
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?2 OFFSET ?3"
@@ -219,6 +221,7 @@ pub fn get_threads_for_category(
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
              WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.category = ?2
+               AND t.is_chat_thread = 0
              GROUP BY t.account_id, t.id
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?3 OFFSET ?4"
@@ -809,14 +812,16 @@ pub fn get_thread_count(
         conn.query_row(
             "SELECT COUNT(DISTINCT t.id) AS cnt FROM threads t
              INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-             WHERE t.account_id = ?1 AND tl.label_id = ?2",
+             WHERE t.account_id = ?1 AND tl.label_id = ?2
+               AND t.is_chat_thread = 0",
             params![account_id, label_id],
             |row| row.get::<_, i64>("cnt"),
         )
         .map_err(|e| e.to_string())
     } else {
         conn.query_row(
-            "SELECT COUNT(*) AS cnt FROM threads WHERE account_id = ?1",
+            "SELECT COUNT(*) AS cnt FROM threads WHERE account_id = ?1
+               AND is_chat_thread = 0",
             params![account_id],
             |row| row.get::<_, i64>("cnt"),
         )
@@ -841,7 +846,8 @@ pub fn get_unread_count(conn: &Connection, account_id: &str) -> Result<i64, Stri
     conn.query_row(
         "SELECT COUNT(*) AS cnt FROM threads t
          INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-         WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND t.is_read = 0",
+         WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND t.is_read = 0
+           AND t.is_chat_thread = 0",
         params![account_id],
         |row| row.get::<_, i64>("cnt"),
     )

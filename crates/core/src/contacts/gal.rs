@@ -32,15 +32,19 @@ pub async fn cache_gal_entries(
 ) -> Result<usize, String> {
     let count = entries.len();
     db.with_conn(move |conn| {
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| format!("begin gal tx: {e}"))?;
+
         // Clear existing entries for this account
-        conn.execute(
+        tx.execute(
             "DELETE FROM gal_cache WHERE account_id = ?1",
             params![account_id],
         )
         .map_err(|e| format!("clear gal_cache: {e}"))?;
 
         // Insert new entries
-        let mut stmt = conn
+        let mut stmt = tx
             .prepare(
                 "INSERT OR REPLACE INTO gal_cache
                  (email, display_name, phone, company, title, department, account_id, cached_at)
@@ -60,6 +64,9 @@ pub async fn cache_gal_entries(
             ])
             .map_err(|e| format!("insert gal entry: {e}"))?;
         }
+
+        drop(stmt);
+        tx.commit().map_err(|e| format!("commit gal tx: {e}"))?;
 
         Ok(count)
     })
