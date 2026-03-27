@@ -76,6 +76,12 @@ pub struct ReadingPane {
     current_thread: Option<ThreadRef>,
     /// Search terms to highlight in message bodies. Empty when not in search mode.
     pub search_highlight_terms: Vec<String>,
+    /// Cached deduplicated attachments: `(index_into_thread_attachments, duplicate_count)`.
+    /// Computed once when thread detail loads, not on every view cycle.
+    deduped_attachments: Vec<(usize, usize)>,
+    /// Pre-parsed HTML bodies, one per message. Avoids re-parsing HTML on every
+    /// view cycle — only rebuilt when thread detail loads.
+    cached_html: Vec<Option<super::html_render::CachedHtmlBody>>,
 }
 
 /// Minimal reference to the currently selected thread for display purposes.
@@ -100,6 +106,8 @@ impl ReadingPane {
             date_display: DateDisplay::RelativeOffset,
             current_thread: None,
             search_highlight_terms: Vec::new(),
+            deduped_attachments: Vec::new(),
+            cached_html: Vec::new(),
         }
     }
 
@@ -116,6 +124,8 @@ impl ReadingPane {
         self.thread_labels.clear();
         self.message_expanded.clear();
         self.focused_message = None;
+        self.deduped_attachments.clear();
+        self.cached_html.clear();
         // Restore attachment collapse state from cache
         self.attachments_collapsed = thread
             .map(|t| {
@@ -187,9 +197,41 @@ impl ReadingPane {
 
         // Apply expansion rules then set messages
         self.apply_message_expansion(&detail.messages);
+        // Pre-parse HTML bodies so we don't re-parse on every view cycle.
+        self.cached_html = detail
+            .messages
+            .iter()
+            .map(|msg| {
+                msg.body_html
+                    .as_deref()
+                    .map(super::html_render::preparse_html)
+            })
+            .collect();
+
         self.thread_messages = detail.messages;
         self.thread_attachments = detail.attachments;
         self.thread_labels = detail.labels;
+        self.recompute_deduped_attachments();
+    }
+
+    /// Recompute the deduplicated attachment list from `thread_attachments`.
+    fn recompute_deduped_attachments(&mut self) {
+        let mut seen: HashMap<&str, usize> = HashMap::new();
+        for att in &self.thread_attachments {
+            let name = att.filename.as_deref().unwrap_or("");
+            *seen.entry(name).or_insert(0) += 1;
+        }
+
+        let mut emitted: HashMap<&str, bool> = HashMap::new();
+        self.deduped_attachments.clear();
+        for (i, att) in self.thread_attachments.iter().enumerate() {
+            let name = att.filename.as_deref().unwrap_or("");
+            if !emitted.contains_key(name) {
+                let count = seen.get(name).copied().unwrap_or(1);
+                self.deduped_attachments.push((i, count));
+                emitted.insert(name, true);
+            }
+        }
     }
 
     fn thread_key(&self) -> Option<String> {
@@ -368,7 +410,7 @@ fn thread_view_with_commands<'a>(
 
     if !pane.thread_attachments.is_empty() {
         col = col.push(
-            attachment_group(&pane.thread_attachments, pane.attachments_collapsed)
+            attachment_group(&pane.thread_attachments, &pane.deduped_attachments, pane.attachments_collapsed)
                 .map(Message::ReadingPane),
         );
     }
@@ -455,7 +497,7 @@ fn thread_view<'a>(
     col = col.push(thread_header(thread_ref, &pane.message_expanded, &pane.thread_messages, &pane.thread_labels));
 
     if !pane.thread_attachments.is_empty() {
-        col = col.push(attachment_group(&pane.thread_attachments, pane.attachments_collapsed));
+        col = col.push(attachment_group(&pane.thread_attachments, &pane.deduped_attachments, pane.attachments_collapsed));
     }
 
     col = col.push(message_list(pane));
@@ -570,12 +612,14 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
     for (i, msg) in pane.thread_messages.iter().enumerate() {
         let is_expanded = pane.message_expanded.get(i).copied().unwrap_or(false);
         if is_expanded {
+            let cached_html = pane.cached_html.get(i).and_then(|c| c.as_ref());
             msg_col = msg_col.push(widgets::expanded_message_card(
                 msg,
                 i,
                 pane.date_display,
                 first_message_date,
                 &pane.search_highlight_terms,
+                cached_html,
                 ReadingPaneMessage::ToggleMessageExpanded,
                 ReadingPaneMessage::PopOut,
                 ReadingPaneMessage::Reply,
@@ -603,33 +647,11 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
 
 // ── Attachment group ────────────────────────────────────
 
-fn dedup_attachments(attachments: &[ThreadAttachment]) -> Vec<(&ThreadAttachment, usize)> {
-    let mut seen: HashMap<&str, usize> = HashMap::new();
-    let mut result: Vec<(&ThreadAttachment, usize)> = Vec::new();
-
-    for att in attachments {
-        let name = att.filename.as_deref().unwrap_or("");
-        *seen.entry(name).or_insert(0) += 1;
-    }
-
-    let mut emitted: HashMap<&str, bool> = HashMap::new();
-    for att in attachments {
-        let name = att.filename.as_deref().unwrap_or("");
-        if !emitted.contains_key(name) {
-            let count = seen.get(name).copied().unwrap_or(1);
-            result.push((att, count));
-            emitted.insert(name, true);
-        }
-    }
-
-    result
-}
-
 fn attachment_group<'a>(
     attachments: &'a [ThreadAttachment],
+    deduped_indices: &'a [(usize, usize)],
     collapsed: bool,
 ) -> Element<'a, ReadingPaneMessage> {
-    let deduped = dedup_attachments(attachments);
 
     let chevron = if collapsed {
         icon::chevron_right()
@@ -643,7 +665,7 @@ fn attachment_group<'a>(
                 .align_y(Alignment::Center),
             Space::new().width(SPACE_XXS),
             container(
-                text(format!("Attachments ({})", deduped.len()))
+                text(format!("Attachments ({})", deduped_indices.len()))
                     .size(TEXT_MD)
                     .font(font::text_semibold())
                     .style(text::base),
@@ -666,8 +688,10 @@ fn attachment_group<'a>(
     let mut content_col = column![header].spacing(SPACE_XS);
 
     if !collapsed {
-        for (att, version_count) in &deduped {
-            content_col = content_col.push(widgets::attachment_card(att, *version_count));
+        for &(att_idx, version_count) in deduped_indices {
+            if let Some(att) = attachments.get(att_idx) {
+                content_col = content_col.push(widgets::attachment_card(att, version_count));
+            }
         }
     }
 

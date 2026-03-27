@@ -1019,6 +1019,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     date_display: DateDisplay,
     first_message_date: Option<i64>,
     search_highlight_terms: &'a [String],
+    cached_html: Option<&'a super::html_render::CachedHtmlBody>,
     on_toggle: impl Fn(usize) -> M,
     on_pop_out: impl Fn(usize) -> M,
     on_reply: impl Fn(usize) -> M,
@@ -1109,13 +1110,18 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
 
     let header = column![avatar_rows, to_row].spacing(SPACE_XXS);
 
-    let body_inner: Element<'_, M> = if let Some(html) = msg.body_html.as_deref() {
-        container(super::html_render::render_html::<M>(
-            html,
-            msg.body_text.as_deref(),
-        ))
-        .padding(PAD_BODY)
-        .into()
+    let body_inner: Element<'_, M> = if msg.body_html.is_some() {
+        // Use pre-parsed HTML cache when available to avoid re-parsing on every view.
+        let rendered = if let Some(cached) = cached_html {
+            super::html_render::render_cached_html::<M>(cached, msg.body_text.as_deref())
+        } else if let Some(html) = msg.body_html.as_deref() {
+            super::html_render::render_html::<M>(html, msg.body_text.as_deref())
+        } else {
+            unreachable!()
+        };
+        container(rendered)
+            .padding(PAD_BODY)
+            .into()
     } else {
         let display = msg
             .body_text

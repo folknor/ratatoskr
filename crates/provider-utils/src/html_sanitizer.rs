@@ -15,6 +15,27 @@ static JS_URL_RE: LazyLock<Regex> =
 static EVENT_HANDLER_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)^on[a-z]").expect("EVENT_HANDLER_RE"));
 
+/// Regex matching `data:` URIs with an allowed image MIME type.
+/// Allows `data:image/png`, `data:image/jpeg`, `data:image/gif`,
+/// `data:image/webp`, `data:image/svg+xml` (with optional parameters like
+/// `;base64`).
+static DATA_IMAGE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^\s*data:image/(png|jpeg|gif|webp|svg\+xml)\b").expect("DATA_IMAGE_RE")
+});
+
+/// Regex matching `url(...)` values that reference external HTTP(S) URLs
+/// inside CSS style attributes. Used for detection.
+static CSS_URL_HTTP_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)url\(\s*['"]?https?://"#).expect("CSS_URL_HTTP_RE")
+});
+
+/// Regex matching the full `url(...)` token with an external HTTP(S) URL,
+/// used to strip tracking pixels from CSS. Handles optional quotes (single,
+/// double, or none) and balanced parentheses.
+static CSS_URL_HTTP_REPLACE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)url\(\s*['"]?https?://[^)]*\)"#).expect("CSS_URL_HTTP_REPLACE_RE")
+});
+
 // ---------------------------------------------------------------------------
 // Stage 1: CSS inlining
 // ---------------------------------------------------------------------------
@@ -87,6 +108,22 @@ fn strip_dangerous_elements(html: &str) -> String {
                 && el.get_attribute(name).is_some_and(|val| JS_URL_RE.is_match(&val))
             {
                 el.remove_attribute(name);
+            }
+
+            // Restrict data: URIs — block phishing via data:text/html in
+            // links. Only <img src="data:image/..."> is allowed; all other
+            // data: URIs on href/src are stripped.
+            if (name.eq_ignore_ascii_case("href") || name.eq_ignore_ascii_case("src"))
+                && let Some(val) = el.get_attribute(name)
+                && val.trim().to_ascii_lowercase().starts_with("data:")
+            {
+                let tag = el.tag_name().to_ascii_lowercase();
+                let allowed = tag == "img"
+                    && name.eq_ignore_ascii_case("src")
+                    && DATA_IMAGE_RE.is_match(val.trim());
+                if !allowed {
+                    el.remove_attribute(name);
+                }
             }
 
             // Strip @import from inline styles.
@@ -259,23 +296,40 @@ fn strip_remote_images(html: &str) -> String {
     use lol_html::{element, rewrite_str, RewriteStrSettings};
 
     let settings = RewriteStrSettings {
-        element_content_handlers: vec![element!("img[src]", |el| {
-            if let Some(src) = el.get_attribute("src") {
-                let lower = src.trim().to_ascii_lowercase();
-                if lower.starts_with("http://") || lower.starts_with("https://") {
-                    // Replace with a blocked-image placeholder
-                    el.remove_attribute("src");
-                    el.set_attribute("data-blocked-src", &src)
-                        .unwrap_or_default();
-                    el.set_attribute("alt", "[Remote image blocked]")
-                        .unwrap_or_default();
-                    el.set_attribute("style", "display:inline-block;width:20px;height:20px;background:#ddd;border:1px solid #ccc;")
-                        .unwrap_or_default();
+        element_content_handlers: vec![
+            // Block remote <img src="http(s)://...">
+            element!("img[src]", |el| {
+                if let Some(src) = el.get_attribute("src") {
+                    let lower = src.trim().to_ascii_lowercase();
+                    if lower.starts_with("http://") || lower.starts_with("https://") {
+                        // Replace with a blocked-image placeholder
+                        el.remove_attribute("src");
+                        el.set_attribute("data-blocked-src", &src)
+                            .unwrap_or_default();
+                        el.set_attribute("alt", "[Remote image blocked]")
+                            .unwrap_or_default();
+                        el.set_attribute("style", "display:inline-block;width:20px;height:20px;background:#ddd;border:1px solid #ccc;")
+                            .unwrap_or_default();
+                    }
+                    // cid: and data: URIs pass through untouched
                 }
-                // cid: and data: URIs pass through untouched
-            }
-            Ok(())
-        })],
+                Ok(())
+            }),
+            // Strip external url() references in style attributes to prevent
+            // tracking pixels via CSS background-image, list-style-image, etc.
+            element!("*[style]", |el| {
+                if let Some(style) = el.get_attribute("style") {
+                    if CSS_URL_HTTP_RE.is_match(&style) {
+                        let cleaned =
+                            CSS_URL_HTTP_REPLACE_RE.replace_all(&style, "none").to_string();
+                        el.set_attribute("style", &cleaned).unwrap_or_else(|e| {
+                            log::warn!("failed to rewrite style attribute: {e}");
+                        });
+                    }
+                }
+                Ok(())
+            }),
+        ],
         ..RewriteStrSettings::default()
     };
 
@@ -644,5 +698,96 @@ mod tests {
         assert!(!result.contains("onerror"));
         assert!(!result.contains("onload"));
         assert!(result.contains("https://example.com/photo.jpg"));
+    }
+
+    // ── data: URI restriction tests ──────────────────────────
+
+    #[test]
+    fn data_text_html_in_href_stripped() {
+        let html = r#"<a href="data:text/html,<h1>Phishing</h1>">Click me</a>"#;
+        let result = sanitize_html_body(html);
+        assert!(!result.contains("data:text/html"));
+        assert!(result.contains("Click me"));
+    }
+
+    #[test]
+    fn data_image_in_img_src_preserved() {
+        let html = r#"<img src="data:image/png;base64,iVBOR">"#;
+        let result = sanitize_html_body(html);
+        assert!(result.contains("data:image/png"));
+    }
+
+    #[test]
+    fn data_image_jpeg_in_img_src_preserved() {
+        let html = r#"<img src="data:image/jpeg;base64,/9j/4AAQ">"#;
+        let result = sanitize_html_body(html);
+        assert!(result.contains("data:image/jpeg"));
+    }
+
+    #[test]
+    fn data_text_html_in_img_src_stripped() {
+        // data:text/html should not be allowed even on img src
+        let html = r#"<img src="data:text/html,<script>alert(1)</script>">"#;
+        let result = sanitize_html_body(html);
+        assert!(!result.contains("data:text/html"));
+    }
+
+    #[test]
+    fn data_application_pdf_in_href_stripped() {
+        let html = r#"<a href="data:application/pdf;base64,JVBER">PDF</a>"#;
+        let result = sanitize_html_body(html);
+        assert!(!result.contains("data:application/pdf"));
+        assert!(result.contains("PDF"));
+    }
+
+    // ── CSS url() tracking pixel tests ───────────────────────
+
+    #[test]
+    fn css_url_tracking_pixel_blocked() {
+        let html = r#"<div style="background:url(https://tracker.example.com/pixel.gif)">Text</div>"#;
+        let result = sanitize_html_body_with_image_policy(html, true, false);
+        assert!(!result.contains("tracker.example.com"));
+        assert!(result.contains("Text"));
+    }
+
+    #[test]
+    fn css_url_tracking_pixel_allowed_when_allowlisted() {
+        let html = r#"<div style="background:url(https://example.com/bg.png)">Text</div>"#;
+        let result = sanitize_html_body_with_image_policy(html, true, true);
+        assert!(result.contains("example.com/bg.png"));
+    }
+
+    #[test]
+    fn css_url_tracking_pixel_allowed_when_policy_off() {
+        let html = r#"<div style="background:url(https://example.com/bg.png)">Text</div>"#;
+        let result = sanitize_html_body_with_image_policy(html, false, false);
+        assert!(result.contains("example.com/bg.png"));
+    }
+
+    #[test]
+    fn css_url_with_single_quotes_blocked() {
+        let html = r#"<div style="background-image: url('https://tracker.example.com/pixel.gif')">Text</div>"#;
+        let result = sanitize_html_body_with_image_policy(html, true, false);
+        assert!(!result.contains("tracker.example.com"));
+    }
+
+    #[test]
+    fn css_url_data_uri_not_blocked() {
+        let html = r#"<div style="background:url(data:image/png;base64,iVBOR)">Text</div>"#;
+        let result = sanitize_html_body_with_image_policy(html, true, false);
+        assert!(result.contains("data:image/png"));
+    }
+
+    #[test]
+    fn css_url_non_http_not_stripped_by_image_policy() {
+        // Our image-blocking stage should not strip non-HTTP url() values.
+        // (Ammonia may independently strip url() from styles, so we test
+        // the intermediate stage directly.)
+        let html = r#"<td style="background-image:url(cid:bg001@mail)">Text</td>"#;
+        let stage = strip_remote_images(html);
+        assert!(
+            stage.contains("cid:bg001@mail"),
+            "strip_remote_images should not touch non-HTTP url(): {stage}"
+        );
     }
 }

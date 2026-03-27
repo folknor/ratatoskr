@@ -330,7 +330,7 @@ fn build_all_account_tags(
              WHERE l.label_kind = 'tag'
                AND l.visible = 1
                AND (t.shared_mailbox_id IS NULL OR t.id IS NULL) AND (t.is_chat_thread = 0 OR t.id IS NULL)
-             GROUP BY LOWER(TRIM(l.name))
+             GROUP BY l.name COLLATE NOCASE
              ORDER BY l.name COLLATE NOCASE ASC",
         )
         .map_err(|e| e.to_string())?;

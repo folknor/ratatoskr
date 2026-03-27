@@ -63,6 +63,64 @@ fn starts_with_at(haystack: &str, pos: usize, prefix: &str) -> bool {
     haystack.get(pos..).is_some_and(|s| s.starts_with(prefix))
 }
 
+/// Pre-parsed HTML body, cached to avoid re-parsing on every view cycle.
+pub(super) enum CachedHtmlBody {
+    /// HTML was too complex; render as plain text fallback.
+    Complex,
+    /// Parsed block structure ready for rendering.
+    Blocks(Vec<Block>),
+    /// Empty HTML body.
+    Empty,
+}
+
+/// Pre-parse an HTML body into a cached block structure.
+///
+/// Call once when thread detail loads; store the result and use
+/// `render_cached_html` on each view cycle.
+pub(super) fn preparse_html(html: &str) -> CachedHtmlBody {
+    if assess_complexity(html) == HtmlComplexity::Complex {
+        return CachedHtmlBody::Complex;
+    }
+    let blocks = parse_html_to_blocks(html);
+    if blocks.is_empty() {
+        CachedHtmlBody::Empty
+    } else {
+        CachedHtmlBody::Blocks(blocks)
+    }
+}
+
+/// Render pre-parsed HTML blocks to iced widgets, using fallback text for
+/// complex/empty HTML. Avoids re-parsing HTML on every view cycle.
+pub fn render_cached_html<'a, M: Clone + 'a>(
+    cached: &CachedHtmlBody,
+    fallback_text: Option<&str>,
+) -> Element<'a, M> {
+    match cached {
+        CachedHtmlBody::Complex => {
+            let display = fallback_text
+                .unwrap_or("(complex HTML email — plain text unavailable)");
+            text(display.to_string())
+                .size(TEXT_LG)
+                .style(text::secondary)
+                .into()
+        }
+        CachedHtmlBody::Empty => {
+            let display = fallback_text.unwrap_or("(empty message)");
+            text(display.to_string())
+                .size(TEXT_LG)
+                .style(text::secondary)
+                .into()
+        }
+        CachedHtmlBody::Blocks(blocks) => {
+            let mut col = column![].spacing(SPACE_XS).width(Length::Fill);
+            for block in blocks {
+                col = col.push(render_block_ref::<M>(block));
+            }
+            col.into()
+        }
+    }
+}
+
 /// Render HTML email body to iced widgets.
 ///
 /// For simple HTML, parses into blocks and emits native iced widgets.
@@ -98,7 +156,7 @@ pub fn render_html<'a, M: Clone + 'a>(
 
 // ── Block model ─────────────────────────────────────────
 
-enum Block {
+pub(super) enum Block {
     Paragraph(String),
     Heading(String, u8),
     Preformatted(String),
@@ -107,7 +165,71 @@ enum Block {
     HorizontalRule,
 }
 
-fn render_block<'a, M: Clone + 'a>(block: Block) -> Element<'a, M> {
+/// Render a block by reference (for cached rendering). Clones the owned
+/// strings inside the block — this is cheap compared to re-parsing HTML.
+fn render_block_ref<'a, M: Clone + 'a>(block: &Block) -> Element<'a, M> {
+    match block {
+        Block::Paragraph(txt) => {
+            text(txt.clone())
+                .size(TEXT_LG)
+                .style(text::secondary)
+                .into()
+        }
+        Block::Heading(txt, level) => {
+            let size = match level {
+                1 => TEXT_HEADING,
+                2 => TEXT_TITLE,
+                _ => TEXT_XL,
+            };
+            text(txt.clone())
+                .size(size)
+                .font(crate::font::text_semibold())
+                .style(text::base)
+                .into()
+        }
+        Block::Preformatted(txt) => {
+            container(
+                text(txt.clone())
+                    .size(TEXT_MD)
+                    .font(iced::Font::MONOSPACE)
+                    .style(text::secondary),
+            )
+            .padding(PAD_CARD)
+            .style(theme::ContainerClass::Elevated.style())
+            .width(Length::Fill)
+            .into()
+        }
+        Block::Blockquote(txt) => {
+            container(
+                text(txt.clone())
+                    .size(TEXT_LG)
+                    .style(theme::TextClass::Tertiary.style()),
+            )
+            .padding(Padding { top: SPACE_XXS, right: SPACE_SM, bottom: SPACE_XXS, left: SPACE_MD })
+            .style(theme::ContainerClass::Elevated.style())
+            .width(Length::Fill)
+            .into()
+        }
+        Block::ListItem { prefix, content } => {
+            row![
+                container(
+                    text(prefix.clone())
+                        .size(TEXT_LG)
+                        .style(theme::TextClass::Tertiary.style()),
+                )
+                .width(Length::Fixed(SPACE_LG)),
+                text(content.clone()).size(TEXT_LG).style(text::secondary),
+            ]
+            .spacing(SPACE_XXS)
+            .into()
+        }
+        Block::HorizontalRule => {
+            iced::widget::rule::horizontal(1).into()
+        }
+    }
+}
+
+pub(super) fn render_block<'a, M: Clone + 'a>(block: Block) -> Element<'a, M> {
     match block {
         Block::Paragraph(txt) => {
             text(txt)

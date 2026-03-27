@@ -67,8 +67,18 @@ pub fn remove_cached_relative(app_data_dir: &Path, relative_path: &str) -> Resul
         return Err(format!("invalid attachment cache path: {relative_path}"));
     }
 
-    let path = app_data_dir.join(relative_path);
-    match std::fs::remove_file(&path) {
+    let full_path = app_data_dir.join(relative_path);
+    let canonical =
+        full_path.canonicalize().map_err(|e| format!("canonicalize cache path: {e}"))?;
+    let cache_dir = app_data_dir
+        .join(CACHE_DIR)
+        .canonicalize()
+        .map_err(|e| format!("canonicalize cache dir: {e}"))?;
+    if !canonical.starts_with(&cache_dir) {
+        return Err(format!("path escapes cache directory: {relative_path}"));
+    }
+
+    match std::fs::remove_file(&canonical) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(format!("remove cache file: {error}")),
