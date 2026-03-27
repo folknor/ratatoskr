@@ -713,7 +713,11 @@ fn search_contacts_fts(
     if fts_query.is_empty() {
         return Ok(Vec::new());
     }
-    let like_pattern = format!("%{query}%");
+    let like_pattern = if query.len() <= 2 {
+        format!("{query}%")
+    } else {
+        format!("%{query}%")
+    };
 
     let sql = format!(
         "SELECT c.id, c.email, c.display_name, c.avatar_url, c.frequency,
@@ -747,7 +751,11 @@ fn search_contacts_like(
     query: &str,
     limit: i64,
 ) -> Result<Vec<DbContact>, String> {
-    let pattern = format!("%{query}%");
+    let pattern = if query.len() <= 2 {
+        format!("{query}%")
+    } else {
+        format!("%{query}%")
+    };
 
     let sql = format!(
         "SELECT id, email, display_name, avatar_url, frequency,
@@ -778,7 +786,7 @@ fn search_contacts_like(
 /// `"john sm"` → `"john* sm*"` — each token gets a trailing `*` for prefix matching.
 /// FTS5 operators are stripped to prevent injection. Email-significant characters
 /// (`@`, `.`, `-`, `_`) are preserved since the tokenizer includes them via `tokenchars`.
-fn build_fts_query(raw: &str) -> String {
+pub fn build_fts_query(raw: &str) -> String {
     raw.split_whitespace()
         .map(|token| {
             let clean: String = token

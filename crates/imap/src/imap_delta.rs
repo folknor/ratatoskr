@@ -770,8 +770,9 @@ async fn process_folder_delta(
 
     // Non-CONDSTORE: also sync flags on existing messages while we're at it,
     // since we can't rely on CHANGEDSINCE to detect changes.
+    // Reuse the session that's already open from fetch_uids_on_session above.
     if delta.highest_modseq.is_none() {
-        match sync_flags_without_condstore(config, &folder.raw_path, account_id, db).await {
+        match sync_flags_on_session(&mut session, &folder.raw_path, account_id, db).await {
             Ok(updated) if updated > 0 => {
                 log::info!(
                     "[sync] Non-CONDSTORE flag sync for {} (with new UIDs): {updated} flags updated",
@@ -807,15 +808,17 @@ async fn process_folder_delta(
 /// on large folders.
 const FLAG_SYNC_INTERVAL_SECS: i64 = 300; // 5 minutes
 
-/// Sync flags for servers that don't support CONDSTORE.
+/// Sync flags for servers that don't support CONDSTORE, reusing an existing
+/// IMAP session.
 ///
 /// Fetches all current flags via `UID FETCH 1:* (FLAGS)`, diffs against
 /// locally cached flags, and applies any changes. This is the fallback for
 /// servers like Exchange IMAP, Courier, and hMailServer that lack CONDSTORE.
 ///
+/// The caller is responsible for connecting/disconnecting the session.
 /// Returns the number of flags updated.
-pub async fn sync_flags_without_condstore(
-    config: &ImapConfig,
+async fn sync_flags_on_session(
+    session: &mut super::connection::ImapSession,
     folder_path: &str,
     account_id: &str,
     db: &DbState,
@@ -854,10 +857,8 @@ pub async fn sync_flags_without_condstore(
         .map(|(uid, is_read, is_starred)| (uid, (is_read, is_starred)))
         .collect();
 
-    // Fetch current flags from server
-    let mut session = connect(config).await?;
-    let server_flags = client::fetch_all_flags(&mut session, folder_path).await?;
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+    // Fetch current flags from server (SELECT + UID FETCH handled by callee)
+    let server_flags = client::fetch_all_flags(session, folder_path).await?;
 
     // Diff: only include UIDs where flags actually changed
     let changes: Vec<super::types::FlagChange> = server_flags
@@ -893,17 +894,32 @@ pub async fn sync_flags_without_condstore(
     Ok(updated)
 }
 
-/// Detect messages deleted on the IMAP server by comparing `UID SEARCH ALL`
-/// results against locally-cached UIDs.
+/// Sync flags for servers that don't support CONDSTORE.
 ///
-/// This is the core detection function: it connects to the server, gets all
-/// UIDs for the folder, diffs against the local DB, and returns the local
-/// message IDs whose server-side UIDs no longer exist.
+/// Convenience wrapper that opens (and closes) its own IMAP connection.
+/// Prefer `sync_flags_on_session` when a session is already available.
+pub async fn sync_flags_without_condstore(
+    config: &ImapConfig,
+    folder_path: &str,
+    account_id: &str,
+    db: &DbState,
+) -> Result<u64, String> {
+    let mut session = connect(config).await?;
+    let result = sync_flags_on_session(&mut session, folder_path, account_id, db).await;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+    result
+}
+
+/// Detect messages deleted on the IMAP server by comparing `UID SEARCH ALL`
+/// results against locally-cached UIDs, reusing an existing IMAP session.
+///
+/// The caller is responsible for connecting/disconnecting the session.
+/// `SELECT folder` is issued internally by `search_all_uids`.
 ///
 /// Only runs if enough time has elapsed since the last check (controlled by
 /// `DELETION_CHECK_INTERVAL_SECS`).
-pub async fn detect_deleted_messages(
-    config: &ImapConfig,
+async fn detect_deleted_on_session(
+    session: &mut super::connection::ImapSession,
     folder_path: &str,
     account_id: &str,
     db: &DbState,
@@ -930,10 +946,8 @@ pub async fn detect_deleted_messages(
         return Ok(vec![]);
     }
 
-    // Get all UIDs currently on server
-    let mut session = connect(config).await?;
-    let server_uids = client::search_all_uids(&mut session, folder_path).await?;
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+    // Get all UIDs currently on server (SELECT + UID SEARCH handled by callee)
+    let server_uids = client::search_all_uids(session, folder_path).await?;
 
     let server_uid_set: HashSet<u32> = server_uids.into_iter().collect();
 
@@ -967,11 +981,28 @@ pub async fn detect_deleted_messages(
     Ok(deleted_ids)
 }
 
+/// Detect messages deleted on the IMAP server by comparing `UID SEARCH ALL`
+/// results against locally-cached UIDs.
+///
+/// Convenience wrapper that opens (and closes) its own IMAP connection.
+/// Prefer `detect_deleted_on_session` when a session is already available.
+pub async fn detect_deleted_messages(
+    config: &ImapConfig,
+    folder_path: &str,
+    account_id: &str,
+    db: &DbState,
+) -> Result<Vec<String>, String> {
+    let mut session = connect(config).await?;
+    let result = detect_deleted_on_session(&mut session, folder_path, account_id, db).await;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+    result
+}
+
 /// Run deletion detection across all synced folders and remove deleted messages.
 ///
-/// Designed to be called from the delta sync flow. For each folder that has
-/// a saved sync state, checks if enough time has elapsed, then runs
-/// `UID SEARCH ALL` to find deletions.
+/// Opens a single IMAP connection and reuses it across all folders, using
+/// `SELECT` to switch between them. This avoids the overhead of a separate
+/// TLS handshake per folder.
 ///
 /// Returns the list of affected thread IDs (for UI refresh).
 pub async fn run_deletion_detection(
@@ -985,13 +1016,27 @@ pub async fn run_deletion_detection(
 ) -> Vec<String> {
     let mut all_affected = Vec::new();
 
-    for folder in syncable_folders {
-        // Only check folders we've already synced
-        if !state_map.contains_key(&folder.raw_path) {
-            continue;
-        }
+    // Filter to folders that need checking (already synced)
+    let folders_to_check: Vec<_> = syncable_folders
+        .iter()
+        .filter(|f| state_map.contains_key(&f.raw_path))
+        .collect();
 
-        match detect_deleted_messages(config, &folder.raw_path, account_id, db).await {
+    if folders_to_check.is_empty() {
+        return all_affected;
+    }
+
+    // Open one connection for all folder deletion checks
+    let mut session = match connect(config).await {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("[sync] Deletion detection: failed to connect: {e}");
+            return all_affected;
+        }
+    };
+
+    for folder in &folders_to_check {
+        match detect_deleted_on_session(&mut session, &folder.raw_path, account_id, db).await {
             Ok(deleted_ids) if !deleted_ids.is_empty() => {
                 // Remove from body store
                 if let Err(e) = body_store.delete(deleted_ids.clone()).await {
@@ -1023,9 +1068,21 @@ pub async fn run_deletion_detection(
                     "[sync] Deletion detection failed for {}: {e}",
                     folder.path
                 );
+                // Connection may be broken — try to reconnect for remaining folders
+                if is_connection_error(&e) {
+                    log::info!("[sync] Reconnecting for remaining deletion checks...");
+                    match connect(config).await {
+                        Ok(s) => session = s,
+                        Err(e2) => {
+                            log::error!("[sync] Reconnect failed, aborting deletion detection: {e2}");
+                            break;
+                        }
+                    }
+                }
             }
         }
     }
 
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
     all_affected
 }

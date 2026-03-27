@@ -7,6 +7,8 @@
 
 use rusqlite::{Connection, params};
 
+use crate::db::build_fts_query;
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -47,10 +49,11 @@ pub struct ContactSearchResult {
 
 /// Search contacts, seen addresses, and groups for autocomplete.
 ///
-/// Searches the `contacts` table and `seen_addresses` table using LIKE
-/// matching, plus `contact_groups` by name. Deduplicates by email
-/// (contacts take priority over seen addresses). Results ranked by
-/// recency (last_contacted_at / last_seen_at) as the spec requires.
+/// Uses FTS5 prefix matching for the contacts table (with LIKE fallback
+/// if the FTS5 table is unavailable). For seen_addresses, short queries
+/// (1-2 chars) use prefix LIKE (`pattern%`) which can use a B-tree index;
+/// longer queries use substring LIKE (`%pattern%`) for mid-word matches.
+/// Deduplicates by email (contacts take priority over seen addresses).
 /// Returns up to `limit` results.
 pub fn search_contacts_unified(
     conn: &Connection,
@@ -61,26 +64,85 @@ pub fn search_contacts_unified(
     if trimmed.is_empty() {
         return Ok(Vec::new());
     }
-    let pattern = format!("%{trimmed}%");
+    let like_pattern = make_like_pattern(trimmed);
     let mut results = Vec::new();
     let mut seen_emails: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    // 1. Search contacts table (highest priority).
-    search_contacts_table(conn, &pattern, limit, &mut seen_emails, &mut results)?;
+    // 1. Search contacts table (highest priority) — FTS5 with LIKE fallback.
+    search_contacts_fts_or_like(conn, trimmed, &like_pattern, limit, &mut seen_emails, &mut results)?;
 
     // 2. Search seen_addresses table (lower priority, fills remaining).
     let remaining = limit - i64::try_from(results.len()).unwrap_or(i64::MAX);
     if remaining > 0 {
-        search_seen_addresses_table(conn, &pattern, remaining, &mut seen_emails, &mut results)?;
+        search_seen_addresses_table(conn, &like_pattern, remaining, &mut seen_emails, &mut results)?;
     }
 
     // 3. Search contact groups by name.
     let group_remaining = limit - i64::try_from(results.len()).unwrap_or(i64::MAX);
     if group_remaining > 0 {
-        search_groups_table(conn, &pattern, group_remaining, &mut results)?;
+        search_groups_table(conn, &like_pattern, group_remaining, &mut results)?;
     }
 
     Ok(results)
+}
+
+/// Build LIKE pattern: short queries (1-2 chars) use prefix match
+/// (`pattern%`) which can use a B-tree index; longer queries use
+/// substring match (`%pattern%`) for mid-word hits.
+fn make_like_pattern(trimmed: &str) -> String {
+    if trimmed.len() <= 2 {
+        format!("{trimmed}%")
+    } else {
+        format!("%{trimmed}%")
+    }
+}
+
+/// Search contacts via FTS5 prefix matching, falling back to LIKE if
+/// the FTS5 table is unavailable.
+fn search_contacts_fts_or_like(
+    conn: &Connection,
+    raw_query: &str,
+    like_pattern: &str,
+    limit: i64,
+    seen_emails: &mut std::collections::HashSet<String>,
+    results: &mut Vec<ContactSearchResult>,
+) -> Result<(), String> {
+    let fts_query = build_fts_query(raw_query);
+    if !fts_query.is_empty() {
+        let fts_sql = "SELECT c.email, c.display_name, c.source
+                       FROM contacts c
+                       INNER JOIN contacts_fts ON contacts_fts.rowid = c.rowid
+                       WHERE contacts_fts MATCH ?1
+                       ORDER BY c.last_contacted_at DESC NULLS LAST,
+                                c.display_name ASC
+                       LIMIT ?2";
+        match conn.prepare(fts_sql) {
+            Ok(mut stmt) => {
+                let rows = stmt
+                    .query_map(params![&fts_query, limit], |row| {
+                        Ok(ContactSearchResult {
+                            email: row.get("email")?,
+                            display_name: row.get("display_name")?,
+                            kind: ContactSearchKind::Contact,
+                            source: row.get("source")?,
+                        })
+                    })
+                    .map_err(|e| e.to_string())?;
+                for row in rows {
+                    let result = row.map_err(|e| e.to_string())?;
+                    let key = result.email.to_lowercase();
+                    if seen_emails.insert(key) {
+                        results.push(result);
+                    }
+                }
+                return Ok(());
+            }
+            Err(_) => { /* FTS5 table missing — fall through to LIKE */ }
+        }
+    }
+
+    // LIKE fallback
+    search_contacts_table(conn, like_pattern, limit, seen_emails, results)
 }
 
 // ---------------------------------------------------------------------------

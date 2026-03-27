@@ -1,5 +1,7 @@
 use rusqlite::{Connection, params};
 
+use ratatoskr_core::db::build_fts_query;
+
 use super::connection::Db;
 
 // ── Contact search types ─────────────────────────────────────
@@ -19,11 +21,11 @@ pub struct ContactMatch {
 
 /// Search contacts, seen addresses, and groups for autocomplete.
 ///
-/// Searches the `contacts` table and `seen_addresses` table using LIKE
-/// matching, plus `contact_groups` by name. Deduplicates by email
-/// (contacts take priority over seen addresses). Results ranked by
-/// recency (last_contacted_at / last_seen_at) as spec requires.
-/// Returns up to `limit` results.
+/// Uses FTS5 prefix matching for the contacts table (with LIKE fallback
+/// if the FTS5 table is unavailable). For seen_addresses and GAL cache,
+/// short queries (1-2 chars) use prefix LIKE (`pattern%`) which can use
+/// a B-tree index; longer queries use substring LIKE (`%pattern%`) for
+/// mid-word matches. Returns up to `limit` results.
 pub fn search_contacts_for_autocomplete(
     conn: &Connection,
     query: &str,
@@ -33,22 +35,122 @@ pub fn search_contacts_for_autocomplete(
     if trimmed.is_empty() {
         return Ok(Vec::new());
     }
-    let pattern = format!("%{trimmed}%");
+    let like_pattern = make_like_pattern(trimmed);
     let mut results = Vec::new();
     let mut seen_emails: std::collections::HashSet<String> =
         std::collections::HashSet::new();
 
-    // Search contacts table first (higher priority).
-    // Order by recency (last_contacted_at DESC), not frequency.
-    let contacts_sql = "SELECT email, display_name FROM contacts
-                        WHERE email LIKE ?1 OR display_name LIKE ?1
-                        ORDER BY last_contacted_at DESC NULLS LAST,
-                                 display_name ASC
-                        LIMIT ?2";
-    let mut stmt =
-        conn.prepare(contacts_sql).map_err(|e| e.to_string())?;
+    // Search contacts table first (higher priority) — FTS5 with LIKE fallback.
+    search_contacts_fts_or_like(
+        conn,
+        trimmed,
+        &like_pattern,
+        limit,
+        &mut seen_emails,
+        &mut results,
+    )?;
+
+    // Search GAL cache (second priority, after synced contacts).
+    #[allow(clippy::cast_possible_wrap)]
+    let gal_remaining = limit - results.len() as i64;
+    if gal_remaining > 0 {
+        search_gal_cache(
+            conn,
+            &like_pattern,
+            gal_remaining,
+            &mut seen_emails,
+            &mut results,
+        )?;
+    }
+
+    // Search seen_addresses table (lower priority, fills remaining).
+    #[allow(clippy::cast_possible_wrap)]
+    let remaining = limit - results.len() as i64;
+    if remaining > 0 {
+        search_seen_addresses(
+            conn,
+            &like_pattern,
+            remaining,
+            &mut seen_emails,
+            &mut results,
+        )?;
+    }
+
+    // Search contact groups by name.
+    #[allow(clippy::cast_possible_wrap)]
+    let group_remaining = limit - results.len() as i64;
+    if group_remaining > 0 {
+        search_groups(conn, &like_pattern, group_remaining, &mut results)?;
+    }
+
+    Ok(results)
+}
+
+/// Build LIKE pattern: short queries (1-2 chars) use prefix match
+/// (`pattern%`) which can use a B-tree index; longer queries use
+/// substring match (`%pattern%`) for mid-word hits.
+fn make_like_pattern(trimmed: &str) -> String {
+    if trimmed.len() <= 2 {
+        format!("{trimmed}%")
+    } else {
+        format!("%{trimmed}%")
+    }
+}
+
+/// Search contacts via FTS5 prefix matching, falling back to LIKE if
+/// the FTS5 table is unavailable (e.g. old DB without migration 32).
+fn search_contacts_fts_or_like(
+    conn: &Connection,
+    raw_query: &str,
+    like_pattern: &str,
+    limit: i64,
+    seen_emails: &mut std::collections::HashSet<String>,
+    results: &mut Vec<ContactMatch>,
+) -> Result<(), String> {
+    let fts_query = build_fts_query(raw_query);
+    if !fts_query.is_empty() {
+        let fts_sql = "SELECT c.email, c.display_name
+                       FROM contacts c
+                       INNER JOIN contacts_fts ON contacts_fts.rowid = c.rowid
+                       WHERE contacts_fts MATCH ?1
+                       ORDER BY c.last_contacted_at DESC NULLS LAST,
+                                c.display_name ASC
+                       LIMIT ?2";
+        match conn.prepare(fts_sql) {
+            Ok(mut stmt) => {
+                let rows = stmt
+                    .query_map(params![&fts_query, limit], |row| {
+                        Ok(ContactMatch {
+                            email: row.get("email")?,
+                            display_name: row.get("display_name")?,
+                            is_group: false,
+                            group_id: None,
+                            member_count: None,
+                        })
+                    })
+                    .map_err(|e| e.to_string())?;
+                for row in rows {
+                    let contact = row.map_err(|e| e.to_string())?;
+                    let key = contact.email.to_lowercase();
+                    if seen_emails.insert(key) {
+                        results.push(contact);
+                    }
+                }
+                return Ok(());
+            }
+            Err(_) => { /* FTS5 table missing — fall through to LIKE */ }
+        }
+    }
+
+    // LIKE fallback
+    let like_sql = "SELECT email, display_name FROM contacts
+                    WHERE email LIKE ?1 OR display_name LIKE ?1
+                    ORDER BY last_contacted_at DESC NULLS LAST,
+                             display_name ASC
+                    LIMIT ?2";
+    let mut stmt = conn.prepare(like_sql).map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(params![&pattern, limit], |row| {
+        .query_map(params![like_pattern, limit], |row| {
             Ok(ContactMatch {
                 email: row.get("email")?,
                 display_name: row.get("display_name")?,
@@ -65,42 +167,7 @@ pub fn search_contacts_for_autocomplete(
             results.push(contact);
         }
     }
-
-    // Search GAL cache (second priority, after synced contacts).
-    #[allow(clippy::cast_possible_wrap)]
-    let gal_remaining = limit - results.len() as i64;
-    if gal_remaining > 0 {
-        search_gal_cache(
-            conn,
-            &pattern,
-            gal_remaining,
-            &mut seen_emails,
-            &mut results,
-        )?;
-    }
-
-    // Search seen_addresses table (lower priority, fills remaining).
-    // Order by last_seen_at DESC for recency.
-    #[allow(clippy::cast_possible_wrap)]
-    let remaining = limit - results.len() as i64;
-    if remaining > 0 {
-        search_seen_addresses(
-            conn,
-            &pattern,
-            remaining,
-            &mut seen_emails,
-            &mut results,
-        )?;
-    }
-
-    // Search contact groups by name.
-    #[allow(clippy::cast_possible_wrap)]
-    let group_remaining = limit - results.len() as i64;
-    if group_remaining > 0 {
-        search_groups(conn, &pattern, group_remaining, &mut results)?;
-    }
-
-    Ok(results)
+    Ok(())
 }
 
 /// Search the GAL cache for autocomplete matches.

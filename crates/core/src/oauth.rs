@@ -511,39 +511,15 @@ fn parse_auth_code_and_state(request: &str) -> Result<(String, String), String> 
 }
 
 fn parse_query_string(path: &str) -> HashMap<String, String> {
-    let mut params = HashMap::new();
-    if let Some(query) = path.split('?').nth(1) {
-        for pair in query.split('&') {
-            let mut kv = pair.splitn(2, '=');
-            if let (Some(key), Some(value)) = (kv.next(), kv.next()) {
-                params.insert(key.to_string(), urlencoding_decode(value));
-            }
-        }
-    }
-    params
-}
-
-fn urlencoding_decode(s: &str) -> String {
-    let mut result = Vec::with_capacity(s.len());
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let Ok(byte) = u8::from_str_radix(&s[i + 1..i + 3], 16)
-        {
-            result.push(byte);
-            i += 3;
-            continue;
-        }
-        if bytes[i] == b'+' {
-            result.push(b' ');
-        } else {
-            result.push(bytes[i]);
-        }
-        i += 1;
-    }
-    String::from_utf8(result).unwrap_or_else(|_| s.to_string())
+    // Prepend a dummy base so `url::Url` can parse a relative path with query string.
+    let full = format!("http://localhost{path}");
+    let Ok(parsed) = url::Url::parse(&full) else {
+        return HashMap::new();
+    };
+    parsed
+        .query_pairs()
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect()
 }
 
 #[derive(Serialize, Deserialize)]
