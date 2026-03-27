@@ -116,21 +116,20 @@ fn search_contacts_fts_or_like(
                        ORDER BY c.last_contacted_at DESC NULLS LAST,
                                 c.display_name ASC
                        LIMIT ?2";
-        match conn.prepare(fts_sql) {
-            Ok(mut stmt) => {
-                let rows = stmt
-                    .query_map(params![&fts_query, limit], |row| {
-                        Ok(ContactMatch {
-                            email: row.get("email")?,
-                            display_name: row.get("display_name")?,
-                            is_group: false,
-                            group_id: None,
-                            member_count: None,
-                        })
-                    })
-                    .map_err(|e| e.to_string())?;
-                for row in rows {
-                    let contact = row.map_err(|e| e.to_string())?;
+        match conn.prepare(fts_sql).and_then(|mut stmt| {
+            stmt.query_map(params![&fts_query, limit], |row| {
+                Ok(ContactMatch {
+                    email: row.get("email")?,
+                    display_name: row.get("display_name")?,
+                    is_group: false,
+                    group_id: None,
+                    member_count: None,
+                })
+            })
+            .map(|rows| rows.filter_map(Result::ok).collect::<Vec<_>>())
+        }) {
+            Ok(contacts) => {
+                for contact in contacts {
                     let key = contact.email.to_lowercase();
                     if seen_emails.insert(key) {
                         results.push(contact);

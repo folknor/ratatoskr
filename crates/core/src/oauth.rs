@@ -501,10 +501,12 @@ fn parse_auth_code_and_state(request: &str) -> Result<(String, String), String> 
     let params = parse_query_string(path);
     let code = params
         .get("code")
+        .filter(|v| !v.is_empty())
         .cloned()
         .ok_or_else(|| "No auth code in redirect".to_string())?;
     let state = params
         .get("state")
+        .filter(|v| !v.is_empty())
         .cloned()
         .ok_or_else(|| "No state in redirect".to_string())?;
     Ok((code, state))

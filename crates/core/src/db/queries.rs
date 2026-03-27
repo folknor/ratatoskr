@@ -789,15 +789,19 @@ fn search_contacts_like(
 pub fn build_fts_query(raw: &str) -> String {
     raw.split_whitespace()
         .map(|token| {
+            // Strip everything except alphanumeric and email-significant chars.
             let clean: String = token
                 .chars()
                 .filter(|c| {
                     c.is_alphanumeric() || *c == '@' || *c == '.' || *c == '-' || *c == '_'
                 })
                 .collect();
-            format!("{clean}*")
+            // Quote the token to prevent FTS5 operator interpretation
+            // (`.`, `-` etc. can be parsed as syntax otherwise).
+            // The `*` suffix goes outside the quotes for prefix matching.
+            format!("\"{clean}\"*")
         })
-        .filter(|t| t.len() > 1) // skip empty tokens (just "*")
+        .filter(|t| t.len() > 3) // skip empty tokens (just `""*`)
         .collect::<Vec<_>>()
         .join(" ")
 }
