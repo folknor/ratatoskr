@@ -9,6 +9,7 @@ use crate::command_dispatch::NavigationTarget;
 impl App {
     /// Enter chat view for a contact.
     pub(crate) fn enter_chat_view(&mut self, email: String) -> Task<Message> {
+        self.clear_search_state();
         self.navigation_target = Some(NavigationTarget::Chat { email: email.clone() });
         self.clear_thread_selection();
         self.chat_timeline = Some(ChatTimeline::new(email.clone()));

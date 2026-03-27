@@ -279,6 +279,18 @@ pub fn maybe_update_chat_state(
         return Ok(());
     };
 
+    // Defensive: if the chat contact email is one of the user's own emails,
+    // this is not a valid 1:1 chat — clear the flag and bail.
+    if user_emails.iter().any(|ue| ue == chat_email) {
+        tx.execute(
+            "UPDATE threads SET is_chat_thread = 0 \
+             WHERE account_id = ?1 AND id = ?2 AND is_chat_thread = 1",
+            rusqlite::params![account_id, thread_id],
+        )
+        .map_err(|e| format!("clear chat flag (self-contact): {e}"))?;
+        return Ok(());
+    }
+
     // Count distinct participants
     let participant_count: i64 = tx
         .query_row(

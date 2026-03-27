@@ -1386,7 +1386,8 @@ impl App {
                         status_bar,
                     ];
 
-                    row![sidebar, content_area].height(Length::Fill)
+                    let divider_sidebar = self.build_divider(Divider::Sidebar);
+                    row![sidebar, divider_sidebar, content_area].height(Length::Fill)
                 } else {
                     // Normal mail view: sidebar + thread list + reading pane
                     let thread_list = container(self.thread_list.view().map(Message::ThreadList))

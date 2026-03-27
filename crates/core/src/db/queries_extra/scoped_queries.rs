@@ -593,6 +593,7 @@ pub fn get_threads_for_shared_mailbox(
                ) WHERE rn = 1
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
              WHERE t.account_id = ?1 AND t.shared_mailbox_id = ?2
+               AND t.is_chat_thread = 0
                AND tl.label_id = ?3
              GROUP BY t.account_id, t.id
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
@@ -617,6 +618,7 @@ pub fn get_threads_for_shared_mailbox(
                ) WHERE rn = 1
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
              WHERE t.account_id = ?1 AND t.shared_mailbox_id = ?2
+               AND t.is_chat_thread = 0
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?3"
         )

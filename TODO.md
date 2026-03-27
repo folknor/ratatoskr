@@ -174,10 +174,10 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [x] **Summary update scans ALL chat threads** — Fixed: latest-message query now scoped to the current thread; only updates contact summary when this thread has a newer message than what's stored, skipping the expensive cross-thread join in the common case. `persistence.rs:maybe_update_chat_state`
 - [x] **`contact_photo_cache` join uses LOWER()** — Defeats index on `cpc.email`. Cache table should use NOCASE collation or store normalized emails. `chat.rs:get_chat_contacts`
 
-- [ ] **IMAP re-threading can orphan `thread_participants`** — Delta re-threading is rare, but when it happens old participant rows for the previous thread ID are not cleaned up. Low impact, accumulates slowly.
+- [x] **IMAP re-threading can orphan `thread_participants`** — Delta re-threading is rare, but when it happens old participant rows for the previous thread ID are not cleaned up. Low impact, accumulates slowly.
 - [x] **Legacy `queries.rs` helpers missing `is_chat_thread = 0`** — `get_threads`, `get_thread_count`, `get_unread_count` in `queries.rs` don't filter chat threads. No current call sites, but residual regression risk if reused. `queries.rs:155, 803, 840`
-- [ ] **`get_threads_for_shared_mailbox` missing `is_chat_thread = 0`** — Shared mailbox thread query doesn't exclude chat threads. Low risk (shared mailboxes unlikely to have chat contacts). `scoped_queries.rs:get_threads_for_shared_mailbox`
-- [ ] **Self-to-self threads can misclassify as chat** — If user designates one of their own aliases, a thread between two of the user's own accounts could qualify as "1:1 chat". Edge case.
+- [x] **`get_threads_for_shared_mailbox` missing `is_chat_thread = 0`** — Shared mailbox thread query doesn't exclude chat threads. Low risk (shared mailboxes unlikely to have chat contacts). `scoped_queries.rs:get_threads_for_shared_mailbox`
+- [x] **Self-to-self threads can misclassify as chat** — If user designates one of their own aliases, a thread between two of the user's own accounts could qualify as "1:1 chat". Edge case.
 - [x] **`LOWER()` on NOCASE columns** — Several chat queries use `LOWER()` on columns already declared COLLATE NOCASE, defeating index use. Remove the redundant `LOWER()` calls.
 - [x] **IMAP `is_connection_error` missing patterns** — Missing "broken pipe", "reset by peer", "end of file". Also differs between `imap_delta.rs` and `imap_initial.rs` — should be unified. `imap_delta.rs`
 - [x] **IMAP batch delta check loses tail folders on mid-batch disconnect** — If shared session dies halfway through `delta_check_folders`, remaining folders are silently omitted from results. Before reuse, one broken connection only lost one folder. `imap_delta.rs`
@@ -188,8 +188,8 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [x] **`fetch_all_flags` doc says "must NOT be SELECTed"** — Stale with session-reuse model. IMAP re-SELECT is harmless. `commands.rs`
 - [x] **Chat timeline pagination cursor** — Currently timestamp-only (`date < ?`). Should use `(date, message_id)` tuple to avoid skipping/duplicating messages with equal timestamps. `chat.rs:get_chat_timeline`
 - [x] **ChatTimeline should implement Component trait** — Currently has ad-hoc `update()`/`view()` methods. UI.md says components implement the shared Component trait. `chat_timeline.rs`
-- [ ] **Missing sidebar divider in chat layout** — Normal mail view has a draggable divider between sidebar and content. Chat view omits it. `main.rs` view branching
-- [ ] **Search state persists across chat entry/exit** — If user enters chat from search mode, search state persists. Exiting chat may return to stale search. `handlers/chat.rs:enter_chat_view`
+- [x] **Missing sidebar divider in chat layout** — Normal mail view has a draggable divider between sidebar and content. Chat view omits it. `main.rs` view branching
+- [x] **Search state persists across chat entry/exit** — If user enters chat from search mode, search state persists. Exiting chat may return to stale search. `handlers/chat.rs:enter_chat_view`
 - [x] **Subject change indicator triggers on Re: variations** — `needs_subject_indicator` compares raw subjects. Should normalize by stripping Re:/Fwd: prefixes. `chat_timeline.rs`
 - [x] **`scroll_id` stored but never attached to scrollable** — Deferred scroll-to-bottom needs a usable hook. `chat_timeline.rs`
 - [x] **Chat view command context classifies as Inbox** — `view_type_from_target` returns `ViewType::Inbox` for `Chat` target. Palette/command availability logic thinks user is in Inbox. `command_dispatch.rs`
@@ -223,7 +223,7 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 ### NoOp detection (69bf316)
 - [x] **All-NoOp batch shows success toast + auto-advance** — "Archived" toast and selection advance when nothing changed. Should show no toast or "Already archived". `commands.rs:handle_action_completed`
-- [ ] **NoOp conflates "already in state" with "target missing"** — 0 affected rows for both cases. Can't distinguish no-op from invalid target. `archive.rs:12, star.rs:12`
+- [x] **NoOp conflates "already in state" with "target missing"** — 0 affected rows for both cases. Can't distinguish no-op from invalid target. `archive.rs:12, star.rs:12`
 - [x] **Degraded batch path erases NoOp signal** — `action_local()` discards the bool via `.map(|_| ())`, returns `LocalOnly` instead of `NoOp`. Causes spurious pending-ops enqueue and undo tokens. `batch.rs:316, 322`
 
 ## Remaining Enhancements (other)

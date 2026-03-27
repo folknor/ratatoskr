@@ -11,17 +11,19 @@ use crate::progress::NoopProgressReporter;
 
 /// Local DB mutation for archive. Returns true if state changed.
 pub(crate) async fn archive_local(ctx: &ActionContext, account_id: &str, thread_id: &str) -> Result<bool, ActionError> {
-    let db = ctx.db.clone();
+    let ctx_clone = ctx.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
     tokio::task::spawn_blocking(move || {
-        let conn = db.conn();
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
+        ctx_clone.verify_thread_exists(&aid, &tid)?;
+        let conn = ctx_clone.db.conn();
+        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         remove_inbox_label(&conn, &aid, &tid)
+            .map(|n| n > 0)
+            .map_err(ActionError::db)
     })
     .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
-    .and_then(|r| r.map(|n| n > 0).map_err(ActionError::db))
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))?
 }
 
 /// Provider dispatch for archive (assumes local mutation already applied).

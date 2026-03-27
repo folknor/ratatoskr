@@ -38,6 +38,14 @@ pub async fn designate_chat_contact(
     let email = email.to_lowercase();
     let user_emails: Vec<String> = user_emails.iter().map(|e| e.to_lowercase()).collect();
 
+    // Refuse to designate one of the user's own emails as a chat contact —
+    // threads between two of the user's own accounts are not 1:1 chats.
+    if user_emails.iter().any(|ue| ue == &email) {
+        return Err(
+            "Cannot designate your own email address as a chat contact".to_string(),
+        );
+    }
+
     db.with_conn(move |conn| {
         let tx = conn.unchecked_transaction().map_err(|e| format!("begin: {e}"))?;
 
@@ -245,6 +253,12 @@ fn set_chat_thread_flags(
     user_emails: &[String],
 ) -> Result<(), String> {
     if user_emails.is_empty() {
+        return Ok(());
+    }
+
+    // Defensive: if the contact email is one of the user's own emails, no
+    // thread qualifies — skip to avoid flagging inter-account threads.
+    if user_emails.iter().any(|ue| ue == email) {
         return Ok(());
     }
 
