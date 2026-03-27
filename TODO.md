@@ -36,7 +36,7 @@
 
 - [ ] **`responsive` for adaptive layout** — Collapse panels at narrow window sizes.
 
-- [ ] **Per-pane minimum resize limits** — Clamp ratios on both drag and window resize.
+- [x] **Per-pane minimum resize limits** — Clamp ratios on both drag and window resize.
 
 - [ ] **Keybinding management UI (Slice 6f)** — Settings panel for viewing, searching, and rebinding shortcuts. Backend ready (override persistence, conflict detection, set/unbind/reset APIs). See `docs/command-palette/app-integration-spec.md` § Slice 6f.
 
@@ -52,7 +52,7 @@ Features with backend complete but UI or integration work remaining. Each refere
 
 Phases 1-5 complete (schema, Exchange/IMAP/JMAP sync, local dispatch + provider write-back, sidebar). Remaining:
 
-- [ ] **Label pills in reading pane** — Display tag-type labels as colored pills on expanded message headers. Data now in `thread_labels` via unified sync.
+- [x] **Label pills in reading pane** — Display tag-type labels as colored pills on expanded message headers. Data now in `thread_labels` via unified sync.
 - [ ] **Label picker overlay** — Triggered from reading pane or command palette. Lists all available tag-type labels with colors for apply/remove.
 
 ### Tracking Blocking — `docs/roadmap/tracking-blocking.md`
@@ -113,7 +113,7 @@ Backend complete (server delegation + overdue handling). Missing UI.
 
 Backend complete (Gmail + JMAP sync). Exchange fetch permanently blocked (no public API, Microsoft confirmed no plans).
 
-- [ ] **Signature placement in compose** — Insert signature in compose body. New compose: bottom. Reply: between new content and quoted text. Wrap in `<div id="ratatoskr-signature">` for replacement/stripping.
+- [x] **Signature placement in compose** — Insert signature in compose body. New compose: bottom. Reply: between new content and quoted text. Wrap in `<div id="ratatoskr-signature">` for replacement/stripping.
 
 ### BIMI — `docs/roadmap/bimi.md`
 
@@ -129,7 +129,7 @@ Not yet implemented. Full read/write API available on Exchange, Gmail, and JMAP.
 - [x] **Gmail vacation settings read/write** — *(2026-03-25)* `fetch_gmail_auto_response` / `push_gmail_auto_response`. Epoch ms timestamps converted to RFC 3339.
 - [x] **JMAP VacationResponse read/write** — *(2026-03-25)* `fetch_jmap_auto_response` / `push_jmap_auto_response` using `jmap-client` fork's VacationResponse support.
 - [ ] **Auto-reply settings UI** — Per-account editor in settings. Toggle, date pickers, message editor, audience selector. Internal/external tabs for Exchange only.
-- [ ] **Active auto-reply status indicator** — Status bar or sidebar indicator when any account has active auto-replies.
+- [x] **Active auto-reply status indicator** — Status bar or sidebar indicator when any account has active auto-replies.
 
 ### IMAP CONDSTORE/QRESYNC — `docs/roadmap/imap-condstore-qresync.md`
 

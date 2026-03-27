@@ -21,6 +21,8 @@ pub struct ResolvedLabel {
     pub name: String,
     pub color_bg: String,
     pub color_fg: String,
+    /// "container" (folder/mailbox) or "tag" (category/keyword).
+    pub label_kind: String,
 }
 
 /// Full thread detail data for the reading pane.
@@ -52,6 +54,7 @@ fn convert_thread_detail(detail: ThreadDetail) -> AppThreadDetail {
             name: l.name,
             color_bg: l.color_bg,
             color_fg: l.color_fg,
+            label_kind: l.label_kind,
         })
         .collect();
 

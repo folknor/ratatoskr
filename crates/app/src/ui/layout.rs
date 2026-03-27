@@ -134,6 +134,7 @@ pub const SIDEBAR_MIN_WIDTH: f32 = 220.0;
 /// Height of the sidebar header (mode button + dropdown + compose stack)
 pub const SIDEBAR_HEADER_HEIGHT: f32 = 76.0;
 pub const THREAD_LIST_MIN_WIDTH: f32 = 250.0;
+pub const READING_PANE_MIN_WIDTH: f32 = 300.0;
 
 // ── Padding presets ─────────────────────────────────────
 // Named by usage, not by raw values. All values land on

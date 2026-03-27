@@ -137,6 +137,18 @@ pub async fn db_upsert_auto_response(
     .await
 }
 
+/// Check whether any account has an active auto-response (`enabled = 1`).
+/// Uses a raw `Connection` so callers can run this on the read-only
+/// connection without needing `DbState`.
+pub fn any_auto_response_active(conn: &rusqlite::Connection) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM auto_responses WHERE enabled = 1)",
+        [],
+        |row| row.get::<_, bool>(0),
+    )
+    .map_err(|e| format!("any_auto_response_active: {e}"))
+}
+
 // ── Helpers ───────────────────────────────────────────
 
 /// Normalize a .NET-style datetime (e.g. `"2026-03-25T08:00:00.0000000"`)

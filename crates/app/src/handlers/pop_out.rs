@@ -408,7 +408,10 @@ impl App {
         self.pop_out_windows
             .insert(window_id, PopOutWindow::Compose(Box::new(state)));
 
-        open_task.discard()
+        // Dispatch initial signature resolution for the default From account.
+        let sig_task = self.resolve_compose_signature(window_id);
+
+        Task::batch([open_task.discard(), sig_task])
     }
 
     /// Open a compose window from a message view's Reply/ReplyAll/Forward.
@@ -1169,7 +1172,7 @@ impl App {
         }
     }
 
-    // ── Compose signature account-switching ──────────────
+    // ── Compose signature resolution ───────────────────────
 
     /// When the user changes the "From" account, update the compose state
     /// and dispatch a signature resolution task for the new account.
@@ -1187,6 +1190,24 @@ impl App {
         // Let the standard update handler process the account change first
         // (sets state.from_account to the new account).
         crate::pop_out::compose::update_compose(state, msg);
+
+        self.resolve_compose_signature(window_id)
+    }
+
+    /// Resolve the default signature for the current From account of a
+    /// compose window and dispatch a `SignatureResolved` message.
+    ///
+    /// Used both on initial compose window open and when the user switches
+    /// the From account.
+    fn resolve_compose_signature(
+        &self,
+        window_id: iced::window::Id,
+    ) -> Task<Message> {
+        let Some(PopOutWindow::Compose(state)) =
+            self.pop_out_windows.get(&window_id)
+        else {
+            return Task::none();
+        };
 
         let Some(ref account) = state.from_account else {
             return Task::none();

@@ -549,8 +549,8 @@ fn thread_header<'a>(
     .spacing(SPACE_XS)
     .align_y(Alignment::Center);
 
-    // Label pills
-    for label in labels {
+    // Label pills — only show tag-type labels (not folder/container labels)
+    for label in labels.iter().filter(|l| l.label_kind == "tag") {
         let bg = theme::hex_to_color(&label.color_bg);
         let fg = theme::hex_to_color(&label.color_fg);
         info_row = info_row.push(
@@ -620,6 +620,7 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
                 first_message_date,
                 &pane.search_highlight_terms,
                 cached_html,
+                &pane.thread_labels,
                 ReadingPaneMessage::ToggleMessageExpanded,
                 ReadingPaneMessage::PopOut,
                 ReadingPaneMessage::Reply,

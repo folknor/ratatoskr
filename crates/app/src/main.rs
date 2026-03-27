@@ -62,7 +62,8 @@ use ratatoskr_core::generation::{
 };
 use ratatoskr_core::scope::ViewScope;
 use ui::layout::{
-    RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH, THREAD_LIST_MIN_WIDTH,
+    READING_PANE_MIN_WIDTH, RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH,
+    THREAD_LIST_MIN_WIDTH,
 };
 use ui::add_account::{AddAccountMessage, AddAccountWizard};
 use ui::undoable::UndoableText;
@@ -355,6 +356,9 @@ pub enum Message {
 
     // Keyboard modifier tracking (for Ctrl+click, Shift+click)
     ModifiersChanged(iced::keyboard::Modifiers),
+
+    // Auto-reply status check result
+    AutoReplyChecked(bool),
 }
 
 struct App {
@@ -907,6 +911,9 @@ impl App {
                     {
                         self.right_sidebar_open = false;
                     }
+                    // Clamp panel widths so minimums are respected after
+                    // the window shrinks.
+                    self.clamp_panel_widths();
                 } else {
                     match self.pop_out_windows.get_mut(&id) {
                         Some(PopOutWindow::MessageView(state)) => {
@@ -1032,7 +1039,9 @@ impl App {
                     return self.enter_chat_view(email);
                 }
                 let _ = self.nav_generation.next();
-                self.load_navigation_and_threads()
+                let nav_task = self.load_navigation_and_threads();
+                let auto_reply_task = self.check_auto_reply_status();
+                Task::batch([nav_task, auto_reply_task])
             }
             Message::SetReadingPanePosition(_pos) => Task::none(),
             Message::Palette(msg) => self.handle_palette(msg),
@@ -1305,6 +1314,10 @@ impl App {
             }
             Message::ModifiersChanged(modifiers) => {
                 self.current_modifiers = modifiers;
+                Task::none()
+            }
+            Message::AutoReplyChecked(active) => {
+                self.status_bar.set_auto_reply_active(active);
                 Task::none()
             }
         }
@@ -1917,6 +1930,19 @@ impl App {
             .unwrap_or_else(|| account_id.to_string())
     }
 
+    /// Spawn an async task that checks whether any account has an active
+    /// auto-reply and delivers the result as `Message::AutoReplyChecked`.
+    fn check_auto_reply_status(&self) -> Task<Message> {
+        let conn = self.db.conn_arc();
+        Task::perform(
+            async move {
+                let guard = conn.lock().map_err(|e| format!("lock: {e}"))?;
+                ratatoskr_core::auto_responses::any_auto_response_active(&guard)
+            },
+            |result| Message::AutoReplyChecked(result.unwrap_or(false)),
+        )
+    }
+
     /// Render the status bar, respecting the `sync_status_bar` setting.
     /// When the setting is off, returns an empty zero-height element.
     fn status_bar_view(&self) -> Element<'_, Message> {
@@ -2360,7 +2386,8 @@ impl App {
             .map(Message::SignatureOp);
         let sync_task = self.sync_all_accounts();
         let push_task = self.start_jmap_push();
-        Task::batch([self.load_navigation_and_threads(), sig_task, sync_task, push_task])
+        let auto_reply_task = self.check_auto_reply_status();
+        Task::batch([self.load_navigation_and_threads(), sig_task, sync_task, push_task, auto_reply_task])
     }
 
     fn view_first_launch_modal<'a>(
@@ -2459,18 +2486,63 @@ impl App {
     }
 
     fn handle_divider_drag(&mut self, point: Point) -> Task<Message> {
+        // Available width for the three main panels (excludes right sidebar
+        // when open, and both dividers).
+        let right_sidebar_used = if self.right_sidebar_open {
+            ui::layout::RIGHT_SIDEBAR_WIDTH
+        } else {
+            0.0
+        };
+        let available =
+            self.window.width - 2.0 * DIVIDER_WIDTH - right_sidebar_used;
+
         match self.dragging {
             Some(Divider::Sidebar) => {
-                self.sidebar_width = point.x.max(SIDEBAR_MIN_WIDTH);
+                // max: leave room for thread list min + reading pane min
+                let max_sidebar =
+                    available - THREAD_LIST_MIN_WIDTH - READING_PANE_MIN_WIDTH;
+                self.sidebar_width =
+                    point.x.clamp(SIDEBAR_MIN_WIDTH, max_sidebar.max(SIDEBAR_MIN_WIDTH));
             }
             Some(Divider::ThreadList) => {
+                // max: leave room for reading pane min
+                let max_thread_list =
+                    available - self.sidebar_width - READING_PANE_MIN_WIDTH;
                 let new_width = (point.x - self.sidebar_width - DIVIDER_WIDTH)
-                    .max(THREAD_LIST_MIN_WIDTH);
+                    .clamp(THREAD_LIST_MIN_WIDTH, max_thread_list.max(THREAD_LIST_MIN_WIDTH));
                 self.thread_list_width = new_width;
             }
             None => {}
         }
         Task::none()
+    }
+
+    /// Clamp sidebar and thread-list widths so that all three panels
+    /// respect their minimums at the current window size.  Called after
+    /// every main-window resize.
+    fn clamp_panel_widths(&mut self) {
+        let right_sidebar_used = if self.right_sidebar_open {
+            ui::layout::RIGHT_SIDEBAR_WIDTH
+        } else {
+            0.0
+        };
+        let available =
+            self.window.width - 2.0 * DIVIDER_WIDTH - right_sidebar_used;
+
+        // 1. Ensure sidebar doesn't exceed what leaves room for the other
+        //    two panels at their minimums.
+        let max_sidebar =
+            (available - THREAD_LIST_MIN_WIDTH - READING_PANE_MIN_WIDTH)
+                .max(SIDEBAR_MIN_WIDTH);
+        self.sidebar_width = self.sidebar_width.clamp(SIDEBAR_MIN_WIDTH, max_sidebar);
+
+        // 2. Ensure thread list doesn't exceed what leaves room for the
+        //    reading pane at its minimum.
+        let max_thread_list =
+            (available - self.sidebar_width - READING_PANE_MIN_WIDTH)
+                .max(THREAD_LIST_MIN_WIDTH);
+        self.thread_list_width =
+            self.thread_list_width.clamp(THREAD_LIST_MIN_WIDTH, max_thread_list);
     }
 
     fn handle_clear_all_pinned_searches(&mut self) -> Task<Message> {

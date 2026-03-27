@@ -57,6 +57,8 @@ pub struct ThreadLabel {
     pub name: String,
     pub color_bg: String,
     pub color_fg: String,
+    /// "container" (folder/mailbox) or "tag" (category/keyword).
+    pub label_kind: String,
 }
 
 /// Attachments grouped for the conversation view's attachment panel.
@@ -390,7 +392,7 @@ fn query_thread_labels(
 
     let mut stmt = conn
         .prepare(
-            "SELECT l.id, l.name, l.color_bg, l.color_fg, l.account_id \
+            "SELECT l.id, l.name, l.color_bg, l.color_fg, l.account_id, l.label_kind \
              FROM thread_labels tl \
              JOIN labels l ON l.account_id = tl.account_id AND l.id = tl.label_id \
              WHERE tl.account_id = ?1 AND tl.thread_id = ?2 \
@@ -406,6 +408,7 @@ fn query_thread_labels(
                 color_bg: row.get("color_bg")?,
                 color_fg: row.get("color_fg")?,
                 account_id: row.get("account_id")?,
+                label_kind: row.get("label_kind")?,
             })
         })
         .map_err(|e| format!("query thread labels: {e}"))?;
@@ -425,7 +428,7 @@ fn query_thread_labels(
             account_id: lr.account_id,
             name: lr.name.clone(),
             label_type: None,
-            label_kind: "container".to_string(),
+            label_kind: lr.label_kind.clone(),
             color_bg: lr.color_bg,
             color_fg: lr.color_fg,
             visible: true,
@@ -451,6 +454,7 @@ fn query_thread_labels(
             name: lr.name,
             color_bg: bg.to_string(),
             color_fg: fg.to_string(),
+            label_kind: lr.label_kind,
         });
     }
 
@@ -464,6 +468,7 @@ struct LabelRow {
     color_bg: Option<String>,
     color_fg: Option<String>,
     account_id: String,
+    label_kind: String,
 }
 
 // ── Attachments with message context ────────────────────────

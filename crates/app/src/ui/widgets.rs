@@ -8,7 +8,7 @@ use iced::{mouse, Alignment, Color, Element, Length, Rectangle, Renderer, Theme}
 
 use ratatoskr_command_palette::{BindingTable, CommandContext, CommandId, CommandRegistry};
 
-use crate::db::{DateDisplay, Thread, ThreadAttachment, ThreadMessage};
+use crate::db::{DateDisplay, ResolvedLabel, Thread, ThreadAttachment, ThreadMessage};
 use crate::font;
 use crate::icon;
 use crate::ui::layout::*;
@@ -1060,6 +1060,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     first_message_date: Option<i64>,
     search_highlight_terms: &'a [String],
     cached_html: Option<&'a super::html_render::CachedHtmlBody>,
+    thread_labels: &'a [ResolvedLabel],
     on_toggle: impl Fn(usize) -> M,
     on_pop_out: impl Fn(usize) -> M,
     on_reply: impl Fn(usize) -> M,
@@ -1157,7 +1158,47 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     .spacing(0)
     .align_y(Alignment::Start);
 
-    let header = column![avatar_rows, to_row].spacing(SPACE_XXS);
+    // Label pills row — only show tag-type labels (not folder/container labels)
+    let tag_labels: Vec<_> = thread_labels
+        .iter()
+        .filter(|l| l.label_kind == "tag")
+        .collect();
+
+    let mut header = column![avatar_rows, to_row].spacing(SPACE_XXS);
+
+    if !tag_labels.is_empty() {
+        let pill_pad = iced::Padding {
+            top: 2.0,
+            right: 6.0,
+            bottom: 2.0,
+            left: 6.0,
+        };
+        let mut pills_row = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
+
+        // Indent to align with text content (avatar width + gap)
+        pills_row = pills_row.push(
+            Space::new().width(AVATAR_MESSAGE_CARD + SPACE_SM),
+        );
+
+        for label in &tag_labels {
+            let bg = theme::hex_to_color(&label.color_bg);
+            let fg = theme::hex_to_color(&label.color_fg);
+            pills_row = pills_row.push(
+                container(text(&label.name).size(TEXT_XS).color(fg))
+                    .padding(pill_pad)
+                    .style(move |_theme: &Theme| container::Style {
+                        background: Some(bg.into()),
+                        border: iced::Border {
+                            radius: RADIUS_LG.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }),
+            );
+        }
+
+        header = header.push(pills_row);
+    }
 
     let body_inner: Element<'_, M> = if msg.body_html.is_some() {
         // Use pre-parsed HTML cache when available to avoid re-parsing on every view.

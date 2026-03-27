@@ -473,6 +473,12 @@ impl ComposeState {
                 "<p><br></p><p><em>{attribution}</em></p><blockquote>{body_paras}</blockquote>"
             );
             state.body = EditorState::from_html(&html);
+            // Mark block index 1 as the signature insertion point so that
+            // the initial `SignatureResolved` message inserts the signature
+            // between the user content area and the quoted text (attribution
+            // + blockquote).  Block 0 is the empty paragraph for the user;
+            // block 1 is the attribution line.
+            state.signature_separator_index = Some(1);
         }
 
         state.reply_thread_id = thread_id.map(String::from);

@@ -67,6 +67,8 @@ enum ResolvedContent {
     Confirmation {
         text: String,
     },
+    /// At least one account has an active auto-reply / out-of-office.
+    AutoReplyActive,
 }
 
 // ── Sync event pipeline ─────────────────────────────────
@@ -259,6 +261,8 @@ pub struct StatusBar {
     /// Incremented when a sync cycle starts; if a progress entry's
     /// generation is behind the current generation, the entry is stale.
     sync_generations: HashMap<String, u64>,
+    /// True when any account has an active auto-reply / out-of-office.
+    auto_reply_active: bool,
 }
 
 impl StatusBar {
@@ -270,6 +274,7 @@ impl StatusBar {
             warning_cycle_index: 0,
             sync_cycle_index: 0,
             sync_generations: HashMap::new(),
+            auto_reply_active: false,
         }
     }
 
@@ -351,6 +356,11 @@ impl StatusBar {
         });
     }
 
+    /// Update whether any account has an active auto-reply.
+    pub fn set_auto_reply_active(&mut self, active: bool) {
+        self.auto_reply_active = active;
+    }
+
     // ── Priority resolution ─────────────────────────────
 
     fn resolve(&self, now: iced::time::Instant) -> ResolvedContent {
@@ -380,6 +390,11 @@ impl StatusBar {
                     text: conf.text.clone(),
                 };
             }
+        }
+
+        // 5. Persistent auto-reply indicator (lowest priority above idle).
+        if self.auto_reply_active {
+            return ResolvedContent::AutoReplyActive;
         }
 
         ResolvedContent::Idle
@@ -548,6 +563,14 @@ impl Component for StatusBar {
                     icon::check(),
                     &conf_text,
                     TextClass::Muted,
+                )
+                .into()
+            }
+            ResolvedContent::AutoReplyActive => {
+                build_status_row(
+                    icon::mail(),
+                    "Out of Office auto-reply is active",
+                    TextClass::Accent,
                 )
                 .into()
             }
