@@ -5,11 +5,9 @@
 //! detection, collapsed summaries, resolved label colors, and persisted
 //! attachment collapse state.
 
-use std::sync::Arc;
-
 use ratatoskr_core::body_store::BodyStoreState;
 use ratatoskr_core::db::queries_extra::thread_detail::{
-    self, ThreadDetail, get_thread_detail,
+    self, ThreadDetail, assemble_thread_detail, fetch_thread_bodies, query_thread_from_db,
 };
 use ratatoskr_core::db::queries_extra::set_attachments_collapsed;
 
@@ -125,13 +123,24 @@ pub async fn load_thread_detail(
     let db_conn = db.conn_arc();
 
     tokio::task::spawn_blocking(move || {
-        let conn = db_conn
-            .lock()
-            .map_err(|e| format!("db lock: {e}"))?;
-        let bs = bs_conn
-            .lock()
-            .map_err(|e| format!("body store lock: {e}"))?;
-        let detail = get_thread_detail(&conn, &bs, &account_id, &thread_id)?;
+        // Phase 1: hold main DB lock only for DB queries, then release.
+        let db_data = {
+            let conn = db_conn
+                .lock()
+                .map_err(|e| format!("db lock: {e}"))?;
+            query_thread_from_db(&conn, &account_id, &thread_id)?
+        };
+
+        // Phase 2: hold body store lock only for body fetches, then release.
+        let body_map = {
+            let bs = bs_conn
+                .lock()
+                .map_err(|e| format!("body store lock: {e}"))?;
+            fetch_thread_bodies(&bs, &db_data.messages)?
+        };
+
+        // Phase 3: pure computation, no locks needed.
+        let detail = assemble_thread_detail(db_data, body_map, &account_id, &thread_id);
         Ok(convert_thread_detail(detail))
     })
     .await

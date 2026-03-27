@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 /// Map from message ID to (text_body, html_body).
-type BodyMap = HashMap<String, (Option<String>, Option<String>)>;
+pub type BodyMap = HashMap<String, (Option<String>, Option<String>)>;
 
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
@@ -106,12 +106,12 @@ pub struct ThreadDetail {
 
 // ── Thread metadata (from threads table) ────────────────────
 
-struct ThreadMeta {
-    subject: Option<String>,
-    is_starred: bool,
-    is_snoozed: bool,
-    is_pinned: bool,
-    is_muted: bool,
+pub struct ThreadMeta {
+    pub subject: Option<String>,
+    pub is_starred: bool,
+    pub is_snoozed: bool,
+    pub is_pinned: bool,
+    pub is_muted: bool,
 }
 
 fn query_thread_meta(
@@ -515,28 +515,74 @@ fn query_thread_attachments(
 
 // ── Main entry point ────────────────────────────────────────
 
-/// Fetch everything needed to render the conversation view for a thread.
+/// Intermediate result from the main DB queries (phase 1).
 ///
-/// Joins thread metadata, messages (with bodies from BodyStore), labels
-/// (with resolved colors), attachments, and attachment collapse state.
-/// Each message is annotated with `is_own_message` (ownership detection)
-/// and `collapsed_summary` (quote/signature-stripped preview).
-pub fn get_thread_detail(
+/// Returned by [`query_thread_from_db`] so callers can release the main
+/// DB lock before fetching bodies from the separate body store.
+pub struct ThreadDbData {
+    pub meta: ThreadMeta,
+    pub messages: Vec<ThreadDetailMessage>,
+    pub identity_emails: HashSet<String>,
+    pub labels: Vec<ThreadLabel>,
+    pub attachments: Vec<ThreadAttachment>,
+    pub attachments_collapsed: bool,
+}
+
+/// Phase 1: Run all main-DB queries and return intermediate data.
+///
+/// The caller should release the main DB lock after this returns, then
+/// call [`assemble_thread_detail`] with body data from the body store.
+pub fn query_thread_from_db(
     conn: &Connection,
-    body_store_conn: &Connection,
     account_id: &str,
     thread_id: &str,
-) -> Result<ThreadDetail, String> {
-    log::debug!("Loading thread detail: thread_id={thread_id}, account_id={account_id}");
+) -> Result<ThreadDbData, String> {
+    log::debug!("Loading thread detail (DB phase): thread_id={thread_id}, account_id={account_id}");
     let meta = query_thread_meta(conn, account_id, thread_id).map_err(|e| {
         log::error!("Failed to load thread meta: thread_id={thread_id}, error={e}");
         e
     })?;
-    let mut messages = query_messages(conn, account_id, thread_id)?;
+    let messages = query_messages(conn, account_id, thread_id)?;
+    let identity_emails = query_identity_emails(conn, account_id)?;
+    let labels = query_thread_labels(conn, account_id, thread_id)?;
+    let attachments = query_thread_attachments(conn, account_id, thread_id)?;
+    let attachments_collapsed = get_attachments_collapsed(conn, account_id, thread_id)?;
 
-    // Fetch and attach bodies
+    Ok(ThreadDbData {
+        meta,
+        messages,
+        identity_emails,
+        labels,
+        attachments,
+        attachments_collapsed,
+    })
+}
+
+/// Phase 2: Fetch bodies from the body store for the given message IDs.
+///
+/// Runs against the separate `bodies.db` connection. The caller should
+/// hold the body-store lock only for this call.
+pub fn fetch_thread_bodies(
+    body_store_conn: &Connection,
+    messages: &[ThreadDetailMessage],
+) -> Result<BodyMap, String> {
     let message_ids: Vec<String> = messages.iter().map(|m| m.id.clone()).collect();
-    let body_map = fetch_bodies(body_store_conn, &message_ids)?;
+    fetch_bodies(body_store_conn, &message_ids)
+}
+
+/// Phase 3: Assemble the final [`ThreadDetail`] from DB data + bodies.
+///
+/// Pure computation — no DB locks required. Attaches bodies to messages,
+/// detects message ownership, and generates collapsed summaries.
+pub fn assemble_thread_detail(
+    db_data: ThreadDbData,
+    body_map: BodyMap,
+    account_id: &str,
+    thread_id: &str,
+) -> ThreadDetail {
+    let mut messages = db_data.messages;
+
+    // Attach bodies
     for msg in &mut messages {
         if let Some((html, text)) = body_map.get(&msg.id) {
             msg.body_html.clone_from(html);
@@ -545,33 +591,45 @@ pub fn get_thread_detail(
     }
 
     // Detect ownership and generate summaries
-    let identity_emails = query_identity_emails(conn, account_id)?;
-    annotate_messages(&mut messages, &identity_emails);
-
-    let labels = query_thread_labels(conn, account_id, thread_id)?;
-    let attachments = query_thread_attachments(conn, account_id, thread_id)?;
-    let attachments_collapsed = get_attachments_collapsed(conn, account_id, thread_id)?;
+    annotate_messages(&mut messages, &db_data.identity_emails);
 
     let detail = ThreadDetail {
         thread_id: thread_id.to_string(),
         account_id: account_id.to_string(),
-        subject: meta.subject,
-        is_starred: meta.is_starred,
-        is_snoozed: meta.is_snoozed,
-        is_pinned: meta.is_pinned,
-        is_muted: meta.is_muted,
+        subject: db_data.meta.subject,
+        is_starred: db_data.meta.is_starred,
+        is_snoozed: db_data.meta.is_snoozed,
+        is_pinned: db_data.meta.is_pinned,
+        is_muted: db_data.meta.is_muted,
         messages,
-        labels,
-        attachments,
-        attachments_collapsed,
+        labels: db_data.labels,
+        attachments: db_data.attachments,
+        attachments_collapsed: db_data.attachments_collapsed,
     };
     log::debug!(
-        "Thread detail loaded: thread_id={thread_id}, messages={}, labels={}, attachments={}",
+        "Thread detail assembled: thread_id={thread_id}, messages={}, labels={}, attachments={}",
         detail.messages.len(),
         detail.labels.len(),
         detail.attachments.len(),
     );
-    Ok(detail)
+    detail
+}
+
+/// Fetch everything needed to render the conversation view for a thread.
+///
+/// Convenience wrapper that runs all three phases sequentially. If you
+/// need to minimize lock scope (e.g. when holding `Arc<Mutex<Connection>>`),
+/// use [`query_thread_from_db`], [`fetch_thread_bodies`], and
+/// [`assemble_thread_detail`] individually instead.
+pub fn get_thread_detail(
+    conn: &Connection,
+    body_store_conn: &Connection,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<ThreadDetail, String> {
+    let db_data = query_thread_from_db(conn, account_id, thread_id)?;
+    let body_map = fetch_thread_bodies(body_store_conn, &db_data.messages)?;
+    Ok(assemble_thread_detail(db_data, body_map, account_id, thread_id))
 }
 
 /// Set `is_own_message` and `collapsed_summary` on each message.

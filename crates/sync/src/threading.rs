@@ -60,11 +60,21 @@ impl Arena {
     }
 
     /// Check whether `ancestor_idx` is an ancestor of `idx` (or the same).
+    ///
+    /// Depth-limited to avoid O(n²) behavior on pathological linear threads.
+    /// Real email threads never nest 100+ levels deep; if the walk exceeds
+    /// the limit we conservatively return `false`.
     fn is_ancestor(&self, idx: usize, ancestor_idx: usize) -> bool {
+        const MAX_DEPTH: usize = 100;
         let mut current = Some(idx);
+        let mut depth = 0;
         while let Some(c) = current {
             if c == ancestor_idx {
                 return true;
+            }
+            depth += 1;
+            if depth >= MAX_DEPTH {
+                return false;
             }
             current = self.containers[c].parent;
         }

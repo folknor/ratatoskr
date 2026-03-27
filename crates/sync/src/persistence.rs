@@ -310,39 +310,51 @@ pub fn maybe_update_chat_state(
     )
     .map_err(|e| format!("update chat flag: {e}"))?;
 
-    // Always refresh summary — the thread may have just gained or lost chat status
+    // Refresh chat contact summary scoped to this thread, avoiding full scans.
     {
-        // Latest message (from either direction)
-        let latest: Option<(Option<String>, i64)> = tx
+        // Get this thread's latest message and unread count from this contact.
+        let thread_latest: Option<(Option<String>, i64)> = tx
             .query_row(
-                "SELECT m.snippet, m.date FROM messages m \
-                 INNER JOIN threads t ON m.thread_id = t.id AND m.account_id = t.account_id \
-                 INNER JOIN thread_participants tp \
-                   ON tp.account_id = m.account_id AND tp.thread_id = m.thread_id \
-                 WHERE t.is_chat_thread = 1 AND tp.email = ?1 \
-                 ORDER BY m.date DESC LIMIT 1",
-                rusqlite::params![chat_email],
+                "SELECT snippet, date FROM messages \
+                 WHERE account_id = ?1 AND thread_id = ?2 \
+                 ORDER BY date DESC LIMIT 1",
+                rusqlite::params![account_id, thread_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .ok();
 
-        let unread: i64 = tx
-            .query_row(
-                "SELECT COUNT(*) FROM messages m \
-                 INNER JOIN threads t ON m.thread_id = t.id AND m.account_id = t.account_id \
-                 WHERE t.is_chat_thread = 1 AND m.is_read = 0 \
-                   AND LOWER(m.from_address) = ?1",
-                rusqlite::params![chat_email],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
+        // Only update the contact summary if this thread has a newer message
+        // than what's currently stored. This avoids scanning all chat threads.
+        if let Some((preview, ts)) = thread_latest {
+            let existing_ts: i64 = tx
+                .query_row(
+                    "SELECT COALESCE(latest_message_at, 0) FROM chat_contacts WHERE email = ?1",
+                    rusqlite::params![chat_email],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
 
-        if let Some((preview, ts)) = latest {
-            let _ = tx.execute(
-                "UPDATE chat_contacts SET latest_message_preview = ?2, \
-                 latest_message_at = ?3, unread_count = ?4 WHERE email = ?1",
-                rusqlite::params![chat_email, preview, ts, unread],
-            );
+            if ts >= existing_ts {
+                // Unread count: recount only messages from this contact across
+                // their chat threads. This is narrower than the old global scan
+                // because we filter on the specific contact email.
+                let unread: i64 = tx
+                    .query_row(
+                        "SELECT COUNT(*) FROM messages m \
+                         INNER JOIN threads t ON m.thread_id = t.id AND m.account_id = t.account_id \
+                         WHERE t.is_chat_thread = 1 AND m.is_read = 0 \
+                           AND LOWER(m.from_address) = ?1",
+                        rusqlite::params![chat_email],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(0);
+
+                let _ = tx.execute(
+                    "UPDATE chat_contacts SET latest_message_preview = ?2, \
+                     latest_message_at = ?3, unread_count = ?4 WHERE email = ?1",
+                    rusqlite::params![chat_email, preview, ts, unread],
+                );
+            }
         }
     }
 

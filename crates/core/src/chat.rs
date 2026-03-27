@@ -130,7 +130,7 @@ pub async fn get_chat_contacts(
                         cc.latest_message_preview, cc.unread_count, cc.sort_order, \
                         cpc.file_path \
                  FROM chat_contacts cc \
-                 LEFT JOIN contact_photo_cache cpc ON LOWER(cpc.email) = cc.email \
+                 LEFT JOIN contact_photo_cache cpc ON cpc.email = cc.email \
                  ORDER BY cc.sort_order ASC",
             )
             .map_err(|e| e.to_string())?;
@@ -167,83 +167,64 @@ pub async fn get_chat_timeline(
     let email = email.to_lowercase();
     let user_emails: Vec<String> = user_emails.iter().map(|e| e.to_lowercase()).collect();
 
-    db.with_conn(move |conn| {
-        // Step 1: Find eligible chat thread IDs
-        let mut thread_stmt = conn
-            .prepare(
-                "SELECT DISTINCT tp.account_id, tp.thread_id \
-                 FROM thread_participants tp \
-                 INNER JOIN threads t ON t.id = tp.thread_id AND t.account_id = tp.account_id \
-                 WHERE tp.email = ?1 AND t.is_chat_thread = 1",
-            )
-            .map_err(|e| e.to_string())?;
+    let limit_i64 = limit as i64;
 
-        let thread_ids: Vec<(String, String)> = thread_stmt
-            .query_map(rusqlite::params![email], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    db.with_conn(move |conn| {
+        // Single query: join messages against chat threads for this contact,
+        // ORDER BY date DESC LIMIT N to get the most recent N messages,
+        // then reverse in Rust for chronological order.
+        let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(before_ts) =
+            before
+        {
+            (
+                "SELECT m.id, m.account_id, m.thread_id, m.from_address, m.from_name, \
+                        m.date, m.is_read, m.subject \
+                 FROM messages m \
+                 INNER JOIN threads t ON t.id = m.thread_id AND t.account_id = m.account_id \
+                 INNER JOIN thread_participants tp \
+                   ON tp.account_id = m.account_id AND tp.thread_id = m.thread_id \
+                 WHERE t.is_chat_thread = 1 AND tp.email = ?1 AND m.date < ?2 \
+                 ORDER BY m.date DESC \
+                 LIMIT ?3"
+                    .to_string(),
+                vec![
+                    Box::new(email.clone()),
+                    Box::new(before_ts),
+                    Box::new(limit_i64),
+                ],
+            )
+        } else {
+            (
+                "SELECT m.id, m.account_id, m.thread_id, m.from_address, m.from_name, \
+                        m.date, m.is_read, m.subject \
+                 FROM messages m \
+                 INNER JOIN threads t ON t.id = m.thread_id AND t.account_id = m.account_id \
+                 INNER JOIN thread_participants tp \
+                   ON tp.account_id = m.account_id AND tp.thread_id = m.thread_id \
+                 WHERE t.is_chat_thread = 1 AND tp.email = ?1 \
+                 ORDER BY m.date DESC \
+                 LIMIT ?2"
+                    .to_string(),
+                vec![Box::new(email.clone()), Box::new(limit_i64)],
+            )
+        };
+
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(AsRef::as_ref).collect();
+
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let mut messages: Vec<ChatMessage> = stmt
+            .query_map(param_refs.as_slice(), |row| {
+                chat_message_from_row(row, &user_emails)
             })
             .map_err(|e| e.to_string())?
             .filter_map(Result::ok)
             .collect();
 
-        if thread_ids.is_empty() {
-            return Ok(Vec::new());
-        }
+        // Reverse from DESC to chronological (oldest first)
+        messages.reverse();
 
-        // Step 2: Build IN clause for thread IDs
-        // Use a temp approach: query messages per thread and merge
-        let mut all_messages: Vec<ChatMessage> = Vec::new();
-
-        for (account_id, thread_id) in &thread_ids {
-            let sql = if before.is_some() {
-                "SELECT id, account_id, thread_id, from_address, from_name, \
-                        date, is_read, subject \
-                 FROM messages \
-                 WHERE account_id = ?1 AND thread_id = ?2 AND date < ?3 \
-                 ORDER BY date ASC"
-            } else {
-                "SELECT id, account_id, thread_id, from_address, from_name, \
-                        date, is_read, subject \
-                 FROM messages \
-                 WHERE account_id = ?1 AND thread_id = ?2 \
-                 ORDER BY date ASC"
-            };
-
-            let mut msg_stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
-
-            let params: Vec<Box<dyn rusqlite::types::ToSql>> = if let Some(before_ts) = before {
-                vec![
-                    Box::new(account_id.clone()),
-                    Box::new(thread_id.clone()),
-                    Box::new(before_ts),
-                ]
-            } else {
-                vec![
-                    Box::new(account_id.clone()),
-                    Box::new(thread_id.clone()),
-                ]
-            };
-            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                params.iter().map(AsRef::as_ref).collect();
-            let rows: Vec<ChatMessage> = msg_stmt
-                .query_map(param_refs.as_slice(), |row| {
-                    chat_message_from_row(row, &user_emails)
-                })
-                .map_err(|e| e.to_string())?
-                .filter_map(Result::ok)
-                .collect();
-
-            all_messages.extend(rows);
-        }
-
-        // Sort all messages chronologically and apply limit (take the LAST N)
-        all_messages.sort_by_key(|m| m.date);
-        let total = all_messages.len();
-        if total > limit {
-            all_messages = all_messages.split_off(total - limit);
-        }
-
-        Ok(all_messages)
+        Ok(messages)
     })
     .await
 }
@@ -251,62 +232,61 @@ pub async fn get_chat_timeline(
 // ── Internal helpers ──────────────────────────────────────
 
 /// Set `is_chat_thread = 1` on all qualifying 1:1 threads for a contact.
+///
+/// A qualifying thread has exactly 2 distinct participants: the contact and
+/// one of the user's own email addresses. This is done in a single UPDATE
+/// with a subquery to avoid N+1 queries.
 fn set_chat_thread_flags(
     tx: &rusqlite::Transaction,
     email: &str,
     user_emails: &[String],
 ) -> Result<(), String> {
-    // Find all threads where this contact participates
-    let mut stmt = tx
-        .prepare(
-            "SELECT DISTINCT account_id, thread_id FROM thread_participants \
-             WHERE LOWER(email) = ?1",
-        )
-        .map_err(|e| format!("prepare: {e}"))?;
-
-    let thread_ids: Vec<(String, String)> = stmt
-        .query_map(rusqlite::params![email], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(|e| format!("query: {e}"))?
-        .filter_map(Result::ok)
-        .collect();
-
-    for (account_id, thread_id) in &thread_ids {
-        let participant_count: i64 = tx
-            .query_row(
-                "SELECT COUNT(DISTINCT email) FROM thread_participants \
-                 WHERE account_id = ?1 AND thread_id = ?2",
-                rusqlite::params![account_id, thread_id],
-                |row| row.get(0),
-            )
-            .map_err(|e| format!("count: {e}"))?;
-
-        if participant_count != 2 {
-            continue;
-        }
-
-        // Verify one of the two is the user
-        let has_user = user_emails.iter().any(|ue| {
-            tx.query_row(
-                "SELECT COUNT(*) FROM thread_participants \
-                 WHERE account_id = ?1 AND thread_id = ?2 AND email = ?3",
-                rusqlite::params![account_id, thread_id, ue],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap_or(0)
-                > 0
-        });
-
-        if has_user {
-            tx.execute(
-                "UPDATE threads SET is_chat_thread = 1 \
-                 WHERE account_id = ?1 AND id = ?2",
-                rusqlite::params![account_id, thread_id],
-            )
-            .map_err(|e| format!("set chat flag: {e}"))?;
-        }
+    if user_emails.is_empty() {
+        return Ok(());
     }
+
+    // Build placeholders for user_emails (?2, ?3, …)
+    let placeholders: Vec<String> = (0..user_emails.len())
+        .map(|i| format!("?{}", i + 2))
+        .collect();
+    let placeholders_csv = placeholders.join(", ");
+
+    // Single UPDATE: find threads where the contact participates, that have
+    // exactly 2 distinct participants, and where at least one participant is
+    // a user email.
+    let sql = format!(
+        "UPDATE threads SET is_chat_thread = 1 \
+         WHERE (account_id, id) IN ( \
+             SELECT tp.account_id, tp.thread_id \
+             FROM thread_participants tp \
+             WHERE tp.email = ?1 \
+             GROUP BY tp.account_id, tp.thread_id \
+             HAVING ( \
+                 SELECT COUNT(DISTINCT tp2.email) \
+                 FROM thread_participants tp2 \
+                 WHERE tp2.account_id = tp.account_id \
+                   AND tp2.thread_id = tp.thread_id \
+             ) = 2 \
+             AND EXISTS ( \
+                 SELECT 1 FROM thread_participants tp3 \
+                 WHERE tp3.account_id = tp.account_id \
+                   AND tp3.thread_id = tp.thread_id \
+                   AND tp3.email IN ({placeholders_csv}) \
+             ) \
+         )"
+    );
+
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
+        Vec::with_capacity(1 + user_emails.len());
+    params.push(Box::new(email.to_string()));
+    for ue in user_emails {
+        params.push(Box::new(ue.clone()));
+    }
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        params.iter().map(AsRef::as_ref).collect();
+
+    tx.execute(&sql, param_refs.as_slice())
+        .map_err(|e| format!("set chat flags: {e}"))?;
 
     Ok(())
 }
