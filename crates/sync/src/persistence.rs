@@ -235,27 +235,34 @@ pub fn upsert_thread_participants(
     Ok(())
 }
 
-/// Update `is_chat_thread` flag and chat contact summary after thread
-/// participants change. Called from sync paths after `upsert_thread_participants`.
+/// Query all user email addresses (lowercased) from the accounts table.
 ///
-/// `user_emails` should be all email addresses across all user accounts,
-/// lowercased.
-pub fn maybe_update_chat_state(
-    tx: &Transaction,
-    account_id: &str,
-    thread_id: &str,
-) -> Result<(), String> {
-    // Resolve all user email addresses from accounts table
-    let mut email_stmt = tx
+/// Call this once per sync batch and pass the result into
+/// [`maybe_update_chat_state`] to avoid redundant queries.
+pub fn query_user_emails(tx: &Transaction) -> Result<Vec<String>, String> {
+    let mut stmt = tx
         .prepare("SELECT email FROM accounts")
         .map_err(|e| format!("prepare user emails: {e}"))?;
-    let user_emails: Vec<String> = email_stmt
+    let emails: Vec<String> = stmt
         .query_map([], |row| row.get::<_, String>(0))
         .map_err(|e| format!("query user emails: {e}"))?
         .filter_map(Result::ok)
         .map(|e| e.to_lowercase())
         .collect();
-    drop(email_stmt);
+    Ok(emails)
+}
+
+/// Update `is_chat_thread` flag and chat contact summary after thread
+/// participants change. Called from sync paths after `upsert_thread_participants`.
+///
+/// `user_emails` should be all email addresses across all user accounts,
+/// lowercased. Obtain via [`query_user_emails`] once per sync batch.
+pub fn maybe_update_chat_state(
+    tx: &Transaction,
+    account_id: &str,
+    thread_id: &str,
+    user_emails: &[String],
+) -> Result<(), String> {
     // Check if any participant in this thread is a designated chat contact
     let chat_email: Option<String> = tx
         .query_row(
@@ -395,6 +402,8 @@ pub fn delete_messages_and_cleanup_threads(
         account_id
     );
 
+    let user_emails = query_user_emails(tx)?;
+
     // Collect affected thread IDs before deleting
     let mut affected_threads: HashSet<String> = HashSet::new();
     for id in message_ids {
@@ -477,7 +486,7 @@ pub fn delete_messages_and_cleanup_threads(
                 )?;
             }
             // Re-evaluate chat state after participant change
-            maybe_update_chat_state(tx, account_id, tid)?;
+            maybe_update_chat_state(tx, account_id, tid, &user_emails)?;
         }
     }
 

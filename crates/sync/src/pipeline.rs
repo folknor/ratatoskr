@@ -41,6 +41,8 @@ pub fn store_threads(
             .unchecked_transaction()
             .map_err(|e| format!("begin thread tx: {e}"))?;
 
+        let user_emails = super::persistence::query_user_emails(&tx)?;
+
         for group in batch {
             if skipped_thread_ids.contains(&group.thread_id) {
                 continue;
@@ -300,7 +302,7 @@ pub fn store_threads(
                 }
             }
             super::persistence::maybe_update_chat_state(
-                &tx, account_id, &group.thread_id,
+                &tx, account_id, &group.thread_id, &user_emails,
             )?;
 
             affected_thread_ids.push(group.thread_id.clone());

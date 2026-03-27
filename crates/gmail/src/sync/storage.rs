@@ -80,7 +80,8 @@ fn store_thread_to_db(
             msg.base.bcc_addresses.as_deref(),
         )?;
     }
-    sync_persistence::maybe_update_chat_state(&tx, account_id, thread_id)?;
+    let user_emails = sync_persistence::query_user_emails(&tx)?;
+    sync_persistence::maybe_update_chat_state(&tx, account_id, thread_id, &user_emails)?;
 
     tx.commit().map_err(|e| format!("commit: {e}"))?;
     Ok(())

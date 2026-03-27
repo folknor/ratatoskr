@@ -338,7 +338,7 @@ impl App {
 
         let generation = self.next_pop_out_generation();
         let source_label_id = self.sidebar.selected_label.clone();
-        let state = MessageViewState::from_thread_message(&msg, generation, source_label_id);
+        let state = MessageViewState::from_thread_message(&msg, generation, source_label_id, self.settings.default_rendering_mode);
         let account_id = state.account_id.clone();
         let message_id = state.message_id.clone();
 
@@ -736,7 +736,7 @@ impl App {
             let (window_id, open_task) = iced::window::open(settings);
 
             let generation = self.next_pop_out_generation();
-            let state = MessageViewState::from_session_entry(entry, generation);
+            let state = MessageViewState::from_session_entry(entry, generation, self.settings.default_rendering_mode);
             let account_id = entry.account_id.clone();
             let message_id = entry.message_id.clone();
 

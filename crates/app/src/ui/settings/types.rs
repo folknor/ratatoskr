@@ -2,6 +2,7 @@ use iced::animation::{self, Easing};
 use iced::time::Duration;
 
 use crate::db::DateDisplay;
+use crate::pop_out::RenderingMode;
 use crate::ui::undoable::UndoableText;
 
 use ratatoskr_rich_text_editor::EditorState as RteEditorState;
@@ -341,6 +342,7 @@ pub struct PreferencesState {
     pub block_remote_images: bool,
     pub phishing_detection: bool,
     pub phishing_sensitivity: String,
+    pub default_rendering_mode: RenderingMode,
 }
 
 // ── State ───────────────────────────────────────────────
@@ -611,6 +613,7 @@ pub struct Settings {
     pub phishing_detection: bool,
     pub phishing_sensitivity: String,
     pub date_display: DateDisplay,
+    pub default_rendering_mode: RenderingMode,
     // Composing
     pub undo_delay: String,
     pub send_and_archive: bool,
@@ -823,6 +826,7 @@ impl Settings {
             block_remote_images: self.block_remote_images,
             phishing_detection: self.phishing_detection,
             phishing_sensitivity: self.phishing_sensitivity.clone(),
+            default_rendering_mode: self.default_rendering_mode,
         }
     }
 
@@ -838,6 +842,7 @@ impl Settings {
         self.block_remote_images = prefs.block_remote_images;
         self.phishing_detection = prefs.phishing_detection;
         self.phishing_sensitivity = prefs.phishing_sensitivity.clone();
+        self.default_rendering_mode = prefs.default_rendering_mode;
     }
 }
 
@@ -854,6 +859,7 @@ impl Default for Settings {
             block_remote_images: false,
             phishing_detection: true,
             phishing_sensitivity: "Default".into(),
+            default_rendering_mode: RenderingMode::default(),
         };
         Self {
             active_tab: Tab::General,
@@ -872,6 +878,7 @@ impl Default for Settings {
             phishing_detection: true,
             phishing_sensitivity: "Default".into(),
             date_display: DateDisplay::RelativeOffset,
+            default_rendering_mode: RenderingMode::default(),
             undo_delay: "5 seconds".into(),
             send_and_archive: false,
             default_reply_mode: "Reply".into(),

@@ -41,3 +41,4 @@ mundy = { version = "0.2", default-features = false, features = ["color-scheme",
 display-info = "0.5"
 rfd = "0.15"
 ratatoskr-stores = { path = "../stores" }
+mime_guess = "2"

@@ -42,8 +42,9 @@ pub(crate) async fn persist_messages(
             let tx = conn
                 .unchecked_transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
+            let user_emails = sync_persistence::query_user_emails(&tx)?;
             for (thread_id, msgs) in &thread_groups {
-                store_thread_to_db(&tx, &aid, thread_id, msgs, shared_mb_id.as_deref())?;
+                store_thread_to_db(&tx, &aid, thread_id, msgs, shared_mb_id.as_deref(), &user_emails)?;
             }
             tx.commit().map_err(|e| format!("commit: {e}"))?;
             Ok(())
@@ -103,6 +104,7 @@ fn store_thread_to_db(
     thread_id: &str,
     messages: &[ParsedJmapMessage],
     shared_mailbox_id: Option<&str>,
+    user_emails: &[String],
 ) -> Result<(), String> {
     // upsert_thread_record calls upsert_messages internally before aggregating
     upsert_attachments(tx, account_id, messages)?;
@@ -120,7 +122,7 @@ fn store_thread_to_db(
             msg.base.bcc_addresses.as_deref(),
         )?;
     }
-    sync_persistence::maybe_update_chat_state(tx, account_id, thread_id)?;
+    sync_persistence::maybe_update_chat_state(tx, account_id, thread_id, user_emails)?;
     Ok(())
 }
 

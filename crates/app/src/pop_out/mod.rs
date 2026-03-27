@@ -3,7 +3,7 @@ pub mod message_view;
 pub mod session;
 
 pub use compose::{ComposeMessage, ComposeState};
-pub use message_view::{MessageViewMessage, MessageViewState};
+pub use message_view::{MessageViewMessage, MessageViewState, RenderingMode};
 
 /// Identifies what a pop-out window is showing.
 pub enum PopOutWindow {

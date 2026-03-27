@@ -112,6 +112,7 @@ impl MessageViewState {
         msg: &ThreadMessage,
         generation: ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::PopOut>,
         source_label_id: Option<String>,
+        default_rendering_mode: RenderingMode,
     ) -> Self {
         Self {
             message_id: msg.id.clone(),
@@ -128,7 +129,7 @@ impl MessageViewState {
             snippet: msg.snippet.clone(),
             raw_source: None,
             attachments: Vec::new(),
-            rendering_mode: RenderingMode::default(),
+            rendering_mode: default_rendering_mode,
 
             overflow_menu_open: false,
             remote_content_loaded: false,
@@ -146,6 +147,7 @@ impl MessageViewState {
     pub fn from_session_entry(
         entry: &MessageViewSessionEntry,
         generation: ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::PopOut>,
+        default_rendering_mode: RenderingMode,
     ) -> Self {
         Self {
             message_id: entry.message_id.clone(),
@@ -162,7 +164,7 @@ impl MessageViewState {
             snippet: None,
             raw_source: None,
             attachments: Vec::new(),
-            rendering_mode: RenderingMode::default(),
+            rendering_mode: default_rendering_mode,
 
             overflow_menu_open: false,
             remote_content_loaded: false,

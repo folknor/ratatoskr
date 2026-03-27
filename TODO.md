@@ -4,8 +4,6 @@
 
 - [ ] **Message box / toast notification system** — Generic modal message box and/or toast notification infrastructure for the app. Needed for: compose draft save failure on close (currently silently aborts the close with no user feedback), action service retry exhaustion warnings, and any future error/confirmation flows. Should support at least: transient toasts (auto-dismiss), persistent error banners, and modal confirmation dialogs.
 
-- [ ] **Better MIME handling** - for example in app/src/pop_out_compose.rs mime_from_extension, hardcoded things like this.
-
 - [ ] **Starred thread card background** — The golden tint on starred thread cards uses a fixed `mix()` ratio (`STARRED_BG_ALPHA`) which may not look right across all themes. Needs a GPU-level blend/shader effect that adapts to the theme's background luminance so the starred highlight reads consistently in both light and dark themes.
 
 - [ ] **Star icon: need filled variant** — Lucide only has outline icons. The star toggle in the reading pane needs a filled star (golden) for the active state and an outline star for inactive. Currently uses Unicode ★ as a stopgap, which causes size mismatch and visual jank. Options: (1) add a second icon font with filled variants, (2) use an SVG/image icon, (3) custom widget that draws a filled star path. The button should also not change background color on toggle — just the icon fill.
@@ -42,7 +40,7 @@
 
 - [ ] **Keybinding management UI (Slice 6f)** — Settings panel for viewing, searching, and rebinding shortcuts. Backend ready (override persistence, conflict detection, set/unbind/reset APIs). See `docs/command-palette/app-integration-spec.md` § Slice 6f.
 
-- [ ] **`prepare_move_up/down` in editor** — Tested infrastructure, not called from widget. Wire or remove.
+- [x] **`prepare_move_up/down` in editor** — Tested infrastructure, not called from widget. Wire or remove.
 
 - [ ] **Restore OS-based theme and 1.0 scale** *(Deferred until 1.0)* — Revert to `"System"` theme, persist user prefs.
 
@@ -168,7 +166,7 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 ## Chats Optimization Findings (review agent, 2026-03-27)
 
-- [ ] **`maybe_update_chat_state` queries ALL accounts per call** — Runs `SELECT email FROM accounts` on every sync-time call. Should cache user emails per sync batch or pass as parameter. `persistence.rs:maybe_update_chat_state`
+- [x] **`maybe_update_chat_state` queries ALL accounts per call** — Fixed: extracted `query_user_emails()` helper; callers query once per sync batch and pass `&[String]` through. `persistence.rs:query_user_emails`
 - [x] **`set_chat_thread_flags` N+1 queries** — Iterates threads individually with per-thread participant count + user check. Should use a single SQL statement with HAVING clause per the plan. `chat.rs:set_chat_thread_flags`
 - [x] **`get_chat_timeline` loads ALL messages then truncates** — Queries all messages across all threads, sorts in Rust, then takes last N. Should use SQL LIMIT + reverse, or paginate per-thread with a merge. `chat.rs:get_chat_timeline`
 - [x] **Summary update scans ALL chat threads** — Fixed: latest-message query now scoped to the current thread; only updates contact summary when this thread has a newer message than what's stored, skipping the expensive cross-thread join in the common case. `persistence.rs:maybe_update_chat_state`
@@ -235,7 +233,7 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **Provider push notifications (remaining)** — JMAP WebSocket push is wired. Still missing: IMAP IDLE (persistent connection per folder), Graph/Gmail (poll-based, needs tuning — true push requires cloud infrastructure).
 - [ ] **Pop-out HTML rendering** — SimpleHtml/OriginalHtml modes in message view pop-out fall back to plain text. Depends on the DOM-to-widget pipeline (`html_render.rs`) being wired into the pop-out view. Tracked separately in the HTML rendering section above.
 - [ ] **Pop-out Print** — OS print dialog integration for message view and compose pop-out windows. Platform-specific, no iced precedent. Needs investigation.
-- [ ] **Pop-out default rendering mode from settings** — `MessageViewState` hardcodes `RenderingMode::default()` (SimpleHtml). Should load from a system-wide user preference. Needs a settings field + plumbing to pass it into `from_thread_message()` and `from_session_entry()`.
+- [x] **Pop-out default rendering mode from settings** — `MessageViewState` hardcodes `RenderingMode::default()` (SimpleHtml). Should load from a system-wide user preference. Needs a settings field + plumbing to pass it into `from_thread_message()` and `from_session_entry()`.
 - [ ] **Signature: draft restoration with signature state** — Draft save does not persist `signature_separator_index` or `active_signature_id`. On draft reopen, signature position in the document is not reconstructed.
 - [ ] **Signature: per-account default dropdown in Account Settings** — Account editor overlay has no signature dropdown for selecting the default signature for an account.
 - [x] **GAL sync trigger** — *(2026-03-25)* `refresh_gal_for_account()` in core, wired to `SyncTick`. Checks cache age (>24h stale threshold), creates provider client, fetches + caches. Runs alongside delta sync every 5 minutes.

@@ -96,43 +96,14 @@ impl ComposeAttachment {
     }
 }
 
-/// Guess a MIME type from a file extension.
+/// Guess a MIME type from a file name (uses the `mime_guess` crate's
+/// database of 800+ extension mappings, falling back to
+/// `application/octet-stream` for unknown extensions).
 pub fn mime_from_extension(name: &str) -> String {
-    let ext = name
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    match ext.as_str() {
-        "pdf" => "application/pdf",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "svg" => "image/svg+xml",
-        "txt" => "text/plain",
-        "html" | "htm" => "text/html",
-        "csv" => "text/csv",
-        "json" => "application/json",
-        "xml" => "application/xml",
-        "zip" => "application/zip",
-        "gz" | "gzip" => "application/gzip",
-        "tar" => "application/x-tar",
-        "doc" => "application/msword",
-        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "xls" => "application/vnd.ms-excel",
-        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "ppt" => "application/vnd.ms-powerpoint",
-        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "odt" => "application/vnd.oasis.opendocument.text",
-        "ods" => "application/vnd.oasis.opendocument.spreadsheet",
-        "mp3" => "audio/mpeg",
-        "mp4" => "video/mp4",
-        "webm" => "video/webm",
-        "eml" => "message/rfc822",
-        _ => "application/octet-stream",
-    }
-    .to_string()
+    mime_guess::from_path(name)
+        .first_raw()
+        .unwrap_or("application/octet-stream")
+        .to_string()
 }
 
 // ── Messages ────────────────────────────────────────────
