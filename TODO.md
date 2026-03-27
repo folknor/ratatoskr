@@ -152,6 +152,16 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **Chat subject normalization panics on non-ASCII** — `normalize_subject()` slices original string using byte lengths from lowercased copy. Unicode lowercase can change byte length → invalid slice boundary. `chat_timeline.rs:221`
 - [ ] **Scope dropdown missing public folder entries** — Dropdown has All Accounts + accounts + shared mailboxes but no public folders. `sidebar.rs:413`
 
+## Security Audit Findings (review agent, 2026-03-27)
+
+- [ ] **Link click command injection on Windows** — Email HTML links are passed directly to `cmd /c start` with no scheme allowlist. A malicious `href` can reach a shell-adjacent sink. On all platforms, arbitrary schemes (`file:`, custom handlers) are opened from untrusted content. Fix: allowlist `http://`, `https://`, `mailto:` only. `reading_pane.rs:730, html_render.rs:217`
+- [ ] **ammonia still allows `data:` scheme globally** — Stage 2 (lol_html) restricts data: URIs, but ammonia (stage 3) still permits the `data` scheme. If stage 2 fails, `data:text/html` in `<a href>` passes through. Remove `"data"` from ammonia's `url_schemes`. `html_sanitizer.rs:207`
+- [ ] **`data:image/svg+xml` allowed in sanitizer** — SVG is active content, not a passive bitmap. Allowing it through the sanitizer is risky if output ever reaches a richer renderer. `html_sanitizer.rs:18`
+- [ ] **OAuth error responses reflect raw provider bodies** — `oauth_exchange_token`, `oauth_refresh_token`, userinfo fetch include `response.text()` verbatim in errors. Could leak secrets or expose untrusted remote content in logs/UI. `oauth.rs:572,615,673`
+- [ ] **`contact_photo_cache` join duplicates chat sidebar entries** — Keyed by `(email, account_id)`, so contacts with photos from multiple accounts produce duplicate rows. `chat.rs:141`
+- [ ] **Auto-response HTML stored unsanitized** — Future XSS risk when the auto-reply settings UI renders it. Sanitize before display. `auto_responses.rs`
+- [ ] **Encryption key not zeroized on drop** — `[u8; 32]` remains in freed memory. Consider `zeroize::Zeroize`. `crypto.rs:8`
+
 ## Security Findings (review agent, 2026-03-25)
 
 - [ ] **Microsoft ID token not signature-verified** — JWT payload is base64-decoded and trusted for email/name claims without verifying the signature. Token comes over TLS from Microsoft, but a MITM or compromised endpoint could inject arbitrary identity claims. `oauth.rs:735-771`
