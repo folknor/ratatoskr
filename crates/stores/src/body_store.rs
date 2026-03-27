@@ -105,10 +105,16 @@ impl BodyStoreState {
         body_text: Option<String>,
     ) -> Result<(), String> {
         log::debug!("Storing body for message_id={message_id}");
-        self.with_conn(move |conn| {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            // Compress outside the lock — CPU-intensive work.
             let html_blob = body_html.as_deref().map(compress).transpose()?;
             let text_blob = body_text.as_deref().map(compress).transpose()?;
 
+            // Lock only for the DB write.
+            let conn = conn
+                .lock()
+                .map_err(|e| format!("body store lock poisoned: {e}"))?;
             conn.execute(
                 "INSERT OR REPLACE INTO bodies (message_id, body_html, body_text)
                  VALUES (?1, ?2, ?3)",
@@ -118,11 +124,27 @@ impl BodyStoreState {
             Ok(())
         })
         .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
     }
 
     /// Store multiple message bodies in a single transaction.
     pub async fn put_batch(&self, bodies: Vec<MessageBody>) -> Result<(), String> {
-        self.with_conn(move |conn| {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            // Compress all bodies outside the lock — CPU-intensive work.
+            let compressed: Vec<(String, Option<Vec<u8>>, Option<Vec<u8>>)> = bodies
+                .iter()
+                .map(|body| {
+                    let html_blob = body.body_html.as_deref().map(compress).transpose()?;
+                    let text_blob = body.body_text.as_deref().map(compress).transpose()?;
+                    Ok((body.message_id.clone(), html_blob, text_blob))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+
+            // Lock only for the DB writes.
+            let conn = conn
+                .lock()
+                .map_err(|e| format!("body store lock poisoned: {e}"))?;
             let tx = conn
                 .unchecked_transaction()
                 .map_err(|e| format!("body store tx: {e}"))?;
@@ -135,11 +157,8 @@ impl BodyStoreState {
                     )
                     .map_err(|e| format!("prepare batch put: {e}"))?;
 
-                for body in &bodies {
-                    let html_blob = body.body_html.as_deref().map(compress).transpose()?;
-                    let text_blob = body.body_text.as_deref().map(compress).transpose()?;
-
-                    stmt.execute(params![body.message_id, html_blob, text_blob])
+                for (message_id, html_blob, text_blob) in &compressed {
+                    stmt.execute(params![message_id, html_blob, text_blob])
                         .map_err(|e| format!("batch put row: {e}"))?;
                 }
             }
@@ -148,25 +167,33 @@ impl BodyStoreState {
             Ok(())
         })
         .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
     }
 
     /// Retrieve a single message body (decompressed).
     pub async fn get(&self, message_id: String) -> Result<Option<MessageBody>, String> {
         log::debug!("Retrieving body for message_id={message_id}");
-        self.with_conn(move |conn| {
-            let mut stmt = conn
-                .prepare("SELECT body_html, body_text FROM bodies WHERE message_id = ?1")
-                .map_err(|e| format!("prepare get: {e}"))?;
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            // Lock only for the DB read.
+            let blobs = {
+                let conn = conn
+                    .lock()
+                    .map_err(|e| format!("body store lock poisoned: {e}"))?;
+                let mut stmt = conn
+                    .prepare("SELECT body_html, body_text FROM bodies WHERE message_id = ?1")
+                    .map_err(|e| format!("prepare get: {e}"))?;
 
-            let result = stmt
-                .query_row(params![message_id], |row| {
+                stmt.query_row(params![message_id], |row| {
                     let html_blob: Option<Vec<u8>> = row.get("body_html")?;
                     let text_blob: Option<Vec<u8>> = row.get("body_text")?;
                     Ok((html_blob, text_blob))
                 })
-                .ok();
+                .ok()
+            };
+            // Lock released — decompress outside the lock.
 
-            match result {
+            match blobs {
                 Some((html_blob, text_blob)) => {
                     let body_html = html_blob.map(|b| decompress(&b)).transpose()?;
                     let body_text = text_blob.map(|b| decompress(&b)).transpose()?;
@@ -180,6 +207,7 @@ impl BodyStoreState {
             }
         })
         .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
     }
 
     /// Retrieve multiple message bodies in a single query.
@@ -188,53 +216,66 @@ impl BodyStoreState {
             return Ok(Vec::new());
         }
 
-        self.with_conn(move |conn| {
-            let mut results = Vec::with_capacity(message_ids.len());
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || {
+            // Lock only for the DB reads — collect compressed blobs.
+            let compressed_rows: Vec<(String, Option<Vec<u8>>, Option<Vec<u8>>)> = {
+                let conn = conn
+                    .lock()
+                    .map_err(|e| format!("body store lock poisoned: {e}"))?;
+                let mut rows_out = Vec::with_capacity(message_ids.len());
 
-            // Process in chunks of 100 to stay within SQLite variable limits
-            for chunk in message_ids.chunks(100) {
-                let placeholders: String = chunk
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| format!("?{}", i + 1))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                for chunk in message_ids.chunks(100) {
+                    let placeholders: String = chunk
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| format!("?{}", i + 1))
+                        .collect::<Vec<_>>()
+                        .join(", ");
 
-                let sql =
-                    format!("SELECT message_id, body_html, body_text FROM bodies WHERE message_id IN ({placeholders})");
+                    let sql =
+                        format!("SELECT message_id, body_html, body_text FROM bodies WHERE message_id IN ({placeholders})");
 
-                let mut stmt = conn.prepare(&sql).map_err(|e| format!("prepare batch get: {e}"))?;
+                    let mut stmt = conn.prepare(&sql).map_err(|e| format!("prepare batch get: {e}"))?;
 
-                let param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
-                    chunk.iter().map(|id| Box::new(id.clone()) as Box<dyn rusqlite::types::ToSql>).collect();
-                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                    param_values.iter().map(AsRef::as_ref).collect();
+                    let param_values: Vec<Box<dyn rusqlite::types::ToSql>> =
+                        chunk.iter().map(|id| Box::new(id.clone()) as Box<dyn rusqlite::types::ToSql>).collect();
+                    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                        param_values.iter().map(AsRef::as_ref).collect();
 
-                let rows = stmt
-                    .query_map(param_refs.as_slice(), |row| {
-                        let mid: String = row.get("message_id")?;
-                        let html_blob: Option<Vec<u8>> = row.get("body_html")?;
-                        let text_blob: Option<Vec<u8>> = row.get("body_text")?;
-                        Ok((mid, html_blob, text_blob))
-                    })
-                    .map_err(|e| format!("query batch get: {e}"))?;
+                    let rows = stmt
+                        .query_map(param_refs.as_slice(), |row| {
+                            let mid: String = row.get("message_id")?;
+                            let html_blob: Option<Vec<u8>> = row.get("body_html")?;
+                            let text_blob: Option<Vec<u8>> = row.get("body_text")?;
+                            Ok((mid, html_blob, text_blob))
+                        })
+                        .map_err(|e| format!("query batch get: {e}"))?;
 
-                for row in rows {
-                    let (mid, html_blob, text_blob) =
-                        row.map_err(|e| format!("map row: {e}"))?;
-                    let body_html = html_blob.map(|b| decompress(&b)).transpose()?;
-                    let body_text = text_blob.map(|b| decompress(&b)).transpose()?;
-                    results.push(MessageBody {
-                        message_id: mid,
-                        body_html,
-                        body_text,
-                    });
+                    for row in rows {
+                        rows_out.push(row.map_err(|e| format!("map row: {e}"))?);
+                    }
                 }
+
+                Ok::<_, String>(rows_out)
+            }?;
+            // Lock released — decompress outside the lock.
+
+            let mut results = Vec::with_capacity(compressed_rows.len());
+            for (mid, html_blob, text_blob) in compressed_rows {
+                let body_html = html_blob.map(|b| decompress(&b)).transpose()?;
+                let body_text = text_blob.map(|b| decompress(&b)).transpose()?;
+                results.push(MessageBody {
+                    message_id: mid,
+                    body_html,
+                    body_text,
+                });
             }
 
             Ok(results)
         })
         .await
+        .map_err(|e| format!("spawn_blocking: {e}"))?
     }
 
     /// Delete bodies for given message IDs.

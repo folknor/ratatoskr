@@ -237,7 +237,12 @@ async fn handle_thread_degraded(
     let mlog = MutationLog::begin(name, account_id, thread_id);
 
     match action_local(ctx, action, account_id, thread_id).await {
-        Ok(()) => {
+        Ok(false) => {
+            let outcome = ActionOutcome::NoOp;
+            mlog.emit(&outcome);
+            outcome
+        }
+        Ok(true) => {
             let retryable = matches!(
                 error_kind,
                 RemoteFailureKind::Transient | RemoteFailureKind::Unknown
@@ -306,27 +311,31 @@ async fn dispatch_with_provider(
 }
 
 /// Route to the correct `_local` function for degraded/short-circuit paths.
+///
+/// Returns `Ok(true)` when the local mutation changed something, `Ok(false)`
+/// when it was a no-op (e.g. already archived). The caller maps `false` to
+/// `ActionOutcome::NoOp` instead of `ActionOutcome::LocalOnly`.
 async fn action_local(
     ctx: &ActionContext,
     action: &BatchAction,
     account_id: &str,
     thread_id: &str,
-) -> Result<(), ActionError> {
+) -> Result<bool, ActionError> {
     match action {
-        BatchAction::Archive => archive::archive_local(ctx, account_id, thread_id).await.map(|_| ()),
-        BatchAction::Trash => trash::trash_local(ctx, account_id, thread_id).await,
-        BatchAction::Spam { is_spam } => spam::spam_local(ctx, account_id, thread_id, *is_spam).await,
+        BatchAction::Archive => archive::archive_local(ctx, account_id, thread_id).await,
+        BatchAction::Trash => trash::trash_local(ctx, account_id, thread_id).await.map(|()| true),
+        BatchAction::Spam { is_spam } => spam::spam_local(ctx, account_id, thread_id, *is_spam).await.map(|()| true),
         BatchAction::MoveToFolder { folder_id, source_label_id } => {
-            move_to_folder::move_local(ctx, account_id, thread_id, folder_id, source_label_id.as_deref()).await
+            move_to_folder::move_local(ctx, account_id, thread_id, folder_id, source_label_id.as_deref()).await.map(|()| true)
         }
-        BatchAction::Star { starred } => star::star_local(ctx, account_id, thread_id, *starred).await.map(|_| ()),
-        BatchAction::MarkRead { read } => mark_read::mark_read_local(ctx, account_id, thread_id, *read).await,
-        BatchAction::PermanentDelete => permanent_delete::permanent_delete_local(ctx, account_id, thread_id).await,
+        BatchAction::Star { starred } => star::star_local(ctx, account_id, thread_id, *starred).await,
+        BatchAction::MarkRead { read } => mark_read::mark_read_local(ctx, account_id, thread_id, *read).await.map(|()| true),
+        BatchAction::PermanentDelete => permanent_delete::permanent_delete_local(ctx, account_id, thread_id).await.map(|()| true),
         BatchAction::AddLabel { label_id } => {
-            label::add_label_local(ctx, account_id, thread_id, label_id).await.map(|_| ())
+            label::add_label_local(ctx, account_id, thread_id, label_id).await.map(|()| true)
         }
         BatchAction::RemoveLabel { label_id } => {
-            label::remove_label_local(ctx, account_id, thread_id, label_id).await.map(|_| ())
+            label::remove_label_local(ctx, account_id, thread_id, label_id).await.map(|()| true)
         }
         BatchAction::Pin { .. } | BatchAction::Mute { .. } | BatchAction::Snooze { .. } => {
             unreachable!("local-only actions use direct dispatch")

@@ -156,14 +156,14 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 ## Performance Findings (review agent, 2026-03-25)
 
-- [ ] **Body store zstd under lock** — Zstd compress/decompress runs inside the Mutex lock closure. Should compress/decompress outside the lock and only hold it for the DB read/write. `body_store.rs:108-110, 171-172, 225-226`
+- [x] **Body store zstd under lock** — Zstd compress/decompress runs inside the Mutex lock closure. Should compress/decompress outside the lock and only hold it for the DB read/write. `body_store.rs:108-110, 171-172, 225-226`
 - [ ] **IMAP per-folder connections** — Flag sync and deletion detection open a separate TLS connection per folder. 50 folders = 50 handshakes. Should reuse a single connection with SELECT. `imap_delta.rs:817-894, 988-1031`
 - [ ] **Reading pane rebuild on expand/collapse** — All message widgets are rebuilt on any expand/collapse toggle. Should diff and rebuild only the affected message. `reading_pane.rs:565-602`
 - [ ] **Attachment dedup in view()** — HashMap allocation for attachment dedup runs every `view()` cycle, not memoized. `reading_pane.rs:606-626`
 - [ ] **get_thread_detail lock span** — Holds the DB lock across 7 sequential queries. Should batch or reduce lock scope. `thread_detail.rs:524-575`
 - [ ] **Contact autocomplete LIKE %pattern%** — No FTS index; uses LIKE with leading wildcard which can't use indexes. `contacts.rs:43-46`
 - [ ] **JWZ is_ancestor() quadratic** — `is_ancestor()` is O(depth) per link, O(n²) on deep linear threads. `threading.rs:63-72`
-- [ ] **Attachment cache eviction lock churn** — Deletes one file per loop iteration with 2+ lock acquisitions each. Should collect files to delete, release the lock, then delete in batch. `attachment_cache.rs:188-262`
+- [x] **Attachment cache eviction lock churn** — Deletes one file per loop iteration with 2+ lock acquisitions each. Should collect files to delete, release the lock, then delete in batch. `attachment_cache.rs:188-262`
 - [ ] **Navigation tag unread counts** — 3-table LEFT JOIN with `LOWER(TRIM())` in GROUP BY for tag unread counts. `navigation.rs:325-339`
 
 ## Chats Optimization Findings (review agent, 2026-03-27)
@@ -207,7 +207,7 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 ### IMAP OAUTHBEARER (133fff2)
 - [x] **Raw IMAP helpers not updated for `"oauthbearer"` auth method** — `raw_fetch_messages` and `raw_fetch_diagnostic` fall through to LOGIN, sending bearer token as password. `raw.rs:57, 190`
-- [ ] **RFC 7628 GS2 header may need full email as authzid** — Current format uses bare username. Strict implementations may reject. `connection.rs:71`
+- [x] **RFC 7628 GS2 header may need full email as authzid** — Current format uses bare username. Strict implementations may reject. `connection.rs:71`
 - [x] **OAUTHBEARER error acknowledgment should be `\x01`** — Current implementation sends empty vec on second challenge instead of RFC 7628 §3.2.3 single `\x01` byte. `connection.rs:78`
 
 ### GAL sync (dd0c6e8)
@@ -215,9 +215,9 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [x] **Empty directory results don't update cache age** — Returns early on empty, `cached_at` never advances, retries every 5 minutes indefinitely. Also stale entries persist when directory access is revoked. `gal.rs:262, 273`
 
 ### NoOp detection (69bf316)
-- [ ] **All-NoOp batch shows success toast + auto-advance** — "Archived" toast and selection advance when nothing changed. Should show no toast or "Already archived". `commands.rs:handle_action_completed`
+- [x] **All-NoOp batch shows success toast + auto-advance** — "Archived" toast and selection advance when nothing changed. Should show no toast or "Already archived". `commands.rs:handle_action_completed`
 - [ ] **NoOp conflates "already in state" with "target missing"** — 0 affected rows for both cases. Can't distinguish no-op from invalid target. `archive.rs:12, star.rs:12`
-- [ ] **Degraded batch path erases NoOp signal** — `action_local()` discards the bool via `.map(|_| ())`, returns `LocalOnly` instead of `NoOp`. Causes spurious pending-ops enqueue and undo tokens. `batch.rs:316, 322`
+- [x] **Degraded batch path erases NoOp signal** — `action_local()` discards the bool via `.map(|_| ())`, returns `LocalOnly` instead of `NoOp`. Causes spurious pending-ops enqueue and undo tokens. `batch.rs:316, 322`
 
 ## Remaining Enhancements (other)
 

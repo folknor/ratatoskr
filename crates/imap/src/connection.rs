@@ -66,6 +66,10 @@ impl Authenticator for XOAuth2 {
 /// OAUTHBEARER authenticator (RFC 7628).
 /// Format: `n,a={user},\x01auth=Bearer {token}\x01\x01`
 ///
+/// `user` should be the full email address (authorization identity per
+/// RFC 7628). The GS2 header escapes `=` → `=3D` and `,` → `=2C`
+/// per RFC 5801 §4.
+///
 /// Preferred over XOAUTH2 for modern on-prem servers (Dovecot, Cyrus)
 /// and standards-compliant OIDC deployments.
 struct OAuthBearer {
@@ -74,7 +78,10 @@ struct OAuthBearer {
 
 impl OAuthBearer {
     fn new(user: &str, access_token: &str) -> Self {
-        let s = format!("n,a={user},\x01auth=Bearer {access_token}\x01\x01");
+        // RFC 5801 §4: the authzid in the GS2 header must encode '=' as '=3D'
+        // and ',' as '=2C' to avoid conflicting with the GS2 header delimiters.
+        let escaped_user = user.replace('=', "=3D").replace(',', "=2C");
+        let s = format!("n,a={escaped_user},\x01auth=Bearer {access_token}\x01\x01");
         Self {
             response: s.into_bytes(),
         }
@@ -821,6 +828,24 @@ mod tests {
         assert!(!rights.contains('w'), "should not have write");
         assert!(!rights.contains('i'), "should not have insert");
         assert!(!rights.contains('d'), "should not have delete");
+    }
+
+    #[test]
+    fn oauthbearer_gs2_escapes_special_chars() {
+        // RFC 5801 §4: '=' must be encoded as '=3D', ',' as '=2C' in authzid
+        let auth = OAuthBearer::new("user=test,org@example.com", "tok123");
+        let payload = String::from_utf8(auth.response).expect("valid utf-8");
+        assert_eq!(
+            payload,
+            "n,a=user=3Dtest=2Corg@example.com,\x01auth=Bearer tok123\x01\x01"
+        );
+    }
+
+    #[test]
+    fn oauthbearer_plain_email_unchanged() {
+        let auth = OAuthBearer::new("alice@example.com", "tok");
+        let payload = String::from_utf8(auth.response).expect("valid utf-8");
+        assert_eq!(payload, "n,a=alice@example.com,\x01auth=Bearer tok\x01\x01");
     }
 
     #[test]

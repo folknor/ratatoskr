@@ -428,6 +428,10 @@ impl App {
         params: &ActionParams,
     ) -> Task<Message> {
         let all_failed = outcomes.iter().all(ActionOutcome::is_failed);
+        let all_noop = outcomes.iter().all(|o| matches!(o, ActionOutcome::NoOp));
+        if all_noop {
+            return Task::none();
+        }
         let any_failed = outcomes.iter().any(ActionOutcome::is_failed);
         let any_local_only = outcomes.iter().any(ActionOutcome::is_local_only);
 
