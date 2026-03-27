@@ -141,6 +141,17 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] Table rendering (table-for-layout is the hardest — no `<table>`/`<tr>`/`<td>` handling at all)
 - [ ] Image caching (`HashMap<String, image::Handle>`) — no `iced::widget::image` usage in app crate
 
+## Bug Hunt Findings (review agent, 2026-03-27)
+
+- [ ] **`from_address` nullable crash in chat timeline** — `row.get::<_, String>("from_address")` on NULL silently drops the message. Mailer-daemon/DSN messages can have no From. `chat.rs:368`
+- [ ] **N+1 per-user-email queries in `maybe_update_chat_state`** — One SQL query per user email per thread per sync. Replace with single `IN` query. `persistence.rs:312-317`
+- [ ] **`user_emails()` excludes send-as aliases** — Only primary account emails. Send-as aliases break chat ownership detection and 1:1 thread classification. Should include `send_identities` table. `handlers/chat.rs:91`
+- [ ] **Chat summary stale when thread stops qualifying** — Early-return paths clear `is_chat_thread` but don't recompute `chat_contacts` summary. Thread deletion also skips summary update. `persistence.rs:278,291,434`
+- [ ] **`enter_chat_view` doesn't clear pinned-search context** — `sidebar.active_pinned_search` persists, overriding `NavigationTarget::Chat` in `current_view_and_label()`. `handlers/chat.rs:11`
+- [ ] **Reading pane star sync keyed by thread_id only** — `update_star()` compares only `t.id`, not `(account_id, thread_id)`. Cross-account thread ID collision can mutate wrong thread. `reading_pane.rs:249`
+- [ ] **Chat subject normalization panics on non-ASCII** — `normalize_subject()` slices original string using byte lengths from lowercased copy. Unicode lowercase can change byte length → invalid slice boundary. `chat_timeline.rs:221`
+- [ ] **Scope dropdown missing public folder entries** — Dropdown has All Accounts + accounts + shared mailboxes but no public folders. `sidebar.rs:413`
+
 ## Security Findings (review agent, 2026-03-25)
 
 - [ ] **Microsoft ID token not signature-verified** — JWT payload is base64-decoded and trusted for email/name claims without verifying the signature. Token comes over TLS from Microsoft, but a MITM or compromised endpoint could inject arbitrary identity claims. `oauth.rs:735-771`
