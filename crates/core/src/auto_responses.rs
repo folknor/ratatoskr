@@ -36,6 +36,8 @@ pub struct AutoResponseConfig {
 pub enum ExternalAudience {
     None,
     ContactsOnly,
+    /// Gmail `restrictToDomain = true` — replies only to same-domain senders.
+    DomainOnly,
     All,
 }
 
@@ -50,6 +52,7 @@ impl ExternalAudience {
         match self {
             Self::None => "none",
             Self::ContactsOnly => "contacts_only",
+            Self::DomainOnly => "domain_only",
             Self::All => "all",
         }
     }
@@ -58,6 +61,7 @@ impl ExternalAudience {
         match s {
             "none" => Self::None,
             "contacts_only" => Self::ContactsOnly,
+            "domain_only" => Self::DomainOnly,
             _ => Self::All,
         }
     }
@@ -133,6 +137,31 @@ pub async fn db_upsert_auto_response(
     .await
 }
 
+// ── Helpers ───────────────────────────────────────────
+
+/// Normalize a .NET-style datetime (e.g. `"2026-03-25T08:00:00.0000000"`)
+/// into proper RFC 3339 so that `chrono::DateTime::parse_from_rfc3339` works
+/// on the stored value when pushing to other providers.
+fn normalize_dotnet_datetime(s: &str) -> String {
+    // Already valid RFC 3339 — return as-is.
+    if chrono::DateTime::parse_from_rfc3339(s).is_ok() {
+        return s.to_string();
+    }
+    // .NET format without offset: try parsing as NaiveDateTime, emit as UTC.
+    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f") {
+        return naive.and_utc().to_rfc3339();
+    }
+    // Fallback: append Z and hope for the best.
+    let mut owned = s.to_string();
+    if !owned.ends_with('Z')
+        && !owned.contains('+')
+        && !owned.rfind('-').is_some_and(|i| i > 10)
+    {
+        owned.push('Z');
+    }
+    owned
+}
+
 // ── Exchange (Graph) ───────────────────────────────────
 
 /// Fetch auto-response settings from Microsoft Graph.
@@ -159,10 +188,10 @@ pub async fn fetch_graph_auto_response(
         enabled,
         start_date: resp["scheduledStartDateTime"]["dateTime"]
             .as_str()
-            .map(str::to_string),
+            .map(normalize_dotnet_datetime),
         end_date: resp["scheduledEndDateTime"]["dateTime"]
             .as_str()
-            .map(str::to_string),
+            .map(normalize_dotnet_datetime),
         start_date_tz: resp["scheduledStartDateTime"]["timeZone"]
             .as_str()
             .map(str::to_string),
@@ -198,7 +227,7 @@ pub async fn push_graph_auto_response(
 
     let audience = match config.external_audience {
         ExternalAudience::None => "none",
-        ExternalAudience::ContactsOnly => "contactsOnly",
+        ExternalAudience::ContactsOnly | ExternalAudience::DomainOnly => "contactsOnly",
         ExternalAudience::All => "all",
     };
 
@@ -270,8 +299,7 @@ pub async fn fetch_gmail_auto_response(
     let audience = if resp["restrictToContacts"].as_bool().unwrap_or(false) {
         ExternalAudience::ContactsOnly
     } else if resp["restrictToDomain"].as_bool().unwrap_or(false) {
-        // Domain restriction maps closest to ContactsOnly
-        ExternalAudience::ContactsOnly
+        ExternalAudience::DomainOnly
     } else {
         ExternalAudience::All
     };
@@ -327,6 +355,8 @@ pub async fn push_gmail_auto_response(
 
     body["restrictToContacts"] =
         serde_json::Value::Bool(config.external_audience == ExternalAudience::ContactsOnly);
+    body["restrictToDomain"] =
+        serde_json::Value::Bool(config.external_audience == ExternalAudience::DomainOnly);
 
     let _resp: serde_json::Value = client
         .put("/settings/vacation", &body, db)

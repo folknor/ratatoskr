@@ -100,7 +100,7 @@ pub async fn undesignate_chat_contact(
              WHERE is_chat_thread = 1 \
                AND (account_id, id) IN ( \
                    SELECT account_id, thread_id FROM thread_participants \
-                   WHERE LOWER(email) = ?1 \
+                   WHERE email = ?1 \
                )",
             rusqlite::params![email],
         )
@@ -174,7 +174,7 @@ pub async fn get_chat_timeline(
                 "SELECT DISTINCT tp.account_id, tp.thread_id \
                  FROM thread_participants tp \
                  INNER JOIN threads t ON t.id = tp.thread_id AND t.account_id = tp.account_id \
-                 WHERE LOWER(tp.email) = ?1 AND t.is_chat_thread = 1",
+                 WHERE tp.email = ?1 AND t.is_chat_thread = 1",
             )
             .map_err(|e| e.to_string())?;
 
@@ -275,7 +275,7 @@ fn set_chat_thread_flags(
     for (account_id, thread_id) in &thread_ids {
         let participant_count: i64 = tx
             .query_row(
-                "SELECT COUNT(DISTINCT LOWER(email)) FROM thread_participants \
+                "SELECT COUNT(DISTINCT email) FROM thread_participants \
                  WHERE account_id = ?1 AND thread_id = ?2",
                 rusqlite::params![account_id, thread_id],
                 |row| row.get(0),
@@ -290,7 +290,7 @@ fn set_chat_thread_flags(
         let has_user = user_emails.iter().any(|ue| {
             tx.query_row(
                 "SELECT COUNT(*) FROM thread_participants \
-                 WHERE account_id = ?1 AND thread_id = ?2 AND LOWER(email) = ?3",
+                 WHERE account_id = ?1 AND thread_id = ?2 AND email = ?3",
                 rusqlite::params![account_id, thread_id, ue],
                 |row| row.get::<_, i64>(0),
             )
@@ -323,7 +323,7 @@ fn update_chat_summary(
              INNER JOIN threads t ON m.thread_id = t.id AND m.account_id = t.account_id \
              INNER JOIN thread_participants tp \
                ON tp.account_id = m.account_id AND tp.thread_id = m.thread_id \
-             WHERE t.is_chat_thread = 1 AND LOWER(tp.email) = ?1 \
+             WHERE t.is_chat_thread = 1 AND tp.email = ?1 \
              ORDER BY m.date DESC LIMIT 1",
             rusqlite::params![email],
             |row| Ok((row.get(0)?, row.get(1)?)),

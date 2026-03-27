@@ -178,7 +178,7 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [x] **Legacy `queries.rs` helpers missing `is_chat_thread = 0`** — `get_threads`, `get_thread_count`, `get_unread_count` in `queries.rs` don't filter chat threads. No current call sites, but residual regression risk if reused. `queries.rs:155, 803, 840`
 - [ ] **`get_threads_for_shared_mailbox` missing `is_chat_thread = 0`** — Shared mailbox thread query doesn't exclude chat threads. Low risk (shared mailboxes unlikely to have chat contacts). `scoped_queries.rs:get_threads_for_shared_mailbox`
 - [ ] **Self-to-self threads can misclassify as chat** — If user designates one of their own aliases, a thread between two of the user's own accounts could qualify as "1:1 chat". Edge case.
-- [ ] **`LOWER()` on NOCASE columns** — Several chat queries use `LOWER()` on columns already declared COLLATE NOCASE, defeating index use. Remove the redundant `LOWER()` calls.
+- [x] **`LOWER()` on NOCASE columns** — Several chat queries use `LOWER()` on columns already declared COLLATE NOCASE, defeating index use. Remove the redundant `LOWER()` calls.
 - [ ] **Chat timeline pagination cursor** — Currently timestamp-only (`date < ?`). Should use `(date, message_id)` tuple to avoid skipping/duplicating messages with equal timestamps. `chat.rs:get_chat_timeline`
 - [ ] **ChatTimeline should implement Component trait** — Currently has ad-hoc `update()`/`view()` methods. UI.md says components implement the shared Component trait. `chat_timeline.rs`
 - [ ] **Missing sidebar divider in chat layout** — Normal mail view has a draggable divider between sidebar and content. Chat view omits it. `main.rs` view branching
@@ -202,8 +202,8 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [x] **Graph push sends wrong JSON shape for reply messages** — `internalReplyMessage` wrapped in `{ "message": ... }` object instead of plain string. Will fail or corrupt reply text on push. `auto_responses.rs:200`
 - [x] **Graph schedule discards timezone on fetch** — Reads `dateTime` but drops `timeZone`. Pushes back with hardcoded `"UTC"`. Round-trip shifts out-of-office window for non-UTC mailboxes. `auto_responses.rs:155, 205`
 - [x] **JMAP enable + set_dates non-atomic** — Two separate `VacationResponse/set` requests. If second fails, vacation is enabled without schedule constraints. Should use a single set request. `auto_responses.rs:384-399`
-- [ ] **Gmail `restrictToDomain` mapped to `ContactsOnly`** — Lossy round-trip. Domain restriction becomes contacts restriction on push. Need `ExternalAudience::DomainOnly` variant or explicit handling. `auto_responses.rs:261, 290`
-- [ ] **Exchange dates not normalized to RFC 3339** — Cross-provider push (Exchange → Gmail) silently drops dates because `.NET` datetime format lacks timezone offset. `auto_responses.rs:155, 281`
+- [x] **Gmail `restrictToDomain` mapped to `ContactsOnly`** — Lossy round-trip. Domain restriction becomes contacts restriction on push. Need `ExternalAudience::DomainOnly` variant or explicit handling. `auto_responses.rs:261, 290`
+- [x] **Exchange dates not normalized to RFC 3339** — Cross-provider push (Exchange → Gmail) silently drops dates because `.NET` datetime format lacks timezone offset. `auto_responses.rs:155, 281`
 
 ### IMAP OAUTHBEARER (133fff2)
 - [x] **Raw IMAP helpers not updated for `"oauthbearer"` auth method** — `raw_fetch_messages` and `raw_fetch_diagnostic` fall through to LOGIN, sending bearer token as password. `raw.rs:57, 190`
@@ -212,7 +212,7 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 ### GAL sync (dd0c6e8)
 - [x] **`cache_gal_entries` not transactional** — DELETE + N INSERTs without transaction. Crash between DELETE and final INSERT loses cache. Also N individual fsyncs. `gal.rs:34-62`
-- [ ] **Empty directory results don't update cache age** — Returns early on empty, `cached_at` never advances, retries every 5 minutes indefinitely. Also stale entries persist when directory access is revoked. `gal.rs:262, 273`
+- [x] **Empty directory results don't update cache age** — Returns early on empty, `cached_at` never advances, retries every 5 minutes indefinitely. Also stale entries persist when directory access is revoked. `gal.rs:262, 273`
 
 ### NoOp detection (69bf316)
 - [ ] **All-NoOp batch shows success toast + auto-advance** — "Archived" toast and selection advance when nothing changed. Should show no toast or "Already archived". `commands.rs:handle_action_completed`

@@ -260,7 +260,7 @@ pub fn maybe_update_chat_state(
     let chat_email: Option<String> = tx
         .query_row(
             "SELECT cc.email FROM chat_contacts cc \
-             INNER JOIN thread_participants tp ON LOWER(tp.email) = cc.email \
+             INNER JOIN thread_participants tp ON tp.email = cc.email \
              WHERE tp.account_id = ?1 AND tp.thread_id = ?2 \
              LIMIT 1",
             rusqlite::params![account_id, thread_id],
@@ -282,7 +282,7 @@ pub fn maybe_update_chat_state(
     // Count distinct participants
     let participant_count: i64 = tx
         .query_row(
-            "SELECT COUNT(DISTINCT LOWER(email)) FROM thread_participants \
+            "SELECT COUNT(DISTINCT email) FROM thread_participants \
              WHERE account_id = ?1 AND thread_id = ?2",
             rusqlite::params![account_id, thread_id],
             |row| row.get(0),
@@ -293,7 +293,7 @@ pub fn maybe_update_chat_state(
     let has_user = user_emails.iter().any(|ue| {
         tx.query_row(
             "SELECT COUNT(*) FROM thread_participants \
-             WHERE account_id = ?1 AND thread_id = ?2 AND LOWER(email) = ?3",
+             WHERE account_id = ?1 AND thread_id = ?2 AND email = ?3",
             rusqlite::params![account_id, thread_id, ue],
             |row| row.get::<_, i64>(0),
         )
@@ -319,7 +319,7 @@ pub fn maybe_update_chat_state(
                  INNER JOIN threads t ON m.thread_id = t.id AND m.account_id = t.account_id \
                  INNER JOIN thread_participants tp \
                    ON tp.account_id = m.account_id AND tp.thread_id = m.thread_id \
-                 WHERE t.is_chat_thread = 1 AND LOWER(tp.email) = ?1 \
+                 WHERE t.is_chat_thread = 1 AND tp.email = ?1 \
                  ORDER BY m.date DESC LIMIT 1",
                 rusqlite::params![chat_email],
                 |row| Ok((row.get(0)?, row.get(1)?)),

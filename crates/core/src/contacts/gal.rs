@@ -7,7 +7,7 @@
 //! Autocomplete searches include GAL entries via the app-level
 //! `search_gal_cache()` function, so autocomplete is always local.
 
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use crate::db::DbState;
 
@@ -266,28 +266,47 @@ pub async fn refresh_gal_for_account(
         _ => return Ok(0), // IMAP/JMAP don't have organization directories
     };
 
-    if entries.is_empty() {
-        return Ok(0);
-    }
-
     let count = entries.len();
     cache_gal_entries(db, account_id.to_string(), entries).await?;
+    record_gal_refresh(db, account_id.to_string()).await?;
     Ok(count)
 }
 
-/// Get the timestamp of the last GAL cache refresh for an account.
-/// Returns None if no cache exists.
+/// Record that a GAL refresh was performed for an account.
+///
+/// Stores the current unix timestamp in the `settings` table so the
+/// staleness check works even when the fetch returns zero entries.
+async fn record_gal_refresh(db: &DbState, account_id: String) -> Result<(), String> {
+    let now = chrono::Utc::now().timestamp().to_string();
+    db.with_conn(move |conn| {
+        let key = format!("gal_refresh_{account_id}");
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+            params![key, now],
+        )
+        .map_err(|e| format!("record gal refresh: {e}"))?;
+        Ok(())
+    })
+    .await
+}
+
+/// Get the timestamp of the last GAL refresh attempt for an account.
+/// Returns None if no refresh has ever been performed.
 pub async fn gal_cache_age(
     db: &DbState,
     account_id: String,
 ) -> Result<Option<i64>, String> {
     db.with_conn(move |conn| {
+        let key = format!("gal_refresh_{account_id}");
         conn.query_row(
-            "SELECT MAX(cached_at) FROM gal_cache WHERE account_id = ?1",
-            params![account_id],
-            |row| row.get::<_, Option<i64>>(0),
+            "SELECT value FROM settings WHERE key = ?1",
+            params![key],
+            |row| row.get::<_, String>(0),
         )
-        .map_err(|e| format!("query gal_cache age: {e}"))
+        .optional()
+        .map_err(|e| format!("query gal refresh age: {e}"))?
+        .map(|v| v.parse::<i64>().map_err(|e| format!("parse gal timestamp: {e}")))
+        .transpose()
     })
     .await
 }
