@@ -1,9 +1,24 @@
+use std::cell::Cell;
+
 use iced::widget::{button, container, pick_list, radio, rule, slider, text, text_input, toggler};
 use iced::{border, Color, Theme};
 use iced::theme::palette::Seed;
 use serde::Deserialize;
 
 use super::layout::*;
+use super::settings::types::EmailBodyBackground;
+
+// ── Email body background thread-local ──────────────────
+// Style functions only receive `&Theme`, so we use a thread-local to
+// communicate the user's preference to `style_email_body_container`.
+thread_local! {
+    static EMAIL_BODY_BG_PREF: Cell<EmailBodyBackground> = const { Cell::new(EmailBodyBackground::AlwaysWhite) };
+}
+
+/// Set the email body background preference. Call when preferences change.
+pub fn set_email_body_background(pref: EmailBodyBackground) {
+    EMAIL_BODY_BG_PREF.set(pref);
+}
 
 // ── Built-in theme catalog ─────────────────────────────
 
@@ -996,11 +1011,27 @@ fn style_message_card_container(theme: &Theme) -> container::Style {
     }
 }
 
-fn style_email_body_container(_theme: &Theme) -> container::Style {
+fn style_email_body_container(theme: &Theme) -> container::Style {
+    let pref = EMAIL_BODY_BG_PREF.get();
+    let theme_bg = theme.palette().background.base.color;
+    let use_white = match pref {
+        EmailBodyBackground::AlwaysWhite => true,
+        EmailBodyBackground::MatchTheme => false,
+        EmailBodyBackground::Auto => {
+            // Luminance check: if the theme background is light, use white.
+            let lum = 0.299 * theme_bg.r + 0.587 * theme_bg.g + 0.114 * theme_bg.b;
+            lum > 0.5
+        }
+    };
+    let (bg, border_color) = if use_white {
+        (Color::WHITE, Color::BLACK.scale_alpha(0.08))
+    } else {
+        (theme_bg, theme.palette().background.strongest.color.scale_alpha(0.15))
+    };
     container::Style {
-        background: Some(Color::WHITE.into()),
+        background: Some(bg.into()),
         border: iced::Border {
-            color: Color::BLACK.scale_alpha(0.08),
+            color: border_color,
             width: 1.0,
             radius: RADIUS_MD.into(),
         },

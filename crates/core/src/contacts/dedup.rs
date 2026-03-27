@@ -145,11 +145,11 @@ fn find_duplicates_inner(conn: &Connection) -> Result<Vec<DuplicatePair>, String
                FROM contacts c
                INNER JOIN seen_addresses s ON LOWER(c.email) = LOWER(s.email)
                WHERE c.source != 'seen'
-               LIMIT 500";
+               LIMIT ?1";
 
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map([], |row| {
+        .query_map(rusqlite::params![crate::constants::DEFAULT_QUERY_LIMIT], |row| {
             Ok(DuplicatePair {
                 email: row.get("email")?,
                 primary_id: row.get("id")?,

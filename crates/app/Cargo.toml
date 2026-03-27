@@ -17,10 +17,10 @@ chrono.workspace = true
 
 # Crate-specific deps
 #iced = { git = "https://github.com/squidowl/iced", rev = "b201e4f", default-features = false, features = [
-#    "wgpu", "tokio", "lazy", "advanced", "canvas", "web-colors", "wayland", "x11",
+#    "wgpu", "tokio", "lazy", "advanced", "canvas", "web-colors", "wayland", "x11", "image",
 #] }
 iced = { path = "/home/folk/Programs/sluggrs/repos/iced", default-features = false, features = [
-    "wgpu", "tokio", "lazy", "advanced", "canvas", "web-colors", "wayland", "x11",
+    "wgpu", "tokio", "lazy", "advanced", "canvas", "web-colors", "wayland", "x11", "image",
 ] }
 dirs = "6"
 dissimilar.workspace = true

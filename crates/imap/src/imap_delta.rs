@@ -53,7 +53,7 @@ pub async fn imap_delta_sync(
     let all_folders = {
         let mut session = connect(config).await?;
         let folders = client::list_folders(&mut session).await?;
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         folders
     };
     let syncable_folders = get_syncable_folders(&all_folders);
@@ -306,7 +306,7 @@ async fn batch_delta_check(
     let result = async {
         let mut session = connect(config).await?;
         let results = client::delta_check_folders(&mut session, requests).await;
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         results
     }
     .await;
@@ -348,7 +348,7 @@ async fn batch_delta_check(
                                 }
                             }
                         }
-                        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+                        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
                     }
                     Err(e) => {
                         log::error!("[sync] Reconnect for missed folders failed: {e}");
@@ -394,7 +394,7 @@ async fn per_folder_check(
     let changed = saved.uidvalidity.is_some() && saved.uidvalidity != Some(status.uidvalidity);
 
     if changed {
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         return Ok(DeltaCheckResult {
             folder: folder_path.to_string(),
             uidvalidity: status.uidvalidity,
@@ -418,7 +418,7 @@ async fn per_folder_check(
     };
 
     let new_uids = client::fetch_new_uids(&mut session, folder_path, saved.last_uid).await?;
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+    let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
 
     Ok(DeltaCheckResult {
         folder: folder_path.to_string(),
@@ -453,7 +453,7 @@ async fn fetch_folder_uids(
         client::search_folder(&mut session, &folder.raw_path, Some(since_date.to_string())).await?;
 
     if sr.uids.is_empty() {
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         // Still persist sync state so this folder isn't treated as "new" on every delta cycle
         let aid = account_id.to_string();
         let fp = folder.raw_path.clone();
@@ -493,7 +493,7 @@ async fn fetch_folder_uids(
     })
     .await?;
 
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+    let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
     Ok(())
 }
 
@@ -638,7 +638,7 @@ async fn process_folder_delta(
                 );
             }
         }
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
 
         // Persist the server's new (lower) modseq so future syncs use CHANGEDSINCE
         // with the correct baseline.
@@ -673,7 +673,7 @@ async fn process_folder_delta(
         let sr = client::search_folder(&mut session, &folder.raw_path, Some(since_date)).await?;
 
         if sr.uids.is_empty() {
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+            let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
             // Persist the new uidvalidity even for empty folders, so we don't
             // repeat the expensive UIDVALIDITY recovery on every sync cycle
             let aid = account_id.to_string();
@@ -714,7 +714,7 @@ async fn process_folder_delta(
         })
         .await?;
 
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         return Ok(());
     }
 
@@ -751,7 +751,7 @@ async fn process_folder_delta(
                     }
                 }
                 let _ =
-                    tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+                    tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
             }
         } else if delta.highest_modseq.is_none() {
             // Non-CONDSTORE fallback: server doesn't support CONDSTORE, so we
@@ -838,7 +838,7 @@ async fn process_folder_delta(
     })
     .await?;
 
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+    let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
     Ok(())
 }
 
@@ -945,7 +945,7 @@ pub async fn sync_flags_without_condstore(
 ) -> Result<u64, String> {
     let mut session = connect(config).await?;
     let result = sync_flags_on_session(&mut session, folder_path, account_id, db).await;
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+    let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
     result
 }
 
@@ -1033,7 +1033,7 @@ pub async fn detect_deleted_messages(
 ) -> Result<Vec<String>, String> {
     let mut session = connect(config).await?;
     let result = detect_deleted_on_session(&mut session, folder_path, account_id, db).await;
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+    let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
     result
 }
 
@@ -1166,6 +1166,6 @@ pub async fn run_deletion_detection(
         }
     }
 
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+    let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
     all_affected
 }

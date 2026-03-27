@@ -8,11 +8,11 @@
 
 - [ ] **Star icon: need filled variant** — Lucide only has outline icons. The star toggle in the reading pane needs a filled star (golden) for the active state and an outline star for inactive. Currently uses Unicode ★ as a stopgap, which causes size mismatch and visual jank. Options: (1) add a second icon font with filled variants, (2) use an SVG/image icon, (3) custom widget that draws a filled star path. The button should also not change background color on toggle — just the icon fill.
 
-- [ ] **Collapse individual expanded messages** — Removed the full-card click-to-collapse overlay because it intercepted all clicks on the message body. Need a dedicated collapse affordance — e.g. clicking the message header row (sender/date area), a small collapse chevron button, or a right-click context menu option.
+- [x] **Collapse individual expanded messages** — Removed the full-card click-to-collapse overlay because it intercepted all clicks on the message body. Need a dedicated collapse affordance — e.g. clicking the message header row (sender/date area), a small collapse chevron button, or a right-click context menu option.
 
 - [ ] **Contact pills on recipients** — Per `docs/pop-out-windows/problem-statement.md`: recipients in To/Cc fields should appear as plain text but become contact pills on hover, revealing an inline edit button for quick contact editing. Applies to: reading pane message headers, pop-out message view, compose window recipient display. Currently recipients are plain text everywhere with no hover interaction. Needs: (1) a contact pill widget that blends with background at rest and reveals pill styling + edit button on hover, (2) display name resolution from the contact system (name → email fallback chain), (3) wiring to the existing `EditContact` flow that opens the settings contact editor.
 
-- [ ] **Email body background override setting** — Email body areas are always rendered on a white background for fidelity (HTML emails are authored against white). Users should be able to override this to use the theme's background instead, for a fully immersive dark mode experience at the cost of email rendering accuracy. Setting in Preferences with three options: "Always white" (default), "Match theme", "Auto" (white in light themes, theme bg in dark themes).
+- [x] **Email body background override setting** — Email body areas are always rendered on a white background for fidelity (HTML emails are authored against white). Users should be able to override this to use the theme's background instead, for a fully immersive dark mode experience at the cost of email rendering accuracy. Setting in Preferences with three options: "Always white" (default), "Match theme", "Auto" (white in light themes, theme bg in dark themes).
 
 - [x] **Codebase contracts** — *(2026-03-27)* All 24 implicit contracts fixed. See `docs/architecture.md` for the principles and enforcement mechanisms.
 
@@ -24,7 +24,7 @@
 
 - [ ] **Action service: native provider batching** *(Deferred)* — Currently `batch_execute` reuses one provider per account but still makes one HTTP request per thread (sequential `provider.archive()` calls). Some providers support batching natively: Gmail batch API (up to 100 requests in one HTTP multipart request), Graph `/$batch` endpoint (up to 20 per batch), JMAP `Email/set` can modify multiple emails in one method call, IMAP `STORE` can set flags on multiple UIDs in one command. Native batching would reduce 50 HTTP round-trips to 1-3 for bulk operations. Requires adding batch methods to `ProviderOps` (e.g., `archive_batch(&self, ctx, thread_ids: &[&str]) -> Vec<Result<(), ProviderError>>`), implementing per provider (IMAP would need UID set formatting, Gmail needs multipart boundary encoding, Graph needs JSON batch request assembly, JMAP needs method call batching), and updating `batch.rs` to prefer batch methods when available and fall back to sequential for providers that don't implement them. The per-account sequential approach works fine for now — provider reuse eliminated the construction overhead, and the remaining latency is network-bound.
 
-- [ ] **Hardcoded values** - We need to do a sweep of the codebase for hardcoded values that shouldn't be. These need to be extracted to a common location so that we can keep track of them and decide whether or not to make them configurable.
+- [x] **Hardcoded values** - We need to do a sweep of the codebase for hardcoded values that shouldn't be. These need to be extracted to a common location so that we can keep track of them and decide whether or not to make them configurable.
 
 - [ ] **Crate structure and dependency graph** - So much has been implemented without any real consideration for what kind of code lives where. It might be time to get a grip on things.
 
@@ -119,7 +119,7 @@ Backend complete (Gmail + JMAP sync). Exchange fetch permanently blocked (no pub
 
 Backend complete (DNS + SVG + cache). Missing UI wiring.
 
-- [ ] **BIMI avatar display** — Wire `BimiLruCache` to message list sender avatars. Fall back to initials when no BIMI logo cached.
+- [x] **BIMI avatar display** — Wire `BimiLruCache` to message list sender avatars. Fall back to initials when no BIMI logo cached.
 
 ### Auto-Responses — `docs/auto-responses/problem-statement.md`
 

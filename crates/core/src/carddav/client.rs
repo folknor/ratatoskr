@@ -45,7 +45,7 @@ impl CardDavClient {
     ) -> Self {
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::limited(5))
-            .timeout(std::time::Duration::from_secs(30))
+            .timeout(crate::constants::DAV_CLIENT_TIMEOUT)
             .build()
             .unwrap_or_default();
 

@@ -3,6 +3,10 @@ mod send;
 
 use async_trait::async_trait;
 
+/// TTL for the in-memory folder map cache.  Avoids redundant Graph API calls
+/// when multiple operations query folders in quick succession.
+const FOLDER_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+
 use ratatoskr_db::db::DbState;
 use ratatoskr_provider_utils::error::ProviderError;
 use ratatoskr_provider_utils::ops::ProviderOps;
@@ -290,9 +294,9 @@ impl ProviderOps for GraphOps {
         &self,
         ctx: &ProviderCtx<'_>,
     ) -> Result<Vec<ProviderFolderEntry>, ProviderError> {
-        // Use cached folder map if it was synced less than 60 seconds ago
+        // Use cached folder map if it was synced within the TTL window
         let use_cache = if let Some(age) = self.client.folder_map_age().await {
-            age < std::time::Duration::from_secs(60) && self.client.folder_map().await.is_some()
+            age < FOLDER_CACHE_TTL && self.client.folder_map().await.is_some()
         } else {
             false
         };

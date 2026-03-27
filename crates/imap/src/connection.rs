@@ -15,6 +15,8 @@ pub const IMAP_CMD_TIMEOUT: Duration = Duration::from_secs(30);
 pub const IMAP_FETCH_TIMEOUT: Duration = Duration::from_secs(120);
 pub const IMAP_SEARCH_TIMEOUT: Duration = Duration::from_secs(60);
 pub const OVERALL_CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
+/// Timeout for graceful IMAP LOGOUT before dropping the connection.
+pub const IMAP_LOGOUT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Configure TCP keepalive and nodelay on a connected socket.
 pub(crate) fn configure_tcp_socket(stream: &TcpStream) {

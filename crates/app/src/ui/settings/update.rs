@@ -334,6 +334,13 @@ impl Settings {
                     if let Some(ref mut prefs) = self.editing_preferences { prefs.scale = v; }
                 }
             }
+            SettingsMessage::EmailBodyBgChanged(v) => {
+                let bg = EmailBodyBackground::from_label(&v);
+                self.email_body_background = bg;
+                if let Some(ref mut prefs) = self.editing_preferences { prefs.email_body_background = bg; }
+                crate::ui::theme::set_email_body_background(bg);
+                self.open_select = None;
+            }
             SettingsMessage::ThemeChanged(v) => {
                 self.theme = v.clone();
                 if let Some(ref mut prefs) = self.editing_preferences { prefs.theme = v; }

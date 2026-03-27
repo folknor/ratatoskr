@@ -27,7 +27,7 @@ pub async fn fetch(domain: &str, email: &str) -> Vec<ProtocolOption> {
 
 async fn try_fetch_and_parse(url: &str, email: &str) -> Option<Vec<ProtocolOption>> {
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(crate::constants::DISCOVERY_HTTP_TIMEOUT)
         .build()
         .ok()?;
 

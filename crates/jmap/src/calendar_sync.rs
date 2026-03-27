@@ -175,7 +175,7 @@ pub async fn sync_events_delta(
     loop {
         let inner = client.inner();
         let changes = inner
-            .calendar_event_changes(&since_state, Some(500))
+            .calendar_event_changes(&since_state, Some(crate::JMAP_MAX_CHANGES))
             .await
             .map_err(|e| {
                 let msg = e.to_string();

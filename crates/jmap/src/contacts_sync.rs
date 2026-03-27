@@ -275,7 +275,7 @@ pub async fn jmap_contacts_delta_sync(
     loop {
         let inner = client.inner();
         let changes = inner
-            .contact_card_changes(&since_state, Some(500))
+            .contact_card_changes(&since_state, Some(crate::JMAP_MAX_CHANGES))
             .await
             .map_err(|e| {
                 let msg = e.to_string();

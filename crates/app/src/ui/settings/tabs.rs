@@ -185,6 +185,13 @@ fn general_tab(state: &Settings) -> Element<'_, SettingsMessage> {
             SettingsMessage::ToggleSelect(SelectField::FontSize),
             SettingsMessage::FontSizeChanged,
         ), SettingsMessage::ToggleSelect(SelectField::FontSize)),
+        setting_row("Email Body Background", widgets::select(
+            &["Always White", "Match Theme", "Auto"],
+            state.email_body_background.label(),
+            state.open_select == Some(SelectField::EmailBodyBg),
+            SettingsMessage::ToggleSelect(SelectField::EmailBodyBg),
+            SettingsMessage::EmailBodyBgChanged,
+        ), SettingsMessage::ToggleSelect(SelectField::EmailBodyBg)),
         slider_row("Scale", None, 1.0..=4.0, state.scale_preview.unwrap_or(state.scale), 1.0, 0.125, SettingsMessage::ScaleDragged, Some(SettingsMessage::ScaleReleased)),
         setting_row("Message Dates", widgets::select(
             &["Relative Offset", "Absolute"],

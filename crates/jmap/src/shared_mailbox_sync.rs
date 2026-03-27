@@ -281,7 +281,7 @@ async fn shared_delta_sync(ctx: &SyncCtx<'_>) -> Result<SyncResult, String> {
         let inner = ctx.client.inner();
         let mut request = inner.build();
         let mut changes = jmap_client::email::EmailChanges::new(jmap_id, &since_state);
-        changes.max_changes(500);
+        changes.max_changes(crate::JMAP_MAX_CHANGES);
         let handle = request
             .call(changes)
             .map_err(|e| format!("Email/changes: {e}"))?;
@@ -368,7 +368,7 @@ async fn shared_mailbox_changes(
     let inner = ctx.client.inner();
     let mut request = inner.build();
     let mut changes = MailboxChanges::new(jmap_id, since_state);
-    changes.max_changes(500);
+    changes.max_changes(crate::JMAP_MAX_CHANGES);
     let handle = request
         .call(changes)
         .map_err(|e| format!("Mailbox/changes: {e}"))?;

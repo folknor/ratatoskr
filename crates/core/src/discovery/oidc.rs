@@ -88,7 +88,7 @@ pub async fn probe_issuer(issuer_url: &str) -> Option<OidcEndpoints> {
     let url = format!("{normalized_issuer}/.well-known/openid-configuration");
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(crate::constants::DISCOVERY_HTTP_TIMEOUT)
         .redirect(reqwest::redirect::Policy::limited(3))
         .user_agent("Ratatoskr/1.0")
         .build()

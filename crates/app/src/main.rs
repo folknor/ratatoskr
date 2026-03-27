@@ -537,10 +537,12 @@ impl App {
             Ok(CalendarState::parse_view_name(&view_name))
         }).unwrap_or(CalendarView::Month);
 
+        let bimi_cache = Arc::new(ratatoskr_core::bimi::BimiLruCache::new());
+
         let mut app = Self {
             db,
             sidebar: Sidebar::new(),
-            thread_list: ThreadList::new(),
+            thread_list: ThreadList::new(Arc::clone(&bimi_cache)),
             reading_pane: ReadingPane::new(),
             settings: Settings::with_scale(
                 *DEFAULT_SCALE.get().unwrap_or(&1.0),

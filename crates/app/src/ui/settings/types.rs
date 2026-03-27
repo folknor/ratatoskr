@@ -7,6 +7,38 @@ use crate::ui::undoable::UndoableText;
 
 use ratatoskr_rich_text_editor::EditorState as RteEditorState;
 
+// ── Email body background preference ────────────────────
+
+/// Controls the background color of email body containers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EmailBodyBackground {
+    /// Always use a white background (best for email rendering fidelity).
+    #[default]
+    AlwaysWhite,
+    /// Use the current theme's background color.
+    MatchTheme,
+    /// White in light themes, theme background in dark themes.
+    Auto,
+}
+
+impl EmailBodyBackground {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::AlwaysWhite => "Always White",
+            Self::MatchTheme => "Match Theme",
+            Self::Auto => "Auto",
+        }
+    }
+
+    pub fn from_label(s: &str) -> Self {
+        match s {
+            "Match Theme" => Self::MatchTheme,
+            "Auto" => Self::Auto,
+            _ => Self::AlwaysWhite,
+        }
+    }
+}
+
 // ── Messages ────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -26,6 +58,7 @@ pub enum SettingsMessage {
     TogglePhishingDetection(bool),
     PhishingSensitivityChanged(String),
     DateDisplayChanged(String),
+    EmailBodyBgChanged(String),
     ToggleSelect(SelectField),
     // About
     CheckForUpdates,
@@ -259,6 +292,7 @@ pub enum SelectField {
     AiProvider,
     AiModel,
     DateDisplay,
+    EmailBodyBg,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -343,6 +377,7 @@ pub struct PreferencesState {
     pub phishing_detection: bool,
     pub phishing_sensitivity: String,
     pub default_rendering_mode: RenderingMode,
+    pub email_body_background: EmailBodyBackground,
 }
 
 // ── State ───────────────────────────────────────────────
@@ -614,6 +649,7 @@ pub struct Settings {
     pub phishing_sensitivity: String,
     pub date_display: DateDisplay,
     pub default_rendering_mode: RenderingMode,
+    pub email_body_background: EmailBodyBackground,
     // Composing
     pub undo_delay: String,
     pub send_and_archive: bool,
@@ -827,6 +863,7 @@ impl Settings {
             phishing_detection: self.phishing_detection,
             phishing_sensitivity: self.phishing_sensitivity.clone(),
             default_rendering_mode: self.default_rendering_mode,
+            email_body_background: self.email_body_background,
         }
     }
 
@@ -843,6 +880,8 @@ impl Settings {
         self.phishing_detection = prefs.phishing_detection;
         self.phishing_sensitivity = prefs.phishing_sensitivity.clone();
         self.default_rendering_mode = prefs.default_rendering_mode;
+        self.email_body_background = prefs.email_body_background;
+        crate::ui::theme::set_email_body_background(prefs.email_body_background);
     }
 }
 
@@ -860,6 +899,7 @@ impl Default for Settings {
             phishing_detection: true,
             phishing_sensitivity: "Default".into(),
             default_rendering_mode: RenderingMode::default(),
+            email_body_background: EmailBodyBackground::default(),
         };
         Self {
             active_tab: Tab::General,
@@ -879,6 +919,7 @@ impl Default for Settings {
             phishing_sensitivity: "Default".into(),
             date_display: DateDisplay::RelativeOffset,
             default_rendering_mode: RenderingMode::default(),
+            email_body_background: EmailBodyBackground::default(),
             undo_delay: "5 seconds".into(),
             send_and_archive: false,
             default_reply_mode: "Reply".into(),

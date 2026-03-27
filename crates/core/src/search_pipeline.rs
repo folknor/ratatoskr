@@ -111,7 +111,7 @@ fn search_combined(
 ) -> Result<Vec<UnifiedSearchResult>, String> {
     // Step 1: SQL generates candidate thread IDs.
     let scope = build_scope(parsed);
-    let sql_threads = query_threads(conn, parsed, &scope, Some(500), Some(0))?;
+    let sql_threads = query_threads(conn, parsed, &scope, Some(crate::constants::DEFAULT_QUERY_LIMIT), Some(0))?;
     let candidate_ids: HashSet<String> = sql_threads.iter().map(|t| t.id.clone()).collect();
 
     // Build a lookup map for enrichment from SQL results.

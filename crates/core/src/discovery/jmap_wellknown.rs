@@ -5,7 +5,7 @@ pub async fn probe(domain: &str) -> Option<ProtocolOption> {
     let url = format!("https://{domain}/.well-known/jmap");
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(crate::constants::DISCOVERY_HTTP_TIMEOUT)
         .redirect(reqwest::redirect::Policy::limited(3))
         .build()
         .ok()?;

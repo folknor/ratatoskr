@@ -78,7 +78,7 @@ pub async fn imap_initial_sync(
     let all_folders = {
         let mut session = connect(config).await?;
         let folders = client::list_folders(&mut session).await?;
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         folders
     };
 
@@ -371,7 +371,7 @@ async fn sync_single_folder(
     let uids = search_result.uids;
     let kw_cap = search_result.folder_status.supports_custom_keywords;
     if uids.is_empty() {
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         return Ok((0, 0, 0, kw_cap));
     }
 
@@ -504,7 +504,7 @@ async fn sync_single_folder(
         .await?;
     }
 
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+    let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
 
     Ok((folder_fetched, folder_stored, uids.len() as u64, kw_cap))
 }

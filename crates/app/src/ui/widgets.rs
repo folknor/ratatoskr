@@ -1,6 +1,8 @@
+use std::path::Path;
+
 use iced::widget::{
-    button, canvas, column, container, row, rule, scrollable, text, text_input, tooltip, Canvas,
-    Space,
+    button, canvas, column, container, image, row, rule, scrollable, text, text_input, tooltip,
+    Canvas, Space,
 };
 use iced::{mouse, Alignment, Color, Element, Length, Rectangle, Renderer, Theme};
 
@@ -139,6 +141,37 @@ pub fn avatar_circle<'a, M: 'a>(name: &str, size: f32) -> Element<'a, M> {
     .width(size)
     .height(size)
     .into()
+}
+
+/// Render a sender avatar: BIMI logo if available, initials circle otherwise.
+pub fn sender_avatar<'a, M: 'a>(
+    name: &str,
+    bimi_logo: Option<&Path>,
+    size: f32,
+) -> Element<'a, M> {
+    match bimi_logo {
+        Some(path) => {
+            let handle = image::Handle::from_path(path);
+            container(
+                image(handle)
+                    .width(size)
+                    .height(size)
+                    .content_fit(iced::ContentFit::Cover),
+            )
+            .width(size)
+            .height(size)
+            .clip(true)
+            .style(move |_theme: &Theme| container::Style {
+                border: iced::Border {
+                    radius: (size / 2.0).into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .into()
+        }
+        None => avatar_circle(name, size),
+    }
 }
 
 pub fn color_dot<'a, M: 'a>(color: Color) -> Element<'a, M> {
@@ -804,6 +837,7 @@ pub fn thread_card<'a, M: Clone + 'a>(
     index: usize,
     selected: bool,
     label_colors: &[(Color,)],
+    bimi_logo: Option<&Path>,
     on_select: impl Fn(usize) -> M,
 ) -> Element<'a, M> {
     let sender = thread
@@ -904,9 +938,15 @@ pub fn thread_card<'a, M: Clone + 'a>(
     ]
     .align_y(Alignment::Center);
 
-    let content = column![top_row, subject_row, snippet_row]
+    let text_content = column![top_row, subject_row, snippet_row]
         .spacing(SPACE_XXXS)
         .width(Length::Fill);
+
+    let avatar = sender_avatar(sender, bimi_logo, AVATAR_THREAD_CARD);
+
+    let content = row![avatar, text_content]
+        .spacing(SPACE_SM)
+        .align_y(Alignment::Center);
 
     button(
         container(content)
@@ -1064,6 +1104,14 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     .style(theme::ButtonClass::BareTransparent.style())
     .into();
 
+    // Collapse chevron button
+    let collapse_btn = button(
+        icon::chevron_down().size(ICON_SM).style(text::secondary),
+    )
+    .on_press(on_toggle(index))
+    .padding(PAD_ICON_BTN)
+    .style(theme::ButtonClass::Ghost.style());
+
     // Row 1-2: avatar spanning sender name + sender email
     let avatar_rows = row![
         avatar,
@@ -1077,6 +1125,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
                         .style(theme::TextClass::Tertiary.style()),
                 )
                 .align_y(Alignment::Center),
+                collapse_btn,
                 pop_out_btn,
             ]
             .align_y(Alignment::Center)
@@ -1196,7 +1245,7 @@ pub fn collapsed_message_row<'a, M: Clone + 'a>(
     let snippet = truncate_snippet(msg.snippet.as_deref(), 60);
 
     let content = row![
-        container(text("\u{2014}").size(TEXT_SM).style(theme::TextClass::Tertiary.style()))
+        container(icon::chevron_right().size(ICON_XS).style(theme::TextClass::Tertiary.style()))
             .align_y(Alignment::Center),
         container(
             text(sender)

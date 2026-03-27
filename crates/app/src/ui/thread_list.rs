@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::{Color, Element, Length, Padding, Task};
@@ -164,10 +165,12 @@ pub struct ThreadList {
     pub auto_advance_direction: AutoAdvanceDirection,
     /// Typeahead suggestion state.
     pub typeahead: TypeaheadState,
+    /// BIMI logo LRU cache — shared with App for cross-component access.
+    pub bimi_cache: Arc<ratatoskr_core::bimi::BimiLruCache>,
 }
 
 impl ThreadList {
-    pub fn new() -> Self {
+    pub fn new(bimi_cache: Arc<ratatoskr_core::bimi::BimiLruCache>) -> Self {
         Self {
             threads: Vec::new(),
             selected_thread: None,
@@ -179,6 +182,7 @@ impl ThreadList {
             search_query: String::new(),
             auto_advance_direction: AutoAdvanceDirection::Next,
             typeahead: TypeaheadState::default(),
+            bimi_cache,
         }
     }
 
@@ -647,11 +651,25 @@ fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
     let mut list = column![].spacing(0);
     for (i, thread) in state.threads.iter().enumerate() {
         let label_colors: &[(Color,)] = &[];
+        // Look up BIMI logo for the sender's domain.
+        let bimi_logo = thread
+            .from_address
+            .as_deref()
+            .and_then(|addr| addr.rsplit('@').next())
+            .and_then(|domain| {
+                // get() returns None on miss, Some(None) for negative cache,
+                // Some(Some(path)) for a cached logo.
+                match state.bimi_cache.get(domain) {
+                    Some(Some(path)) if path.exists() => Some(path),
+                    _ => None,
+                }
+            });
         list = list.push(widgets::thread_card(
             thread,
             i,
             state.is_selected(i),
             label_colors,
+            bimi_logo.as_deref(),
             ThreadListMessage::SelectThread,
         ));
     }
