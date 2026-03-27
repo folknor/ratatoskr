@@ -219,20 +219,19 @@ fn needs_subject_indicator(prev: &ChatMessage, curr: &ChatMessage) -> bool {
 /// Strip leading Re:/Fwd:/Fw: prefixes (case-insensitive, repeated) so that
 /// "Re: hello" and "Re: Re: hello" compare as equal.
 fn normalize_subject(s: &str) -> String {
-    let mut s = s.trim();
+    let mut s = s.trim().to_lowercase();
     loop {
-        let lower = s.to_lowercase();
-        if let Some(rest) = lower
+        if let Some(rest) = s
             .strip_prefix("re:")
-            .or_else(|| lower.strip_prefix("fwd:"))
-            .or_else(|| lower.strip_prefix("fw:"))
+            .or_else(|| s.strip_prefix("fwd:"))
+            .or_else(|| s.strip_prefix("fw:"))
         {
-            s = s[s.len() - rest.len()..].trim_start();
+            s = rest.trim_start().to_string();
         } else {
             break;
         }
     }
-    s.to_lowercase()
+    s
 }
 
 fn local_date(timestamp: i64) -> chrono::NaiveDate {

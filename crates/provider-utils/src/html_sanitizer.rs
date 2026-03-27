@@ -17,10 +17,11 @@ static EVENT_HANDLER_RE: LazyLock<Regex> =
 
 /// Regex matching `data:` URIs with an allowed image MIME type.
 /// Allows `data:image/png`, `data:image/jpeg`, `data:image/gif`,
-/// `data:image/webp`, `data:image/svg+xml` (with optional parameters like
-/// `;base64`).
+/// `data:image/webp` (with optional parameters like `;base64`).
+/// SVG is intentionally excluded — it is active content that can contain
+/// `<script>`, event handlers, and external references.
 static DATA_IMAGE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^\s*data:image/(png|jpeg|gif|webp|svg\+xml)\b").expect("DATA_IMAGE_RE")
+    Regex::new(r"(?i)^\s*data:image/(png|jpeg|gif|webp)\b").expect("DATA_IMAGE_RE")
 });
 
 /// Regex matching `url(...)` values that reference external HTTP(S) URLs
@@ -204,7 +205,7 @@ fn build_ammonia() -> ammonia::Builder<'static> {
 
     // URL schemes.
     let schemes: HashSet<&str> =
-        ["http", "https", "mailto", "cid", "data"].into_iter().collect();
+        ["http", "https", "mailto", "cid"].into_iter().collect();
     builder.url_schemes(schemes);
 
     // Link security.
@@ -261,7 +262,7 @@ pub fn sanitize_html_body(html: &str) -> String {
 /// Same three-stage pipeline as [`sanitize_html_body`], plus:
 /// - Remote `<img src="http(s)://...">` tags are replaced with a
 ///   placeholder unless the sender is allowlisted.
-/// - `cid:` and `data:` URIs are always preserved (inline attachments).
+/// - `cid:` URIs are always preserved (inline attachments).
 /// - AMP-specific elements (`amp-img`, `amp-list`, etc.) are stripped.
 pub fn sanitize_html_body_with_image_policy(
     html: &str,
@@ -602,10 +603,13 @@ mod tests {
     }
 
     #[test]
-    fn data_uri_images_preserved() {
+    fn data_uri_images_stripped_by_ammonia() {
+        // ammonia does not allow data: scheme (defense-in-depth). Stage 2
+        // allows data:image/* on <img src>, but ammonia as the final pass
+        // strips it. cid: is the primary inline image mechanism in email.
         let html = "<img src=\"data:image/png;base64,iVBOR...\">";
         let result = sanitize_html_body(html);
-        assert!(result.contains("data:image/png"));
+        assert!(!result.contains("data:image/png"));
     }
 
     #[test]
@@ -642,10 +646,12 @@ mod tests {
     }
 
     #[test]
-    fn data_uri_images_not_blocked() {
+    fn data_uri_images_stripped_by_ammonia_with_policy() {
+        // ammonia strips data: URIs (defense-in-depth). Even though stage 2
+        // allows data:image/* on <img src>, ammonia removes them.
         let html = r#"<img src="data:image/png;base64,iVBOR"><p>Text</p>"#;
         let result = sanitize_html_body_with_image_policy(html, true, false);
-        assert!(result.contains("data:image/png"));
+        assert!(!result.contains("data:image/png"));
     }
 
     #[test]
@@ -711,17 +717,19 @@ mod tests {
     }
 
     #[test]
-    fn data_image_in_img_src_preserved() {
+    fn data_image_in_img_src_stripped_by_ammonia() {
+        // Stage 2 allows data:image/png on <img src>, but ammonia strips it
+        // (data: scheme not in ammonia's allowlist for defense-in-depth).
         let html = r#"<img src="data:image/png;base64,iVBOR">"#;
         let result = sanitize_html_body(html);
-        assert!(result.contains("data:image/png"));
+        assert!(!result.contains("data:image/png"));
     }
 
     #[test]
-    fn data_image_jpeg_in_img_src_preserved() {
+    fn data_image_jpeg_in_img_src_stripped_by_ammonia() {
         let html = r#"<img src="data:image/jpeg;base64,/9j/4AAQ">"#;
         let result = sanitize_html_body(html);
-        assert!(result.contains("data:image/jpeg"));
+        assert!(!result.contains("data:image/jpeg"));
     }
 
     #[test]

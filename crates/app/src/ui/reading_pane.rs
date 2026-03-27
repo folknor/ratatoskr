@@ -729,6 +729,15 @@ fn attachment_group<'a>(
 
 /// Open a URL in the system default browser.
 fn open_url_in_browser(url: &str) {
+    // Only allow safe URL schemes from untrusted email content
+    let allowed = url.starts_with("http://")
+        || url.starts_with("https://")
+        || url.starts_with("mailto:");
+    if !allowed {
+        log::warn!("Blocked URL with disallowed scheme: {url}");
+        return;
+    }
+
     #[cfg(target_os = "linux")]
     {
         let _ = std::process::Command::new("xdg-open")

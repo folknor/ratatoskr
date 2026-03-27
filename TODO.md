@@ -143,20 +143,20 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 ## Bug Hunt Findings (review agent, 2026-03-27)
 
-- [ ] **`from_address` nullable crash in chat timeline** — `row.get::<_, String>("from_address")` on NULL silently drops the message. Mailer-daemon/DSN messages can have no From. `chat.rs:368`
-- [ ] **N+1 per-user-email queries in `maybe_update_chat_state`** — One SQL query per user email per thread per sync. Replace with single `IN` query. `persistence.rs:312-317`
+- [x] **`from_address` nullable crash in chat timeline** — `row.get::<_, String>("from_address")` on NULL silently drops the message. Mailer-daemon/DSN messages can have no From. `chat.rs:368`
+- [x] **N+1 per-user-email queries in `maybe_update_chat_state`** — One SQL query per user email per thread per sync. Replace with single `IN` query. `persistence.rs:312-317`
 - [ ] **`user_emails()` excludes send-as aliases** — Only primary account emails. Send-as aliases break chat ownership detection and 1:1 thread classification. Should include `send_identities` table. `handlers/chat.rs:91`
 - [ ] **Chat summary stale when thread stops qualifying** — Early-return paths clear `is_chat_thread` but don't recompute `chat_contacts` summary. Thread deletion also skips summary update. `persistence.rs:278,291,434`
-- [ ] **`enter_chat_view` doesn't clear pinned-search context** — `sidebar.active_pinned_search` persists, overriding `NavigationTarget::Chat` in `current_view_and_label()`. `handlers/chat.rs:11`
+- [x] **`enter_chat_view` doesn't clear pinned-search context** — `sidebar.active_pinned_search` persists, overriding `NavigationTarget::Chat` in `current_view_and_label()`. `handlers/chat.rs:11`
 - [ ] **Reading pane star sync keyed by thread_id only** — `update_star()` compares only `t.id`, not `(account_id, thread_id)`. Cross-account thread ID collision can mutate wrong thread. `reading_pane.rs:249`
-- [ ] **Chat subject normalization panics on non-ASCII** — `normalize_subject()` slices original string using byte lengths from lowercased copy. Unicode lowercase can change byte length → invalid slice boundary. `chat_timeline.rs:221`
+- [x] **Chat subject normalization panics on non-ASCII** — `normalize_subject()` slices original string using byte lengths from lowercased copy. Unicode lowercase can change byte length → invalid slice boundary. `chat_timeline.rs:221`
 - [ ] **Scope dropdown missing public folder entries** — Dropdown has All Accounts + accounts + shared mailboxes but no public folders. `sidebar.rs:413`
 
 ## Security Audit Findings (review agent, 2026-03-27)
 
-- [ ] **Link click command injection on Windows** — Email HTML links are passed directly to `cmd /c start` with no scheme allowlist. A malicious `href` can reach a shell-adjacent sink. On all platforms, arbitrary schemes (`file:`, custom handlers) are opened from untrusted content. Fix: allowlist `http://`, `https://`, `mailto:` only. `reading_pane.rs:730, html_render.rs:217`
-- [ ] **ammonia still allows `data:` scheme globally** — Stage 2 (lol_html) restricts data: URIs, but ammonia (stage 3) still permits the `data` scheme. If stage 2 fails, `data:text/html` in `<a href>` passes through. Remove `"data"` from ammonia's `url_schemes`. `html_sanitizer.rs:207`
-- [ ] **`data:image/svg+xml` allowed in sanitizer** — SVG is active content, not a passive bitmap. Allowing it through the sanitizer is risky if output ever reaches a richer renderer. `html_sanitizer.rs:18`
+- [x] **Link click command injection on Windows** — Email HTML links are passed directly to `cmd /c start` with no scheme allowlist. A malicious `href` can reach a shell-adjacent sink. On all platforms, arbitrary schemes (`file:`, custom handlers) are opened from untrusted content. Fix: allowlist `http://`, `https://`, `mailto:` only. `reading_pane.rs:730, html_render.rs:217`
+- [x] **ammonia still allows `data:` scheme globally** — Stage 2 (lol_html) restricts data: URIs, but ammonia (stage 3) still permits the `data` scheme. If stage 2 fails, `data:text/html` in `<a href>` passes through. Remove `"data"` from ammonia's `url_schemes`. `html_sanitizer.rs:207`
+- [x] **`data:image/svg+xml` allowed in sanitizer** — SVG is active content, not a passive bitmap. Allowing it through the sanitizer is risky if output ever reaches a richer renderer. `html_sanitizer.rs:18`
 - [ ] **OAuth error responses reflect raw provider bodies** — `oauth_exchange_token`, `oauth_refresh_token`, userinfo fetch include `response.text()` verbatim in errors. Could leak secrets or expose untrusted remote content in logs/UI. `oauth.rs:572,615,673`
 - [ ] **`contact_photo_cache` join duplicates chat sidebar entries** — Keyed by `(email, account_id)`, so contacts with photos from multiple accounts produce duplicate rows. `chat.rs:141`
 - [ ] **Auto-response HTML stored unsanitized** — Future XSS risk when the auto-reply settings UI renders it. Sanitize before display. `auto_responses.rs`

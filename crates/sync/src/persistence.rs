@@ -308,17 +308,29 @@ pub fn maybe_update_chat_state(
         )
         .map_err(|e| format!("count participants: {e}"))?;
 
-    // Check if one participant is the user
-    let has_user = user_emails.iter().any(|ue| {
-        tx.query_row(
+    // Check if one participant is the user (single IN query instead of N+1)
+    let has_user = if user_emails.is_empty() {
+        false
+    } else {
+        let placeholders: Vec<&str> = user_emails.iter().map(|_| "?").collect();
+        let placeholders_csv = placeholders.join(", ");
+        let sql = format!(
             "SELECT COUNT(*) FROM thread_participants \
-             WHERE account_id = ?1 AND thread_id = ?2 AND email = ?3",
-            rusqlite::params![account_id, thread_id, ue],
-            |row| row.get::<_, i64>(0),
-        )
-        .unwrap_or(0)
+             WHERE account_id = ?1 AND thread_id = ?2 \
+               AND email IN ({placeholders_csv})"
+        );
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
+            Vec::with_capacity(2 + user_emails.len());
+        params.push(Box::new(account_id.to_string()));
+        params.push(Box::new(thread_id.to_string()));
+        for ue in user_emails {
+            params.push(Box::new(ue.clone()));
+        }
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| &**p).collect();
+        tx.query_row(&sql, param_refs.as_slice(), |row| row.get::<_, i64>(0))
+            .unwrap_or(0)
             > 0
-    });
+    };
 
     let is_chat = participant_count == 2 && has_user;
 

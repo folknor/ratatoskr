@@ -365,7 +365,7 @@ fn chat_message_from_row(
     row: &rusqlite::Row<'_>,
     user_emails: &[String],
 ) -> rusqlite::Result<ChatMessage> {
-    let from_address: String = row.get("from_address")?;
+    let from_address: String = row.get::<_, Option<String>>("from_address")?.unwrap_or_default();
     let is_from_user = user_emails
         .iter()
         .any(|ue| ue.eq_ignore_ascii_case(&from_address));
