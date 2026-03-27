@@ -32,6 +32,7 @@ use crate::ui::layout::{
 use crate::{App, Message, APP_DATA_DIR};
 
 use ratatoskr_core::actions::SendAttachment;
+use rusqlite::OptionalExtension;
 
 // ── Pop-out message dispatch ────────────────────────────
 
@@ -391,6 +392,28 @@ impl App {
                 matches!(w, PopOutWindow::Compose(s) if s.reply_thread_id.as_deref() == Some(tid))
             }) {
                 return iced::window::gain_focus(existing_id);
+            }
+        }
+
+        // Auto-select shared mailbox identity when replying from shared
+        // mailbox context.  Query the cached email address synchronously.
+        if let ratatoskr_core::scope::ViewScope::SharedMailbox {
+            ref account_id,
+            ref mailbox_id,
+        } = self.sidebar.selected_scope
+        {
+            if let Ok(Some(shared_email)) = self.db.with_conn_sync(|conn| {
+                conn.query_row(
+                    "SELECT email_address FROM shared_mailbox_sync_state \
+                     WHERE account_id = ?1 AND mailbox_id = ?2",
+                    rusqlite::params![account_id, mailbox_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()
+                .map_err(|e| format!("shared mailbox email: {e}"))
+                .map(|opt| opt.flatten())
+            }) {
+                state.set_shared_mailbox_from(account_id, &shared_email);
             }
         }
 

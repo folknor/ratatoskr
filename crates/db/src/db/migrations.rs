@@ -1829,6 +1829,42 @@ static MIGRATIONS: &[Migration] = &[
                 WHERE is_chat_thread = 1;
         "#,
     },
+    Migration {
+        version: 79,
+        description: "FTS5 prefix search index for seen_addresses",
+        sql: r#"
+            CREATE VIRTUAL TABLE IF NOT EXISTS seen_addresses_fts USING fts5(
+                email,
+                display_name,
+                content=seen_addresses,
+                content_rowid=rowid,
+                tokenize='unicode61 tokenchars ''@._-''',
+                prefix='2,3'
+            );
+
+            INSERT INTO seen_addresses_fts(seen_addresses_fts) VALUES('rebuild');
+
+            CREATE TRIGGER IF NOT EXISTS seen_addresses_fts_insert AFTER INSERT ON seen_addresses
+            BEGIN
+                INSERT INTO seen_addresses_fts(rowid, email, display_name)
+                    VALUES (NEW.rowid, NEW.email, COALESCE(NEW.display_name, ''));
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS seen_addresses_fts_delete AFTER DELETE ON seen_addresses
+            BEGIN
+                INSERT INTO seen_addresses_fts(seen_addresses_fts, rowid, email, display_name)
+                    VALUES ('delete', OLD.rowid, OLD.email, COALESCE(OLD.display_name, ''));
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS seen_addresses_fts_update AFTER UPDATE ON seen_addresses
+            BEGIN
+                INSERT INTO seen_addresses_fts(seen_addresses_fts, rowid, email, display_name)
+                    VALUES ('delete', OLD.rowid, OLD.email, COALESCE(OLD.display_name, ''));
+                INSERT INTO seen_addresses_fts(rowid, email, display_name)
+                    VALUES (NEW.rowid, NEW.email, COALESCE(NEW.display_name, ''));
+            END;
+        "#,
+    },
 ];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

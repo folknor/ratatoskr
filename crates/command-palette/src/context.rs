@@ -71,6 +71,19 @@ pub struct CommandContext {
     /// Current search query (if any). Used for "Save as Smart Folder"
     /// availability.
     pub search_query: Option<String>,
+
+    // ── Mailbox rights (from JMAP/IMAP ACL) ─────────────────
+    // `None` = unknown / not reported (allow by default).
+    // `Some(false)` = explicitly denied by the server.
+
+    /// Whether items can be removed from the current mailbox (archive, trash, move).
+    pub may_remove_items: Option<bool>,
+    /// Whether the seen/read flag can be changed.
+    pub may_set_seen: Option<bool>,
+    /// Whether keywords (star, pin, mute) can be changed.
+    pub may_set_keywords: Option<bool>,
+    /// Whether messages can be submitted (reply/forward) from this mailbox.
+    pub may_submit: Option<bool>,
 }
 
 impl CommandContext {
@@ -88,6 +101,26 @@ impl CommandContext {
 
     pub fn is_focused(&self, region: FocusedRegion) -> bool {
         self.focused_region == Some(region)
+    }
+
+    /// Returns `true` unless the mailbox explicitly denies removing items.
+    pub fn allows_remove_items(&self) -> bool {
+        self.may_remove_items != Some(false)
+    }
+
+    /// Returns `true` unless the mailbox explicitly denies setting seen flag.
+    pub fn allows_set_seen(&self) -> bool {
+        self.may_set_seen != Some(false)
+    }
+
+    /// Returns `true` unless the mailbox explicitly denies setting keywords.
+    pub fn allows_set_keywords(&self) -> bool {
+        self.may_set_keywords != Some(false)
+    }
+
+    /// Returns `true` unless the mailbox explicitly denies submission.
+    pub fn allows_submit(&self) -> bool {
+        self.may_submit != Some(false)
     }
 }
 
@@ -114,6 +147,10 @@ mod tests {
             composer_is_open: false,
             focused_region: None,
             search_query: None,
+            may_remove_items: None,
+            may_set_seen: None,
+            may_set_keywords: None,
+            may_submit: None,
         }
     }
 

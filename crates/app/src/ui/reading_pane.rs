@@ -401,7 +401,7 @@ fn thread_view_with_commands<'a>(
 
     // Thread header (subject, expand/collapse) — uses ReadingPaneMessage internally
     col = col.push(
-        thread_header(thread_ref, &pane.message_expanded, &pane.thread_messages, &pane.thread_labels)
+        thread_header(thread_ref, &pane.message_expanded, &pane.thread_messages, &pane.thread_labels, ctx.allows_set_keywords())
             .map(Message::ReadingPane),
     );
 
@@ -494,7 +494,8 @@ fn thread_view<'a>(
 ) -> Element<'a, ReadingPaneMessage> {
     let mut col = column![].spacing(0).width(Length::Fill);
 
-    col = col.push(thread_header(thread_ref, &pane.message_expanded, &pane.thread_messages, &pane.thread_labels));
+    // No command context → allow star by default (non-command path)
+    col = col.push(thread_header(thread_ref, &pane.message_expanded, &pane.thread_messages, &pane.thread_labels, true));
 
     if !pane.thread_attachments.is_empty() {
         col = col.push(attachment_group(&pane.thread_attachments, &pane.deduped_attachments, pane.attachments_collapsed));
@@ -509,19 +510,25 @@ fn thread_header<'a>(
     message_expanded: &'a [bool],
     messages: &'a [ThreadMessage],
     labels: &'a [ResolvedLabel],
+    may_set_keywords: bool,
 ) -> Element<'a, ReadingPaneMessage> {
     let subject = thread_ref.subject.as_deref().unwrap_or("(no subject)");
 
-    let star_icon_style: fn(&iced::Theme) -> text::Style = if thread_ref.is_starred {
+    let star_icon_style: fn(&iced::Theme) -> text::Style = if !may_set_keywords {
+        theme::TextClass::Tertiary.style()
+    } else if thread_ref.is_starred {
         text::warning
     } else {
         text::secondary
     };
 
-    let star_btn = button(icon::star().size(ICON_XL).style(star_icon_style))
-        .on_press(ReadingPaneMessage::ToggleStar)
+    let mut star_btn = button(icon::star().size(ICON_XL).style(star_icon_style))
         .padding(PAD_ICON_BTN)
         .style(theme::ButtonClass::Ghost.style());
+
+    if may_set_keywords {
+        star_btn = star_btn.on_press(ReadingPaneMessage::ToggleStar);
+    }
 
     let toggle_label = if message_expanded.iter().all(|&e| e) {
         "Collapse all"

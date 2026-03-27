@@ -16,7 +16,7 @@
 
 - [x] **Codebase contracts** — *(2026-03-27)* All 24 implicit contracts fixed. See `docs/architecture.md` for the principles and enforcement mechanisms.
 
-- [ ] **App logo in first-launch modal + about page** — `assets/icon.svg` exists but isn't rendered anywhere. Needs iced `svg` feature enabled to use `iced::widget::svg`. SVG preferred over PNG because the icon should be re-colored to match the active theme (e.g. primary color tint). Requires adding `"svg"` to the iced features list in `crates/app/Cargo.toml`.
+- [x] **App logo in first-launch modal + about page** — `assets/icon.svg` exists but isn't rendered anywhere. Needs iced `svg` feature enabled to use `iced::widget::svg`. SVG preferred over PNG because the icon should be re-colored to match the active theme (e.g. primary color tint). Requires adding `"svg"` to the iced features list in `crates/app/Cargo.toml`.
 
 - [x] **Action service: NoOp detection** — *(2026-03-25)* `ActionOutcome::NoOp` variant added. DB helpers return affected row counts. `archive` and `star` use the affected-rows approach to skip provider dispatch + undo tokens when state didn't change. Other actions have the infrastructure (`usize` returns) but don't detect NoOp yet — can be upgraded incrementally per action.
 
@@ -82,7 +82,7 @@ EWS SOAP client, autodiscover routing, offline sync, IMAP NAMESPACE public folde
 Exchange Graph sync + Autodiscover + sidebar integration done. Remaining:
 
 - [ ] **Thread loading on selection** — App handler for `SharedMailboxSelected` event to load navigation and threads for the selected shared mailbox.
-- [ ] **Compose identity auto-selection** — When replying from shared mailbox context, auto-set From to shared mailbox address. `send_as_shared_mailbox()` and `send_on_behalf_of()` APIs exist.
+- [x] **Compose identity auto-selection** — When replying from shared mailbox context, auto-set From to shared mailbox address. `send_as_shared_mailbox()` and `send_on_behalf_of()` APIs exist.
 - [ ] **Gmail delegation support** — Blocked (API limitation). Send-As aliases work.
 - [ ] **Per-mailbox sync depth config** — Currently hardcoded to 30 days. No per-mailbox setting.
 
@@ -90,7 +90,7 @@ Exchange Graph sync + Autodiscover + sidebar integration done. Remaining:
 
 All 6 backend phases complete (discovery, sync, rights, subscription, notifications, identity resolution). Remaining app-crate UI integration:
 
-- [ ] **Rights gating on action buttons** — `NavigationFolder.rights` (`MailboxRightsInfo`) is populated from synced `myRights`. App should check `may_delete`, `may_rename`, `may_submit` etc. before showing action buttons. Especially important for shared/read-only mailboxes where the user lacks write permissions.
+- [x] **Rights gating on action buttons** — `NavigationFolder.rights` (`MailboxRightsInfo`) is populated from synced `myRights`. App should check `may_delete`, `may_rename`, `may_submit` etc. before showing action buttons. Especially important for shared/read-only mailboxes where the user lacks write permissions.
 - [ ] **Subscription toggle in sidebar** — `NavigationFolder.is_subscribed` is populated from JMAP `isSubscribed`. App needs a UI toggle (context menu or button) on shared account labels that calls `JmapOps::subscribe_mailbox()` / `unsubscribe_mailbox()`. These accept an optional `jmap_account_id` for shared accounts.
 - [ ] **Compose identity auto-selection from shared mailbox** — `shared_mailbox_sync_state.email_address` is resolved via JMAP Principals (Phase 6). When replying from a shared mailbox context, compose should query `sync_state::get_shared_mailbox_email()` and auto-set From. Also check `may_submit` from the mailbox rights before offering the identity.
 
@@ -180,7 +180,7 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [x] **IMAP `is_connection_error` missing patterns** — Missing "broken pipe", "reset by peer", "end of file". Also differs between `imap_delta.rs` and `imap_initial.rs` — should be unified. `imap_delta.rs`
 - [x] **IMAP batch delta check loses tail folders on mid-batch disconnect** — If shared session dies halfway through `delta_check_folders`, remaining folders are silently omitted from results. Before reuse, one broken connection only lost one folder. `imap_delta.rs`
 - [x] **IMAP deletion detection skips folder that triggered reconnect** — On error, reconnects and moves to next folder. The failed folder is unchecked until next 10-minute window. `imap_delta.rs`
-- [ ] **`seen_addresses` LIKE %pattern% for 3+ char queries** — FTS5 only covers `contacts` table. `seen_addresses` (potentially 50k+ rows) still does full scan for substring matches. Consider FTS5 on seen_addresses. `contacts.rs`
+- [x] **`seen_addresses` LIKE %pattern% for 3+ char queries** — FTS5 only covers `contacts` table. `seen_addresses` (potentially 50k+ rows) still does full scan for substring matches. Consider FTS5 on seen_addresses. `contacts.rs`
 - [x] **`make_like_pattern` doesn't escape `%` and `_` wildcards** — User input with LIKE wildcards passes through unescaped. Low risk but technically incorrect. `contacts.rs`
 - [x] **Duplicate `make_like_pattern` in two files** — Identical function in `app/db/contacts.rs` and `core/contacts/search.rs`. Extract to shared module.
 - [x] **`fetch_all_flags` doc says "must NOT be SELECTed"** — Stale with session-reuse model. IMAP re-SELECT is harmless. `commands.rs`

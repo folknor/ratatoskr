@@ -495,6 +495,26 @@ impl ComposeState {
         }
     }
 
+    /// Override the From identity for a shared mailbox context.
+    ///
+    /// Inserts a synthetic `AccountInfo` for the shared mailbox email at the
+    /// front of the From dropdown and selects it. The `parent_account_id` is
+    /// the authenticated account that will actually perform the send.
+    pub fn set_shared_mailbox_from(
+        &mut self,
+        parent_account_id: &str,
+        shared_email: &str,
+    ) {
+        let shared_info = AccountInfo {
+            id: parent_account_id.to_string(),
+            email: shared_email.to_string(),
+            display_name: None,
+            account_name: Some(format!("{shared_email} (shared)")),
+        };
+        self.from_accounts.insert(0, shared_info.clone());
+        self.from_account = Some(shared_info);
+    }
+
     /// Returns true if the compose body has user content beyond the
     /// initial quoted text / signature.
     fn has_user_content(&self) -> bool {

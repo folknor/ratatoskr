@@ -130,6 +130,9 @@ pub fn build_context(app: &App) -> CommandContext {
         Some(app.search_query.text().to_string())
     };
 
+    let (may_remove_items, may_set_seen, may_set_keywords, may_submit) =
+        current_mailbox_rights(app);
+
     CommandContext {
         selected_thread_ids,
         active_message_id,
@@ -148,6 +151,38 @@ pub fn build_context(app: &App) -> CommandContext {
         composer_is_open: app.composer_is_open(),
         focused_region: app.focused_region,
         search_query,
+        may_remove_items,
+        may_set_seen,
+        may_set_keywords,
+        may_submit,
+    }
+}
+
+/// Extract mailbox rights from the currently selected navigation folder.
+///
+/// Returns `(may_remove_items, may_set_seen, may_set_keywords, may_submit)`.
+/// All `None` when the folder has no rights data (provider doesn't report ACL,
+/// or we're in a universal/smart folder view).
+fn current_mailbox_rights(
+    app: &App,
+) -> (Option<bool>, Option<bool>, Option<bool>, Option<bool>) {
+    let rights = app
+        .sidebar
+        .selected_label
+        .as_deref()
+        .and_then(|label_id| {
+            app.sidebar.nav_state.as_ref()?.folders.iter().find_map(|f| {
+                if f.id == label_id {
+                    f.rights.as_ref()
+                } else {
+                    None
+                }
+            })
+        });
+
+    match rights {
+        Some(r) => (r.may_remove_items, r.may_set_seen, r.may_set_keywords, r.may_submit),
+        None => (None, None, None, None),
     }
 }
 

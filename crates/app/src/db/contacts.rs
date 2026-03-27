@@ -21,8 +21,8 @@ pub struct ContactMatch {
 
 /// Search contacts, seen addresses, and groups for autocomplete.
 ///
-/// Uses FTS5 prefix matching for the contacts table (with LIKE fallback
-/// if the FTS5 table is unavailable). For seen_addresses and GAL cache,
+/// Uses FTS5 prefix matching for the contacts and seen_addresses tables
+/// (with LIKE fallback if the FTS5 tables are unavailable). For GAL cache,
 /// short queries (1-2 chars) use prefix LIKE (`pattern%`) which can use
 /// a B-tree index; longer queries use substring LIKE (`%pattern%`) for
 /// mid-word matches. Returns up to `limit` results.
@@ -63,12 +63,13 @@ pub fn search_contacts_for_autocomplete(
         )?;
     }
 
-    // Search seen_addresses table (lower priority, fills remaining).
+    // Search seen_addresses table (lower priority, fills remaining) — FTS5 with LIKE fallback.
     #[allow(clippy::cast_possible_wrap)]
     let remaining = limit - results.len() as i64;
     if remaining > 0 {
-        search_seen_addresses(
+        search_seen_addresses_fts_or_like(
             conn,
+            trimmed,
             &like_pattern,
             remaining,
             &mut seen_emails,
@@ -192,14 +193,50 @@ fn search_gal_cache(
     Ok(())
 }
 
-/// Search seen_addresses table for autocomplete matches.
-fn search_seen_addresses(
+/// Search seen_addresses via FTS5 prefix matching, falling back to LIKE if
+/// the FTS5 table is unavailable (e.g. old DB without migration 79).
+fn search_seen_addresses_fts_or_like(
     conn: &Connection,
-    pattern: &str,
+    raw_query: &str,
+    like_pattern: &str,
     limit: i64,
     seen_emails: &mut std::collections::HashSet<String>,
     results: &mut Vec<ContactMatch>,
 ) -> Result<(), String> {
+    let fts_query = build_fts_query(raw_query);
+    if !fts_query.is_empty() {
+        let fts_sql = "SELECT s.email, s.display_name
+                       FROM seen_addresses s
+                       INNER JOIN seen_addresses_fts ON seen_addresses_fts.rowid = s.rowid
+                       WHERE seen_addresses_fts MATCH ?1
+                       ORDER BY s.last_seen_at DESC
+                       LIMIT ?2";
+        match conn.prepare(fts_sql).and_then(|mut stmt| {
+            stmt.query_map(params![&fts_query, limit], |row| {
+                Ok(ContactMatch {
+                    email: row.get("email")?,
+                    display_name: row.get("display_name")?,
+                    is_group: false,
+                    group_id: None,
+                    member_count: None,
+                })
+            })
+            .map(|rows| rows.filter_map(Result::ok).collect::<Vec<_>>())
+        }) {
+            Ok(matches) => {
+                for contact in matches {
+                    let key = contact.email.to_lowercase();
+                    if seen_emails.insert(key) {
+                        results.push(contact);
+                    }
+                }
+                return Ok(());
+            }
+            Err(_) => { /* FTS5 table missing — fall through to LIKE */ }
+        }
+    }
+
+    // LIKE fallback
     let seen_sql = "SELECT email, display_name FROM seen_addresses
                     WHERE email LIKE ?1 ESCAPE '\\' OR display_name LIKE ?1 ESCAPE '\\'
                     ORDER BY last_seen_at DESC
@@ -207,7 +244,7 @@ fn search_seen_addresses(
     let mut seen_stmt =
         conn.prepare(seen_sql).map_err(|e| e.to_string())?;
     let seen_rows = seen_stmt
-        .query_map(params![pattern, limit], |row| {
+        .query_map(params![like_pattern, limit], |row| {
             Ok(ContactMatch {
                 email: row.get("email")?,
                 display_name: row.get("display_name")?,

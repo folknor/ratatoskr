@@ -5,13 +5,12 @@
 
 use std::sync::Arc;
 
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{button, column, container, row, scrollable, svg, text, text_input, Space};
 use iced::{Alignment, Element, Length, Task};
 
 use crate::component::Component;
 use crate::db::Db;
 use crate::font;
-use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets;
@@ -1423,8 +1422,9 @@ impl AddAccountWizard {
             .width(Length::Fill);
 
         if self.is_first_launch {
+            let logo_handle = svg::Handle::from_memory(include_bytes!("../../../../assets/icon.svg"));
             col = col.push(
-                container(icon::mail().size(WELCOME_ICON_SIZE).style(text::primary))
+                container(svg(logo_handle).width(WELCOME_ICON_SIZE).height(WELCOME_ICON_SIZE))
                     .align_x(Alignment::Center),
             );
             col = col.push(Space::new().height(SPACE_SM));

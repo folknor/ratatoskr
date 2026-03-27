@@ -501,22 +501,24 @@ fn register_navigation_categories(out: &mut Vec<CommandDescriptor>) {
 fn register_email(out: &mut Vec<CommandDescriptor>) {
     out.push(with_docs(undoable(desc_kw(
         CommandId::EmailArchive, "Archive", "Email",
-        Some(KeyBinding::key('e')), needs_selection,
+        Some(KeyBinding::key('e')),
+        |ctx| ctx.has_selection() && ctx.allows_remove_items(),
         &["done", "file"],
     )), "Archive", "Remove the thread from inbox without deleting it. Can be undone."));
     out.push(with_docs(undoable(desc_kw(
         CommandId::EmailTrash, "Delete", "Email",
         Some(KeyBinding::key('#')),
-        |ctx| ctx.has_selection() && ctx.thread_in_trash != Some(true),
+        |ctx| ctx.has_selection() && ctx.thread_in_trash != Some(true) && ctx.allows_remove_items(),
         &["delete", "remove", "trash"],
     )), "Delete — Move to Trash", "Move the selected thread to the Trash folder. Can be undone."));
     out.push(with_docs(desc(
         CommandId::EmailPermanentDelete, "Permanently Delete", "Email", None,
-        |ctx| ctx.has_selection() && ctx.thread_in_trash == Some(true),
+        |ctx| ctx.has_selection() && ctx.thread_in_trash == Some(true) && ctx.allows_remove_items(),
     ), "Permanently Delete", "Permanently delete the thread. This cannot be undone. Only available for threads already in Trash."));
     out.push(with_docs(undoable(toggle(
         CommandId::EmailSpam, "Spam", "Not Spam", "Email",
-        Some(KeyBinding::key('!')), needs_selection,
+        Some(KeyBinding::key('!')),
+        |ctx| ctx.has_selection() && ctx.allows_remove_items(),
         |ctx| ctx.thread_in_spam == Some(true),
     )), "Report Spam / Not Spam", "Mark the thread as spam, or remove the spam flag if already marked. Can be undone."));
     register_email_toggles(out);
@@ -527,24 +529,28 @@ fn register_email_toggles(out: &mut Vec<CommandDescriptor>) {
     out.push(with_docs(undoable(with_keywords(
         toggle(
             CommandId::EmailMarkRead, "Mark Read", "Mark Unread", "Email",
-            None, needs_selection,
+            None,
+            |ctx| ctx.has_selection() && ctx.allows_set_seen(),
             |ctx| ctx.thread_is_read == Some(true),
         ),
         &["seen"],
     )), "Mark as Read / Unread", "Toggle the read/unread status of the selected thread. Can be undone."));
     out.push(with_docs(undoable(toggle(
         CommandId::EmailStar, "Star", "Unstar", "Email",
-        Some(KeyBinding::key('s')), needs_selection,
+        Some(KeyBinding::key('s')),
+        |ctx| ctx.has_selection() && ctx.allows_set_keywords(),
         |ctx| ctx.thread_is_starred == Some(true),
     )), "Star / Unstar", "Toggle the star flag on the selected thread. Starred threads appear in the Starred folder. Can be undone."));
     out.push(with_docs(undoable(toggle(
         CommandId::EmailPin, "Pin", "Unpin", "Email",
-        Some(KeyBinding::key('p')), needs_selection,
+        Some(KeyBinding::key('p')),
+        |ctx| ctx.has_selection() && ctx.allows_set_keywords(),
         |ctx| ctx.thread_is_pinned == Some(true),
     )), "Pin / Unpin", "Pin the thread to the top of the thread list. Pinned threads stay visible regardless of sort order. Can be undone."));
     out.push(with_docs(undoable(toggle(
         CommandId::EmailMute, "Mute", "Unmute", "Email",
-        Some(KeyBinding::key('m')), needs_selection,
+        Some(KeyBinding::key('m')),
+        |ctx| ctx.has_selection() && ctx.allows_set_keywords(),
         |ctx| ctx.thread_is_muted == Some(true),
     )), "Mute / Unmute", "Mute the thread so new replies don't bring it back to the inbox. Can be undone."));
 }
@@ -557,7 +563,8 @@ fn register_email_other(out: &mut Vec<CommandDescriptor>) {
     out.push(with_docs(undoable(with_keywords(
         parameterized(
             CommandId::EmailMoveToFolder, "Move", "Email",
-            Some(KeyBinding::key('v')), needs_selection,
+            Some(KeyBinding::key('v')),
+            |ctx| ctx.has_selection() && ctx.allows_remove_items(),
             InputSchema::Single {
                 param: super::input::ParamDef::ListPicker { label: "Folder" },
             },
@@ -601,14 +608,17 @@ fn register_compose(out: &mut Vec<CommandDescriptor>) {
     ), "Compose New Email", "Open the compose window to write a new email."));
     out.push(with_docs(desc_kw(
         CommandId::ComposeReply, "Reply", "Compose",
-        Some(KeyBinding::key('r')), needs_selection,
+        Some(KeyBinding::key('r')),
+        |ctx| ctx.has_selection() && ctx.allows_submit(),
         &["respond"],
     ), "Reply", "Reply to the sender of the selected message."));
-    out.push(with_docs(desc(CommandId::ComposeReplyAll, "Reply All", "Compose", Some(KeyBinding::key('a')), needs_selection),
+    out.push(with_docs(desc(CommandId::ComposeReplyAll, "Reply All", "Compose", Some(KeyBinding::key('a')),
+        |ctx| ctx.has_selection() && ctx.allows_submit()),
         "Reply All", "Reply to all recipients of the selected message."));
     out.push(with_docs(desc_kw(
         CommandId::ComposeForward, "Forward", "Compose",
-        Some(KeyBinding::key('f')), needs_selection,
+        Some(KeyBinding::key('f')),
+        |ctx| ctx.has_selection() && ctx.allows_submit(),
         &["send", "share"],
     ), "Forward", "Forward the selected message to new recipients."));
 }
@@ -758,6 +768,10 @@ mod tests {
             composer_is_open: false,
             focused_region: None,
             search_query: None,
+            may_remove_items: None,
+            may_set_seen: None,
+            may_set_keywords: None,
+            may_submit: None,
         }
     }
 
