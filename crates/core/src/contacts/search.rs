@@ -7,7 +7,7 @@
 
 use rusqlite::{Connection, params};
 
-use crate::db::build_fts_query;
+use crate::db::{build_fts_query, make_like_pattern};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -86,17 +86,6 @@ pub fn search_contacts_unified(
     Ok(results)
 }
 
-/// Build LIKE pattern: short queries (1-2 chars) use prefix match
-/// (`pattern%`) which can use a B-tree index; longer queries use
-/// substring match (`%pattern%`) for mid-word hits.
-fn make_like_pattern(trimmed: &str) -> String {
-    if trimmed.len() <= 2 {
-        format!("{trimmed}%")
-    } else {
-        format!("%{trimmed}%")
-    }
-}
-
 /// Search contacts via FTS5 prefix matching, falling back to LIKE if
 /// the FTS5 table is unavailable.
 fn search_contacts_fts_or_like(
@@ -157,7 +146,7 @@ fn search_contacts_table(
     results: &mut Vec<ContactSearchResult>,
 ) -> Result<(), String> {
     let sql = "SELECT email, display_name, source FROM contacts
-               WHERE email LIKE ?1 OR display_name LIKE ?1
+               WHERE email LIKE ?1 ESCAPE '\\' OR display_name LIKE ?1 ESCAPE '\\'
                ORDER BY last_contacted_at DESC NULLS LAST, display_name ASC
                LIMIT ?2";
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
@@ -189,7 +178,7 @@ fn search_seen_addresses_table(
     results: &mut Vec<ContactSearchResult>,
 ) -> Result<(), String> {
     let sql = "SELECT email, display_name FROM seen_addresses
-               WHERE email LIKE ?1 OR display_name LIKE ?1
+               WHERE email LIKE ?1 ESCAPE '\\' OR display_name LIKE ?1 ESCAPE '\\'
                ORDER BY last_seen_at DESC
                LIMIT ?2";
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
@@ -223,7 +212,7 @@ fn search_groups_table(
                       (SELECT COUNT(*) FROM contact_group_members m
                        WHERE m.group_id = g.id) AS member_count
                FROM contact_groups g
-               WHERE g.name LIKE ?1
+               WHERE g.name LIKE ?1 ESCAPE '\\'
                ORDER BY g.name ASC
                LIMIT ?2";
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;

@@ -179,20 +179,20 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **`get_threads_for_shared_mailbox` missing `is_chat_thread = 0`** — Shared mailbox thread query doesn't exclude chat threads. Low risk (shared mailboxes unlikely to have chat contacts). `scoped_queries.rs:get_threads_for_shared_mailbox`
 - [ ] **Self-to-self threads can misclassify as chat** — If user designates one of their own aliases, a thread between two of the user's own accounts could qualify as "1:1 chat". Edge case.
 - [x] **`LOWER()` on NOCASE columns** — Several chat queries use `LOWER()` on columns already declared COLLATE NOCASE, defeating index use. Remove the redundant `LOWER()` calls.
-- [ ] **IMAP `is_connection_error` missing patterns** — Missing "broken pipe", "reset by peer", "end of file". Also differs between `imap_delta.rs` and `imap_initial.rs` — should be unified. `imap_delta.rs`
-- [ ] **IMAP batch delta check loses tail folders on mid-batch disconnect** — If shared session dies halfway through `delta_check_folders`, remaining folders are silently omitted from results. Before reuse, one broken connection only lost one folder. `imap_delta.rs`
-- [ ] **IMAP deletion detection skips folder that triggered reconnect** — On error, reconnects and moves to next folder. The failed folder is unchecked until next 10-minute window. `imap_delta.rs`
+- [x] **IMAP `is_connection_error` missing patterns** — Missing "broken pipe", "reset by peer", "end of file". Also differs between `imap_delta.rs` and `imap_initial.rs` — should be unified. `imap_delta.rs`
+- [x] **IMAP batch delta check loses tail folders on mid-batch disconnect** — If shared session dies halfway through `delta_check_folders`, remaining folders are silently omitted from results. Before reuse, one broken connection only lost one folder. `imap_delta.rs`
+- [x] **IMAP deletion detection skips folder that triggered reconnect** — On error, reconnects and moves to next folder. The failed folder is unchecked until next 10-minute window. `imap_delta.rs`
 - [ ] **`seen_addresses` LIKE %pattern% for 3+ char queries** — FTS5 only covers `contacts` table. `seen_addresses` (potentially 50k+ rows) still does full scan for substring matches. Consider FTS5 on seen_addresses. `contacts.rs`
-- [ ] **`make_like_pattern` doesn't escape `%` and `_` wildcards** — User input with LIKE wildcards passes through unescaped. Low risk but technically incorrect. `contacts.rs`
-- [ ] **Duplicate `make_like_pattern` in two files** — Identical function in `app/db/contacts.rs` and `core/contacts/search.rs`. Extract to shared module.
-- [ ] **`fetch_all_flags` doc says "must NOT be SELECTed"** — Stale with session-reuse model. IMAP re-SELECT is harmless. `commands.rs`
-- [ ] **Chat timeline pagination cursor** — Currently timestamp-only (`date < ?`). Should use `(date, message_id)` tuple to avoid skipping/duplicating messages with equal timestamps. `chat.rs:get_chat_timeline`
-- [ ] **ChatTimeline should implement Component trait** — Currently has ad-hoc `update()`/`view()` methods. UI.md says components implement the shared Component trait. `chat_timeline.rs`
+- [x] **`make_like_pattern` doesn't escape `%` and `_` wildcards** — User input with LIKE wildcards passes through unescaped. Low risk but technically incorrect. `contacts.rs`
+- [x] **Duplicate `make_like_pattern` in two files** — Identical function in `app/db/contacts.rs` and `core/contacts/search.rs`. Extract to shared module.
+- [x] **`fetch_all_flags` doc says "must NOT be SELECTed"** — Stale with session-reuse model. IMAP re-SELECT is harmless. `commands.rs`
+- [x] **Chat timeline pagination cursor** — Currently timestamp-only (`date < ?`). Should use `(date, message_id)` tuple to avoid skipping/duplicating messages with equal timestamps. `chat.rs:get_chat_timeline`
+- [x] **ChatTimeline should implement Component trait** — Currently has ad-hoc `update()`/`view()` methods. UI.md says components implement the shared Component trait. `chat_timeline.rs`
 - [ ] **Missing sidebar divider in chat layout** — Normal mail view has a draggable divider between sidebar and content. Chat view omits it. `main.rs` view branching
 - [ ] **Search state persists across chat entry/exit** — If user enters chat from search mode, search state persists. Exiting chat may return to stale search. `handlers/chat.rs:enter_chat_view`
-- [ ] **Subject change indicator triggers on Re: variations** — `needs_subject_indicator` compares raw subjects. Should normalize by stripping Re:/Fwd: prefixes. `chat_timeline.rs`
-- [ ] **`scroll_id` stored but never attached to scrollable** — Deferred scroll-to-bottom needs a usable hook. `chat_timeline.rs`
-- [ ] **Chat view command context classifies as Inbox** — `view_type_from_target` returns `ViewType::Inbox` for `Chat` target. Palette/command availability logic thinks user is in Inbox. `command_dispatch.rs`
+- [x] **Subject change indicator triggers on Re: variations** — `needs_subject_indicator` compares raw subjects. Should normalize by stripping Re:/Fwd: prefixes. `chat_timeline.rs`
+- [x] **`scroll_id` stored but never attached to scrollable** — Deferred scroll-to-bottom needs a usable hook. `chat_timeline.rs`
+- [x] **Chat view command context classifies as Inbox** — `view_type_from_target` returns `ViewType::Inbox` for `Chat` target. Palette/command availability logic thinks user is in Inbox. `command_dispatch.rs`
 
 ## Security Findings (review agent, 2026-03-25)
 

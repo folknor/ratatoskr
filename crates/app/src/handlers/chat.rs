@@ -51,7 +51,7 @@ impl App {
                 let Some(ref timeline) = self.chat_timeline else {
                     return Task::none();
                 };
-                let oldest = timeline.messages.first().map(|m| m.date);
+                let oldest = timeline.messages.first().map(|m| (m.date, m.message_id.clone()));
                 let Some(before) = oldest else {
                     return Task::none();
                 };

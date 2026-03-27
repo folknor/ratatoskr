@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use iced::widget::{column, container, row, scrollable, text, Space};
 use iced::{Alignment, Element, Length};
 
+use crate::component::Component;
 use crate::ui::layout::*;
 use crate::ui::theme;
 
@@ -31,7 +32,6 @@ pub struct ChatTimeline {
     pub messages: Vec<ChatMessage>,
     pub loading: bool,
     pub contact_email: String,
-    pub scroll_id: String,
     expanded: HashSet<String>,
 }
 
@@ -40,13 +40,17 @@ impl ChatTimeline {
         Self {
             messages: Vec::new(),
             loading: true,
-            scroll_id: format!("chat-timeline-{contact_email}"),
             contact_email,
             expanded: HashSet::new(),
         }
     }
+}
 
-    pub fn update(
+impl Component for ChatTimeline {
+    type Message = ChatTimelineMessage;
+    type Event = ChatTimelineEvent;
+
+    fn update(
         &mut self,
         message: ChatTimelineMessage,
     ) -> (iced::Task<ChatTimelineMessage>, Option<ChatTimelineEvent>) {
@@ -65,7 +69,7 @@ impl ChatTimeline {
         }
     }
 
-    pub fn view(&self) -> Element<'_, ChatTimelineMessage> {
+    fn view(&self) -> Element<'_, ChatTimelineMessage> {
         if self.loading && self.messages.is_empty() {
             return container(
                 text("Loading...").size(TEXT_SM).style(theme::TextClass::Muted.style()),
@@ -208,7 +212,27 @@ fn needs_date_separator(prev: &ChatMessage, curr: &ChatMessage) -> bool {
 
 fn needs_subject_indicator(prev: &ChatMessage, curr: &ChatMessage) -> bool {
     prev.thread_id != curr.thread_id
-        && curr.subject != prev.subject
+        && normalize_subject(curr.subject.as_deref().unwrap_or_default())
+            != normalize_subject(prev.subject.as_deref().unwrap_or_default())
+}
+
+/// Strip leading Re:/Fwd:/Fw: prefixes (case-insensitive, repeated) so that
+/// "Re: hello" and "Re: Re: hello" compare as equal.
+fn normalize_subject(s: &str) -> String {
+    let mut s = s.trim();
+    loop {
+        let lower = s.to_lowercase();
+        if let Some(rest) = lower
+            .strip_prefix("re:")
+            .or_else(|| lower.strip_prefix("fwd:"))
+            .or_else(|| lower.strip_prefix("fw:"))
+        {
+            s = s[s.len() - rest.len()..].trim_start();
+        } else {
+            break;
+        }
+    }
+    s.to_lowercase()
 }
 
 fn local_date(timestamp: i64) -> chrono::NaiveDate {

@@ -33,17 +33,7 @@ const CIRCUIT_BREAKER_MAX_FAILURES: u32 = 5;
 /// Delay (ms) between folder syncs to avoid connection bursts.
 const INTER_FOLDER_DELAY_MS: u64 = 1_000;
 
-fn is_connection_error(err: &str) -> bool {
-    let lower = err.to_lowercase();
-    lower.contains("timed out")
-        || lower.contains("connection")
-        || lower.contains("tcp")
-        || lower.contains("tls")
-        || lower.contains("dns")
-        || lower.contains("econnrefused")
-        || lower.contains("network")
-        || lower.contains("socket")
-}
+use super::is_connection_error;
 
 fn compute_since_date(days_back: i64) -> String {
     use chrono::{Duration, Utc};

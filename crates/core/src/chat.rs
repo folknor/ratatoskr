@@ -162,7 +162,7 @@ pub async fn get_chat_timeline(
     email: &str,
     user_emails: &[String],
     limit: usize,
-    before: Option<i64>,
+    before: Option<(i64, String)>,
 ) -> Result<Vec<ChatMessage>, String> {
     let email = email.to_lowercase();
     let user_emails: Vec<String> = user_emails.iter().map(|e| e.to_lowercase()).collect();
@@ -173,8 +173,9 @@ pub async fn get_chat_timeline(
         // Single query: join messages against chat threads for this contact,
         // ORDER BY date DESC LIMIT N to get the most recent N messages,
         // then reverse in Rust for chronological order.
-        let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(before_ts) =
-            before
+        let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(
+            (before_ts, before_id),
+        ) = before
         {
             (
                 "SELECT m.id, m.account_id, m.thread_id, m.from_address, m.from_name, \
@@ -183,13 +184,15 @@ pub async fn get_chat_timeline(
                  INNER JOIN threads t ON t.id = m.thread_id AND t.account_id = m.account_id \
                  INNER JOIN thread_participants tp \
                    ON tp.account_id = m.account_id AND tp.thread_id = m.thread_id \
-                 WHERE t.is_chat_thread = 1 AND tp.email = ?1 AND m.date < ?2 \
-                 ORDER BY m.date DESC \
-                 LIMIT ?3"
+                 WHERE t.is_chat_thread = 1 AND tp.email = ?1 \
+                   AND (m.date < ?2 OR (m.date = ?2 AND m.id < ?3)) \
+                 ORDER BY m.date DESC, m.id DESC \
+                 LIMIT ?4"
                     .to_string(),
                 vec![
                     Box::new(email.clone()),
                     Box::new(before_ts),
+                    Box::new(before_id),
                     Box::new(limit_i64),
                 ],
             )
@@ -202,7 +205,7 @@ pub async fn get_chat_timeline(
                  INNER JOIN thread_participants tp \
                    ON tp.account_id = m.account_id AND tp.thread_id = m.thread_id \
                  WHERE t.is_chat_thread = 1 AND tp.email = ?1 \
-                 ORDER BY m.date DESC \
+                 ORDER BY m.date DESC, m.id DESC \
                  LIMIT ?2"
                     .to_string(),
                 vec![Box::new(email.clone()), Box::new(limit_i64)],

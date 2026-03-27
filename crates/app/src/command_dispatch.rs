@@ -224,7 +224,7 @@ fn view_type_from_target(
         }
         NavigationTarget::Search { .. } => (ViewType::Search, None),
         NavigationTarget::PinnedSearch { .. } => (ViewType::PinnedSearch, None),
-        NavigationTarget::Chat { .. } => (ViewType::Inbox, None), // Chat view doesn't map to a ViewType
+        NavigationTarget::Chat { .. } => (ViewType::Chat, None),
     }
 }
 

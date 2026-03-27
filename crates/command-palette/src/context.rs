@@ -40,6 +40,7 @@ pub enum ViewType {
     Attachments,
     Search,
     PinnedSearch,
+    Chat,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

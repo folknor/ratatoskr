@@ -786,6 +786,26 @@ fn search_contacts_like(
 /// `"john sm"` → `"john* sm*"` — each token gets a trailing `*` for prefix matching.
 /// FTS5 operators are stripped to prevent injection. Email-significant characters
 /// (`@`, `.`, `-`, `_`) are preserved since the tokenizer includes them via `tokenchars`.
+/// Build a LIKE pattern from user input, escaping SQL LIKE wildcards.
+///
+/// Short queries (1-2 chars) produce a prefix pattern (`input%`) which can
+/// use a B-tree index; longer queries produce a substring pattern
+/// (`%input%`) for mid-word hits.
+///
+/// `%` and `_` in the input are escaped with `\` so they match literally.
+/// Callers **must** append `ESCAPE '\'` to the SQL LIKE clause.
+pub fn make_like_pattern(trimmed: &str) -> String {
+    // Escape LIKE wildcards (order matters: escape the escape char first
+    // if we ever used one, but `\` isn't a LIKE wildcard so just escape
+    // `%` and `_`).
+    let escaped = trimmed.replace('%', r"\%").replace('_', r"\_");
+    if trimmed.len() <= 2 {
+        format!("{escaped}%")
+    } else {
+        format!("%{escaped}%")
+    }
+}
+
 pub fn build_fts_query(raw: &str) -> String {
     raw.split_whitespace()
         .map(|token| {

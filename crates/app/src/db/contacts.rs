@@ -1,6 +1,6 @@
 use rusqlite::{Connection, params};
 
-use ratatoskr_core::db::build_fts_query;
+use ratatoskr_core::db::{build_fts_query, make_like_pattern};
 
 use super::connection::Db;
 
@@ -86,17 +86,6 @@ pub fn search_contacts_for_autocomplete(
     Ok(results)
 }
 
-/// Build LIKE pattern: short queries (1-2 chars) use prefix match
-/// (`pattern%`) which can use a B-tree index; longer queries use
-/// substring match (`%pattern%`) for mid-word hits.
-fn make_like_pattern(trimmed: &str) -> String {
-    if trimmed.len() <= 2 {
-        format!("{trimmed}%")
-    } else {
-        format!("%{trimmed}%")
-    }
-}
-
 /// Search contacts via FTS5 prefix matching, falling back to LIKE if
 /// the FTS5 table is unavailable (e.g. old DB without migration 32).
 fn search_contacts_fts_or_like(
@@ -143,7 +132,7 @@ fn search_contacts_fts_or_like(
 
     // LIKE fallback
     let like_sql = "SELECT email, display_name FROM contacts
-                    WHERE email LIKE ?1 OR display_name LIKE ?1
+                    WHERE email LIKE ?1 ESCAPE '\\' OR display_name LIKE ?1 ESCAPE '\\'
                     ORDER BY last_contacted_at DESC NULLS LAST,
                              display_name ASC
                     LIMIT ?2";
@@ -178,7 +167,7 @@ fn search_gal_cache(
     results: &mut Vec<ContactMatch>,
 ) -> Result<(), String> {
     let sql = "SELECT email, display_name FROM gal_cache
-               WHERE email LIKE ?1 OR display_name LIKE ?1
+               WHERE email LIKE ?1 ESCAPE '\\' OR display_name LIKE ?1 ESCAPE '\\'
                ORDER BY display_name ASC
                LIMIT ?2";
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
@@ -212,7 +201,7 @@ fn search_seen_addresses(
     results: &mut Vec<ContactMatch>,
 ) -> Result<(), String> {
     let seen_sql = "SELECT email, display_name FROM seen_addresses
-                    WHERE email LIKE ?1 OR display_name LIKE ?1
+                    WHERE email LIKE ?1 ESCAPE '\\' OR display_name LIKE ?1 ESCAPE '\\'
                     ORDER BY last_seen_at DESC
                     LIMIT ?2";
     let mut seen_stmt =
@@ -250,7 +239,7 @@ fn search_groups(
                 (SELECT COUNT(*) FROM contact_group_members m
                  WHERE m.group_id = g.id) AS member_count
          FROM contact_groups g
-         WHERE g.name LIKE ?1
+         WHERE g.name LIKE ?1 ESCAPE '\\'
          ORDER BY g.name ASC
          LIMIT ?2";
     let mut stmt =
@@ -437,7 +426,8 @@ fn load_contacts_filtered(
     filter: &str,
 ) -> Result<Vec<ContactEntry>, String> {
     let trimmed = filter.trim();
-    let pattern = format!("%{trimmed}%");
+    let escaped = trimmed.replace('%', r"\%").replace('_', r"\_");
+    let pattern = format!("%{escaped}%");
 
     // Single query that JOINs contacts with their group memberships.
     let sql = if trimmed.is_empty() {
@@ -466,9 +456,9 @@ fn load_contacts_filtered(
            ON m.member_type = 'email' AND m.member_value = c.email
          LEFT JOIN contact_groups g ON g.id = m.group_id
          WHERE c.source != 'seen'
-           AND (c.email LIKE ?1
-                OR c.display_name LIKE ?1
-                OR c.company LIKE ?1)
+           AND (c.email LIKE ?1 ESCAPE '\\'
+                OR c.display_name LIKE ?1 ESCAPE '\\'
+                OR c.company LIKE ?1 ESCAPE '\\')
          GROUP BY c.id
          ORDER BY c.last_contacted_at DESC NULLS LAST,
                   c.display_name ASC
@@ -518,7 +508,8 @@ fn load_groups_filtered(
     filter: &str,
 ) -> Result<Vec<GroupEntry>, String> {
     let trimmed = filter.trim();
-    let pattern = format!("%{trimmed}%");
+    let escaped = trimmed.replace('%', r"\%").replace('_', r"\_");
+    let pattern = format!("%{escaped}%");
 
     let sql = if trimmed.is_empty() {
         "SELECT g.id, g.name, g.created_at, g.updated_at,
@@ -532,7 +523,7 @@ fn load_groups_filtered(
                 (SELECT COUNT(*) FROM contact_group_members m
                  WHERE m.group_id = g.id) AS member_count
          FROM contact_groups g
-         WHERE g.name LIKE ?1
+         WHERE g.name LIKE ?1 ESCAPE '\\'
          ORDER BY g.updated_at DESC
          LIMIT 100"
     };

@@ -28,16 +28,7 @@ const CIRCUIT_BREAKER_MAX_FAILURES: u32 = 5;
 /// UID SEARCH ALL can be expensive on large folders, so we throttle it.
 const DELETION_CHECK_INTERVAL_SECS: i64 = 600; // 10 minutes
 
-fn is_connection_error(err: &str) -> bool {
-    let lower = err.to_lowercase();
-    lower.contains("timed out")
-        || lower.contains("connection")
-        || lower.contains("tcp")
-        || lower.contains("tls")
-        || lower.contains("dns")
-        || lower.contains("network")
-        || lower.contains("socket")
-}
+use super::is_connection_error;
 
 fn compute_since_date(days_back: i64) -> String {
     use chrono::{Duration, Utc};
@@ -300,7 +291,12 @@ pub async fn imap_delta_sync(
     })
 }
 
-/// Batch delta check with fallback to per-folder.
+/// Batch delta check with reconnect for missed folders.
+///
+/// Opens a single IMAP session and checks all folders. If the session dies
+/// mid-batch (connection error), attempts one reconnect and retries only the
+/// folders that were missed. Falls back to per-folder checks if the batch
+/// call fails entirely.
 async fn batch_delta_check(
     config: &ImapConfig,
     requests: &[DeltaCheckRequest],
@@ -317,12 +313,55 @@ async fn batch_delta_check(
 
     match result {
         Ok(results) => {
+            let mut map: HashMap<String, DeltaCheckResult> =
+                results.into_iter().map(|r| (r.folder.clone(), r)).collect();
+
+            // Check for folders that were silently skipped (connection died mid-batch)
+            let missing: Vec<&DeltaCheckRequest> = requests
+                .iter()
+                .filter(|r| !map.contains_key(&r.folder))
+                .collect();
+
+            if !missing.is_empty() {
+                log::warn!(
+                    "[sync] Batch delta: {}/{} folders missed, reconnecting for remaining",
+                    missing.len(),
+                    requests.len()
+                );
+                // Attempt one reconnect and retry missed folders
+                match connect(config).await {
+                    Ok(mut session) => {
+                        match client::delta_check_folders(&mut session, &missing.iter().copied().cloned().collect::<Vec<_>>()).await {
+                            Ok(retry_results) => {
+                                for r in retry_results {
+                                    map.insert(r.folder.clone(), r);
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("[sync] Retry batch delta failed, per-folder fallback: {e}");
+                                for req in &missing {
+                                    if let Some(saved) = state_map.get(&req.folder) {
+                                        if let Ok(r) = per_folder_check(config, &req.folder, saved).await {
+                                            map.insert(r.folder.clone(), r);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), session.logout()).await;
+                    }
+                    Err(e) => {
+                        log::error!("[sync] Reconnect for missed folders failed: {e}");
+                    }
+                }
+            }
+
             log::info!(
                 "[sync] Batch delta: {}/{} folders checked",
-                results.len(),
+                map.len(),
                 existing_folders.len()
             );
-            results.into_iter().map(|r| (r.folder.clone(), r)).collect()
+            map
         }
         Err(e) => {
             log::warn!("[sync] Batch delta failed, per-folder fallback: {e}");
@@ -1068,11 +1107,55 @@ pub async fn run_deletion_detection(
                     "[sync] Deletion detection failed for {}: {e}",
                     folder.path
                 );
-                // Connection may be broken — try to reconnect for remaining folders
+                // Connection may be broken — try to reconnect and retry the failed folder
                 if is_connection_error(&e) {
                     log::info!("[sync] Reconnecting for remaining deletion checks...");
                     match connect(config).await {
-                        Ok(s) => session = s,
+                        Ok(s) => {
+                            session = s;
+                            // Retry the folder that triggered the reconnect
+                            match detect_deleted_on_session(
+                                &mut session,
+                                &folder.raw_path,
+                                account_id,
+                                db,
+                            )
+                            .await
+                            {
+                                Ok(deleted_ids) if !deleted_ids.is_empty() => {
+                                    if let Err(e) = body_store.delete(deleted_ids.clone()).await {
+                                        log::warn!("[sync] Failed to delete bodies for removed messages: {e}");
+                                    }
+                                    let id_refs: Vec<&str> =
+                                        deleted_ids.iter().map(String::as_str).collect();
+                                    if let Err(e) = search.delete_messages_batch(&id_refs).await {
+                                        log::warn!("[sync] Failed to remove deleted messages from search: {e}");
+                                    }
+                                    let aid = account_id.to_string();
+                                    let ids = deleted_ids;
+                                    match db
+                                        .with_conn(move |conn| {
+                                            sync_pipeline::remove_deleted_messages(conn, &aid, &ids)
+                                        })
+                                        .await
+                                    {
+                                        Ok(affected) => all_affected.extend(affected),
+                                        Err(e) => {
+                                            log::error!(
+                                                "[sync] Failed to remove deleted messages from DB: {e}"
+                                            );
+                                        }
+                                    }
+                                }
+                                Ok(_) => {}
+                                Err(e2) => {
+                                    log::warn!(
+                                        "[sync] Retry deletion detection for {} also failed: {e2}",
+                                        folder.path
+                                    );
+                                }
+                            }
+                        }
                         Err(e2) => {
                             log::error!("[sync] Reconnect failed, aborting deletion detection: {e2}");
                             break;
