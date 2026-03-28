@@ -18,6 +18,11 @@
 
 Multi-provider email client with calendar and contacts. Connects to Gmail, Microsoft Exchange, JMAP, and IMAP accounts from a single native UI built on [iced](https://iced.rs).
 
+**Not ready for production use - note the lack of releases!**
+
+Built with LLMs. See [LLM.md](LLM.md).
+
+
 ## Features
 
 **Email**
