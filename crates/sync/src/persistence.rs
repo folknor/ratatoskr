@@ -276,18 +276,23 @@ pub fn maybe_update_chat_state(
         .ok();
 
     let Some(ref chat_email) = chat_email else {
-        // No chat contact in this thread — ensure flag is cleared
+        // No chat contact in this thread — clear flag and remove stale summary
         tx.execute(
             "UPDATE threads SET is_chat_thread = 0 \
              WHERE account_id = ?1 AND id = ?2 AND is_chat_thread = 1",
             rusqlite::params![account_id, thread_id],
         )
         .map_err(|e| format!("clear chat flag: {e}"))?;
+        tx.execute(
+            "DELETE FROM chat_contacts WHERE account_id = ?1 AND thread_id = ?2",
+            rusqlite::params![account_id, thread_id],
+        )
+        .map_err(|e| format!("clear stale chat_contacts: {e}"))?;
         return Ok(());
     };
 
     // Defensive: if the chat contact email is one of the user's own emails,
-    // this is not a valid 1:1 chat — clear the flag and bail.
+    // this is not a valid 1:1 chat — clear the flag and remove stale summary.
     if user_emails.iter().any(|ue| ue == chat_email) {
         tx.execute(
             "UPDATE threads SET is_chat_thread = 0 \
@@ -295,6 +300,11 @@ pub fn maybe_update_chat_state(
             rusqlite::params![account_id, thread_id],
         )
         .map_err(|e| format!("clear chat flag (self-contact): {e}"))?;
+        tx.execute(
+            "DELETE FROM chat_contacts WHERE account_id = ?1 AND thread_id = ?2",
+            rusqlite::params![account_id, thread_id],
+        )
+        .map_err(|e| format!("clear stale chat_contacts (self-contact): {e}"))?;
         return Ok(());
     }
 
@@ -460,6 +470,11 @@ pub fn delete_messages_and_cleanup_threads(
                 rusqlite::params![tid, account_id],
             )
             .map_err(|e| format!("delete orphan thread participants: {e}"))?;
+            tx.execute(
+                "DELETE FROM chat_contacts WHERE thread_id = ?1 AND account_id = ?2",
+                rusqlite::params![tid, account_id],
+            )
+            .map_err(|e| format!("delete orphan chat_contacts: {e}"))?;
         } else {
             // Re-aggregate thread fields from remaining messages
             let aggregate = compute_thread_aggregate(tx, account_id, tid)?;

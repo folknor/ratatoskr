@@ -369,9 +369,10 @@ fn build_toggle_undo_payloads(
     plan: &ActionExecutionPlan,
     outcomes: &[ActionOutcome],
 ) -> Vec<MailUndoPayload> {
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
-    let mut by_key: HashMap<(&str, bool), Vec<String>> = HashMap::new();
+    // BTreeMap for deterministic payload order (C8).
+    let mut by_key: BTreeMap<(&str, bool), Vec<String>> = BTreeMap::new();
     for (mutation, outcome) in plan.optimistic.iter().zip(outcomes.iter()) {
         if !(outcome.is_success() || outcome.is_local_only()) {
             continue;
@@ -423,9 +424,10 @@ fn build_standard_undo_payloads(
     plan: &ActionExecutionPlan,
     outcomes: &[ActionOutcome],
 ) -> Vec<MailUndoPayload> {
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
-    let mut by_account: HashMap<&str, Vec<String>> = HashMap::new();
+    // BTreeMap for deterministic payload order (C8).
+    let mut by_account: BTreeMap<&str, Vec<String>> = BTreeMap::new();
     for ((account_id, thread_id, _), outcome) in plan.operations.iter().zip(outcomes.iter()) {
         if !(outcome.is_success() || outcome.is_local_only()) {
             continue;

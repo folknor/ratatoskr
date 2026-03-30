@@ -127,7 +127,6 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 ## Bug Hunt Findings (review agent, 2026-03-27)
 
-- [ ] **Chat summary stale when thread stops qualifying** — Early-return paths clear `is_chat_thread` but don't recompute `chat_contacts` summary. Thread deletion also skips summary update.
 - [ ] **Scope dropdown missing public folder entries** — Dropdown has All Accounts + accounts + shared mailboxes but no public folders.
 
 ## Security / Bug Findings (unfixed)
