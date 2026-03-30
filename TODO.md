@@ -50,9 +50,25 @@ Features with backend complete but UI or integration work remaining. Each refere
 
 ### Labels Unification — `docs/labels-unification/problem-statement.md`
 
-Phases 1-5 complete (schema, Exchange/IMAP/JMAP sync, local dispatch + provider write-back, sidebar). Remaining:
+Phases 1-6 complete (backend unified). **10 discrepancies remain** — see `docs/labels-unification/discrepancies.md`. Critical: command palette rejects non-Gmail label operations, palette queries use legacy type filtering. Also:
 
 - [ ] **Label picker overlay** — Triggered from reading pane or command palette. Lists all available tag-type labels with colors for apply/remove.
+
+### Search — `docs/search/problem-statement.md`
+
+Backend pipeline exists (parser, SQL builder, Tantivy, unified router). **29 discrepancies remain** — see `docs/search/discrepancies.md`. Critical: combined path applies free text in SQL before Tantivy ranking, Tantivy-only results show wrong message metadata, date boundaries inconsistent across engines. Also typeahead, pinned search lifecycle, and smart folder management gaps.
+
+### Calendar — `docs/calendar/problem-statement.md`
+
+Views, editor, pop-out, sidebar all partially implemented. **39 discrepancies remain** — see `docs/calendar/discrepancies.md`. Critical: new event creation broken (no calendar selector), calendar sync never triggered from app, timezone handling treats everything as UTC, two competing CalDAV implementations. Also drag interactions, RSVP actions, reminder system, meeting invite detection.
+
+### Generic OAuth — `docs/generic-oauth/problem-statement.md`
+
+Core OIDC discovery + OAUTHBEARER implemented. **6 discrepancies remain** — see `docs/generic-oauth/discrepancies.md`. Critical: re-auth broken for generic/OIDC providers (registry lookup fails for non-built-in provider IDs). Also no manual issuer URL flow, no client ID entry, JMAP OAuth unsupported.
+
+### Chats — `docs/chats/problem-statement.md`
+
+Backend plumbing complete (schema, sync, core APIs, timeline view). Feature unreachable by users. **7 discrepancies remain** — see `docs/chats/discrepancies.md`. Critical: no sidebar entry point, no body text rendering, no mark-read, no inline compose.
 
 ### Tracking Blocking — `docs/roadmap/tracking-blocking.md`
 

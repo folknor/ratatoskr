@@ -1,103 +1,122 @@
-# Calendar: Discrepancies
+# Calendar: Spec vs. Code Discrepancies
 
-Audit of `docs/calendar/problem-statement.md` vs codebase. Updated 2026-03-22.
+Audit date: 2026-03-30
 
-## A. Data Model / Backend — RESOLVED
+---
 
-All items resolved.
+## Remaining Discrepancies
 
-| # | Gap | Status | Resolution |
-|---|-----|--------|------------|
-| A1 | v63 schema fields not surfaced in types | ✅ Resolved | `DbCalendarEvent` + `DbCalendar` types now include all v63 fields. `FromRow` impls updated. |
-| A2 | `SELECT *` in calendar queries | ✅ Resolved | All calendar queries use explicit column lists via `CALENDAR_COLS`, `EVENT_COLS`, `ATTENDEE_COLS`, `REMINDER_COLS` constants. |
-| A3 | No FK constraints / CASCADE on attendees+reminders | ✅ Resolved | All delete paths (`db_delete_calendar_event`, `delete_calendar_event_sync`, `db_delete_event_by_remote_id`, `db_delete_events_for_calendar`) now cascade to `calendar_attendees` and `calendar_reminders`. |
-| A4 | Availability + Visibility fields missing | ✅ Resolved | Migration v65 adds `availability TEXT` and `visibility TEXT` columns. Fields in types, `FromRow`, `CalendarEventData`, editor UI. |
-| A5 | Recurrence expansion missing | ✅ Resolved | `expand_recurrence()` in `calendars.rs` expands DAILY/WEEKLY/MONTHLY/YEARLY with INTERVAL/COUNT/UNTIL into concrete instances for view rendering. |
-| A6 | `calendar_default_view` setting never read | ✅ Resolved | `CalendarState::with_default_view()` reads setting from DB at boot via `with_conn_sync`. |
+### High
 
-## B. Mode Switcher / Navigation — MOSTLY RESOLVED
+1. **New event creation appears broken.** Editor never gives the user a real calendar selector. Save path requires a `calendar_id` and falls back to `""` for new events. `create_calendar_event()` then requires that ID to resolve a provider calendar. A plain "New Event" save has no valid calendar target.
 
-| # | Gap | Status | Resolution |
-|---|-----|--------|------------|
-| B1 | View switcher in wrong location | ✅ Resolved | D/WW/W/M buttons now render in the sidebar header row (right of mode toggle) when in calendar mode. Sidebar conditionally switches between scope dropdown (mail mode) and view switcher (calendar mode). |
-| B2 | No `Ctrl+1` for Mail | ✅ Resolved | `SwitchToMail` command registered with `KeyBinding::cmd_or_ctrl('1')`. |
-| B3 | No distinct Switch to/from commands | ✅ Resolved | "Switch to Calendar" and "Switch to Mail" registered as separate searchable commands alongside "Toggle Calendar". |
-| B4 | Mail state preservation unverified | ⚠️ Partial | Calendar state fully preserved. Mail selected-thread preserved in memory. Scroll position cannot be restored — iced fork lacks `scroll_to()` API (UI.md:60). |
+2. **Calendar visibility toggles are mostly cosmetic.** Sidebar checkbox updates `is_visible`, but the event-loading query fetches all events without filtering by visible calendars. Right-sidebar agenda in mail mode can show hidden-calendar events. Toggling visibility reuses `EventSaved` message, which can close an open event overlay as a side effect.
 
-## C. Calendar Views — PARTIALLY RESOLVED
+3. **Calendar sync never triggered from the app.** The sync backend exists (`calendar_sync_account_impl()`, provider-specific sync in Graph/Gmail/CalDAV) but the iced app never calls it. Calendar data only appears if seeded externally. The read path works, the sync path works, but they are not connected.
 
-| # | Gap | Status | Resolution |
-|---|-----|--------|------------|
-| C1 | No drag-to-select time range | ❌ Open | Requires custom widget with mouse tracking. iced doesn't provide continuous drag position mapping out of the box. Spec acknowledges this: "Drag interactions are important but are also the hardest to implement well in iced." |
-| C2 | No event drag-to-move | ❌ Open | Same — requires custom widget work with hit testing and visual feedback. |
-| C3 | No event edge resize | ❌ Open | Same — requires custom drag handlers with edge detection. |
-| C4 | No scroll-to-now / working-hours | ❌ Blocked | iced fork lacks `scrollable::scroll_to()` API (UI.md:60). Cannot programmatically scroll the time grid. |
-| C5 | Month view: No ISO week numbers | ✅ Resolved | Leftmost "Wk" column with ISO week numbers (1–53). Clicking navigates to that week's start date. |
-| C6 | Multi-day events not spanning as bars | ❌ Open | Multi-day events still render as per-day chips. Continuous horizontal spanning bars require a fundamentally different layout pass (events must be positioned absolutely across cells before single-day events are laid out). |
-| C7 | Weekend columns not narrower | ✅ Resolved | Week view (7 days) uses `FillPortion(2)` for Sat/Sun vs `FillPortion(3)` for weekdays. |
+4. **Graph API timezone handling silently treats everything as UTC.** `parse_graph_datetime()` has "Best-effort: treat as UTC" for all non-UTC timezone names. Microsoft Graph returns Windows timezone names ("Pacific Standard Time") which are silently misinterpreted. Events will be off by hours for non-UTC users.
 
-## D. Event Detail — MOSTLY RESOLVED
+5. **CalDAV iCalendar parser ignores VTIMEZONE / TZID parameters.** `extract_datetime()` calls `to_timestamp()` with no timezone handling. `DTSTART;TZID=America/New_York:20240315T100000` is treated as UTC.
 
-| # | Gap | Status | Resolution |
-|---|-----|--------|------------|
-| D1 | Detail is modal, not popover | ✅ Resolved | Click event opens a compact ~300px popover (right-aligned, lightweight backdrop). |
-| D2 | No ↗ expand-to-modal button | ✅ Resolved | ↗ button on popover triggers `ExpandToFullModal`, opening two-panel modal. |
-| D3 | No two-panel modal layout | ✅ Resolved | Full modal is 70% event detail (scrollable) + 30% mini day view showing the event's day with all events and color-coded conflict display. |
-| D4 | Modal dimensions not responsive | ✅ Resolved | Full modal uses `FillPortion(4)` width with 1200px max, full height with padding. |
-| D5 | No organizer display | ✅ Resolved | Shows "Invited by {name}" or "Invited by {email}" in both popover and full modal. |
-| D6 | No attendees display | ✅ Resolved | Attendees loaded from `calendar_attendees` table via `get_event_attendees()`. Displayed with RSVP status icons (✓/✗/~/?) and "(organizer)" suffix. |
-| D7 | No reminders display | ✅ Resolved | Reminders loaded from `calendar_reminders` table via `get_event_reminders()`. Displayed as "Reminders: 15 min before, 1 hour before" etc. |
-| D8 | No RSVP actions | ⚠️ Partial | RSVP *status* displayed ("Your RSVP: Accepted/Declined/Tentative"). Action *buttons* (Accept/Decline/Tentative/Dismiss) not yet wired — requires provider API calls to actually send RSVP responses. |
-| D9 | No "Email organizer" checkbox | ❌ Open | Depends on D8 RSVP action buttons being wired. |
-| D10 | No recurrence display or icon | ✅ Resolved | 🔁 icon on time grid event blocks when `recurrence_rule` is set. Recurrence info shown in popover and full modal with human-readable format ("Every week", "Every 2 months"). |
-| D11 | No calendar selector in editor | ✅ Resolved | Calendar name with color dot shown as first field in event editor. |
-| D12 | No timezone picker | ✅ Resolved | Timezone text input field in event editor. Timezone shown in full modal detail view. |
-| D13 | No recurrence editor | ⚠️ Partial | Basic recurrence toggle (on/off, defaults to WEEKLY). Full recurrence editor (day-of-week toggles, month/year options, weekend avoidance, end conditions) not yet implemented. |
-| D14 | No double-click to create | ⚠️ Partial | `DoubleClickSlot` message variant added and handled. Not wired from UI — iced doesn't expose double-click events on buttons; needs custom widget with click-timing detection. |
-| D15 | No recurring event edit/delete prompts | ❌ Open | "This / this and following / all" prompts not implemented. Requires tracking recurrence instance identity and provider API support for exception creation. |
-| D16 | No ✕ close button on modal | ✅ Resolved | ✕ button on popover, full modal, and event editor. |
-| D17 | No unsaved changes prompt | ✅ Resolved | Closing editor with title/description/location modifications prompts "Discard unsaved changes?" confirmation. |
-| D18 | No attendee input field | ❌ Open | Event editor has no attendee input with autocomplete. Depends on contacts autocomplete infrastructure being fully wired (Tier 2 gap). |
-| D19 | No availability field | ✅ Resolved | Availability selector (Busy/Free/Tentative/OOO) in event editor. Stored in DB and passed through to provider sync. |
-| D20 | No visibility field | ✅ Resolved | Visibility selector (Default/Public/Private) in event editor. Stored in DB and passed through to provider sync. |
-| D21 | Location not clickable | ⚠️ Partial | Full modal applies `text::primary` style to URLs (http/https) to visually indicate clickability. Actual hyperlink opening not implemented (iced text widget doesn't support click-to-open-URL). |
+6. **Two competing CalDAV implementations, neither properly wired.** `crates/core/src/caldav/` has a full client with ctag/etag incremental sync and OAuth2 support. `crates/calendar/src/caldav/` is what actually runs but uses raw reqwest with basic auth only, always does full fetch (never incremental), and returns all events as "created." The core version's features (batched multiget, ctag/etag diffing, OAuth2) are unused.
 
-## E. Pop-Out Calendar Window — RESOLVED
+7. **No runtime reminder/notification system.** Reminders are synced and stored in `calendar_reminders`, displayed in event detail views. But no timer, scheduler, or notification fires reminders at the specified time. The app never alerts users about upcoming events.
 
-| # | Gap | Status | Resolution |
-|---|-----|--------|------------|
-| E1 | Pop-out calendar window not implemented | ✅ Resolved | `PopOutWindow::Calendar` variant added. ↗ button in calendar sidebar. "Pop Out Calendar" command in palette. Opens 1024×768 window with full calendar layout. Main window reverts to mail mode. |
-| E2 | No window rules enforcement | ⚠️ Partial | One-calendar-pop-out limit enforced (checks existing before opening). Badge on mode toggle and bring-to-foreground not implemented — iced lacks `window::focus()` / `window::raise()` API. |
+### Medium — Interactions requiring custom iced widgets
 
-## F. Email ↔ Calendar Integration — PARTIALLY RESOLVED
+8. **No drag-to-select time range.** Requires custom widget with mouse tracking. Spec acknowledges this as "the hardest to implement well in iced."
 
-| # | Gap | Status | Resolution |
-|---|-----|--------|------------|
-| F1 | No 📅 button on expanded messages | ✅ Resolved | "Event" button (📅 icon + label) added to expanded message actions. Creates event pre-filled with subject → title, snippet → description, current time → start. Switches to calendar mode with editor open. |
-| F2 | No meeting invite detection | ❌ Open | Requires iCalendar attachment parsing (RFC 5545) in the email rendering pipeline. Need to detect `text/calendar` MIME parts and parse VEVENT data. Cross-cutting with provider sync for invite state tracking. |
-| F3 | No inline RSVP in reading pane | ❌ Open | Depends on F2 for invite detection + D8 for RSVP action wiring. |
-| F4 | No calendar indicator on thread cards | ❌ Open | Depends on F2 for invite detection. Thread list card would need a calendar icon when the thread contains a meeting invite. |
+9. **No event drag-to-move.** Same — requires custom widget with hit testing and visual feedback.
 
-## G. Calendar Sidebar — RESOLVED
+10. **No event edge resize.** Same — requires custom drag handlers with edge detection.
 
-All items resolved.
+11. **No scroll-to-now / working-hours snap.** Blocked on iced fork lacking `scrollable::scroll_to()` API.
 
-| # | Gap | Status | Resolution |
-|---|-----|--------|------------|
-| G1 | Calendar list is a placeholder | ✅ Resolved | Real calendar list with color dots (●), display names, and visibility toggle checkboxes. Grouped by account. `load_calendars_for_sidebar()` loads from DB. `set_calendar_visibility()` persists toggle and triggers event reload. |
-| G2 | No event dots on mini-month days | ✅ Resolved | `dates_with_events: HashSet<NaiveDate>` computed in `rebuild_view_data()`. Mini-month renders a small bullet (•) below the date number for dates with events. |
-| G3 | Agenda items not clickable | ✅ Resolved | Right sidebar agenda items wrapped in `button().on_press(CalendarMessage::EventClicked(id))`. Clicking opens event detail. |
-| G4 | No "Open Calendar" entry point | ✅ Resolved | Agenda item clicks open event detail in calendar mode. Mode toggle button always available. |
+12. **Multi-day events not spanning as horizontal bars.** Still render as per-day chips. Continuous spanning requires a fundamentally different layout pass.
 
-## Summary
+### Medium — Event detail / editor gaps
 
-**50 gaps identified → 37 resolved, 6 partially resolved, 7 open.**
+13. **Event detail "popover" not anchored to clicked event.** It's a generic right-aligned overlay, not positioned relative to the event. No context-sensitive RSVP actions, no "Add to my calendar," always offers Edit/Delete regardless of permissions.
 
-### Open items requiring custom iced widget work (C1-C3, C4, C6):
-Drag-to-select, drag-to-move, drag-to-resize, scroll-to-now, and multi-day spanning bars all require either custom `advanced::Widget` implementations or iced API extensions that don't exist in this fork. The spec acknowledges drag interactions as "the hardest to implement well in iced" and defers them as a "fast follow."
+14. **No end date field in event editor.** `CalendarEventData` has `start_date` but no `end_date`. Multi-day timed events (flights, conferences) cannot be created.
 
-### Open items requiring provider API integration (D8-D9, D15, F2-F4):
-RSVP action buttons, recurring event instance editing, and meeting invite detection all require round-trip API calls to Google Calendar / Microsoft Graph / CalDAV providers. These are not pure UI work — they need provider-specific request formatting and response handling.
+15. **No time picker popover.** Spec describes a dedicated popover with date pickers, time pickers, timezone button, all-day checkbox. Editor uses plain text input fields for hour/minute.
 
-### Open items requiring cross-cutting infrastructure (D18):
-Attendee input with autocomplete depends on the contacts autocomplete dropdown being fully wired (currently a Tier 2 gap — the search infrastructure exists but the dropdown never renders).
+16. **No reminder editor.** Reminders displayed read-only in detail views. Cannot be created or modified. `ReminderEntry` type imported but unused in editor.
+
+17. **No recurrence editor beyond basic toggle.** On/off toggle defaults to WEEKLY. No day-of-week toggles, month/year options, weekend avoidance, or end conditions.
+
+18. **No attendee input field.** Event editor has no attendee input with autocomplete. Depends on contacts autocomplete infrastructure.
+
+19. **No recurring event edit/delete prompts.** "This / this and following / all" UI not implemented. Requires recurrence instance identity tracking and provider API support.
+
+20. **Double-click to create not wired from UI.** `DoubleClickSlot` message variant exists and is handled but never emitted — iced doesn't expose double-click events on buttons.
+
+### Medium — Provider integration gaps
+
+21. **RSVP action buttons not wired.** RSVP status is displayed. Action buttons (Accept/Decline/Tentative) require provider API calls to send responses.
+
+22. **No "Email organizer" checkbox.** Depends on RSVP actions being wired.
+
+23. **No meeting invite detection.** Requires `text/calendar` MIME part parsing (RFC 5545) in the email rendering pipeline.
+
+24. **No inline RSVP in reading pane.** Depends on meeting invite detection + RSVP action wiring.
+
+25. **No calendar indicator on thread cards.** Depends on meeting invite detection.
+
+### Medium — Other gaps
+
+26. **No shared calendar detection or permission-aware UI.** Graph API fetches `canEdit` but never uses it. No read-only mode for calendars where user lacks edit permission.
+
+27. **IMAP accounts have no calendar provider path.** `calendar_provider_kind()` handles "caldav", "gmail_api", and "graph" but not "imap". Many IMAP servers co-host CalDAV. No auto-discovery or UI to associate CalDAV with IMAP accounts.
+
+28. **Attendees not pre-filled from email participants.** "Create event from email" sets title and description but not attendees, despite a code comment saying "Pre-fill attendees from To/Cc addresses."
+
+29. **Create-event-from-email switches to calendar mode.** Spec says it should open inline, not switch modes.
+
+30. **No "+N more" overflow in month view.** Time grid's all-day bar has this. Month view does not.
+
+31. **Location URL not clickable.** Full modal applies `text::primary` style to URLs but actual hyperlink opening not implemented.
+
+32. **Pop-out bring-to-foreground not implemented.** One-pop-out limit enforced. No badge on mode toggle, no `window::focus()` / `window::raise()` API in iced.
+
+33. **Mail scroll position not restorable after calendar switch.** Calendar state preserved. Mail selected-thread preserved. Scroll position cannot be restored — iced fork lacks `scroll_to()`.
+
+### Previously marked resolved but not fully correct
+
+34. **Calendar list not grouped by account.** Previous audit said grouped. Current UI is a flat list.
+
+35. **ISO week number click does not switch to week view.** Only selects that row's first date. Spec says it should navigate to week view.
+
+36. **`SELECT *` still exists in calendar code.** `SELECT * FROM calendars` in `crates/calendar/src/sync.rs`.
+
+37. **Unsaved-change detection incomplete.** Only checks title, description, location. Changes to time, all-day, timezone, recurrence, availability, visibility, or calendar assignment discarded without prompt.
+
+38. **Recurrence expansion only handles basic RRULE subset.** FREQ, INTERVAL, COUNT, UNTIL supported. Richer semantics (BYDAY, BYMONTH, EXDATE, etc.) not handled.
+
+39. **Month-view "+X more" just selects the date.** Does not open a day-event popover/list as the spec describes.
+
+---
+
+## Resolved
+
+31 items from previous audit (2026-03-22) confirmed resolved (6 downgraded above):
+
+- Full DB schema (migration v63+v65) with all fields surfaced in types
+- FK constraints + CASCADE on attendees/reminders delete paths
+- Availability + Visibility fields (schema, types, editor UI)
+- Recurrence expansion (basic subset — see #38 for limitations)
+- Default view setting read from DB at boot
+- View switcher in sidebar header row (D/WW/W/M buttons)
+- Ctrl+1 for Mail, separate Switch to Calendar/Mail commands
+- Weekend columns narrower in week view
+- Event detail popover (compact) + expand-to-modal (two-panel with mini day view)
+- Organizer display, attendees with RSVP icons, reminders display
+- Recurrence icon + human-readable format in detail views
+- Calendar selector, timezone picker, availability/visibility selectors in editor
+- Unsaved changes prompt on editor close (partial — see #37)
+- Pop-out calendar window with one-window limit
+- "Create event from email" button on expanded messages
+- Calendar sidebar with color dots and visibility toggles
+- Event dots on mini-month days
+- Clickable agenda items in right sidebar
