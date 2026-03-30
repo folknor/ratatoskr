@@ -247,9 +247,9 @@ impl ReadingPane {
     }
 
     /// Update the star state for a thread if it's currently displayed.
-    pub fn update_star(&mut self, thread_id: &str, is_starred: bool) {
+    pub fn update_star(&mut self, account_id: &str, thread_id: &str, is_starred: bool) {
         if let Some(ref mut t) = self.current_thread {
-            if t.id == thread_id {
+            if t.account_id == account_id && t.id == thread_id {
                 t.is_starred = is_starred;
             }
         }

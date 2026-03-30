@@ -37,7 +37,7 @@ mod ui;
 mod window_state;
 
 use command_dispatch::{
-    ComposeAction, EmailAction, KeyEventMessage, NavigationTarget,
+    ComposeAction, KeyEventMessage, MailActionIntent, NavigationTarget,
     ReadingPanePosition, TaskAction,
 };
 use component::Component;
@@ -159,48 +159,6 @@ struct PendingChord {
     first: Chord,
 }
 
-/// Which action completed — used in ActionCompleted to dispatch outcome handling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CompletedAction {
-    Archive,
-    Trash,
-    Spam,
-    MoveToFolder,
-    PermanentDelete,
-    Star,
-    MarkRead,
-    Pin,
-    Mute,
-    Snooze,
-    AddLabel,
-    RemoveLabel,
-}
-
-impl CompletedAction {
-    fn removes_from_view(self) -> bool {
-        matches!(
-            self,
-            Self::Archive | Self::Trash | Self::Spam | Self::MoveToFolder | Self::PermanentDelete | Self::Snooze
-        )
-    }
-
-    fn success_label(self) -> &'static str {
-        match self {
-            Self::Archive => "Archived",
-            Self::Trash => "Moved to Trash",
-            Self::Spam => "Spam status toggled",
-            Self::MoveToFolder => "Moved to folder",
-            Self::PermanentDelete => "Permanently deleted",
-            Self::Star => "Star toggled",
-            Self::MarkRead => "Read status toggled",
-            Self::Pin => "Pin toggled",
-            Self::Mute => "Mute toggled",
-            Self::Snooze => "Snoozed",
-            Self::AddLabel => "Label applied",
-            Self::RemoveLabel => "Label removed",
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -238,7 +196,7 @@ pub enum Message {
     ExecuteParameterized(CommandId, ratatoskr_command_palette::CommandArgs),
     NavigateTo(NavigationTarget),
     Escape,
-    EmailAction(EmailAction),
+    EmailAction(MailActionIntent),
     /// Action service completed — carries action kind, outcomes, rollback, thread IDs, and params.
     ActionCompleted {
         plan: crate::action_resolve::ActionExecutionPlan,

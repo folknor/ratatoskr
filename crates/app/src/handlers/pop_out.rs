@@ -80,14 +80,14 @@ impl App {
                 PopOutWindow::MessageView(_),
                 PopOutMessage::MessageView(MessageViewMessage::Archive),
             ) => {
-                return self.dispatch_pop_out_action(window_id, crate::CompletedAction::Archive);
+                return self.dispatch_pop_out_action(window_id, crate::action_resolve::MailActionIntent::Archive);
             }
             // Delete — route through action service for DB + provider dispatch
             (
                 PopOutWindow::MessageView(_),
                 PopOutMessage::MessageView(MessageViewMessage::Delete),
             ) => {
-                return self.dispatch_pop_out_action(window_id, crate::CompletedAction::Trash);
+                return self.dispatch_pop_out_action(window_id, crate::action_resolve::MailActionIntent::Trash);
             }
             // All other message view messages
             (PopOutWindow::MessageView(state), PopOutMessage::MessageView(_)) => {
@@ -635,7 +635,7 @@ impl App {
     fn dispatch_pop_out_action(
         &mut self,
         window_id: iced::window::Id,
-        action: crate::CompletedAction,
+        intent: crate::action_resolve::MailActionIntent,
     ) -> Task<Message> {
         let Some(PopOutWindow::MessageView(state)) = self.pop_out_windows.get_mut(&window_id)
         else {
@@ -646,17 +646,7 @@ impl App {
         state.overflow_menu_open = false;
         drop(state);
 
-        // I5: pop-out only reaches Archive/Trash/PermanentDelete — no optimistic toggles.
-        use crate::action_resolve::{self as ar, MailActionIntent, UiContext};
-        let intent = match action {
-            crate::CompletedAction::Archive => MailActionIntent::Archive,
-            crate::CompletedAction::Trash => MailActionIntent::Trash,
-            crate::CompletedAction::PermanentDelete => MailActionIntent::PermanentDelete,
-            other => {
-                log::error!("dispatch_pop_out_action: unexpected action {other:?}");
-                return Task::none();
-            }
-        };
+        use crate::action_resolve::{self as ar, UiContext};
         let ui_ctx = UiContext { selected_label: source_label_id };
         let outcome = ar::resolve_intent(intent, &ui_ctx);
         let Some(plan) = ar::build_execution_plan(

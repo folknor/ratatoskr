@@ -2,7 +2,7 @@ use iced::Task;
 
 use std::sync::Arc;
 
-use crate::command_dispatch::{self, EmailAction};
+use crate::command_dispatch;
 use crate::db::Db;
 use crate::{APP_DATA_DIR, App, Message};
 use ratatoskr_command_palette::{CommandArgs, CommandId, KeyBinding, OptionItem};
@@ -99,7 +99,7 @@ impl App {
 
     pub(crate) fn handle_email_action(
         &mut self,
-        action: EmailAction,
+        intent: crate::action_resolve::MailActionIntent,
     ) -> Task<Message> {
         // Public folder items are not real threads — actions don't apply.
         if matches!(self.sidebar.selected_scope, ViewScope::PublicFolder { .. }) {
@@ -121,10 +121,8 @@ impl App {
 
         // ── Resolve → Plan → Dispatch ───────────────────────────
         use crate::action_resolve::{
-            self as ar, MailActionIntent, OptimisticMutation, ResolveOutcome, UiContext,
+            self as ar, OptimisticMutation, UiContext,
         };
-
-        let intent = email_action_to_intent(action);
         let ui_ctx = UiContext {
             selected_label: self.sidebar.selected_label.clone(),
         };
@@ -143,8 +141,8 @@ impl App {
         // Star optimistic UI → sync reading pane
         if plan.optimistic.iter().any(|m| matches!(m, OptimisticMutation::SetStarred { .. })) {
             for m in &plan.optimistic {
-                if let OptimisticMutation::SetStarred { thread_id, previous, .. } = m {
-                    self.reading_pane.update_star(thread_id, !previous);
+                if let OptimisticMutation::SetStarred { account_id, thread_id, previous } = m {
+                    self.reading_pane.update_star(account_id, thread_id, !previous);
                 }
             }
         }
@@ -194,7 +192,7 @@ impl App {
                     ) {
                         t.is_starred = *previous;
                     }
-                    self.reading_pane.update_star(thread_id, *previous);
+                    self.reading_pane.update_star(account_id, thread_id, *previous);
                 }
                 OptimisticMutation::SetRead { account_id, thread_id, previous } => {
                     if let Some(t) = self.thread_list.threads.iter_mut().find(
@@ -537,32 +535,7 @@ impl App {
     }
 }
 
-// ── Adapters: EmailAction → MailActionIntent, plan → legacy types ────
-//
-// email_action_to_intent survives until Phase C (EmailAction is still
-// the Message variant type). The plan-to-legacy helpers bridge the new
-// plan to the existing completion handler until Phase C replaces it.
-
-use crate::action_resolve::{CompensationContext, MailActionIntent};
-
-/// Convert an `EmailAction` to a `MailActionIntent`.
-fn email_action_to_intent(action: EmailAction) -> MailActionIntent {
-    match action {
-        EmailAction::Archive => MailActionIntent::Archive,
-        EmailAction::Trash => MailActionIntent::Trash,
-        EmailAction::PermanentDelete => MailActionIntent::PermanentDelete,
-        EmailAction::ToggleSpam => MailActionIntent::ToggleSpam,
-        EmailAction::ToggleStar => MailActionIntent::ToggleStar,
-        EmailAction::ToggleRead => MailActionIntent::ToggleRead,
-        EmailAction::TogglePin => MailActionIntent::TogglePin,
-        EmailAction::ToggleMute => MailActionIntent::ToggleMute,
-        EmailAction::Unsubscribe => MailActionIntent::Unsubscribe,
-        EmailAction::MoveToFolder { folder_id } => MailActionIntent::MoveToFolder { folder_id },
-        EmailAction::AddLabel { label_id } => MailActionIntent::AddLabel { label_id },
-        EmailAction::RemoveLabel { label_id } => MailActionIntent::RemoveLabel { label_id },
-        EmailAction::Snooze { until } => MailActionIntent::Snooze { until },
-    }
-}
+// ── Command argument helpers ─────────────────────────────────────────
 
 /// Build `CommandArgs` from a palette option selection.
 pub(crate) fn build_command_args(command_id: CommandId, item: &OptionItem) -> Option<CommandArgs> {

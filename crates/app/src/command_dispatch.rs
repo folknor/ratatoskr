@@ -61,22 +61,7 @@ impl NavigationTarget {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum EmailAction {
-    Archive,
-    Trash,
-    PermanentDelete,
-    ToggleSpam,
-    ToggleRead,
-    ToggleStar,
-    TogglePin,
-    ToggleMute,
-    Unsubscribe,
-    MoveToFolder { folder_id: ratatoskr_core::actions::FolderId },
-    AddLabel { label_id: ratatoskr_core::actions::TagId },
-    RemoveLabel { label_id: ratatoskr_core::actions::TagId },
-    Snooze { until: i64 },
-}
+pub use crate::action_resolve::MailActionIntent;
 
 #[derive(Debug, Clone)]
 pub enum ComposeAction {
@@ -462,15 +447,15 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
         CommandId::NavEscape => Some(Message::Escape),
 
         // Email actions
-        CommandId::EmailArchive => Some(Message::EmailAction(EmailAction::Archive)),
-        CommandId::EmailTrash => Some(Message::EmailAction(EmailAction::Trash)),
-        CommandId::EmailPermanentDelete => Some(Message::EmailAction(EmailAction::PermanentDelete)),
-        CommandId::EmailSpam => Some(Message::EmailAction(EmailAction::ToggleSpam)),
-        CommandId::EmailMarkRead => Some(Message::EmailAction(EmailAction::ToggleRead)),
-        CommandId::EmailStar => Some(Message::EmailAction(EmailAction::ToggleStar)),
-        CommandId::EmailPin => Some(Message::EmailAction(EmailAction::TogglePin)),
-        CommandId::EmailMute => Some(Message::EmailAction(EmailAction::ToggleMute)),
-        CommandId::EmailUnsubscribe => Some(Message::EmailAction(EmailAction::Unsubscribe)),
+        CommandId::EmailArchive => Some(Message::EmailAction(MailActionIntent::Archive)),
+        CommandId::EmailTrash => Some(Message::EmailAction(MailActionIntent::Trash)),
+        CommandId::EmailPermanentDelete => Some(Message::EmailAction(MailActionIntent::PermanentDelete)),
+        CommandId::EmailSpam => Some(Message::EmailAction(MailActionIntent::ToggleSpam)),
+        CommandId::EmailMarkRead => Some(Message::EmailAction(MailActionIntent::ToggleRead)),
+        CommandId::EmailStar => Some(Message::EmailAction(MailActionIntent::ToggleStar)),
+        CommandId::EmailPin => Some(Message::EmailAction(MailActionIntent::TogglePin)),
+        CommandId::EmailMute => Some(Message::EmailAction(MailActionIntent::ToggleMute)),
+        CommandId::EmailUnsubscribe => Some(Message::EmailAction(MailActionIntent::Unsubscribe)),
         CommandId::EmailSelectAll => Some(Message::ThreadList(
             crate::ui::thread_list::ThreadListMessage::SelectAll,
         )),
@@ -586,11 +571,11 @@ pub fn dispatch_parameterized(
         (
             CommandId::EmailMoveToFolder,
             CommandArgs::MoveToFolder { folder_id },
-        ) => Some(Message::EmailAction(EmailAction::MoveToFolder {
+        ) => Some(Message::EmailAction(MailActionIntent::MoveToFolder {
             folder_id: ratatoskr_core::actions::FolderId::from(folder_id),
         })),
         (CommandId::EmailAddLabel, CommandArgs::AddLabel { label_id }) => {
-            Some(Message::EmailAction(EmailAction::AddLabel {
+            Some(Message::EmailAction(MailActionIntent::AddLabel {
                 label_id: ratatoskr_core::actions::TagId::from(label_id),
             }))
         }
@@ -598,12 +583,12 @@ pub fn dispatch_parameterized(
             CommandId::EmailRemoveLabel,
             CommandArgs::RemoveLabel { label_id },
         ) => {
-            Some(Message::EmailAction(EmailAction::RemoveLabel {
+            Some(Message::EmailAction(MailActionIntent::RemoveLabel {
                 label_id: ratatoskr_core::actions::TagId::from(label_id),
             }))
         }
         (CommandId::EmailSnooze, CommandArgs::Snooze { until }) => {
-            Some(Message::EmailAction(EmailAction::Snooze { until }))
+            Some(Message::EmailAction(MailActionIntent::Snooze { until }))
         }
         (
             CommandId::NavigateToLabel,

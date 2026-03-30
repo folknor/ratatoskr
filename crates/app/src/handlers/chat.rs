@@ -88,12 +88,27 @@ impl App {
         Task::none()
     }
 
-    /// Get all user email addresses across accounts.
+    /// Get all user email addresses across accounts, including send-as aliases.
     pub(crate) fn user_emails(&self) -> Vec<String> {
-        self.sidebar
+        let mut emails: Vec<String> = self.sidebar
             .accounts
             .iter()
             .map(|a| a.email.clone())
-            .collect()
+            .collect();
+
+        // Include send-as aliases from send_identities table.
+        if let Ok(conn) = self.db.conn_arc().lock() {
+            if let Ok(mut stmt) = conn.prepare("SELECT DISTINCT email FROM send_identities") {
+                if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+                    for email in rows.flatten() {
+                        if !emails.iter().any(|e| e.eq_ignore_ascii_case(&email)) {
+                            emails.push(email);
+                        }
+                    }
+                }
+            }
+        }
+
+        emails
     }
 }

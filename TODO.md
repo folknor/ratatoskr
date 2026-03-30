@@ -20,11 +20,9 @@
 
 - [ ] **Action service: native provider batching** *(Deferred)* — Currently `batch_execute` reuses one provider per account but still makes one HTTP request per thread (sequential `provider.archive()` calls). Some providers support batching natively: Gmail batch API (up to 100 requests in one HTTP multipart request), Graph `/$batch` endpoint (up to 20 per batch), JMAP `Email/set` can modify multiple emails in one method call, IMAP `STORE` can set flags on multiple UIDs in one command. Native batching would reduce 50 HTTP round-trips to 1-3 for bulk operations. Requires adding batch methods to `ProviderOps` (e.g., `archive_batch(&self, ctx, thread_ids: &[&str]) -> Vec<Result<(), ProviderError>>`), implementing per provider (IMAP would need UID set formatting, Gmail needs multipart boundary encoding, Graph needs JSON batch request assembly, JMAP needs method call batching), and updating `batch.rs` to prefer batch methods when available and fall back to sequential for providers that don't implement them. The per-account sequential approach works fine for now — provider reuse eliminated the construction overhead, and the remaining latency is network-bound.
 
-- [ ] **Typed IDs: UndoToken fields** — `UndoToken` in the `command-palette` crate still uses raw `String` for `original_folder_id`, `source_folder_id`, `label_id`. Converting at construction/execution boundaries works but doesn't prevent wrong-kind-of-string in token construction. Fix: either add `provider-utils` dep to `command-palette` or define parallel newtypes there.
 - [ ] **Typed IDs: CommandArgs fields** — `CommandArgs::MoveToFolder { folder_id: String }`, `AddLabel { label_id: String }`, `RemoveLabel { label_id: String }` in `command-palette` are still raw strings, wrapped at the `command_dispatch.rs` boundary.
 - [ ] **Typed IDs: sidebar.selected_label** — `sidebar.selected_label: Option<String>` is wrapped to `FolderId` at call sites. Semantics are ambiguous (used for both folder nav and label highlighting). Proper fix is part of Contract #10 (scope state unification).
 - [ ] **Search scope respects ViewScope** — `execute_search_sql_fallback` hardcodes `AccountScope::All`. When viewing a shared mailbox or single account, search should be scoped accordingly. Tantivy search path also ignores scope. Follow-up from Contract #10.
-- [ ] **Contract #9 Phase C2: Remove CompletedAction + EmailAction** — Vestigial types. CompletedAction used only by pop_out.rs as intermediary (replace with MailActionIntent). EmailAction used in Message enum (replace with MailActionIntent, update command_dispatch.rs). Mechanical rename, deferred from Phase C.
 
 - [ ] **Crate structure and dependency graph** - So much has been implemented without any real consideration for what kind of code lives where. It might be time to get a grip on things.
 
@@ -151,10 +149,10 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 - [x] **`from_address` nullable crash in chat timeline** — `row.get::<_, String>("from_address")` on NULL silently drops the message. Mailer-daemon/DSN messages can have no From. `chat.rs:368`
 - [x] **N+1 per-user-email queries in `maybe_update_chat_state`** — One SQL query per user email per thread per sync. Replace with single `IN` query. `persistence.rs:312-317`
-- [ ] **`user_emails()` excludes send-as aliases** — Only primary account emails. Send-as aliases break chat ownership detection and 1:1 thread classification. Should include `send_identities` table. `handlers/chat.rs:91`
+- [x] **`user_emails()` excludes send-as aliases** — Fixed: now queries `send_identities` table for aliases.
 - [ ] **Chat summary stale when thread stops qualifying** — Early-return paths clear `is_chat_thread` but don't recompute `chat_contacts` summary. Thread deletion also skips summary update. `persistence.rs:278,291,434`
 - [x] **`enter_chat_view` doesn't clear pinned-search context** — `sidebar.active_pinned_search` persists, overriding `NavigationTarget::Chat` in `current_view_and_label()`. `handlers/chat.rs:11`
-- [ ] **Reading pane star sync keyed by thread_id only** — `update_star()` compares only `t.id`, not `(account_id, thread_id)`. Cross-account thread ID collision can mutate wrong thread. `reading_pane.rs:249`
+- [x] **Reading pane star sync keyed by thread_id only** — Fixed: `update_star()` now checks `(account_id, thread_id)`.
 - [x] **Chat subject normalization panics on non-ASCII** — `normalize_subject()` slices original string using byte lengths from lowercased copy. Unicode lowercase can change byte length → invalid slice boundary. `chat_timeline.rs:221`
 - [ ] **Scope dropdown missing public folder entries** — Dropdown has All Accounts + accounts + shared mailboxes but no public folders. `sidebar.rs:413`
 
