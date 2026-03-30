@@ -1,32 +1,72 @@
-# Contract #9 Phase C: Unified Completion + Undo Migration — Implementation Plan
+# Contract #9 Phase C: Unified Completion + Undo Migration — Implementation Plan (v2)
 
 ## Goal
 
 1. Replace `CompletedAction + ActionParams + rollback tuple` with `ActionExecutionPlan` as the completion handler's input
-2. Derive completion behavior from `MailOperation::completion_behavior()` (exhaustive match)
+2. CompletionBehavior established at plan construction (not derived at completion time)
 3. Build undo payloads directly from `plan.operations + plan.compensation + plan.optimistic`
 4. Move undo payload type to app crate, make palette's stack generic
-5. Remove `EmailAction` → use `MailActionIntent` in Message enum
+5. Fix toggle undo grouping: one user action = one Ctrl+Z
 
-## What Phase C Removes
+`EmailAction` removal is deferred to Phase C2 (cleanup, not coupled to completion/undo).
 
-| Legacy type | Replacement |
-|-------------|-------------|
-| `CompletedAction` enum | `MailOperation::completion_behavior()` → `CompletionBehavior` |
-| `ActionParams` enum | Eliminated — data lives in plan.operations + plan.compensation |
-| `action_params_from_plan()` | Eliminated |
-| `completed_action_from_operation()` | Replaced by `completion_behavior()` |
-| `rollback: Vec<(String, String, bool)>` | `plan.optimistic: Vec<OptimisticMutation>` |
-| `UndoToken` in command-palette | `MailUndoPayload` in app crate |
-| `UndoStack` (concrete) in palette | `UndoStack<T>` (generic) in palette |
-| `EmailAction` in command_dispatch | `MailActionIntent` used directly |
-| `email_action_to_intent()` adapter | Eliminated |
+## Design Decisions (resolved from review)
+
+### D1: CompletionBehavior lives on the plan, not derived from first operation
+
+`ActionExecutionPlan` carries a `CompletionBehavior` set at construction time by `build_execution_plan`. The completion handler reads `plan.behavior` — no derivation, no first-operation assumption. This encodes the single-operation-kind invariant structurally: the plan declares its behavior once, and all operations must be consistent with it.
+
+`completion_behavior()` is a free function in the app crate (not on `MailOperation` in core) — view effects, toast text, and undo policy are UI concerns.
+
+### D2: Star sync responsibilities
+
+Three distinct responsibilities, no overlap:
+
+- **Dispatch time** (build_execution_plan): optimistic star flip in thread list + reading pane `update_star(!previous)`. Already happens in Phase B's `handle_email_action`.
+- **Rollback** (handle_action_completed on failure): restore previous values via `rollback_optimistic`. Already happens in Phase B.
+- **Completion success**: no star sync needed — optimistic state is already correct.
+
+`PostSuccessEffect::SyncReadingPaneStar` is removed. The only `PostSuccessEffect` is `RefreshNav` (for MarkRead).
+
+```rust
+pub enum PostSuccessEffect {
+    None,
+    RefreshNav,
+}
+```
+
+### D3: Toast text in a dedicated helper
+
+`format_outcome_toast(behavior: &CompletionBehavior, outcomes: &[ActionOutcome]) -> String` generates all summary variants (all-success, mixed, all-local-only, partial failure). `CompletionBehavior.success_label` is the base label used by this helper.
+
+### D4: UndoEntry carries Vec of payloads — one user action = one undo step
+
+```rust
+pub struct UndoEntry<T> {
+    pub description: String,
+    pub payloads: Vec<T>,
+}
+```
+
+Toggle actions that affect threads with mixed prior state produce multiple `MailUndoPayload` items (one per account+direction group), but all go in one `UndoEntry`. One Ctrl+Z dispatches all payloads. This fixes the current bug where mixed-direction toggles produce multiple stack entries.
+
+### D5: Description computed at push time, not on payload
+
+`MailUndoPayload` has no `description()` method. The caller computes the description string from the `CompletionBehavior.success_label` and pushes `UndoEntry { description, payloads }`.
+
+### D6: peek/pop return UndoEntry<T>
+
+All call sites (`dispatch_undo`, `Message::Undo` handler) consume `UndoEntry<MailUndoPayload>`. `dispatch_undo` iterates `entry.payloads` and dispatches each compensation. `entry.description` is passed to `Message::UndoCompleted`.
+
+### D7: EmailAction removal deferred to Phase C2
+
+Not coupled to completion/undo. If Phase C hits trouble, this bundling would make rollback harder. Phase C2 is a simple mechanical rename after completion/undo is stable.
+
+---
 
 ## New Types
 
 ### CompletionBehavior (app crate, action_resolve.rs)
-
-Derived from `MailOperation` via exhaustive match. Compiler forces a decision for every variant.
 
 ```rust
 pub struct CompletionBehavior {
@@ -44,7 +84,6 @@ pub enum ViewEffect {
 pub enum PostSuccessEffect {
     None,
     RefreshNav,
-    SyncReadingPaneStar,
 }
 
 pub enum UndoBehavior {
@@ -53,9 +92,35 @@ pub enum UndoBehavior {
 }
 ```
 
-### MailUndoPayload (app crate, action_resolve.rs)
+Derived via exhaustive match — compiler forces a decision for every `MailOperation` variant:
 
-Mail-domain undo compensation data. Built from `plan.operations + plan.compensation + plan.optimistic` without re-reading UI state.
+```rust
+pub fn completion_behavior(op: &MailOperation) -> CompletionBehavior {
+    match op {
+        MailOperation::Archive => CompletionBehavior {
+            view_effect: ViewEffect::LeavesCurrentView,
+            post_success: PostSuccessEffect::None,
+            undo: UndoBehavior::Reversible,
+            success_label: "Archived",
+        },
+        MailOperation::SetRead { .. } => CompletionBehavior {
+            view_effect: ViewEffect::Stays,
+            post_success: PostSuccessEffect::RefreshNav,
+            undo: UndoBehavior::Reversible,
+            success_label: "Read status toggled",
+        },
+        MailOperation::PermanentDelete => CompletionBehavior {
+            view_effect: ViewEffect::LeavesCurrentView,
+            post_success: PostSuccessEffect::None,
+            undo: UndoBehavior::Irreversible,
+            success_label: "Permanently deleted",
+        },
+        // ... exhaustive for all 12 variants
+    }
+}
+```
+
+### MailUndoPayload (app crate, action_resolve.rs)
 
 ```rust
 pub enum MailUndoPayload {
@@ -73,6 +138,21 @@ pub enum MailUndoPayload {
 }
 ```
 
+No `description()` method (D5).
+
+### Updated ActionExecutionPlan
+
+```rust
+pub struct ActionExecutionPlan {
+    pub operations: Vec<(String, String, MailOperation)>,
+    pub behavior: CompletionBehavior,
+    pub compensation: CompensationContext,
+    pub optimistic: Vec<OptimisticMutation>,
+}
+```
+
+`behavior` is set by `build_execution_plan` at construction. The completion handler reads it directly.
+
 ### Generic UndoStack (palette crate)
 
 ```rust
@@ -83,62 +163,64 @@ pub struct UndoStack<T> {
 
 pub struct UndoEntry<T> {
     pub description: String,
-    pub payload: T,
+    pub payloads: Vec<T>,
+}
+
+impl<T> UndoStack<T> {
+    pub fn push(&mut self, description: String, payloads: Vec<T>);
+    pub fn pop(&mut self) -> Option<UndoEntry<T>>;
+    pub fn peek(&self) -> Option<&UndoEntry<T>>;
+    pub fn is_empty(&self) -> bool;
+    pub fn len(&self) -> usize;
+    pub fn clear(&mut self);
 }
 ```
 
-The app instantiates `UndoStack<MailUndoPayload>`.
+---
 
 ## Edit Sequence
 
-### Step 1: Define CompletionBehavior + implement MailOperation::completion_behavior()
-
-File: `crates/app/src/action_resolve.rs` (or `crates/core/src/actions/operation.rs` if behavior is universal)
-
-Decision: `completion_behavior()` lives on `MailOperation` in core? Or as a free function in the app crate?
-
-**Recommendation: app crate.** `ViewEffect`, `PostSuccessEffect`, and `success_label` are UI concerns. Core's `MailOperation` should not know about UI toast text. Define as:
-
-```rust
-// In action_resolve.rs
-pub fn completion_behavior(op: &MailOperation) -> CompletionBehavior {
-    match op {
-        MailOperation::Archive => CompletionBehavior { ... },
-        // ... exhaustive
-    }
-}
-```
-
-### Step 2: Define MailUndoPayload in app crate
+### Step 1: Define CompletionBehavior + completion_behavior() + MailUndoPayload
 
 File: `crates/app/src/action_resolve.rs`
 
-Also implement `MailUndoPayload::description(&self) -> String` for the undo stack entry.
-
-Also implement `build_undo_payloads()`:
+Add types and the exhaustive `completion_behavior()` function. Add `build_undo_payloads()`:
 
 ```rust
-/// Build undo payloads from a completed plan + outcomes.
-/// Filters to success/local_only outcomes only.
-/// Groups by account.
-/// Returns None for irreversible actions (PermanentDelete).
 pub fn build_undo_payloads(
     plan: &ActionExecutionPlan,
     outcomes: &[ActionOutcome],
 ) -> Vec<MailUndoPayload>
 ```
 
-This replaces `produce_undo_tokens`. The grouping logic (by account, by previous value for toggles) moves here.
+Logic:
+- If `plan.behavior.undo == Irreversible`, return empty
+- For toggles (non-empty `plan.optimistic`): group by `(account_id, previous)`, filter to success/local_only outcomes. Produce one `MailUndoPayload` per group.
+- For non-toggles: group `plan.operations` by `account_id`, filter to success/local_only outcomes. Derive payload from operation + compensation.
+- **Trash with `CompensationContext::SourceFolder(None)`: skip** (safer than bad undo).
+- **Spam: derive `was_spam = !to`** from `MailOperation::SetSpam { to }`.
+
+Also add `format_outcome_toast()`:
+```rust
+pub fn format_outcome_toast(behavior: &CompletionBehavior, outcomes: &[ActionOutcome]) -> String
+```
+
+### Step 2: Update ActionExecutionPlan to carry behavior
+
+File: `crates/app/src/action_resolve.rs`
+
+Add `behavior: CompletionBehavior` field. Update `build_execution_plan` to set it from `completion_behavior(&operation)`.
 
 ### Step 3: Make UndoStack generic in palette crate
 
-File: `crates/command-palette/src/undo.rs`
+File: `crates/command-palette/src/undo.rs`, `crates/command-palette/src/lib.rs`
 
-Change `UndoStack` to `UndoStack<T>` with `UndoEntry<T>`. Remove `UndoToken` enum (replaced by `MailUndoPayload`).
-
-The `description()` method moves from `UndoToken` to `UndoEntry::description` (set at push time).
-
-Preserve: `push`, `pop`, `peek`, `is_empty`, `len`, `clear`, `capacity`.
+- Replace concrete `UndoStack` with `UndoStack<T>`, `UndoEntry<T>`
+- Remove `UndoToken` enum
+- Update lib.rs re-exports: `pub use undo::{UndoStack, UndoEntry}` (drop `UndoToken`)
+- `push` takes `(description: String, payloads: Vec<T>)`
+- `pop` returns `Option<UndoEntry<T>>`
+- Remove `UndoToken::description()` method
 
 ### Step 4: Change Message::ActionCompleted to carry the plan
 
@@ -146,18 +228,17 @@ File: `crates/app/src/main.rs`
 
 ```rust
 ActionCompleted {
-    plan: ActionExecutionPlan,
-    outcomes: Vec<ActionOutcome>,
+    plan: crate::action_resolve::ActionExecutionPlan,
+    outcomes: Vec<ratatoskr_core::actions::ActionOutcome>,
 }
 ```
 
-Remove `action`, `rollback`, `threads`, `params` fields. Update the dispatch arm.
+Remove `action`, `rollback`, `threads`, `params` fields.
 
 ### Step 5: Rewrite handle_action_completed
 
 File: `crates/app/src/handlers/commands.rs`
 
-New signature:
 ```rust
 pub(crate) fn handle_action_completed(
     &mut self,
@@ -167,44 +248,53 @@ pub(crate) fn handle_action_completed(
 ```
 
 Flow:
-1. Derive `CompletionBehavior` from first operation
-2. Compute outcome summary (all_failed, any_failed, any_local_only)
+1. Read `plan.behavior` directly (no derivation)
+2. Compute outcome summary
 3. Early return for all-NoOp
-4. If all_failed AND ViewEffect::LeavesCurrentView → show error, return
-5. Show toast using `behavior.success_label`
-6. Rollback failed toggles using `plan.optimistic` (typed `OptimisticMutation`)
-7. Build undo payloads using `build_undo_payloads(plan, outcomes)`
-8. Push undo entries to stack
-9. Post-success effects:
-   - `ViewEffect::LeavesCurrentView` → auto-advance
-   - `PostSuccessEffect::RefreshNav` → reload navigation
-   - `PostSuccessEffect::SyncReadingPaneStar` → reading pane star sync
+4. If all_failed AND LeavesCurrentView → show error, return
+5. Show toast via `format_outcome_toast(&plan.behavior, outcomes)`
+6. Rollback failed toggles via `rollback_optimistic` (typed OptimisticMutation)
+7. Build undo payloads via `build_undo_payloads(plan, outcomes)`
+8. If non-empty and Reversible: push one `UndoEntry` with description + payloads
+9. Post-success: LeavesCurrentView → auto-advance, RefreshNav → reload nav
 
 ### Step 6: Rewrite execute_undo_compensation for MailUndoPayload
 
 File: `crates/app/src/handlers/commands.rs`
 
-Same structure as current but matches on `MailUndoPayload` variants instead of `UndoToken`. Uses `FolderId`/`TagId` directly (no raw string wrapping).
+`dispatch_undo` pops `UndoEntry<MailUndoPayload>`, dispatches all payloads:
 
-### Step 7: Replace EmailAction with MailActionIntent in Message
+```rust
+pub(crate) fn dispatch_undo(&mut self, entry: UndoEntry<MailUndoPayload>) -> Task<Message> {
+    let ctx = ...;
+    let desc = entry.description.clone();
+    Task::perform(
+        async move {
+            let mut all_outcomes = Vec::new();
+            for payload in &entry.payloads {
+                all_outcomes.extend(execute_undo_compensation(&ctx, payload).await);
+            }
+            (desc, all_outcomes)
+        },
+        |(desc, outcomes)| Message::UndoCompleted { desc, outcomes },
+    )
+}
+```
 
-File: `crates/app/src/main.rs`, `crates/app/src/command_dispatch.rs`
+`execute_undo_compensation` matches on `MailUndoPayload` variants (same logic as current, typed IDs).
 
-Change `Message::EmailAction(EmailAction)` to `Message::EmailAction(MailActionIntent)`.
+### Step 7: Update dispatch_plan + remove legacy types
 
-Update `dispatch_command` and `dispatch_parameterized` in `command_dispatch.rs` to construct `MailActionIntent` directly (remove `EmailAction` enum).
+File: `crates/app/src/handlers/commands.rs`, `crates/app/src/main.rs`
 
-Remove `email_action_to_intent()` adapter.
+`dispatch_plan` sends plan + outcomes directly:
+```rust
+Message::ActionCompleted { plan, outcomes }
+```
 
-### Step 8: Update dispatch_plan to use ActionExecutionPlan directly
+Remove: `CompletedAction` enum, `ActionParams` enum, `completed_action_from_operation`, `action_params_from_plan`, `sync_reading_pane_after_toggle`, `rollback_toggles`.
 
-File: `crates/app/src/handlers/commands.rs`
-
-`dispatch_plan` no longer derives legacy `CompletedAction` or `ActionParams`. It sends the plan + outcomes straight through `Message::ActionCompleted`.
-
-Remove: `completed_action_from_operation`, `action_params_from_plan`, `ActionParams` enum.
-
-### Step 9: Update App.undo_stack type
+### Step 8: Update App.undo_stack type + main.rs dispatch
 
 File: `crates/app/src/main.rs`
 
@@ -212,53 +302,64 @@ File: `crates/app/src/main.rs`
 undo_stack: ratatoskr_command_palette::UndoStack<crate::action_resolve::MailUndoPayload>,
 ```
 
-Update `dispatch_undo` to read `MailUndoPayload` from the stack.
+Update `Message::Undo` handler to pop `UndoEntry<MailUndoPayload>` and call `dispatch_undo(entry)`.
 
-### Step 10: Clean up
+Update `Message::ActionCompleted` dispatch arm.
 
-- Remove `CompletedAction` enum from main.rs
-- Remove `sync_reading_pane_after_toggle` (replaced by CompletionBehavior-driven logic)
-- Remove `rollback_toggles` (replaced by `rollback_optimistic` which already exists)
-- Remove old `UndoToken` description methods
+### Step 9: Clean up
+
+- Remove `UndoToken` references (it no longer exists after Step 3)
+- Remove `CompletedAction` impl block (removes_from_view, success_label)
+- Verify pop_out.rs still works (it uses `dispatch_plan` which now sends new Message shape)
+
+---
 
 ## Compilation Strategy
 
-**Steps 1-2** compile independently (new types, unused).
+**Steps 1-2** compile independently (new types + field added to plan).
 
-**Steps 3-9** are one atomic pass. The generic UndoStack, new Message shape, new completion handler, and undo compensation all depend on each other. Similar to Phase B — edit everything, compile once.
+**Steps 3-8** are one atomic pass. Generic UndoStack, new Message shape, new completion handler, undo dispatch all depend on each other.
 
-**Step 10** is cleanup that compiles independently.
+**Step 9** is cleanup.
+
+---
 
 ## Invariants
 
-### C1: CompletionBehavior is exhaustive
+### C1: CompletionBehavior is exhaustive and set once
 
-`completion_behavior()` is an exhaustive match on `MailOperation`. Adding a new operation variant without defining its behavior is a compiler error.
+`completion_behavior()` is an exhaustive match on `MailOperation`. `ActionExecutionPlan.behavior` is set at construction by `build_execution_plan`. The completion handler reads it — no derivation, no first-operation assumption.
 
 ### C2: Undo payloads built without UI re-read
 
-`build_undo_payloads` reads only from `plan.operations`, `plan.compensation`, and `plan.optimistic`. It does not access `self.thread_list`, `self.sidebar`, or any other UI state. This is the Phase B data sufficiency rule validated.
+`build_undo_payloads` reads only from `plan.operations`, `plan.compensation`, `plan.optimistic`, and `outcomes`. No access to thread_list, sidebar, or any other UI state.
 
-### C3: Undo description set at push time
+### C3: Description set at push time only
 
-`UndoEntry<T>` carries a `description: String` set when the payload is pushed. The palette can display "Undo: Archive" without knowing about `MailUndoPayload`.
+`UndoEntry<T>` carries `description: String`. `MailUndoPayload` has no `description()` method. Description is computed from `behavior.success_label` at push time.
 
-### C4: Rollback uses typed OptimisticMutation
+### C4: One user action = one undo step
 
-`rollback_optimistic` (already exists from Phase B) replaces `rollback_toggles`. Star sync happens as part of rollback, not as a separate step.
+`UndoEntry<T>` carries `Vec<T>` payloads. Toggle actions with mixed prior state produce multiple payloads in one entry. One Ctrl+Z dispatches all.
 
-### C5: Stable outcome ordering preserved
+### C5: Trash undo skipped when source unknown
 
-The completion handler indexes `plan.operations[i]` and `outcomes[i]` in parallel. No regrouping.
+`build_undo_payloads` does not produce a `MailUndoPayload::Trash` when `plan.compensation` is `CompensationContext::SourceFolder(None)`. Safer than creating an undo that moves to the wrong place.
+
+### C6: Missing-thread toggles are already excluded
+
+Phase B's fix skips threads not found in thread_list entirely — no operation, no optimistic mutation. `build_undo_payloads` will not encounter operations without matching optimistic entries because such operations don't exist.
+
+---
 
 ## Risk Areas
 
-1. **Toggle undo grouping by previous value.** Current `produce_undo_tokens` groups toggle threads by `(account_id, previous_value)` so threads that were starred get one undo token and threads that were unstarred get another. `build_undo_payloads` must preserve this grouping using `plan.optimistic`.
+1. **Toggle undo grouping.** `build_undo_payloads` groups optimistic mutations by `(account_id, previous)`. The zip between `plan.optimistic` and `outcomes` must be index-aligned. Phase B guarantees this via `build_execution_plan`'s strict ordering — the i-th optimistic mutation corresponds to the i-th toggle operation. But this only holds for toggle plans (non-toggle plans have empty optimistic). The grouping logic must check `plan.optimistic.is_empty()` to decide which branch to use.
 
-2. **Trash source_folder comes from CompensationContext, not the operation.** MoveToFolder source is in the operation. Trash source is in compensation. `build_undo_payloads` must read from the right place for each.
+2. **Palette crate re-exports.** Step 3 changes `lib.rs` to export `UndoStack<T>` and `UndoEntry<T>` instead of `UndoStack` and `UndoToken`. Any external consumer of the palette crate breaks. In this codebase, only the app crate consumes it.
 
-3. **UndoStack<T> requires T: Send + 'static** for the async undo dispatch. `MailUndoPayload` contains `String`, `FolderId`, `TagId` — all are `Send + 'static`. No issue.
+3. **dispatch_undo async boundary.** `UndoEntry<MailUndoPayload>` must be `Send + 'static` for `Task::perform`. All fields are `String`, `Vec<String>`, `FolderId`, `TagId` — all `Send + 'static`.
 
-4. **Palette crate changes.** Making `UndoStack` generic touches the palette crate, which is shared with the command registry. Ensure no palette code depends on `UndoToken`'s concrete fields.
+4. **Pop-out dispatch.** `dispatch_pop_out_action` calls `dispatch_plan` which now produces the new `Message::ActionCompleted` shape. No additional changes needed in pop_out.rs — it's already on the new path from Phase B.
 
-5. **EmailAction removal.** `Message::EmailAction(EmailAction)` is matched in main.rs `update()`. `EmailAction` is constructed in `command_dispatch.rs`. Both must change atomically. The `EmailAction` enum in `command_dispatch.rs` also has methods — check if any are called besides construction.
+5. **UndoCompleted handler.** Currently receives `{ desc, outcomes }`. `dispatch_undo` constructs this from `entry.description` and the flattened outcomes. No change to the handler needed.
