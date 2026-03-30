@@ -570,11 +570,8 @@ pub async fn oauth_exchange_token(
         .map_err(|e| format!("Token exchange request failed: {e}"))?;
 
     if !response.status().is_success() {
-        let error = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(format!("Token exchange failed: {error}"));
+        let status = response.status();
+        return Err(format!("Token exchange failed (HTTP {status})"));
     }
 
     response
@@ -613,11 +610,8 @@ pub async fn oauth_refresh_token(
         .map_err(|e| format!("Token refresh request failed: {e}"))?;
 
     if !response.status().is_success() {
-        let error = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(format!("Token refresh failed: {error}"));
+        let status = response.status();
+        return Err(format!("Token refresh failed (HTTP {status})"));
     }
 
     response
@@ -671,11 +665,8 @@ async fn fetch_provider_userinfo(
         .map_err(|e| format!("Failed to fetch provider user info: {e}"))?;
 
     if !response.status().is_success() {
-        let error = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(format!("Failed to fetch provider user info: {error}"));
+        let status = response.status();
+        return Err(format!("Failed to fetch provider user info (HTTP {status})"));
     }
 
     let data = response

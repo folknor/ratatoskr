@@ -1,11 +1,19 @@
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::Aead};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::path::Path;
+use zeroize::Zeroize;
 
 /// App-wide encryption key state shared by commands that don't own provider clients.
+/// Key material is zeroized on drop to prevent lingering in freed memory.
 #[derive(Clone)]
 pub struct AppCryptoState {
     encryption_key: [u8; 32],
+}
+
+impl Drop for AppCryptoState {
+    fn drop(&mut self) {
+        self.encryption_key.zeroize();
+    }
 }
 
 impl AppCryptoState {
