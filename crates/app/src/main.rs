@@ -241,14 +241,8 @@ pub enum Message {
     EmailAction(EmailAction),
     /// Action service completed — carries action kind, outcomes, rollback, thread IDs, and params.
     ActionCompleted {
-        action: CompletedAction,
+        plan: crate::action_resolve::ActionExecutionPlan,
         outcomes: Vec<ratatoskr_core::actions::ActionOutcome>,
-        /// For toggle actions: (account_id, thread_id, previous_value) for rollback on failure.
-        rollback: Vec<(String, String, bool)>,
-        /// Thread identities for undo token production: (account_id, thread_id).
-        threads: Vec<(String, String)>,
-        /// Action parameters for undo token construction (label_id, source folder, etc.).
-        params: crate::handlers::commands::ActionParams,
     },
     /// Send completed — carries compose window ID and outcome.
     /// Separate from ActionCompleted because send operates on a compose window,
@@ -396,7 +390,7 @@ struct App {
     is_online: bool,
     pending_chord: Option<PendingChord>,
     palette: Palette,
-    undo_stack: UndoStack,
+    undo_stack: UndoStack<crate::action_resolve::MailUndoPayload>,
 
     // Chat state
     chat_timeline: Option<ui::chat_timeline::ChatTimeline>,
@@ -976,8 +970,8 @@ impl App {
                 Task::none()
             }
             Message::EmailAction(action) => self.handle_email_action(action),
-            Message::ActionCompleted { action, ref outcomes, ref rollback, ref threads, ref params } => {
-                self.handle_action_completed(action, outcomes, rollback, threads, params)
+            Message::ActionCompleted { ref plan, ref outcomes } => {
+                self.handle_action_completed(plan, outcomes)
             }
             Message::SendCompleted { window_id, ref outcome } => {
                 self.handle_send_completed(window_id, outcome)
@@ -1267,8 +1261,8 @@ impl App {
                 Task::none()
             }
             Message::Undo => {
-                if let Some(token) = self.undo_stack.pop() {
-                    return self.dispatch_undo(token);
+                if let Some(entry) = self.undo_stack.pop() {
+                    return self.dispatch_undo(entry);
                 }
                 Task::none()
             }

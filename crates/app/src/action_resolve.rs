@@ -8,7 +8,7 @@
 //! Toggle intents that require per-thread state are represented as
 //! `ResolveOutcome::PerThreadToggle`, NOT as fake resolved operations.
 
-use ratatoskr_core::actions::{FolderId, MailOperation, TagId};
+use ratatoskr_core::actions::{ActionOutcome, FolderId, MailOperation, TagId};
 
 // ── Intent ──────────────────────────────────────────────
 
@@ -132,14 +132,339 @@ pub enum OptimisticMutation {
     },
 }
 
+// ── Completion behavior ─────────────────────────────────
+
+/// How the UI should handle an action's completion.
+/// Derived from `MailOperation` via exhaustive match — compiler forces
+/// a decision for every variant.
+#[derive(Debug, Clone)]
+pub struct CompletionBehavior {
+    pub view_effect: ViewEffect,
+    pub post_success: PostSuccessEffect,
+    pub undo: UndoBehavior,
+    pub success_label: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewEffect {
+    Stays,
+    LeavesCurrentView,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PostSuccessEffect {
+    None,
+    RefreshNav,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UndoBehavior {
+    Irreversible,
+    Reversible,
+}
+
+/// Derive completion behavior from a mail operation (exhaustive match).
+/// Lives in the app crate because view effects, toast text, and undo
+/// policy are UI concerns — core's MailOperation should not know about them.
+///
+/// All operations in a plan share the same behavior class even when
+/// concrete values differ (e.g., SetStarred { to: true } and
+/// SetStarred { to: false } produce the same behavior).
+pub fn completion_behavior(op: &MailOperation) -> CompletionBehavior {
+    match op {
+        MailOperation::Archive => CompletionBehavior {
+            view_effect: ViewEffect::LeavesCurrentView,
+            post_success: PostSuccessEffect::None,
+            undo: UndoBehavior::Reversible,
+            success_label: "Archived",
+        },
+        MailOperation::Trash => CompletionBehavior {
+            view_effect: ViewEffect::LeavesCurrentView,
+            post_success: PostSuccessEffect::None,
+            undo: UndoBehavior::Reversible,
+            success_label: "Moved to Trash",
+        },
+        MailOperation::PermanentDelete => CompletionBehavior {
+            view_effect: ViewEffect::LeavesCurrentView,
+            post_success: PostSuccessEffect::None,
+            undo: UndoBehavior::Irreversible,
+            success_label: "Permanently deleted",
+        },
+        MailOperation::SetSpam { .. } => CompletionBehavior {
+            view_effect: ViewEffect::LeavesCurrentView,
+            post_success: PostSuccessEffect::None,
+            undo: UndoBehavior::Reversible,
+            success_label: "Spam status toggled",
+        },
+        MailOperation::SetStarred { .. } => CompletionBehavior {
+            view_effect: ViewEffect::Stays,
+            post_success: PostSuccessEffect::None,
+            undo: UndoBehavior::Reversible,
+            success_label: "Star toggled",
+        },
+        MailOperation::SetRead { .. } => CompletionBehavior {
+            view_effect: ViewEffect::Stays,
+            post_success: PostSuccessEffect::RefreshNav,
+            undo: UndoBehavior::Reversible,
+            success_label: "Read status toggled",
+        },
+        MailOperation::SetPinned { .. } => CompletionBehavior {
+            view_effect: ViewEffect::Stays,
+            post_success: PostSuccessEffect::None,
+            undo: UndoBehavior::Reversible,
+            success_label: "Pin toggled",
+        },
+        MailOperation::SetMuted { .. } => CompletionBehavior {
+            view_effect: ViewEffect::Stays,
+            post_success: PostSuccessEffect::None,
+            undo: UndoBehavior::Reversible,
+            success_label: "Mute toggled",
+        },
+        MailOperation::MoveToFolder { .. } => CompletionBehavior {
+            view_effect: ViewEffect::LeavesCurrentView,
+            post_success: PostSuccessEffect::None,
+            undo: UndoBehavior::Reversible,
+            success_label: "Moved to folder",
+        },
+        MailOperation::AddLabel { .. } => CompletionBehavior {
+            view_effect: ViewEffect::Stays,
+            post_success: PostSuccessEffect::None,
+            undo: UndoBehavior::Reversible,
+            success_label: "Label applied",
+        },
+        MailOperation::RemoveLabel { .. } => CompletionBehavior {
+            view_effect: ViewEffect::Stays,
+            post_success: PostSuccessEffect::None,
+            undo: UndoBehavior::Reversible,
+            success_label: "Label removed",
+        },
+        MailOperation::Snooze { .. } => CompletionBehavior {
+            view_effect: ViewEffect::LeavesCurrentView,
+            post_success: PostSuccessEffect::None,
+            undo: UndoBehavior::Reversible,
+            success_label: "Snoozed",
+        },
+    }
+}
+
+// ── Undo payload ────────────────────────────────────────
+
+/// Mail-domain undo compensation data. Lives in app crate.
+/// No `description()` method — description is set at push time on `UndoEntry` (C3).
+#[derive(Debug, Clone)]
+pub enum MailUndoPayload {
+    Archive { account_id: String, thread_ids: Vec<String> },
+    Trash { account_id: String, thread_ids: Vec<String>, source: Option<FolderId> },
+    MoveToFolder { account_id: String, thread_ids: Vec<String>, source: FolderId },
+    SetSpam { account_id: String, thread_ids: Vec<String>, was_spam: bool },
+    SetStarred { account_id: String, thread_ids: Vec<String>, was_starred: bool },
+    SetRead { account_id: String, thread_ids: Vec<String>, was_read: bool },
+    SetPinned { account_id: String, thread_ids: Vec<String>, was_pinned: bool },
+    SetMuted { account_id: String, thread_ids: Vec<String>, was_muted: bool },
+    AddLabel { account_id: String, thread_ids: Vec<String>, label_id: TagId },
+    RemoveLabel { account_id: String, thread_ids: Vec<String>, label_id: TagId },
+    Snooze { account_id: String, thread_ids: Vec<String> },
+}
+
+// ── Toast formatting ────────────────────────────────────
+
+/// Generate user-facing toast text from completion behavior + outcomes.
+/// All string policy centralized here — the completion handler delegates
+/// entirely to this function.
+pub fn format_outcome_toast(behavior: &CompletionBehavior, outcomes: &[ActionOutcome]) -> String {
+    let total = outcomes.len();
+    let succeeded = outcomes.iter().filter(|o| o.is_success() || o.is_local_only()).count();
+    let failed = total - succeeded;
+    let any_local_only = outcomes.iter().any(ActionOutcome::is_local_only);
+
+    if failed == total {
+        format!("\u{26A0} {} failed", behavior.success_label)
+    } else if failed > 0 {
+        format!(
+            "\u{26A0} {} {succeeded} of {total} threads \u{2014} {failed} failed",
+            behavior.success_label
+        )
+    } else if any_local_only {
+        format!(
+            "\u{26A0} {} locally \u{2014} sync may revert this",
+            behavior.success_label
+        )
+    } else {
+        behavior.success_label.to_string()
+    }
+}
+
+// ── Undo payload construction ───────────────────────────
+
+/// Build undo payloads from a completed plan + outcomes (C2: no UI re-read).
+///
+/// Returns empty vec for irreversible actions or all-failed outcomes.
+/// For toggles: groups by (account_id, previous_value).
+/// For non-toggles: groups by account_id.
+/// C5: skips Trash undo when source is None.
+/// C4: all payloads go in one UndoEntry (caller handles that).
+pub fn build_undo_payloads(
+    plan: &ActionExecutionPlan,
+    outcomes: &[ActionOutcome],
+) -> Vec<MailUndoPayload> {
+    if matches!(plan.behavior.undo, UndoBehavior::Irreversible) {
+        return Vec::new();
+    }
+    if outcomes.iter().all(ActionOutcome::is_failed) {
+        return Vec::new();
+    }
+
+    if !plan.optimistic.is_empty() {
+        // Toggle path: group by (account_id, previous)
+        build_toggle_undo_payloads(plan, outcomes)
+    } else {
+        // Non-toggle path: group by account_id
+        build_standard_undo_payloads(plan, outcomes)
+    }
+}
+
+fn build_toggle_undo_payloads(
+    plan: &ActionExecutionPlan,
+    outcomes: &[ActionOutcome],
+) -> Vec<MailUndoPayload> {
+    use std::collections::HashMap;
+
+    let mut by_key: HashMap<(&str, bool), Vec<String>> = HashMap::new();
+    for (mutation, outcome) in plan.optimistic.iter().zip(outcomes.iter()) {
+        if !(outcome.is_success() || outcome.is_local_only()) {
+            continue;
+        }
+        let (account_id, thread_id, previous) = match mutation {
+            OptimisticMutation::SetStarred { account_id, thread_id, previous }
+            | OptimisticMutation::SetRead { account_id, thread_id, previous }
+            | OptimisticMutation::SetPinned { account_id, thread_id, previous }
+            | OptimisticMutation::SetMuted { account_id, thread_id, previous } => {
+                (account_id.as_str(), thread_id.clone(), *previous)
+            }
+        };
+        by_key
+            .entry((account_id, previous))
+            .or_default()
+            .push(thread_id);
+    }
+
+    // Determine which toggle type from the first optimistic mutation
+    let first_mutation = &plan.optimistic[0];
+    by_key
+        .into_iter()
+        .map(|((account_id, prev), thread_ids)| match first_mutation {
+            OptimisticMutation::SetStarred { .. } => MailUndoPayload::SetStarred {
+                account_id: account_id.to_string(),
+                thread_ids,
+                was_starred: prev,
+            },
+            OptimisticMutation::SetRead { .. } => MailUndoPayload::SetRead {
+                account_id: account_id.to_string(),
+                thread_ids,
+                was_read: prev,
+            },
+            OptimisticMutation::SetPinned { .. } => MailUndoPayload::SetPinned {
+                account_id: account_id.to_string(),
+                thread_ids,
+                was_pinned: prev,
+            },
+            OptimisticMutation::SetMuted { .. } => MailUndoPayload::SetMuted {
+                account_id: account_id.to_string(),
+                thread_ids,
+                was_muted: prev,
+            },
+        })
+        .collect()
+}
+
+fn build_standard_undo_payloads(
+    plan: &ActionExecutionPlan,
+    outcomes: &[ActionOutcome],
+) -> Vec<MailUndoPayload> {
+    use std::collections::HashMap;
+
+    let mut by_account: HashMap<&str, Vec<String>> = HashMap::new();
+    for ((account_id, thread_id, _), outcome) in plan.operations.iter().zip(outcomes.iter()) {
+        if !(outcome.is_success() || outcome.is_local_only()) {
+            continue;
+        }
+        by_account
+            .entry(account_id.as_str())
+            .or_default()
+            .push(thread_id.clone());
+    }
+
+    // Use first operation to determine action type
+    let first_op = &plan.operations[0].2;
+    by_account
+        .into_iter()
+        .filter_map(|(account_id, thread_ids)| {
+            let account_id = account_id.to_string();
+            match first_op {
+                MailOperation::Archive => Some(MailUndoPayload::Archive {
+                    account_id,
+                    thread_ids,
+                }),
+                MailOperation::Trash => {
+                    // C5: skip if source unknown
+                    let source = match &plan.compensation {
+                        CompensationContext::SourceFolder(s) => s.clone(),
+                        CompensationContext::None => None,
+                    };
+                    if source.is_none() {
+                        return None;
+                    }
+                    Some(MailUndoPayload::Trash {
+                        account_id,
+                        thread_ids,
+                        source,
+                    })
+                }
+                MailOperation::MoveToFolder { source, .. } => {
+                    let source = source.clone()?;
+                    Some(MailUndoPayload::MoveToFolder {
+                        account_id,
+                        thread_ids,
+                        source,
+                    })
+                }
+                MailOperation::SetSpam { to } => Some(MailUndoPayload::SetSpam {
+                    account_id,
+                    thread_ids,
+                    was_spam: !to,
+                }),
+                MailOperation::AddLabel { label_id } => Some(MailUndoPayload::AddLabel {
+                    account_id,
+                    thread_ids,
+                    label_id: label_id.clone(),
+                }),
+                MailOperation::RemoveLabel { label_id } => Some(MailUndoPayload::RemoveLabel {
+                    account_id,
+                    thread_ids,
+                    label_id: label_id.clone(),
+                }),
+                MailOperation::Snooze { .. } => Some(MailUndoPayload::Snooze {
+                    account_id,
+                    thread_ids,
+                }),
+                // Toggles use the optimistic path, PermanentDelete is irreversible
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 // ── Execution plan ──────────────────────────────────────
 
 /// Everything needed to execute an action and handle its completion.
 /// Built from a `ResolveOutcome` + selected threads.
+#[derive(Debug, Clone)]
 pub struct ActionExecutionPlan {
     /// Per-target operations — always a flat vec, even for uniform actions.
     /// `operations[i]` corresponds to `outcomes[i]` after execution.
     pub operations: Vec<(String, String, MailOperation)>,
+    /// Completion behavior — set at construction, read by completion handler (C1).
+    pub behavior: CompletionBehavior,
     /// Compensation context from resolution (Trash source folder).
     pub compensation: CompensationContext,
     /// Optimistic UI mutations applied (toggles only). Empty for non-toggles.
@@ -242,12 +567,14 @@ pub fn build_execution_plan(
 ) -> Option<ActionExecutionPlan> {
     match outcome {
         ResolveOutcome::Resolved(resolved) => {
+            let behavior = completion_behavior(&resolved.operation);
             let operations = threads
                 .iter()
                 .map(|(a, t)| (a.clone(), t.clone(), resolved.operation.clone()))
                 .collect();
             Some(ActionExecutionPlan {
                 operations,
+                behavior,
                 compensation: resolved.compensation,
                 optimistic: vec![],
             })
@@ -256,6 +583,8 @@ pub fn build_execution_plan(
             field,
             compensation,
         } => {
+            // C1: to value doesn't affect behavior class
+            let behavior = completion_behavior(&toggle_to_operation(field, true));
             let mut operations = Vec::with_capacity(threads.len());
             let mut optimistic = Vec::with_capacity(threads.len());
 
@@ -293,6 +622,7 @@ pub fn build_execution_plan(
 
             Some(ActionExecutionPlan {
                 operations,
+                behavior,
                 compensation,
                 optimistic,
             })

@@ -19,4 +19,4 @@ pub use keybinding::{
 };
 pub use registry::{CommandRegistry, UsageTracker};
 pub use resolver::CommandInputResolver;
-pub use undo::{UndoStack, UndoToken};
+pub use undo::{UndoEntry, UndoStack};
