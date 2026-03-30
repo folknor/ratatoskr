@@ -5716,6 +5716,7 @@ dependencies = [
  "tokio",
  "unicode-segmentation",
  "xxhash-rust",
+ "zeroize",
 ]
 
 [[package]]

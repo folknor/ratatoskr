@@ -8,6 +8,15 @@
 
 - [ ] **Star icon: need filled variant** — Lucide only has outline icons. The star toggle in the reading pane needs a filled star (golden) for the active state and an outline star for inactive. Currently uses Unicode ★ as a stopgap, which causes size mismatch and visual jank. Options: (1) add a second icon font with filled variants, (2) use an SVG/image icon, (3) custom widget that draws a filled star path. The button should also not change background color on toggle — just the icon fill.
 
+- [ ] **Autocomplete: cross-field drag-and-drop** — Drag detection works but drop cancels. Context menu "Move to" is the workaround. Needs ghost token rendering and target field hit-testing.
+- [ ] **Autocomplete: email validation before tokenization** — Enter/Tab/comma/semicolon tokenize any non-empty text. Should validate plausible email format before creating a token.
+- [ ] **Autocomplete: context menu Cut/Copy/Paste** — Token context menu has Delete, Expand group, Move-to-field only. Missing clipboard operations.
+- [ ] **Autocomplete: bulk-paste "Save as group"** — Banner renders but save action is not wired.
+- [ ] **Autocomplete: richer dropdown rendering** — Currently plain text "Name <email>". Spec calls for two-column layout (name + email), group icon, member count display.
+- [ ] **Autocomplete: group token "(N)" suffix** — `member_count` stored on Token but chip label is just the group name.
+- [ ] **Autocomplete: search debounce** — Search dispatches immediately on every keystroke. Spec calls for 10-20ms debounce to coalesce rapid typing.
+- [ ] **Autocomplete: paste dedup** — `dedup_parsed()` exists but is never called. Also no dedup against existing tokens in the field.
+- [ ] **Autocomplete: reuse beyond compose** — Widget only used in compose. Calendar attendee picker and group editor could reuse it.
 - [ ] **Contact pills on recipients** — Per `docs/pop-out-windows/problem-statement.md`: recipients in To/Cc fields should appear as plain text but become contact pills on hover, revealing an inline edit button for quick contact editing. Applies to: reading pane message headers, pop-out message view, compose window recipient display. Currently recipients are plain text everywhere with no hover interaction. Needs: (1) a contact pill widget that blends with background at rest and reveals pill styling + edit button on hover, (2) display name resolution from the contact system (name → email fallback chain), (3) wiring to the existing `EditContact` flow that opens the settings contact editor.
 
 - [ ] **Action service: user-facing retry status** *(Deferred — blocked on toast system)* — Backend complete: `db_pending_ops_count()`, `db_pending_ops_failed_count()`, `db_pending_ops_retry_failed()` all exist. Zero UI wiring. Needs the toast/notification system (first TODO item) before this can surface "N actions pending retry" badges or "Archive failed after 10 retries" persistent notifications. Without this, users have no visibility into silently diverged state.
@@ -16,6 +25,11 @@
 
 - [ ] **Typed IDs: CommandArgs fields** — `CommandArgs::MoveToFolder { folder_id: String }`, `AddLabel { label_id: String }`, `RemoveLabel { label_id: String }` in `command-palette` are still raw strings. Wrapping happens at the `command_dispatch.rs` boundary (3 lines in `dispatch_parameterized`). The palette crate can't depend on `provider-utils` (pulls in reqwest, rusqlite, stores, search). Fix would require either extracting `FolderId`/`TagId` to a micro-crate or duplicating the newtypes in the palette crate.
 - [ ] **Typed IDs: sidebar.selected_label** — `sidebar.selected_label: Option<String>` is wrapped to `FolderId` at call sites. 32 references across the app. The field is semantically ambiguous — it holds folder IDs for navigation (e.g., "INBOX", "TRASH") AND label IDs for tag highlighting. Typing it as `FolderId` would be wrong in label contexts; typing it as a union would add complexity. The root issue is that the sidebar conflates "which container am I viewing" with "which label is highlighted."
+- [ ] **First-launch modal not dismissible** — In zero-accounts state, cancel doesn't close the wizard. Spec says it should dismiss over an unusable empty app. Intentional safety measure or bug — decide and document.
+- [ ] **Default scope is first account, not All Accounts** — After account load, app selects first account instead of unified All Accounts inbox.
+- [ ] **App-specific-password help not clickable** — Discovery types carry `help_url` but UI shows plain text "Check {domain} for setup instructions" — no clickable link to provider app-password pages.
+- [ ] **Deleted-account compose/pop-out cleanup** — Account deletion doesn't close compose windows or message-view pop-outs for the deleted account, and doesn't block sending from a deleted identity.
+- [ ] **Sync-task cancellation on account deletion** — Delete flow removes DB data but doesn't cancel in-flight sync tasks. Stale sync completions could write to deleted account state.
 - [ ] **Search scope respects ViewScope** — `execute_search_sql_fallback` hardcodes `AccountScope::All`. When viewing a shared mailbox or single account, search should be scoped accordingly. Tantivy search path also ignores scope. Follow-up from Contract #10.
 
 - [ ] **Crate structure and dependency graph** - So much has been implemented without any real consideration for what kind of code lives where. It might be time to get a grip on things.

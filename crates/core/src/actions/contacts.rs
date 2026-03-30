@@ -1,7 +1,7 @@
 //! Contact write-back — save and delete through providers.
 //!
-//! JMAP is fully wired. Google, Graph, and CardDAV are stubs that return
-//! `LocalOnly` with a descriptive reason until their HTTP calls are implemented.
+//! JMAP, Google, and Graph are fully wired. CardDAV is a stub that returns
+//! `LocalOnly` until vCard generation + PUT is implemented.
 
 use super::context::ActionContext;
 use super::log::MutationLog;
