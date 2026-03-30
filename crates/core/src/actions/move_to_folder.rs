@@ -15,14 +15,14 @@ pub(crate) async fn move_local(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,
-    folder_id: &str,
-    source_label_id: Option<&str>,
+    folder_id: &FolderId,
+    source_label_id: Option<&FolderId>,
 ) -> Result<(), ActionError> {
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    let fid = folder_id.to_string();
-    let source = source_label_id.map(String::from);
+    let fid = folder_id.as_str().to_string();
+    let source = source_label_id.map(|s| s.as_str().to_string());
     tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
@@ -42,13 +42,13 @@ async fn move_dispatch(
     provider: &dyn ProviderOps,
     account_id: &str,
     thread_id: &str,
-    folder_id: &str,
-    source_label_id: Option<&str>,
+    folder_id: &FolderId,
+    source_label_id: Option<&FolderId>,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("move_to_folder", account_id, thread_id);
     let params_json = serde_json::json!({
-        "folderId": folder_id,
-        "sourceLabelId": source_label_id,
+        "folderId": folder_id.as_str(),
+        "sourceLabelId": source_label_id.map(FolderId::as_str),
     })
     .to_string();
 
@@ -61,8 +61,7 @@ async fn move_dispatch(
         progress: &NoopProgressReporter,
     };
 
-    let typed_folder = FolderId::from(folder_id);
-    let outcome = match provider.move_to_folder(&provider_ctx, thread_id, &typed_folder).await {
+    let outcome = match provider.move_to_folder(&provider_ctx, thread_id, folder_id).await {
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             let msg = e.to_string();
@@ -79,13 +78,13 @@ pub async fn move_to_folder(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,
-    folder_id: &str,
-    source_label_id: Option<&str>,
+    folder_id: &FolderId,
+    source_label_id: Option<&FolderId>,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("move_to_folder", account_id, thread_id);
     let params_json = serde_json::json!({
-        "folderId": folder_id,
-        "sourceLabelId": source_label_id,
+        "folderId": folder_id.as_str(),
+        "sourceLabelId": source_label_id.map(FolderId::as_str),
     })
     .to_string();
 
@@ -113,8 +112,8 @@ pub(crate) async fn move_to_folder_with_provider(
     provider: &dyn ProviderOps,
     account_id: &str,
     thread_id: &str,
-    folder_id: &str,
-    source_label_id: Option<&str>,
+    folder_id: &FolderId,
+    source_label_id: Option<&FolderId>,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("move_to_folder", account_id, thread_id);
 

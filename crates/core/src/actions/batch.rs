@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use ratatoskr_provider_utils::ops::ProviderOps;
+use ratatoskr_provider_utils::typed_ids::{FolderId, TagId};
 
 use super::context::ActionContext;
 use super::log::MutationLog;
@@ -41,12 +42,12 @@ pub enum BatchAction {
     Archive,
     Trash,
     Spam { is_spam: bool },
-    MoveToFolder { folder_id: String, source_label_id: Option<String> },
+    MoveToFolder { folder_id: FolderId, source_label_id: Option<FolderId> },
     Star { starred: bool },
     MarkRead { read: bool },
     PermanentDelete,
-    AddLabel { label_id: String },
-    RemoveLabel { label_id: String },
+    AddLabel { label_id: TagId },
+    RemoveLabel { label_id: TagId },
     Pin { pinned: bool },
     Mute { muted: bool },
     Snooze { until: i64 },
@@ -286,7 +287,7 @@ async fn dispatch_with_provider(
         }
         BatchAction::MoveToFolder { folder_id, source_label_id } => {
             move_to_folder::move_to_folder_with_provider(
-                ctx, provider, account_id, thread_id, folder_id, source_label_id.as_deref(),
+                ctx, provider, account_id, thread_id, folder_id, source_label_id.as_ref(),
             ).await
         }
         BatchAction::Star { starred } => {
@@ -326,7 +327,7 @@ async fn action_local(
         BatchAction::Trash => trash::trash_local(ctx, account_id, thread_id).await.map(|()| true),
         BatchAction::Spam { is_spam } => spam::spam_local(ctx, account_id, thread_id, *is_spam).await.map(|()| true),
         BatchAction::MoveToFolder { folder_id, source_label_id } => {
-            move_to_folder::move_local(ctx, account_id, thread_id, folder_id, source_label_id.as_deref()).await.map(|()| true)
+            move_to_folder::move_local(ctx, account_id, thread_id, folder_id, source_label_id.as_ref()).await.map(|()| true)
         }
         BatchAction::Star { starred } => star::star_local(ctx, account_id, thread_id, *starred).await,
         BatchAction::MarkRead { read } => mark_read::mark_read_local(ctx, account_id, thread_id, *read).await.map(|()| true),

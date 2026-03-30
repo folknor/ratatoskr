@@ -17,12 +17,12 @@ pub(crate) async fn add_label_local(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,
-    label_id: &str,
+    label_id: &TagId,
 ) -> Result<(), ActionError> {
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    let lid = label_id.to_string();
+    let lid = label_id.as_str().to_string();
     tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
@@ -63,10 +63,10 @@ async fn add_label_dispatch(
     provider: &dyn ProviderOps,
     account_id: &str,
     thread_id: &str,
-    label_id: &str,
+    label_id: &TagId,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("add_label", account_id, thread_id);
-    let params_json = serde_json::json!({"labelId": label_id}).to_string();
+    let params_json = serde_json::json!({"labelId": label_id.as_str()}).to_string();
 
     let provider_ctx = ProviderCtx {
         account_id,
@@ -77,8 +77,7 @@ async fn add_label_dispatch(
         progress: &NoopProgressReporter,
     };
 
-    let typed_tag = TagId::from(label_id);
-    let result = provider.add_tag(&provider_ctx, thread_id, &typed_tag).await;
+    let result = provider.add_tag(&provider_ctx, thread_id, label_id).await;
 
     let outcome = match result {
         Ok(()) => ActionOutcome::Success,
@@ -97,10 +96,10 @@ pub async fn add_label(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,
-    label_id: &str,
+    label_id: &TagId,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("add_label", account_id, thread_id);
-    let params_json = serde_json::json!({"labelId": label_id}).to_string();
+    let params_json = serde_json::json!({"labelId": label_id.as_str()}).to_string();
 
     if let Err(e) = add_label_local(ctx, account_id, thread_id, label_id).await {
         let outcome = ActionOutcome::Failed { error: e };
@@ -127,7 +126,7 @@ pub(crate) async fn add_label_with_provider(
     provider: &dyn ProviderOps,
     account_id: &str,
     thread_id: &str,
-    label_id: &str,
+    label_id: &TagId,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("add_label", account_id, thread_id);
 
@@ -148,12 +147,12 @@ pub(crate) async fn remove_label_local(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,
-    label_id: &str,
+    label_id: &TagId,
 ) -> Result<(), ActionError> {
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
-    let lid = label_id.to_string();
+    let lid = label_id.as_str().to_string();
     tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
@@ -194,10 +193,10 @@ async fn remove_label_dispatch(
     provider: &dyn ProviderOps,
     account_id: &str,
     thread_id: &str,
-    label_id: &str,
+    label_id: &TagId,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("remove_label", account_id, thread_id);
-    let params_json = serde_json::json!({"labelId": label_id}).to_string();
+    let params_json = serde_json::json!({"labelId": label_id.as_str()}).to_string();
 
     let provider_ctx = ProviderCtx {
         account_id,
@@ -208,8 +207,7 @@ async fn remove_label_dispatch(
         progress: &NoopProgressReporter,
     };
 
-    let typed_tag = TagId::from(label_id);
-    let result = provider.remove_tag(&provider_ctx, thread_id, &typed_tag).await;
+    let result = provider.remove_tag(&provider_ctx, thread_id, label_id).await;
 
     let outcome = match result {
         Ok(()) => ActionOutcome::Success,
@@ -228,10 +226,10 @@ pub async fn remove_label(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,
-    label_id: &str,
+    label_id: &TagId,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("remove_label", account_id, thread_id);
-    let params_json = serde_json::json!({"labelId": label_id}).to_string();
+    let params_json = serde_json::json!({"labelId": label_id.as_str()}).to_string();
 
     if let Err(e) = remove_label_local(ctx, account_id, thread_id, label_id).await {
         let outcome = ActionOutcome::Failed { error: e };
@@ -258,7 +256,7 @@ pub(crate) async fn remove_label_with_provider(
     provider: &dyn ProviderOps,
     account_id: &str,
     thread_id: &str,
-    label_id: &str,
+    label_id: &TagId,
 ) -> ActionOutcome {
     let mlog = MutationLog::begin("remove_label", account_id, thread_id);
 

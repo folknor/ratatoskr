@@ -642,7 +642,8 @@ impl App {
             return Task::none();
         };
         let threads = vec![(state.account_id.clone(), state.thread_id.clone())];
-        let source_label_id = state.source_label_id.clone();
+        let source_label_id = state.source_label_id.clone()
+            .map(ratatoskr_core::actions::FolderId::from);
         state.overflow_menu_open = false;
         // Drop the borrow on self.pop_out_windows before calling dispatch.
         drop(state);

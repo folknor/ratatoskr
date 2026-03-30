@@ -72,9 +72,9 @@ pub enum EmailAction {
     TogglePin,
     ToggleMute,
     Unsubscribe,
-    MoveToFolder { folder_id: String },
-    AddLabel { label_id: String },
-    RemoveLabel { label_id: String },
+    MoveToFolder { folder_id: ratatoskr_core::actions::FolderId },
+    AddLabel { label_id: ratatoskr_core::actions::TagId },
+    RemoveLabel { label_id: ratatoskr_core::actions::TagId },
     Snooze { until: i64 },
 }
 
@@ -579,16 +579,20 @@ pub fn dispatch_parameterized(
             CommandId::EmailMoveToFolder,
             CommandArgs::MoveToFolder { folder_id },
         ) => Some(Message::EmailAction(EmailAction::MoveToFolder {
-            folder_id,
+            folder_id: ratatoskr_core::actions::FolderId::from(folder_id),
         })),
         (CommandId::EmailAddLabel, CommandArgs::AddLabel { label_id }) => {
-            Some(Message::EmailAction(EmailAction::AddLabel { label_id }))
+            Some(Message::EmailAction(EmailAction::AddLabel {
+                label_id: ratatoskr_core::actions::TagId::from(label_id),
+            }))
         }
         (
             CommandId::EmailRemoveLabel,
             CommandArgs::RemoveLabel { label_id },
         ) => {
-            Some(Message::EmailAction(EmailAction::RemoveLabel { label_id }))
+            Some(Message::EmailAction(EmailAction::RemoveLabel {
+                label_id: ratatoskr_core::actions::TagId::from(label_id),
+            }))
         }
         (CommandId::EmailSnooze, CommandArgs::Snooze { until }) => {
             Some(Message::EmailAction(EmailAction::Snooze { until }))

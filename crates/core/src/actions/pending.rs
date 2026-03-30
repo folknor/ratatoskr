@@ -220,14 +220,13 @@ async fn dispatch_pending_op(
             super::spam::spam(ctx, account_id, resource_id, is_spam).await
         }
         "moveToFolder" => {
-            let folder_id = params
-                .get("folderId")
+            let folder_id = ratatoskr_provider_utils::typed_ids::FolderId::from(
+                params.get("folderId").and_then(serde_json::Value::as_str).unwrap_or(""),
+            );
+            let source = params.get("sourceLabelId")
                 .and_then(serde_json::Value::as_str)
-                .unwrap_or("");
-            let source = params
-                .get("sourceLabelId")
-                .and_then(serde_json::Value::as_str);
-            super::move_to_folder::move_to_folder(ctx, account_id, resource_id, folder_id, source)
+                .map(ratatoskr_provider_utils::typed_ids::FolderId::from);
+            super::move_to_folder::move_to_folder(ctx, account_id, resource_id, &folder_id, source.as_ref())
                 .await
         }
         "star" => {
@@ -248,18 +247,16 @@ async fn dispatch_pending_op(
             super::permanent_delete::permanent_delete(ctx, account_id, resource_id).await
         }
         "addLabel" => {
-            let label_id = params
-                .get("labelId")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("");
-            super::label::add_label(ctx, account_id, resource_id, label_id).await
+            let label_id = ratatoskr_provider_utils::typed_ids::TagId::from(
+                params.get("labelId").and_then(serde_json::Value::as_str).unwrap_or(""),
+            );
+            super::label::add_label(ctx, account_id, resource_id, &label_id).await
         }
         "removeLabel" => {
-            let label_id = params
-                .get("labelId")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("");
-            super::label::remove_label(ctx, account_id, resource_id, label_id).await
+            let label_id = ratatoskr_provider_utils::typed_ids::TagId::from(
+                params.get("labelId").and_then(serde_json::Value::as_str).unwrap_or(""),
+            );
+            super::label::remove_label(ctx, account_id, resource_id, &label_id).await
         }
         other => {
             log::warn!("[pending_ops] Unknown operation type: {other}");
@@ -290,9 +287,13 @@ async fn dispatch_pending_op_with_provider(
             super::spam::spam_with_provider(ctx, provider, account_id, resource_id, is_spam).await
         }
         "moveToFolder" => {
-            let folder_id = params.get("folderId").and_then(serde_json::Value::as_str).unwrap_or("");
-            let source = params.get("sourceLabelId").and_then(serde_json::Value::as_str);
-            super::move_to_folder::move_to_folder_with_provider(ctx, provider, account_id, resource_id, folder_id, source).await
+            let folder_id = ratatoskr_provider_utils::typed_ids::FolderId::from(
+                params.get("folderId").and_then(serde_json::Value::as_str).unwrap_or(""),
+            );
+            let source = params.get("sourceLabelId")
+                .and_then(serde_json::Value::as_str)
+                .map(ratatoskr_provider_utils::typed_ids::FolderId::from);
+            super::move_to_folder::move_to_folder_with_provider(ctx, provider, account_id, resource_id, &folder_id, source.as_ref()).await
         }
         "star" => {
             let starred = params.get("starred").and_then(serde_json::Value::as_bool).unwrap_or(true);
@@ -306,12 +307,16 @@ async fn dispatch_pending_op_with_provider(
             super::permanent_delete::permanent_delete_with_provider(ctx, provider, account_id, resource_id).await
         }
         "addLabel" => {
-            let label_id = params.get("labelId").and_then(serde_json::Value::as_str).unwrap_or("");
-            super::label::add_label_with_provider(ctx, provider, account_id, resource_id, label_id).await
+            let label_id = ratatoskr_provider_utils::typed_ids::TagId::from(
+                params.get("labelId").and_then(serde_json::Value::as_str).unwrap_or(""),
+            );
+            super::label::add_label_with_provider(ctx, provider, account_id, resource_id, &label_id).await
         }
         "removeLabel" => {
-            let label_id = params.get("labelId").and_then(serde_json::Value::as_str).unwrap_or("");
-            super::label::remove_label_with_provider(ctx, provider, account_id, resource_id, label_id).await
+            let label_id = ratatoskr_provider_utils::typed_ids::TagId::from(
+                params.get("labelId").and_then(serde_json::Value::as_str).unwrap_or(""),
+            );
+            super::label::remove_label_with_provider(ctx, provider, account_id, resource_id, &label_id).await
         }
         other => {
             log::warn!("[pending_ops] Unknown operation type: {other}");

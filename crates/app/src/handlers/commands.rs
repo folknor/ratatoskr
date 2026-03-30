@@ -6,7 +6,7 @@ use crate::command_dispatch::{self, EmailAction};
 use crate::db::Db;
 use crate::{APP_DATA_DIR, App, CompletedAction, Message};
 use ratatoskr_command_palette::{CommandArgs, CommandId, KeyBinding, OptionItem};
-use ratatoskr_core::actions::{ActionOutcome, BatchAction};
+use ratatoskr_core::actions::{ActionOutcome, BatchAction, FolderId, TagId};
 use ratatoskr_core::scope::ViewScope;
 
 /// Parameters for actions that need more than account_id + thread_id.
@@ -15,9 +15,9 @@ use ratatoskr_core::scope::ViewScope;
 pub(crate) enum ActionParams {
     None,
     Spam { is_spam: bool },
-    MoveToFolder { folder_id: String, source_label_id: Option<String> },
-    Label { label_id: String },
-    Trash { source_label_id: Option<String> },
+    MoveToFolder { folder_id: FolderId, source_label_id: Option<FolderId> },
+    Label { label_id: TagId },
+    Trash { source_label_id: Option<FolderId> },
     Snooze { until: i64 },
 }
 
@@ -180,7 +180,7 @@ impl App {
 
             // ── Removes-from-view folder ops via action service ──
             EmailAction::Trash => {
-                let source_label_id = self.sidebar.selected_label.clone();
+                let source_label_id = self.sidebar.selected_label.clone().map(FolderId::from);
                 return self.dispatch_action_service_with_params(
                     CompletedAction::Trash,
                     &selected_threads,
@@ -206,7 +206,7 @@ impl App {
             }
             EmailAction::MoveToFolder { folder_id } => {
                 // Source is the sidebar's active folder, if any.
-                let source_label_id = self.sidebar.selected_label.clone();
+                let source_label_id = self.sidebar.selected_label.clone().map(FolderId::from);
                 return self.dispatch_action_service_with_params(
                     CompletedAction::MoveToFolder,
                     &selected_threads,
@@ -636,7 +636,7 @@ impl App {
                     CompletedAction::Trash => {
                         let source = match params {
                             ActionParams::Trash { source_label_id } => {
-                                source_label_id.clone()
+                                source_label_id.as_ref().map(|f| f.as_str().to_string())
                             }
                             _ => None,
                         };
@@ -666,7 +666,7 @@ impl App {
                         let source = match params {
                             ActionParams::MoveToFolder {
                                 source_label_id, ..
-                            } => source_label_id.clone(),
+                            } => source_label_id.as_ref().map(|f| f.as_str().to_string()),
                             _ => None,
                         };
                         let Some(source_folder_id) = source else {
@@ -680,7 +680,7 @@ impl App {
                     }
                     CompletedAction::AddLabel => {
                         let label_id = match params {
-                            ActionParams::Label { label_id } => label_id.clone(),
+                            ActionParams::Label { label_id } => label_id.as_str().to_string(),
                             _ => continue,
                         };
                         UndoToken::AddLabel {
@@ -691,7 +691,7 @@ impl App {
                     }
                     CompletedAction::RemoveLabel => {
                         let label_id = match params {
-                            ActionParams::Label { label_id } => label_id.clone(),
+                            ActionParams::Label { label_id } => label_id.as_str().to_string(),
                             _ => continue,
                         };
                         UndoToken::RemoveLabel {
@@ -821,7 +821,8 @@ async fn execute_undo_compensation(
                 let _ = db_pending_ops_cancel_for_resource(
                     &ctx.db, account_id.clone(), tid.clone(), "archive".to_string(),
                 ).await;
-                outcomes.push(actions::add_label(ctx, account_id, tid, "INBOX").await);
+                let inbox = TagId::from("INBOX");
+                outcomes.push(actions::add_label(ctx, account_id, tid, &inbox).await);
             }
             outcomes
         }
@@ -836,9 +837,11 @@ async fn execute_undo_compensation(
                     &ctx.db, account_id.clone(), tid.clone(), "trash".to_string(),
                 ).await;
                 let outcome = if let Some(folder) = original_folder_id {
-                    actions::move_to_folder(ctx, account_id, tid, folder, None).await
+                    let fid = FolderId::from(folder.as_str());
+                    actions::move_to_folder(ctx, account_id, tid, &fid, None).await
                 } else {
-                    actions::add_label(ctx, account_id, tid, "INBOX").await
+                    let inbox = TagId::from("INBOX");
+                    actions::add_label(ctx, account_id, tid, &inbox).await
                 };
                 outcomes.push(outcome);
             }
@@ -850,12 +853,13 @@ async fn execute_undo_compensation(
             source_folder_id,
         } => {
             let mut outcomes = Vec::with_capacity(thread_ids.len());
+            let fid = FolderId::from(source_folder_id.as_str());
             for tid in thread_ids {
                 let _ = db_pending_ops_cancel_for_resource(
                     &ctx.db, account_id.clone(), tid.clone(), "moveToFolder".to_string(),
                 ).await;
                 outcomes.push(
-                    actions::move_to_folder(ctx, account_id, tid, source_folder_id, None).await,
+                    actions::move_to_folder(ctx, account_id, tid, &fid, None).await,
                 );
             }
             outcomes
@@ -930,11 +934,12 @@ async fn execute_undo_compensation(
             label_id,
         } => {
             let mut outcomes = Vec::with_capacity(thread_ids.len());
+            let tid_typed = TagId::from(label_id.as_str());
             for tid in thread_ids {
                 let _ = db_pending_ops_cancel_for_resource(
                     &ctx.db, account_id.clone(), tid.clone(), "addLabel".to_string(),
                 ).await;
-                outcomes.push(actions::remove_label(ctx, account_id, tid, label_id).await);
+                outcomes.push(actions::remove_label(ctx, account_id, tid, &tid_typed).await);
             }
             outcomes
         }
@@ -944,11 +949,12 @@ async fn execute_undo_compensation(
             label_id,
         } => {
             let mut outcomes = Vec::with_capacity(thread_ids.len());
+            let tid_typed = TagId::from(label_id.as_str());
             for tid in thread_ids {
                 let _ = db_pending_ops_cancel_for_resource(
                     &ctx.db, account_id.clone(), tid.clone(), "removeLabel".to_string(),
                 ).await;
-                outcomes.push(actions::add_label(ctx, account_id, tid, label_id).await);
+                outcomes.push(actions::add_label(ctx, account_id, tid, &tid_typed).await);
             }
             outcomes
         }

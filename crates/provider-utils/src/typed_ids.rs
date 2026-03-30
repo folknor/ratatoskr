@@ -6,12 +6,14 @@
 
 /// A folder/mailbox/container ID (Gmail label, JMAP mailbox, Graph folder, IMAP path).
 /// Used with `move_to_folder`, `rename_folder`, `delete_folder`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
 pub struct FolderId(pub String);
 
 /// A tag/keyword/category ID (Gmail label, JMAP keyword, Graph category, IMAP keyword).
 /// Used with `add_tag`, `remove_tag`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
 pub struct TagId(pub String);
 
 impl FolderId {

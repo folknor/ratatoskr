@@ -42,6 +42,7 @@ pub use move_to_folder::move_to_folder;
 pub use mute::mute;
 pub use log::MutationLog;
 pub use outcome::{ActionError, ActionOutcome, RemoteFailureKind};
+pub use ratatoskr_provider_utils::typed_ids::{FolderId, TagId};
 pub use permanent_delete::permanent_delete;
 pub use pin::pin;
 // create_provider is pub(crate) — only accessible within core, not to downstream crates.
