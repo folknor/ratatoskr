@@ -81,7 +81,7 @@ pub fn seed_accounts(
                 preset.provider,
                 preset.host,
                 preset.color,
-                accounts.len() as i32,
+                i32::try_from(accounts.len()).unwrap_or(0),
             ],
         )
         .map_err(|e| format!("insert account: {e}"))?;
@@ -93,8 +93,8 @@ pub fn seed_accounts(
             let label_id = crate::next_uuid(rng);
             conn.execute(
                 "INSERT INTO labels (id, account_id, name, type, visible, sort_order, \
-                 imap_special_use, label_kind) \
-                 VALUES (?1, ?2, ?3, 'system', 1, ?4, ?5, 'container')",
+                 imap_special_use, imap_folder_path, label_kind) \
+                 VALUES (?1, ?2, ?3, 'system', 1, ?4, ?5, ?3, 'container')",
                 rusqlite::params![label_id, account_id, sl.name, sl.sort, sl.special],
             )
             .map_err(|e| format!("insert system label: {e}"))?;
@@ -113,7 +113,7 @@ pub fn seed_accounts(
                     ul.name,
                     ul.color_bg,
                     ul.color_fg,
-                    (SYSTEM_LABELS.len() + i) as i32,
+                    i32::try_from(SYSTEM_LABELS.len() + i).unwrap_or(0),
                 ],
             )
             .map_err(|e| format!("insert user label: {e}"))?;

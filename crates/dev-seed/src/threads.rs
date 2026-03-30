@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use rand::Rng;
 use rusqlite::Connection;
@@ -8,6 +7,10 @@ use crate::accounts::Account;
 use crate::contacts;
 use crate::people::{Person, PeoplePools, I18N_LOCALES};
 use crate::templates::{self, Category, CATEGORIES, CATEGORY_WEIGHTS};
+
+/// Fixed reference timestamp for deterministic output.
+/// 2026-03-15 12:00:00 UTC — arbitrary but stable across runs.
+const FIXED_NOW: i64 = 1_773_768_000;
 
 struct AttachmentInfo {
     filename: &'static str,
@@ -45,16 +48,6 @@ fn weighted_choice<T: Copy>(rng: &mut impl Rng, items: &[T], weights: &[f64]) ->
     items[items.len() - 1]
 }
 
-fn now_unix() -> i64 {
-    #[allow(clippy::cast_possible_truncation)]
-    {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64
-    }
-}
-
 /// Body to be inserted into the body store after the main transaction.
 pub struct PendingBody {
     pub message_id: String,
@@ -80,7 +73,7 @@ pub fn generate_threads(
     let mut bodies = Vec::new();
     let mut stats = SeedStats { threads: 0, messages: 0, attachments: 0 };
     let mut imap_uid_counter: HashMap<(String, String), u32> = HashMap::new();
-    let now = now_unix();
+    let now = FIXED_NOW;
 
     for _ in 0..num_threads {
         let acc = &accounts[rng.random_range(0..accounts.len())];
@@ -341,8 +334,13 @@ pub fn generate_threads(
                 stats.attachments += 1;
             }
 
-            // Upsert contact
+            // Upsert sender into contacts
             contacts::upsert_contact(conn, rng, &sender_email, &sender_name, &acc.id, msg_date)?;
+
+            // Upsert recipients into contacts
+            for p in &participants {
+                contacts::upsert_contact(conn, rng, &p.email, &p.display_name, &acc.id, msg_date)?;
+            }
 
             if msg_date > latest_date {
                 latest_date = msg_date;
