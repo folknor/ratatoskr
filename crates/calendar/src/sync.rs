@@ -72,6 +72,20 @@ pub async fn calendar_sync_account_impl(
     }
 }
 
+/// Convenience entry point for syncing a single account's calendars.
+///
+/// Constructs ephemeral `GmailState` / `GraphState` internally so callers
+/// only need `DbState` + encryption key (same pattern as `sync_delta_for_account`).
+pub async fn calendar_sync_account(
+    account_id: &str,
+    db: &DbState,
+    encryption_key: [u8; 32],
+) -> Result<(), String> {
+    let gmail = ratatoskr_gmail::client::new_gmail_state(encryption_key);
+    let graph = ratatoskr_graph::client::new_graph_state(encryption_key);
+    calendar_sync_account_impl(account_id, db, &gmail, &graph).await
+}
+
 pub async fn upsert_discovered_calendars_impl(
     db: &DbState,
     account_id: &str,
@@ -235,7 +249,10 @@ pub async fn load_visible_calendars(
     db.with_conn(move |conn| {
         let mut stmt = conn
             .prepare(
-                "SELECT * FROM calendars WHERE account_id = ?1 AND is_visible = 1
+                "SELECT id, account_id, provider, remote_id, display_name, color, \
+                        is_primary, is_visible, sync_token, ctag, created_at, \
+                        updated_at, sort_order, is_default, provider_id \
+                 FROM calendars WHERE account_id = ?1 AND is_visible = 1 \
                  ORDER BY is_primary DESC, display_name ASC",
             )
             .map_err(|e| e.to_string())?;

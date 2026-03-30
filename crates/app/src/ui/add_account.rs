@@ -766,28 +766,38 @@ impl AddAccountWizard {
             resolve_client_id(&provider_id)
         };
 
-        // Look up the full OAuth config from the discovery registry
+        // Look up the full OAuth config from the discovery registry.
         let oauth_config =
             ratatoskr_core::discovery::registry::oauth_config_for_provider(&provider_id);
-        let Some(auth_method) = oauth_config else {
-            self.step = AddAccountStep::PasswordAuth;
-            self.error = Some(format!(
-                "No OAuth configuration found for provider '{provider_id}'. \
-                 Please enter credentials manually."
-            ));
-            return Task::none();
+
+        // For built-in providers, we can resolve endpoints synchronously.
+        // For generic OIDC providers (oidc:https://...), we need to
+        // re-discover endpoints from the issuer URL at runtime.
+        let resolved = match oauth_config {
+            Some(AuthMethod::OAuth2 {
+                auth_url,
+                token_url,
+                scopes,
+                use_pkce,
+                ..
+            }) => Some((auth_url, token_url, scopes, use_pkce)),
+            _ => None,
         };
 
-        let AuthMethod::OAuth2 {
-            auth_url,
-            token_url,
-            scopes,
-            use_pkce,
-            ..
-        } = auth_method
-        else {
-            self.step = AddAccountStep::PasswordAuth;
-            return Task::none();
+        // If not in registry and not an OIDC provider, fall back to password.
+        let oidc_issuer = if resolved.is_none() {
+            if let Some(issuer) = provider_id.strip_prefix("oidc:") {
+                Some(issuer.to_string())
+            } else {
+                self.step = AddAccountStep::PasswordAuth;
+                self.error = Some(format!(
+                    "No OAuth configuration found for provider \
+                     '{provider_id}'. Please enter credentials manually."
+                ));
+                return Task::none();
+            }
+        } else {
+            None
         };
 
         self.step = AddAccountStep::OAuthWaiting;
@@ -796,21 +806,48 @@ impl AddAccountWizard {
         let provider_id_clone = provider_id.clone();
         let client_id_clone = client_id.clone();
 
-        let request = ratatoskr_core::oauth::OAuthProviderAuthorizationRequest {
-            provider_id,
-            auth_url,
-            token_url,
-            scopes,
-            user_info_url: None,
-            use_pkce,
-            client_id,
-            client_secret: None,
-        };
-
         Task::perform(
             async move {
+                // Resolve endpoints: either from registry or OIDC discovery.
+                let (auth_url, token_url, scopes, use_pkce) =
+                    if let Some(r) = resolved {
+                        r
+                    } else if let Some(issuer) = oidc_issuer {
+                        let endpoints =
+                            ratatoskr_core::discovery::oidc::probe_issuer(&issuer)
+                                .await
+                                .ok_or_else(|| {
+                                    format!(
+                                        "OIDC discovery failed for issuer \
+                                         '{issuer}'"
+                                    )
+                                })?;
+                        (
+                            endpoints.auth_url,
+                            endpoints.token_url,
+                            endpoints.scopes,
+                            endpoints.supports_pkce_s256,
+                        )
+                    } else {
+                        return Err("No OAuth configuration available".into());
+                    };
+
+                let request =
+                    ratatoskr_core::oauth::OAuthProviderAuthorizationRequest {
+                        provider_id: provider_id_clone.clone(),
+                        auth_url,
+                        token_url,
+                        scopes,
+                        user_info_url: None,
+                        use_pkce,
+                        client_id: client_id_clone.clone(),
+                        client_secret: None,
+                    };
+
                 let provider =
-                    ratatoskr_core::oauth::GenericOAuthProvider::from_request(request);
+                    ratatoskr_core::oauth::GenericOAuthProvider::from_request(
+                        request,
+                    );
                 let open_url = |url: &str| -> Result<(), String> {
                     open_browser_url(url)
                 };
@@ -832,9 +869,21 @@ impl AddAccountWizard {
                         oauth_client_id: client_id_clone,
                     }
                 });
-                (generation, mapped)
+                Ok(mapped)
             },
-            |(g, result)| AddAccountMessage::OAuthComplete(g, result),
+            move |result: Result<
+                Result<OAuthSuccess, String>,
+                String,
+            >| match result {
+                Ok(inner) => AddAccountMessage::OAuthComplete(
+                    generation,
+                    inner,
+                ),
+                Err(e) => AddAccountMessage::OAuthComplete(
+                    generation,
+                    Err(e),
+                ),
+            },
         )
     }
 

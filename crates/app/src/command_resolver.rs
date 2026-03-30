@@ -40,15 +40,6 @@ impl CommandInputResolver for AppInputResolver {
                     .active_account_id
                     .as_deref()
                     .ok_or_else(|| "no active account".to_string())?;
-                // Add Label is only meaningful on tag-based providers (Gmail).
-                // On folder-based providers (Exchange/IMAP/JMAP), labels are
-                // exclusive folders — use Move to Folder instead.
-                if self.db.is_folder_based_provider(account_id)? {
-                    return Err(
-                        "This account uses folders, not labels. Use 'Move to Folder' instead."
-                            .to_string(),
-                    );
-                }
                 self.db.get_user_labels_for_palette(account_id)
             }
             (CommandId::EmailRemoveLabel, 0) => {
@@ -56,13 +47,6 @@ impl CommandInputResolver for AppInputResolver {
                     .active_account_id
                     .as_deref()
                     .ok_or_else(|| "no active account".to_string())?;
-                // Remove Label is only meaningful on tag-based providers (Gmail).
-                if self.db.is_folder_based_provider(account_id)? {
-                    return Err(
-                        "This account uses folders, not labels. Use 'Move to Folder' instead."
-                            .to_string(),
-                    );
-                }
                 let thread_id = ctx
                     .selected_thread_ids
                     .first()

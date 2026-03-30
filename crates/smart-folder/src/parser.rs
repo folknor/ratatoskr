@@ -210,13 +210,15 @@ pub fn parse_query(input: &str) -> ParsedQuery {
     // Collect all operator matches and their spans (in reverse order for removal).
     let spans = collect_operator_spans(input);
 
-    // Apply each operator match.
-    for span in &spans {
-        apply_operator(&mut result, &span.operator, &span.value);
-    }
+    // Apply each operator match, tracking which spans were recognized.
+    let recognized: Vec<bool> = spans
+        .iter()
+        .map(|span| apply_operator(&mut result, &span.operator, &span.value))
+        .collect();
 
-    // Remove matched spans from input to get free text (process in reverse).
-    for span in spans.iter().rev() {
+    // Remove only recognized spans from input to get free text (process in reverse).
+    // Unrecognized operator spans (e.g. `is:important`) stay as free text.
+    for (span, _) in spans.iter().zip(recognized.iter()).rev().filter(|(_, r)| **r) {
         remaining = format!("{}{}", &remaining[..span.start], &remaining[span.end..]);
     }
 
@@ -407,64 +409,84 @@ fn is_short_digit_token(token: &str) -> bool {
 
 // -- Operator application --
 
-fn apply_operator(result: &mut ParsedQuery, operator: &str, value: &str) {
+/// Apply a parsed operator to the query result.
+///
+/// Returns `true` if the operator+value was recognized, `false` if the value
+/// was unknown (so the span should be kept as free text).
+fn apply_operator(result: &mut ParsedQuery, operator: &str, value: &str) -> bool {
     match operator {
         "from" => result.from.push(value.to_owned()),
         "to" => result.to.push(value.to_owned()),
-        "has" => apply_has_operator(result, value),
-        "is" => apply_is_operator(result, value),
-        "before" => result.before = parse_date_to_timestamp(value),
-        "after" => result.after = parse_date_to_timestamp(value),
+        "has" => return apply_has_operator(result, value),
+        "is" => return apply_is_operator(result, value),
+        "before" => {
+            result.before = parse_date_to_timestamp(value);
+        }
+        "after" => {
+            result.after = parse_date_to_timestamp(value);
+        }
         "label" => result.label.push(value.to_owned()),
         "account" => result.account.push(value.to_owned()),
         "folder" => result.folder.push(value.to_owned()),
         "in" => result.in_folder.push(value.to_owned()),
         "type" => result.attachment_types.push(value.to_owned()),
-        _ => {}
+        _ => return false,
     }
+    true
 }
 
-fn apply_has_operator(result: &mut ParsedQuery, value: &str) {
+fn apply_has_operator(result: &mut ParsedQuery, value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
     match lower.as_str() {
-        "attachment" => result.has_attachment = true,
-        "contact" => result.has_contact = true,
+        "attachment" => {
+            result.has_attachment = true;
+            true
+        }
+        "contact" => {
+            result.has_contact = true;
+            true
+        }
         _ => expand_has_value(result, &lower),
     }
 }
 
 /// Expand a `has:` value into MIME types via the expansion table.
-fn expand_has_value(result: &mut ParsedQuery, value: &str) {
+///
+/// Returns `true` if the value was recognized, `false` otherwise.
+fn expand_has_value(result: &mut ParsedQuery, value: &str) -> bool {
     // Handle aliases first.
     match value {
         "spreadsheet" => {
             push_expansion_mimes(result, "excel");
-            return;
+            return true;
         }
         "document" => {
             push_expansion_mimes(result, "word");
             push_expansion_mimes(result, "pdf");
-            return;
+            return true;
         }
         _ => {}
     }
 
-    push_expansion_mimes(result, value);
+    push_expansion_mimes(result, value)
 }
 
 /// Push MIME types from the expansion table for a given key.
-fn push_expansion_mimes(result: &mut ParsedQuery, key: &str) {
+///
+/// Returns `true` if the key was found in the expansion table.
+fn push_expansion_mimes(result: &mut ParsedQuery, key: &str) -> bool {
     for &(name, mimes) in HAS_EXPANSIONS {
         if name == key {
             for &mime in mimes {
                 result.attachment_types.push(mime.to_owned());
             }
-            return;
+            return true;
         }
     }
+    false
 }
 
-fn apply_is_operator(result: &mut ParsedQuery, value: &str) {
+fn apply_is_operator(result: &mut ParsedQuery, value: &str) -> bool {
     match value.to_ascii_lowercase().as_str() {
         "unread" => result.is_unread = Some(true),
         "read" => result.is_read = Some(true),
@@ -473,8 +495,9 @@ fn apply_is_operator(result: &mut ParsedQuery, value: &str) {
         "pinned" => result.is_pinned = Some(true),
         "muted" => result.is_muted = Some(true),
         "tagged" => result.is_tagged = Some(true),
-        _ => {}
+        _ => return false,
     }
+    true
 }
 
 // -- Date parsing --
@@ -977,12 +1000,12 @@ mod tests {
     }
 
     #[test]
-    fn is_important_not_parsed() {
+    fn is_important_falls_back_to_free_text() {
         let q = parse_query("is:important");
-        // "important" is not a recognized is: value, so the operator span is
-        // still consumed but no flag is set.
-        assert!(q.free_text.is_empty());
-        // Verify no flags were set.
+        // "important" is not a recognized is: value, so the original token
+        // is preserved as free text for full-text search.
+        assert_eq!(q.free_text, "is:important");
+        // Verify no structured flags were set.
         assert!(!q.has_any_operator());
     }
 

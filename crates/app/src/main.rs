@@ -948,7 +948,8 @@ impl App {
                 let sync_task = self.sync_all_accounts();
                 let pending_task = self.process_pending_ops();
                 let gal_task = self.refresh_gal_caches();
-                Task::batch([sync_task, pending_task, gal_task])
+                let cal_task = self.sync_calendars();
+                Task::batch([sync_task, pending_task, gal_task, cal_task])
             }
             Message::SyncComplete(account_id, result) => {
                 match result {

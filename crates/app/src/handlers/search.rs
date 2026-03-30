@@ -195,7 +195,7 @@ impl App {
                     .collect(),
             ),
             "is" => Some(
-                ["unread", "read", "starred", "snoozed", "pinned", "muted"]
+                ["unread", "read", "starred", "snoozed", "pinned", "muted", "tagged"]
                     .iter()
                     .filter(|s| s.starts_with(&partial.to_lowercase()))
                     .map(|s| TypeaheadItem {
@@ -206,7 +206,7 @@ impl App {
                     .collect(),
             ),
             "has" => Some(
-                ["attachment", "pdf", "image", "excel", "word", "document", "archive", "video", "audio"]
+                ["attachment", "pdf", "image", "excel", "word", "document", "archive", "video", "audio", "powerpoint", "spreadsheet", "calendar", "contact"]
                     .iter()
                     .filter(|s| s.starts_with(&partial.to_lowercase()))
                     .map(|s| TypeaheadItem {
