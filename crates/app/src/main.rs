@@ -160,7 +160,7 @@ struct PendingChord {
 }
 
 /// Which action completed — used in ActionCompleted to dispatch outcome handling.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompletedAction {
     Archive,
     Trash,

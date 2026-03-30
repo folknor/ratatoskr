@@ -282,13 +282,12 @@ pub fn build_execution_plan(
                     ));
                     write_toggle_field(field, t, new_value);
                 } else {
-                    // I2: thread not found in list — still produce an operation
-                    // with fallback direction. Skip optimistic mutation (nothing to flip).
-                    operations.push((
-                        account_id.clone(),
-                        thread_id.clone(),
-                        toggle_to_operation(field, true),
-                    ));
+                    // Thread not in list (concurrent removal). Skip entirely —
+                    // don't fabricate an operation or mutation. operations and
+                    // optimistic stay aligned (both skip this thread).
+                    log::debug!(
+                        "build_execution_plan: toggle target {account_id}/{thread_id} not found in thread list, skipping"
+                    );
                 }
             }
 

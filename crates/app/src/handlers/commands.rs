@@ -180,8 +180,12 @@ impl App {
 
         debug_assert!(!plan.operations.is_empty(), "I1: non-empty plan");
 
-        // I3: derive legacy classifier from first operation
+        // I3: derive legacy classifier from first operation — all ops must map to same classifier
         let action = completed_action_from_operation(&plan.operations[0].2);
+        debug_assert!(
+            plan.operations.iter().all(|(_, _, op)| completed_action_from_operation(op) == action),
+            "I3: all operations must map to the same CompletedAction"
+        );
 
         // Extract what we need for the async task + completion message
         let operations = plan.operations.clone();

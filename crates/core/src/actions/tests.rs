@@ -223,12 +223,11 @@ async fn trash_local_removes_inbox_adds_trash() {
 // ── Public action tests (no provider → LocalOnly) ───────────────────
 
 #[tokio::test]
-async fn archive_without_account_returns_local_only() {
+async fn archive_nonexistent_thread_does_not_succeed() {
     let (ctx, _tmp) = make_test_ctx();
-    // No account/thread in DB → archive_local finds no INBOX label → NoOp,
-    // or Failed if DB error. Either way, not a successful action.
+    // No account/thread in DB → archive_local finds no INBOX label → NoOp or Failed
     let outcome = super::archive::archive(&ctx, "nonexistent", "t1").await;
-    assert!(outcome.is_noop() || outcome.is_failed(), "expected NoOp or Failed, got {outcome:?}");
+    assert!(!outcome.is_success(), "archiving nonexistent thread should not return Success, got {outcome:?}");
 }
 
 #[tokio::test]

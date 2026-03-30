@@ -271,8 +271,9 @@ async fn dispatch_with_provider(
         MailOperation::RemoveLabel { label_id } => {
             label::remove_label_with_provider(ctx, provider, account_id, thread_id, label_id).await
         }
-        MailOperation::SetPinned { .. } | MailOperation::SetMuted { .. } | MailOperation::Snooze { .. } => {
-            unreachable!("local-only actions don't use provider dispatch")
+        // Local-only ops routed through provider path in mixed batches
+        op @ (MailOperation::SetPinned { .. } | MailOperation::SetMuted { .. } | MailOperation::Snooze { .. }) => {
+            dispatch_local_only(ctx, op, account_id, thread_id).await
         }
     }
 }
@@ -300,8 +301,18 @@ async fn op_local(
         MailOperation::RemoveLabel { label_id } => {
             label::remove_label_local(ctx, account_id, thread_id, label_id).await.map(|()| true)
         }
-        MailOperation::SetPinned { .. } | MailOperation::SetMuted { .. } | MailOperation::Snooze { .. } => {
-            unreachable!("local-only actions use direct dispatch")
+        MailOperation::SetPinned { to } => {
+            // Local-only action in degraded path — call the action directly
+            let outcome = pin::pin(ctx, account_id, thread_id, *to).await;
+            Ok(outcome.is_success())
+        }
+        MailOperation::SetMuted { to } => {
+            let outcome = mute::mute(ctx, account_id, thread_id, *to).await;
+            Ok(outcome.is_success())
+        }
+        MailOperation::Snooze { until } => {
+            let outcome = snooze::snooze(ctx, account_id, thread_id, *until).await;
+            Ok(outcome.is_success())
         }
     }
 }
@@ -367,7 +378,15 @@ fn op_name(op: &MailOperation) -> &'static str {
 /// Classify a provider creation error for retry policy.
 fn classify_provider_error(error: &str) -> RemoteFailureKind {
     let lower = error.to_lowercase();
-    if lower.contains("timeout")
+    // Permanent: provider/account doesn't exist or can't be constructed
+    if lower.contains("unknown provider")
+        || lower.contains("no rows returned")
+        || lower.contains("queryreturnednorows")
+        || lower.contains("not found")
+        || lower.contains("missing account")
+    {
+        RemoteFailureKind::Permanent
+    } else if lower.contains("timeout")
         || lower.contains("connection refused")
         || lower.contains("dns")
         || lower.contains("network")
