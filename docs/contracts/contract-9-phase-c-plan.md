@@ -209,7 +209,9 @@ pub fn format_outcome_toast(behavior: &CompletionBehavior, outcomes: &[ActionOut
 
 File: `crates/app/src/action_resolve.rs`
 
-Add `behavior: CompletionBehavior` field. Update `build_execution_plan` to set it from `completion_behavior(&operation)`.
+Add `behavior: CompletionBehavior` field. Update `build_execution_plan` to set it:
+- For `Resolved`: from `completion_behavior(&resolved.operation)`.
+- For `PerThreadToggle`: from `completion_behavior(&toggle_to_operation(field, true))` — the `to` value doesn't affect the behavior class, only the operation semantics.
 
 ### Step 3: Make UndoStack generic in palette crate
 
@@ -249,13 +251,13 @@ pub(crate) fn handle_action_completed(
 
 Flow:
 1. Read `plan.behavior` directly (no derivation)
-2. Compute outcome summary
-3. Early return for all-NoOp
+2. Compute outcome summary (all_failed, any_failed, any_local_only, all_noop)
+3. Early return for all-NoOp or empty plan
 4. If all_failed AND LeavesCurrentView → show error, return
-5. Show toast via `format_outcome_toast(&plan.behavior, outcomes)`
-6. Rollback failed toggles via `rollback_optimistic` (typed OptimisticMutation)
+5. **Delegate ALL toast text to `format_outcome_toast(&plan.behavior, outcomes)`** — no string construction in the handler. All user-facing text policy is centralized in this one function.
+6. Rollback failed toggles via `rollback_optimistic` (typed OptimisticMutation). Reading-pane star updates happen only here and at dispatch time (C9).
 7. Build undo payloads via `build_undo_payloads(plan, outcomes)`
-8. If non-empty and Reversible: push one `UndoEntry` with description + payloads
+8. If non-empty and Reversible: push one `UndoEntry` with description from `plan.behavior.success_label` (action-level, not outcome-summary — C7) + payloads
 9. Post-success: LeavesCurrentView → auto-advance, RefreshNav → reload nav
 
 ### Step 6: Rewrite execute_undo_compensation for MailUndoPayload
@@ -287,8 +289,13 @@ pub(crate) fn dispatch_undo(&mut self, entry: UndoEntry<MailUndoPayload>) -> Tas
 
 File: `crates/app/src/handlers/commands.rs`, `crates/app/src/main.rs`
 
-`dispatch_plan` sends plan + outcomes directly:
+`dispatch_plan` sends plan + outcomes directly. Empty plans (all threads excluded) return `Task::none()` without dispatching:
+
 ```rust
+if plan.operations.is_empty() {
+    return Task::none();
+}
+// ...
 Message::ActionCompleted { plan, outcomes }
 ```
 
@@ -330,6 +337,8 @@ Update `Message::ActionCompleted` dispatch arm.
 
 `completion_behavior()` is an exhaustive match on `MailOperation`. `ActionExecutionPlan.behavior` is set at construction by `build_execution_plan`. The completion handler reads it — no derivation, no first-operation assumption.
 
+All operations in a plan share the same behavior class even if their concrete values differ (e.g., `SetStarred { to: true }` and `SetStarred { to: false }` both produce the same `CompletionBehavior`). This is why a single behavior on the plan is sound.
+
 ### C2: Undo payloads built without UI re-read
 
 `build_undo_payloads` reads only from `plan.operations`, `plan.compensation`, `plan.optimistic`, and `outcomes`. No access to thread_list, sidebar, or any other UI state.
@@ -349,6 +358,24 @@ Update `Message::ActionCompleted` dispatch arm.
 ### C6: Missing-thread toggles are already excluded
 
 Phase B's fix skips threads not found in thread_list entirely — no operation, no optimistic mutation. `build_undo_payloads` will not encounter operations without matching optimistic entries because such operations don't exist.
+
+If ALL selected threads are excluded (all missing from thread_list), `build_execution_plan` returns a plan with zero operations. `dispatch_plan` checks `plan.operations.is_empty()` and returns `Task::none()` — an empty plan is never dispatched.
+
+### C7: Undo descriptions are action-level, not outcome summaries
+
+`UndoEntry.description` is derived from `behavior.success_label` (e.g., "Archived", "Star toggled"). It does NOT include outcome counts or failure details. Toast text may say "Archived 2 of 3 threads" while the undo entry says "Archived". This is intentional — undo describes what will be reversed, not what happened.
+
+### C8: Undo payload execution order is entry order
+
+`dispatch_undo` iterates `entry.payloads` in stored order. This is deterministic and matches the grouping order from `build_undo_payloads`. If one payload fails and another succeeds, the outcomes are collected in payload order and passed to `UndoCompleted`.
+
+### C9: Reading-pane star updates have exactly two call sites
+
+After Phase C, reading-pane star updates exist only in:
+1. `handle_email_action` — optimistic apply (before dispatch)
+2. `rollback_optimistic` — failure rollback
+
+`sync_reading_pane_after_toggle` is removed. The completion handler does NOT touch the reading pane — optimistic state is already correct on success.
 
 ---
 
