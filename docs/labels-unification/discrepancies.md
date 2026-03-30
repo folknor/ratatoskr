@@ -6,7 +6,7 @@ Audit date: 2026-03-30
 
 ## Functional blockers
 
-1. **Command palette rejects non-Gmail label operations.** `EmailAddLabel` and `EmailRemoveLabel` explicitly reject all non-Gmail providers via `is_folder_based_provider()` in `command_resolver.rs` and `palette.rs`. Exchange categories, IMAP keywords, and JMAP keywords are all tag-kind labels in the unified model but cannot be applied or removed from the palette.
+1. ~~**Command palette rejects non-Gmail label operations.**~~ ✅ Fixed — `is_folder_based_provider()` gate removed from `command_resolver.rs`. All providers can now use Add Label / Remove Label from the command palette.
 
 2. **Palette queries use legacy type filtering, not label_kind.** `get_user_folders_for_palette()`, `get_user_labels_for_palette()`, `get_thread_labels_for_palette()`, and `get_all_labels_cross_account()` query by provider type and visibility, not by unified container/tag semantics.
 

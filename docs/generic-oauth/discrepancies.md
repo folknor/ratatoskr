@@ -6,7 +6,7 @@ Audit date: 2026-03-30
 
 ## Critical
 
-1. **Re-auth broken for generic/OIDC providers.** Re-auth looks up OAuth config from the built-in registry by `oauth_provider` field. A discovered generic provider ID like `oidc:https://auth.example.com/...` will not be found in the registry, so the OAuth re-auth flow fails silently for any non-built-in provider. Users with on-prem OIDC accounts cannot re-authenticate when tokens expire.
+1. ~~**Re-auth broken for generic/OIDC providers.**~~ ✅ Fixed — re-auth now detects `oidc:` prefixed providers and discovers endpoints at runtime via `probe_issuer()` instead of failing on registry lookup.
 
 ## Missing features
 

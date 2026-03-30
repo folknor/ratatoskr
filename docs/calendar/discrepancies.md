@@ -10,9 +10,9 @@ Audit date: 2026-03-30
 
 1. **New event creation appears broken.** Editor never gives the user a real calendar selector. Save path requires a `calendar_id` and falls back to `""` for new events. `create_calendar_event()` then requires that ID to resolve a provider calendar. A plain "New Event" save has no valid calendar target.
 
-2. **Calendar visibility toggles are mostly cosmetic.** Sidebar checkbox updates `is_visible`, but the event-loading query fetches all events without filtering by visible calendars. Right-sidebar agenda in mail mode can show hidden-calendar events. Toggling visibility reuses `EventSaved` message, which can close an open event overlay as a side effect.
+2. ~~**Calendar visibility toggles are mostly cosmetic.**~~ ✅ Fixed — event-loading query now filters by `is_visible = 1`. Side effect of `EventSaved` reuse on toggle still exists but is cosmetic.
 
-3. **Calendar sync never triggered from the app.** The sync backend exists (`calendar_sync_account_impl()`, provider-specific sync in Graph/Gmail/CalDAV) but the iced app never calls it. Calendar data only appears if seeded externally. The read path works, the sync path works, but they are not connected.
+3. ~~**Calendar sync never triggered from the app.**~~ ✅ Fixed — `sync_calendars()` wired to SyncTick alongside email sync, pending ops, and GAL refresh. 60s timeout per account. The sync backend exists (`calendar_sync_account_impl()`, provider-specific sync in Graph/Gmail/CalDAV) but the iced app never calls it. Calendar data only appears if seeded externally. The read path works, the sync path works, but they are not connected.
 
 4. **Graph API timezone handling silently treats everything as UTC.** `parse_graph_datetime()` has "Best-effort: treat as UTC" for all non-UTC timezone names. Microsoft Graph returns Windows timezone names ("Pacific Standard Time") which are silently misinterpreted. Events will be off by hours for non-UTC users.
 
@@ -88,7 +88,7 @@ Audit date: 2026-03-30
 
 35. **ISO week number click does not switch to week view.** Only selects that row's first date. Spec says it should navigate to week view.
 
-36. **`SELECT *` still exists in calendar code.** `SELECT * FROM calendars` in `crates/calendar/src/sync.rs`.
+36. ~~**`SELECT *` still exists in calendar code.**~~ ✅ Fixed — replaced with explicit 15-column list.
 
 37. **Unsaved-change detection incomplete.** Only checks title, description, location. Changes to time, all-day, timezone, recurrence, availability, visibility, or calendar assignment discarded without prompt.
 
