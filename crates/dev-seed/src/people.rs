@@ -1,0 +1,283 @@
+use rand::Rng;
+use std::collections::HashSet;
+
+/// A generated person with display name and email.
+#[derive(Clone, Debug)]
+pub struct Person {
+    pub display_name: String,
+    pub email: String,
+}
+
+// ── Latin data pools ────────────────────────────────────────
+
+pub static FIRST_NAMES: &[&str] = &[
+    "Alice", "Bob", "Carol", "David", "Elena", "Frank", "Grace", "Henry",
+    "Iris", "Jack", "Karen", "Leo", "Maya", "Noah", "Olivia", "Paul",
+    "Quinn", "Rosa", "Sam", "Tara", "Uma", "Victor", "Wendy", "Xander",
+    "Yuki", "Zara", "Amir", "Bianca", "Chen", "Diana", "Erik", "Fatima",
+    "George", "Hannah", "Ivan", "Julia", "Kenji", "Lena", "Marco", "Nina",
+    "Oscar", "Priya", "Raj", "Sofia", "Tomás", "Ursula", "Wei", "Ximena",
+];
+
+pub static LAST_NAMES: &[&str] = &[
+    "Anderson", "Brown", "Chen", "Davis", "Evans", "Fischer", "Garcia",
+    "Hernández", "Ivanova", "Johnson", "Kim", "Lee", "Martinez", "Nakamura",
+    "O'Brien", "Patel", "Quinn", "Rossi", "Schmidt", "Taylor", "Ueda",
+    "Van den Berg", "Williams", "Xu", "Yamamoto", "Zhang", "Ali", "Björk",
+    "Costa", "Dubois", "El-Amin", "Fujimoto", "Gupta", "Hansen", "Ibrahim",
+];
+
+pub static DOMAINS: &[&str] = &[
+    "gmail.com", "outlook.com", "yahoo.com", "protonmail.com",
+    "fastmail.com", "hey.com", "icloud.com", "zoho.com",
+    "company.io", "startup.dev", "acme.corp", "bigco.com",
+    "university.edu", "research.org", "consulting.biz",
+];
+
+// ── i18n locale data ────────────────────────────────────────
+
+pub struct LocaleData {
+    pub key: &'static str,
+    pub first_names: &'static [&'static str],
+    pub last_names: &'static [&'static str],
+    pub romanized_first: &'static [&'static str],
+    pub romanized_last: &'static [&'static str],
+    pub domains: &'static [&'static str],
+    pub days: &'static [&'static str],
+    pub months: &'static [&'static str],
+    pub re_prefix: &'static str,
+    pub topics: &'static [&'static str],
+    pub projects: &'static [&'static str],
+    pub teams: &'static [&'static str],
+    pub services: &'static [&'static str],
+}
+
+pub static I18N_LOCALES: &[LocaleData] = &[
+    // ── Japanese ──
+    LocaleData {
+        key: "ja",
+        first_names: &["太郎", "花子", "健太", "美咲", "大輔", "由美", "翔太", "さくら",
+                        "拓也", "陽子", "直樹", "麻衣", "隆", "恵子", "誠", "裕子"],
+        last_names: &["田中", "鈴木", "佐藤", "山田", "渡辺", "伊藤", "中村", "小林",
+                       "加藤", "吉田", "山口", "松本", "高橋", "林", "清水", "藤田"],
+        romanized_first: &["taro", "hanako", "kenta", "misaki", "daisuke", "yumi", "shota", "sakura",
+                            "takuya", "yoko", "naoki", "mai", "takashi", "keiko", "makoto", "yuko"],
+        romanized_last: &["tanaka", "suzuki", "sato", "yamada", "watanabe", "ito", "nakamura", "kobayashi",
+                           "kato", "yoshida", "yamaguchi", "matsumoto", "takahashi", "hayashi", "shimizu", "fujita"],
+        domains: &["gmail.com", "yahoo.co.jp", "docomo.ne.jp", "softbank.ne.jp", "icloud.com"],
+        days: &["月曜日", "火曜日", "水曜日", "木曜日", "金曜日"],
+        months: &["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"],
+        re_prefix: "Re:",
+        topics: &["マイクロサービス", "クラウド移行", "UI刷新", "セキュリティ監査",
+                   "パフォーマンス改善", "データベース最適化", "API設計", "テスト自動化",
+                   "写真", "料理", "旅行", "読書", "キャンプ", "温泉"],
+        projects: &["暁", "富士", "桜", "雷神", "翡翠", "銀河", "鶴", "龍"],
+        teams: &["開発", "設計", "企画", "基盤", "品質管理", "営業"],
+        services: &["認証サービス", "API基盤", "PostgreSQL", "Redis", "監視システム", "CDN"],
+    },
+    // ── Chinese ──
+    LocaleData {
+        key: "zh",
+        first_names: &["伟", "芳", "秀英", "敏", "强", "静", "磊", "丽",
+                        "军", "洋", "艳", "勇", "杰", "娟", "涛", "明"],
+        last_names: &["王", "李", "张", "刘", "陈", "杨", "赵", "黄",
+                       "周", "吴", "徐", "孙", "胡", "朱", "高", "林"],
+        romanized_first: &["wei", "fang", "xiuying", "min", "qiang", "jing", "lei", "li",
+                            "jun", "yang", "yan", "yong", "jie", "juan", "tao", "ming"],
+        romanized_last: &["wang", "li", "zhang", "liu", "chen", "yang", "zhao", "huang",
+                           "zhou", "wu", "xu", "sun", "hu", "zhu", "gao", "lin"],
+        domains: &["gmail.com", "qq.com", "163.com", "126.com", "outlook.com"],
+        days: &["周一", "周二", "周三", "周四", "周五"],
+        months: &["一月", "二月", "三月", "四月", "五月", "六月",
+                   "七月", "八月", "九月", "十月", "十一月", "十二月"],
+        re_prefix: "回复：",
+        topics: &["微服务架构", "云迁移", "前端重构", "安全审计",
+                   "性能优化", "数据库优化", "API设计", "自动化测试",
+                   "摄影", "美食", "旅行", "读书", "健身", "音乐"],
+        projects: &["凤凰", "龙腾", "明月", "长城", "星辰", "大鹏", "翡翠", "麒麟"],
+        teams: &["研发", "设计", "产品", "基础架构", "质量", "运维"],
+        services: &["认证服务", "API网关", "PostgreSQL", "Redis", "监控平台", "消息队列"],
+    },
+    // ── Korean ──
+    LocaleData {
+        key: "ko",
+        first_names: &["민준", "서연", "지호", "하은", "현우", "수빈", "도윤", "지민",
+                        "서준", "예은", "준서", "다은", "시우", "소율", "유준", "하린"],
+        last_names: &["김", "이", "박", "최", "정", "강", "조", "윤",
+                       "장", "임", "한", "오", "서", "신", "권", "황"],
+        romanized_first: &["minjun", "seoyeon", "jiho", "haeun", "hyunwoo", "subin", "doyun", "jimin",
+                            "seojun", "yeeun", "junseo", "daeun", "siwoo", "soyul", "yujun", "harin"],
+        romanized_last: &["kim", "lee", "park", "choi", "jung", "kang", "cho", "yoon",
+                           "jang", "lim", "han", "oh", "seo", "shin", "kwon", "hwang"],
+        domains: &["gmail.com", "naver.com", "daum.net", "kakao.com", "outlook.com"],
+        days: &["월요일", "화요일", "수요일", "목요일", "금요일"],
+        months: &["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"],
+        re_prefix: "Re:",
+        topics: &["마이크로서비스", "클라우드 마이그레이션", "프론트엔드 리팩토링", "보안 감사",
+                   "성능 최적화", "데이터베이스 최적화", "API 설계", "테스트 자동화",
+                   "사진", "요리", "여행", "독서", "등산", "음악"],
+        projects: &["무궁화", "한라", "백두", "아리랑", "은하", "태양", "청룡", "봉황"],
+        teams: &["개발", "디자인", "기획", "인프라", "QA", "운영"],
+        services: &["인증 서비스", "API 게이트웨이", "PostgreSQL", "Redis", "모니터링", "메시지 큐"],
+    },
+    // ── Arabic ──
+    LocaleData {
+        key: "ar",
+        first_names: &["محمد", "فاطمة", "أحمد", "عائشة", "علي", "مريم", "عمر", "نور",
+                        "خالد", "سارة", "يوسف", "زينب", "حسن", "ليلى", "إبراهيم", "هدى"],
+        last_names: &["الأحمد", "المحمد", "العلي", "الحسن", "الخالد", "الرشيد", "السعيد", "الكريم",
+                       "الحمد", "الناصر", "العمر", "الصالح", "القاسم", "الفهد", "المنصور", "الهاشمي"],
+        romanized_first: &["mohammed", "fatima", "ahmed", "aisha", "ali", "maryam", "omar", "noor",
+                            "khaled", "sarah", "youssef", "zainab", "hassan", "layla", "ibrahim", "huda"],
+        romanized_last: &["alahmad", "almohammed", "alali", "alhassan", "alkhaled", "alrashid", "alsaid", "alkarim",
+                           "alhamd", "alnasser", "alomar", "alsaleh", "alqasim", "alfahd", "almansour", "alhashimi"],
+        domains: &["gmail.com", "outlook.com", "yahoo.com", "hotmail.com", "outlook.sa"],
+        days: &["الإثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"],
+        months: &["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+                   "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"],
+        re_prefix: "رد:",
+        topics: &["الخدمات المصغرة", "الترحيل السحابي", "إعادة هيكلة الواجهة", "التدقيق الأمني",
+                   "تحسين الأداء", "تحسين قاعدة البيانات", "تصميم API", "أتمتة الاختبارات",
+                   "التصوير", "الطبخ", "السفر", "القراءة", "الرياضة", "الموسيقى"],
+        projects: &["الفلك", "النجم", "البرق", "الصقر", "الواحة", "القمر", "السيف", "النخلة"],
+        teams: &["التطوير", "التصميم", "المنتج", "البنية التحتية", "الجودة", "العمليات"],
+        services: &["خدمة المصادقة", "بوابة API", "PostgreSQL", "Redis", "نظام المراقبة", "طابور الرسائل"],
+    },
+    // ── Russian ──
+    LocaleData {
+        key: "ru",
+        first_names: &["Александр", "Мария", "Дмитрий", "Анна", "Сергей", "Елена", "Андрей", "Ольга",
+                        "Иван", "Наталья", "Михаил", "Татьяна", "Николай", "Екатерина", "Павел", "Светлана"],
+        last_names: &["Иванов", "Петрова", "Сидоров", "Козлова", "Новиков", "Морозова", "Волков", "Соколова",
+                       "Кузнецов", "Попова", "Лебедев", "Смирнова", "Фёдоров", "Васильева", "Орлов", "Никитина"],
+        romanized_first: &["alexander", "maria", "dmitry", "anna", "sergey", "elena", "andrey", "olga",
+                            "ivan", "natalya", "mikhail", "tatyana", "nikolay", "ekaterina", "pavel", "svetlana"],
+        romanized_last: &["ivanov", "petrova", "sidorov", "kozlova", "novikov", "morozova", "volkov", "sokolova",
+                           "kuznetsov", "popova", "lebedev", "smirnova", "fedorov", "vasileva", "orlov", "nikitina"],
+        domains: &["gmail.com", "yandex.ru", "mail.ru", "rambler.ru", "outlook.com"],
+        days: &["понедельник", "вторник", "среда", "четверг", "пятница"],
+        months: &["январь", "февраль", "март", "апрель", "май", "июнь",
+                   "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"],
+        re_prefix: "Re:",
+        topics: &["микросервисы", "облачная миграция", "рефакторинг фронтенда", "аудит безопасности",
+                   "оптимизация производительности", "оптимизация БД", "проектирование API", "автотесты",
+                   "фотография", "кулинария", "путешествия", "чтение", "спорт", "музыка"],
+        projects: &["Буран", "Спутник", "Тайга", "Байкал", "Восток", "Сокол", "Аврора", "Кедр"],
+        teams: &["разработка", "дизайн", "продукт", "инфраструктура", "QA", "DevOps"],
+        services: &["сервис аутентификации", "API-шлюз", "PostgreSQL", "Redis", "мониторинг", "Kafka"],
+    },
+    // ── Hindi ──
+    LocaleData {
+        key: "hi",
+        first_names: &["आदित्य", "प्रिया", "राहुल", "अनीता", "विकास", "सुनीता", "अमित", "नेहा",
+                        "रोहित", "पूजा", "संजय", "कविता", "मनीष", "रीना", "दीपक", "स्वाति"],
+        last_names: &["शर्मा", "वर्मा", "सिंह", "गुप्ता", "कुमार", "पटेल", "जोशी", "मिश्रा",
+                       "अग्रवाल", "राव", "चौहान", "यादव", "तिवारी", "पांडे", "दुबे", "श्रीवास्तव"],
+        romanized_first: &["aditya", "priya", "rahul", "anita", "vikas", "sunita", "amit", "neha",
+                            "rohit", "pooja", "sanjay", "kavita", "manish", "reena", "deepak", "swati"],
+        romanized_last: &["sharma", "verma", "singh", "gupta", "kumar", "patel", "joshi", "mishra",
+                           "agrawal", "rao", "chauhan", "yadav", "tiwari", "pandey", "dubey", "srivastava"],
+        domains: &["gmail.com", "yahoo.co.in", "rediffmail.com", "outlook.com", "hotmail.com"],
+        days: &["सोमवार", "मंगलवार", "बुधवार", "गुरुवार", "शुक्रवार"],
+        months: &["जनवरी", "फ़रवरी", "मार्च", "अप्रैल", "मई", "जून",
+                   "जुलाई", "अगस्त", "सितम्बर", "अक्टूबर", "नवम्बर", "दिसम्बर"],
+        re_prefix: "Re:",
+        topics: &["माइक्रोसर्विसेज़", "क्लाउड माइग्रेशन", "फ्रंटएंड रीफैक्टरिंग", "सुरक्षा ऑडिट",
+                   "परफ़ॉर्मेंस ऑप्टिमाइज़ेशन", "डेटाबेस ऑप्टिमाइज़ेशन", "API डिज़ाइन", "टेस्ट ऑटोमेशन",
+                   "फ़ोटोग्राफ़ी", "खाना पकाना", "यात्रा", "पढ़ाई", "क्रिकेट", "संगीत"],
+        projects: &["गरुड़", "हिमालय", "चक्र", "वज्र", "सूर्य", "गंगा", "अग्नि", "इंद्र"],
+        teams: &["डेवलपमेंट", "डिज़ाइन", "प्रोडक्ट", "इंफ्रास्ट्रक्चर", "क्वालिटी", "ऑपरेशंस"],
+        services: &["ऑथ सर्विस", "API गेटवे", "PostgreSQL", "Redis", "मॉनिटरिंग", "मैसेज क्यू"],
+    },
+    // ── Thai ──
+    LocaleData {
+        key: "th",
+        first_names: &["สมชาย", "สมหญิง", "วิชัย", "สุภาพร", "ประเสริฐ", "นารี", "ธนากร", "พิมพ์ใจ",
+                        "อนุชา", "ดวงใจ", "ศักดิ์ชัย", "รัตนา", "กิตติ", "วรรณา", "พงศ์เทพ", "จินดา"],
+        last_names: &["สุขใจ", "ใจดี", "รักษา", "พิทักษ์", "บุญมี", "ศรีสุข", "วงศ์สวัสดิ์", "ทองดี",
+                       "แก้วมณี", "สมบูรณ์", "พันธ์ทอง", "จันทร์เพ็ญ", "สุวรรณ", "เจริญ", "ประสิทธิ์", "มงคล"],
+        romanized_first: &["somchai", "somying", "wichai", "supaporn", "prasert", "naree", "thanakorn", "pimjai",
+                            "anucha", "duangjai", "sakchai", "rattana", "kitti", "wanna", "pongthep", "jinda"],
+        romanized_last: &["sukjai", "jaidee", "raksa", "pitak", "boonmee", "srisuk", "wongsawat", "thongdee",
+                           "kaewmanee", "somboon", "phanthong", "chanpen", "suwan", "charoen", "prasit", "mongkhon"],
+        domains: &["gmail.com", "hotmail.com", "yahoo.co.th", "outlook.com", "naver.com"],
+        days: &["วันจันทร์", "วันอังคาร", "วันพุธ", "วันพฤหัสบดี", "วันศุกร์"],
+        months: &["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+                   "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"],
+        re_prefix: "Re:",
+        topics: &["ไมโครเซอร์วิส", "การย้ายคลาวด์", "รีแฟคเตอร์ฟรอนต์เอนด์", "ตรวจสอบความปลอดภัย",
+                   "ปรับปรุงประสิทธิภาพ", "ปรับแต่งฐานข้อมูล", "ออกแบบ API", "ทดสอบอัตโนมัติ",
+                   "ถ่ายภาพ", "ทำอาหาร", "ท่องเที่ยว", "อ่านหนังสือ", "มวยไทย", "ดนตรี"],
+        projects: &["ช้าง", "นาคา", "สยาม", "ครุฑ", "ราชสีห์", "กินรี", "พญานาค", "หงส์"],
+        teams: &["พัฒนา", "ออกแบบ", "ผลิตภัณฑ์", "โครงสร้างพื้นฐาน", "คุณภาพ", "ปฏิบัติการ"],
+        services: &["บริการยืนยันตัวตน", "API Gateway", "PostgreSQL", "Redis", "ระบบมอนิเตอร์", "คิวข้อความ"],
+    },
+];
+
+// ── People pool generation ──────────────────────────────────
+
+pub fn gen_latin_person(rng: &mut impl Rng) -> (String, String) {
+    let first = FIRST_NAMES[rng.random_range(0..FIRST_NAMES.len())];
+    let last = LAST_NAMES[rng.random_range(0..LAST_NAMES.len())];
+    let domain = DOMAINS[rng.random_range(0..DOMAINS.len())];
+    let email = format!(
+        "{}.{}@{domain}",
+        first.to_lowercase(),
+        last.to_lowercase().replace(' ', "")
+    );
+    (format!("{first} {last}"), email)
+}
+
+pub fn gen_i18n_person(rng: &mut impl Rng, locale: &LocaleData) -> (String, String) {
+    let idx = rng.random_range(0..locale.first_names.len());
+    let last_idx = rng.random_range(0..locale.last_names.len());
+    let domain = locale.domains[rng.random_range(0..locale.domains.len())];
+
+    let display_name = format!("{} {}", locale.first_names[idx], locale.last_names[last_idx]);
+    let email = format!(
+        "{}.{}@{domain}",
+        locale.romanized_first[idx],
+        locale.romanized_last[last_idx]
+    );
+    (display_name, email)
+}
+
+pub struct PeoplePools {
+    pub latin: Vec<Person>,
+    pub i18n: Vec<Vec<Person>>, // parallel with I18N_LOCALES
+    pub combined: Vec<Person>,
+}
+
+pub fn generate_pools(rng: &mut impl Rng) -> PeoplePools {
+    let mut seen_emails = HashSet::new();
+
+    // Latin pool (~200 unique people)
+    let mut latin = Vec::with_capacity(200);
+    for _ in 0..200 {
+        let (name, email) = gen_latin_person(rng);
+        if seen_emails.insert(email.clone()) {
+            latin.push(Person { display_name: name, email });
+        }
+    }
+
+    // Per-locale pools (~60 each)
+    let mut i18n = Vec::with_capacity(I18N_LOCALES.len());
+    for locale in I18N_LOCALES {
+        let mut pool = Vec::with_capacity(60);
+        for _ in 0..60 {
+            let (name, email) = gen_i18n_person(rng, locale);
+            if seen_emails.insert(email.clone()) {
+                pool.push(Person { display_name: name, email });
+            }
+        }
+        i18n.push(pool);
+    }
+
+    // Combined pool for VIPs etc.
+    let mut combined = latin.clone();
+    for pool in &i18n {
+        combined.extend(pool.iter().cloned());
+    }
+
+    PeoplePools { latin, i18n, combined }
+}

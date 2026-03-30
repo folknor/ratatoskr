@@ -1,0 +1,22 @@
+[package]
+name = "dev-seed"
+description = "Ephemeral dev database seeder for Ratatoskr"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ratatoskr-db = { path = "../db" }
+ratatoskr-stores = { path = "../stores" }
+
+rusqlite.workspace = true
+rand = { version = "0.9", features = ["small_rng"] }
+zstd = "0.13"
+toml = "0.8"
+serde = { workspace = true }
+log = "0.4"

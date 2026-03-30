@@ -98,9 +98,31 @@ fn main() -> iced::Result {
     env_logger::init();
     log::info!("Ratatoskr starting");
 
+    #[cfg(feature = "dev-seed")]
+    let app_data_dir = {
+        let dev_dir = dirs::data_dir()
+            .expect("no data dir")
+            .join("org.folknor.ratatoskr.dev");
+
+        let config = dev_seed::Config::load_or_default();
+
+        // Always regenerate — ephemeral dev database
+        if dev_dir.exists() {
+            std::fs::remove_dir_all(&dev_dir).ok();
+        }
+        std::fs::create_dir_all(&dev_dir).expect("create dev data dir");
+
+        log::info!("Dev-seed: generating ephemeral database in {}", dev_dir.display());
+        dev_seed::seed_database(&config, &dev_dir)
+            .expect("dev-seed failed");
+
+        dev_dir
+    };
+
+    #[cfg(not(feature = "dev-seed"))]
     let app_data_dir = dirs::data_dir()
         .expect("no data dir")
-        .join("com.velo.app");
+        .join("org.folknor.ratatoskr");
 
     let db = Db::open(&app_data_dir)
         .map_err(|e| iced::Error::WindowCreationFailed(e.into()))?;
