@@ -1,112 +1,157 @@
 # Search: Spec vs. Code Discrepancies
 
-Audit date: 2026-03-30 (consolidated from 3 Opus agents + 5-wave outside review)
+Audit date: 2026-03-30
+
+This file consolidates:
+- the prior 2026-03-22 search audit,
+- the current repo state,
+- a deeper review of search semantics, parser/planner fidelity, app integration, pinned searches, and performance.
+
+It aims to preserve earlier audit information while correcting a few places where the old notes had gone stale.
 
 ---
 
-## Pipeline Semantics (High)
+## Remaining Discrepancies
 
-1. **Combined path applies free text in SQL, breaking the documented model.** Spec says SQL narrows by operators, Tantivy ranks free text. `search_combined()` passes the full parsed query into `query_threads()` which always includes `build_free_text_clause()`. Mixed queries are intersected against a SQL LIKE candidate set, so valid Tantivy hits can be dropped before ranking.
+### High
 
-2. **Combined path does full Tantivy search then intersects — no corpus narrowing.** `search_combined()` runs Tantivy broadly and filters in application code. Does not implement the spec's "SQL narrows corpus first" performance model. Gets more expensive as mailbox size grows.
+1. **Combined path still applies free text in SQL before Tantivy ranking.**
+   The product/spec model says SQL should narrow by structured operators while Tantivy handles free-text relevance. Current `search_combined()` passes the full parsed query into `query_threads()`, and `query_threads()` always includes `build_free_text_clause()`. Mixed queries are therefore constrained by a SQL `LIKE` candidate set before ranking.
 
-3. **Tantivy-only results show best-match message, not thread's latest.** Spec says search cards show latest-message metadata. Tantivy path groups by thread keeping the highest-ranked message. Only the combined SQL path re-enriches from DbThread. Free-text-only results can show wrong sender/snippet/subject.
+2. **Combined path still does broad Tantivy search, then intersects in application code.**
+   This works, but it does not implement the intended "SQL narrows corpus first" performance model. As mailbox sizes grow, the combined path will do more Tantivy work than the spec implies.
 
-4. **Tantivy account name-to-ID resolution broken.** `account:` operator values (display names like "Work") are passed directly as `account_ids` to Tantivy, which indexes UUIDs. `account:Work` in a free-text-only query will never match.
+3. **Tantivy-only thread cards can show best-matching message metadata instead of latest-message metadata.**
+   The product spec says thread cards should always show the latest message in the thread, with ranking only affecting order. Current Tantivy-only path groups by highest-scoring message and uses that message's subject/snippet/sender. Only the combined path re-enriches from `DbThread`.
 
-5. **Date boundary semantics inconsistent across engines.** SQL uses strict `<` / `>`. Tantivy uses inclusive range bounds. Same query can include boundary-day messages in one engine and exclude them in the other.
+4. **Date boundary semantics differ across engines.**
+   SQL uses strict `<` / `>` for `before:` / `after:`. Tantivy uses inclusive bounds. The same query can therefore include boundary-day messages in one path and exclude them in another.
 
-## Parser / Operator Semantics (High)
+5. **Unknown `is:` / `has:` values are consumed and dropped instead of falling back to free text.**
+   The query language says anything not recognized as an operator should behave like free text. Current parser behavior recognizes `is:` / `has:` syntactically, then drops unknown values during operator application. Example: `is:important` disappears entirely.
 
-6. **Unrecognized `is:` and `has:` values silently dropped.** Spec says anything not recognized as an operator is free text. Parser recognizes `is:`/`has:` as operators first, then drops unknown values in `apply_is_operator()`/`apply_has_operator()`. `is:important` is consumed, no flag set, no free text remains.
+6. **`is:tagged` currently includes system-folder membership such as Inbox.**
+   The implementation checks only whether any `thread_labels` row exists for the thread. In practice that means ordinary Inbox mail often counts as "tagged", which is much broader than normal user expectation.
 
-7. **`is:tagged` includes universal folders (INBOX, etc.).** Implementation checks for any `thread_labels` row. Test explicitly treats INBOX membership as tagged. Much broader than user expectation — most normal inbox mail is "tagged."
+7. **`folder:` semantics are still fuzzy substring matching, not true folder-path semantics.**
+   The spec calls for path-aware folder matching with cross-provider normalization. Current SQL lowers `folder:` to `%LIKE%` against `labels.name` or `imap_folder_path`, with no provider-agnostic normalized `folder_path`.
 
-8. **`folder:` semantics are fuzzy substring, not exact folder-path.** Spec calls for path-aware, cross-provider normalized matching. Implementation does `%LIKE%` against `l.name` or `l.imap_folder_path`. No normalized `folder_path` column. Only works for IMAP.
+### Medium
 
-9. **`label:` matching not normalized.** Uses `LOWER(l.name) = LOWER(?)` — no trim, no alignment with labels-unification grouped-name normalization.
+8. **`label:` matching is not normalized to the cross-account label model.**
+   Current matching is `LOWER(l.name) = LOWER(?)`. There is no trimming or alignment with the normalized-name grouping behavior described elsewhere in the search and labels docs.
 
-## Operator Gaps (Medium)
+9. **`to:` semantics are incomplete.**
+   Current SQL only checks `to_addresses` and `cc_addresses`. There is no contact expansion and no `bcc` coverage.
 
-10. **`to:` has no contact expansion.** Only does LIKE against `m.to_addresses` and `m.cc_addresses`. No contact lookup, no BCC coverage.
+10. **`from:` contact expansion uses a weaker path than the spec describes.**
+    The docs call for `contacts_fts`-style resolution. Current SQL uses `display_name LIKE` expansion only, not the richer FTS-backed contact lookup path.
 
-11. **`from:` contact expansion uses LIKE, not FTS5.** Spec calls for `contacts_fts` MATCH. Implementation uses `contacts.display_name LIKE`. Doesn't search contact emails in subquery.
+11. **`has:contact` is sender-only.**
+    Current implementation checks only whether `m.from_address` exists in contacts. The docs frame this operator more broadly around known participants, and the implementation-spec leaves sender-vs-any-participant unresolved.
 
-12. **`has:contact` is sender-only.** Spec frames it as "any sender/recipient exists as a stored contact." Implementation checks only `m.from_address`.
+12. **Free-text Tantivy search does not cover all indexed address fields.**
+    The index stores `from_address` and `to_addresses`, but the free-text query parser searches only `subject`, `from_name`, `body_text`, and `snippet`.
 
-13. **Free-text Tantivy search doesn't cover all indexed address fields.** Indexes `to_addresses` and `from_address` but free-text query parser only searches `subject`, `from_name`, `body_text`, `snippet`.
+13. **`has_attachments` is still missing from unified search results.**
+    `UnifiedSearchResult` still lacks a `has_attachments` field, and the app currently maps search results to thread cards with `has_attachments: false`. Search results therefore do not show attachment indicators consistently.
 
-14. **`in:` operator has undocumented shorthands.** Code supports `archive` and `important` not in the spec. Not a bug but spec/code drift.
+14. **Smart-folder execution is only partially migrated.**
+    The reachable app flow for sidebar smart-folder selection uses the unified search path, but the legacy `crates/smart-folder/src/lib.rs` facade still exists and still runs through the SQL-only path. `count_smart_folder_unread()` also remains SQL-only by design.
 
-## App Integration (Medium)
+15. **Legacy smart-folder token migration is still runtime, not a one-time DB migration.**
+    `migrate_legacy_tokens()` still rewrites old `__LAST_7_DAYS__`-style tokens at execution time. The implementation docs proposed an actual persisted migration.
 
-15. **`has_attachments` always false in search results.** `UnifiedSearchResult` has no such field. `unified_result_to_thread()` hardcodes `false`. Search results never show attachment indicator.
+16. **SQL fallback search is a real semantics downgrade.**
+    If `SearchState` is unavailable, free-text search falls back to a simple thread-level `LIKE` search on subject/snippet. That preserves basic usability but not the full search contract.
 
-16. **SmartFolder Update/Delete/Rename commands missing.** Only `SmartFolderSave` exists. No UI for editing or deleting smart folders.
+17. **Pinned-search graduation does not remove the pinned search.**
+    "Save as Smart Folder" creates the smart folder, but the pinned search remains. The pinned-search spec says promotion should remove the pinned search entry.
 
-17. **Search history UI not wired.** `search_history` loaded on boot, never rendered. No up-arrow interaction.
+18. **Pinned-search freshness is not shown near the search bar.**
+    Sidebar cards show relative age, but the pinned-search spec also calls for a subtle "Last updated ..." indicator near the search bar when a pinned search is active.
 
-18. **Smart folder execution not routed through unified pipeline.** `execute_smart_folder_query` goes directly to SQL builder. `count_smart_folder_unread` gets SQL-only behavior without Tantivy ranking.
+19. **Search history frontend is still missing.**
+    Recent search queries are loaded from `pinned_searches`, but there is still no frontend interaction for browsing history from the search bar.
 
-19. **Token migration DB migration not done.** Runtime `migrate_legacy_tokens()` shim instead of one-time migration.
+20. **Typeahead has no "keep as text" fallback item.**
+    The product spec says the last suggestion should always let the user keep the raw input. Current typeahead only shows matched suggestions.
 
-20. **SQL fallback is a material behavior downgrade.** If SearchState absent, free text collapses to `threads.subject LIKE ? OR threads.snippet LIKE ?`. Worse recall, no ranking, different semantics.
+21. **`label:` / `folder:` typeahead is not scoped by existing `account:` filters.**
+    Both operators currently route through the same unscoped label search. There is no account-aware narrowing and no real folder-path source.
 
-## Typeahead (Medium)
+22. **Contact typeahead uses a different source than the docs describe.**
+    The docs say `from:` / `to:` typeahead should use `contacts_fts`. Current app code queries `seen_addresses` with `LIKE`.
 
-21. **No "keep as text" fallback option.** Spec says last option is always raw text. Current typeahead only returns matched items.
+23. **Date typeahead lacks the "Pick a date..." path.**
+    Current implementation offers static presets only.
 
-22. **`label:` / `folder:` typeahead not scoped by `account:`.** Both dispatch to same `search_labels_for_typeahead()` with raw string. No account filtering, no folder-path source, no folder/label separation.
+24. **Static typeahead coverage is incomplete.**
+    Missing from the current static suggestion lists: `is:tagged`, `has:powerpoint`, `has:spreadsheet`, `has:calendar`, and `has:contact`.
 
-23. **Contact typeahead uses wrong source.** Spec says `contacts_fts`. Implementation queries `seen_addresses` with LIKE. Weaker dataset.
+25. **Result limits are still fixed and engine-specific.**
+    Combined search uses one SQL candidate limit, Tantivy uses its own limit, and SQL fallback uses another hardcoded limit. Broad searches can truncate in engine-specific ways before paging/refinement exists.
 
-24. **Date typeahead missing "Pick a date" path.** Only preset list.
+26. **The SQL builder still relies heavily on `%LIKE%` scans.**
+    This is primarily a performance/scale risk, but it is worth tracking as an implementation discrepancy because the docs set a very high responsiveness bar for large local stores.
 
-25. **Missing typeahead items:** `is:tagged`, `has:powerpoint`, `has:spreadsheet`, `has:calendar`, `has:contact`.
+27. **Undocumented `in:` shorthands exist in code.**
+    The implementation currently supports `archive` and `important` in `in:` even though they are not part of the documented operator surface.
 
-## Pinned Searches (Medium)
+28. **Clear-all pinned-search support exists in code but not in the visible product surface.**
+    There is a handler and DB operation for deleting all pinned searches. However, the pinned-search spec promises a clear-all affordance, and the current UI still does not expose one.
 
-26. **Graduation does not remove the pinned search.** `handle_save_as_smart_folder` creates smart folder but pinned search survives. Spec requires deletion. `GraduatePinnedSearch` message never created.
+29. **Smart-folder management beyond "Save Search" is still incomplete.**
+    The search docs describe rename/delete/update flows for smart folders. The current command surface still centers on save, and the broader management flow described in the docs is not yet fully present.
 
-27. **No staleness label near search bar.** Sidebar card shows relative time, but spec's "Last updated X ago" near the search bar not implemented.
+---
 
-28. **"Clear All Pinned Searches" has no UI path.** Handler and DB function exist. No CommandId in palette, no sidebar button.
+## Resolved Since The Previous Audit
 
-## Performance (Medium)
+These items were previously open and are now in place:
 
-29. **SQL builder relies heavily on `%LIKE%` scans.** `from:`, `to:`, `account:`, `folder:`, and free-text fallback all use substring patterns. Degrades under large local stores.
+- `SearchBlur` now uses the blur-sink focus trick and is no longer a no-op.
+- `UnifiedSearchResult` naming was cleaned up.
+- `PinnedSearch.thread_ids` exists and is lazily loaded.
+- Sidebar smart-folder clicks now execute through the unified search flow.
+- Pinned-search auto-expiry runs on a periodic subscription rather than only at startup.
+- Operator typeahead exists for static and async-backed operators.
+- "Search here" is implemented for sidebar folders/labels.
+- "Save as Smart Folder" exists as a real command.
+- Pinned-search cards show relative staleness in the sidebar.
+- Search-result highlighting exists in the reading pane.
+- `SearchState` is initialized at app boot and reused; it is no longer re-initialized per search dispatch.
 
-30. **Result limits are fixed and engine-specific.** Combined uses `DEFAULT_QUERY_LIMIT` for SQL, Tantivy hardcodes 200, SQL fallback hardcodes 200. Broad searches can truncate in engine-specific ways before paging.
+---
 
-## Dead Code
+## Preserved Notes From The Earlier Audit
 
-31. **`tokens.rs` orphaned.** `crates/smart-folder/src/tokens.rs` not declared as module in `lib.rs`. Unreachable.
+These do not all count as product discrepancies, but they are still useful context:
 
-32. **`parse_date_string` in `search_pipeline.rs` dead.** Only used in tests, simple `i64` parsing. Leftover.
+1. **Earlier audit position on clear-all pinned searches.**
+   The previous audit treated missing clear-all UI as "not a discrepancy" because pinned searches auto-expire and can be dismissed individually. After re-reading `docs/search/pinned-searches.md`, this broader audit now treats it as a real spec mismatch because that doc explicitly promises a clear-all affordance.
 
-## Stale Spec Content (not bugs)
+2. **Form-based smart-folder editor.**
+   The old settings-based smart-folder editor is still correctly treated as superseded. The current docs favor search-bar editing plus command-palette save/update flows, so the lack of a settings-form editor is not considered a gap.
 
-33. Generation tracking uses branded `GenerationCounter<Search>`, not raw `u64`.
-34. `active_smart_folder_id` replaced by pinned search system.
-35. `search_query` is wrapper type, not `String`.
-36. Async bridge is `db.with_conn()`, not `tokio::spawn_blocking`.
-37. Folder restore re-queries DB, not clone — explicitly better.
+---
 
-## Confirmed Limitations (not discrepancies)
+## Stale Or Over-Specific Spec Content (Not Code Bugs)
 
-38. No negation (`NOT`) or grouping (parentheses) — deferred in spec, matches code.
-39. No pagination — limits are fixed per path.
+These are cases where the docs describe a slightly different implementation shape than the current code, but the difference itself is not a user-visible bug:
 
-## Resolved from previous audit (2026-03-22)
+- Generational tracking uses branded `GenerationCounter<T>` types rather than a raw `u64`.
+- The app stores search query state in wrapper/state structs rather than a bare `String`.
+- The async bridge is `db.with_conn()` / existing app task plumbing rather than the exact pseudo-code in the spec.
+- Folder-view restoration re-queries from DB instead of restoring a cloned thread list, which is actually the better design.
 
-- SearchBlur focuses blur-sink correctly
-- UnifiedSearchResult naming consolidated
-- PinnedSearch.thread_ids field exists (lazy-loaded)
-- Smart folders execute via unified pipeline from sidebar click
-- Auto-expiry runs hourly via subscription
-- Operator typeahead implemented (static + async DB)
-- "Search here" interaction implemented
-- "Save as Smart Folder" implemented
-- Pinned search staleness in sidebar cards implemented
-- Search result highlighting implemented
-- SearchState per-search concern downgraded — Arc clone, not re-init
+---
+
+## Confirmed Intentional Limitations
+
+These are explicitly deferred in the product docs and therefore are not discrepancies:
+
+- No explicit `AND`, `OR`, or `NOT` operators in V1.
+- No grouping via parentheses in V1.
+- No negation syntax in V1.
+- No pagination yet; result limits are fixed.
