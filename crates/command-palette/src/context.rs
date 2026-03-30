@@ -41,6 +41,8 @@ pub enum ViewType {
     Search,
     PinnedSearch,
     Chat,
+    SharedMailbox,
+    PublicFolder,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

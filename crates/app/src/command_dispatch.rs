@@ -219,6 +219,14 @@ fn current_view_and_label(app: &App) -> (ViewType, Option<String>) {
         return (ViewType::Search, None);
     }
 
+    // Shared mailbox / public folder scope — check before navigation target
+    // because the sidebar sets selected_scope before the event reaches App.
+    match &app.sidebar.selected_scope {
+        ViewScope::SharedMailbox { .. } => return (ViewType::SharedMailbox, None),
+        ViewScope::PublicFolder { .. } => return (ViewType::PublicFolder, None),
+        _ => {}
+    }
+
     // Derive from navigation target if set
     if let Some(target) = &app.navigation_target {
         return view_type_from_target(app, target);

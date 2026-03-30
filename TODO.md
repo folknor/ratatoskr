@@ -23,6 +23,7 @@
 - [ ] **Typed IDs: UndoToken fields** — `UndoToken` in the `command-palette` crate still uses raw `String` for `original_folder_id`, `source_folder_id`, `label_id`. Converting at construction/execution boundaries works but doesn't prevent wrong-kind-of-string in token construction. Fix: either add `provider-utils` dep to `command-palette` or define parallel newtypes there.
 - [ ] **Typed IDs: CommandArgs fields** — `CommandArgs::MoveToFolder { folder_id: String }`, `AddLabel { label_id: String }`, `RemoveLabel { label_id: String }` in `command-palette` are still raw strings, wrapped at the `command_dispatch.rs` boundary. Same dependency question as UndoToken.
 - [ ] **Typed IDs: sidebar.selected_label** — `sidebar.selected_label: Option<String>` is wrapped to `FolderId` at call sites. Semantics are ambiguous (used for both folder nav and label highlighting). Proper fix is part of Contract #10 (scope state unification).
+- [ ] **Search scope respects ViewScope** — `execute_search_sql_fallback` hardcodes `AccountScope::All`. When viewing a shared mailbox or single account, search should be scoped accordingly. Tantivy search path also ignores scope. Follow-up from Contract #10.
 
 - [ ] **Crate structure and dependency graph** - So much has been implemented without any real consideration for what kind of code lives where. It might be time to get a grip on things.
 
