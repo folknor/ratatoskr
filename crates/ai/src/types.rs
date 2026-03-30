@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 // Re-export ThreadCategory from its canonical location in core/sync.
-pub use ratatoskr_core::categorization::ThreadCategory;
+pub use rtsk::categorization::ThreadCategory;
 
 /// Request sent to an AI completion provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]

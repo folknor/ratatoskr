@@ -7,13 +7,13 @@
 
 use std::collections::HashMap;
 
-use ratatoskr_core::body_store::BodyStoreState;
-use ratatoskr_core::db::queries_extra::thread_detail::{
+use rtsk::body_store::BodyStoreState;
+use rtsk::db::queries_extra::thread_detail::{
     self, ThreadDetail, assemble_thread_detail, fetch_thread_bodies, query_inline_cid_hashes,
     query_thread_from_db,
 };
-use ratatoskr_core::db::queries_extra::set_attachments_collapsed;
-use ratatoskr_stores::inline_image_store::InlineImageStoreState;
+use rtsk::db::queries_extra::set_attachments_collapsed;
+use store::inline_image_store::InlineImageStoreState;
 
 use super::connection::Db;
 use super::types::{ThreadAttachment, ThreadMessage};
@@ -202,7 +202,7 @@ pub async fn persist_attachments_collapsed(
 // the results into app display types. Raw SQL formerly lived here but
 // has been moved to `crates/core/src/db/queries_extra/message_queries.rs`.
 
-use ratatoskr_core::db::queries_extra::message_queries;
+use rtsk::db::queries_extra::message_queries;
 
 impl Db {
     /// Load body text and HTML for a single message (used by pop-out windows).

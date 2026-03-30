@@ -11,5 +11,5 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-ratatoskr-db = { path = "../db" }
+db = { path = "../db" }
 log = "0.4"

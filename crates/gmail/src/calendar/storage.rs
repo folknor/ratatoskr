@@ -1,11 +1,11 @@
 //! Calendar database operations for the Gmail provider.
 //!
 //! Uses raw SQL via `DbState::with_conn` to avoid a circular dependency
-//! on `ratatoskr-core` (which contains `queries_extra::calendars`).
+//! on `rtsk` (which contains `queries_extra::calendars`).
 
 use rusqlite::params;
 
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 
 use super::CalendarInfo;
 use super::types::GoogleCalendarEvent;

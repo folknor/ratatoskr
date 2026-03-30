@@ -7,8 +7,8 @@ use crate::actions::provider::create_provider;
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
 use crate::search::SearchState;
-use ratatoskr_provider_utils::types::ProviderCtx;
-use ratatoskr_stores::inline_image_store::InlineImageStoreState;
+use common::types::ProviderCtx;
+use store::inline_image_store::InlineImageStoreState;
 
 /// Run a delta sync for a single account.
 ///
@@ -21,7 +21,7 @@ pub async fn sync_delta_for_account(
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
-    progress: &dyn ratatoskr_db::progress::ProgressReporter,
+    progress: &dyn db::progress::ProgressReporter,
 ) -> Result<(), String> {
     let provider = create_provider(db, account_id, encryption_key).await?;
     let ctx = ProviderCtx {

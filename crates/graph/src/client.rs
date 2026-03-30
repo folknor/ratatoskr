@@ -5,10 +5,10 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::sync::{Mutex, RwLock, Semaphore};
 
-use ratatoskr_db::db::DbState;
-use ratatoskr_provider_utils::crypto;
-use ratatoskr_provider_utils::http::{self, RetryConfig};
-use ratatoskr_provider_utils::token::{self, TokenState};
+use db::db::DbState;
+use common::crypto;
+use common::http::{self, RetryConfig};
+use common::token::{self, TokenState};
 
 use super::folder_mapper::FolderMap;
 
@@ -52,7 +52,7 @@ struct ClientInner {
 }
 
 /// State holding all Graph clients and the encryption key.
-pub type GraphState = ratatoskr_provider_utils::state::ProviderState<GraphClient>;
+pub type GraphState = common::state::ProviderState<GraphClient>;
 
 /// Create a new `GraphState` with the given encryption key.
 pub fn new_graph_state(encryption_key: [u8; 32]) -> GraphState {
@@ -462,7 +462,7 @@ impl GraphClient {
                 break;
             }
 
-            let delay_ms = ratatoskr_provider_utils::http::compute_retry_delay(
+            let delay_ms = common::http::compute_retry_delay(
                 last_response.as_ref(),
                 attempt,
                 &RETRY_CONFIG,
@@ -627,7 +627,7 @@ async fn persist_refreshed_token(
     let aid = account_id.to_string();
 
     db.with_conn(move |conn| {
-        ratatoskr_db::db::queries::persist_refreshed_token(conn, &aid, &encrypted, expires_at)
+        db::db::queries::persist_refreshed_token(conn, &aid, &encrypted, expires_at)
     })
     .await
 }

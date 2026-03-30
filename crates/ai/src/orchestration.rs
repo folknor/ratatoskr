@@ -7,7 +7,7 @@ use crate::types::{
     ExtractedTask, TextTransformType, ThreadCategory, ThreadForCategorization,
     WritingStyleProfile,
 };
-use ratatoskr_core::db::DbState;
+use rtsk::db::DbState;
 
 // ---------------------------------------------------------------------------
 // Internal formatting helpers
@@ -437,7 +437,7 @@ pub async fn analyze_writing_style(
     let sample_count = sent_messages.len() as i64;
 
     // Store in DB
-    ratatoskr_core::db::queries_extra::db_upsert_writing_style_profile(
+    rtsk::db::queries_extra::db_upsert_writing_style_profile(
         db,
         account_id.to_string(),
         profile_text.clone(),
@@ -538,7 +538,7 @@ async fn db_get_cache(
     thread_id: &str,
     cache_type: &str,
 ) -> Result<Option<String>, AiError> {
-    ratatoskr_core::db::queries_extra::db_get_ai_cache(
+    rtsk::db::queries_extra::db_get_ai_cache(
         db,
         account_id.to_string(),
         thread_id.to_string(),
@@ -555,7 +555,7 @@ async fn db_set_cache(
     cache_type: &str,
     content: &str,
 ) -> Result<(), AiError> {
-    ratatoskr_core::db::queries_extra::db_set_ai_cache(
+    rtsk::db::queries_extra::db_set_ai_cache(
         db,
         account_id.to_string(),
         thread_id.to_string(),

@@ -1,6 +1,6 @@
-use ratatoskr_provider_utils::text::truncate_graphemes;
-use ratatoskr_sync::types::MessageMeta;
-use ratatoskr_sync::threading::ThreadableMessage;
+use common::text::truncate_graphemes;
+use sync::types::MessageMeta;
+use sync::threading::ThreadableMessage;
 
 use super::folder_mapper::get_labels_for_message;
 use super::types::ImapMessage;

@@ -1,11 +1,11 @@
-use ratatoskr_stores::body_store::BodyStoreState;
-use ratatoskr_db::db::DbState;
-use ratatoskr_stores::inline_image_store::{InlineImage, InlineImageStoreState};
-use ratatoskr_search::{SearchDocument, SearchState};
+use store::body_store::BodyStoreState;
+use db::db::DbState;
+use store::inline_image_store::{InlineImage, InlineImageStoreState};
+use search::{SearchDocument, SearchState};
 
 use super::super::client::GmailClient;
 use super::super::parse::{ParsedGmailMessage, parse_gmail_message};
-use ratatoskr_sync::persistence as sync_persistence;
+use sync::persistence as sync_persistence;
 
 // ---------------------------------------------------------------------------
 // Single-thread fetch + store

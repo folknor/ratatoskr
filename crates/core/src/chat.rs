@@ -1,4 +1,4 @@
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 
 /// Summary data for a chat contact in the sidebar.
 #[derive(Debug, Clone)]

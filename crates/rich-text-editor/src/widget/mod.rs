@@ -6,7 +6,7 @@
 //! # Usage
 //!
 //! ```ignore
-//! use ratatoskr_rich_text_editor::widget::{EditorState, RichTextEditor, Action};
+//! use rte::widget::{EditorState, RichTextEditor, Action};
 //!
 //! struct State {
 //!     editor: EditorState,

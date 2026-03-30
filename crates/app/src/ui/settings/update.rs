@@ -5,7 +5,7 @@ use crate::component::Component;
 use crate::db::DateDisplay;
 use crate::ui::layout::*;
 use crate::ui::undoable::UndoableText;
-use ratatoskr_rich_text_editor::EditorState as RteEditorState;
+use rte::EditorState as RteEditorState;
 
 use super::tabs::settings_view;
 use super::types::*;
@@ -939,22 +939,22 @@ impl Settings {
         // Detect format from extension
         let lower_path = path.to_lowercase();
         let format = if lower_path.ends_with(".vcf") || lower_path.ends_with(".vcard") {
-            ratatoskr_contact_import::ImportFormat::Vcf
+            import::ImportFormat::Vcf
         } else {
-            ratatoskr_contact_import::ImportFormat::Csv
+            import::ImportFormat::Csv
         };
 
-        let source = ratatoskr_contact_import::ImportSource {
+        let source = import::ImportSource {
             format,
             data,
             filename: path.clone(),
         };
 
         match format {
-            ratatoskr_contact_import::ImportFormat::Csv => {
-                match ratatoskr_contact_import::parse_csv(&source, 20) {
+            import::ImportFormat::Csv => {
+                match import::parse_csv(&source, 20) {
                     Ok(preview) => {
-                        let auto_mappings = ratatoskr_contact_import::auto_detect_mappings(&preview.headers);
+                        let auto_mappings = import::auto_detect_mappings(&preview.headers);
                         wizard.mappings = auto_mappings
                             .iter()
                             .map(|m| ImportContactField::from_import_field(m.target_field))
@@ -970,8 +970,8 @@ impl Settings {
                     }
                 }
             }
-            ratatoskr_contact_import::ImportFormat::Vcf => {
-                match ratatoskr_contact_import::parse_vcf(&source.data) {
+            import::ImportFormat::Vcf => {
+                match import::parse_vcf(&source.data) {
                     Ok(contacts) => {
                         wizard.vcf_contacts = contacts;
                         wizard.source = Some(source);
@@ -996,9 +996,9 @@ impl Settings {
 
         // Re-parse with new header setting
         if let Some(ref source) = wizard.source {
-            if source.format == ratatoskr_contact_import::ImportFormat::Csv {
-                if let Ok(preview) = ratatoskr_contact_import::csv_parser::parse_csv_with_header(source, 20, has_header) {
-                    let auto_mappings = ratatoskr_contact_import::auto_detect_mappings(&preview.headers);
+            if source.format == import::ImportFormat::Csv {
+                if let Ok(preview) = import::csv_parser::parse_csv_with_header(source, 20, has_header) {
+                    let auto_mappings = import::auto_detect_mappings(&preview.headers);
                     wizard.mappings = auto_mappings
                         .iter()
                         .map(|m| ImportContactField::from_import_field(m.target_field))
@@ -1016,12 +1016,12 @@ impl Settings {
             return (Task::none(), None);
         };
 
-        let contacts: Vec<ratatoskr_contact_import::ImportedContact> = match wizard.source.as_ref().map(|s| s.format) {
-            Some(ratatoskr_contact_import::ImportFormat::Csv) => {
+        let contacts: Vec<import::ImportedContact> = match wizard.source.as_ref().map(|s| s.format) {
+            Some(import::ImportFormat::Csv) => {
                 let Some(ref source) = wizard.source else {
                     return (Task::none(), None);
                 };
-                let mappings: Vec<ratatoskr_contact_import::ColumnMapping> = wizard.mappings
+                let mappings: Vec<import::ColumnMapping> = wizard.mappings
                     .iter()
                     .enumerate()
                     .map(|(i, field)| {
@@ -1030,14 +1030,14 @@ impl Settings {
                             .and_then(|p| p.headers.get(i))
                             .cloned()
                             .unwrap_or_default();
-                        ratatoskr_contact_import::ColumnMapping {
+                        import::ColumnMapping {
                             source_index: i,
                             source_column: header,
                             target_field: field.to_import_field(),
                         }
                     })
                     .collect();
-                match ratatoskr_contact_import::csv_parser::execute_csv_import(
+                match import::csv_parser::execute_csv_import(
                     source,
                     &mappings,
                     wizard.has_header,
@@ -1049,7 +1049,7 @@ impl Settings {
                     }
                 }
             }
-            Some(ratatoskr_contact_import::ImportFormat::Vcf) => {
+            Some(import::ImportFormat::Vcf) => {
                 wizard.vcf_contacts.clone()
             }
             None => return (Task::none(), None),
@@ -1119,7 +1119,7 @@ impl Settings {
             .and_then(|i| presets.get(i))
             .map(|(_, bg, _)| (*bg).to_string());
 
-        let params = ratatoskr_core::db::queries_extra::UpdateAccountParams {
+        let params = rtsk::db::queries_extra::UpdateAccountParams {
             account_name: Some(editor.account_name.clone()),
             display_name: Some(editor.display_name.clone()),
             account_color: color_hex,

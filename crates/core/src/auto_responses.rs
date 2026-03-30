@@ -179,7 +179,7 @@ fn normalize_dotnet_datetime(s: &str) -> String {
 /// Fetch auto-response settings from Microsoft Graph.
 /// `GET /me/mailboxSettings/automaticRepliesSetting`
 pub async fn fetch_graph_auto_response(
-    client: &ratatoskr_graph::client::GraphClient,
+    client: &graph::client::GraphClient,
     db: &DbState,
 ) -> Result<AutoResponseConfig, String> {
     let resp: serde_json::Value = client
@@ -225,7 +225,7 @@ pub async fn fetch_graph_auto_response(
 /// Update auto-response settings on Microsoft Graph.
 /// `PATCH /me/mailboxSettings`
 pub async fn push_graph_auto_response(
-    client: &ratatoskr_graph::client::GraphClient,
+    client: &graph::client::GraphClient,
     db: &DbState,
     config: &AutoResponseConfig,
 ) -> Result<(), String> {
@@ -277,7 +277,7 @@ pub async fn push_graph_auto_response(
 /// Fetch vacation settings from Gmail API.
 /// `GET /users/me/settings/vacation`
 pub async fn fetch_gmail_auto_response(
-    client: &ratatoskr_gmail::client::GmailClient,
+    client: &gmail::client::GmailClient,
     db: &DbState,
 ) -> Result<AutoResponseConfig, String> {
     let resp: serde_json::Value = client
@@ -340,7 +340,7 @@ pub async fn fetch_gmail_auto_response(
 /// Update vacation settings on Gmail.
 /// `PUT /users/me/settings/vacation`
 pub async fn push_gmail_auto_response(
-    client: &ratatoskr_gmail::client::GmailClient,
+    client: &gmail::client::GmailClient,
     db: &DbState,
     config: &AutoResponseConfig,
 ) -> Result<(), String> {
@@ -382,7 +382,7 @@ pub async fn push_gmail_auto_response(
 /// Fetch vacation response from JMAP server.
 /// Uses `jmap-client` VacationResponse/get with the singleton ID.
 pub async fn fetch_jmap_auto_response(
-    client: &ratatoskr_jmap::client::JmapClient,
+    client: &jmap::client::JmapClient,
 ) -> Result<AutoResponseConfig, String> {
     client.ensure_valid_token().await?;
     let inner = client.inner();
@@ -425,7 +425,7 @@ pub async fn fetch_jmap_auto_response(
 /// All fields are set in a single JMAP request to avoid partial-update
 /// failures (e.g. enabling the vacation without schedule dates).
 pub async fn push_jmap_auto_response(
-    client: &ratatoskr_jmap::client::JmapClient,
+    client: &jmap::client::JmapClient,
     config: &AutoResponseConfig,
 ) -> Result<(), String> {
     use jmap_client::vacation_response::VacationResponseSet;

@@ -1,4 +1,4 @@
-use ratatoskr_db::progress::{self, ProgressReporter};
+use db::progress::{self, ProgressReporter};
 
 pub fn emit_sync_progress(
     reporter: &dyn ProgressReporter,

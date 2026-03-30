@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
-use ratatoskr_stores::attachment_cache::hash_bytes;
-use ratatoskr_stores::body_store::BodyStoreState;
-use ratatoskr_stores::inline_image_store::{InlineImage, MAX_INLINE_SIZE};
-use ratatoskr_search::{SearchDocument, SearchState};
+use store::attachment_cache::hash_bytes;
+use store::body_store::BodyStoreState;
+use store::inline_image_store::{InlineImage, MAX_INLINE_SIZE};
+use search::{SearchDocument, SearchState};
 
 use super::super::parse::ParsedJmapMessage;
 use super::SyncCtx;
-use ratatoskr_sync::persistence as sync_persistence;
+use sync::persistence as sync_persistence;
 
 // ---------------------------------------------------------------------------
 // DB persistence

@@ -1,5 +1,5 @@
 [package]
-name = "ratatoskr-imap"
+name = "imap"
 description = "IMAP provider for Ratatoskr"
 version.workspace = true
 edition.workspace = true
@@ -21,13 +21,13 @@ base64.workspace = true
 rusqlite.workspace = true
 
 # Extracted workspace crates
-ratatoskr-db = { path = "../db" }
-ratatoskr-stores = { path = "../stores" }
-ratatoskr-search = { path = "../search" }
+db = { path = "../db" }
+store = { path = "../stores" }
+search = { path = "../search" }
 ratatoskr-seen-addresses = { path = "../seen-addresses" }
-ratatoskr-provider-utils = { path = "../provider-utils" }
-ratatoskr-smtp = { path = "../smtp" }
-ratatoskr-sync = { path = "../sync" }
+common = { path = "../provider-utils" }
+smtp = { path = "../smtp" }
+sync = { path = "../sync" }
 
 # Crate-specific deps
 log = "0.4"

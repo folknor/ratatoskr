@@ -18,17 +18,17 @@ fn make_test_ctx() -> (ActionContext, tempfile::TempDir) {
 
     // Main DB with full migrations
     let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
-    ratatoskr_db::db::migrations::run_all(&conn).expect("migrations");
+    db::db::migrations::run_all(&conn).expect("migrations");
     let db = DbState::from_arc(Arc::new(Mutex::new(conn)));
 
     // Stores: tempdir-backed
     let body_store =
-        ratatoskr_stores::body_store::BodyStoreState::init(tmp.path()).expect("body store");
+        store::body_store::BodyStoreState::init(tmp.path()).expect("body store");
     let inline_images =
-        ratatoskr_stores::inline_image_store::InlineImageStoreState::init(tmp.path())
+        store::inline_image_store::InlineImageStoreState::init(tmp.path())
             .expect("inline images");
     let search =
-        ratatoskr_search::SearchState::init(tmp.path()).expect("search");
+        search::SearchState::init(tmp.path()).expect("search");
 
     let ctx = ActionContext {
         db,

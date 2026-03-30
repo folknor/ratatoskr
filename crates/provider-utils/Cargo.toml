@@ -1,5 +1,5 @@
 [package]
-name = "ratatoskr-provider-utils"
+name = "common"
 description = "Shared provider utilities for Ratatoskr email providers"
 version.workspace = true
 edition.workspace = true
@@ -20,9 +20,9 @@ chrono.workspace = true
 rusqlite.workspace = true
 
 # Extracted workspace crates
-ratatoskr-db = { path = "../db" }
-ratatoskr-stores = { path = "../stores" }
-ratatoskr-search = { path = "../search" }
+db = { path = "../db" }
+store = { path = "../stores" }
+search = { path = "../search" }
 ratatoskr-seen-addresses = { path = "../seen-addresses" }
 
 # Crate-specific deps

@@ -31,9 +31,9 @@ pub enum RenderingMode {
 #[derive(Debug, Clone)]
 pub enum MessageViewMessage {
     /// Body content loaded from the body store.
-    BodyLoaded(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::PopOut>, Result<(Option<String>, Option<String>), String>),
+    BodyLoaded(rtsk::generation::GenerationToken<rtsk::generation::PopOut>, Result<(Option<String>, Option<String>), String>),
     /// Attachments loaded for this message.
-    AttachmentsLoaded(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::PopOut>, Result<Vec<MessageViewAttachment>, String>),
+    AttachmentsLoaded(rtsk::generation::GenerationToken<rtsk::generation::PopOut>, Result<Vec<MessageViewAttachment>, String>),
     /// Raw source loaded (for Source rendering mode).
     RawSourceLoaded(Result<String, String>),
     /// User changed the rendering mode toggle.
@@ -104,13 +104,13 @@ pub struct MessageViewState {
 
     // ── Generation tracking ──
     /// Per-window generation token to guard against stale data loads.
-    pub generation: ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::PopOut>,
+    pub generation: rtsk::generation::GenerationToken<rtsk::generation::PopOut>,
 }
 
 impl MessageViewState {
     pub fn from_thread_message(
         msg: &ThreadMessage,
-        generation: ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::PopOut>,
+        generation: rtsk::generation::GenerationToken<rtsk::generation::PopOut>,
         source_label_id: Option<String>,
         default_rendering_mode: RenderingMode,
     ) -> Self {
@@ -146,7 +146,7 @@ impl MessageViewState {
     /// Construct state from a session restore entry (minimal data, body loaded async).
     pub fn from_session_entry(
         entry: &MessageViewSessionEntry,
-        generation: ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::PopOut>,
+        generation: rtsk::generation::GenerationToken<rtsk::generation::PopOut>,
         default_rendering_mode: RenderingMode,
     ) -> Self {
         Self {
@@ -179,7 +179,7 @@ impl MessageViewState {
     }
 
     /// Check if a loaded result matches this window's current generation.
-    pub fn is_current_generation(&self, token: ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::PopOut>) -> bool {
+    pub fn is_current_generation(&self, token: rtsk::generation::GenerationToken<rtsk::generation::PopOut>) -> bool {
         self.generation == token
     }
 }

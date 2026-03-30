@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use iced::widget::{button, column, container, mouse_area, pick_list, row, scrollable, text, text_input, Space};
 use iced::{Alignment, Element, Length, Point};
-use ratatoskr_rich_text_editor::{
+use rte::{
     rich_text_editor, Action as RteAction, EditAction, EditorState, InlineStyle,
 };
 
@@ -123,7 +123,7 @@ pub enum ComposeMessage {
     /// Toggle discard confirmation dialog.
     ToggleDiscardConfirm,
     /// Autocomplete results arrived from the database.
-    AutocompleteResults(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::Autocomplete>, Result<Vec<ContactMatch>, String>),
+    AutocompleteResults(rtsk::generation::GenerationToken<rtsk::generation::Autocomplete>, Result<Vec<ContactMatch>, String>),
     /// User selected an autocomplete suggestion.
     AutocompleteSelect(usize),
     /// User navigated the autocomplete list (up/down).
@@ -234,7 +234,7 @@ pub struct AutocompleteState {
     /// Currently highlighted index in the results list.
     pub highlighted: Option<usize>,
     /// Generation counter to discard stale results.
-    pub search_generation: ratatoskr_core::generation::GenerationCounter<ratatoskr_core::generation::Autocomplete>,
+    pub search_generation: rtsk::generation::GenerationCounter<rtsk::generation::Autocomplete>,
     /// Which recipient field is currently active.
     pub active_field: RecipientField,
 }
@@ -245,7 +245,7 @@ impl AutocompleteState {
             query: String::new(),
             results: Vec::new(),
             highlighted: None,
-            search_generation: ratatoskr_core::generation::GenerationCounter::new(),
+            search_generation: rtsk::generation::GenerationCounter::new(),
             active_field: RecipientField::To,
         }
     }
@@ -407,7 +407,7 @@ impl ComposeState {
     /// the signature boundary is.
     pub fn from_local_draft(
         accounts: &[db::Account],
-        draft: &ratatoskr_core::db::types::DbLocalDraft,
+        draft: &rtsk::db::types::DbLocalDraft,
     ) -> Self {
         let from_accounts = accounts_to_info(accounts);
         // Match the From account by email or fall back to first account.
@@ -898,7 +898,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         ComposeMessage::FormatList => {
             state.body.perform(RteAction::Edit(
                 EditAction::SetBlockType(
-                    ratatoskr_rich_text_editor::BlockKind::ListItem {
+                    rte::BlockKind::ListItem {
                         ordered: false,
                     },
                 ),
@@ -907,7 +907,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         }
         ComposeMessage::FormatBlockquote => {
             state.body.perform(RteAction::Edit(
-                EditAction::SetBlockType(ratatoskr_rich_text_editor::BlockKind::BlockQuote),
+                EditAction::SetBlockType(rte::BlockKind::BlockQuote),
             ));
             state.draft_dirty = true;
         }
@@ -969,7 +969,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             signature_id,
             signature_html,
         } => {
-            use ratatoskr_rich_text_editor::compose::replace_signature;
+            use rte::compose::replace_signature;
 
             let old_sep = state.signature_separator_index.unwrap_or(
                 state.body.document.block_count(),

@@ -8,7 +8,7 @@ use crate::ui::layout::*;
 use crate::ui::theme;
 
 use chrono::TimeZone;
-use ratatoskr_core::chat::ChatMessage;
+use rtsk::chat::ChatMessage;
 
 // ── Messages & Events ──────────────────────────────────
 

@@ -2,7 +2,7 @@ use iced::Task;
 
 use crate::command_dispatch::NavigationTarget;
 use crate::{App, Message};
-use ratatoskr_core::scope::ViewScope;
+use rtsk::scope::ViewScope;
 
 impl App {
     /// Handle navigation to a specific target.

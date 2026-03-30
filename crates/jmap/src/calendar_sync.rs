@@ -10,7 +10,7 @@ use jmap_client::calendar_event::{CalendarEvent, CalendarEventGet, CalendarEvent
 use jmap_client::core::set::SetObject;
 use jmap_client::Get;
 
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 
 use crate::client::JmapClient;
 
@@ -1060,14 +1060,14 @@ fn persist_reminder_rows(
 
 /// Save a JMAP sync state for calendar objects.
 ///
-/// Reuses the existing `jmap_sync_state` table via ratatoskr_sync.
+/// Reuses the existing `jmap_sync_state` table via sync.
 async fn save_calendar_sync_state(
     db: &DbState,
     account_id: &str,
     state_type: &str,
     state: &str,
 ) -> Result<(), String> {
-    ratatoskr_sync::state::save_jmap_sync_state(db, account_id, state_type, state).await
+    sync::state::save_jmap_sync_state(db, account_id, state_type, state).await
 }
 
 /// Load a JMAP sync state for calendar objects.
@@ -1076,7 +1076,7 @@ async fn load_calendar_sync_state(
     account_id: &str,
     state_type: &str,
 ) -> Result<Option<String>, String> {
-    ratatoskr_sync::state::load_jmap_sync_state(db, account_id, state_type).await
+    sync::state::load_jmap_sync_state(db, account_id, state_type).await
 }
 
 // ── Calendar DB helpers ────────────────────────────────────

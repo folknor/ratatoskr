@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 
 use super::super::client::GraphClient;
 use super::super::types::{MESSAGE_SELECT, ODataCollection, REACTIONS_EXPAND};
-use ratatoskr_sync::state as sync_state;
+use sync::state as sync_state;
 
 // ---------------------------------------------------------------------------
 // Delta token management

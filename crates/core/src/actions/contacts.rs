@@ -217,14 +217,14 @@ async fn dispatch_write_back(
 ) -> Result<(), ActionError> {
     match source {
         "jmap" => {
-            let client = ratatoskr_jmap::client::JmapClient::from_account(
+            let client = jmap::client::JmapClient::from_account(
                 &ctx.db,
                 account_id,
                 &ctx.encryption_key,
             )
             .await
             .map_err(ActionError::remote)?;
-            ratatoskr_jmap::contacts_sync::jmap_contacts_push_update(
+            jmap::contacts_sync::jmap_contacts_push_update(
                 &client, server_id, phone, company, notes,
             )
             .await
@@ -246,7 +246,7 @@ async fn dispatch_write_back(
                 return Ok(()); // nothing to push
             }
 
-            let client = ratatoskr_gmail::client::GmailClient::from_account(
+            let client = gmail::client::GmailClient::from_account(
                 &ctx.db,
                 account_id,
                 ctx.encryption_key,
@@ -269,7 +269,7 @@ async fn dispatch_write_back(
             Ok(())
         }
         "graph" => {
-            let client = ratatoskr_graph::client::GraphClient::from_account(
+            let client = graph::client::GraphClient::from_account(
                 &ctx.db,
                 account_id,
                 ctx.encryption_key,
@@ -302,7 +302,7 @@ async fn dispatch_delete(
 ) -> Result<(), ActionError> {
     match source {
         "jmap" => {
-            let client = ratatoskr_jmap::client::JmapClient::from_account(
+            let client = jmap::client::JmapClient::from_account(
                 &ctx.db,
                 account_id,
                 &ctx.encryption_key,
@@ -314,7 +314,7 @@ async fn dispatch_delete(
                 .map_err(ActionError::remote)
         }
         "google" => {
-            let client = ratatoskr_gmail::client::GmailClient::from_account(
+            let client = gmail::client::GmailClient::from_account(
                 &ctx.db,
                 account_id,
                 ctx.encryption_key,
@@ -333,7 +333,7 @@ async fn dispatch_delete(
             Ok(())
         }
         "graph" => {
-            let client = ratatoskr_graph::client::GraphClient::from_account(
+            let client = graph::client::GraphClient::from_account(
                 &ctx.db,
                 account_id,
                 ctx.encryption_key,
@@ -354,7 +354,7 @@ async fn dispatch_delete(
 
 /// Delete a contact via JMAP ContactCard/set destroy.
 async fn jmap_contact_delete(
-    client: &ratatoskr_jmap::client::JmapClient,
+    client: &jmap::client::JmapClient,
     server_id: &str,
 ) -> Result<(), String> {
     let inner = client.inner();

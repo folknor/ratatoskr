@@ -12,7 +12,7 @@ impl Db {
     pub fn get_user_folders_for_palette(
         &self,
         account_id: &str,
-    ) -> Result<Vec<ratatoskr_command_palette::OptionItem>, String> {
+    ) -> Result<Vec<cmdk::OptionItem>, String> {
         self.with_conn_sync(|conn| {
             let mut stmt = conn
                 .prepare(
@@ -40,7 +40,7 @@ impl Db {
     pub fn get_user_labels_for_palette(
         &self,
         account_id: &str,
-    ) -> Result<Vec<ratatoskr_command_palette::OptionItem>, String> {
+    ) -> Result<Vec<cmdk::OptionItem>, String> {
         self.get_user_folders_for_palette(account_id)
     }
 
@@ -49,7 +49,7 @@ impl Db {
         &self,
         account_id: &str,
         thread_id: &str,
-    ) -> Result<Vec<ratatoskr_command_palette::OptionItem>, String> {
+    ) -> Result<Vec<cmdk::OptionItem>, String> {
         self.with_conn_sync(|conn| {
             let mut stmt = conn
                 .prepare(
@@ -82,7 +82,7 @@ impl Db {
     /// the palette can split them when building `CommandArgs`.
     pub fn get_all_labels_cross_account(
         &self,
-    ) -> Result<Vec<ratatoskr_command_palette::OptionItem>, String> {
+    ) -> Result<Vec<cmdk::OptionItem>, String> {
         self.with_conn_sync(|conn| {
             let mut stmt = conn
                 .prepare(
@@ -148,7 +148,7 @@ impl Db {
 fn label_name_to_option_item(
     id: String,
     name: &str,
-) -> ratatoskr_command_palette::OptionItem {
+) -> cmdk::OptionItem {
     let segments: Vec<&str> = name.split('/').collect();
     let (label, path) = if segments.len() > 1 {
         let label = segments.last().unwrap_or(&name).to_string();
@@ -161,7 +161,7 @@ fn label_name_to_option_item(
         (name.to_string(), None)
     };
 
-    ratatoskr_command_palette::OptionItem {
+    cmdk::OptionItem {
         id,
         label,
         path,

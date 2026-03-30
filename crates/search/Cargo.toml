@@ -1,5 +1,5 @@
 [package]
-name = "ratatoskr-search"
+name = "search"
 description = "Tantivy-based full-text search for Ratatoskr"
 version.workspace = true
 edition.workspace = true

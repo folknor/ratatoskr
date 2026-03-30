@@ -6,13 +6,13 @@
 //! all API paths use `client.api_path_prefix()` and delta token routing is
 //! handled by the wrapper functions in `sync.rs`.
 
-use ratatoskr_stores::body_store::BodyStoreState;
-use ratatoskr_db::db::DbState;
-use ratatoskr_stores::inline_image_store::InlineImageStoreState;
-use ratatoskr_db::progress::ProgressReporter;
-use ratatoskr_provider_utils::types::{ProviderCtx, SyncResult};
-use ratatoskr_search::SearchState;
-use ratatoskr_sync::state as sync_state;
+use store::body_store::BodyStoreState;
+use db::db::DbState;
+use store::inline_image_store::InlineImageStoreState;
+use db::progress::ProgressReporter;
+use common::types::{ProviderCtx, SyncResult};
+use search::SearchState;
+use sync::state as sync_state;
 
 use super::client::GraphClient;
 use super::sync::{graph_delta_sync, graph_initial_sync};
@@ -180,7 +180,7 @@ pub async fn sync_all_shared_mailboxes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatoskr_sync::state::SharedMailboxSyncEntry;
+    use sync::state::SharedMailboxSyncEntry;
 
     #[test]
     fn shared_mailbox_initial_sync_days_is_reasonable() {

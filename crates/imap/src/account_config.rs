@@ -1,10 +1,10 @@
 use rusqlite::OptionalExtension;
 
-use ratatoskr_db::db::DbState;
-use ratatoskr_provider_utils::crypto::{decrypt_if_needed, encrypt_value};
-use ratatoskr_provider_utils::http::shared_http_client;
-use ratatoskr_provider_utils::token::{get_refresh_lock, oauth_token_endpoint, refresh_oauth_token};
-use ratatoskr_smtp::types::SmtpConfig;
+use db::db::DbState;
+use common::crypto::{decrypt_if_needed, encrypt_value};
+use common::http::shared_http_client;
+use common::token::{get_refresh_lock, oauth_token_endpoint, refresh_oauth_token};
+use smtp::types::SmtpConfig;
 
 use super::types::ImapConfig;
 
@@ -161,7 +161,7 @@ async fn ensure_oauth_access_token(
     let aid = account_id.to_string();
     let new_expires = refreshed.expires_at;
     db.with_conn(move |conn| {
-        ratatoskr_db::db::queries::persist_refreshed_token(
+        db::db::queries::persist_refreshed_token(
             conn,
             &aid,
             &encrypted_access_token,
@@ -279,7 +279,7 @@ pub async fn load_both_configs(
 
 #[cfg(test)]
 mod tests {
-    use ratatoskr_provider_utils::crypto::decrypt_if_needed;
+    use common::crypto::decrypt_if_needed;
 
     #[test]
     fn decrypt_failure_returns_err() {

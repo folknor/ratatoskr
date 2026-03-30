@@ -15,13 +15,13 @@ impl App {
         self.clear_thread_selection();
         self.chat_timeline = Some(ChatTimeline::new(email.clone()));
 
-        let db_state = ratatoskr_core::db::DbState::from_arc(self.db.conn_arc());
+        let db_state = rtsk::db::DbState::from_arc(self.db.conn_arc());
         let user_emails = self.user_emails();
         let token = self.chat_generation.next();
 
         Task::perform(
             async move {
-                ratatoskr_core::chat::get_chat_timeline(
+                rtsk::chat::get_chat_timeline(
                     &db_state, &email, &user_emails, 50, None,
                 )
                 .await
@@ -33,7 +33,7 @@ impl App {
     /// Handle chat timeline data loaded.
     pub(crate) fn handle_chat_timeline_loaded(
         &mut self,
-        messages: Vec<ratatoskr_core::chat::ChatMessage>,
+        messages: Vec<rtsk::chat::ChatMessage>,
     ) -> Task<Message> {
         if let Some(ref mut timeline) = self.chat_timeline {
             timeline.messages = messages;
@@ -58,13 +58,13 @@ impl App {
                     return Task::none();
                 };
                 let contact = timeline.contact_email.clone();
-                let db_state = ratatoskr_core::db::DbState::from_arc(self.db.conn_arc());
+                let db_state = rtsk::db::DbState::from_arc(self.db.conn_arc());
                 let user_emails = self.user_emails();
 
                 let email = contact.clone();
                 Task::perform(
                     async move {
-                        ratatoskr_core::chat::get_chat_timeline(
+                        rtsk::chat::get_chat_timeline(
                             &db_state, &email, &user_emails, 50, Some(before),
                         )
                         .await
@@ -78,7 +78,7 @@ impl App {
     /// Prepend older messages to the chat timeline.
     pub(crate) fn handle_chat_older_loaded(
         &mut self,
-        messages: Vec<ratatoskr_core::chat::ChatMessage>,
+        messages: Vec<rtsk::chat::ChatMessage>,
     ) -> Task<Message> {
         if let Some(ref mut timeline) = self.chat_timeline {
             let mut older = messages;

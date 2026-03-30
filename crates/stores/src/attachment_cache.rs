@@ -4,7 +4,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use xxhash_rust::xxh3::xxh3_64;
 
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 
 use crate::inline_image_store::InlineImageStoreState;
 
@@ -167,7 +167,7 @@ pub struct CacheInfo {
 
 async fn attachment_cache_max_bytes(db: &DbState) -> Result<i64, String> {
     db.with_conn(|conn| {
-        let raw = ratatoskr_db::db::queries::get_setting(conn, "attachment_cache_max_mb")
+        let raw = db::db::queries::get_setting(conn, "attachment_cache_max_mb")
             .unwrap_or(None);
         let max_mb = raw
             .as_deref()

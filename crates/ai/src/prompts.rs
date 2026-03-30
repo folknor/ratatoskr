@@ -43,7 +43,7 @@ Rules:
 - When referencing a message, include the message ID in brackets like [msg_id] so the user can navigate to it
 - Do not make up or infer information not present in the emails"#;
 
-pub use ratatoskr_core::categorization::CATEGORIZE_PROMPT;
+pub use rtsk::categorization::CATEGORIZE_PROMPT;
 
 pub const WRITING_STYLE_ANALYSIS_PROMPT: &str = r#"Analyze the writing style of the following email samples from a single author. Create a concise writing style profile.
 

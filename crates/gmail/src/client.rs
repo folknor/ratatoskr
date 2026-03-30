@@ -5,10 +5,10 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::sync::{Mutex, RwLock};
 
-use ratatoskr_db::db::DbState;
-use ratatoskr_provider_utils::crypto;
-use ratatoskr_provider_utils::http::{self, RetryConfig};
-use ratatoskr_provider_utils::token::{self, TokenState};
+use db::db::DbState;
+use common::crypto;
+use common::http::{self, RetryConfig};
+use common::token::{self, TokenState};
 
 const GMAIL_API_BASE: &str = "https://www.googleapis.com/gmail/v1/users/me";
 const RETRY_CONFIG: RetryConfig = RetryConfig {
@@ -37,7 +37,7 @@ struct ClientInner {
 }
 
 /// State holding all Gmail clients and the encryption key.
-pub type GmailState = ratatoskr_provider_utils::state::ProviderState<GmailClient>;
+pub type GmailState = common::state::ProviderState<GmailClient>;
 
 /// Create a new `GmailState` with the given encryption key.
 pub fn new_gmail_state(encryption_key: [u8; 32]) -> GmailState {
@@ -458,7 +458,7 @@ async fn persist_refreshed_token(
     let aid = account_id.to_string();
 
     db.with_conn(move |conn| {
-        ratatoskr_db::db::queries::persist_refreshed_token(conn, &aid, &encrypted, expires_at)
+        db::db::queries::persist_refreshed_token(conn, &aid, &encrypted, expires_at)
     })
     .await
 }

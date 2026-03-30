@@ -1,10 +1,10 @@
 use serde::Serialize;
 
-use ratatoskr_db::db::DbState;
-use ratatoskr_db::progress::ProgressReporter;
-use ratatoskr_search::SearchState;
-use ratatoskr_stores::body_store::BodyStoreState;
-use ratatoskr_stores::inline_image_store::InlineImageStoreState;
+use db::db::DbState;
+use db::progress::ProgressReporter;
+use search::SearchState;
+use store::body_store::BodyStoreState;
+use store::inline_image_store::InlineImageStoreState;
 
 /// Standardized sync result across all providers.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -65,7 +65,7 @@ pub struct ProviderFolderMutation {
     pub color_fg: Option<String>,
 }
 
-pub use ratatoskr_stores::attachment_cache::AttachmentData;
+pub use store::attachment_cache::AttachmentData;
 
 /// Provider-agnostic parsed attachment metadata.
 #[derive(Debug, Clone, Serialize)]

@@ -1,4 +1,4 @@
-use ratatoskr_db::db::types::AccountScope;
+use db::db::types::AccountScope;
 
 /// What the user is currently viewing — drives query routing and UI context.
 ///

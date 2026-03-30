@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 
 use super::super::client::GraphClient;
 use super::super::parse::ParsedGraphMessage;
@@ -9,7 +9,7 @@ use super::super::types::{
 };
 use super::SyncCtx;
 use super::stores::{index_messages, store_bodies, store_inline_images};
-use ratatoskr_sync::persistence as sync_persistence;
+use sync::persistence as sync_persistence;
 
 // ---------------------------------------------------------------------------
 // DB persistence (mirrors jmap/sync.rs patterns)

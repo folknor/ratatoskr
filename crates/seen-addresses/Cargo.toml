@@ -11,7 +11,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-ratatoskr-db = { path = "../db" }
+db = { path = "../db" }
 serde.workspace = true
 rusqlite.workspace = true
 mail-parser = "0.11"

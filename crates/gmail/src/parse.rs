@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-use ratatoskr_provider_utils::attachment_dedup::{
+use common::attachment_dedup::{
     dedup_by_key, prefer_missing_clone, prefer_non_placeholder_filename,
 };
-use ratatoskr_provider_utils::email_parsing::parse_single_address_header;
-use ratatoskr_provider_utils::encoding::decode_base64url_nopad;
-use ratatoskr_provider_utils::headers::find_header_value_case_insensitive;
-use ratatoskr_provider_utils::parsed_message::ParsedMessageBase;
+use common::email_parsing::parse_single_address_header;
+use common::encoding::decode_base64url_nopad;
+use common::headers::find_header_value_case_insensitive;
+use common::parsed_message::ParsedMessageBase;
 
 use super::auth_parser::parse_authentication_results;
 use super::types::{GmailHeader, GmailMessage, GmailPayload};
@@ -50,7 +50,7 @@ pub struct ParsedGmailMessage {
     pub reaction_emoji: Option<String>,
 }
 
-ratatoskr_provider_utils::impl_message_addresses!(ParsedGmailMessage);
+common::impl_message_addresses!(ParsedGmailMessage);
 
 /// Parse a Gmail API message into the internal representation.
 pub fn parse_gmail_message(msg: &GmailMessage) -> ParsedGmailMessage {
@@ -127,7 +127,7 @@ fn get_header(headers: &[GmailHeader], name: &str) -> Option<String> {
 /// Skips `text/x-amp-html` parts — AMP emails contain tracking-heavy
 /// interactive content that should never be selected as the body.
 fn extract_body(part: &GmailPayload, mime_type: &str) -> Option<String> {
-    if !ratatoskr_provider_utils::email_parsing::is_amp_content_type(&part.mime_type)
+    if !common::email_parsing::is_amp_content_type(&part.mime_type)
         && part.mime_type == mime_type
         && let Some(body) = &part.body
         && let Some(data) = &body.data
@@ -210,13 +210,13 @@ fn collect_attachments(part: &GmailPayload, results: &mut Vec<ParsedAttachment>)
                 body.data
                     .as_deref()
                     .and_then(decode_base64url_bytes)
-                    .filter(|data| data.len() <= ratatoskr_stores::inline_image_store::MAX_INLINE_SIZE)
+                    .filter(|data| data.len() <= store::inline_image_store::MAX_INLINE_SIZE)
             } else {
                 None
             };
             let content_hash = inline_data
                 .as_deref()
-                .map(ratatoskr_stores::attachment_cache::hash_bytes);
+                .map(store::attachment_cache::hash_bytes);
 
             let filename = if has_filename {
                 part.filename.clone()

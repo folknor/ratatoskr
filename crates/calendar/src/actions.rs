@@ -7,11 +7,11 @@
 //! `ActionOutcome`, `DbState`) and has access to all provider write functions.
 //! Adding `calendar` as a dependency of `core` would create a circular dep.
 
-use ratatoskr_core::actions::{ActionContext, ActionError, ActionOutcome, MutationLog};
-use ratatoskr_core::db::DbState;
-use ratatoskr_gmail::client::GmailClient;
-use ratatoskr_graph::client::GraphClient;
-use ratatoskr_jmap::client::JmapClient;
+use rtsk::actions::{ActionContext, ActionError, ActionOutcome, MutationLog};
+use rtsk::db::DbState;
+use gmail::client::GmailClient;
+use graph::client::GraphClient;
+use jmap::client::JmapClient;
 
 use super::google::{
     google_calendar_create_event_impl, google_calendar_delete_event_impl,
@@ -154,7 +154,7 @@ async fn dispatch_create(
                 .map_err(|e| ActionError::remote(e))
         }
         CalendarProvider::Jmap(client) => {
-            let remote_id = ratatoskr_jmap::calendar_sync::create_event_remote(
+            let remote_id = jmap::calendar_sync::create_event_remote(
                 client,
                 calendar_remote_id,
                 &input.title,
@@ -212,7 +212,7 @@ async fn dispatch_update(
                 .map_err(|e| ActionError::remote(e))
         }
         CalendarProvider::Jmap(client) => {
-            ratatoskr_jmap::calendar_sync::update_event_remote(
+            jmap::calendar_sync::update_event_remote(
                 client,
                 remote_event_id,
                 &input.title,
@@ -273,7 +273,7 @@ async fn dispatch_delete(
                 .map_err(|e| ActionError::remote(e))
         }
         CalendarProvider::Jmap(client) => {
-            ratatoskr_jmap::calendar_sync::delete_event_remote(client, remote_event_id)
+            jmap::calendar_sync::delete_event_remote(client, remote_event_id)
                 .await
                 .map_err(|e| ActionError::remote(e))
         }
@@ -371,7 +371,7 @@ pub async fn create_calendar_event(
 
         let calendar_remote_id = lookup_calendar_remote_id(&conn, &aid, &cid)?;
 
-        let params = ratatoskr_core::db::queries_extra::calendars::LocalCalendarEventParams {
+        let params = rtsk::db::queries_extra::calendars::LocalCalendarEventParams {
             account_id: aid.clone(),
             summary: input_clone.title,
             description: input_clone.description,
@@ -385,7 +385,7 @@ pub async fn create_calendar_event(
             availability: input_clone.availability,
             visibility: input_clone.visibility,
         };
-        let event_id = ratatoskr_core::db::queries_extra::calendars::create_calendar_event_sync(
+        let event_id = rtsk::db::queries_extra::calendars::create_calendar_event_sync(
             &conn, &params,
         )
         .map_err(|e| ActionError::db(e))?;
@@ -495,7 +495,7 @@ pub async fn update_calendar_event(
         let local_result = tokio::task::spawn_blocking(move || {
             let conn = db.conn();
             let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-            let params = ratatoskr_core::db::queries_extra::calendars::LocalCalendarEventParams {
+            let params = rtsk::db::queries_extra::calendars::LocalCalendarEventParams {
                 account_id: meta.account_id.clone(),
                 summary: input.title,
                 description: input.description,
@@ -509,7 +509,7 @@ pub async fn update_calendar_event(
                 availability: input.availability,
                 visibility: input.visibility,
             };
-            ratatoskr_core::db::queries_extra::calendars::update_calendar_event_sync(
+            rtsk::db::queries_extra::calendars::update_calendar_event_sync(
                 &conn, &eid, &params,
             )
             .map_err(|e| ActionError::db(e))
@@ -568,7 +568,7 @@ pub async fn update_calendar_event(
                 let conn = db.conn();
                 if let Ok(conn) = conn.lock() {
                     let params =
-                        ratatoskr_core::db::queries_extra::calendars::LocalCalendarEventParams {
+                        rtsk::db::queries_extra::calendars::LocalCalendarEventParams {
                             account_id: event_account_id,
                             summary: input.title,
                             description: input.description,
@@ -582,7 +582,7 @@ pub async fn update_calendar_event(
                             availability: input.availability,
                             visibility: input.visibility,
                         };
-                    let _ = ratatoskr_core::db::queries_extra::calendars::update_calendar_event_sync(
+                    let _ = rtsk::db::queries_extra::calendars::update_calendar_event_sync(
                         &conn, &eid, &params,
                     );
                     // Also update etag from provider response
@@ -646,7 +646,7 @@ pub async fn delete_calendar_event(
         let local_result = tokio::task::spawn_blocking(move || {
             let conn = db.conn();
             let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-            ratatoskr_core::db::queries_extra::calendars::delete_calendar_event_sync(&conn, &eid)
+            rtsk::db::queries_extra::calendars::delete_calendar_event_sync(&conn, &eid)
                 .map_err(|e| ActionError::db(e))
         })
         .await
@@ -701,7 +701,7 @@ pub async fn delete_calendar_event(
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        ratatoskr_core::db::queries_extra::calendars::delete_calendar_event_sync(&conn, &eid)
+        rtsk::db::queries_extra::calendars::delete_calendar_event_sync(&conn, &eid)
             .map_err(|e| ActionError::db(e))
     })
     .await

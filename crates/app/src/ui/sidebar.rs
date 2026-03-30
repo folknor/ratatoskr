@@ -6,11 +6,11 @@ use iced::{Alignment, Element, Length, Task};
 use crate::component::Component;
 use crate::db::{Account, PinnedPublicFolder, PinnedSearch, SharedMailbox};
 use crate::icon;
-use ratatoskr_core::scope::ViewScope;
+use rtsk::scope::ViewScope;
 use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets::{self, DropdownEntry, DropdownIcon};
-use ratatoskr_core::db::queries_extra::navigation::{
+use rtsk::db::queries_extra::navigation::{
     FolderKind, NavigationFolder, NavigationState,
 };
 

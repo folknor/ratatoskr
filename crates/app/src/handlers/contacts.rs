@@ -42,7 +42,7 @@ impl App {
         let db = Arc::clone(&self.db);
         let filter = self.settings.contact_filter.clone();
 
-        let input = ratatoskr_core::actions::contacts::ContactSaveInput {
+        let input = rtsk::actions::contacts::ContactSaveInput {
             id: entry.id,
             email: entry.email,
             display_name: entry.display_name,
@@ -58,14 +58,14 @@ impl App {
         Task::perform(
             async move {
                 let outcome =
-                    ratatoskr_core::actions::contacts::save_contact(&ctx, input).await;
+                    rtsk::actions::contacts::save_contact(&ctx, input).await;
                 // Reload contacts regardless of outcome (local save succeeded
                 // for Success and LocalOnly, failed for Failed)
                 let contacts = db.get_contacts_for_settings(filter).await;
                 (outcome, contacts)
             },
             |(outcome, contacts)| {
-                use ratatoskr_core::actions::ActionOutcome;
+                use rtsk::actions::ActionOutcome;
                 match outcome {
                     ActionOutcome::Failed { error } => {
                         log::error!("Contact save failed: {error}");
@@ -96,9 +96,9 @@ impl App {
         Task::perform(
             async move {
                 let outcome =
-                    ratatoskr_core::actions::contacts::delete_contact(&ctx, &id).await;
+                    rtsk::actions::contacts::delete_contact(&ctx, &id).await;
                 match outcome {
-                    ratatoskr_core::actions::ActionOutcome::Failed { .. } => {
+                    rtsk::actions::ActionOutcome::Failed { .. } => {
                         // Provider-first delete failed (e.g. JMAP) — contact not
                         // deleted locally. Don't reload (nothing changed).
                         (outcome, None)
@@ -111,7 +111,7 @@ impl App {
                 }
             },
             |(outcome, contacts)| {
-                use ratatoskr_core::actions::ActionOutcome;
+                use rtsk::actions::ActionOutcome;
                 match outcome {
                     ActionOutcome::Failed { error } => {
                         log::error!("Contact delete failed: {error}");
@@ -179,7 +179,7 @@ impl App {
 
     pub(crate) fn handle_import_contacts(
         &self,
-        contacts: Vec<ratatoskr_contact_import::ImportedContact>,
+        contacts: Vec<import::ImportedContact>,
         account_id: Option<String>,
         update_existing: bool,
     ) -> Task<Message> {
@@ -205,7 +205,7 @@ impl App {
 /// Execute the contact import against the database.
 async fn execute_contact_import(
     db: &Arc<Db>,
-    contacts: Vec<ratatoskr_contact_import::ImportedContact>,
+    contacts: Vec<import::ImportedContact>,
     account_id: Option<String>,
     update_existing: bool,
 ) -> Result<(usize, usize, usize, usize, usize), String> {
@@ -343,7 +343,7 @@ async fn execute_contact_import(
 fn build_contact_entry(
     id: String,
     email: &str,
-    contact: &ratatoskr_contact_import::ImportedContact,
+    contact: &import::ImportedContact,
     account_id: &Option<String>,
 ) -> ContactEntry {
     let display_name = contact.effective_display_name();

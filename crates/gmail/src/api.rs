@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 
 use super::client::GmailClient;
 use super::types::{

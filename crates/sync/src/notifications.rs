@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::Connection;
 
 use crate::categorization::AiCategorizationCandidate;
-use ratatoskr_db::db::queries::load_recent_rule_categorized_threads;
-use ratatoskr_db::db::DbState;
+use db::db::queries::load_recent_rule_categorized_threads;
+use db::db::DbState;
 use crate::filters::FilterableMessage;
 use crate::types::NotificationCandidate;
 
@@ -15,7 +15,7 @@ pub async fn get_ai_categorization_candidates(
 ) -> Result<Vec<AiCategorizationCandidate>, String> {
     let account_id = account_id.to_string();
     db.with_conn(move |conn| {
-        let auto_categorize = ratatoskr_db::db::queries::get_setting(conn, "ai_auto_categorize")
+        let auto_categorize = db::db::queries::get_setting(conn, "ai_auto_categorize")
             .unwrap_or(None);
         if auto_categorize.as_deref() == Some("false") {
             return Ok(Vec::new());
@@ -63,7 +63,7 @@ fn evaluate_notifications_sync(
     messages: &[FilterableMessage],
     thread_ids: &[String],
 ) -> Result<Vec<NotificationCandidate>, String> {
-    use ratatoskr_db::db::queries::get_setting;
+    use db::db::queries::get_setting;
     let notifications_enabled = get_setting(conn, "notifications_enabled")
         .unwrap_or(None);
     if notifications_enabled.as_deref() == Some("false") {

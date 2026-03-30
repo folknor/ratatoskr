@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use jmap_client::email::{Email, Header, HeaderValue, Property};
 
-use ratatoskr_provider_utils::email_parsing::format_address_list;
-use ratatoskr_provider_utils::parsed_message::ParsedMessageBase;
+use common::email_parsing::format_address_list;
+use common::parsed_message::ParsedMessageBase;
 
 use super::mailbox_mapper::{MailboxInfo, get_labels_for_email};
 
@@ -19,7 +19,7 @@ pub struct ParsedJmapMessage {
     pub keyword_categories: Vec<String>,
 }
 
-ratatoskr_provider_utils::impl_message_addresses!(ParsedJmapMessage);
+common::impl_message_addresses!(ParsedJmapMessage);
 
 #[derive(Debug, Clone)]
 pub struct ParsedJmapAttachment {
@@ -230,7 +230,7 @@ fn extract_body_value(email: &Email, html: bool) -> Option<String> {
         // Skip AMP body parts — prefer regular text/html
         if html
             && let Some(ct) = part.content_type()
-            && ratatoskr_provider_utils::email_parsing::is_amp_content_type(ct)
+            && common::email_parsing::is_amp_content_type(ct)
         {
             continue;
         }

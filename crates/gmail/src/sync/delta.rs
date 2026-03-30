@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use serde::Serialize;
 
-use ratatoskr_sync::{pending as sync_pending, state as sync_state};
+use sync::{pending as sync_pending, state as sync_state};
 
 use super::SyncCtx;
 use super::labels;

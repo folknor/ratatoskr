@@ -1,5 +1,5 @@
 [package]
-name = "ratatoskr-db"
+name = "db"
 description = "Shared database types, state, and migrations for Ratatoskr"
 version.workspace = true
 edition.workspace = true

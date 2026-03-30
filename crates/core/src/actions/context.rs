@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use crate::body_store::BodyStoreState;
 use crate::db::DbState;
 use crate::search::SearchState;
-use ratatoskr_stores::inline_image_store::InlineImageStoreState;
+use store::inline_image_store::InlineImageStoreState;
 
 /// Dependencies needed by the action service.
 ///

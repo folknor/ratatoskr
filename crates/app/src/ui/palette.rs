@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use iced::widget::{column, container, mouse_area, row, scrollable, text, text_input};
 use iced::{Element, Length, Task};
-use ratatoskr_command_palette::{
+use cmdk::{
     CommandArgs, CommandContext, CommandId, CommandInputResolver, CommandMatch,
     CommandRegistry, InputMode, OptionItem, OptionMatch,
 };
@@ -38,7 +38,7 @@ pub enum PaletteMessage {
     ClickOption(usize),
     /// Stage 2: option list loaded from resolver.
     /// The token is a generation guard to discard stale results.
-    OptionsLoaded(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::PaletteOptions>, CommandId, Result<Vec<OptionItem>, String>),
+    OptionsLoaded(rtsk::generation::GenerationToken<rtsk::generation::PaletteOptions>, CommandId, Result<Vec<OptionItem>, String>),
 }
 
 /// Events the palette emits upward to the App.
@@ -90,7 +90,7 @@ pub struct Palette {
     /// The param label to display in the placeholder (e.g., "Folder", "Label").
     stage2_label: String,
     /// Generation counter to discard stale resolver results.
-    option_load_generation: ratatoskr_core::generation::GenerationCounter<ratatoskr_core::generation::PaletteOptions>,
+    option_load_generation: rtsk::generation::GenerationCounter<rtsk::generation::PaletteOptions>,
     /// Whether the resolver is currently loading options.
     options_loading: bool,
 }
@@ -109,7 +109,7 @@ impl Palette {
             option_matches: Vec::new(),
             stage2_command_id: None,
             stage2_label: String::new(),
-            option_load_generation: ratatoskr_core::generation::GenerationCounter::new(),
+            option_load_generation: rtsk::generation::GenerationCounter::new(),
             options_loading: false,
         }
     }
@@ -170,17 +170,17 @@ impl Palette {
                 let param_label = schema
                     .param_at(0)
                     .map(|p| match p {
-                        ratatoskr_command_palette::ParamDef::ListPicker { label } => label,
-                        ratatoskr_command_palette::ParamDef::DateTime { label } => label,
-                        ratatoskr_command_palette::ParamDef::Enum { label, .. } => label,
-                        ratatoskr_command_palette::ParamDef::Text { label, .. } => label,
+                        cmdk::ParamDef::ListPicker { label } => label,
+                        cmdk::ParamDef::DateTime { label } => label,
+                        cmdk::ParamDef::Enum { label, .. } => label,
+                        cmdk::ParamDef::Text { label, .. } => label,
                     })
                     .unwrap_or("option");
 
                 // DateTime commands use preset options instead of a full picker
                 if matches!(
                     schema.param_at(0),
-                    Some(ratatoskr_command_palette::ParamDef::DateTime { .. })
+                    Some(cmdk::ParamDef::DateTime { .. })
                 ) {
                     let task = self.enter_snooze_stage2(id, param_label);
                     return (task, None);
@@ -238,7 +238,7 @@ impl Palette {
         self.options_loading = false;
 
         let items = snooze_preset_options();
-        self.option_matches = ratatoskr_command_palette::search_options(&items, "");
+        self.option_matches = cmdk::search_options(&items, "");
         self.option_items = items;
 
         iced::widget::operation::focus::<PaletteMessage>(
@@ -271,7 +271,7 @@ impl Palette {
 
     fn handle_options_loaded(
         &mut self,
-        generation: ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::PaletteOptions>,
+        generation: rtsk::generation::GenerationToken<rtsk::generation::PaletteOptions>,
         command_id: CommandId,
         result: Result<Vec<OptionItem>, String>,
     ) -> (Task<PaletteMessage>, Option<PaletteEvent>) {
@@ -289,7 +289,7 @@ impl Palette {
         match result {
             Ok(items) => {
                 self.option_matches =
-                    ratatoskr_command_palette::search_options(&items, &self.query);
+                    cmdk::search_options(&items, &self.query);
                 self.option_items = items;
                 self.selected_index = 0;
                 (Task::none(), None)
@@ -340,7 +340,7 @@ impl Component for Palette {
             PaletteMessage::QueryChanged(query, ctx) => {
                 if self.is_option_pick() {
                     // Stage 2: filter options with fuzzy search
-                    self.option_matches = ratatoskr_command_palette::search_options(
+                    self.option_matches = cmdk::search_options(
                         &self.option_items,
                         &query,
                     );

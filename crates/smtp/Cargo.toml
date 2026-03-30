@@ -1,5 +1,5 @@
 [package]
-name = "ratatoskr-smtp"
+name = "smtp"
 description = "SMTP client for Ratatoskr"
 version.workspace = true
 edition.workspace = true
@@ -11,7 +11,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-ratatoskr-provider-utils = { path = "../provider-utils" }
+common = { path = "../provider-utils" }
 
 serde.workspace = true
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }

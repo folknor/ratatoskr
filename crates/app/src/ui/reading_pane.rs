@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Alignment, Element, Length, Padding, Task};
 
-use ratatoskr_command_palette::{BindingTable, CommandContext, CommandId, CommandRegistry};
+use cmdk::{BindingTable, CommandContext, CommandId, CommandRegistry};
 
 use crate::component::Component;
 use crate::db::{AppThreadDetail, DateDisplay, ResolvedLabel, Thread, ThreadAttachment, ThreadMessage};

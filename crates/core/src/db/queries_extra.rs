@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 // Re-export from the db crate so existing callers (`sync/notifications.rs`,
 // `bundles_categories.rs`) can keep importing via this path.
-pub use ratatoskr_db::db::queries::load_recent_rule_categorized_threads;
+pub use db::db::queries::load_recent_rule_categorized_threads;
 
 mod accounts_crud;
 mod accounts_messages;

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ratatoskr_command_palette::{
+use cmdk::{
     CommandContext, CommandId, CommandInputResolver, OptionItem,
 };
 

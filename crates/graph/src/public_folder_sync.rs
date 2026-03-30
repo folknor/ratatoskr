@@ -3,7 +3,7 @@
 //! Public folders have no delta tokens — all sync is timestamp-based polling.
 //! Deletion detection is expensive (full ID scan) and throttled to once per hour.
 
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 use crate::ews::{EwsClient, EwsFolder, EwsHeaders, EwsItem};
 use crate::parse::parse_iso_datetime;
 

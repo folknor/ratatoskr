@@ -1,11 +1,11 @@
 use rusqlite::Connection;
 
-use ratatoskr_stores::body_store::BodyStoreState;
-use ratatoskr_db::db::DbState;
-use ratatoskr_stores::inline_image_store::{InlineImage, InlineImageStoreState};
-use ratatoskr_search::{SearchDocument, SearchState};
+use store::body_store::BodyStoreState;
+use db::db::DbState;
+use store::inline_image_store::{InlineImage, InlineImageStoreState};
+use search::{SearchDocument, SearchState};
 use ratatoskr_seen_addresses::MessageAddresses;
-use ratatoskr_sync::persistence;
+use sync::persistence;
 
 use super::convert::ConvertedMessage;
 use super::folder_mapper::map_folder_to_label;
@@ -300,10 +300,10 @@ impl MessageAddresses for ImapAddressData {
 /// Store bodies in the body store (compressed, separate DB).
 /// Fire-and-forget pattern — errors are logged but don't fail the sync.
 pub async fn store_bodies(body_store: &BodyStoreState, messages: &[ConvertedMessage]) {
-    let bodies: Vec<ratatoskr_stores::body_store::MessageBody> = messages
+    let bodies: Vec<store::body_store::MessageBody> = messages
         .iter()
         .filter(|m| m.imap_msg.body_html.is_some() || m.imap_msg.body_text.is_some())
-        .map(|m| ratatoskr_stores::body_store::MessageBody {
+        .map(|m| store::body_store::MessageBody {
             message_id: m.id.clone(),
             body_html: m.imap_msg.body_html.clone(),
             body_text: m.imap_msg.body_text.clone(),

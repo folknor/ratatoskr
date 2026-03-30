@@ -1,4 +1,4 @@
-use ratatoskr_core::db::queries_extra::calendars::{
+use rtsk::db::queries_extra::calendars::{
     create_calendar_event_sync, delete_calendar_event_sync,
     get_calendar_event_sync, load_calendar_events_for_view_sync,
     update_calendar_event_sync, LocalCalendarEventParams,

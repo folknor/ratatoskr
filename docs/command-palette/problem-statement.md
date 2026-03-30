@@ -8,7 +8,7 @@ This document describes the backend: the command registry, search, and dispatch 
 
 ## Current State
 
-The command palette backend is implemented in the `ratatoskr-command-palette` crate (`crates/command-palette/`). The old TypeScript frontend (which had duplicate registries, duplicate execution paths, substring-only search, no parameterized commands, and no context filtering) has been removed entirely. The Rust crate is the single source of truth.
+The command palette backend is implemented in the `cmdk` crate (`crates/command-palette/`). The old TypeScript frontend (which had duplicate registries, duplicate execution paths, substring-only search, no parameterized commands, and no context filtering) has been removed entirely. The Rust crate is the single source of truth.
 
 ### What Exists (Slices 1-4 Complete)
 
@@ -191,7 +191,7 @@ Each command declares its context requirements as a predicate over this struct. 
 
 ### 6. Separation of Registry and Execution
 
-The command registry, search, and metadata live in the `ratatoskr-command-palette` crate (framework-agnostic, no UI dependencies). The actual command *execution* is app-specific:
+The command registry, search, and metadata live in the `cmdk` crate (framework-agnostic, no UI dependencies). The actual command *execution* is app-specific:
 
 - The iced app (`crates/app/`) dispatches commands through its `Message` enum / `update()` cycle
 

@@ -505,7 +505,7 @@ pub fn get_shared_mailbox_navigation(
 ///
 /// Returns `None` if no rights are set (all fields are `None`), meaning
 /// the provider doesn't supply rights data for this label.
-fn rights_from_label(label: &ratatoskr_db::db::types::DbLabel) -> Option<MailboxRightsInfo> {
+fn rights_from_label(label: &db::db::types::DbLabel) -> Option<MailboxRightsInfo> {
     if label.right_read.is_none() {
         return None;
     }

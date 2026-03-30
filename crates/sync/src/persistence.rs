@@ -2,10 +2,10 @@ use std::collections::HashSet;
 
 use rusqlite::Transaction;
 
-use ratatoskr_db::db::lookups;
-use ratatoskr_stores::body_store::{BodyStoreState, MessageBody};
-use ratatoskr_stores::inline_image_store::{InlineImage, InlineImageStoreState};
-use ratatoskr_search::{SearchDocument, SearchState};
+use db::db::lookups;
+use store::body_store::{BodyStoreState, MessageBody};
+use store::inline_image_store::{InlineImage, InlineImageStoreState};
+use search::{SearchDocument, SearchState};
 
 pub struct ThreadAggregate {
     pub subject: Option<String>,

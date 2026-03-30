@@ -47,21 +47,21 @@ use iced::{Element, Length, Point, Size, Task, Theme};
 use pop_out::{PopOutMessage, PopOutWindow};
 use pop_out::compose::ComposeMode;
 use ui::palette::{Palette, PaletteMessage};
-use ratatoskr_command_palette::{
+use cmdk::{
     BindingTable, Chord, CommandId, CommandRegistry,
     FocusedRegion, UndoStack, current_platform,
 };
-use ratatoskr_core::db::queries_extra::navigation::{
+use rtsk::db::queries_extra::navigation::{
     NavigationState, get_navigation_state, get_shared_mailbox_navigation,
 };
-use ratatoskr_core::db::queries_extra::{
+use rtsk::db::queries_extra::{
     get_threads_scoped, get_threads_for_shared_mailbox, get_public_folder_items,
 };
-use ratatoskr_core::db::types::{AccountScope, DbThread};
-use ratatoskr_core::generation::{
+use rtsk::db::types::{AccountScope, DbThread};
+use rtsk::generation::{
     GenerationCounter, GenerationToken, Nav, ThreadDetail, Search, PopOut,
 };
-use ratatoskr_core::scope::ViewScope;
+use rtsk::scope::ViewScope;
 use ui::layout::{
     READING_PANE_MIN_WIDTH, RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH,
     THREAD_LIST_MIN_WIDTH,
@@ -215,21 +215,21 @@ pub enum Message {
     // Command system (Slice 6a)
     KeyEvent(KeyEventMessage),
     ExecuteCommand(CommandId),
-    ExecuteParameterized(CommandId, ratatoskr_command_palette::CommandArgs),
+    ExecuteParameterized(CommandId, cmdk::CommandArgs),
     NavigateTo(NavigationTarget),
     Escape,
     EmailAction(MailActionIntent),
     /// Action service completed — carries action kind, outcomes, rollback, thread IDs, and params.
     ActionCompleted {
         plan: crate::action_resolve::ActionExecutionPlan,
-        outcomes: Vec<ratatoskr_core::actions::ActionOutcome>,
+        outcomes: Vec<rtsk::actions::ActionOutcome>,
     },
     /// Send completed — carries compose window ID and outcome.
     /// Separate from ActionCompleted because send operates on a compose window,
     /// not a thread list selection.
     SendCompleted {
         window_id: iced::window::Id,
-        outcome: ratatoskr_core::actions::ActionOutcome,
+        outcome: rtsk::actions::ActionOutcome,
     },
     ComposeAction(ComposeAction),
     TaskAction(TaskAction),
@@ -294,14 +294,14 @@ pub enum Message {
     OpenMessageView(usize),
     ComposeDraftTick,
     /// A local draft was loaded from DB — open it in a compose window.
-    LocalDraftLoaded(Result<Option<ratatoskr_core::db::types::DbLocalDraft>, String>),
+    LocalDraftLoaded(Result<Option<rtsk::db::types::DbLocalDraft>, String>),
 
     // Thread detail via core
     ThreadDetailLoaded(GenerationToken<ThreadDetail>, Result<db::AppThreadDetail, String>),
     // Chat
     ChatTimeline(ui::chat_timeline::ChatTimelineMessage),
-    ChatTimelineLoaded(GenerationToken<ratatoskr_core::generation::Chat>, Result<Vec<ratatoskr_core::chat::ChatMessage>, String>),
-    ChatOlderLoaded(String, Result<Vec<ratatoskr_core::chat::ChatMessage>, String>),
+    ChatTimelineLoaded(GenerationToken<rtsk::generation::Chat>, Result<Vec<rtsk::chat::ChatMessage>, String>),
+    ChatOlderLoaded(String, Result<Vec<rtsk::chat::ChatMessage>, String>),
     ChatReadMarked,
 
     // Pinned search management
@@ -318,7 +318,7 @@ pub enum Message {
     /// Undo compensation completed.
     UndoCompleted {
         desc: String,
-        outcomes: Vec<ratatoskr_core::actions::ActionOutcome>,
+        outcomes: Vec<rtsk::actions::ActionOutcome>,
     },
 
     // Shared mailboxes & public folders
@@ -376,10 +376,10 @@ struct App {
 
     // Chat state
     chat_timeline: Option<ui::chat_timeline::ChatTimeline>,
-    chat_generation: GenerationCounter<ratatoskr_core::generation::Chat>,
+    chat_generation: GenerationCounter<rtsk::generation::Chat>,
 
     // Search state
-    search_state: Option<Arc<ratatoskr_core::search::SearchState>>,
+    search_state: Option<Arc<rtsk::search::SearchState>>,
     search_generation: GenerationCounter<Search>,
     search_query: UndoableText,
     search_debounce_deadline: Option<iced::time::Instant>,
@@ -415,14 +415,14 @@ struct App {
     jmap_push_receiver: JmapPushReceiver,
 
     /// Body store for loading decompressed message bodies via core.
-    body_store: Option<ratatoskr_core::body_store::BodyStoreState>,
+    body_store: Option<rtsk::body_store::BodyStoreState>,
     /// Inline image store for CID image resolution.
-    inline_image_store: Option<ratatoskr_stores::inline_image_store::InlineImageStoreState>,
+    inline_image_store: Option<store::inline_image_store::InlineImageStoreState>,
     /// Encryption key for decrypting provider credentials (OAuth tokens, passwords).
     encryption_key: Option<[u8; 32]>,
     /// Action service context — the authoritative write path for email mutations.
     /// `None` if stores failed to initialize at boot (degraded mode).
-    action_ctx: Option<ratatoskr_core::actions::ActionContext>,
+    action_ctx: Option<rtsk::actions::ActionContext>,
 }
 
 impl App {
@@ -467,7 +467,7 @@ impl App {
             }
         };
 
-        let inline_image_store = match ratatoskr_stores::inline_image_store::InlineImageStoreState::init(data_dir) {
+        let inline_image_store = match store::inline_image_store::InlineImageStoreState::init(data_dir) {
             Ok(store) => Some(store),
             Err(e) => {
                 log::error!("Failed to init inline image store: {e}");
@@ -475,7 +475,7 @@ impl App {
             }
         };
 
-        let encryption_key = match ratatoskr_core::load_encryption_key(data_dir) {
+        let encryption_key = match rtsk::load_encryption_key(data_dir) {
             Ok(key) => Some(key),
             Err(e) => {
                 log::error!("Failed to load encryption key: {e}");
@@ -484,15 +484,15 @@ impl App {
         };
 
         // Initialize search state once — shared between the app and action service.
-        let search_state: Option<Arc<ratatoskr_core::search::SearchState>> =
-            ratatoskr_core::search::SearchState::init(data_dir)
+        let search_state: Option<Arc<rtsk::search::SearchState>> =
+            rtsk::search::SearchState::init(data_dir)
                 .map(Arc::new)
                 .ok();
 
         let action_ctx = match (&body_store, &inline_image_store, &search_state, encryption_key) {
             (Some(bs), Some(iis), Some(ss), Some(key)) => {
-                Some(ratatoskr_core::actions::ActionContext {
-                    db: ratatoskr_core::db::DbState::from_arc(db.write_conn_arc()),
+                Some(rtsk::actions::ActionContext {
+                    db: rtsk::db::DbState::from_arc(db.write_conn_arc()),
                     body_store: bs.clone(),
                     inline_images: iis.clone(),
                     search: (**ss).clone(),
@@ -520,7 +520,7 @@ impl App {
             Ok(CalendarState::parse_view_name(&view_name))
         }).unwrap_or(CalendarView::Month);
 
-        let bimi_cache = Arc::new(ratatoskr_core::bimi::BimiLruCache::new());
+        let bimi_cache = Arc::new(rtsk::bimi::BimiLruCache::new());
 
         let mut app = Self {
             db,
@@ -632,7 +632,7 @@ impl App {
             let ctx = ctx.clone();
             boot_tasks.push(Task::perform(
                 async move {
-                    ratatoskr_core::actions::pending::recover_on_boot(&ctx).await;
+                    rtsk::actions::pending::recover_on_boot(&ctx).await;
                 },
                 |()| Message::Noop,
             ));
@@ -1256,8 +1256,8 @@ impl App {
                 if outcomes.is_empty() {
                     return Task::none();
                 }
-                let all_failed = outcomes.iter().all(ratatoskr_core::actions::ActionOutcome::is_failed);
-                let any_failed = outcomes.iter().any(ratatoskr_core::actions::ActionOutcome::is_failed);
+                let all_failed = outcomes.iter().all(rtsk::actions::ActionOutcome::is_failed);
+                let any_failed = outcomes.iter().any(rtsk::actions::ActionOutcome::is_failed);
                 if all_failed {
                     self.status_bar.show_confirmation(
                         format!("\u{26A0} Undo failed: {desc}"),
@@ -1457,7 +1457,7 @@ impl App {
                     .style(ui::theme::ContainerClass::PaletteBackdrop.style()),
             )
             .on_press(Message::Palette(PaletteMessage::Close(
-                ratatoskr_command_palette::CommandContext::default(),
+                cmdk::CommandContext::default(),
             )));
 
             let palette_widget = self.palette.view().map(Message::Palette);
@@ -1938,7 +1938,7 @@ impl App {
         Task::perform(
             async move {
                 let guard = conn.lock().map_err(|e| format!("lock: {e}"))?;
-                ratatoskr_core::auto_responses::any_auto_response_active(&guard)
+                rtsk::auto_responses::any_auto_response_active(&guard)
             },
             |result| Message::AutoReplyChecked(result.unwrap_or(false)),
         )
@@ -2077,7 +2077,7 @@ impl App {
                 // fired yet when we query attachment rows)
                 let plan = db
                     .with_write_conn(move |conn| {
-                        ratatoskr_core::account::delete::delete_account_orchestrate(
+                        rtsk::account::delete::delete_account_orchestrate(
                             conn,
                             &account_id,
                         )
@@ -2086,7 +2086,7 @@ impl App {
 
                 // Phase 2: best-effort cleanup of external stores
                 let mut report =
-                    ratatoskr_core::account::types::AccountDeletionCleanupReport::default();
+                    rtsk::account::types::AccountDeletionCleanupReport::default();
 
                 // Body store
                 if let Some(ref bs) = body_store {
@@ -2127,7 +2127,7 @@ impl App {
                     if plan.shared_cache_hashes.contains(hash) {
                         continue;
                     }
-                    match ratatoskr_core::attachment_cache::remove_cached_relative(
+                    match rtsk::attachment_cache::remove_cached_relative(
                         &app_data_dir,
                         path,
                     ) {
@@ -2170,13 +2170,13 @@ impl App {
     fn handle_save_account_changes(
         &mut self,
         account_id: String,
-        params: ratatoskr_core::db::queries_extra::UpdateAccountParams,
+        params: rtsk::db::queries_extra::UpdateAccountParams,
     ) -> Task<Message> {
         let db = Arc::clone(&self.db);
         Task::perform(
             async move {
                 db.with_write_conn(move |conn| {
-                    ratatoskr_core::db::queries_extra::update_account_sync(
+                    rtsk::db::queries_extra::update_account_sync(
                         conn, &account_id, params,
                     )
                 })
@@ -2315,8 +2315,8 @@ impl App {
                 return Task::perform(
                     async move {
                         let core_db =
-                            ratatoskr_core::db::DbState::from_arc(db.conn_arc());
-                        ratatoskr_core::db::queries_extra::db_get_local_draft(
+                            rtsk::db::DbState::from_arc(db.conn_arc());
+                        rtsk::db::queries_extra::db_get_local_draft(
                             &core_db,
                             draft_id,
                         )
@@ -2723,7 +2723,7 @@ async fn load_threads_scoped(
 
         // When viewing Drafts, also include local-only drafts
         if label_id.as_deref() == Some("DRAFT") {
-            let local = ratatoskr_core::db::queries_extra::get_local_draft_summaries(
+            let local = rtsk::db::queries_extra::get_local_draft_summaries(
                 conn, &scope, Some(1000), None,
             )?;
             let local_threads: Vec<Thread> = local
@@ -2820,7 +2820,7 @@ fn db_thread_to_app_thread(t: DbThread) -> Thread {
 }
 
 fn local_draft_to_app_thread(
-    d: ratatoskr_core::db::queries_extra::LocalDraftSummary,
+    d: rtsk::db::queries_extra::LocalDraftSummary,
 ) -> Thread {
     Thread {
         id: d.id,

@@ -1,5 +1,5 @@
 [package]
-name = "ratatoskr-graph"
+name = "graph"
 description = "Microsoft Graph provider for Ratatoskr"
 version.workspace = true
 edition.workspace = true
@@ -22,13 +22,13 @@ quick-xml.workspace = true
 rusqlite.workspace = true
 
 # Extracted workspace crates
-ratatoskr-db = { path = "../db" }
-ratatoskr-stores = { path = "../stores" }
-ratatoskr-search = { path = "../search" }
+db = { path = "../db" }
+store = { path = "../stores" }
+search = { path = "../search" }
 ratatoskr-seen-addresses = { path = "../seen-addresses" }
-ratatoskr-provider-utils = { path = "../provider-utils" }
+common = { path = "../provider-utils" }
 ratatoskr-label-colors = { path = "../label-colors" }
-ratatoskr-sync = { path = "../sync" }
+sync = { path = "../sync" }
 
 # Crate-specific deps
 log = "0.4"

@@ -6,7 +6,7 @@ use iced::widget::{
 };
 use iced::{mouse, Alignment, Color, Element, Length, Rectangle, Renderer, Theme};
 
-use ratatoskr_command_palette::{BindingTable, CommandContext, CommandId, CommandRegistry};
+use cmdk::{BindingTable, CommandContext, CommandId, CommandRegistry};
 
 use crate::db::{DateDisplay, ResolvedLabel, Thread, ThreadAttachment, ThreadMessage};
 use crate::font;

@@ -428,7 +428,7 @@ async fn execute_search(
         // (b) Create a new SearchState per search (expensive — avoid).
         // Option (a) is correct: SearchState wraps Arc<...> and is Clone.
 
-        let results = ratatoskr_core::search_pipeline::search(
+        let results = rtsk::search_pipeline::search(
             &query,
             &search_state,
             &conn_guard,
@@ -607,7 +607,7 @@ pub fn execute_smart_folder_query(
     search_state: &SearchState,
     params: &SmartFolderParams<'_>,
 ) -> Result<Vec<DbThread>, String> {
-    let results = ratatoskr_core::search_pipeline::search(
+    let results = rtsk::search_pipeline::search(
         params.query,
         search_state,
         conn,

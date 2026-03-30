@@ -5,7 +5,7 @@ use rusqlite::params;
 use rusqlite::OptionalExtension;
 
 use crate::db::DbState;
-use ratatoskr_stores::attachment_cache::hash_bytes;
+use store::attachment_cache::hash_bytes;
 
 // ---------------------------------------------------------------------------
 // Types

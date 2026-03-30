@@ -99,7 +99,7 @@ A user may have Full Access but not Send As (can read but not impersonate), or S
 ## Research
 
 **Date**: March 2026
-**Context**: Ground-up implementation research for the pure Rust iced app. Architecture: 19-crate Cargo workspace with `ratatoskr-core` as facade, provider crates (`gmail`, `graph`, `jmap`, `imap`), and the `app` crate for the iced UI.
+**Context**: Ground-up implementation research for the pure Rust iced app. Architecture: 19-crate Cargo workspace with `rtsk` as facade, provider crates (`gmail`, `graph`, `jmap`, `imap`), and the `app` crate for the iced UI.
 
 ---
 

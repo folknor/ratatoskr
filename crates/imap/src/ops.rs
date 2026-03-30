@@ -3,16 +3,16 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use rusqlite::Connection;
 
-use ratatoskr_provider_utils::error::ProviderError;
-use ratatoskr_provider_utils::typed_ids::{FolderId, TagId};
-use ratatoskr_provider_utils::folder_roles::{imap_name_to_special_use, imap_special_use_to_label_id};
-use ratatoskr_provider_utils::ops::ProviderOps;
-use ratatoskr_provider_utils::types::{
+use common::error::ProviderError;
+use common::typed_ids::{FolderId, TagId};
+use common::folder_roles::{imap_name_to_special_use, imap_special_use_to_label_id};
+use common::ops::ProviderOps;
+use common::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderParsedAttachment, ProviderParsedMessage, ProviderProfile, ProviderTestResult,
     SyncResult,
 };
-use ratatoskr_smtp as smtp;
+use smtp as smtp;
 
 use super::client as imap_client;
 use super::connection::connect;
@@ -632,7 +632,7 @@ impl ProviderOps for ImapOps {
 
         // Inject read-receipt header and send via SMTP
         log::info!("[IMAP] Sending email via SMTP for account {}", ctx.account_id);
-        let patched = ratatoskr_provider_utils::headers::inject_read_receipt_header_base64url(raw_base64url)?;
+        let patched = common::headers::inject_read_receipt_header_base64url(raw_base64url)?;
         let result = smtp::client::send_raw_email(&smtp_config, &patched).await?;
         if !result.success {
             log::error!("[IMAP] SMTP send failed for account {}: {}", ctx.account_id, result.message);
@@ -649,7 +649,7 @@ impl ProviderOps for ImapOps {
         // Copy sent message to Sent folder (non-fatal if it fails)
         let raw_b64url = patched;
         if let Err(e) = async {
-            let raw_bytes = ratatoskr_provider_utils::encoding::decode_base64url_nopad(&raw_b64url)?;
+            let raw_bytes = common::encoding::decode_base64url_nopad(&raw_b64url)?;
 
             with_session!(&imap_config, session => {
                 imap_client::append_message(&mut session, &sent_folder, Some("(\\Seen)"), &raw_bytes).await
@@ -678,7 +678,7 @@ impl ProviderOps for ImapOps {
             .await?
             .unwrap_or_else(|| "Drafts".to_string());
 
-        let raw_bytes = ratatoskr_provider_utils::encoding::decode_base64url_nopad(raw_base64url)?;
+        let raw_bytes = common::encoding::decode_base64url_nopad(raw_base64url)?;
 
         with_session!(&config, session => {
             imap_client::append_message(&mut session, &drafts_folder, Some("(\\Draft)"), &raw_bytes).await

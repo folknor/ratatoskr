@@ -8,7 +8,7 @@ use crate::ui::theme;
 use crate::ui::undoable_text_input::undoable_text_input;
 use crate::ui::widgets;
 
-use ratatoskr_rich_text_editor::{
+use rte::{
     rich_text_editor, Action as RteAction, EditAction, InlineStyle,
     BlockKind,
 };
@@ -2317,7 +2317,7 @@ fn import_header_toggle(has_header: bool) -> Element<'static, SettingsMessage> {
 }
 
 fn import_mapping_table<'a>(
-    preview: &'a ratatoskr_contact_import::ImportPreview,
+    preview: &'a import::ImportPreview,
     mappings: &'a [ImportContactField],
 ) -> Element<'a, SettingsMessage> {
     let mut items: Vec<Element<'a, SettingsMessage>> = Vec::new();
@@ -2404,7 +2404,7 @@ fn import_sample_row(row: &[String]) -> Element<'_, SettingsMessage> {
 }
 
 fn import_preview_stats<'a>(
-    preview: &'a ratatoskr_contact_import::ImportPreview,
+    preview: &'a import::ImportPreview,
     mappings: &'a [ImportContactField],
 ) -> Element<'a, SettingsMessage> {
     let has_email = mappings.iter().any(|m| *m == ImportContactField::Email);
@@ -2539,7 +2539,7 @@ fn import_step_vcf_preview<'a>(
     col.into()
 }
 
-fn import_vcf_contact_row(contact: &ratatoskr_contact_import::ImportedContact) -> Element<'_, SettingsMessage> {
+fn import_vcf_contact_row(contact: &import::ImportedContact) -> Element<'_, SettingsMessage> {
     let name = contact.effective_display_name().unwrap_or_else(|| "(no name)".to_string());
     let email = contact.normalized_email().unwrap_or_else(|| "(no email)".to_string());
 

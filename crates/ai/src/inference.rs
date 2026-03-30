@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
-use ratatoskr_core::db::DbState;
-use ratatoskr_core::provider::crypto::{AppCryptoState, decrypt_value, is_encrypted};
+use rtsk::db::DbState;
+use rtsk::provider::crypto::{AppCryptoState, decrypt_value, is_encrypted};
 
-use ratatoskr_core::provider::http::shared_http_client;
+use rtsk::provider::http::shared_http_client;
 
 use crate::types::{AiCompletionRequest, AiConfig, AiError, AiProvider};
 
@@ -129,7 +129,7 @@ pub async fn read_plain_setting(
     key: &str,
 ) -> Result<Option<String>, AiError> {
     let key_name = key.to_string();
-    db.with_conn(move |conn| ratatoskr_core::db::get_setting(conn, &key_name))
+    db.with_conn(move |conn| rtsk::db::get_setting(conn, &key_name))
         .await
         .map_err(|e| AiError::DbError(format!("read setting {key}: {e}")))
 }

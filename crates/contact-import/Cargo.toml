@@ -1,5 +1,5 @@
 [package]
-name = "ratatoskr-contact-import"
+name = "import"
 description = "Contact import from CSV and vCard files"
 version.workspace = true
 edition.workspace = true

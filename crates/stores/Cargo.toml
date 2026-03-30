@@ -1,5 +1,5 @@
 [package]
-name = "ratatoskr-stores"
+name = "store"
 description = "Content stores for Ratatoskr: email bodies, inline images, attachment cache"
 version.workspace = true
 edition.workspace = true
@@ -11,7 +11,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-ratatoskr-db = { path = "../db" }
+db = { path = "../db" }
 
 rusqlite.workspace = true
 tokio = { workspace = true, features = ["sync", "rt"] }

@@ -1,5 +1,5 @@
-use ratatoskr_command_palette::{CommandArgs, CommandContext, CommandId, ViewType};
-use ratatoskr_core::scope::ViewScope;
+use cmdk::{CommandArgs, CommandContext, CommandId, ViewType};
+use rtsk::scope::ViewScope;
 
 use crate::App;
 use crate::Message;
@@ -280,7 +280,7 @@ fn view_type_from_label(app: &App, label_id: &str) -> (ViewType, Option<String>)
                 .is_some_and(|f| {
                     matches!(
                         f.folder_kind,
-                        ratatoskr_core::db::queries_extra::navigation::FolderKind::SmartFolder
+                        rtsk::db::queries_extra::navigation::FolderKind::SmartFolder
                     )
                 });
             if is_smart {
@@ -298,7 +298,7 @@ fn view_type_from_label(app: &App, label_id: &str) -> (ViewType, Option<String>)
 /// the account's `provider` field so availability predicates work.
 fn active_account_info(
     app: &App,
-) -> (Option<String>, Option<ratatoskr_command_palette::ProviderKind>) {
+) -> (Option<String>, Option<cmdk::ProviderKind>) {
     // 1. Derive account from the current view scope.
     let scope_account: Option<&str> = match &app.sidebar.selected_scope {
         ViewScope::Account(id) => Some(id.as_str()),
@@ -334,12 +334,12 @@ fn active_account_info(
 /// Map a provider string from the DB to a `ProviderKind` enum.
 fn provider_str_to_kind(
     provider: &str,
-) -> Option<ratatoskr_command_palette::ProviderKind> {
+) -> Option<cmdk::ProviderKind> {
     match provider {
-        "gmail_api" => Some(ratatoskr_command_palette::ProviderKind::Gmail),
-        "jmap" => Some(ratatoskr_command_palette::ProviderKind::Jmap),
-        "graph" => Some(ratatoskr_command_palette::ProviderKind::Graph),
-        "imap" => Some(ratatoskr_command_palette::ProviderKind::Imap),
+        "gmail_api" => Some(cmdk::ProviderKind::Gmail),
+        "jmap" => Some(cmdk::ProviderKind::Jmap),
+        "graph" => Some(cmdk::ProviderKind::Graph),
+        "imap" => Some(cmdk::ProviderKind::Imap),
         _ => None,
     }
 }
@@ -512,7 +512,7 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
         CommandId::AppSyncFolder => Some(Message::SyncCurrentFolder),
         CommandId::AppOpenPalette => Some(Message::Palette(
             crate::ui::palette::PaletteMessage::Open(
-                ratatoskr_command_palette::CommandContext::default(),
+                cmdk::CommandContext::default(),
             ),
         )),
 
@@ -572,11 +572,11 @@ pub fn dispatch_parameterized(
             CommandId::EmailMoveToFolder,
             CommandArgs::MoveToFolder { folder_id },
         ) => Some(Message::EmailAction(MailActionIntent::MoveToFolder {
-            folder_id: ratatoskr_core::actions::FolderId::from(folder_id),
+            folder_id: rtsk::actions::FolderId::from(folder_id),
         })),
         (CommandId::EmailAddLabel, CommandArgs::AddLabel { label_id }) => {
             Some(Message::EmailAction(MailActionIntent::AddLabel {
-                label_id: ratatoskr_core::actions::TagId::from(label_id),
+                label_id: rtsk::actions::TagId::from(label_id),
             }))
         }
         (
@@ -584,7 +584,7 @@ pub fn dispatch_parameterized(
             CommandArgs::RemoveLabel { label_id },
         ) => {
             Some(Message::EmailAction(MailActionIntent::RemoveLabel {
-                label_id: ratatoskr_core::actions::TagId::from(label_id),
+                label_id: rtsk::actions::TagId::from(label_id),
             }))
         }
         (CommandId::EmailSnooze, CommandArgs::Snooze { until }) => {
@@ -613,7 +613,7 @@ pub fn dispatch_parameterized(
 
 // ── iced key conversion ─────────────────────────────────
 
-use ratatoskr_command_palette::{Chord, Key, Modifiers, NamedKey};
+use cmdk::{Chord, Key, Modifiers, NamedKey};
 
 /// Convert iced keyboard types to command-palette Chord.
 ///

@@ -1,5 +1,5 @@
 [package]
-name = "ratatoskr-calendar"
+name = "cal"
 description = "Calendar sync (Google Calendar + CalDAV) for Ratatoskr"
 version.workspace = true
 edition.workspace = true
@@ -11,10 +11,10 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-ratatoskr-core = { path = "../core" }
-ratatoskr-gmail = { path = "../gmail" }
-ratatoskr-graph = { path = "../graph" }
-ratatoskr-jmap = { path = "../jmap" }
+rtsk = { path = "../core" }
+gmail = { path = "../gmail" }
+graph = { path = "../graph" }
+jmap = { path = "../jmap" }
 
 serde.workspace = true
 serde_json.workspace = true

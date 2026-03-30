@@ -15,7 +15,7 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, mpsc, watch};
 
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 
 use super::client::JmapClient;
 

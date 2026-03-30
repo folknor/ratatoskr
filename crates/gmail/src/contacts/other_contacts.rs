@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use ratatoskr_db::db::DbState;
-use ratatoskr_sync::state as sync_state;
+use db::db::DbState;
+use sync::state as sync_state;
 
 use super::super::client::GmailClient;
 use super::{

@@ -1077,7 +1077,7 @@ Renders `body_text` from the body store. If only HTML is available, strip tags (
 
 ### Simple HTML Mode
 
-Renders the sanitized HTML — this is the same pipeline the reading pane uses for message bodies. The HTML sanitizer (`ratatoskr-provider-utils` crate) strips scripts, remote content, heavy styling, and returns safe HTML. The iced rendering converts sanitized HTML to widget trees.
+Renders the sanitized HTML — this is the same pipeline the reading pane uses for message bodies. The HTML sanitizer (`provider` crate) strips scripts, remote content, heavy styling, and returns safe HTML. The iced rendering converts sanitized HTML to widget trees.
 
 **Implementation note:** The reading pane currently shows snippets, not rendered HTML. Full HTML rendering depends on the HTML-to-iced-widget pipeline (cedilla/frostmark pattern from the ecosystem survey). Until that pipeline exists, Simple HTML falls back to plain text with basic formatting hints. This is acceptable for the initial implementation — the rendering pipeline is a cross-cutting concern that benefits both the reading pane and pop-out views.
 

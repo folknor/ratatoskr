@@ -17,7 +17,7 @@ pub async fn verify_imap_credentials(
     auth_method: &str,
     accept_invalid_certs: bool,
 ) -> Result<(), String> {
-    let config = ratatoskr_imap::types::ImapConfig {
+    let config = imap::types::ImapConfig {
         host: host.to_string(),
         port,
         security: security.to_string(),
@@ -27,7 +27,7 @@ pub async fn verify_imap_credentials(
         accept_invalid_certs,
     };
 
-    let session = ratatoskr_imap::connection::connect(&config).await?;
+    let session = imap::connection::connect(&config).await?;
     drop(session);
     Ok(())
 }

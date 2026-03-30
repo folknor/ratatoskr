@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::connection::{ImapSession, discover_myrights, discover_namespaces};
 use super::client::list_shared_folders;
 use super::types::{ImapFolder, NamespaceType};
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 
 // ── Types ────────────────────────────────────────────────────
 

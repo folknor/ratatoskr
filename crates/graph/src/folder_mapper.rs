@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use ratatoskr_provider_utils::folder_roles::graph_well_known_aliases;
-use ratatoskr_provider_utils::label_flags::{assemble_labels, prefixed_labels};
+use common::folder_roles::graph_well_known_aliases;
+use common::label_flags::{assemble_labels, prefixed_labels};
 
 use super::types::GraphMailFolder;
 

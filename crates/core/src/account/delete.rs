@@ -207,7 +207,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .expect("enable FK");
-        ratatoskr_db::db::migrations::run_all(&conn).expect("migrations");
+        db::db::migrations::run_all(&conn).expect("migrations");
         conn
     }
 

@@ -3,7 +3,7 @@ use iced::Task;
 use crate::command_dispatch::{self, KeyEventMessage};
 use crate::ui::thread_list::{ThreadListMessage, TypeaheadDirection};
 use crate::{App, Message, PendingChord};
-use ratatoskr_command_palette::{Chord, CommandId, ResolveResult};
+use cmdk::{Chord, CommandId, ResolveResult};
 
 impl App {
     pub(crate) fn handle_key_event(&mut self, msg: KeyEventMessage) -> Task<Message> {
@@ -122,7 +122,7 @@ impl App {
     /// When the palette is open, intercept Escape/ArrowUp/ArrowDown/Enter.
     fn handle_palette_key(&mut self, key: &iced::keyboard::Key) -> Task<Message> {
         use crate::ui::palette::PaletteMessage;
-        let default_ctx = ratatoskr_command_palette::CommandContext::default();
+        let default_ctx = cmdk::CommandContext::default();
         match key {
             iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
                 self.update(Message::Palette(PaletteMessage::Close(default_ctx)))

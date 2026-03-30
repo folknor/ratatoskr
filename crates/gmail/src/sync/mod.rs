@@ -5,14 +5,14 @@ mod storage;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use ratatoskr_stores::body_store::BodyStoreState;
-use ratatoskr_db::db::DbState;
-use ratatoskr_stores::inline_image_store::InlineImageStoreState;
-use ratatoskr_db::progress::ProgressReporter;
-use ratatoskr_search::SearchState;
+use store::body_store::BodyStoreState;
+use db::db::DbState;
+use store::inline_image_store::InlineImageStoreState;
+use db::progress::ProgressReporter;
+use search::SearchState;
 
 use super::client::GmailClient;
-use ratatoskr_sync::{progress as sync_progress, state as sync_state};
+use sync::{progress as sync_progress, state as sync_state};
 
 pub(crate) use delta::GmailSyncResult;
 

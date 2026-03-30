@@ -1,5 +1,5 @@
 use crate::db::DbState;
-use ratatoskr_provider_utils::ops::ProviderOps;
+use common::ops::ProviderOps;
 
 /// Create a provider ops instance for the given account.
 ///
@@ -29,33 +29,33 @@ pub async fn create_provider(
 
     match provider.as_str() {
         "gmail_api" => {
-            let client = ratatoskr_gmail::client::GmailClient::from_account(
+            let client = gmail::client::GmailClient::from_account(
                 db,
                 account_id,
                 encryption_key,
             )
             .await?;
-            Ok(Box::new(ratatoskr_gmail::ops::GmailOps::new(client)))
+            Ok(Box::new(gmail::ops::GmailOps::new(client)))
         }
         "graph" => {
-            let client = ratatoskr_graph::client::GraphClient::from_account(
+            let client = graph::client::GraphClient::from_account(
                 db,
                 account_id,
                 encryption_key,
             )
             .await?;
-            Ok(Box::new(ratatoskr_graph::ops::GraphOps::new(client)))
+            Ok(Box::new(graph::ops::GraphOps::new(client)))
         }
         "jmap" => {
-            let client = ratatoskr_jmap::client::JmapClient::from_account(
+            let client = jmap::client::JmapClient::from_account(
                 db,
                 account_id,
                 &encryption_key,
             )
             .await?;
-            Ok(Box::new(ratatoskr_jmap::ops::JmapOps::new(client)))
+            Ok(Box::new(jmap::ops::JmapOps::new(client)))
         }
-        "imap" => Ok(Box::new(ratatoskr_imap::ops::ImapOps::new(
+        "imap" => Ok(Box::new(imap::ops::ImapOps::new(
             encryption_key,
         ))),
         other => Err(format!("Unknown provider: {other}")),

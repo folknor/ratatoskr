@@ -15,11 +15,11 @@ use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets;
 
-use ratatoskr_core::db::queries_extra::{
+use rtsk::db::queries_extra::{
     CreateAccountParams, ReauthAccountParams, account_exists_by_email_sync,
     create_account_sync, get_account_auth_info_sync, update_account_tokens_sync,
 };
-use ratatoskr_core::discovery::types::{
+use rtsk::discovery::types::{
     AuthMethod, DiscoveredConfig, DiscoverySource, Protocol, ProtocolOption, Security,
 };
 
@@ -213,7 +213,7 @@ pub enum AddAccountMessage {
     SubmitEmail,
 
     // Step 2: Discovery result
-    DiscoveryComplete(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::AddAccount>, Result<DiscoveredConfig, String>),
+    DiscoveryComplete(rtsk::generation::GenerationToken<rtsk::generation::AddAccount>, Result<DiscoveredConfig, String>),
     SelectProtocol(usize),
     ConfirmProtocol,
 
@@ -231,7 +231,7 @@ pub enum AddAccountMessage {
 
     // Step 3: Authentication
     // OAuth
-    OAuthComplete(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::AddAccount>, Result<OAuthSuccess, String>),
+    OAuthComplete(rtsk::generation::GenerationToken<rtsk::generation::AddAccount>, Result<OAuthSuccess, String>),
     CancelOAuth,
     RetryOAuth,
 
@@ -249,7 +249,7 @@ pub enum AddAccountMessage {
     AuthSmtpPortChanged(String),
     AuthSmtpSecurityChanged(SecurityOption),
     SubmitCredentials,
-    ValidationComplete(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::AddAccount>, Result<(), String>),
+    ValidationComplete(rtsk::generation::GenerationToken<rtsk::generation::AddAccount>, Result<(), String>),
 
     // Step 4: Identity
     AccountNameChanged(String),
@@ -257,10 +257,10 @@ pub enum AddAccountMessage {
     SubmitIdentity,
 
     // Step 5: Creation
-    AccountCreated(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::AddAccount>, Result<String, String>),
+    AccountCreated(rtsk::generation::GenerationToken<rtsk::generation::AddAccount>, Result<String, String>),
 
     // Re-auth: token/credential update
-    ReauthTokensSaved(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::AddAccount>, Result<(), String>),
+    ReauthTokensSaved(rtsk::generation::GenerationToken<rtsk::generation::AddAccount>, Result<(), String>),
 
     // General
     Cancel,
@@ -286,7 +286,7 @@ pub struct AddAccountWizard {
     pub is_first_launch: bool,
     pub email: String,
     pub error: Option<String>,
-    pub generation: ratatoskr_core::generation::GenerationCounter<ratatoskr_core::generation::AddAccount>,
+    pub generation: rtsk::generation::GenerationCounter<rtsk::generation::AddAccount>,
     // Discovery result
     pub discovery: Option<DiscoveredConfig>,
     pub selected_option: Option<usize>,
@@ -394,7 +394,7 @@ impl AddAccountWizard {
             is_first_launch,
             email: String::new(),
             error: None,
-            generation: ratatoskr_core::generation::GenerationCounter::new(),
+            generation: rtsk::generation::GenerationCounter::new(),
             discovery: None,
             selected_option: None,
             manual_config: ManualConfig::default(),
@@ -615,7 +615,7 @@ impl AddAccountWizard {
                 }
 
                 // Run real discovery with 15s timeout
-                let result = ratatoskr_core::discovery::discover(&email).await;
+                let result = rtsk::discovery::discover(&email).await;
                 (generation, result)
             },
             |(g, result)| AddAccountMessage::DiscoveryComplete(g, result),
@@ -686,7 +686,7 @@ impl AddAccountWizard {
                 self.error = None;
                 let generation = self.generation.next();
 
-                let request = ratatoskr_core::oauth::OAuthProviderAuthorizationRequest {
+                let request = rtsk::oauth::OAuthProviderAuthorizationRequest {
                     provider_id: provider_id.clone(),
                     auth_url: auth_url.clone(),
                     token_url: token_url.clone(),
@@ -703,11 +703,11 @@ impl AddAccountWizard {
                 let task = Task::perform(
                     async move {
                         let provider =
-                            ratatoskr_core::oauth::GenericOAuthProvider::from_request(request);
+                            rtsk::oauth::GenericOAuthProvider::from_request(request);
                         let open_url = |url: &str| -> Result<(), String> {
                             open_browser_url(url)
                         };
-                        let result = ratatoskr_core::oauth::authorize_with_provider(
+                        let result = rtsk::oauth::authorize_with_provider(
                             &provider, &open_url,
                         )
                         .await;
@@ -768,7 +768,7 @@ impl AddAccountWizard {
 
         // Look up the full OAuth config from the discovery registry.
         let oauth_config =
-            ratatoskr_core::discovery::registry::oauth_config_for_provider(&provider_id);
+            rtsk::discovery::registry::oauth_config_for_provider(&provider_id);
 
         // For built-in providers, we can resolve endpoints synchronously.
         // For generic OIDC providers (oidc:https://...), we need to
@@ -814,7 +814,7 @@ impl AddAccountWizard {
                         r
                     } else if let Some(issuer) = oidc_issuer {
                         let endpoints =
-                            ratatoskr_core::discovery::oidc::probe_issuer(&issuer)
+                            rtsk::discovery::oidc::probe_issuer(&issuer)
                                 .await
                                 .ok_or_else(|| {
                                     format!(
@@ -833,7 +833,7 @@ impl AddAccountWizard {
                     };
 
                 let request =
-                    ratatoskr_core::oauth::OAuthProviderAuthorizationRequest {
+                    rtsk::oauth::OAuthProviderAuthorizationRequest {
                         provider_id: provider_id_clone.clone(),
                         auth_url,
                         token_url,
@@ -845,13 +845,13 @@ impl AddAccountWizard {
                     };
 
                 let provider =
-                    ratatoskr_core::oauth::GenericOAuthProvider::from_request(
+                    rtsk::oauth::GenericOAuthProvider::from_request(
                         request,
                     );
                 let open_url = |url: &str| -> Result<(), String> {
                     open_browser_url(url)
                 };
-                let result = ratatoskr_core::oauth::authorize_with_provider(
+                let result = rtsk::oauth::authorize_with_provider(
                     &provider, &open_url,
                 )
                 .await;
@@ -1384,7 +1384,7 @@ fn source_display(source: &DiscoverySource) -> &str {
 fn resolve_client_id(provider_id: &str) -> String {
     match provider_id {
         "microsoft" | "microsoft_graph" => {
-            ratatoskr_core::oauth::MICROSOFT_DEFAULT_CLIENT_ID.to_string()
+            rtsk::oauth::MICROSOFT_DEFAULT_CLIENT_ID.to_string()
         }
         // For Google, the client_id is typically embedded in the app.
         // If not available, the OAuth flow will use the discovery registry value.
@@ -1432,7 +1432,7 @@ async fn validate_imap_connection(
 
     let security_str = security.to_db_string().to_string();
 
-    ratatoskr_core::account::verify_imap::verify_imap_credentials(
+    rtsk::account::verify_imap::verify_imap_credentials(
         host,
         port,
         &security_str,

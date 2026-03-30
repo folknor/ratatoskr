@@ -3,7 +3,7 @@ mod xml;
 
 use rusqlite::OptionalExtension;
 
-use ratatoskr_core::db::DbState;
+use rtsk::db::DbState;
 
 use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
 use super::{CALDAV_NS, shared_http_client};
@@ -214,8 +214,8 @@ pub async fn load_caldav_account_config(
             .3
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| "CalDAV credentials not configured".to_string())?;
-        let password = if ratatoskr_core::provider::crypto::is_encrypted(&password_raw) {
-            ratatoskr_core::provider::crypto::decrypt_value(&key, &password_raw).unwrap_or(password_raw)
+        let password = if rtsk::provider::crypto::is_encrypted(&password_raw) {
+            rtsk::provider::crypto::decrypt_value(&key, &password_raw).unwrap_or(password_raw)
         } else {
             password_raw
         };

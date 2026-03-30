@@ -1,10 +1,10 @@
-use ratatoskr_stores::body_store::BodyStoreState;
-use ratatoskr_stores::inline_image_store::{InlineImage, InlineImageStoreState};
-use ratatoskr_search::{SearchDocument, SearchState};
+use store::body_store::BodyStoreState;
+use store::inline_image_store::{InlineImage, InlineImageStoreState};
+use search::{SearchDocument, SearchState};
 
 use super::super::parse::ParsedGraphMessage;
 use super::SyncCtx;
-use ratatoskr_sync::{persistence as sync_persistence, progress as sync_progress};
+use sync::{persistence as sync_persistence, progress as sync_progress};
 
 // ---------------------------------------------------------------------------
 // Body store helper

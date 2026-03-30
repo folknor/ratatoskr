@@ -6,8 +6,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use ratatoskr_db::db::types::{AccountScope, DbThread};
-use ratatoskr_search::{SearchParams, SearchResult as TantivyResult, SearchState};
+use db::db::types::{AccountScope, DbThread};
+use search::{SearchParams, SearchResult as TantivyResult, SearchState};
 use ratatoskr_smart_folder::{ParsedQuery, parse_query, query_threads};
 use rusqlite::Connection;
 
@@ -195,10 +195,10 @@ fn db_thread_to_unified(t: DbThread) -> UnifiedSearchResult {
 }
 
 /// Group message-level Tantivy results by thread_id, taking the highest
-/// score per thread. Delegates to `ratatoskr_search::group_by_thread`
+/// score per thread. Delegates to `search::group_by_thread`
 /// for the grouping logic, then converts to `UnifiedSearchResult`.
 fn group_by_thread_unified(results: Vec<TantivyResult>) -> Vec<UnifiedSearchResult> {
-    let grouped = ratatoskr_search::group_by_thread(results);
+    let grouped = search::group_by_thread(results);
     grouped.into_iter().map(|r| tantivy_result_to_unified(&r)).collect()
 }
 

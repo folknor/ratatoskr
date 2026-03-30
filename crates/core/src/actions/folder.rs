@@ -1,11 +1,11 @@
-use ratatoskr_provider_utils::typed_ids::FolderId;
+use common::typed_ids::FolderId;
 
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
 use crate::progress::NoopProgressReporter;
-use ratatoskr_provider_utils::types::{ProviderCtx, ProviderFolderMutation};
+use common::types::{ProviderCtx, ProviderFolderMutation};
 
 /// Build a `ProviderCtx` from an `ActionContext` and account ID.
 ///

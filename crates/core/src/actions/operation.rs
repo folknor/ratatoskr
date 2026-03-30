@@ -4,7 +4,7 @@
 //! no undo provenance, no completion behavior. The app layer resolves
 //! user intent into a `MailOperation` before dispatching to core.
 
-use ratatoskr_provider_utils::typed_ids::{FolderId, TagId};
+use common::typed_ids::{FolderId, TagId};
 
 /// A fully resolved, unambiguous mail operation.
 ///

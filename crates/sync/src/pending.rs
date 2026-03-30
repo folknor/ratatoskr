@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 use rusqlite::Connection;
 
 /// Synchronous version: check which thread IDs have pending local operations.

@@ -1,6 +1,6 @@
 use rusqlite::params;
 
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 
 use super::ingest::{get_self_emails, ingest_observations};
 use super::parse::extract_observations;

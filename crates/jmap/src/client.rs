@@ -3,10 +3,10 @@ use std::sync::{Arc, RwLock as StdRwLock};
 use jmap_client::client::{Client, Credentials};
 use tokio::sync::RwLock;
 
-use ratatoskr_db::db::DbState;
-use ratatoskr_provider_utils::crypto::{decrypt_if_needed, encrypt_value};
-use ratatoskr_provider_utils::http::shared_http_client;
-use ratatoskr_provider_utils::token::{get_refresh_lock, oauth_token_endpoint, refresh_oauth_token};
+use db::db::DbState;
+use common::crypto::{decrypt_if_needed, encrypt_value};
+use common::http::shared_http_client;
+use common::token::{get_refresh_lock, oauth_token_endpoint, refresh_oauth_token};
 
 /// Cached mailbox list entry: (mailbox_id, role, name).
 pub type MailboxListEntry = (String, Option<String>, String);
@@ -167,7 +167,7 @@ impl JmapClient {
         let aid = self.account_id.clone();
         let new_expires = refreshed.expires_at;
         db.with_conn(move |conn| {
-            ratatoskr_db::db::queries::persist_refreshed_token(
+            db::db::queries::persist_refreshed_token(
                 conn,
                 &aid,
                 &encrypted_access,
@@ -355,7 +355,7 @@ fn read_jmap_credentials(
 // ---------------------------------------------------------------------------
 
 /// State holding all JMAP clients and the encryption key.
-pub type JmapState = ratatoskr_provider_utils::state::ProviderState<JmapClient>;
+pub type JmapState = common::state::ProviderState<JmapClient>;
 
 /// Create a new `JmapState` with the given encryption key.
 pub fn new_jmap_state(encryption_key: [u8; 32]) -> JmapState {

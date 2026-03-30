@@ -2,7 +2,7 @@
 
 Implementation specification for wiring the command palette into the iced app's Elm architecture. This covers everything from the roadmap's Slice 6: palette overlay UI, keyboard dispatch, command-backed UI surfaces, and the supporting infrastructure that makes them work.
 
-**Preconditions:** Slices 1-3 are complete. The `ratatoskr-command-palette` crate provides `CommandRegistry`, `BindingTable`, `CommandContext`, `CommandInputResolver` trait, `InputSchema`/`ParamDef`/`InputMode`, and `search_options()`. All 55 commands are registered with fuzzy search, availability predicates, toggle labels, input schemas, and keybinding resolution. This spec is primarily `crates/app/` work, with one required addition to the command palette crate: `CommandArgs` (placed there for type-level guarantees and compile-time exhaustive matching in the dispatch layer). It also adds `AppOpenPalette` to the `CommandId` enum.
+**Preconditions:** Slices 1-3 are complete. The `cmdk` crate provides `CommandRegistry`, `BindingTable`, `CommandContext`, `CommandInputResolver` trait, `InputSchema`/`ParamDef`/`InputMode`, and `search_options()`. All 55 commands are registered with fuzzy search, availability predicates, toggle labels, input schemas, and keybinding resolution. This spec is primarily `crates/app/` work, with one required addition to the command palette crate: `CommandArgs` (placed there for type-level guarantees and compile-time exhaustive matching in the dispatch layer). It also adds `AppOpenPalette` to the `CommandId` enum.
 
 **App architecture prerequisites:** Several parts of this spec reference app-state accessors and component boundaries (`reading_pane.focused_message_id()`, `thread_list.selected_thread`, per-panel `Component` implementations) that may not exist in their final form yet. Where this spec references these, it is defining the target interface the app should expose — not assuming it already exists. Some of this work is app-state normalization that must happen alongside or slightly ahead of command integration.
 
@@ -62,7 +62,7 @@ pub enum CommandArgs {
 A function that snapshots the current `App` model state into a `CommandContext`. Called on every registry query (palette keystroke, keyboard event, UI surface render). Must be cheap — it reads fields, does not allocate except for `selected_thread_ids`.
 
 ```rust
-use ratatoskr_command_palette::{
+use cmdk::{
     CommandContext, FocusedRegion, ProviderKind, ViewType,
 };
 
@@ -151,7 +151,7 @@ The `ViewType` values:
 The central function that maps a command execution (either direct or parameterized) to an iced `Message` and feeds it into `update()`. This is the single point where "what to do" (from the registry) connects to "how to do it" (the app's message handling).
 
 ```rust
-use ratatoskr_command_palette::{CommandArgs, CommandId};
+use cmdk::{CommandArgs, CommandId};
 
 /// Map a direct (non-parameterized) command to an iced Message.
 ///
@@ -387,7 +387,7 @@ Message::ExecuteParameterized(id, args) => {
 A concrete implementation of the `CommandInputResolver` trait that queries `DbState` for folders, labels, and accounts. This provides the option lists for parameterized commands' stage 2.
 
 ```rust
-use ratatoskr_command_palette::{
+use cmdk::{
     CommandContext, CommandId, CommandInputResolver, OptionItem,
 };
 use std::sync::Arc;
@@ -1292,7 +1292,7 @@ Six independently shippable slices with a clear dependency graph. Each slice pro
 - `crates/command-palette/src/lib.rs` (re-export `CommandArgs`)
 - `crates/command-palette/src/id.rs` (add `AppOpenPalette`)
 - `crates/command-palette/src/registry.rs` (register `AppOpenPalette`)
-- `crates/app/Cargo.toml` (add `ratatoskr-command-palette` dependency)
+- `crates/app/Cargo.toml` (add `cmdk` dependency)
 - `crates/app/src/command_dispatch.rs` (new)
 - `crates/app/src/main.rs` (new fields, new `Message` variants, subscription, key handler)
 
@@ -1469,7 +1469,7 @@ Modified files:
 - `crates/command-palette/src/lib.rs` — re-export `CommandArgs`
 - `crates/command-palette/src/id.rs` — add `AppOpenPalette`
 - `crates/command-palette/src/registry.rs` — register `AppOpenPalette`
-- `crates/app/Cargo.toml` — add `ratatoskr-command-palette` dependency
+- `crates/app/Cargo.toml` — add `cmdk` dependency
 - `crates/app/src/main.rs` — `App` fields, `Message` variants, `boot()`, `subscription()`, `update()`, `view()`
 - `crates/app/src/ui/mod.rs` — add `pub mod palette;`
 - `crates/app/src/ui/layout.rs` — palette sizing constants

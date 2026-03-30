@@ -1,12 +1,12 @@
 use mail_parser::{MessageParser, MimeHeaders};
 use xxhash_rust::xxh3::xxh3_64;
 
-use ratatoskr_provider_utils::attachment_dedup::{
+use common::attachment_dedup::{
     dedup_by_key, prefer_missing_clone, prefer_missing_take, prefer_non_placeholder_filename,
 };
-use ratatoskr_provider_utils::email_parsing::format_address_list as format_addresses;
-use ratatoskr_provider_utils::folder_roles::imap_name_to_special_use;
-use ratatoskr_provider_utils::text::snippet_from_text_body;
+use common::email_parsing::format_address_list as format_addresses;
+use common::folder_roles::imap_name_to_special_use;
+use common::text::snippet_from_text_body;
 
 use super::types::*;
 
@@ -102,7 +102,7 @@ pub fn parse_message(
             && let Some(part) = message.parts.get(part_idx as usize)
             && let Some(ct) = part.content_type()
             && let Some(subtype) = ct.subtype()
-            && ratatoskr_provider_utils::email_parsing::is_amp_content_type(
+            && common::email_parsing::is_amp_content_type(
                 &format!("{}/{subtype}", ct.ctype()),
             )
         {
@@ -186,7 +186,7 @@ pub fn parse_message(
                 // Carry raw bytes for small inline images so we can store them
                 // in the inline image SQLite cache during sync.
                 let inline_data = if is_inline
-                    && (size as usize) <= ratatoskr_stores::inline_image_store::MAX_INLINE_SIZE
+                    && (size as usize) <= store::inline_image_store::MAX_INLINE_SIZE
                     && mime_type.starts_with("image/")
                 {
                     Some(contents.to_vec())

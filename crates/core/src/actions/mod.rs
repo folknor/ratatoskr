@@ -33,7 +33,7 @@ pub use archive::archive;
 pub use batch::batch_execute;
 pub use context::ActionContext;
 pub use folder::{create_folder, delete_folder, rename_folder};
-pub use ratatoskr_provider_utils::types::ProviderFolderMutation;
+pub use common::types::ProviderFolderMutation;
 pub use label::{add_label, remove_label};
 pub use mark_read::mark_read;
 // Re-export send types so callers import from actions, not crate::send directly.
@@ -44,7 +44,7 @@ pub use mute::mute;
 pub use log::MutationLog;
 pub use operation::MailOperation;
 pub use outcome::{ActionError, ActionOutcome, RemoteFailureKind};
-pub use ratatoskr_provider_utils::typed_ids::{FolderId, TagId};
+pub use common::typed_ids::{FolderId, TagId};
 pub use permanent_delete::permanent_delete;
 pub use pin::pin;
 // create_provider is pub(crate) — only accessible within core, not to downstream crates.

@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use super::client::GraphClient;
 use ratatoskr_label_colors::category_colors;
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

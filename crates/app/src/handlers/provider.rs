@@ -119,8 +119,8 @@ impl App {
         let aid = account_id.clone();
         Task::perform(
             async move {
-                let core_db = ratatoskr_core::db::DbState::from_arc(db.write_conn_arc());
-                ratatoskr_core::sync_dispatch::sync_delta_for_account(
+                let core_db = rtsk::db::DbState::from_arc(db.write_conn_arc());
+                rtsk::sync_dispatch::sync_delta_for_account(
                     &core_db,
                     &account_id,
                     encryption_key,
@@ -158,7 +158,7 @@ impl App {
         };
         Task::perform(
             async move {
-                ratatoskr_core::actions::pending::process_pending_ops(&ctx).await;
+                rtsk::actions::pending::process_pending_ops(&ctx).await;
             },
             |()| Message::Noop,
         )
@@ -186,11 +186,11 @@ impl App {
         let db = Arc::clone(&self.db);
         Task::perform(
             async move {
-                let core_db = ratatoskr_core::db::DbState::from_arc(db.write_conn_arc());
+                let core_db = rtsk::db::DbState::from_arc(db.write_conn_arc());
                 for account_id in &account_ids {
                     match tokio::time::timeout(
                         std::time::Duration::from_secs(60),
-                        ratatoskr_core::contacts::gal::refresh_gal_for_account(
+                        rtsk::contacts::gal::refresh_gal_for_account(
                             &core_db,
                             account_id,
                             encryption_key,
@@ -239,12 +239,12 @@ impl App {
         let db = Arc::clone(&self.db);
         Task::perform(
             async move {
-                let core_db = ratatoskr_core::db::DbState::from_arc(db.write_conn_arc());
+                let core_db = rtsk::db::DbState::from_arc(db.write_conn_arc());
                 let mut any_synced = false;
                 for account_id in &account_ids {
                     match tokio::time::timeout(
                         std::time::Duration::from_secs(60),
-                        ratatoskr_calendar::sync::calendar_sync_account(
+                        cal::sync::calendar_sync_account(
                             account_id,
                             &core_db,
                             encryption_key,
@@ -306,8 +306,8 @@ impl App {
 
             tasks.push(Task::perform(
                 async move {
-                    let core_db = ratatoskr_core::db::DbState::from_arc(db.write_conn_arc());
-                    ratatoskr_core::jmap_push::start_jmap_push_for_account(
+                    let core_db = rtsk::db::DbState::from_arc(db.write_conn_arc());
+                    rtsk::jmap_push::start_jmap_push_for_account(
                         &core_db,
                         &account_id,
                         &email,

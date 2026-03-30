@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use super::SyncCtx;
 use super::super::types::{GmailLabel, GmailSendAs};
 use super::super::client::GmailClient;
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 
 // ---------------------------------------------------------------------------
 // Label sync

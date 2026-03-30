@@ -1,9 +1,9 @@
 use rusqlite::{OptionalExtension, Row, params};
 
-use ratatoskr_core::db::DbState;
-use ratatoskr_core::db::types::DbCalendar;
-use ratatoskr_gmail::client::GmailState;
-use ratatoskr_graph::client::GraphState;
+use rtsk::db::DbState;
+use rtsk::db::types::DbCalendar;
+use gmail::client::GmailState;
+use graph::client::GraphState;
 
 use super::caldav::{caldav_list_calendars_impl, caldav_sync_events_impl};
 use super::google::{google_calendar_list_calendars_impl, google_calendar_sync_events_impl};
@@ -81,8 +81,8 @@ pub async fn calendar_sync_account(
     db: &DbState,
     encryption_key: [u8; 32],
 ) -> Result<(), String> {
-    let gmail = ratatoskr_gmail::client::new_gmail_state(encryption_key);
-    let graph = ratatoskr_graph::client::new_graph_state(encryption_key);
+    let gmail = gmail::client::new_gmail_state(encryption_key);
+    let graph = graph::client::new_graph_state(encryption_key);
     calendar_sync_account_impl(account_id, db, &gmail, &graph).await
 }
 

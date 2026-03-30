@@ -539,12 +539,12 @@ impl App {
 /// Falls back to SQL-only if no SearchState is available.
 pub(crate) async fn execute_search(
     db: Arc<db::Db>,
-    search_state: Option<Arc<ratatoskr_core::search::SearchState>>,
+    search_state: Option<Arc<rtsk::search::SearchState>>,
     query: String,
 ) -> Result<Vec<Thread>, String> {
     db.with_conn(move |conn| {
         if let Some(ref ss) = search_state {
-            let results = ratatoskr_core::search_pipeline::search(
+            let results = rtsk::search_pipeline::search(
                 &query, ss, conn,
             )?;
             Ok(results.into_iter().map(unified_result_to_thread).collect())
@@ -560,11 +560,11 @@ fn execute_search_sql_fallback(
     conn: &rusqlite::Connection,
     query: &str,
 ) -> Result<Vec<Thread>, String> {
-    let parsed = ratatoskr_core::smart_folder::parse_query(query);
-    let scope = ratatoskr_core::db::types::AccountScope::All;
+    let parsed = rtsk::smart_folder::parse_query(query);
+    let scope = rtsk::db::types::AccountScope::All;
 
     if parsed.has_any_operator() || parsed.free_text.is_empty() {
-        let db_threads = ratatoskr_core::smart_folder::query_threads(
+        let db_threads = rtsk::smart_folder::query_threads(
             conn, &parsed, &scope, Some(200), Some(0),
         )?;
         Ok(db_threads.into_iter().map(crate::db_thread_to_app_thread).collect())
@@ -614,7 +614,7 @@ fn execute_search_sql_fallback(
 
 /// Convert a `UnifiedSearchResult` from the search pipeline to an app `Thread`.
 fn unified_result_to_thread(
-    r: ratatoskr_core::search_pipeline::UnifiedSearchResult,
+    r: rtsk::search_pipeline::UnifiedSearchResult,
 ) -> Thread {
     Thread {
         id: r.thread_id,

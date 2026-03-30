@@ -7,10 +7,10 @@ use jmap_client::email_submission::{Address as SubmissionAddress, EmailSubmissio
 use jmap_client::mailbox::Role;
 use jmap_client::Set;
 
-use ratatoskr_provider_utils::error::ProviderError;
-use ratatoskr_provider_utils::ops::ProviderOps;
-use ratatoskr_provider_utils::typed_ids::{FolderId, TagId};
-use ratatoskr_provider_utils::types::{
+use common::error::ProviderError;
+use common::ops::ProviderOps;
+use common::typed_ids::{FolderId, TagId};
+use common::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
     ProviderTestResult, SyncResult,
 };
@@ -450,8 +450,8 @@ impl ProviderOps for JmapOps {
     ) -> Result<String, ProviderError> {
         log::info!("[JMAP] Sending email");
         self.client.ensure_valid_token().await?;
-        let patched = ratatoskr_provider_utils::headers::inject_read_receipt_header_base64url(raw_base64url)?;
-        let raw_bytes = ratatoskr_provider_utils::encoding::decode_base64url_nopad(&patched)?;
+        let patched = common::headers::inject_read_receipt_header_base64url(raw_base64url)?;
+        let raw_bytes = common::encoding::decode_base64url_nopad(&patched)?;
         let client = self.client.inner();
 
         // Step 1: Upload blob and fetch identity concurrently.
@@ -525,7 +525,7 @@ impl ProviderOps for JmapOps {
         _thread_id: Option<&str>,
     ) -> Result<String, ProviderError> {
         self.client.ensure_valid_token().await?;
-        let raw_bytes = ratatoskr_provider_utils::encoding::decode_base64url_nopad(raw_base64url)?;
+        let raw_bytes = common::encoding::decode_base64url_nopad(raw_base64url)?;
 
         let mailboxes = get_mailbox_list(&self.client).await?;
         let drafts_id =
@@ -587,7 +587,7 @@ impl ProviderOps for JmapOps {
             .map_err(|e| ProviderError::Server(format!("Blob download: {e}")))?;
 
         Ok(AttachmentData {
-            data: ratatoskr_provider_utils::encoding::encode_base64_standard(&data),
+            data: common::encoding::encode_base64_standard(&data),
             size: data.len(),
         })
     }

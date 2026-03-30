@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use ratatoskr_db::db::DbState;
-use ratatoskr_provider_utils::types::ProviderCtx;
+use db::db::DbState;
+use common::types::ProviderCtx;
 
 use super::super::client::GraphClient;
 use super::super::folder_mapper::FolderMap;

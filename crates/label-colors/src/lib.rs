@@ -7,7 +7,7 @@
 pub mod category_colors;
 
 use category_colors::all_presets;
-use ratatoskr_db::db::types::DbLabel;
+use db::db::types::DbLabel;
 
 /// Deterministic color assignment for a label that has no synced color.
 ///

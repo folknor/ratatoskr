@@ -5,9 +5,9 @@ use std::sync::Arc;
 use crate::command_dispatch;
 use crate::db::Db;
 use crate::{APP_DATA_DIR, App, Message};
-use ratatoskr_command_palette::{CommandArgs, CommandId, KeyBinding, OptionItem};
-use ratatoskr_core::actions::{ActionOutcome, FolderId, MailOperation, TagId};
-use ratatoskr_core::scope::ViewScope;
+use cmdk::{CommandArgs, CommandId, KeyBinding, OptionItem};
+use rtsk::actions::{ActionOutcome, FolderId, MailOperation, TagId};
+use rtsk::scope::ViewScope;
 
 
 impl App {
@@ -93,7 +93,7 @@ impl App {
 
     /// Get a clone of the action context, or `None` if the action service
     /// is not initialized (degraded mode — stores failed at boot).
-    pub(crate) fn action_ctx(&self) -> Option<ratatoskr_core::actions::ActionContext> {
+    pub(crate) fn action_ctx(&self) -> Option<rtsk::actions::ActionContext> {
         self.action_ctx.as_ref().cloned()
     }
 
@@ -172,7 +172,7 @@ impl App {
 
         Task::perform(
             async move {
-                ratatoskr_core::actions::batch_execute(&ctx, operations).await
+                rtsk::actions::batch_execute(&ctx, operations).await
             },
             move |outcomes| Message::ActionCompleted {
                 plan,
@@ -313,7 +313,7 @@ impl App {
 
     pub(crate) fn dispatch_undo(
         &mut self,
-        entry: ratatoskr_command_palette::UndoEntry<crate::action_resolve::MailUndoPayload>,
+        entry: cmdk::UndoEntry<crate::action_resolve::MailUndoPayload>,
     ) -> Task<Message> {
         let Some(mut ctx) = self.action_ctx() else {
             self.status_bar.show_confirmation(
@@ -345,12 +345,12 @@ impl App {
 
 /// Execute undo compensation for a single payload.
 async fn execute_undo_compensation(
-    ctx: &ratatoskr_core::actions::ActionContext,
+    ctx: &rtsk::actions::ActionContext,
     payload: &crate::action_resolve::MailUndoPayload,
 ) -> Vec<ActionOutcome> {
     use crate::action_resolve::MailUndoPayload;
-    use ratatoskr_core::actions;
-    use ratatoskr_core::db::pending_ops::db_pending_ops_cancel_for_resource;
+    use rtsk::actions;
+    use rtsk::db::pending_ops::db_pending_ops_cancel_for_resource;
 
     match payload {
         MailUndoPayload::Archive { account_id, thread_ids } => {
@@ -479,7 +479,7 @@ impl App {
         Task::perform(
             async move {
                 let now = chrono::Utc::now().timestamp();
-                let due = ratatoskr_core::db::queries_extra::db_get_snoozed_threads_due(
+                let due = rtsk::db::queries_extra::db_get_snoozed_threads_due(
                     &ctx.db, now,
                 )
                 .await?;
@@ -488,17 +488,17 @@ impl App {
                 }
                 let mut success_count = 0usize;
                 for thread in &due {
-                    let outcome = ratatoskr_core::actions::unsnooze(
+                    let outcome = rtsk::actions::unsnooze(
                         &ctx,
                         &thread.account_id,
                         &thread.id,
                     )
                     .await;
                     match outcome {
-                        ratatoskr_core::actions::ActionOutcome::Success => {
+                        rtsk::actions::ActionOutcome::Success => {
                             success_count += 1;
                         }
-                        ratatoskr_core::actions::ActionOutcome::Failed { error } => {
+                        rtsk::actions::ActionOutcome::Failed { error } => {
                             log::error!(
                                 "Failed to unsnooze thread {}: {}",
                                 thread.id,

@@ -50,7 +50,7 @@ const MICROSOFT_GRAPH_SCOPES: [&str; 10] = [
     "User.Read",
 ];
 
-use ratatoskr_provider_utils::http::shared_http_client;
+use common::http::shared_http_client;
 
 type OAuthFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 

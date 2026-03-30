@@ -6,7 +6,7 @@
 pub mod types;
 mod storage;
 
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 
 use super::client::GmailClient;
 use types::{

@@ -4,19 +4,19 @@
 
 Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 
-- **`ratatoskr-core`** (`crates/core/`) — Top-level facade: re-exports all subsystem crates, plus owns accounts, oauth, discovery, email actions, DB queries, cloud attachments.
+- **`rtsk`** (`crates/core/`) — Top-level facade: re-exports all subsystem crates, plus owns accounts, oauth, discovery, email actions, DB queries, cloud attachments.
 - **`app`** (`crates/app/`) — iced UI app. Elm architecture (boot/update/view). All UI conventions are in `UI.md` at the repo root — **read UI.md before any UI work.**
 - **`squeeze`** (`crates/squeeze/`) — Attachment compression (CLI + library). Images (mozjpeg-rs + oxipng), PDFs (lopdf), OOXML/ODF.
-- **`ratatoskr-stores`** (`crates/stores/`) — Content stores: email body store (zstd-compressed), inline image store, attachment file cache.
-- **`ratatoskr-sync`** (`crates/sync/`) — Sync pipeline, threading (JWZ), categorization, filters, smart labels.
-- **`ratatoskr-provider-utils`** (`crates/provider-utils/`) — Shared provider helpers, encryption (AES-256-GCM), email parsing, HTML sanitization.
+- **`store`** (`crates/stores/`) — Content stores: email body store (zstd-compressed), inline image store, attachment file cache.
+- **`sync`** (`crates/sync/`) — Sync pipeline, threading (JWZ), categorization, filters, smart labels.
+- **`provider`** (`crates/provider-utils/`) — Shared provider helpers, encryption (AES-256-GCM), email parsing, HTML sanitization.
 - **`ratatoskr-label-colors`** (`crates/label-colors/`) — Label color resolution + Exchange category color presets.
 - **Providers**: `gmail`, `jmap`, `graph`, `imap` — each in `crates/{name}/`.
 
 ## Commands
 
 - `cargo check --workspace` — check all crates
-- `cargo check -p ratatoskr-core` — check core only
+- `cargo check -p rtsk` — check core only
 - `cargo check -p app` — check app only
 - `cargo run -p app` — run the iced app (requires a seeded DB, see `crates/app/seed-db.py`)
 - `cargo check -p squeeze` — check squeeze only
@@ -24,7 +24,7 @@ Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 
 ## Crate Architecture
 
-**`ProgressReporter` trait** (`ratatoskr_core::progress`) — All event emission goes through `&dyn ProgressReporter`. The iced app will provide its own implementation.
+**`ProgressReporter` trait** (`rtsk::progress`) — All event emission goes through `&dyn ProgressReporter`. The iced app will provide its own implementation.
 
 **State types are `Clone`** — `DbState`, `BodyStoreState`, `InlineImageStoreState`, `SearchState`, `AppCryptoState` all wrap `Arc<Mutex<Connection>>` or similar and implement `Clone`. Both `DbState` and `BodyStoreState` expose `pub fn conn(&self) -> Arc<Mutex<Connection>>` for synchronous access.
 
@@ -50,7 +50,7 @@ Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 
 **Generation counters use branded tokens**: `GenerationCounter<T>` / `GenerationToken<T>` in `core/src/generation.rs`. `next()` is the only way to get a token (bumps and returns). `#[must_use]` on `next()` — use `let _ = counter.next()` for invalidation-only bumps. Phantom type brands prevent cross-counter comparison. See `docs/architecture.md` for the full pattern.
 
-**Core crate boundary**: Business logic belongs in `ratatoskr-core`. The app crate calls core functions directly (no command wrappers needed — the Tauri app shell has been removed). When adding new core functionality, add it to `crates/core/src/`.
+**Core crate boundary**: Business logic belongs in `rtsk`. The app crate calls core functions directly (no command wrappers needed — the Tauri app shell has been removed). When adding new core functionality, add it to `crates/core/src/`.
 
 **iced is depended on in 3 places**: `crates/app/Cargo.toml` (full iced umbrella), `crates/rich-text-editor/Cargo.toml` (iced umbrella, optional behind `widget` feature), and `crates/iced-drop/Cargo.toml` (iced_core + iced_widget + iced_runtime individually). All three must point to the same iced source. When switching between the git URL and local path, update all three.
 

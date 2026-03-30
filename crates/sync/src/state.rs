@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 use rusqlite::{Connection, OptionalExtension};
 
 /// Synchronous version: update account sync state (history_id column).
@@ -279,7 +279,7 @@ pub async fn load_google_contacts_sync_token(
 ) -> Result<Option<String>, String> {
     let key = format!("google_contacts_sync_token:{account_id}");
 
-    db.with_conn(move |conn| ratatoskr_db::db::queries::get_setting(conn, &key))
+    db.with_conn(move |conn| db::db::queries::get_setting(conn, &key))
         .await
 }
 
@@ -327,7 +327,7 @@ pub async fn load_google_other_contacts_sync_token(
 ) -> Result<Option<String>, String> {
     let key = format!("google_other_contacts_sync_token:{account_id}");
 
-    db.with_conn(move |conn| ratatoskr_db::db::queries::get_setting(conn, &key))
+    db.with_conn(move |conn| db::db::queries::get_setting(conn, &key))
         .await
 }
 

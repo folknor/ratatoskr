@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use rusqlite::params;
 
-use ratatoskr_db::db::DbState;
-use ratatoskr_sync::state as sync_state;
+use db::db::DbState;
+use sync::state as sync_state;
 
 use super::client::GraphClient;
 use super::types::{

@@ -1,5 +1,5 @@
 [package]
-name = "ratatoskr-sync"
+name = "sync"
 description = "Sync pipeline, persistence, notifications, and state for Ratatoskr"
 version.workspace = true
 edition.workspace = true
@@ -17,7 +17,7 @@ rusqlite.workspace = true
 tokio = { workspace = true, features = ["rt"] }
 log = "0.4"
 
-ratatoskr-db = { path = "../db" }
-ratatoskr-stores = { path = "../stores" }
-ratatoskr-search = { path = "../search" }
+db = { path = "../db" }
+store = { path = "../stores" }
+search = { path = "../search" }
 ratatoskr-seen-addresses = { path = "../seen-addresses" }

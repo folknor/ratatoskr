@@ -7,16 +7,16 @@ use jmap_client::core::query::QueryResponse;
 use jmap_client::email;
 use serde::Serialize;
 
-use ratatoskr_stores::body_store::BodyStoreState;
-use ratatoskr_db::db::DbState;
-use ratatoskr_stores::inline_image_store::InlineImageStoreState;
-use ratatoskr_db::progress::ProgressReporter;
-use ratatoskr_search::SearchState;
+use store::body_store::BodyStoreState;
+use db::db::DbState;
+use store::inline_image_store::InlineImageStoreState;
+use db::progress::ProgressReporter;
+use search::SearchState;
 
 use super::client::JmapClient;
 use super::mailbox_mapper::MailboxInfo;
 use super::parse::{ParsedJmapMessage, email_get_properties, parse_jmap_email};
-use ratatoskr_sync::{
+use sync::{
     pending as sync_pending, progress as sync_progress,
     state as sync_state,
 };
@@ -157,7 +157,7 @@ pub async fn jmap_initial_sync(
     let email_state = mailbox::get_email_state(client).await?;
     save_sync_state(db, account_id, "Email", &email_state).await?;
     let aid = account_id.to_string();
-    db.with_conn(move |conn| ratatoskr_sync::pipeline::mark_initial_sync_completed(conn, &aid))
+    db.with_conn(move |conn| sync::pipeline::mark_initial_sync_completed(conn, &aid))
         .await?;
 
     log::info!("[JMAP] Initial sync complete for account {account_id}: {fetched} messages synced");

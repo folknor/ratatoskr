@@ -1,6 +1,6 @@
 use rusqlite::{Connection, params};
 
-use ratatoskr_core::db::{build_fts_query, make_like_pattern};
+use rtsk::db::{build_fts_query, make_like_pattern};
 
 use super::connection::Db;
 

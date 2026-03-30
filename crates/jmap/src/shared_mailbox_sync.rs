@@ -9,13 +9,13 @@ use std::collections::{HashMap, HashSet};
 
 use jmap_client::mailbox::MailboxChanges;
 
-use ratatoskr_stores::body_store::BodyStoreState;
-use ratatoskr_db::db::DbState;
-use ratatoskr_stores::inline_image_store::InlineImageStoreState;
-use ratatoskr_db::progress::ProgressReporter;
-use ratatoskr_provider_utils::types::SyncResult;
-use ratatoskr_search::SearchState;
-use ratatoskr_sync::state as sync_state;
+use store::body_store::BodyStoreState;
+use db::db::DbState;
+use store::inline_image_store::InlineImageStoreState;
+use db::progress::ProgressReporter;
+use common::types::SyncResult;
+use search::SearchState;
+use sync::state as sync_state;
 
 use crate::client::JmapClient;
 use crate::mailbox_mapper::MailboxInfo;

@@ -1,6 +1,6 @@
 use mail_parser::MimeHeaders;
 
-use ratatoskr_provider_utils::types::ProviderCtx;
+use common::types::ProviderCtx;
 
 use super::super::client::GraphClient;
 use super::super::types::SingleValueExtendedProperty;
@@ -40,7 +40,7 @@ pub(super) async fn create_draft_with_deferred_time(
     _thread_id: Option<&str>,
     send_at_utc: &str,
 ) -> Result<String, String> {
-    let raw_bytes = ratatoskr_provider_utils::encoding::decode_base64url_nopad(raw_base64url)
+    let raw_bytes = common::encoding::decode_base64url_nopad(raw_base64url)
         .map_err(|e| format!("Failed to decode base64url: {e}"))?;
 
     let parsed = mail_parser::MessageParser::default()
@@ -79,7 +79,7 @@ pub(super) async fn create_draft_impl(
     _thread_id: Option<&str>,
 ) -> Result<String, String> {
     // Decode base64url → raw MIME bytes
-    let raw_bytes = ratatoskr_provider_utils::encoding::decode_base64url_nopad(raw_base64url)
+    let raw_bytes = common::encoding::decode_base64url_nopad(raw_base64url)
         .map_err(|e| format!("Failed to decode base64url: {e}"))?;
 
     // Parse MIME using mail-parser
@@ -225,7 +225,7 @@ async fn upload_attachments_from_mime(
         } else {
             // Small attachment: inline base64
             let content_bytes =
-                ratatoskr_provider_utils::encoding::encode_base64_standard(raw_bytes);
+                common::encoding::encode_base64_standard(raw_bytes);
             let content_id = attachment
                 .content_id()
                 .map(|id| id.trim_matches(&['<', '>'] as &[char]).to_string());
@@ -345,7 +345,7 @@ pub(super) async fn upload_attachments_to_user_mailbox(
         // For shared mailbox drafts, only inline (base64) attachments are supported.
         // Large attachment upload sessions on /users/{id} require application
         // permissions, so we skip the resumable path here.
-        let content_bytes = ratatoskr_provider_utils::encoding::encode_base64_standard(raw_bytes);
+        let content_bytes = common::encoding::encode_base64_standard(raw_bytes);
         let content_id = attachment
             .content_id()
             .map(|id| id.trim_matches(&['<', '>'] as &[char]).to_string());

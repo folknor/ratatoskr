@@ -56,9 +56,9 @@ Cargo workspace with 23 crates. Key boundaries:
 | Crate | Role |
 |-------|------|
 | `app` | iced UI — Elm architecture (boot/update/view) |
-| `ratatoskr-core` | Facade over all subsystems: accounts, OAuth, actions, DB |
-| `ratatoskr-sync` | Sync pipeline, JWZ threading, filters, categorization |
-| `ratatoskr-stores` | Body store (zstd), inline images, attachment cache |
+| `rtsk` | Facade over all subsystems: accounts, OAuth, actions, DB |
+| `sync` | Sync pipeline, JWZ threading, filters, categorization |
+| `store` | Body store (zstd), inline images, attachment cache |
 | `squeeze` | Attachment compression (CLI + library) |
 | `gmail` / `jmap` / `graph` / `imap` | Provider implementations |
 | `command-palette` | Fuzzy command search with context-sensitive keybindings |

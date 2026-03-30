@@ -1,8 +1,8 @@
 use rusqlite::Connection;
 
-use ratatoskr_db::db::FromRow;
-use ratatoskr_db::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
-use ratatoskr_db::db::types::{AccountScope, DbThread};
+use db::db::FromRow;
+use db::db::sql_fragments::LATEST_MESSAGE_SUBQUERY;
+use db::db::types::{AccountScope, DbThread};
 
 use super::parser::ParsedQuery;
 
@@ -530,7 +530,7 @@ mod tests {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .expect("pragmas");
-        ratatoskr_db::db::migrations::run_all(&conn).expect("migrations");
+        db::db::migrations::run_all(&conn).expect("migrations");
         seed_test_data(&conn);
         conn
     }

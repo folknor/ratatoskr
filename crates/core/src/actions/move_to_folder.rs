@@ -1,6 +1,6 @@
-use ratatoskr_provider_utils::ops::ProviderOps;
-use ratatoskr_provider_utils::typed_ids::FolderId;
-use ratatoskr_provider_utils::types::ProviderCtx;
+use common::ops::ProviderOps;
+use common::typed_ids::FolderId;
+use common::types::ProviderCtx;
 
 use super::context::ActionContext;
 use super::log::MutationLog;

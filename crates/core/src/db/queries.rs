@@ -313,7 +313,7 @@ pub fn get_labels(conn: &Connection, account_id: &str) -> Result<Vec<DbLabel>, S
     )
 }
 
-pub use ratatoskr_db::db::queries::get_setting;
+pub use db::db::queries::get_setting;
 
 pub fn get_secure_setting(
     conn: &Connection,

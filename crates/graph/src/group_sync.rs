@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use rusqlite::params;
 use serde::Deserialize;
 
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 
 use super::client::GraphClient;
 

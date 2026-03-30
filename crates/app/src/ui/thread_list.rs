@@ -45,7 +45,7 @@ pub struct TypeaheadState {
     pub items: Vec<TypeaheadItem>,
     pub selected: usize,
     /// Generation counter for stale typeahead result detection.
-    pub generation: ratatoskr_core::generation::GenerationCounter<ratatoskr_core::generation::Typeahead>,
+    pub generation: rtsk::generation::GenerationCounter<rtsk::generation::Typeahead>,
 }
 
 impl Default for TypeaheadState {
@@ -54,7 +54,7 @@ impl Default for TypeaheadState {
             visible: false,
             items: Vec::new(),
             selected: 0,
-            generation: ratatoskr_core::generation::GenerationCounter::new(),
+            generation: rtsk::generation::GenerationCounter::new(),
         }
     }
 }
@@ -97,7 +97,7 @@ pub enum ThreadListMessage {
     /// Navigate typeahead suggestions up or down.
     TypeaheadNavigate(TypeaheadDirection),
     /// Typeahead suggestion items loaded from async query (carries generation).
-    TypeaheadItemsLoaded(ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::Typeahead>, Vec<TypeaheadItem>),
+    TypeaheadItemsLoaded(rtsk::generation::GenerationToken<rtsk::generation::Typeahead>, Vec<TypeaheadItem>),
     /// User selected a typeahead suggestion by index.
     TypeaheadSelect(usize),
     /// Dismiss the typeahead dropdown.
@@ -166,11 +166,11 @@ pub struct ThreadList {
     /// Typeahead suggestion state.
     pub typeahead: TypeaheadState,
     /// BIMI logo LRU cache — shared with App for cross-component access.
-    pub bimi_cache: Arc<ratatoskr_core::bimi::BimiLruCache>,
+    pub bimi_cache: Arc<rtsk::bimi::BimiLruCache>,
 }
 
 impl ThreadList {
-    pub fn new(bimi_cache: Arc<ratatoskr_core::bimi::BimiLruCache>) -> Self {
+    pub fn new(bimi_cache: Arc<rtsk::bimi::BimiLruCache>) -> Self {
         Self {
             threads: Vec::new(),
             selected_thread: None,

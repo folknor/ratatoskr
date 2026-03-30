@@ -1,4 +1,4 @@
-use ratatoskr_provider_utils::types::{ProviderCtx, ProviderFolderMutation};
+use common::types::{ProviderCtx, ProviderFolderMutation};
 
 use super::super::client::GraphClient;
 use super::super::folder_mapper::FolderMap;
@@ -100,7 +100,7 @@ pub(super) async fn query_thread_message_ids(
     let tid = thread_id.to_string();
     let aid = ctx.account_id.to_string();
     ctx.db
-        .with_conn(move |conn| ratatoskr_db::db::lookups::get_message_ids_for_thread(conn, &aid, &tid))
+        .with_conn(move |conn| db::db::lookups::get_message_ids_for_thread(conn, &aid, &tid))
         .await
 }
 

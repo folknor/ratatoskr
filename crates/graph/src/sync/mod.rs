@@ -5,18 +5,18 @@ mod stores;
 
 use std::collections::HashSet;
 
-use ratatoskr_stores::body_store::BodyStoreState;
-use ratatoskr_db::db::DbState;
-use ratatoskr_stores::inline_image_store::InlineImageStoreState;
-use ratatoskr_db::progress::ProgressReporter;
-use ratatoskr_provider_utils::types::{ProviderCtx, SyncResult};
-use ratatoskr_search::SearchState;
+use store::body_store::BodyStoreState;
+use db::db::DbState;
+use store::inline_image_store::InlineImageStoreState;
+use db::progress::ProgressReporter;
+use common::types::{ProviderCtx, SyncResult};
+use search::SearchState;
 
 use super::client::GraphClient;
 use super::folder_mapper::FolderMap;
 use super::parse::{ParsedGraphMessage, parse_graph_message};
 use super::types::{GraphMessage, ODataCollection};
-use ratatoskr_sync::pending as sync_pending;
+use sync::pending as sync_pending;
 
 use self::delta_tokens::{
     bootstrap_delta_token, bootstrap_delta_token_latest, delete_delta_token,
@@ -151,7 +151,7 @@ pub(crate) async fn graph_initial_sync(
 
     let aid = ctx.account_id.to_string();
     ctx.db
-        .with_conn(move |conn| ratatoskr_sync::pipeline::mark_initial_sync_completed(conn, &aid))
+        .with_conn(move |conn| sync::pipeline::mark_initial_sync_completed(conn, &aid))
         .await?;
 
     log::info!(

@@ -2,15 +2,15 @@
 
 use std::collections::{HashMap, HashSet};
 
-use ratatoskr_db::progress::ProgressReporter;
+use db::progress::ProgressReporter;
 
-use ratatoskr_stores::body_store::BodyStoreState;
-use ratatoskr_db::db::DbState;
-use ratatoskr_stores::inline_image_store::InlineImageStoreState;
-use ratatoskr_search::SearchState;
-use ratatoskr_sync::pipeline;
-use ratatoskr_sync::types::{ImapSyncResult, MessageMeta};
-use ratatoskr_sync::threading;
+use store::body_store::BodyStoreState;
+use db::db::DbState;
+use store::inline_image_store::InlineImageStoreState;
+use search::SearchState;
+use sync::pipeline;
+use sync::types::{ImapSyncResult, MessageMeta};
+use sync::threading;
 
 use super::client;
 use super::connection::connect;
@@ -242,7 +242,7 @@ pub async fn imap_delta_sync(
         let aid = account_id.to_string();
         let t = tids.clone();
         db.with_conn(move |conn| {
-            ratatoskr_sync::pending::get_blocked_thread_ids(conn, &aid, &t)
+            sync::pending::get_blocked_thread_ids(conn, &aid, &t)
         })
         .await?
     };
@@ -273,7 +273,7 @@ pub async fn imap_delta_sync(
         let aid = account_id.to_string();
         let marker = format!("imap-synced-{}", chrono::Utc::now().timestamp_millis());
         db.with_conn(move |conn| {
-            ratatoskr_sync::state::update_account_sync_state(conn, &aid, &marker)
+            sync::state::update_account_sync_state(conn, &aid, &marker)
         })
         .await?;
     }

@@ -7,11 +7,11 @@ use async_trait::async_trait;
 /// when multiple operations query folders in quick succession.
 const FOLDER_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
 
-use ratatoskr_db::db::DbState;
-use ratatoskr_provider_utils::error::ProviderError;
-use ratatoskr_provider_utils::ops::ProviderOps;
-use ratatoskr_provider_utils::typed_ids::{FolderId, TagId};
-use ratatoskr_provider_utils::types::{
+use db::db::DbState;
+use common::error::ProviderError;
+use common::ops::ProviderOps;
+use common::typed_ids::{FolderId, TagId};
+use common::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
     ProviderTestResult, SyncResult,
 };
@@ -267,7 +267,7 @@ impl ProviderOps for GraphOps {
             .await?;
 
         let data = if let Some(ref content_bytes) = attachment.content_bytes {
-            ratatoskr_provider_utils::encoding::decode_base64_standard(content_bytes)
+            common::encoding::decode_base64_standard(content_bytes)
                 .map_err(|e| ProviderError::Client(format!("Failed to decode attachment: {e}")))?
         } else {
             let raw = self
@@ -285,7 +285,7 @@ impl ProviderOps for GraphOps {
 
         let size = data.len();
         Ok(AttachmentData {
-            data: ratatoskr_provider_utils::encoding::encode_base64_standard(&data),
+            data: common::encoding::encode_base64_standard(&data),
             size,
         })
     }
@@ -557,7 +557,7 @@ impl GraphOps {
     ) -> Result<String, String> {
         use super::types::{GraphEmailAddress, GraphRecipient};
 
-        let raw_bytes = ratatoskr_provider_utils::encoding::decode_base64url_nopad(raw_base64url)
+        let raw_bytes = common::encoding::decode_base64url_nopad(raw_base64url)
             .map_err(|e| format!("Failed to decode base64url: {e}"))?;
 
         let parsed = mail_parser::MessageParser::default()
@@ -633,7 +633,7 @@ impl GraphOps {
     ) -> Result<String, String> {
         use super::types::{GraphEmailAddress, GraphRecipient};
 
-        let raw_bytes = ratatoskr_provider_utils::encoding::decode_base64url_nopad(raw_base64url)
+        let raw_bytes = common::encoding::decode_base64url_nopad(raw_base64url)
             .map_err(|e| format!("Failed to decode base64url: {e}"))?;
 
         let parsed = mail_parser::MessageParser::default()

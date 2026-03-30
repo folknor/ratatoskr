@@ -1,6 +1,6 @@
 # Main Layout: Backend Implementation Spec (Phase 1)
 
-Backend prerequisites for the initial main layout UI per `docs/main-layout/problem-statement.md`. All work is in `crates/core/` (the `ratatoskr-core` crate). No UI work.
+Backend prerequisites for the initial main layout UI per `docs/main-layout/problem-statement.md`. All work is in `crates/core/` (the `rtsk` crate). No UI work.
 
 **Scope note:** This document covers four specific early backend slices (label colors, thread detail, attachment collapse, focused region) that were prerequisites for the initial reading pane and conversation view. It is not the full backend spec for the main layout — the broader product surface (sidebar navigation, search pipeline, command dispatch, pinned searches, multi-window, calendar mode) implies a much larger backend/query surface documented in their respective specs. Treat this as a phase-specific implementation record, not the living authority for all main-layout backend needs.
 

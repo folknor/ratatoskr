@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 
 use super::client::GraphClient;
 use super::types::ODataCollection;

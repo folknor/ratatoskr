@@ -5,7 +5,7 @@ use crate::db::DateDisplay;
 use crate::pop_out::RenderingMode;
 use crate::ui::undoable::UndoableText;
 
-use ratatoskr_rich_text_editor::EditorState as RteEditorState;
+use rte::EditorState as RteEditorState;
 
 // ── Email body background preference ────────────────────
 
@@ -145,7 +145,7 @@ pub enum SettingsMessage {
     SignatureDeleteCancelled,                  // cancel pending delete
     SignatureEditorNameChanged(String),
     SignatureEditorBodyChanged(String),
-    SignatureEditorAction(ratatoskr_rich_text_editor::Action),
+    SignatureEditorAction(rte::Action),
     SignatureEditorToggleDefault(bool),
     SignatureEditorToggleReplyDefault(bool),
     SignatureEditorSave,
@@ -238,7 +238,7 @@ pub enum SettingsEvent {
     /// Request the App to save account editor changes.
     SaveAccountChanges {
         account_id: String,
-        params: ratatoskr_core::db::queries_extra::UpdateAccountParams,
+        params: rtsk::db::queries_extra::UpdateAccountParams,
     },
     /// Request the App to load contacts (with filter).
     LoadContacts(String),
@@ -248,7 +248,7 @@ pub enum SettingsEvent {
     LoadGroupMembers(String),
     /// Request the App to execute a contact import.
     ExecuteContactImport {
-        contacts: Vec<ratatoskr_contact_import::ImportedContact>,
+        contacts: Vec<import::ImportedContact>,
         account_id: Option<String>,
         update_existing: bool,
     },
@@ -522,34 +522,34 @@ impl ImportContactField {
     }
 
     /// Convert to the import crate's `ContactField`.
-    pub fn to_import_field(self) -> ratatoskr_contact_import::ContactField {
+    pub fn to_import_field(self) -> import::ContactField {
         match self {
-            ImportContactField::DisplayName => ratatoskr_contact_import::ContactField::DisplayName,
-            ImportContactField::FirstName => ratatoskr_contact_import::ContactField::FirstName,
-            ImportContactField::LastName => ratatoskr_contact_import::ContactField::LastName,
-            ImportContactField::Email => ratatoskr_contact_import::ContactField::Email,
-            ImportContactField::Email2 => ratatoskr_contact_import::ContactField::Email2,
-            ImportContactField::Phone => ratatoskr_contact_import::ContactField::Phone,
-            ImportContactField::Company => ratatoskr_contact_import::ContactField::Company,
-            ImportContactField::Notes => ratatoskr_contact_import::ContactField::Notes,
-            ImportContactField::Group => ratatoskr_contact_import::ContactField::Group,
-            ImportContactField::Ignore => ratatoskr_contact_import::ContactField::Ignore,
+            ImportContactField::DisplayName => import::ContactField::DisplayName,
+            ImportContactField::FirstName => import::ContactField::FirstName,
+            ImportContactField::LastName => import::ContactField::LastName,
+            ImportContactField::Email => import::ContactField::Email,
+            ImportContactField::Email2 => import::ContactField::Email2,
+            ImportContactField::Phone => import::ContactField::Phone,
+            ImportContactField::Company => import::ContactField::Company,
+            ImportContactField::Notes => import::ContactField::Notes,
+            ImportContactField::Group => import::ContactField::Group,
+            ImportContactField::Ignore => import::ContactField::Ignore,
         }
     }
 
     /// Convert from the import crate's `ContactField`.
-    pub fn from_import_field(field: ratatoskr_contact_import::ContactField) -> Self {
+    pub fn from_import_field(field: import::ContactField) -> Self {
         match field {
-            ratatoskr_contact_import::ContactField::DisplayName => ImportContactField::DisplayName,
-            ratatoskr_contact_import::ContactField::FirstName => ImportContactField::FirstName,
-            ratatoskr_contact_import::ContactField::LastName => ImportContactField::LastName,
-            ratatoskr_contact_import::ContactField::Email => ImportContactField::Email,
-            ratatoskr_contact_import::ContactField::Email2 => ImportContactField::Email2,
-            ratatoskr_contact_import::ContactField::Phone => ImportContactField::Phone,
-            ratatoskr_contact_import::ContactField::Company => ImportContactField::Company,
-            ratatoskr_contact_import::ContactField::Notes => ImportContactField::Notes,
-            ratatoskr_contact_import::ContactField::Group => ImportContactField::Group,
-            ratatoskr_contact_import::ContactField::Ignore => ImportContactField::Ignore,
+            import::ContactField::DisplayName => ImportContactField::DisplayName,
+            import::ContactField::FirstName => ImportContactField::FirstName,
+            import::ContactField::LastName => ImportContactField::LastName,
+            import::ContactField::Email => ImportContactField::Email,
+            import::ContactField::Email2 => ImportContactField::Email2,
+            import::ContactField::Phone => ImportContactField::Phone,
+            import::ContactField::Company => ImportContactField::Company,
+            import::ContactField::Notes => ImportContactField::Notes,
+            import::ContactField::Group => ImportContactField::Group,
+            import::ContactField::Ignore => ImportContactField::Ignore,
         }
     }
 }
@@ -592,15 +592,15 @@ pub struct ImportWizardState {
     /// Selected file path (display only).
     pub file_path: Option<String>,
     /// Parsed import source.
-    pub source: Option<ratatoskr_contact_import::ImportSource>,
+    pub source: Option<import::ImportSource>,
     /// Preview data (for CSV).
-    pub preview: Option<ratatoskr_contact_import::ImportPreview>,
+    pub preview: Option<import::ImportPreview>,
     /// Column mappings (one per header column).
     pub mappings: Vec<ImportContactField>,
     /// Whether the first row is treated as a header.
     pub has_header: bool,
     /// Parsed vCard contacts (for VCF files).
-    pub vcf_contacts: Vec<ratatoskr_contact_import::ImportedContact>,
+    pub vcf_contacts: Vec<import::ImportedContact>,
     /// Target account for import.
     pub account_id: Option<String>,
     /// Whether to update existing contacts on duplicate email.

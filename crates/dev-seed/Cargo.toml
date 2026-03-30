@@ -11,8 +11,8 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-ratatoskr-db = { path = "../db" }
-ratatoskr-stores = { path = "../stores" }
+db = { path = "../db" }
+store = { path = "../stores" }
 
 rusqlite.workspace = true
 rand = { version = "0.9", features = ["small_rng"] }

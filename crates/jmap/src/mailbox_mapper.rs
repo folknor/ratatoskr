@@ -1,5 +1,5 @@
-use ratatoskr_provider_utils::folder_roles::{SYSTEM_FOLDER_ROLES, system_folder_by_jmap_role};
-use ratatoskr_provider_utils::label_flags::assemble_labels;
+use common::folder_roles::{SYSTEM_FOLDER_ROLES, system_folder_by_jmap_role};
+use common::label_flags::assemble_labels;
 use std::collections::HashMap;
 
 pub struct MailboxLabelMapping {

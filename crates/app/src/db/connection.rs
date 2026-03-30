@@ -48,7 +48,7 @@ impl Db {
             .map_err(|e| format!("write pragmas: {e}"))?;
 
         // Run pending migrations on the writable connection.
-        ratatoskr_core::db::migrations::run_all(&write_conn)
+        rtsk::db::migrations::run_all(&write_conn)
             .map_err(|e| format!("migrations: {e}"))?;
 
         log::info!("Database opened, migrations applied");

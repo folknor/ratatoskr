@@ -10,13 +10,13 @@ When evaluating a design: if adding a new call site can silently break existing 
 
 ## Crate Boundaries
 
-**`ratatoskr-core`** is the facade. All business logic lives here — accounts, OAuth, discovery, email actions, DB queries, cloud attachments. The app crate calls core functions directly.
+**`rtsk`** is the facade. All business logic lives here — accounts, OAuth, discovery, email actions, DB queries, cloud attachments. The app crate calls core functions directly.
 
 **Provider crates** (`gmail`, `jmap`, `graph`, `imap`) each implement the `ProviderOps` trait (`provider-utils/src/ops.rs`). No provider-specific logic should leak into app or core beyond the trait surface.
 
-**`ratatoskr-stores`** owns all content outside the main SQLite database: zstd-compressed body store (`bodies.db`), inline image store, attachment file cache. Never assume message content is in the main DB.
+**`store`** owns all content outside the main SQLite database: zstd-compressed body store (`bodies.db`), inline image store, attachment file cache. Never assume message content is in the main DB.
 
-**`ratatoskr-provider-utils`** holds shared provider helpers: encryption (AES-256-GCM), email parsing, HTML sanitization.
+**`provider`** holds shared provider helpers: encryption (AES-256-GCM), email parsing, HTML sanitization.
 
 **`app`** is the iced UI. Elm architecture (boot/update/view). It should contain presentation logic only — no direct DB writes, no provider calls, no business rules.
 

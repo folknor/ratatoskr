@@ -189,11 +189,11 @@ All pure Rust except optional HEIC:
 Designed as a standalone crate for now. Later integration as optional dependency:
 
 ```toml
-# In ratatoskr-core/Cargo.toml
+# In rtsk/Cargo.toml
 squeeze = { path = "../../squeeze", optional = true }
 
 [features]
 compress-attachments = ["squeeze"]
 ```
 
-The orchestration layer (running totals, provider limits, UI warnings) belongs in ratatoskr-core. Squeeze is a per-file tool — it doesn't know about "the email" or how many attachments there are.
+The orchestration layer (running totals, provider limits, UI warnings) belongs in rtsk. Squeeze is a per-file tool — it doesn't know about "the email" or how many attachments there are.

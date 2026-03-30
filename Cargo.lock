@@ -227,7 +227,9 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 name = "app"
 version = "0.1.0"
 dependencies = [
+ "cal",
  "chrono",
+ "cmdk",
  "dev-seed",
  "dirs",
  "display-info",
@@ -235,22 +237,20 @@ dependencies = [
  "env_logger",
  "iced",
  "iced-drop",
+ "import",
  "log",
  "mime_guess",
  "mundy",
- "ratatoskr-calendar",
- "ratatoskr-command-palette",
- "ratatoskr-contact-import",
- "ratatoskr-core",
  "ratatoskr-label-colors",
- "ratatoskr-rich-text-editor",
  "ratatoskr-smart-folder",
- "ratatoskr-stores",
  "ratatoskr-system-fonts",
  "rfd",
+ "rte",
+ "rtsk",
  "rusqlite",
  "serde",
  "serde_json",
+ "store",
  "tokio",
  "toml 1.1.0+spec-1.1.0",
  "uuid",
@@ -871,6 +871,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
+name = "cal"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "gmail",
+ "graph",
+ "jmap",
+ "log",
+ "quick-xml 0.37.5",
+ "reqwest 0.13.2",
+ "rtsk",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
 name = "calcard"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1128,6 +1148,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cmdk"
+version = "0.1.0"
+dependencies = [
+ "nucleo-matcher",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "codespan-reporting"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1158,6 +1187,34 @@ checksum = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd"
 dependencies = [
  "bytes",
  "memchr",
+]
+
+[[package]]
+name = "common"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "ammonia",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "css-inline",
+ "db",
+ "getrandom 0.2.17",
+ "log",
+ "lol_html",
+ "ratatoskr-seen-addresses",
+ "regex",
+ "reqwest 0.13.2",
+ "rusqlite",
+ "search",
+ "serde",
+ "serde_json",
+ "store",
+ "tokio",
+ "unicode-segmentation",
+ "xxhash-rust",
+ "zeroize",
 ]
 
 [[package]]
@@ -1507,6 +1564,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
+name = "db"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1541,12 +1609,12 @@ dependencies = [
 name = "dev-seed"
 version = "0.1.0"
 dependencies = [
+ "db",
  "log",
  "rand 0.9.2",
- "ratatoskr-db",
- "ratatoskr-stores",
  "rusqlite",
  "serde",
+ "store",
  "toml 0.8.23",
  "zstd",
 ]
@@ -2371,6 +2439,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "gmail"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "common",
+ "db",
+ "futures",
+ "log",
+ "ratatoskr-seen-addresses",
+ "reqwest 0.13.2",
+ "rusqlite",
+ "search",
+ "serde",
+ "serde_json",
+ "sha2",
+ "store",
+ "sync",
+ "tokio",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
 name = "gpu-allocator"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2402,6 +2494,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fdf242682df893b86f33a73828fb09ca4b2d3bb6cc95249707fc684d27484b91"
 dependencies = [
  "bitflags 2.11.0",
+]
+
+[[package]]
+name = "graph"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "common",
+ "db",
+ "futures",
+ "getrandom 0.2.17",
+ "log",
+ "mail-parser",
+ "quick-xml 0.37.5",
+ "ratatoskr-label-colors",
+ "ratatoskr-seen-addresses",
+ "reqwest 0.13.2",
+ "rusqlite",
+ "search",
+ "serde",
+ "serde_json",
+ "sha2",
+ "store",
+ "sync",
+ "tokio",
+ "urlencoding",
+ "uuid",
 ]
 
 [[package]]
@@ -3094,6 +3215,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09e54e57b4c48b40f7aec75635392b12b3421fa26fe8b4332e63138ed278459c"
 
 [[package]]
+name = "imap"
+version = "0.1.0"
+dependencies = [
+ "async-imap",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "common",
+ "db",
+ "futures",
+ "getrandom 0.2.17",
+ "log",
+ "mail-parser",
+ "native-tls",
+ "ratatoskr-seen-addresses",
+ "regex",
+ "reqwest 0.13.2",
+ "rusqlite",
+ "search",
+ "serde",
+ "serde_json",
+ "smtp",
+ "socket2",
+ "store",
+ "sync",
+ "tokio",
+ "tokio-native-tls",
+ "utf7-imap",
+ "xxhash-rust",
+]
+
+[[package]]
 name = "imap-proto"
 version = "0.16.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3107,6 +3260,14 @@ name = "imgref"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7c5cedc30da3a610cac6b4ba17597bdf7152cf974e8aab3afb3d54455e371c8"
+
+[[package]]
+name = "import"
+version = "0.1.0"
+dependencies = [
+ "calcard",
+ "encoding_rs",
+]
 
 [[package]]
 name = "indexmap"
@@ -3231,6 +3392,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "875a5a69ac2bab1a891711cf5eccbec1ce0341ea805560dcd90b7a2e925132e8"
 dependencies = [
  "jiff-tzdb",
+]
+
+[[package]]
+name = "jmap"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "common",
+ "db",
+ "futures",
+ "jmap-client",
+ "log",
+ "native-tls",
+ "ratatoskr-seen-addresses",
+ "reqwest 0.13.2",
+ "rusqlite",
+ "search",
+ "serde",
+ "serde_json",
+ "sha2",
+ "store",
+ "sync",
+ "tokio",
+ "tokio-tungstenite",
+ "uuid",
 ]
 
 [[package]]
@@ -3595,6 +3783,22 @@ name = "litrs"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
+
+[[package]]
+name = "llm"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "log",
+ "regex",
+ "reqwest 0.13.2",
+ "rtsk",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "urlencoding",
+]
 
 [[package]]
 name = "lock_api"
@@ -5393,301 +5597,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "973443cf09a9c8656b574a866ab68dfa19f0867d0340648c7d2f6a71b8a8ea68"
 
 [[package]]
-name = "ratatoskr-ai"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "log",
- "ratatoskr-core",
- "regex",
- "reqwest 0.13.2",
- "rusqlite",
- "serde",
- "serde_json",
- "urlencoding",
-]
-
-[[package]]
-name = "ratatoskr-calendar"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "log",
- "quick-xml 0.37.5",
- "ratatoskr-core",
- "ratatoskr-gmail",
- "ratatoskr-graph",
- "ratatoskr-jmap",
- "reqwest 0.13.2",
- "rusqlite",
- "serde",
- "serde_json",
- "tokio",
- "urlencoding",
- "uuid",
-]
-
-[[package]]
-name = "ratatoskr-command-palette"
-version = "0.1.0"
-dependencies = [
- "nucleo-matcher",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "ratatoskr-contact-import"
-version = "0.1.0"
-dependencies = [
- "calcard",
- "encoding_rs",
-]
-
-[[package]]
-name = "ratatoskr-core"
-version = "0.1.0"
-dependencies = [
- "ammonia",
- "async-imap",
- "async-trait",
- "base64 0.22.1",
- "calcard",
- "chrono",
- "css-inline",
- "futures",
- "getrandom 0.2.17",
- "hickory-resolver",
- "jmap-client",
- "lettre",
- "log",
- "lol_html",
- "mail-parser",
- "native-tls",
- "quick-xml 0.37.5",
- "ratatoskr-command-palette",
- "ratatoskr-db",
- "ratatoskr-gmail",
- "ratatoskr-graph",
- "ratatoskr-imap",
- "ratatoskr-jmap",
- "ratatoskr-label-colors",
- "ratatoskr-provider-utils",
- "ratatoskr-search",
- "ratatoskr-seen-addresses",
- "ratatoskr-smart-folder",
- "ratatoskr-smtp",
- "ratatoskr-stores",
- "ratatoskr-sync",
- "regex",
- "reqwest 0.13.2",
- "resvg 0.47.0",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "socket2",
- "tantivy",
- "tempfile",
- "tokio",
- "tokio-native-tls",
- "tokio-tungstenite",
- "unicode-segmentation",
- "url",
- "urlencoding",
- "utf7-imap",
- "uuid",
- "zstd",
-]
-
-[[package]]
-name = "ratatoskr-db"
-version = "0.1.0"
-dependencies = [
- "log",
- "rusqlite",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "ratatoskr-gmail"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "futures",
- "log",
- "ratatoskr-db",
- "ratatoskr-provider-utils",
- "ratatoskr-search",
- "ratatoskr-seen-addresses",
- "ratatoskr-stores",
- "ratatoskr-sync",
- "reqwest 0.13.2",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "urlencoding",
- "uuid",
-]
-
-[[package]]
-name = "ratatoskr-graph"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "futures",
- "getrandom 0.2.17",
- "log",
- "mail-parser",
- "quick-xml 0.37.5",
- "ratatoskr-db",
- "ratatoskr-label-colors",
- "ratatoskr-provider-utils",
- "ratatoskr-search",
- "ratatoskr-seen-addresses",
- "ratatoskr-stores",
- "ratatoskr-sync",
- "reqwest 0.13.2",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "urlencoding",
- "uuid",
-]
-
-[[package]]
-name = "ratatoskr-imap"
-version = "0.1.0"
-dependencies = [
- "async-imap",
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "futures",
- "getrandom 0.2.17",
- "log",
- "mail-parser",
- "native-tls",
- "ratatoskr-db",
- "ratatoskr-provider-utils",
- "ratatoskr-search",
- "ratatoskr-seen-addresses",
- "ratatoskr-smtp",
- "ratatoskr-stores",
- "ratatoskr-sync",
- "regex",
- "reqwest 0.13.2",
- "rusqlite",
- "serde",
- "serde_json",
- "socket2",
- "tokio",
- "tokio-native-tls",
- "utf7-imap",
- "xxhash-rust",
-]
-
-[[package]]
-name = "ratatoskr-jmap"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "futures",
- "jmap-client",
- "log",
- "native-tls",
- "ratatoskr-db",
- "ratatoskr-provider-utils",
- "ratatoskr-search",
- "ratatoskr-seen-addresses",
- "ratatoskr-stores",
- "ratatoskr-sync",
- "reqwest 0.13.2",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "tokio-tungstenite",
- "uuid",
-]
-
-[[package]]
 name = "ratatoskr-label-colors"
 version = "0.1.0"
 dependencies = [
+ "db",
  "log",
- "ratatoskr-db",
-]
-
-[[package]]
-name = "ratatoskr-provider-utils"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "ammonia",
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "css-inline",
- "getrandom 0.2.17",
- "log",
- "lol_html",
- "ratatoskr-db",
- "ratatoskr-search",
- "ratatoskr-seen-addresses",
- "ratatoskr-stores",
- "regex",
- "reqwest 0.13.2",
- "rusqlite",
- "serde",
- "serde_json",
- "tokio",
- "unicode-segmentation",
- "xxhash-rust",
- "zeroize",
-]
-
-[[package]]
-name = "ratatoskr-rich-text-editor"
-version = "0.1.0"
-dependencies = [
- "bitflags 2.11.0",
- "html5ever 0.39.0",
- "iced",
- "markup5ever 0.39.0",
-]
-
-[[package]]
-name = "ratatoskr-search"
-version = "0.1.0"
-dependencies = [
- "log",
- "serde",
- "tantivy",
- "tempfile",
- "tokio",
 ]
 
 [[package]]
 name = "ratatoskr-seen-addresses"
 version = "0.1.0"
 dependencies = [
+ "db",
  "log",
  "mail-parser",
- "ratatoskr-db",
  "rusqlite",
  "serde",
 ]
@@ -5697,49 +5620,9 @@ name = "ratatoskr-smart-folder"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "db",
  "log",
- "ratatoskr-db",
  "rusqlite",
-]
-
-[[package]]
-name = "ratatoskr-smtp"
-version = "0.1.0"
-dependencies = [
- "lettre",
- "log",
- "mail-parser",
- "ratatoskr-provider-utils",
- "serde",
-]
-
-[[package]]
-name = "ratatoskr-stores"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "log",
- "ratatoskr-db",
- "rusqlite",
- "serde",
- "tokio",
- "xxhash-rust",
- "zstd",
-]
-
-[[package]]
-name = "ratatoskr-sync"
-version = "0.1.0"
-dependencies = [
- "log",
- "ratatoskr-db",
- "ratatoskr-search",
- "ratatoskr-seen-addresses",
- "ratatoskr-stores",
- "rusqlite",
- "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -6106,6 +5989,72 @@ dependencies = [
 ]
 
 [[package]]
+name = "rte"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.11.0",
+ "html5ever 0.39.0",
+ "iced",
+ "markup5ever 0.39.0",
+]
+
+[[package]]
+name = "rtsk"
+version = "0.1.0"
+dependencies = [
+ "ammonia",
+ "async-imap",
+ "async-trait",
+ "base64 0.22.1",
+ "calcard",
+ "chrono",
+ "cmdk",
+ "common",
+ "css-inline",
+ "db",
+ "futures",
+ "getrandom 0.2.17",
+ "gmail",
+ "graph",
+ "hickory-resolver",
+ "imap",
+ "jmap",
+ "jmap-client",
+ "lettre",
+ "log",
+ "lol_html",
+ "mail-parser",
+ "native-tls",
+ "quick-xml 0.37.5",
+ "ratatoskr-label-colors",
+ "ratatoskr-seen-addresses",
+ "ratatoskr-smart-folder",
+ "regex",
+ "reqwest 0.13.2",
+ "resvg 0.47.0",
+ "rusqlite",
+ "search",
+ "serde",
+ "serde_json",
+ "sha2",
+ "smtp",
+ "socket2",
+ "store",
+ "sync",
+ "tantivy",
+ "tempfile",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-tungstenite",
+ "unicode-segmentation",
+ "url",
+ "urlencoding",
+ "utf7-imap",
+ "uuid",
+ "zstd",
+]
+
+[[package]]
 name = "rusqlite"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6339,6 +6288,17 @@ dependencies = [
  "memmap2",
  "smithay-client-toolkit 0.19.2",
  "tiny-skia 0.11.4",
+]
+
+[[package]]
+name = "search"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "serde",
+ "tantivy",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -6728,6 +6688,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4aaa7368fcf4852a4c2dd92df0cace6a71f2091ca0a23391ce7f3a31833f1523"
 
 [[package]]
+name = "smtp"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "lettre",
+ "log",
+ "mail-parser",
+ "serde",
+]
+
+[[package]]
 name = "socket2"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6828,6 +6799,20 @@ dependencies = [
  "cfg-if",
  "futures-core",
  "pin-project-lite",
+]
+
+[[package]]
+name = "store"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "db",
+ "log",
+ "rusqlite",
+ "serde",
+ "tokio",
+ "xxhash-rust",
+ "zstd",
 ]
 
 [[package]]
@@ -6957,6 +6942,21 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "sync"
+version = "0.1.0"
+dependencies = [
+ "db",
+ "log",
+ "ratatoskr-seen-addresses",
+ "rusqlite",
+ "search",
+ "serde",
+ "serde_json",
+ "store",
+ "tokio",
 ]
 
 [[package]]
@@ -7501,7 +7501,7 @@ dependencies = [
  "toml_datetime 1.1.0+spec-1.1.0",
  "toml_parser",
  "toml_writer",
- "winnow 1.0.0",
+ "winnow 1.0.1",
 ]
 
 [[package]]
@@ -7554,7 +7554,7 @@ dependencies = [
  "indexmap",
  "toml_datetime 1.1.0+spec-1.1.0",
  "toml_parser",
- "winnow 1.0.0",
+ "winnow 1.0.1",
 ]
 
 [[package]]
@@ -7563,7 +7563,7 @@ version = "1.1.0+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2334f11ee363607eb04df9b8fc8a13ca1715a72ba8662a26ac285c98aabb4011"
 dependencies = [
- "winnow 1.0.0",
+ "winnow 1.0.1",
 ]
 
 [[package]]
@@ -8954,9 +8954,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a90e88e4667264a994d34e6d1ab2d26d398dcdca8b7f52bec8668957517fc7d8"
+checksum = "09dac053f1cd375980747450bfc7250c264eaae0583872e845c0c7cd578872b5"
 dependencies = [
  "memchr",
 ]

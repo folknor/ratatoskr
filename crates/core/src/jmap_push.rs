@@ -43,10 +43,10 @@ pub async fn start_jmap_push_for_account(
     notify_tx: tokio::sync::mpsc::UnboundedSender<String>,
 ) -> Result<(), String> {
     let client =
-        ratatoskr_jmap::client::JmapClient::from_account(db, account_id, &encryption_key).await?;
+        jmap::client::JmapClient::from_account(db, account_id, &encryption_key).await?;
 
-    let (tx, mut rx) = ratatoskr_jmap::push::create_push_channel();
-    let manager = ratatoskr_jmap::push::start_push(&client, account_id, db, tx).await?;
+    let (tx, mut rx) = jmap::push::create_push_channel();
+    let manager = jmap::push::start_push(&client, account_id, db, tx).await?;
 
     let aid = account_id.to_string();
     let email = email.to_string();

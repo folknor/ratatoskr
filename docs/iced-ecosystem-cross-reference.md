@@ -50,7 +50,7 @@ apply, and where the gaps are.
 ### Gaps
 
 - **Animated panel transitions** (slide-in editor): No surveyed project demonstrates animated transitions in iced
-- **OAuth browser handoff**: Purely backend (already in ratatoskr-core)
+- **OAuth browser handoff**: Purely backend (already in rtsk)
 
 ---
 

@@ -1,9 +1,9 @@
 use super::folder_mapper::FolderMap;
 use super::types::{GraphMessage, GraphRecipient, REACTIONS_GUID};
-use ratatoskr_provider_utils::email_parsing::format_address_list;
-use ratatoskr_provider_utils::encoding::decode_base64_standard;
-use ratatoskr_provider_utils::headers::find_header_value_case_insensitive;
-use ratatoskr_provider_utils::parsed_message::ParsedMessageBase;
+use common::email_parsing::format_address_list;
+use common::encoding::decode_base64_standard;
+use common::headers::find_header_value_case_insensitive;
+use common::parsed_message::ParsedMessageBase;
 
 /// Parsed attachment metadata ready for DB persistence.
 #[derive(Debug, Clone)]
@@ -35,7 +35,7 @@ pub struct ParsedGraphMessage {
     pub reactions_count: Option<i64>,
 }
 
-ratatoskr_provider_utils::impl_message_addresses!(ParsedGraphMessage);
+common::impl_message_addresses!(ParsedGraphMessage);
 
 /// Convert a Graph API message to our DB-ready struct.
 ///
@@ -144,7 +144,7 @@ pub fn parse_graph_message(
             ParsedGraphAttachment {
                 content_hash: inline_data
                     .as_deref()
-                    .map(ratatoskr_stores::attachment_cache::hash_bytes),
+                    .map(store::attachment_cache::hash_bytes),
                 inline_data,
                 id: a.id.clone(),
                 filename: a.name.clone(),
@@ -268,7 +268,7 @@ fn format_recipients(recipients: Option<&[GraphRecipient]>) -> Option<String> {
 
 fn decode_inline_bytes(data: &str) -> Option<Vec<u8>> {
     let decoded = decode_base64_standard(data).ok()?;
-    if decoded.len() > ratatoskr_stores::inline_image_store::MAX_INLINE_SIZE {
+    if decoded.len() > store::inline_image_store::MAX_INLINE_SIZE {
         return None;
     }
     Some(decoded)

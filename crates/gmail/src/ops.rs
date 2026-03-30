@@ -1,9 +1,9 @@
-use ratatoskr_db::db::DbState;
-use ratatoskr_provider_utils::encoding::encode_base64url_nopad;
-use ratatoskr_provider_utils::error::ProviderError;
-use ratatoskr_provider_utils::ops::ProviderOps;
-use ratatoskr_provider_utils::typed_ids::{FolderId, TagId};
-use ratatoskr_provider_utils::types::{
+use db::db::DbState;
+use common::encoding::encode_base64url_nopad;
+use common::error::ProviderError;
+use common::ops::ProviderOps;
+use common::typed_ids::{FolderId, TagId};
+use common::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
     ProviderTestResult, SyncResult,
 };
@@ -183,7 +183,7 @@ impl ProviderOps for GmailOps {
         thread_id: Option<&str>,
     ) -> Result<String, ProviderError> {
         log::info!("[Gmail] Sending email for account {}", ctx.account_id);
-        let patched = ratatoskr_provider_utils::headers::inject_read_receipt_header_base64url(raw_base64url)?;
+        let patched = common::headers::inject_read_receipt_header_base64url(raw_base64url)?;
         let msg = self
             .client
             .send_message(&patched, thread_id, ctx.db)

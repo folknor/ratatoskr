@@ -1,7 +1,7 @@
 //! Signature CRUD handlers for the app crate.
 //!
 //! These functions delegate to core CRUD functions in
-//! `ratatoskr_core::db::queries_extra::compose` rather than using raw SQL.
+//! `rtsk::db::queries_extra::compose` rather than using raw SQL.
 //! The core functions handle transactional default-clearing properly.
 
 use std::sync::Arc;
@@ -24,11 +24,11 @@ pub fn handle_save_signature(
     Task::perform(
         async move {
             let body_text = html_to_plain_text(&req.body_html);
-            let core_db = ratatoskr_core::db::DbState::from_arc(db.write_conn_arc());
+            let core_db = rtsk::db::DbState::from_arc(db.write_conn_arc());
 
             if let Some(ref id) = req.id {
                 // Update existing signature via core CRUD.
-                let params = ratatoskr_core::db::queries_extra::UpdateSignatureParams {
+                let params = rtsk::db::queries_extra::UpdateSignatureParams {
                     id: id.clone(),
                     name: Some(req.name),
                     body_html: Some(req.body_html),
@@ -36,10 +36,10 @@ pub fn handle_save_signature(
                     is_default: Some(req.is_default),
                     is_reply_default: Some(req.is_reply_default),
                 };
-                ratatoskr_core::db::queries_extra::db_update_signature(&core_db, params).await
+                rtsk::db::queries_extra::db_update_signature(&core_db, params).await
             } else {
                 // Insert new signature via core CRUD.
-                let params = ratatoskr_core::db::queries_extra::InsertSignatureParams {
+                let params = rtsk::db::queries_extra::InsertSignatureParams {
                     account_id: req.account_id,
                     name: req.name,
                     body_html: req.body_html,
@@ -47,7 +47,7 @@ pub fn handle_save_signature(
                     is_default: req.is_default,
                     is_reply_default: req.is_reply_default,
                 };
-                ratatoskr_core::db::queries_extra::db_insert_signature(&core_db, params)
+                rtsk::db::queries_extra::db_insert_signature(&core_db, params)
                     .await
                     .map(|_id| ())
             }
@@ -71,8 +71,8 @@ pub fn handle_delete_signature(
     let db = Arc::clone(db);
     Task::perform(
         async move {
-            let core_db = ratatoskr_core::db::DbState::from_arc(db.write_conn_arc());
-            ratatoskr_core::db::queries_extra::db_delete_signature(&core_db, sig_id).await
+            let core_db = rtsk::db::DbState::from_arc(db.write_conn_arc());
+            rtsk::db::queries_extra::db_delete_signature(&core_db, sig_id).await
         },
         |result| {
             if let Err(ref e) = result {
@@ -92,8 +92,8 @@ pub fn load_signatures_async(
     let db = Arc::clone(db);
     Task::perform(
         async move {
-            let core_db = ratatoskr_core::db::DbState::from_arc(db.conn_arc());
-            let db_sigs = ratatoskr_core::db::queries_extra::db_get_all_signatures(&core_db).await?;
+            let core_db = rtsk::db::DbState::from_arc(db.conn_arc());
+            let db_sigs = rtsk::db::queries_extra::db_get_all_signatures(&core_db).await?;
             // Convert DbSignature to the app's SignatureEntry type.
             let entries: Vec<SignatureEntry> = db_sigs
                 .into_iter()
@@ -126,8 +126,8 @@ pub fn handle_reorder_signatures(
     let db = Arc::clone(db);
     Task::perform(
         async move {
-            let core_db = ratatoskr_core::db::DbState::from_arc(db.write_conn_arc());
-            ratatoskr_core::db::queries_extra::db_reorder_signatures(&core_db, ordered_ids).await
+            let core_db = rtsk::db::DbState::from_arc(db.write_conn_arc());
+            rtsk::db::queries_extra::db_reorder_signatures(&core_db, ordered_ids).await
         },
         |result| {
             if let Err(ref e) = result {
@@ -146,5 +146,5 @@ pub fn handle_reorder_signatures(
 /// Block elements insert newlines; inline elements are dropped.
 fn html_to_plain_text(html: &str) -> String {
     // Delegate to the core implementation.
-    ratatoskr_core::db::queries_extra::html_to_plain_text(html)
+    rtsk::db::queries_extra::html_to_plain_text(html)
 }

@@ -1,6 +1,6 @@
 use rusqlite::{Connection, params};
 
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 
 use super::parse::extract_observations;
 use super::types::{AddressObservation, Direction, ObservationParams};

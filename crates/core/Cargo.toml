@@ -1,5 +1,5 @@
 [package]
-name = "ratatoskr-core"
+name = "rtsk"
 description = "Framework-agnostic core logic for Ratatoskr"
 version.workspace = true
 edition.workspace = true
@@ -22,20 +22,20 @@ base64.workspace = true
 quick-xml.workspace = true
 
 # Extracted workspace crates
-ratatoskr-db = { path = "../db" }
-ratatoskr-stores = { path = "../stores" }
-ratatoskr-command-palette = { path = "../command-palette" }
-ratatoskr-search = { path = "../search" }
+db = { path = "../db" }
+store = { path = "../stores" }
+cmdk = { path = "../command-palette" }
+search = { path = "../search" }
 ratatoskr-smart-folder = { path = "../smart-folder" }
 ratatoskr-label-colors = { path = "../label-colors" }
 ratatoskr-seen-addresses = { path = "../seen-addresses" }
-ratatoskr-provider-utils = { path = "../provider-utils" }
-ratatoskr-smtp = { path = "../smtp" }
-ratatoskr-sync = { path = "../sync" }
-ratatoskr-gmail = { path = "../gmail" }
-ratatoskr-jmap = { path = "../jmap" }
-ratatoskr-graph = { path = "../graph" }
-ratatoskr-imap = { path = "../imap" }
+common = { path = "../provider-utils" }
+smtp = { path = "../smtp" }
+sync = { path = "../sync" }
+gmail = { path = "../gmail" }
+jmap = { path = "../jmap" }
+graph = { path = "../graph" }
+imap = { path = "../imap" }
 
 # Crate-specific deps
 log = "0.4"

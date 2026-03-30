@@ -8,7 +8,7 @@
 //! Toggle intents that require per-thread state are represented as
 //! `ResolveOutcome::PerThreadToggle`, NOT as fake resolved operations.
 
-use ratatoskr_core::actions::{ActionOutcome, FolderId, MailOperation, TagId};
+use rtsk::actions::{ActionOutcome, FolderId, MailOperation, TagId};
 
 // ── Intent ──────────────────────────────────────────────
 

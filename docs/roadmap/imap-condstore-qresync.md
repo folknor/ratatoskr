@@ -77,7 +77,7 @@ Our codebase already handles UIDVALIDITY changes in `crates/imap/src/imap_delta.
 
 ### Current codebase state
 
-CONDSTORE is fully implemented (Phases 1-2). All IMAP CONDSTORE/QRESYNC code lives in the `crates/imap/` crate, with DB schema in `crates/db/` and DB types shared via `ratatoskr-db`.
+CONDSTORE is fully implemented (Phases 1-2). All IMAP CONDSTORE/QRESYNC code lives in the `crates/imap/` crate, with DB schema in `crates/db/` and DB types shared via `db`.
 
 **Foundation (in place since early development):**
 - `ImapFolderStatus` struct has `highest_modseq: Option<u64>` (in `crates/imap/src/types.rs`)

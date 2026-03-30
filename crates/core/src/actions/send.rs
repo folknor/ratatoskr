@@ -4,7 +4,7 @@ use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
 use crate::progress::NoopProgressReporter;
 use crate::send::{build_mime_message_base64url, mark_draft_failed, mark_draft_sent, SendRequest};
-use ratatoskr_provider_utils::types::ProviderCtx;
+use common::types::ProviderCtx;
 
 /// Send an email: build MIME, persist draft, dispatch to provider.
 ///

@@ -4,7 +4,7 @@ use regex::Regex;
 use serde::Deserialize;
 
 use crate::types::{ExtractedTask, TaskPriority};
-use ratatoskr_core::categorization::ThreadCategory;
+use rtsk::categorization::ThreadCategory;
 
 // ---------------------------------------------------------------------------
 // Compiled regexes

@@ -80,7 +80,7 @@ pub async fn cache_gal_entries(
 /// Requires the `User.ReadBasic.All` or `User.Read.All` Graph permission.
 /// Paginates using `@odata.nextLink` until all users are fetched.
 pub async fn fetch_graph_gal(
-    client: &ratatoskr_graph::client::GraphClient,
+    client: &graph::client::GraphClient,
     db: &DbState,
 ) -> Result<Vec<GalEntry>, String> {
     let select = "displayName,mail,businessPhones,companyName,jobTitle,department";
@@ -138,7 +138,7 @@ pub async fn fetch_graph_gal(
 /// Requires the `https://www.googleapis.com/auth/directory.readonly` scope.
 /// Returns an empty vec if the scope is not granted (403).
 pub async fn fetch_google_gal(
-    client: &ratatoskr_gmail::client::GmailClient,
+    client: &gmail::client::GmailClient,
     db: &DbState,
 ) -> Result<Vec<GalEntry>, String> {
     let mut entries = Vec::new();

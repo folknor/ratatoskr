@@ -31,7 +31,7 @@ use crate::ui::layout::{
 };
 use crate::{App, Message, APP_DATA_DIR};
 
-use ratatoskr_core::actions::SendAttachment;
+use rtsk::actions::SendAttachment;
 use rusqlite::OptionalExtension;
 
 // ── Pop-out message dispatch ────────────────────────────
@@ -397,7 +397,7 @@ impl App {
 
         // Auto-select shared mailbox identity when replying from shared
         // mailbox context.  Query the cached email address synchronously.
-        if let ratatoskr_core::scope::ViewScope::SharedMailbox {
+        if let rtsk::scope::ViewScope::SharedMailbox {
             ref account_id,
             ref mailbox_id,
         } = self.sidebar.selected_scope
@@ -540,7 +540,7 @@ impl App {
     fn dispatch_message_view_loads(
         &self,
         window_id: iced::window::Id,
-        generation: ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::PopOut>,
+        generation: rtsk::generation::GenerationToken<rtsk::generation::PopOut>,
         account_id: String,
         message_id: String,
         open_task: Task<iced::window::Id>,
@@ -692,7 +692,7 @@ impl App {
     }
 
     /// Increment and return the next pop-out generation token.
-    fn next_pop_out_generation(&mut self) -> ratatoskr_core::generation::GenerationToken<ratatoskr_core::generation::PopOut> {
+    fn next_pop_out_generation(&mut self) -> rtsk::generation::GenerationToken<rtsk::generation::PopOut> {
         self.pop_out_generation.next()
     }
 }
@@ -1122,7 +1122,7 @@ impl App {
             .get_or_insert_with(|| uuid::Uuid::new_v4().to_string())
             .clone();
 
-        let send_req = ratatoskr_core::actions::SendRequest {
+        let send_req = rtsk::actions::SendRequest {
             draft_id,
             account_id: account_info.id.clone(),
             from,
@@ -1149,7 +1149,7 @@ impl App {
     fn dispatch_send(
         &mut self,
         window_id: iced::window::Id,
-        request: ratatoskr_core::actions::SendRequest,
+        request: rtsk::actions::SendRequest,
     ) -> Task<Message> {
         let Some(ctx) = self.action_ctx() else {
             if let Some(PopOutWindow::Compose(state)) =
@@ -1166,7 +1166,7 @@ impl App {
         Task::perform(
             async move {
                 let outcome =
-                    ratatoskr_core::actions::send_email(&ctx, request).await;
+                    rtsk::actions::send_email(&ctx, request).await;
                 (window_id, outcome)
             },
             move |(window_id, outcome)| Message::SendCompleted {
@@ -1180,11 +1180,11 @@ impl App {
     pub(crate) fn handle_send_completed(
         &mut self,
         window_id: iced::window::Id,
-        outcome: &ratatoskr_core::actions::ActionOutcome,
+        outcome: &rtsk::actions::ActionOutcome,
     ) -> Task<Message> {
         match outcome {
-            ratatoskr_core::actions::ActionOutcome::Success
-            | ratatoskr_core::actions::ActionOutcome::NoOp => {
+            rtsk::actions::ActionOutcome::Success
+            | rtsk::actions::ActionOutcome::NoOp => {
                 self.pop_out_windows.remove(&window_id);
                 self.status_bar
                     .show_confirmation("Message sent".to_string());
@@ -1192,8 +1192,8 @@ impl App {
             }
             // LocalOnly should not occur for send (send uses Failed for all
             // failures), but handle it defensively as failure for safety.
-            ratatoskr_core::actions::ActionOutcome::Failed { error }
-            | ratatoskr_core::actions::ActionOutcome::LocalOnly {
+            rtsk::actions::ActionOutcome::Failed { error }
+            | rtsk::actions::ActionOutcome::LocalOnly {
                 reason: error, ..
             } => {
                 if let Some(PopOutWindow::Compose(state)) =
@@ -1262,8 +1262,8 @@ impl App {
         Task::perform(
             async move {
                 let core_db =
-                    ratatoskr_core::db::DbState::from_arc(db.conn_arc());
-                let sig = ratatoskr_core::db::queries_extra::db_resolve_signature_for_compose(
+                    rtsk::db::DbState::from_arc(db.conn_arc());
+                let sig = rtsk::db::queries_extra::db_resolve_signature_for_compose(
                     &core_db,
                     account_id,
                     from_email,

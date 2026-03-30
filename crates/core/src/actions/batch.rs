@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use ratatoskr_provider_utils::ops::ProviderOps;
+use common::ops::ProviderOps;
 
 use super::context::ActionContext;
 use super::log::MutationLog;

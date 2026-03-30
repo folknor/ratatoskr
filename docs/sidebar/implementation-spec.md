@@ -76,10 +76,10 @@ The `u64` is the `nav_generation` counter for stale-load rejection (same pattern
 Import the type:
 
 ```rust
-use ratatoskr_core::db::queries_extra::navigation::NavigationState;
+use rtsk::db::queries_extra::navigation::NavigationState;
 ```
 
-Note: the app crate currently uses its own `db.rs` module with local types (`Account`, `Label`, `Thread`). `NavigationState` comes from the core crate. The app already depends on `ratatoskr-core` (or will need to). If the dependency is not yet present in `crates/app/Cargo.toml`, add it.
+Note: the app crate currently uses its own `db.rs` module with local types (`Account`, `Label`, `Thread`). `NavigationState` comes from the core crate. The app already depends on `rtsk` (or will need to). If the dependency is not yet present in `crates/app/Cargo.toml`, add it.
 
 ### 1A.2 Sidebar State Changes
 
@@ -88,7 +88,7 @@ Replace `Sidebar`'s data-holding fields with a single `NavigationState` plus the
 **File: `crates/app/src/ui/sidebar.rs`**
 
 ```rust
-use ratatoskr_core::db::queries_extra::navigation::{
+use rtsk::db::queries_extra::navigation::{
     FolderKind, NavigationFolder, NavigationState,
 };
 
@@ -342,7 +342,7 @@ fn view(&self) -> Element<'_, SidebarMessage> {
 
 | File | Change |
 |------|--------|
-| `crates/app/Cargo.toml` | Add `ratatoskr-core` dependency if not present |
+| `crates/app/Cargo.toml` | Add `rtsk` dependency if not present |
 | `crates/app/src/main.rs` | Add `NavigationLoaded` variant, `load_navigation()`, `current_scope()`, update `handle_accounts_loaded`, `handle_sidebar_event`, `handle_label_selected` |
 | `crates/app/src/ui/sidebar.rs` | Replace `labels` field with `nav_state`, update `nav_items`, `smart_folders`, `labels`, `view` |
 

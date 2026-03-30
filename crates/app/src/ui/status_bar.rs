@@ -151,7 +151,7 @@ pub struct IcedProgressReporter {
     sender: tokio::sync::mpsc::UnboundedSender<SyncEvent>,
 }
 
-impl ratatoskr_core::progress::ProgressReporter for IcedProgressReporter {
+impl rtsk::progress::ProgressReporter for IcedProgressReporter {
     fn emit_json(&self, event_name: &str, json: serde_json::Value) {
         let event = SyncEvent::from_json(event_name, &json);
         // Best-effort send — drop on failure (receiver closed).

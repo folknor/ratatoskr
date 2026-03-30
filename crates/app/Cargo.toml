@@ -25,14 +25,14 @@ iced = { path = "/home/folk/Programs/sluggrs/repos/iced", default-features = fal
 dirs = "6"
 dissimilar.workspace = true
 ratatoskr-system-fonts = { path = "../system-fonts" }
-ratatoskr-command-palette = { path = "../command-palette" }
-ratatoskr-core = { path = "../core" }
+cmdk = { path = "../command-palette" }
+rtsk = { path = "../core" }
 ratatoskr-smart-folder = { path = "../smart-folder" }
 ratatoskr-label-colors = { path = "../label-colors" }
 iced-drop = { path = "../iced-drop" }
-ratatoskr-rich-text-editor = { path = "../rich-text-editor" }
-ratatoskr-calendar = { path = "../calendar" }
-ratatoskr-contact-import = { path = "../contact-import" }
+rte = { path = "../rich-text-editor" }
+cal = { path = "../calendar" }
+import = { path = "../contact-import" }
 env_logger = "0.11"
 log = "0.4"
 uuid = { version = "1", features = ["v4"] }
@@ -40,7 +40,7 @@ toml = "1.0"
 mundy = { version = "0.2", default-features = false, features = ["color-scheme", "tokio", "log"] }
 display-info = "0.5"
 rfd = "0.15"
-ratatoskr-stores = { path = "../stores" }
+store = { path = "../stores" }
 mime_guess = "2"
 dev-seed = { path = "../dev-seed", optional = true }
 

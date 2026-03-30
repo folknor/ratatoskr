@@ -212,7 +212,7 @@ impl App {
                 self.calendar.overlay = CalendarOverlay::None;
                 Task::perform(
                     async move {
-                        let outcome = ratatoskr_calendar::actions::delete_calendar_event(
+                        let outcome = cal::actions::delete_calendar_event(
                             &ctx, &account_id, &event_id,
                         )
                         .await;
@@ -409,7 +409,7 @@ impl App {
             })
             .unwrap_or_default();
 
-        let input = ratatoskr_calendar::actions::CalendarEventInput {
+        let input = cal::actions::CalendarEventInput {
             title: event.title.clone(),
             description: event.description.clone(),
             location: event.location.clone(),
@@ -426,7 +426,7 @@ impl App {
             let aid = account_id.clone();
             Task::perform(
                 async move {
-                    let outcome = ratatoskr_calendar::actions::update_calendar_event(
+                    let outcome = cal::actions::update_calendar_event(
                         &ctx, &aid, &id, input,
                     )
                     .await;
@@ -439,7 +439,7 @@ impl App {
             let aid = account_id.clone();
             Task::perform(
                 async move {
-                    let outcome = ratatoskr_calendar::actions::create_calendar_event(
+                    let outcome = cal::actions::create_calendar_event(
                         &ctx, &aid, &cal_id, input,
                     )
                     .await;
@@ -476,13 +476,13 @@ impl App {
 /// LocalOnly maps to Ok(()) — the event is visible locally, the overlay closes.
 /// Phase 3 can add richer outcome reporting for the "saved locally, not synced" case.
 fn calendar_outcome_to_result(
-    outcome: ratatoskr_core::actions::ActionOutcome,
+    outcome: rtsk::actions::ActionOutcome,
 ) -> Result<(), String> {
     match outcome {
-        ratatoskr_core::actions::ActionOutcome::Success
-        | ratatoskr_core::actions::ActionOutcome::NoOp
-        | ratatoskr_core::actions::ActionOutcome::LocalOnly { .. } => Ok(()),
-        ratatoskr_core::actions::ActionOutcome::Failed { error } => Err(error.user_message()),
+        rtsk::actions::ActionOutcome::Success
+        | rtsk::actions::ActionOutcome::NoOp
+        | rtsk::actions::ActionOutcome::LocalOnly { .. } => Ok(()),
+        rtsk::actions::ActionOutcome::Failed { error } => Err(error.user_message()),
     }
 }
 

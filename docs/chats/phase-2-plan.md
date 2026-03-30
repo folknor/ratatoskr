@@ -284,10 +284,10 @@ fn mark_chat_read(&mut self, email: &str) -> Task<Message> {
     Task::perform(
         async move {
             // 1. Local: batch UPDATE messages + re-aggregate threads
-            ratatoskr_core::chat::mark_chat_read_local(&db, &email).await?;
+            rtsk::chat::mark_chat_read_local(&db, &email).await?;
             // 2. Provider: fire-and-forget mark_read per affected thread.
             //    Failures create pending ops for retry on next sync.
-            ratatoskr_core::chat::mark_chat_read_remote(&db, &email).await;
+            rtsk::chat::mark_chat_read_remote(&db, &email).await;
             Ok::<(), String>(())
         },
         |_| Message::ChatReadMarked,

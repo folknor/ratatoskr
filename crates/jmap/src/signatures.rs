@@ -2,7 +2,7 @@ use sha2::{Digest, Sha256};
 
 use jmap_client::identity::{IdentityGet, IdentitySet};
 
-use ratatoskr_db::db::DbState;
+use db::db::DbState;
 
 use super::client::JmapClient;
 

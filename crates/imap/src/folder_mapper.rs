@@ -1,5 +1,5 @@
 use super::types::ImapFolder;
-use ratatoskr_provider_utils::folder_roles::{imap_name_to_special_use, system_folder_by_imap_special_use};
+use common::folder_roles::{imap_name_to_special_use, system_folder_by_imap_special_use};
 
 /// Mapping from an IMAP folder to a Gmail-style label.
 #[derive(Debug, Clone)]
