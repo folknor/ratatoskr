@@ -44,7 +44,9 @@ Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 
 **Multiple content stores** (`crates/stores/`): Message bodies live outside the main `messages` table in `bodies.db` (zstd-compressed), and inline multipart images have their own attachment database. Use `BodyStoreState` / `InlineImageStoreState` rather than assuming message content is in the main SQLite database. The attachment file cache is also in this crate.
 
-**Four email providers**: `gmail_api`, `jmap`, `graph` (Microsoft), `imap`. All unified behind the `ProviderOps` trait (`provider-utils/src/ops.rs`). Folder-accepting methods use `&FolderId`, tag-accepting methods use `&TagId` (`provider-utils/src/typed_ids.rs`). The action layer wraps raw strings at the provider call boundary.
+**Four email providers**: `gmail_api`, `jmap`, `graph` (Microsoft), `imap`. All unified behind the `ProviderOps` trait (`provider-utils/src/ops.rs`). Folder-accepting methods use `&FolderId`, tag-accepting methods use `&TagId` (`provider-utils/src/typed_ids.rs`). Typed IDs flow from `MailActionIntent` through `MailOperation` to the provider — no raw string boundaries in the action pipeline.
+
+**Action pipeline**: `MailActionIntent → resolve_intent() → build_execution_plan() → batch_execute() → handle_action_completed()`. All 12 action types flow through one path. `MailOperation` (core) is the canonical execution type. `CompletionBehavior` (app) drives toast, auto-advance, and undo via exhaustive match. See `docs/architecture.md` § "Adding a New Email Action" for the checklist.
 
 **Generation counters use branded tokens**: `GenerationCounter<T>` / `GenerationToken<T>` in `core/src/generation.rs`. `next()` is the only way to get a token (bumps and returns). `#[must_use]` on `next()` — use `let _ = counter.next()` for invalidation-only bumps. Phantom type brands prevent cross-counter comparison. See `docs/architecture.md` for the full pattern.
 

@@ -32,7 +32,7 @@ Every email state mutation (archive, delete, star, move, label, etc.) must flow 
 
 The four providers are unified behind `ProviderOps`. All provider-specific behavior is behind this trait — callers should never branch on provider type.
 
-**Enforcement:** `FolderId` and `TagId` newtypes in `crates/provider-utils/src/typed_ids.rs`. The `ProviderOps` trait uses `&FolderId` for `move_to_folder`, `rename_folder`, `delete_folder` and `&TagId` for `add_tag`, `remove_tag`. Passing a folder ID where a tag ID is expected is a compile error. The action layer constructs typed IDs at the provider call boundary.
+**Enforcement:** `FolderId` and `TagId` newtypes in `crates/provider-utils/src/typed_ids.rs`. The `ProviderOps` trait uses `&FolderId` for `move_to_folder`, `rename_folder`, `delete_folder` and `&TagId` for `add_tag`, `remove_tag`. Passing a folder ID where a tag ID is expected is a compile error. Typed IDs flow from `MailActionIntent` through `MailOperation` through `batch_execute` to the provider — no raw string boundaries except JSON deserialization in `pending.rs` and `CommandArgs` in the palette crate.
 
 ### Scope as a single source of truth
 
@@ -48,9 +48,19 @@ Async loads (nav, threads, search, etc.) must not overwrite fresher state. Each 
 
 ## Adding a New Email Action
 
-Adding a new action requires 8 coordinated edits: `EmailAction` variant, `CompletedAction` variant (with `removes_from_view`, `success_label`), `BatchAction` variant, `to_batch_action` mapping, `handle_action_completed` arm, `UndoToken` variant, undo dispatch arm, `handle_email_action` arm.
+The action pipeline flows: `MailActionIntent → resolve_intent → build_execution_plan → batch_execute → handle_action_completed`. Adding a new action requires:
 
-**Enforcement:** All match arms on `CompletedAction` are exhaustive — no wildcards. Adding a new variant produces compiler errors at every dispatch site (`to_batch_action`, `to_toggle_batch`, `rollback_toggles`, `produce_undo_tokens`, `success_label`, `removes_from_view`). The 8-edit protocol still exists, but you can't silently miss a step.
+1. **Variant in `MailActionIntent`** (`action_resolve.rs`) — the user intent
+2. **Variant in `MailOperation`** (`core/actions/operation.rs`) — the core execution type
+3. **Arm in `resolve_intent()`** — collapses intent + UI context into operation + compensation
+4. **Arm in `completion_behavior()`** — defines view effect, post-success effect, undo behavior, toast label. Compiler-enforced exhaustive match.
+5. **Core action function** (e.g., `core/actions/my_action.rs`) — local DB mutation + provider dispatch
+6. **Arms in `batch.rs` routing** (`dispatch_with_provider`, `op_local`, `enqueue_params`, `op_name`) — route `MailOperation` to the action function
+7. **`MailUndoPayload` variant + compensation arm** (`action_resolve.rs`, `commands.rs`) — if reversible
+
+**Enforcement:** `MailOperation` is an exhaustive enum. Adding a variant produces compiler errors in `completion_behavior()`, `dispatch_with_provider`, `op_local`, `enqueue_params`, `op_name`, and `build_standard_undo_payloads`. No wildcards — you cannot silently miss a dispatch site.
+
+Toggle actions (boolean state flips) need only the `MailOperation` variant and a `ToggleField` entry — `build_execution_plan` handles per-thread resolution, optimistic UI, and rollback generically.
 
 ## Database Integrity
 
