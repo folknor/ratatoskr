@@ -4,7 +4,7 @@ use rusqlite::{Connection, params};
 
 /// Remove a label from a thread. Returns the number of rows affected
 /// (0 = label wasn't present, 1 = removed).
-pub fn remove_label(
+pub(crate) fn remove_label(
     conn: &Connection,
     account_id: &str,
     thread_id: &str,
@@ -19,7 +19,7 @@ pub fn remove_label(
 
 /// Add a label to a thread. Returns the number of rows affected
 /// (0 = label already present, 1 = inserted).
-pub fn insert_label(
+pub(crate) fn insert_label(
     conn: &Connection,
     account_id: &str,
     thread_id: &str,
@@ -33,7 +33,7 @@ pub fn insert_label(
 }
 
 /// Remove the INBOX label. Returns affected rows (0 = already not in inbox).
-pub fn remove_inbox_label(
+pub(crate) fn remove_inbox_label(
     conn: &Connection,
     account_id: &str,
     thread_id: &str,
