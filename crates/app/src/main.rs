@@ -257,6 +257,8 @@ pub enum Message {
     SetAppMode(AppMode),
     SetCalendarView(CalendarView),
     CalendarToday,
+    /// Calendar sync completed — refresh in-memory calendar state.
+    CalendarSyncComplete,
 
     // Account management
     AddAccount(AddAccountMessage),
@@ -1099,6 +1101,9 @@ impl App {
                     return iced::window::gain_focus(win_id);
                 }
                 self.update(Message::Calendar(Box::new(CalendarMessage::Today)))
+            }
+            Message::CalendarSyncComplete => {
+                self.reload_calendar_events()
             }
 
             // Account management

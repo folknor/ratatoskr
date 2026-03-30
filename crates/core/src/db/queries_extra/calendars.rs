@@ -683,7 +683,7 @@ pub fn load_calendar_events_for_view_sync(
              FROM calendar_events e
              LEFT JOIN calendars c
                ON c.account_id = e.account_id AND c.id = e.calendar_id
-             WHERE c.is_visible = 1 OR c.id IS NULL
+             WHERE c.is_visible = 1 OR e.calendar_id IS NULL
              ORDER BY e.start_time ASC",
         )
         .map_err(|e| e.to_string())?;

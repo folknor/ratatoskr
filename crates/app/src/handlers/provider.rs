@@ -222,11 +222,13 @@ impl App {
             return Task::none();
         };
 
+        // Pass all accounts — calendar_sync_account returns Err for unsupported
+        // providers, which is logged as a warning. This avoids filtering out
+        // IMAP/JMAP accounts that have calendar_provider = "caldav" set.
         let account_ids: Vec<String> = self
             .sidebar
             .accounts
             .iter()
-            .filter(|a| matches!(a.provider.as_str(), "graph" | "gmail_api" | "caldav"))
             .map(|a| a.id.clone())
             .collect();
 
@@ -238,6 +240,7 @@ impl App {
         Task::perform(
             async move {
                 let core_db = ratatoskr_core::db::DbState::from_arc(db.write_conn_arc());
+                let mut any_synced = false;
                 for account_id in &account_ids {
                     match tokio::time::timeout(
                         std::time::Duration::from_secs(60),
@@ -251,17 +254,25 @@ impl App {
                     {
                         Ok(Ok(())) => {
                             log::info!("[Calendar] Synced calendars for {account_id}");
+                            any_synced = true;
                         }
                         Ok(Err(e)) => {
-                            log::warn!("[Calendar] Sync failed for {account_id}: {e}");
+                            log::debug!("[Calendar] Sync skipped/failed for {account_id}: {e}");
                         }
                         Err(_) => {
                             log::warn!("[Calendar] Sync timed out for {account_id}");
                         }
                     }
                 }
+                any_synced
             },
-            |()| Message::Noop,
+            |synced| {
+                if synced {
+                    Message::CalendarSyncComplete
+                } else {
+                    Message::Noop
+                }
+            },
         )
     }
 
