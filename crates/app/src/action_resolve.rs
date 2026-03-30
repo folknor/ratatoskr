@@ -266,6 +266,48 @@ pub enum MailUndoPayload {
     Snooze { account_id: String, thread_ids: Vec<String> },
 }
 
+/// Compute a direction-aware undo description from undo payloads.
+/// More informative than just success_label — e.g., "Starred" vs "Unstarred"
+/// instead of generic "Star toggled".
+pub fn undo_description(payloads: &[MailUndoPayload]) -> String {
+    if payloads.is_empty() {
+        return String::new();
+    }
+    match &payloads[0] {
+        MailUndoPayload::Archive { thread_ids, .. } => {
+            format!("Archived {} thread(s)", thread_ids.len())
+        }
+        MailUndoPayload::Trash { thread_ids, .. } => {
+            format!("Trashed {} thread(s)", thread_ids.len())
+        }
+        MailUndoPayload::MoveToFolder { thread_ids, .. } => {
+            format!("Moved {} thread(s)", thread_ids.len())
+        }
+        MailUndoPayload::SetSpam { was_spam, .. } => {
+            if *was_spam {
+                "Removed from spam".to_string()
+            } else {
+                "Marked as spam".to_string()
+            }
+        }
+        MailUndoPayload::SetStarred { was_starred, .. } => {
+            if *was_starred { "Unstarred" } else { "Starred" }.to_string()
+        }
+        MailUndoPayload::SetRead { was_read, .. } => {
+            if *was_read { "Marked as unread" } else { "Marked as read" }.to_string()
+        }
+        MailUndoPayload::SetPinned { was_pinned, .. } => {
+            if *was_pinned { "Unpinned" } else { "Pinned" }.to_string()
+        }
+        MailUndoPayload::SetMuted { was_muted, .. } => {
+            if *was_muted { "Unmuted" } else { "Muted" }.to_string()
+        }
+        MailUndoPayload::AddLabel { .. } => "Added label".to_string(),
+        MailUndoPayload::RemoveLabel { .. } => "Removed label".to_string(),
+        MailUndoPayload::Snooze { .. } => "Snoozed".to_string(),
+    }
+}
+
 // ── Toast formatting ────────────────────────────────────
 
 /// Generate user-facing toast text from completion behavior + outcomes.
@@ -273,8 +315,8 @@ pub enum MailUndoPayload {
 /// entirely to this function.
 pub fn format_outcome_toast(behavior: &CompletionBehavior, outcomes: &[ActionOutcome]) -> String {
     let total = outcomes.len();
-    let succeeded = outcomes.iter().filter(|o| o.is_success() || o.is_local_only()).count();
-    let failed = total - succeeded;
+    let succeeded = outcomes.iter().filter(|o| o.is_success() || o.is_local_only() || o.is_noop()).count();
+    let failed = outcomes.iter().filter(|o| o.is_failed()).count();
     let any_local_only = outcomes.iter().any(ActionOutcome::is_local_only);
 
     if failed == total {

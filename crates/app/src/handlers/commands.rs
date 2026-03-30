@@ -243,8 +243,8 @@ impl App {
             return Task::none();
         }
 
-        // All failed + leaves view → show error, don't advance
-        if all_failed && matches!(behavior.view_effect, ViewEffect::LeavesCurrentView) {
+        // All failed → show detailed error, rollback toggles, don't advance
+        if all_failed {
             let errors: Vec<String> = outcomes
                 .iter()
                 .filter_map(|o| match o {
@@ -255,6 +255,10 @@ impl App {
             self.status_bar.show_confirmation(
                 format!("\u{26A0} {} failed: {}", behavior.success_label, errors.join("; ")),
             );
+            // Rollback all optimistic toggle mutations on total failure
+            if !plan.optimistic.is_empty() {
+                self.rollback_optimistic(&plan.optimistic);
+            }
             return Task::none();
         }
 
@@ -282,10 +286,8 @@ impl App {
         if matches!(behavior.undo, UndoBehavior::Reversible) {
             let payloads = ar::build_undo_payloads(plan, outcomes);
             if !payloads.is_empty() {
-                self.undo_stack.push(
-                    behavior.success_label.to_string(), // C7: action-level description
-                    payloads,
-                );
+                let desc = ar::undo_description(&payloads);
+                self.undo_stack.push(desc, payloads);
             }
         }
 
