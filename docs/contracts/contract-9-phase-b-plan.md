@@ -86,6 +86,51 @@ The completion handler calls `completed_action_from_plan` once at the top. Phase
 
 ---
 
+## Invariants
+
+These must hold throughout Phase B and are checked at implementation time.
+
+### I1: Non-empty plan
+
+`ActionExecutionPlan.operations` is non-empty for every plan returned from `build_execution_plan`. The function returns `None` only for `ResolveOutcome::NoOp`. For `Resolved` and `PerThreadToggle`, the caller has already verified `threads` is non-empty (early return in `handle_email_action`), and every thread in `threads` produces exactly one operation. `dispatch_plan` may `debug_assert!(!plan.operations.is_empty())` as a safety net.
+
+### I2: Toggle targets must be resolvable
+
+In `build_execution_plan`, every `(account_id, thread_id)` in `threads` must be found in `thread_list`. If a selected thread is missing (e.g., concurrent removal), the plan must still produce an operation for it — use the fallback `to: true` (same direction as if the thread were unstarred/unread/etc.) and skip the optimistic mutation (nothing to flip). This preserves 1:1 correspondence between input targets, operations, outcomes, and undo grouping. An operation for a missing thread may produce a NoOp or Failed outcome from core — that's fine.
+
+### I3: Uniform legacy classifier
+
+All operations in a single plan must map to the same `CompletedAction` via `completed_action_from_plan`. This is true for the current action set (a plan is always built from a single resolved intent or a single toggle field). The function should `debug_assert!` that all operations map to the same classifier, catching any future violation.
+
+### I4: Rollback on missing action_ctx
+
+`dispatch_plan` must roll back `plan.optimistic` before returning if `action_ctx()` is `None`. Current toggle behavior rolls back immediately and shows an unavailable toast. The new path must match:
+
+```rust
+fn dispatch_plan(&mut self, plan: ActionExecutionPlan) -> Task<Message> {
+    let Some(ctx) = self.action_ctx() else {
+        self.rollback_optimistic(&plan.optimistic);
+        self.status_bar.show_confirmation("Action unavailable — service not initialized".to_string());
+        return Task::none();
+    };
+    // ...
+}
+```
+
+### I5: Pop-out does not use optimistic toggles
+
+Only Archive/Trash/PermanentDelete are reachable from the pop-out overflow menu. These are non-toggle actions with empty `plan.optimistic`. `build_execution_plan` receives `&mut self.thread_list` (the main window's thread list), which is not the pop-out's display source. Since pop-out actions produce no optimistic mutations, the mutation target mismatch is harmless. If pop-out ever needs toggle support, it must pass its own state as the mutation target.
+
+### I6: Phase A fake toggle resolution removed
+
+Phase B replaces `resolve_intent`'s `None` return for toggles with `ResolveOutcome::PerThreadToggle { field, compensation }`. The Phase A code paths that returned `None` for toggles and handled them with a separate `match &intent` block in `handle_email_action` are deleted. No `MailOperation::SetStarred { to: true }` placeholder values exist anywhere after Phase B.
+
+### I7: Outcome order matches operation order
+
+`dispatch_plan` clones `plan.operations` into the async task and moves `plan` into the completion message. Core's `batch_execute` returns `outcomes[i]` corresponding to `operations[i]` regardless of internal regrouping. The completion handler indexes into `plan.operations` and `outcomes` in parallel — the ordering contract is critical.
+
+---
+
 ## Current State (after Phase A)
 
 Two dispatch paths:
