@@ -111,7 +111,7 @@ enum CompensationContext {
 
 #### Step 2b: build_execution_plan
 
-Takes the resolved intent + selected threads. Applies optimistic UI mutations for toggles. Produces a plan ready for execution.
+Takes the resolved intent + selected threads. For toggles, reads per-thread state, computes per-thread `MailOperation`, records `OptimisticMutation`, then mutates UI — in that exact order to prevent double-flip or deriving previous from already-mutated state.
 
 ```rust
 fn build_execution_plan(
@@ -121,29 +121,31 @@ fn build_execution_plan(
 ) -> ActionExecutionPlan
 ```
 
+**Ordering contract for toggles:**
+1. Read prior thread state (`is_starred`, `is_read`, etc.)
+2. Compute per-thread `MailOperation` (e.g., `SetStarred { to: !previous }`)
+3. Record typed `OptimisticMutation` with the `previous` value
+4. Mutate UI state (flip the bool in the thread list)
+
+Steps 1-4 must happen in this order per thread. Deriving `previous` from already-mutated state is a bug.
+
 ```rust
 struct ActionExecutionPlan {
-    /// Per-target operations. Uniform for non-toggles.
-    /// Per-thread for toggles (each thread gets its resolved direction).
-    targets: ActionTargets,
+    /// Per-target operations — always a flat vec, even for uniform actions.
+    /// The executor groups identical operations internally for potential
+    /// provider-level batching; the plan doesn't need to distinguish
+    /// uniform from per-target.
+    operations: Vec<(String, String, MailOperation)>,
     /// How to handle completion — derived via exhaustive match, not ad-hoc.
     completion: CompletionBehavior,
-    /// Compensation context from resolution.
+    /// Compensation context from resolution (source folder, etc.).
     compensation: CompensationContext,
     /// Optimistic UI mutations applied, if any.
     optimistic: Vec<OptimisticMutation>,
 }
-
-enum ActionTargets {
-    /// All targets get the same operation (non-toggles).
-    Uniform {
-        operation: MailOperation,
-        targets: Vec<(String, String)>,
-    },
-    /// Each target has a resolved operation (toggles with mixed prior state).
-    PerTarget(Vec<(String, String, MailOperation)>),
-}
 ```
+
+**Design note:** No `ActionTargets::Uniform | PerTarget` enum. The plan always builds `Vec<(String, String, MailOperation)>` directly. "Uniform" is just the degenerate case where every entry has the same operation — the executor can detect this as an optimization, but the plan doesn't need two representations. This avoids preserving two code paths in the app when the goal is to collapse them.
 
 ### Typed optimistic mutations (not anonymous tuples)
 
@@ -156,6 +158,8 @@ enum OptimisticMutation {
     SetMuted { account_id: String, thread_id: String, previous: bool },
 }
 ```
+
+**Data sufficiency rule:** Phase C must be able to build `MailUndoPayload` from `MailOperation` + `CompensationContext` + `OptimisticMutation` without re-reading UI state. If Phase B has not captured enough data in these three types, Phase C cannot produce correct undo. This is the key invariant that validates Phase B's completeness.
 
 ### Typed completion behavior (not boolean flags)
 
@@ -239,9 +243,9 @@ pub async fn batch_execute(
 ```
 
 **Executor regrouping contract:**
-- Groups operations by `(account_id, MailOperation)` — `PartialEq` + `Eq` on `MailOperation` enables this
+- Groups operations by `(account_id, MailOperation)` using exact enum value equality (`PartialEq` + `Eq`). This means grouping is by full Rust value shape — `SetStarred { to: true }` and `SetStarred { to: false }` are different groups. If "same provider dispatch shape" (ignoring field values) is ever needed, introduce an explicit dispatch-key type rather than relaxing equality.
+- Execution order within an account may change due to regrouping, but **outcome ordering is by original input position** (`outcomes[i]` corresponds to `operations[i]`). All undo/rollback bookkeeping must key off original operation order, not regrouped order.
 - Within each group, dispatches to the provider (future: multi-target provider calls for IMAP STORE, Graph $batch, JMAP Email/set)
-- Preserves stable outcome ordering (outcomes[i] corresponds to operations[i])
 - Provider reuse per account preserved
 - Degraded/local-only behavior unchanged
 
@@ -314,7 +318,7 @@ The app instantiates `UndoStack<MailUndoPayload>`. The palette queries `has_undo
 | `CompletedAction` + `ActionParams` sidecar | Gone — `MailOperation` + `CompensationContext` |
 | `BatchAction` | Gone — core accepts `MailOperation` directly |
 | `to_batch_action` / `to_toggle_batch` | Gone — plan builds per-target operations |
-| Toggle split/merge dance | Gone — `ActionTargets::PerTarget` |
+| Toggle split/merge dance | Gone — per-target operations in flat vec |
 | `removes_from_view()` / `success_label()` | `CompletionBehavior` via exhaustive match |
 | Anonymous `rollback: Vec<(String, String, bool)>` | Typed `OptimisticMutation` |
 | `UndoToken` in command-palette | `MailUndoPayload` in app, `UndoStack<T>` in palette |
@@ -341,11 +345,14 @@ Steps 2-3 are compile-time enforced via exhaustive match. No silent degradation 
 - **Pitfall:** The `ResolvedIntent → BatchAction` adapter must be a single exhaustive match in one place
 
 ### Phase B: Per-target batch execution + typed optimistic mutations
-- Define `ActionTargets`, `OptimisticMutation`
+- Define `OptimisticMutation` (typed per field, not anonymous tuples)
+- Implement `build_execution_plan()` with strict ordering: read prior state → compute operation → record mutation → flip UI
 - Change `batch_execute` to accept `Vec<(String, String, MailOperation)>`
-- Core groups by `(account_id, MailOperation)` for dispatch
-- Remove toggle split/merge in app code
+- Core groups by exact `(account_id, MailOperation)` value for dispatch; outcomes ordered by original input position
+- Remove toggle split/merge in app code — toggles are just per-target operations in the flat vec
 - Merge `dispatch_toggle_action` and `dispatch_action_service_with_params` into one path
+- Remove Phase A toggle placeholder paths from `resolve_intent` (already done: toggles return `None`)
+- **Key invariant:** `MailOperation + CompensationContext + OptimisticMutation` must be sufficient for Phase C to build undo without re-reading UI state
 
 ### Phase C: Unified completion + undo migration (merged — they're coupled)
 - Define `CompletionBehavior`, `ViewEffect`, `PostSuccessEffect`, `UndoBehavior`

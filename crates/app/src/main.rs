@@ -22,6 +22,7 @@
 // module index and `UI.md` for the full module map.
 // ────────────────────────────────────────────────────────
 
+pub(crate) mod action_resolve;
 mod appearance;
 mod command_dispatch;
 mod command_resolver;

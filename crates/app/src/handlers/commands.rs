@@ -117,14 +117,6 @@ impl App {
             return Task::none();
         }
 
-        let selection_count = self.thread_list.selection_count();
-
-        // ── Actions through the action service ──────────────────
-        //
-        // Archive + boolean toggles go through core::actions.
-        // Removes-from-view folder ops use the legacy path until Phase 2.1b.
-        // Labels use the legacy path until Phase 2.2.
-
         // Collect selected thread info.
         let selected_threads: Vec<(String, String)> = self
             .thread_list
@@ -138,112 +130,55 @@ impl App {
             return Task::none();
         }
 
-        match action {
-            // ── Removes-from-view via action service ──
-            EmailAction::Archive => {
-                return self.dispatch_action_service(
-                    CompletedAction::Archive,
-                    &selected_threads,
-                );
-            }
+        // ── Phase A: Resolve intent, then adapter-dispatch ──────
+        //
+        // Convert EmailAction → MailActionIntent, resolve with UI context,
+        // then convert back to existing (CompletedAction, ActionParams) for
+        // dispatch. Toggle optimistic UI still uses the old path — per-thread
+        // resolution moves to Phase B's build_execution_plan.
 
-            // ── Toggle actions via action service (with optimistic UI) ──
-            EmailAction::ToggleStar => {
+        use crate::action_resolve::{self as ar, MailActionIntent, UiContext};
+
+        let intent = email_action_to_intent(action);
+        let ui_ctx = UiContext {
+            selected_label: self.sidebar.selected_label.clone(),
+        };
+
+        // Toggles: optimistic UI must happen before dispatch.
+        // Phase A preserves the toggle path — resolution of per-thread
+        // direction happens in optimistic_toggle, not resolve_intent.
+        match &intent {
+            MailActionIntent::ToggleStar => {
                 let rollback = self.optimistic_toggle(&selected_threads, |t| &mut t.is_starred);
                 self.sync_reading_pane_after_toggle(CompletedAction::Star, &rollback, true);
-                return self.dispatch_toggle_action(
-                    CompletedAction::Star,
-                    rollback,
-                );
+                return self.dispatch_toggle_action(CompletedAction::Star, rollback);
             }
-            EmailAction::ToggleRead => {
+            MailActionIntent::ToggleRead => {
                 let rollback = self.optimistic_toggle(&selected_threads, |t| &mut t.is_read);
-                return self.dispatch_toggle_action(
-                    CompletedAction::MarkRead,
-                    rollback,
-                );
+                return self.dispatch_toggle_action(CompletedAction::MarkRead, rollback);
             }
-            EmailAction::TogglePin => {
+            MailActionIntent::TogglePin => {
                 let rollback = self.optimistic_toggle(&selected_threads, |t| &mut t.is_pinned);
-                return self.dispatch_toggle_action(
-                    CompletedAction::Pin,
-                    rollback,
-                );
+                return self.dispatch_toggle_action(CompletedAction::Pin, rollback);
             }
-            EmailAction::ToggleMute => {
+            MailActionIntent::ToggleMute => {
                 let rollback = self.optimistic_toggle(&selected_threads, |t| &mut t.is_muted);
-                return self.dispatch_toggle_action(
-                    CompletedAction::Mute,
-                    rollback,
-                );
+                return self.dispatch_toggle_action(CompletedAction::Mute, rollback);
             }
-
-            // ── Removes-from-view folder ops via action service ──
-            EmailAction::Trash => {
-                let source_label_id = self.sidebar.selected_label.clone().map(FolderId::from);
-                return self.dispatch_action_service_with_params(
-                    CompletedAction::Trash,
-                    &selected_threads,
-                    &ActionParams::Trash { source_label_id },
-                );
-            }
-            EmailAction::PermanentDelete => {
-                return self.dispatch_action_service(
-                    CompletedAction::PermanentDelete,
-                    &selected_threads,
-                );
-            }
-            EmailAction::ToggleSpam => {
-                // Resolve spam direction from the sidebar's active folder.
-                // If viewing the spam folder, un-spam; otherwise mark as spam.
-                let current_label = self.sidebar.selected_label.as_deref();
-                let is_spam = current_label != Some("SPAM");
-                return self.dispatch_action_service_with_params(
-                    CompletedAction::Spam,
-                    &selected_threads,
-                    &ActionParams::Spam { is_spam },
-                );
-            }
-            EmailAction::MoveToFolder { folder_id } => {
-                // Source is the sidebar's active folder, if any.
-                let source_label_id = self.sidebar.selected_label.clone().map(FolderId::from);
-                return self.dispatch_action_service_with_params(
-                    CompletedAction::MoveToFolder,
-                    &selected_threads,
-                    &ActionParams::MoveToFolder { folder_id, source_label_id },
-                );
-            }
-
-            EmailAction::Snooze { until } => {
-                return self.dispatch_action_service_with_params(
-                    CompletedAction::Snooze,
-                    &selected_threads,
-                    &ActionParams::Snooze { until },
-                );
-            }
-
-            // ── Labels via action service (Phase 2.2) ──
-            EmailAction::AddLabel { label_id } => {
-                return self.dispatch_action_service_with_params(
-                    CompletedAction::AddLabel,
-                    &selected_threads,
-                    &ActionParams::Label { label_id },
-                );
-            }
-            EmailAction::RemoveLabel { label_id } => {
-                return self.dispatch_action_service_with_params(
-                    CompletedAction::RemoveLabel,
-                    &selected_threads,
-                    &ActionParams::Label { label_id },
-                );
-            }
-
-            // ── Not yet migrated ──
-            EmailAction::Unsubscribe => {
+            MailActionIntent::Unsubscribe => {
                 self.status_bar.show_confirmation("Unsubscribed".to_string());
-                Task::none()
+                return Task::none();
             }
+            _ => {}
         }
+
+        // Non-toggle: resolve intent → adapter → existing dispatch.
+        let Some(resolved) = ar::resolve_intent(intent, &ui_ctx) else {
+            return Task::none();
+        };
+
+        let (completed, params) = resolved_to_legacy(&resolved);
+        self.dispatch_action_service_with_params(completed, &selected_threads, &params)
     }
 
     /// Dispatch a removes-from-view action through the action service.
@@ -1157,6 +1092,8 @@ impl App {
     }
 
     /// After unsnoozing due threads, reload navigation (unread counts) and thread list.
+    // NOTE: The methods above this line are the Phase A boundary.
+    // Below: snooze tick (unchanged) + adapter functions.
     pub(crate) fn handle_snooze_resurface_complete(
         &mut self,
         result: Result<usize, String>,
@@ -1168,6 +1105,93 @@ impl App {
                 log::error!("Snooze resurface check failed: {e}");
                 Task::none()
             }
+        }
+    }
+}
+
+// ── Phase A adapters ────────────────────────────────────────────────
+//
+// These convert between the new resolve types and the existing dispatch
+// types. They will be removed in Phase B/C when the existing types are
+// replaced by the unified pipeline.
+
+use crate::action_resolve::{CompensationContext, MailActionIntent, ResolvedIntent};
+use ratatoskr_core::actions::MailOperation;
+
+/// Convert an `EmailAction` to a `MailActionIntent`.
+/// 1:1 mapping — just renames variants and carries parameters through.
+fn email_action_to_intent(action: EmailAction) -> MailActionIntent {
+    match action {
+        EmailAction::Archive => MailActionIntent::Archive,
+        EmailAction::Trash => MailActionIntent::Trash,
+        EmailAction::PermanentDelete => MailActionIntent::PermanentDelete,
+        EmailAction::ToggleSpam => MailActionIntent::ToggleSpam,
+        EmailAction::ToggleStar => MailActionIntent::ToggleStar,
+        EmailAction::ToggleRead => MailActionIntent::ToggleRead,
+        EmailAction::TogglePin => MailActionIntent::TogglePin,
+        EmailAction::ToggleMute => MailActionIntent::ToggleMute,
+        EmailAction::Unsubscribe => MailActionIntent::Unsubscribe,
+        EmailAction::MoveToFolder { folder_id } => MailActionIntent::MoveToFolder { folder_id },
+        EmailAction::AddLabel { label_id } => MailActionIntent::AddLabel { label_id },
+        EmailAction::RemoveLabel { label_id } => MailActionIntent::RemoveLabel { label_id },
+        EmailAction::Snooze { until } => MailActionIntent::Snooze { until },
+    }
+}
+
+/// Convert a `ResolvedIntent` to existing `(CompletedAction, ActionParams)`.
+/// Single exhaustive match — the one adapter that Phase B/C will remove.
+///
+/// # Panics
+/// Panics if a toggle operation reaches this adapter (toggles are handled
+/// by the optimistic path before resolve_intent is called) or if
+/// compensation context doesn't match the operation's requirements.
+fn resolved_to_legacy(resolved: &ResolvedIntent) -> (CompletedAction, ActionParams) {
+    match &resolved.operation {
+        MailOperation::Archive => (CompletedAction::Archive, ActionParams::None),
+        MailOperation::Trash => {
+            let CompensationContext::SourceFolder(source) = &resolved.compensation else {
+                panic!(
+                    "Trash requires CompensationContext::SourceFolder, got {:?}",
+                    resolved.compensation
+                );
+            };
+            (CompletedAction::Trash, ActionParams::Trash { source_label_id: source.clone() })
+        }
+        MailOperation::PermanentDelete => (CompletedAction::PermanentDelete, ActionParams::None),
+        MailOperation::SetSpam { to } => {
+            (CompletedAction::Spam, ActionParams::Spam { is_spam: *to })
+        }
+        MailOperation::MoveToFolder { dest } => {
+            let CompensationContext::SourceFolder(source) = &resolved.compensation else {
+                panic!(
+                    "MoveToFolder requires CompensationContext::SourceFolder, got {:?}",
+                    resolved.compensation
+                );
+            };
+            (
+                CompletedAction::MoveToFolder,
+                ActionParams::MoveToFolder {
+                    folder_id: dest.clone(),
+                    source_label_id: source.clone(),
+                },
+            )
+        }
+        MailOperation::AddLabel { label_id } => {
+            (CompletedAction::AddLabel, ActionParams::Label { label_id: label_id.clone() })
+        }
+        MailOperation::RemoveLabel { label_id } => {
+            (CompletedAction::RemoveLabel, ActionParams::Label { label_id: label_id.clone() })
+        }
+        MailOperation::Snooze { until } => {
+            (CompletedAction::Snooze, ActionParams::Snooze { until: *until })
+        }
+        // Toggles require per-thread state and go through the optimistic path.
+        // resolve_intent returns None for toggles, so this is unreachable.
+        MailOperation::SetStarred { .. }
+        | MailOperation::SetRead { .. }
+        | MailOperation::SetPinned { .. }
+        | MailOperation::SetMuted { .. } => {
+            unreachable!("toggle operations must not reach resolved_to_legacy — they are handled by the optimistic toggle path before resolve_intent is called")
         }
     }
 }
