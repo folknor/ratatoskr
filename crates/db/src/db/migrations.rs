@@ -14,8 +14,8 @@ struct Migration {
 // Future migrations go here as version 2, 3, etc.
 static MIGRATIONS: &[Migration] = &[
     Migration {
-        version: 1,
-        description: "Initial schema (collapsed)",
+        version: 100,
+        description: "Initial schema (collapsed from v1-v80)",
         sql: r#"
 
 -- ── Core ────────────────────────────────────────────────────
