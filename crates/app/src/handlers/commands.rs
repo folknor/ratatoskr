@@ -6,7 +6,7 @@ use crate::command_dispatch::{self, EmailAction};
 use crate::db::Db;
 use crate::{APP_DATA_DIR, App, CompletedAction, Message};
 use ratatoskr_command_palette::{CommandArgs, CommandId, KeyBinding, OptionItem};
-use ratatoskr_core::actions::{ActionOutcome, BatchAction, FolderId, TagId};
+use ratatoskr_core::actions::{ActionOutcome, FolderId, MailOperation, TagId};
 use ratatoskr_core::scope::ViewScope;
 
 /// Parameters for actions that need more than account_id + thread_id.
@@ -130,118 +130,127 @@ impl App {
             return Task::none();
         }
 
-        // ── Phase A: Resolve intent, then adapter-dispatch ──────
-        //
-        // Convert EmailAction → MailActionIntent, resolve with UI context,
-        // then convert back to existing (CompletedAction, ActionParams) for
-        // dispatch. Toggle optimistic UI still uses the old path — per-thread
-        // resolution moves to Phase B's build_execution_plan.
-
-        use crate::action_resolve::{self as ar, MailActionIntent, UiContext};
+        // ── Resolve → Plan → Dispatch ───────────────────────────
+        use crate::action_resolve::{
+            self as ar, MailActionIntent, OptimisticMutation, ResolveOutcome, UiContext,
+        };
 
         let intent = email_action_to_intent(action);
         let ui_ctx = UiContext {
             selected_label: self.sidebar.selected_label.clone(),
         };
+        let outcome = ar::resolve_intent(intent, &ui_ctx);
 
-        // Toggles: optimistic UI must happen before dispatch.
-        // Phase A preserves the toggle path — resolution of per-thread
-        // direction happens in optimistic_toggle, not resolve_intent.
-        match &intent {
-            MailActionIntent::ToggleStar => {
-                let rollback = self.optimistic_toggle(&selected_threads, |t| &mut t.is_starred);
-                self.sync_reading_pane_after_toggle(CompletedAction::Star, &rollback, true);
-                return self.dispatch_toggle_action(CompletedAction::Star, rollback);
-            }
-            MailActionIntent::ToggleRead => {
-                let rollback = self.optimistic_toggle(&selected_threads, |t| &mut t.is_read);
-                return self.dispatch_toggle_action(CompletedAction::MarkRead, rollback);
-            }
-            MailActionIntent::TogglePin => {
-                let rollback = self.optimistic_toggle(&selected_threads, |t| &mut t.is_pinned);
-                return self.dispatch_toggle_action(CompletedAction::Pin, rollback);
-            }
-            MailActionIntent::ToggleMute => {
-                let rollback = self.optimistic_toggle(&selected_threads, |t| &mut t.is_muted);
-                return self.dispatch_toggle_action(CompletedAction::Mute, rollback);
-            }
-            MailActionIntent::Unsubscribe => {
-                self.status_bar.show_confirmation("Unsubscribed".to_string());
-                return Task::none();
-            }
-            _ => {}
-        }
-
-        // Non-toggle: resolve intent → adapter → existing dispatch.
-        let Some(resolved) = ar::resolve_intent(intent, &ui_ctx) else {
+        let Some(plan) = ar::build_execution_plan(
+            outcome,
+            &selected_threads,
+            &mut self.thread_list,
+        ) else {
+            // NoOp (Unsubscribe)
+            self.status_bar.show_confirmation("Unsubscribed".to_string());
             return Task::none();
         };
 
-        let (completed, params) = resolved_to_legacy(&resolved);
-        self.dispatch_action_service_with_params(completed, &selected_threads, &params)
+        // Star optimistic UI → sync reading pane
+        if plan.optimistic.iter().any(|m| matches!(m, OptimisticMutation::SetStarred { .. })) {
+            for m in &plan.optimistic {
+                if let OptimisticMutation::SetStarred { thread_id, previous, .. } = m {
+                    self.reading_pane.update_star(thread_id, !previous);
+                }
+            }
+        }
+
+        self.dispatch_plan(plan)
     }
 
-    /// Dispatch a removes-from-view action through the action service.
-    /// Auto-advance is deferred to handle_action_completed.
-    ///
-    /// Known UX regression: the user waits for the full provider round-trip
-    /// before the thread list advances. The old path advanced immediately.
-    /// The proper fix is splitting local mutation from provider dispatch so
-    /// advance fires after local success — that's Phase 3 optimistic UI.
-    pub(crate) fn dispatch_action_service(
+    /// Dispatch an execution plan through the batch executor.
+    /// Derives the legacy CompletedAction from the plan for the completion handler.
+    pub(crate) fn dispatch_plan(
         &mut self,
-        action: CompletedAction,
-        threads: &[(String, String)],
-    ) -> Task<Message> {
-        self.dispatch_action_service_with_params(action, threads, &ActionParams::None)
-    }
-
-    pub(crate) fn dispatch_action_service_with_params(
-        &mut self,
-        action: CompletedAction,
-        threads: &[(String, String)],
-        params: &ActionParams,
+        plan: crate::action_resolve::ActionExecutionPlan,
     ) -> Task<Message> {
         let Some(ctx) = self.action_ctx() else {
+            // I4: rollback optimistic mutations before returning
+            self.rollback_optimistic(&plan.optimistic);
             self.status_bar.show_confirmation(
-                format!("\u{26A0} {} unavailable \u{2014} action service not initialized", action.success_label()),
+                "\u{26A0} Action unavailable \u{2014} service not initialized".to_string(),
             );
             return Task::none();
         };
 
-        let threads = threads.to_vec();
-        let params_clone = params.clone();
-        let Some(batch_action) = to_batch_action(action, params) else {
-            let outcomes = vec![
-                ActionOutcome::Failed {
-                    error: ratatoskr_core::actions::ActionError::invalid_state(
-                        format!("{action:?} not supported for batch dispatch"),
-                    ),
-                };
-                threads.len()
-            ];
-            return Task::done(Message::ActionCompleted {
-                action,
-                outcomes,
-                rollback: Vec::new(),
-                threads,
-                params: params_clone,
-            });
-        };
+        debug_assert!(!plan.operations.is_empty(), "I1: non-empty plan");
+
+        // I3: derive legacy classifier from first operation
+        let action = completed_action_from_operation(&plan.operations[0].2);
+
+        // Extract what we need for the async task + completion message
+        let operations = plan.operations.clone();
+        let threads: Vec<(String, String)> = plan.operations.iter()
+            .map(|(a, t, _)| (a.clone(), t.clone()))
+            .collect();
+        let rollback: Vec<(String, String, bool)> = plan.optimistic.iter()
+            .map(|m| match m {
+                crate::action_resolve::OptimisticMutation::SetStarred { account_id, thread_id, previous }
+                | crate::action_resolve::OptimisticMutation::SetRead { account_id, thread_id, previous }
+                | crate::action_resolve::OptimisticMutation::SetPinned { account_id, thread_id, previous }
+                | crate::action_resolve::OptimisticMutation::SetMuted { account_id, thread_id, previous } => {
+                    (account_id.clone(), thread_id.clone(), *previous)
+                }
+            })
+            .collect();
+        let params = action_params_from_plan(&plan, action);
+
         Task::perform(
             async move {
-                let outcomes =
-                    ratatoskr_core::actions::batch_execute(&ctx, batch_action, threads.clone()).await;
+                let outcomes = ratatoskr_core::actions::batch_execute(&ctx, operations).await;
                 (action, outcomes, threads)
             },
             move |(action, outcomes, threads)| Message::ActionCompleted {
                 action,
                 outcomes,
-                rollback: Vec::new(),
+                rollback,
                 threads,
-                params: params_clone,
+                params,
             },
         )
+    }
+
+    /// Rollback optimistic mutations when dispatch cannot proceed (I4).
+    fn rollback_optimistic(&mut self, mutations: &[crate::action_resolve::OptimisticMutation]) {
+        use crate::action_resolve::OptimisticMutation;
+        for m in mutations {
+            match m {
+                OptimisticMutation::SetStarred { account_id, thread_id, previous } => {
+                    if let Some(t) = self.thread_list.threads.iter_mut().find(
+                        |t| t.account_id == *account_id && t.id == *thread_id,
+                    ) {
+                        t.is_starred = *previous;
+                    }
+                    self.reading_pane.update_star(thread_id, *previous);
+                }
+                OptimisticMutation::SetRead { account_id, thread_id, previous } => {
+                    if let Some(t) = self.thread_list.threads.iter_mut().find(
+                        |t| t.account_id == *account_id && t.id == *thread_id,
+                    ) {
+                        t.is_read = *previous;
+                    }
+                }
+                OptimisticMutation::SetPinned { account_id, thread_id, previous } => {
+                    if let Some(t) = self.thread_list.threads.iter_mut().find(
+                        |t| t.account_id == *account_id && t.id == *thread_id,
+                    ) {
+                        t.is_pinned = *previous;
+                    }
+                }
+                OptimisticMutation::SetMuted { account_id, thread_id, previous } => {
+                    if let Some(t) = self.thread_list.threads.iter_mut().find(
+                        |t| t.account_id == *account_id && t.id == *thread_id,
+                    ) {
+                        t.is_muted = *previous;
+                    }
+                }
+            }
+        }
     }
 
     /// Sync reading pane state after a thread list toggle or rollback.
@@ -259,64 +268,6 @@ impl App {
                 self.reading_pane.update_star(tid, star_val);
             }
         }
-    }
-
-    /// Apply optimistic UI toggle to selected threads. Returns rollback data
-    /// keyed by (account_id, thread_id, previous_value).
-    fn optimistic_toggle(
-        &mut self,
-        threads: &[(String, String)],
-        get_field: fn(&mut crate::db::Thread) -> &mut bool,
-    ) -> Vec<(String, String, bool)> {
-        let mut rollback = Vec::with_capacity(threads.len());
-        for (account_id, thread_id) in threads {
-            if let Some(t) = self.thread_list.threads.iter_mut().find(
-                |t| t.account_id == *account_id && t.id == *thread_id,
-            ) {
-                let field = get_field(t);
-                let prev = *field;
-                *field = !prev;
-                rollback.push((account_id.clone(), thread_id.clone(), prev));
-            }
-        }
-        rollback
-    }
-
-    /// Dispatch a toggle action through the batch executor with rollback data.
-    ///
-    /// Toggles have per-thread target values (some true, some false). We
-    /// partition by value, run separate batch_execute calls in parallel,
-    /// then merge outcomes back in original order.
-    fn dispatch_toggle_action(
-        &mut self,
-        action: CompletedAction,
-        rollback: Vec<(String, String, bool)>,
-    ) -> Task<Message> {
-        let Some(ctx) = self.action_ctx() else {
-            self.rollback_toggles(&rollback, action);
-            self.status_bar.show_confirmation(
-                format!("\u{26A0} {} unavailable \u{2014} action service not initialized", action.success_label()),
-            );
-            return Task::none();
-        };
-
-        Task::perform(
-            async move {
-                let outcomes = dispatch_toggle_batch(&ctx, action, &rollback).await;
-                let threads: Vec<(String, String)> = rollback
-                    .iter()
-                    .map(|(a, t, _)| (a.clone(), t.clone()))
-                    .collect();
-                (action, outcomes, rollback, threads)
-            },
-            move |(action, outcomes, rollback, threads)| Message::ActionCompleted {
-                action,
-                outcomes,
-                rollback,
-                threads,
-                params: ActionParams::None,
-            },
-        )
     }
 
     /// Restore previous toggle values on failure. Finds threads by ID, not index.
@@ -907,141 +858,6 @@ async fn execute_undo_compensation(
 
 // ── Batch helpers ───────────────────────────────────────────────────
 
-/// Convert app action types to core's BatchAction.
-/// Returns None for unsupported/mismatched action+params combinations.
-fn to_batch_action(action: CompletedAction, params: &ActionParams) -> Option<BatchAction> {
-    match (action, params) {
-        (CompletedAction::Archive, _) => Some(BatchAction::Archive),
-        (CompletedAction::Trash, _) => Some(BatchAction::Trash),
-        (CompletedAction::PermanentDelete, _) => Some(BatchAction::PermanentDelete),
-        (CompletedAction::Spam, ActionParams::Spam { is_spam }) => {
-            Some(BatchAction::Spam { is_spam: *is_spam })
-        }
-        (CompletedAction::MoveToFolder, ActionParams::MoveToFolder { folder_id, source_label_id }) => {
-            Some(BatchAction::MoveToFolder {
-                folder_id: folder_id.clone(),
-                source_label_id: source_label_id.clone(),
-            })
-        }
-        (CompletedAction::AddLabel, ActionParams::Label { label_id }) => {
-            Some(BatchAction::AddLabel { label_id: label_id.clone() })
-        }
-        (CompletedAction::RemoveLabel, ActionParams::Label { label_id }) => {
-            Some(BatchAction::RemoveLabel { label_id: label_id.clone() })
-        }
-        (CompletedAction::Snooze, ActionParams::Snooze { until }) => {
-            Some(BatchAction::Snooze { until: *until })
-        }
-        // Toggle actions go through dispatch_toggle_batch, not this path.
-        (CompletedAction::Star, _)
-        | (CompletedAction::MarkRead, _)
-        | (CompletedAction::Pin, _)
-        | (CompletedAction::Mute, _) => {
-            log::error!("to_batch_action: toggle action {action:?} should use dispatch_toggle_batch");
-            None
-        }
-        // Mismatched params for parameterized actions.
-        (CompletedAction::Spam, _)
-        | (CompletedAction::MoveToFolder, _)
-        | (CompletedAction::AddLabel, _)
-        | (CompletedAction::RemoveLabel, _)
-        | (CompletedAction::Snooze, _) => {
-            log::error!("to_batch_action: mismatched params for {action:?}: {params:?}");
-            None
-        }
-    }
-}
-
-/// Partition toggle targets by new_value, batch-execute each partition
-/// in parallel, and merge outcomes back in original order.
-async fn dispatch_toggle_batch(
-    ctx: &ratatoskr_core::actions::ActionContext,
-    action: CompletedAction,
-    rollback: &[(String, String, bool)],
-) -> Vec<ActionOutcome> {
-    let total = rollback.len();
-
-    // Partition: (original_index, account_id, thread_id) grouped by new_value
-    let mut true_indices = Vec::new();
-    let mut true_targets = Vec::new();
-    let mut false_indices = Vec::new();
-    let mut false_targets = Vec::new();
-    for (i, (aid, tid, prev)) in rollback.iter().enumerate() {
-        let new_value = !prev;
-        if new_value {
-            true_indices.push(i);
-            true_targets.push((aid.clone(), tid.clone()));
-        } else {
-            false_indices.push(i);
-            false_targets.push((aid.clone(), tid.clone()));
-        }
-    }
-
-    let Some(batch_true) = to_toggle_batch(action, true) else {
-        return vec![
-            ActionOutcome::Failed {
-                error: ratatoskr_core::actions::ActionError::invalid_state(
-                    format!("{action:?} is not a toggle action"),
-                ),
-            };
-            total
-        ];
-    };
-    let Some(batch_false) = to_toggle_batch(action, false) else {
-        return vec![
-            ActionOutcome::Failed {
-                error: ratatoskr_core::actions::ActionError::invalid_state(
-                    format!("{action:?} is not a toggle action"),
-                ),
-            };
-            total
-        ];
-    };
-
-    // Execute both partitions in parallel
-    let (true_outcomes, false_outcomes) = iced::futures::future::join(
-        ratatoskr_core::actions::batch_execute(ctx, batch_true, true_targets),
-        ratatoskr_core::actions::batch_execute(ctx, batch_false, false_targets),
-    )
-    .await;
-
-    // Merge back in original order
-    let mut outcomes = Vec::with_capacity(total);
-    outcomes.resize_with(total, || ActionOutcome::Failed {
-        error: ratatoskr_core::actions::ActionError::invalid_state("toggle merge bug"),
-    });
-    for (idx, outcome) in true_indices.into_iter().zip(true_outcomes) {
-        outcomes[idx] = outcome;
-    }
-    for (idx, outcome) in false_indices.into_iter().zip(false_outcomes) {
-        outcomes[idx] = outcome;
-    }
-    outcomes
-}
-
-/// Map a toggle action + target value to a BatchAction.
-/// Returns None for non-toggle actions.
-fn to_toggle_batch(action: CompletedAction, value: bool) -> Option<BatchAction> {
-    match action {
-        CompletedAction::Star => Some(BatchAction::Star { starred: value }),
-        CompletedAction::MarkRead => Some(BatchAction::MarkRead { read: value }),
-        CompletedAction::Pin => Some(BatchAction::Pin { pinned: value }),
-        CompletedAction::Mute => Some(BatchAction::Mute { muted: value }),
-        // Non-toggle actions should never reach this function.
-        CompletedAction::Archive
-        | CompletedAction::Trash
-        | CompletedAction::Spam
-        | CompletedAction::MoveToFolder
-        | CompletedAction::PermanentDelete
-        | CompletedAction::Snooze
-        | CompletedAction::AddLabel
-        | CompletedAction::RemoveLabel => {
-            log::error!("to_toggle_batch: {action:?} is not a toggle");
-            None
-        }
-    }
-}
-
 // ── Snooze resurface ─────────────────────────────────────────
 
 impl App {
@@ -1109,17 +925,15 @@ impl App {
     }
 }
 
-// ── Phase A adapters ────────────────────────────────────────────────
+// ── Adapters: EmailAction → MailActionIntent, plan → legacy types ────
 //
-// These convert between the new resolve types and the existing dispatch
-// types. They will be removed in Phase B/C when the existing types are
-// replaced by the unified pipeline.
+// email_action_to_intent survives until Phase C (EmailAction is still
+// the Message variant type). The plan-to-legacy helpers bridge the new
+// plan to the existing completion handler until Phase C replaces it.
 
-use crate::action_resolve::{CompensationContext, MailActionIntent, ResolvedIntent};
-use ratatoskr_core::actions::MailOperation;
+use crate::action_resolve::{CompensationContext, MailActionIntent};
 
 /// Convert an `EmailAction` to a `MailActionIntent`.
-/// 1:1 mapping — just renames variants and carries parameters through.
 fn email_action_to_intent(action: EmailAction) -> MailActionIntent {
     match action {
         EmailAction::Archive => MailActionIntent::Archive,
@@ -1138,60 +952,70 @@ fn email_action_to_intent(action: EmailAction) -> MailActionIntent {
     }
 }
 
-/// Convert a `ResolvedIntent` to existing `(CompletedAction, ActionParams)`.
-/// Single exhaustive match — the one adapter that Phase B/C will remove.
-///
-/// # Panics
-/// Panics if a toggle operation reaches this adapter (toggles are handled
-/// by the optimistic path before resolve_intent is called) or if
-/// compensation context doesn't match the operation's requirements.
-fn resolved_to_legacy(resolved: &ResolvedIntent) -> (CompletedAction, ActionParams) {
-    match &resolved.operation {
-        MailOperation::Archive => (CompletedAction::Archive, ActionParams::None),
-        MailOperation::Trash => {
-            let CompensationContext::SourceFolder(source) = &resolved.compensation else {
-                panic!(
-                    "Trash requires CompensationContext::SourceFolder, got {:?}",
-                    resolved.compensation
-                );
+/// Derive `CompletedAction` from the first operation in a plan (I3).
+fn completed_action_from_operation(op: &MailOperation) -> CompletedAction {
+    match op {
+        MailOperation::Archive => CompletedAction::Archive,
+        MailOperation::Trash => CompletedAction::Trash,
+        MailOperation::PermanentDelete => CompletedAction::PermanentDelete,
+        MailOperation::SetSpam { .. } => CompletedAction::Spam,
+        MailOperation::MoveToFolder { .. } => CompletedAction::MoveToFolder,
+        MailOperation::SetStarred { .. } => CompletedAction::Star,
+        MailOperation::SetRead { .. } => CompletedAction::MarkRead,
+        MailOperation::SetPinned { .. } => CompletedAction::Pin,
+        MailOperation::SetMuted { .. } => CompletedAction::Mute,
+        MailOperation::AddLabel { .. } => CompletedAction::AddLabel,
+        MailOperation::RemoveLabel { .. } => CompletedAction::RemoveLabel,
+        MailOperation::Snooze { .. } => CompletedAction::Snooze,
+    }
+}
+
+/// Derive legacy `ActionParams` from a plan + completed action.
+/// Bridges the new plan to the existing completion/undo handler.
+fn action_params_from_plan(
+    plan: &crate::action_resolve::ActionExecutionPlan,
+    action: CompletedAction,
+) -> ActionParams {
+    match action {
+        CompletedAction::Spam => {
+            let is_spam = match &plan.operations[0].2 {
+                MailOperation::SetSpam { to } => *to,
+                _ => true,
             };
-            (CompletedAction::Trash, ActionParams::Trash { source_label_id: source.clone() })
+            ActionParams::Spam { is_spam }
         }
-        MailOperation::PermanentDelete => (CompletedAction::PermanentDelete, ActionParams::None),
-        MailOperation::SetSpam { to } => {
-            (CompletedAction::Spam, ActionParams::Spam { is_spam: *to })
-        }
-        MailOperation::MoveToFolder { dest } => {
-            let CompensationContext::SourceFolder(source) = &resolved.compensation else {
-                panic!(
-                    "MoveToFolder requires CompensationContext::SourceFolder, got {:?}",
-                    resolved.compensation
-                );
+        CompletedAction::Trash => {
+            let source = match &plan.compensation {
+                CompensationContext::SourceFolder(s) => s.clone(),
+                CompensationContext::None => None,
             };
-            (
-                CompletedAction::MoveToFolder,
-                ActionParams::MoveToFolder {
-                    folder_id: dest.clone(),
-                    source_label_id: source.clone(),
-                },
-            )
+            ActionParams::Trash { source_label_id: source }
         }
-        MailOperation::AddLabel { label_id } => {
-            (CompletedAction::AddLabel, ActionParams::Label { label_id: label_id.clone() })
+        CompletedAction::MoveToFolder => {
+            let (folder_id, source_label_id) = match &plan.operations[0].2 {
+                MailOperation::MoveToFolder { dest, source } => {
+                    (dest.clone(), source.clone())
+                }
+                _ => (FolderId::from(""), None),
+            };
+            ActionParams::MoveToFolder { folder_id, source_label_id }
         }
-        MailOperation::RemoveLabel { label_id } => {
-            (CompletedAction::RemoveLabel, ActionParams::Label { label_id: label_id.clone() })
+        CompletedAction::AddLabel | CompletedAction::RemoveLabel => {
+            let label_id = match &plan.operations[0].2 {
+                MailOperation::AddLabel { label_id } | MailOperation::RemoveLabel { label_id } => {
+                    label_id.clone()
+                }
+                _ => TagId::from(""),
+            };
+            ActionParams::Label { label_id }
         }
-        MailOperation::Snooze { until } => {
-            (CompletedAction::Snooze, ActionParams::Snooze { until: *until })
+        CompletedAction::Snooze => {
+            let until = match &plan.operations[0].2 {
+                MailOperation::Snooze { until } => *until,
+                _ => 0,
+            };
+            ActionParams::Snooze { until }
         }
-        // Toggles require per-thread state and go through the optimistic path.
-        // resolve_intent returns None for toggles, so this is unreachable.
-        MailOperation::SetStarred { .. }
-        | MailOperation::SetRead { .. }
-        | MailOperation::SetPinned { .. }
-        | MailOperation::SetMuted { .. } => {
-            unreachable!("toggle operations must not reach resolved_to_legacy — they are handled by the optimistic toggle path before resolve_intent is called")
-        }
+        _ => ActionParams::None,
     }
 }

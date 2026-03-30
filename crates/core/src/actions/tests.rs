@@ -225,9 +225,10 @@ async fn trash_local_removes_inbox_adds_trash() {
 #[tokio::test]
 async fn archive_without_account_returns_local_only() {
     let (ctx, _tmp) = make_test_ctx();
-    // No account in DB → create_provider fails → LocalOnly
+    // No account/thread in DB → archive_local finds no INBOX label → NoOp,
+    // or Failed if DB error. Either way, not a successful action.
     let outcome = super::archive::archive(&ctx, "nonexistent", "t1").await;
-    assert!(outcome.is_local_only());
+    assert!(outcome.is_noop() || outcome.is_failed(), "expected NoOp or Failed, got {outcome:?}");
 }
 
 #[tokio::test]
@@ -402,10 +403,9 @@ async fn batch_pin_is_local_only_success() {
 
     let outcomes = super::batch::batch_execute(
         &ctx,
-        super::batch::BatchAction::Pin { pinned: true },
         vec![
-            ("acc1".to_string(), "t1".to_string()),
-            ("acc1".to_string(), "t2".to_string()),
+            ("acc1".to_string(), "t1".to_string(), super::MailOperation::SetPinned { to: true }),
+            ("acc1".to_string(), "t2".to_string(), super::MailOperation::SetPinned { to: true }),
         ],
     )
     .await;
@@ -427,11 +427,10 @@ async fn batch_preserves_target_order() {
     // Mixed accounts — outcomes should be in same order as targets
     let outcomes = super::batch::batch_execute(
         &ctx,
-        super::batch::BatchAction::Pin { pinned: true },
         vec![
-            ("acc1".to_string(), "t1".to_string()),
-            ("acc2".to_string(), "t2".to_string()),
-            ("acc1".to_string(), "t3".to_string()),
+            ("acc1".to_string(), "t1".to_string(), super::MailOperation::SetPinned { to: true }),
+            ("acc2".to_string(), "t2".to_string(), super::MailOperation::SetPinned { to: true }),
+            ("acc1".to_string(), "t3".to_string(), super::MailOperation::SetPinned { to: true }),
         ],
     )
     .await;
@@ -448,10 +447,9 @@ async fn batch_archive_without_accounts_returns_local_only() {
 
     let outcomes = super::batch::batch_execute(
         &ctx,
-        super::batch::BatchAction::Archive,
         vec![
-            ("nonexistent".to_string(), "t1".to_string()),
-            ("nonexistent".to_string(), "t2".to_string()),
+            ("nonexistent".to_string(), "t1".to_string(), super::MailOperation::Archive),
+            ("nonexistent".to_string(), "t2".to_string(), super::MailOperation::Archive),
         ],
     )
     .await;
@@ -475,10 +473,9 @@ async fn batch_respects_flight_guard() {
 
     let outcomes = super::batch::batch_execute(
         &ctx,
-        super::batch::BatchAction::Pin { pinned: true },
         vec![
-            ("acc1".to_string(), "t1".to_string()),
-            ("acc1".to_string(), "t2".to_string()),
+            ("acc1".to_string(), "t1".to_string(), super::MailOperation::SetPinned { to: true }),
+            ("acc1".to_string(), "t2".to_string(), super::MailOperation::SetPinned { to: true }),
         ],
     )
     .await;

@@ -6,84 +6,53 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use ratatoskr_provider_utils::ops::ProviderOps;
-use ratatoskr_provider_utils::typed_ids::{FolderId, TagId};
 
 use super::context::ActionContext;
 use super::log::MutationLog;
+use super::operation::MailOperation;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
 use super::{archive, label, mark_read, move_to_folder, mute, permanent_delete, pin, snooze, spam, star, trash};
 
-/// Classify a provider-creation error as permanent or potentially transient.
-///
-/// `create_provider` returns plain `String` errors. We classify known
-/// permanent patterns (unknown provider, account not found) so the batch
-/// executor doesn't spray the retry queue with unrecoverable ops.
-fn classify_provider_error(error: &str) -> RemoteFailureKind {
-    if error.starts_with("Unknown provider")
-        || error.contains("no rows returned")
-        || error.contains("QueryReturnedNoRows")
-    {
-        RemoteFailureKind::Permanent
-    } else {
-        RemoteFailureKind::Unknown
-    }
-}
-
-/// After this many consecutive retryable remote failures within one account
-/// group, remaining threads are short-circuited (local-only + enqueue).
+/// Maximum consecutive remote failures before short-circuiting to degraded mode.
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 
-/// Action + parameters for a batch operation.
-/// All threads in the batch get the same action.
-#[derive(Debug, Clone)]
-pub enum BatchAction {
-    Archive,
-    Trash,
-    Spam { is_spam: bool },
-    MoveToFolder { folder_id: FolderId, source_label_id: Option<FolderId> },
-    Star { starred: bool },
-    MarkRead { read: bool },
-    PermanentDelete,
-    AddLabel { label_id: TagId },
-    RemoveLabel { label_id: TagId },
-    Pin { pinned: bool },
-    Mute { muted: bool },
-    Snooze { until: i64 },
-}
-
-/// Execute a batch action across multiple threads.
+/// Execute operations across multiple threads.
 ///
-/// Groups targets by account, creates one provider per account, and
-/// dispatches sequentially within each account. Accounts run in parallel.
-/// Returns outcomes in the same order as `targets`.
+/// Each entry is `(account_id, thread_id, operation)` — per-target operations
+/// support mixed-value toggles and heterogeneous batches.
+///
+/// Groups by account, creates one provider per account, dispatches sequentially
+/// within each account. Accounts run in parallel.
+///
+/// **Outcome ordering:** `outcomes[i]` corresponds to `operations[i]` regardless
+/// of internal regrouping. All undo/rollback bookkeeping must key off original
+/// operation order.
 pub async fn batch_execute(
     ctx: &ActionContext,
-    action: BatchAction,
-    targets: Vec<(String, String)>,
+    operations: Vec<(String, String, MailOperation)>,
 ) -> Vec<ActionOutcome> {
     let started = Instant::now();
-    let total = targets.len();
+    let total = operations.len();
 
     // Group by account, preserving original indices
-    let mut groups: HashMap<String, Vec<(usize, String)>> = HashMap::new();
-    for (i, (account_id, thread_id)) in targets.iter().enumerate() {
+    let mut groups: HashMap<String, Vec<(usize, String, MailOperation)>> = HashMap::new();
+    for (i, (account_id, thread_id, op)) in operations.iter().enumerate() {
         groups
             .entry(account_id.clone())
             .or_default()
-            .push((i, thread_id.clone()));
+            .push((i, thread_id.clone(), op.clone()));
     }
     let account_count = groups.len();
 
     // Dispatch per-account groups in parallel
     let account_futures: Vec<_> = groups
         .into_iter()
-        .map(|(account_id, thread_indices)| {
+        .map(|(account_id, thread_ops)| {
             let ctx = ctx.clone();
-            let action = action.clone();
             async move {
-                execute_account_group(&ctx, &action, &account_id, thread_indices).await
+                execute_account_group(&ctx, &account_id, thread_ops).await
             }
         })
         .collect();
@@ -107,9 +76,8 @@ pub async fn batch_execute(
     let local_only = outcomes.iter().filter(|o| o.is_local_only()).count();
     let failed = outcomes.iter().filter(|o| o.is_failed()).count();
     let elapsed = started.elapsed().as_millis();
-    let name = action_name(&action);
     log::info!(
-        "[action-batch] {name} | {total} threads / {account_count} accounts | \
+        "[action-batch] {total} ops / {account_count} accounts | \
          {success} ok, {local_only} local-only, {failed} failed | {elapsed}ms"
     );
 
@@ -119,15 +87,16 @@ pub async fn batch_execute(
 /// Execute one account's thread group.
 async fn execute_account_group(
     ctx: &ActionContext,
-    action: &BatchAction,
     account_id: &str,
-    thread_indices: Vec<(usize, String)>,
+    thread_ops: Vec<(usize, String, MailOperation)>,
 ) -> Vec<(usize, ActionOutcome)> {
-    let mut results = Vec::with_capacity(thread_indices.len());
+    let mut results = Vec::with_capacity(thread_ops.len());
 
-    // Pin/mute/snooze are local-only — no provider needed, still guarded
-    if matches!(action, BatchAction::Pin { .. } | BatchAction::Mute { .. } | BatchAction::Snooze { .. }) {
-        for (idx, thread_id) in thread_indices {
+    // Check if ALL operations are local-only (pin/mute/snooze)
+    let all_local_only = thread_ops.iter().all(|(_, _, op)| is_local_only(op));
+
+    if all_local_only {
+        for (idx, thread_id, op) in thread_ops {
             let _guard = match ctx.try_acquire_flight(account_id, &thread_id) {
                 Some(g) => g,
                 None => {
@@ -137,9 +106,8 @@ async fn execute_account_group(
                     continue;
                 }
             };
-            let outcome = dispatch_local_only(ctx, action, account_id, &thread_id).await;
+            let outcome = dispatch_local_only(ctx, &op, account_id, &thread_id).await;
             results.push((idx, outcome));
-            // _guard dropped here — key removed
         }
         return results;
     }
@@ -149,15 +117,14 @@ async fn execute_account_group(
         Ok(p) => p,
         Err(e) => {
             let kind = classify_provider_error(&e);
-            return degraded_fallback(ctx, action, account_id, &e, kind, thread_indices).await;
+            return degraded_fallback(ctx, account_id, &e, kind, thread_ops).await;
         }
     };
 
     // Dispatch sequentially with short-circuit on consecutive failures
     let mut consecutive_remote_failures: u32 = 0;
 
-    for (idx, thread_id) in &thread_indices {
-        // Scoped in-flight guard — released on drop (end of iteration or continue)
+    for (idx, thread_id, op) in &thread_ops {
         let _guard = match ctx.try_acquire_flight(account_id, thread_id) {
             Some(g) => g,
             None => {
@@ -170,12 +137,12 @@ async fn execute_account_group(
 
         let outcome = if consecutive_remote_failures >= MAX_CONSECUTIVE_FAILURES {
             handle_thread_degraded(
-                ctx, action, account_id, thread_id,
+                ctx, op, account_id, thread_id,
                 "provider presumed unavailable after consecutive failures",
                 RemoteFailureKind::Unknown,
             ).await
         } else {
-            let o = dispatch_with_provider(ctx, &*provider, action, account_id, thread_id).await;
+            let o = dispatch_with_provider(ctx, &*provider, op, account_id, thread_id).await;
             if let ActionOutcome::LocalOnly { reason, .. } = &o {
                 if reason.is_retryable() {
                     consecutive_remote_failures += 1;
@@ -189,24 +156,21 @@ async fn execute_account_group(
         };
 
         results.push((*idx, outcome));
-        // _guard dropped here — key removed
     }
 
     results
 }
 
 /// Degraded fallback when provider creation fails.
-/// Each thread gets its own _local call, per-thread outcome, and flight guard.
 async fn degraded_fallback(
     ctx: &ActionContext,
-    action: &BatchAction,
     account_id: &str,
     provider_error: &str,
     error_kind: RemoteFailureKind,
-    thread_indices: Vec<(usize, String)>,
+    thread_ops: Vec<(usize, String, MailOperation)>,
 ) -> Vec<(usize, ActionOutcome)> {
-    let mut results = Vec::with_capacity(thread_indices.len());
-    for (idx, thread_id) in thread_indices {
+    let mut results = Vec::with_capacity(thread_ops.len());
+    for (idx, thread_id, op) in thread_ops {
         let _guard = match ctx.try_acquire_flight(account_id, &thread_id) {
             Some(g) => g,
             None => {
@@ -217,27 +181,25 @@ async fn degraded_fallback(
             }
         };
         let outcome =
-            handle_thread_degraded(ctx, action, account_id, &thread_id, provider_error, error_kind).await;
+            handle_thread_degraded(ctx, &op, account_id, &thread_id, provider_error, error_kind).await;
         results.push((idx, outcome));
-        // _guard dropped — key removed
     }
     results
 }
 
-/// Handle a single thread in degraded mode: apply _local, return per-thread
-/// outcome with MutationLog, enqueue only if the error is retryable.
+/// Handle a single thread in degraded mode.
 async fn handle_thread_degraded(
     ctx: &ActionContext,
-    action: &BatchAction,
+    op: &MailOperation,
     account_id: &str,
     thread_id: &str,
     provider_error: &str,
     error_kind: RemoteFailureKind,
 ) -> ActionOutcome {
-    let name = action_name(action);
+    let name = op_name(op);
     let mlog = MutationLog::begin(name, account_id, thread_id);
 
-    match action_local(ctx, action, account_id, thread_id).await {
+    match op_local(ctx, op, account_id, thread_id).await {
         Ok(false) => {
             let outcome = ActionOutcome::NoOp;
             mlog.emit(&outcome);
@@ -252,7 +214,7 @@ async fn handle_thread_degraded(
                 reason: ActionError::remote_with_kind(error_kind, provider_error),
                 retryable,
             };
-            let (op_type, params_json) = enqueue_params(action);
+            let (op_type, params_json) = enqueue_params(op);
             enqueue_if_retryable(ctx, &outcome, account_id, op_type, thread_id, &params_json).await;
             mlog.emit(&outcome);
             outcome
@@ -265,80 +227,80 @@ async fn handle_thread_degraded(
     }
 }
 
-// ── Action-specific routing ─────────────────────────────────────────
+// ── Operation-specific routing ────────────────────────────────────
+
+fn is_local_only(op: &MailOperation) -> bool {
+    matches!(op, MailOperation::SetPinned { .. } | MailOperation::SetMuted { .. } | MailOperation::Snooze { .. })
+}
 
 /// Route to the correct `_with_provider` function.
 async fn dispatch_with_provider(
     ctx: &ActionContext,
     provider: &dyn ProviderOps,
-    action: &BatchAction,
+    op: &MailOperation,
     account_id: &str,
     thread_id: &str,
 ) -> ActionOutcome {
-    match action {
-        BatchAction::Archive => {
+    match op {
+        MailOperation::Archive => {
             archive::archive_with_provider(ctx, provider, account_id, thread_id).await
         }
-        BatchAction::Trash => {
+        MailOperation::Trash => {
             trash::trash_with_provider(ctx, provider, account_id, thread_id).await
         }
-        BatchAction::Spam { is_spam } => {
-            spam::spam_with_provider(ctx, provider, account_id, thread_id, *is_spam).await
+        MailOperation::SetSpam { to } => {
+            spam::spam_with_provider(ctx, provider, account_id, thread_id, *to).await
         }
-        BatchAction::MoveToFolder { folder_id, source_label_id } => {
+        MailOperation::MoveToFolder { dest, source } => {
             move_to_folder::move_to_folder_with_provider(
-                ctx, provider, account_id, thread_id, folder_id, source_label_id.as_ref(),
+                ctx, provider, account_id, thread_id, dest, source.as_ref(),
             ).await
         }
-        BatchAction::Star { starred } => {
-            star::star_with_provider(ctx, provider, account_id, thread_id, *starred).await
+        MailOperation::SetStarred { to } => {
+            star::star_with_provider(ctx, provider, account_id, thread_id, *to).await
         }
-        BatchAction::MarkRead { read } => {
-            mark_read::mark_read_with_provider(ctx, provider, account_id, thread_id, *read).await
+        MailOperation::SetRead { to } => {
+            mark_read::mark_read_with_provider(ctx, provider, account_id, thread_id, *to).await
         }
-        BatchAction::PermanentDelete => {
+        MailOperation::PermanentDelete => {
             permanent_delete::permanent_delete_with_provider(ctx, provider, account_id, thread_id).await
         }
-        BatchAction::AddLabel { label_id } => {
+        MailOperation::AddLabel { label_id } => {
             label::add_label_with_provider(ctx, provider, account_id, thread_id, label_id).await
         }
-        BatchAction::RemoveLabel { label_id } => {
+        MailOperation::RemoveLabel { label_id } => {
             label::remove_label_with_provider(ctx, provider, account_id, thread_id, label_id).await
         }
-        BatchAction::Pin { .. } | BatchAction::Mute { .. } | BatchAction::Snooze { .. } => {
+        MailOperation::SetPinned { .. } | MailOperation::SetMuted { .. } | MailOperation::Snooze { .. } => {
             unreachable!("local-only actions don't use provider dispatch")
         }
     }
 }
 
 /// Route to the correct `_local` function for degraded/short-circuit paths.
-///
-/// Returns `Ok(true)` when the local mutation changed something, `Ok(false)`
-/// when it was a no-op (e.g. already archived). The caller maps `false` to
-/// `ActionOutcome::NoOp` instead of `ActionOutcome::LocalOnly`.
-async fn action_local(
+async fn op_local(
     ctx: &ActionContext,
-    action: &BatchAction,
+    op: &MailOperation,
     account_id: &str,
     thread_id: &str,
 ) -> Result<bool, ActionError> {
-    match action {
-        BatchAction::Archive => archive::archive_local(ctx, account_id, thread_id).await,
-        BatchAction::Trash => trash::trash_local(ctx, account_id, thread_id).await.map(|()| true),
-        BatchAction::Spam { is_spam } => spam::spam_local(ctx, account_id, thread_id, *is_spam).await.map(|()| true),
-        BatchAction::MoveToFolder { folder_id, source_label_id } => {
-            move_to_folder::move_local(ctx, account_id, thread_id, folder_id, source_label_id.as_ref()).await.map(|()| true)
+    match op {
+        MailOperation::Archive => archive::archive_local(ctx, account_id, thread_id).await,
+        MailOperation::Trash => trash::trash_local(ctx, account_id, thread_id).await.map(|()| true),
+        MailOperation::SetSpam { to } => spam::spam_local(ctx, account_id, thread_id, *to).await.map(|()| true),
+        MailOperation::MoveToFolder { dest, source } => {
+            move_to_folder::move_local(ctx, account_id, thread_id, dest, source.as_ref()).await.map(|()| true)
         }
-        BatchAction::Star { starred } => star::star_local(ctx, account_id, thread_id, *starred).await,
-        BatchAction::MarkRead { read } => mark_read::mark_read_local(ctx, account_id, thread_id, *read).await.map(|()| true),
-        BatchAction::PermanentDelete => permanent_delete::permanent_delete_local(ctx, account_id, thread_id).await.map(|()| true),
-        BatchAction::AddLabel { label_id } => {
+        MailOperation::SetStarred { to } => star::star_local(ctx, account_id, thread_id, *to).await,
+        MailOperation::SetRead { to } => mark_read::mark_read_local(ctx, account_id, thread_id, *to).await.map(|()| true),
+        MailOperation::PermanentDelete => permanent_delete::permanent_delete_local(ctx, account_id, thread_id).await.map(|()| true),
+        MailOperation::AddLabel { label_id } => {
             label::add_label_local(ctx, account_id, thread_id, label_id).await.map(|()| true)
         }
-        BatchAction::RemoveLabel { label_id } => {
+        MailOperation::RemoveLabel { label_id } => {
             label::remove_label_local(ctx, account_id, thread_id, label_id).await.map(|()| true)
         }
-        BatchAction::Pin { .. } | BatchAction::Mute { .. } | BatchAction::Snooze { .. } => {
+        MailOperation::SetPinned { .. } | MailOperation::SetMuted { .. } | MailOperation::Snooze { .. } => {
             unreachable!("local-only actions use direct dispatch")
         }
     }
@@ -347,57 +309,71 @@ async fn action_local(
 /// Dispatch a local-only action (pin/mute/snooze).
 async fn dispatch_local_only(
     ctx: &ActionContext,
-    action: &BatchAction,
+    op: &MailOperation,
     account_id: &str,
     thread_id: &str,
 ) -> ActionOutcome {
-    match action {
-        BatchAction::Pin { pinned } => pin::pin(ctx, account_id, thread_id, *pinned).await,
-        BatchAction::Mute { muted } => mute::mute(ctx, account_id, thread_id, *muted).await,
-        BatchAction::Snooze { until } => snooze::snooze(ctx, account_id, thread_id, *until).await,
+    match op {
+        MailOperation::SetPinned { to } => pin::pin(ctx, account_id, thread_id, *to).await,
+        MailOperation::SetMuted { to } => mute::mute(ctx, account_id, thread_id, *to).await,
+        MailOperation::Snooze { until } => snooze::snooze(ctx, account_id, thread_id, *until).await,
         _ => unreachable!("only pin/mute/snooze are local-only"),
     }
 }
 
 /// Derive `(operation_type, params_json)` for pending-ops enqueue.
-fn enqueue_params(action: &BatchAction) -> (&'static str, String) {
-    match action {
-        BatchAction::Archive => ("archive", "{}".to_string()),
-        BatchAction::Trash => ("trash", "{}".to_string()),
-        BatchAction::Spam { is_spam } => ("spam", format!(r#"{{"isSpam":{is_spam}}}"#)),
-        BatchAction::MoveToFolder { folder_id, source_label_id } => (
+fn enqueue_params(op: &MailOperation) -> (&'static str, String) {
+    match op {
+        MailOperation::Archive => ("archive", "{}".to_string()),
+        MailOperation::Trash => ("trash", "{}".to_string()),
+        MailOperation::SetSpam { to } => ("spam", format!(r#"{{"isSpam":{to}}}"#)),
+        MailOperation::MoveToFolder { dest, source } => (
             "moveToFolder",
-            serde_json::json!({"folderId": folder_id, "sourceLabelId": source_label_id}).to_string(),
+            serde_json::json!({"folderId": dest, "sourceLabelId": source}).to_string(),
         ),
-        BatchAction::Star { starred } => ("star", format!(r#"{{"starred":{starred}}}"#)),
-        BatchAction::MarkRead { read } => ("markRead", format!(r#"{{"read":{read}}}"#)),
-        BatchAction::PermanentDelete => ("permanentDelete", "{}".to_string()),
-        BatchAction::AddLabel { label_id } => {
+        MailOperation::SetStarred { to } => ("star", format!(r#"{{"starred":{to}}}"#)),
+        MailOperation::SetRead { to } => ("markRead", format!(r#"{{"read":{to}}}"#)),
+        MailOperation::PermanentDelete => ("permanentDelete", "{}".to_string()),
+        MailOperation::AddLabel { label_id } => {
             ("addLabel", serde_json::json!({"labelId": label_id}).to_string())
         }
-        BatchAction::RemoveLabel { label_id } => {
+        MailOperation::RemoveLabel { label_id } => {
             ("removeLabel", serde_json::json!({"labelId": label_id}).to_string())
         }
-        BatchAction::Pin { .. } | BatchAction::Mute { .. } | BatchAction::Snooze { .. } => {
+        MailOperation::SetPinned { .. } | MailOperation::SetMuted { .. } | MailOperation::Snooze { .. } => {
             unreachable!("local-only actions don't enqueue")
         }
     }
 }
 
-/// Human-readable action name for logging.
-fn action_name(action: &BatchAction) -> &'static str {
-    match action {
-        BatchAction::Archive => "archive",
-        BatchAction::Trash => "trash",
-        BatchAction::Spam { .. } => "spam",
-        BatchAction::MoveToFolder { .. } => "move_to_folder",
-        BatchAction::Star { .. } => "star",
-        BatchAction::MarkRead { .. } => "mark_read",
-        BatchAction::PermanentDelete => "permanent_delete",
-        BatchAction::AddLabel { .. } => "add_label",
-        BatchAction::RemoveLabel { .. } => "remove_label",
-        BatchAction::Pin { .. } => "pin",
-        BatchAction::Mute { .. } => "mute",
-        BatchAction::Snooze { .. } => "snooze",
+/// Human-readable operation name for logging.
+fn op_name(op: &MailOperation) -> &'static str {
+    match op {
+        MailOperation::Archive => "archive",
+        MailOperation::Trash => "trash",
+        MailOperation::SetSpam { .. } => "spam",
+        MailOperation::MoveToFolder { .. } => "move_to_folder",
+        MailOperation::SetStarred { .. } => "star",
+        MailOperation::SetRead { .. } => "mark_read",
+        MailOperation::PermanentDelete => "permanent_delete",
+        MailOperation::AddLabel { .. } => "add_label",
+        MailOperation::RemoveLabel { .. } => "remove_label",
+        MailOperation::SetPinned { .. } => "pin",
+        MailOperation::SetMuted { .. } => "mute",
+        MailOperation::Snooze { .. } => "snooze",
+    }
+}
+
+/// Classify a provider creation error for retry policy.
+fn classify_provider_error(error: &str) -> RemoteFailureKind {
+    let lower = error.to_lowercase();
+    if lower.contains("timeout")
+        || lower.contains("connection refused")
+        || lower.contains("dns")
+        || lower.contains("network")
+    {
+        RemoteFailureKind::Transient
+    } else {
+        RemoteFailureKind::Unknown
     }
 }

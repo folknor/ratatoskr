@@ -25,7 +25,7 @@ pub enum MailOperation {
     SetRead { to: bool },
     SetPinned { to: bool },
     SetMuted { to: bool },
-    MoveToFolder { dest: FolderId },
+    MoveToFolder { dest: FolderId, source: Option<FolderId> },
     AddLabel { label_id: TagId },
     RemoveLabel { label_id: TagId },
     Snooze { until: i64 },

@@ -30,7 +30,7 @@ mod star;
 mod trash;
 
 pub use archive::archive;
-pub use batch::{BatchAction, batch_execute};
+pub use batch::batch_execute;
 pub use context::ActionContext;
 pub use folder::{create_folder, delete_folder, rename_folder};
 pub use ratatoskr_provider_utils::types::ProviderFolderMutation;

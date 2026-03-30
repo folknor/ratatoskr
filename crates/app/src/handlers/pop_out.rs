@@ -642,20 +642,31 @@ impl App {
             return Task::none();
         };
         let threads = vec![(state.account_id.clone(), state.thread_id.clone())];
-        let source_label_id = state.source_label_id.clone()
-            .map(ratatoskr_core::actions::FolderId::from);
+        let source_label_id = state.source_label_id.clone();
         state.overflow_menu_open = false;
-        // Drop the borrow on self.pop_out_windows before calling dispatch.
         drop(state);
 
-        match action {
-            crate::CompletedAction::Trash => self.dispatch_action_service_with_params(
-                action,
-                &threads,
-                &super::commands::ActionParams::Trash { source_label_id },
-            ),
-            _ => self.dispatch_action_service(action, &threads),
-        }
+        // I5: pop-out only reaches Archive/Trash/PermanentDelete — no optimistic toggles.
+        use crate::action_resolve::{self as ar, MailActionIntent, UiContext};
+        let intent = match action {
+            crate::CompletedAction::Archive => MailActionIntent::Archive,
+            crate::CompletedAction::Trash => MailActionIntent::Trash,
+            crate::CompletedAction::PermanentDelete => MailActionIntent::PermanentDelete,
+            other => {
+                log::error!("dispatch_pop_out_action: unexpected action {other:?}");
+                return Task::none();
+            }
+        };
+        let ui_ctx = UiContext { selected_label: source_label_id };
+        let outcome = ar::resolve_intent(intent, &ui_ctx);
+        let Some(plan) = ar::build_execution_plan(
+            outcome,
+            &threads,
+            &mut self.thread_list,
+        ) else {
+            return Task::none();
+        };
+        self.dispatch_plan(plan)
     }
 
     /// Handle Save As action from the overflow menu.
