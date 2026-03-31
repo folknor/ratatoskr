@@ -166,16 +166,16 @@ CREATE TABLE IF NOT EXISTS thread_labels (
 );
 CREATE INDEX IF NOT EXISTS idx_thread_labels_label ON thread_labels(account_id, label_id);
 
-CREATE TABLE IF NOT EXISTS thread_categories (
+CREATE TABLE IF NOT EXISTS thread_bundles (
     account_id TEXT NOT NULL,
     thread_id TEXT NOT NULL,
-    category TEXT NOT NULL,
+    bundle TEXT NOT NULL,
     is_manual INTEGER DEFAULT 0,
     created_at INTEGER DEFAULT (unixepoch()),
     PRIMARY KEY (account_id, thread_id),
     FOREIGN KEY (account_id, thread_id) REFERENCES threads(account_id, id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_thread_categories_cat ON thread_categories(account_id, category);
+CREATE INDEX IF NOT EXISTS idx_thread_bundles ON thread_bundles(account_id, bundle);
 
 -- ── Messages ────────────────────────────────────────────────
 
@@ -762,20 +762,20 @@ CREATE INDEX IF NOT EXISTS idx_unsub_account ON unsubscribe_actions(account_id, 
 CREATE TABLE IF NOT EXISTS bundle_rules (
     id TEXT PRIMARY KEY,
     account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    category TEXT NOT NULL,
+    bundle TEXT NOT NULL,
     is_bundled INTEGER DEFAULT 1,
     delivery_enabled INTEGER DEFAULT 0,
     delivery_schedule TEXT,
     last_delivered_at INTEGER,
     created_at INTEGER DEFAULT (unixepoch()),
-    UNIQUE(account_id, category)
+    UNIQUE(account_id, bundle)
 );
 CREATE INDEX IF NOT EXISTS idx_bundle_rules_account ON bundle_rules(account_id);
 
 CREATE TABLE IF NOT EXISTS bundled_threads (
     account_id TEXT NOT NULL,
     thread_id TEXT NOT NULL,
-    category TEXT NOT NULL,
+    bundle TEXT NOT NULL,
     held_until INTEGER,
     PRIMARY KEY (account_id, thread_id),
     FOREIGN KEY (account_id, thread_id) REFERENCES threads(account_id, id) ON DELETE CASCADE

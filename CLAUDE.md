@@ -8,9 +8,11 @@ Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 - **`app`** (`crates/app/`) — iced UI app. Elm architecture (boot/update/view). All UI conventions are in `UI.md` at the repo root — **read UI.md before any UI work.**
 - **`squeeze`** (`crates/squeeze/`) — Attachment compression (CLI + library). Images (mozjpeg-rs + oxipng), PDFs (lopdf), OOXML/ODF.
 - **`store`** (`crates/stores/`) — Content stores: email body store (compressed), inline image store, attachment file cache.
-- **`sync`** (`crates/sync/`) — Sync pipeline, threading (JWZ), categorization, filters, smart labels.
+- **`sync`** (`crates/sync/`) — Sync pipeline, threading (JWZ), bundling (AI inbox classification), filters, smart labels.
 - **`provider`** (`crates/common/`) — Shared provider helpers, encryption (AES-256-GCM), email parsing, HTML sanitization.
-- **`label-colors`** (`crates/label-colors/`) — Label color resolution + Exchange category color presets.
+- **`label-colors`** (`crates/label-colors/`) — Label color resolution + Exchange preset color palette.
+- **`types`** (`crates/types/`) — Lightweight shared types (`FolderId`, `TagId`, `SidebarSelection`). Minimal deps (serde only).
+- **`dev-seed`** (`crates/dev-seed/`) — Deterministic test database generator. See dev-seed section below.
 - **Providers**: `gmail`, `jmap`, `graph`, `imap` — each in `crates/{name}/`.
 
 ## Commands
@@ -21,6 +23,10 @@ Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 - `cargo run -p app` — run the iced app (requires a seeded DB, see `crates/app/seed-db.py`)
 - `cargo check -p squeeze` — check squeeze only
 - `cargo test -p squeeze` — run squeeze tests
+
+## Dev-Seed
+
+`crates/dev-seed/` generates a deterministic test database from scratch. Config lives in `dev-seed.toml` at the repo root (thread count, account count, locale, RNG seed). When the app is built with `--features dev-seed`, it **wipes the entire dev data directory and re-seeds on every launch** — there is no persistence between runs. Schema comes from `crates/db/src/db/migrations.rs` (a single v100 migration). Dev-seed does not use DB migrations for schema changes — just update the CREATE TABLE in migrations.rs and re-run.
 
 ## Crate Architecture
 

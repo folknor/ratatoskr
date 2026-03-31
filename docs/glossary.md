@@ -213,4 +213,4 @@ This is not urgent but should happen before 1.0. Each is independent:
 - [x] ~~Drop `categories` and `message_categories` tables~~ (labels unification Phase 6). *(2026-03-24)*
 - [x] ~~Rename `category_sync.rs` → `label_sync.rs` in the graph crate.~~ Renamed `graph_categories_sync` → `graph_label_sync`. File retains old name for now. *(2026-03-24)*
 - [x] ~~Rename `categorization.rs` → `bundling.rs`, `bundles_categories.rs` → `bundles.rs`, `category_colors.rs` → `preset_colors.rs`.~~ Also renamed `ThreadCategory` → `ThreadBundle`, `CATEGORY_PRIMARY` → `BUNDLE_PRIMARY`, `ViewType::Category` → `ViewType::Bundle`, and all related function/type names. *(2026-03-31)*
-- [ ] Rename `thread_categories` table → `thread_bundles` and `category` column → `bundle` in DB schema + SQL strings (dev-seed + migrations).
+- [x] ~~Rename `thread_categories` table → `thread_bundles` and `category` column → `bundle` in DB schema, SQL strings, and struct fields.~~ Also renamed `bundle_rules.category` → `bundle_rules.bundle`, `bundled_threads.category` → `bundled_threads.bundle`. *(2026-03-31)*

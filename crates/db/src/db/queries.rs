@@ -44,7 +44,7 @@ pub fn load_recent_rule_bundled_threads(
         "SELECT t.id, t.subject, t.snippet, m.from_address
          FROM threads t
          INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-         INNER JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
+         INNER JOIN thread_bundles tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
          LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
          ) m ON m.account_id = t.account_id AND m.thread_id = t.id
          WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.is_manual = 0

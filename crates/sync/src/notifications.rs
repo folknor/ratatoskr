@@ -84,7 +84,7 @@ fn evaluate_notifications_sync(
 
     let vip_senders = load_vip_senders(conn, account_id)?;
     let muted_thread_ids = load_muted_thread_ids(conn, account_id, thread_ids)?;
-    let category_by_thread = load_thread_categories(conn, account_id, thread_ids)?;
+    let bundle_by_thread = load_thread_bundles(conn, account_id, thread_ids)?;
 
     let mut candidates = Vec::new();
     for msg in messages {
@@ -101,10 +101,10 @@ fn evaluate_notifications_sync(
             if vip_senders.contains(from_addr) {
                 true
             } else {
-                category_allowed(&category_by_thread, &msg.thread_id, &allowed_categories)
+                bundle_allowed(&bundle_by_thread, &msg.thread_id, &allowed_categories)
             }
         } else {
-            category_allowed(&category_by_thread, &msg.thread_id, &allowed_categories)
+            bundle_allowed(&bundle_by_thread, &msg.thread_id, &allowed_categories)
         };
 
         if should_notify {
@@ -120,12 +120,12 @@ fn evaluate_notifications_sync(
     Ok(candidates)
 }
 
-fn category_allowed(
-    category_by_thread: &HashMap<String, String>,
+fn bundle_allowed(
+    bundle_by_thread: &HashMap<String, String>,
     thread_id: &str,
     allowed: &HashSet<String>,
 ) -> bool {
-    let category = category_by_thread
+    let category = bundle_by_thread
         .get(thread_id)
         .map(String::as_str)
         .unwrap_or("Primary");
@@ -182,12 +182,12 @@ fn load_muted_thread_ids(
     Ok(rows.into_iter().collect())
 }
 
-fn load_thread_categories(
+fn load_thread_bundles(
     conn: &Connection,
     account_id: &str,
     thread_ids: &[String],
 ) -> Result<HashMap<String, String>, String> {
-    let mut category_by_thread = HashMap::new();
+    let mut bundle_by_thread = HashMap::new();
     for chunk in thread_ids.chunks(100) {
         if chunk.is_empty() {
             continue;
@@ -199,7 +199,7 @@ fn load_thread_categories(
             .collect::<Vec<_>>()
             .join(", ");
         let sql = format!(
-            "SELECT thread_id, category FROM thread_categories WHERE account_id = ?1 AND thread_id IN ({placeholders})"
+            "SELECT thread_id, bundle FROM thread_bundles WHERE account_id = ?1 AND thread_id IN ({placeholders})"
         );
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -219,7 +219,7 @@ fn load_thread_categories(
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
-        category_by_thread.extend(rows);
+        bundle_by_thread.extend(rows);
     }
-    Ok(category_by_thread)
+    Ok(bundle_by_thread)
 }

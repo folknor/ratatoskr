@@ -330,7 +330,7 @@ pub struct SortOrderItem {
 pub struct DbBundleRule {
     pub id: String,
     pub account_id: String,
-    pub category: String,
+    pub bundle: String,
     pub is_bundled: i64,
     pub delivery_enabled: i64,
     pub delivery_schedule: Option<String>,
@@ -341,13 +341,13 @@ pub struct DbBundleRule {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct BundleSummary {
-    pub category: String,
+    pub bundle: String,
     pub count: i64,
     pub latest_subject: Option<String>,
     pub latest_sender: Option<String>,
 }
 
-// ── Bundle Summary (single category) ───────────────────────
+// ── Bundle Summary (single bundle) ─────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -362,7 +362,7 @@ pub struct BundleSummarySingle {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadBundleWithManual {
-    pub category: String,
+    pub bundle: String,
     pub is_manual: bool,
 }
 

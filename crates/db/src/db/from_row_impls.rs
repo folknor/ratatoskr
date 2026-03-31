@@ -239,7 +239,7 @@ impl_from_row!(DbTaskTag {
 impl_from_row!(DbBundleRule {
     id,
     account_id,
-    category,
+    bundle,
     is_bundled,
     delivery_enabled,
     delivery_schedule,
@@ -544,7 +544,7 @@ impl_from_row!(FolderAccountUnreadCount {
 });
 
 impl_from_row!(ThreadBundleWithManual {
-    category,
+    bundle,
     bool is_manual,
 });
 

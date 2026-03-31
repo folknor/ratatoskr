@@ -190,7 +190,7 @@ pub fn get_threads(
     }
 }
 
-pub fn get_threads_for_category(
+pub fn get_threads_for_bundle(
     conn: &Connection,
     account_id: &str,
     category: &str,
@@ -204,11 +204,11 @@ pub fn get_threads_for_category(
         let sql = format!(
             "SELECT t.*, m.from_name, m.from_address FROM threads t
              INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-             LEFT JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
+             LEFT JOIN thread_bundles tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
              WHERE t.account_id = ?1 AND tl.label_id = 'INBOX'
-               AND (tc.category IS NULL OR tc.category = 'Primary')
+               AND (tc.bundle IS NULL OR tc.bundle = 'Primary')
                AND t.is_chat_thread = 0
              GROUP BY t.account_id, t.id
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
@@ -219,10 +219,10 @@ pub fn get_threads_for_category(
         let sql = format!(
             "SELECT t.*, m.from_name, m.from_address FROM threads t
              INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-             INNER JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
+             INNER JOIN thread_bundles tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
              LEFT JOIN ({LATEST_MESSAGE_SUBQUERY}
              ) m ON m.account_id = t.account_id AND m.thread_id = t.id
-             WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.category = ?2
+             WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND tc.bundle = ?2
                AND t.is_chat_thread = 0
              GROUP BY t.account_id, t.id
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
@@ -622,18 +622,18 @@ pub fn delete_label(conn: &Connection, account_id: &str, label_id: &str) -> Resu
     Ok(())
 }
 
-pub fn get_category_unread_counts(
+pub fn get_bundle_unread_counts(
     conn: &Connection,
     account_id: &str,
 ) -> Result<Vec<CategoryCount>, String> {
     query_as::<CategoryCount>(
         conn,
-        "SELECT tc.category, COUNT(*) as count
+        "SELECT tc.bundle, COUNT(*) as count
          FROM threads t
          INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
-         LEFT JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
+         LEFT JOIN thread_bundles tc ON tc.account_id = t.account_id AND tc.thread_id = t.id
          WHERE t.account_id = ?1 AND tl.label_id = 'INBOX' AND t.is_read = 0
-         GROUP BY tc.category",
+         GROUP BY tc.bundle",
         &[&account_id],
     )
 }
@@ -657,7 +657,7 @@ pub fn get_categories_for_threads(
             .join(", ");
 
         let sql = format!(
-            "SELECT thread_id, category FROM thread_categories WHERE account_id = ?1 AND thread_id IN ({placeholders})"
+            "SELECT thread_id, bundle FROM thread_bundles WHERE account_id = ?1 AND thread_id IN ({placeholders})"
         );
 
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
