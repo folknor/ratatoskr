@@ -12,7 +12,7 @@ When evaluating a design: if adding a new call site can silently break existing 
 
 **`rtsk`** is the facade. All business logic lives here — accounts, OAuth, discovery, email actions, DB queries, cloud attachments. The app crate calls core functions directly.
 
-**Provider crates** (`gmail`, `jmap`, `graph`, `imap`) each implement the `ProviderOps` trait (`provider-utils/src/ops.rs`). No provider-specific logic should leak into app or core beyond the trait surface.
+**Provider crates** (`gmail`, `jmap`, `graph`, `imap`) each implement the `ProviderOps` trait (`common/src/ops.rs`). No provider-specific logic should leak into app or core beyond the trait surface.
 
 **`store`** owns all content outside the main SQLite database: zstd-compressed body store (`bodies.db`), inline image store, attachment file cache. Never assume message content is in the main DB.
 
@@ -32,7 +32,7 @@ Every email state mutation (archive, delete, star, move, label, etc.) must flow 
 
 The four providers are unified behind `ProviderOps`. All provider-specific behavior is behind this trait — callers should never branch on provider type.
 
-**Enforcement:** `FolderId` and `TagId` newtypes in `crates/provider-utils/src/typed_ids.rs`. The `ProviderOps` trait uses `&FolderId` for `move_to_folder`, `rename_folder`, `delete_folder` and `&TagId` for `add_tag`, `remove_tag`. Passing a folder ID where a tag ID is expected is a compile error. Typed IDs flow from `MailActionIntent` through `MailOperation` through `batch_execute` to the provider — no raw string boundaries except JSON deserialization in `pending.rs` and `CommandArgs` in the palette crate.
+**Enforcement:** `FolderId` and `TagId` newtypes in `crates/common/src/typed_ids.rs`. The `ProviderOps` trait uses `&FolderId` for `move_to_folder`, `rename_folder`, `delete_folder` and `&TagId` for `add_tag`, `remove_tag`. Passing a folder ID where a tag ID is expected is a compile error. Typed IDs flow from `MailActionIntent` through `MailOperation` through `batch_execute` to the provider — no raw string boundaries except JSON deserialization in `pending.rs` and `CommandArgs` in the palette crate.
 
 ### Scope as a single source of truth
 

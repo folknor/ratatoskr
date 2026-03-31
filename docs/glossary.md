@@ -74,7 +74,7 @@ For **system folders** (Inbox, Trash, Spam, etc.), Ratatoskr defines its own can
 
 Every provider's inbox is stored with label ID `"INBOX"`, regardless of what the provider calls it natively. A Graph account's inbox (which has an opaque GUID on the server) is stored as `"INBOX"` in the local DB. This means `remove_label(conn, account_id, thread_id, "INBOX")` works for any provider.
 
-The normalization mapping lives in `SYSTEM_FOLDER_ROLES` (`crates/provider-utils/src/folder_roles.rs`).
+The normalization mapping lives in `SYSTEM_FOLDER_ROLES` (`crates/common/src/folder_roles.rs`).
 
 **Verified:** All four provider sync pipelines write canonical IDs for system folders:
 - **Gmail** — native IDs happen to match canonical (`"INBOX"`, `"TRASH"`, etc.). Written directly.

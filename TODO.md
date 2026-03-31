@@ -23,7 +23,7 @@
 
 - [ ] **Action service: native provider batching** *(Deferred — low ROI until bulk ops are common)* — `batch_execute` dispatches per-thread `MailOperation` sequentially within each account. Provider reuse per account already eliminated client construction overhead — remaining cost is network latency (one round-trip per thread). Native batching (Gmail batch API, Graph `/$batch`, JMAP `Email/set`, IMAP multi-UID STORE) would reduce 50 round-trips to 1-3 for bulk operations. `PartialEq` on `MailOperation` enables grouping identical operations; the executor contract already specifies regrouping semantics. Implementation deferred until bulk operations on 50+ threads become a real user workflow.
 
-- [ ] **Typed IDs: CommandArgs fields** — `CommandArgs::MoveToFolder { folder_id: String }`, `AddLabel { label_id: String }`, `RemoveLabel { label_id: String }` in `command-palette` are still raw strings. Wrapping happens at the `command_dispatch.rs` boundary (3 lines in `dispatch_parameterized`). The palette crate can't depend on `provider-utils` (pulls in reqwest, rusqlite, stores, search). Fix would require either extracting `FolderId`/`TagId` to a micro-crate or duplicating the newtypes in the palette crate.
+- [ ] **Typed IDs: CommandArgs fields** — `CommandArgs::MoveToFolder { folder_id: String }`, `AddLabel { label_id: String }`, `RemoveLabel { label_id: String }` in `cmdk` are still raw strings. Wrapping happens at the `command_dispatch.rs` boundary (3 lines in `dispatch_parameterized`). The palette crate can't depend on `common` (pulls in reqwest, rusqlite, stores, search). Fix would require either extracting `FolderId`/`TagId` to a micro-crate or duplicating the newtypes in the palette crate.
 - [ ] **Typed IDs: sidebar.selected_label** — `sidebar.selected_label: Option<String>` is wrapped to `FolderId` at call sites. 32 references across the app. The field is semantically ambiguous — it holds folder IDs for navigation (e.g., "INBOX", "TRASH") AND label IDs for tag highlighting. Typing it as `FolderId` would be wrong in label contexts; typing it as a union would add complexity. The root issue is that the sidebar conflates "which container am I viewing" with "which label is highlighted."
 - [ ] **First-launch modal not dismissible** — In zero-accounts state, cancel doesn't close the wizard. Spec says it should dismiss over an unusable empty app. Intentional safety measure or bug — decide and document.
 - [ ] **Default scope is first account, not All Accounts** — After account load, app selects first account instead of unified All Accounts inbox.
@@ -40,7 +40,7 @@
 
 - [ ] **`responsive` for adaptive layout** — Collapse panels at narrow window sizes.
 
-- [ ] **Keybinding management UI (Slice 6f)** — Settings panel for viewing, searching, and rebinding shortcuts. Backend ready (override persistence, conflict detection, set/unbind/reset APIs). See `docs/command-palette/app-integration-spec.md` § Slice 6f.
+- [ ] **Keybinding management UI (Slice 6f)** — Settings panel for viewing, searching, and rebinding shortcuts. Backend ready (override persistence, conflict detection, set/unbind/reset APIs). See `docs/cmdk/app-integration-spec.md` § Slice 6f.
 
 - [ ] **Restore OS-based theme and 1.0 scale** *(Deferred until 1.0)* — Revert to `"System"` theme, persist user prefs.
 

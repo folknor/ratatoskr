@@ -20,19 +20,19 @@ chrono.workspace = true
 #    "wgpu", "tokio", "lazy", "advanced", "canvas", "web-colors", "wayland", "x11", "image", "svg",
 #] }
 iced = { path = "/home/folk/Programs/sluggrs/repos/iced", default-features = false, features = [
-    "wgpu", "tokio", "lazy", "advanced", "canvas", "web-colors", "wayland", "x11", "image", "svg",
+    "wgpu", "tokio", "lazy", "advanced", "canvas", "web-colors", "wayland", "image", "svg",
 ] }
 dirs = "6"
 dissimilar.workspace = true
 ratatoskr-system-fonts = { path = "../system-fonts" }
-cmdk = { path = "../command-palette" }
+cmdk = { path = "../cmdk" }
 rtsk = { path = "../core" }
 ratatoskr-smart-folder = { path = "../smart-folder" }
 ratatoskr-label-colors = { path = "../label-colors" }
 iced-drop = { path = "../iced-drop" }
-rte = { path = "../rich-text-editor" }
+rte = { path = "../rte" }
 cal = { path = "../calendar" }
-import = { path = "../contact-import" }
+import = { path = "../import" }
 env_logger = "0.11"
 log = "0.4"
 uuid = { version = "1", features = ["v4"] }

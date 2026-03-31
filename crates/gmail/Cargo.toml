@@ -23,7 +23,7 @@ db = { path = "../db" }
 store = { path = "../stores" }
 search = { path = "../search" }
 ratatoskr-seen-addresses = { path = "../seen-addresses" }
-common = { path = "../provider-utils" }
+common = { path = "../common" }
 sync = { path = "../sync" }
 
 # Crate-specific deps

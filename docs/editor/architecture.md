@@ -10,7 +10,7 @@ only reference project that solves rendering + input on a declarative UI framewo
 without contentEditable). See `docs/editor/research-summary.md` for detailed
 analysis of all four.
 
-**Crate:** `crates/rich-text-editor/` — 14,300+ lines, 680+ tests, zero clippy
+**Crate:** `crates/rte/` — 14,300+ lines, 680+ tests, zero clippy
 warnings. Pure-Rust core modules (no iced dependency) + feature-gated widget.
 
 ---
@@ -469,7 +469,7 @@ Vertical scroll support with:
 ## Crate Structure
 
 ```
-crates/rich-text-editor/
+crates/rte/
   Cargo.toml
   src/
     lib.rs                    // re-exports + feature gate
@@ -595,7 +595,7 @@ sending `Action::Edit(EditAction::ToggleInlineStyle(...))` etc.
 | iced `widget/src/text/rich.rs` | `Paragraph::with_spans`, span→font mapping |
 | `crates/app/src/font.rs` | Font variants (text_bold, text_italic, etc.) |
 | `crates/app/src/ui/layout.rs` | Type scale and spacing constants |
-| `crates/provider-utils/src/html_sanitizer.rs` | Sanitizer pipeline — runs before html5ever parse |
+| `crates/common/src/html_sanitizer.rs` | Sanitizer pipeline — runs before html5ever parse |
 | research/frostmark `renderer.rs` | ChildData bitflags — adopted for html_parse.rs StyleContext |
 | research/halloy `selectable_rich_text.rs` | Selection math reference |
 | **Email rendering** | |

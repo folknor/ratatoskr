@@ -13,7 +13,7 @@ Phased implementation plan for the command palette backend. Each slice builds on
 - `CommandMatch` returned with `available: bool` (UI decides hide vs grey-out)
 - 18 unit tests
 
-**Files:** `crates/command-palette/src/` (`id.rs`, `context.rs`, `descriptor.rs`, `registry.rs`)
+**Files:** `crates/cmdk/src/` (`id.rs`, `context.rs`, `descriptor.rs`, `registry.rs`)
 
 ## Slice 2: Parameterized Commands — Input Schema & Resolver Trait ✅
 
@@ -23,7 +23,7 @@ This slice adds the typed input model and resolver trait. The four parameterized
 
 ### What was built
 
-**Command palette crate (`crates/command-palette/src/`):**
+**Command palette crate (`crates/cmdk/src/`):**
 - `input.rs` — `EnumOption` (value/label separation), `ParamDef` (ListPicker, DateTime, Enum, Text), `InputSchema` (Single, Sequence), `InputMode` (Direct, Parameterized) — all `Copy`, zero-allocation
 - `input.rs` — `OptionItem` (flat, allocating runtime data from DB), `OptionMatch` (scored), `search_options()` with nucleo-matcher (searches label + path + keywords)
 - `resolver.rs` — `CommandInputResolver` trait with sequence-aware `prior_selections: &[String]` on both `get_options()` and `validate_option()`
@@ -48,10 +48,10 @@ This slice adds the typed input model and resolver trait. The four parameterized
 ### Ownership boundary
 
 ```
-CommandRegistry (command-palette crate, static, immutable):
+CommandRegistry (cmdk crate, static, immutable):
   - CommandId, descriptors, availability, input schema declarations, search
 
-CommandInputResolver (command-palette crate trait, app-implemented, live state):
+CommandInputResolver (cmdk crate trait, app-implemented, live state):
   - Resolving dynamic options for ListPicker parameter steps
   - Validating selected values (any step type) against current state
   - Sequence-aware: prior_selections flows through both methods
@@ -76,7 +76,7 @@ App layer (crates/app/, iced Elm architecture):
 
 `NavigateToLabel` is a cross-account parameterized command: the resolver populates options from all accounts when in unified scope, with account name in `OptionItem.path` for disambiguation. This command is a prerequisite for the sidebar's unified view (see `docs/sidebar/problem-statement.md` and the "Cross-Account Label/Folder Disambiguation" section in the command palette problem statement). Additional parameterized commands (templates, filters, etc.) will be added incrementally.
 
-**Files:** `crates/command-palette/src/input.rs`, `crates/command-palette/src/resolver.rs`
+**Files:** `crates/cmdk/src/input.rs`, `crates/cmdk/src/resolver.rs`
 
 **Depends on:** Slice 1
 
@@ -88,7 +88,7 @@ This slice is backend-only — no user-visible behavior changes until slice 6 wi
 
 ### What was built
 
-**Command palette crate (`crates/command-palette/src/keybinding.rs`):**
+**Command palette crate (`crates/cmdk/src/keybinding.rs`):**
 - Structured keybinding model: `Key` (Char/Named), `NamedKey` (26 variants matching DOM `KeyboardEvent.key`), `Modifiers` (with `CmdOrCtrl` abstraction), `Chord` (key + modifiers), `KeyBinding` (single chord or two-chord sequence), `Platform` (Mac/Windows/Linux)
 - Const constructors: `KeyBinding::key('j')`, `::named(Escape)`, `::cmd_or_ctrl('a')`, `::cmd_or_ctrl_shift('e')`, `::seq('g', 'i')`
 - Parse/display with canonical string format (`"CmdOrCtrl+Shift+E"`, `"g then i"`) and platform-resolved display (`"Ctrl"` on Linux, `"Cmd"` on Mac)
@@ -121,7 +121,7 @@ This slice is backend-only — no user-visible behavior changes until slice 6 wi
 - Override persistence to settings
 - `query()` signature change to accept `&BindingTable` for effective bindings
 
-**Files:** `crates/command-palette/src/keybinding.rs` (new), `descriptor.rs`, `registry.rs`, `id.rs`, `lib.rs` (modified)
+**Files:** `crates/cmdk/src/keybinding.rs` (new), `descriptor.rs`, `registry.rs`, `id.rs`, `lib.rs` (modified)
 
 **Depends on:** Slice 1
 
@@ -166,7 +166,7 @@ The registry contains an `Undo` command ID so it appears in the palette and can 
 
 ## Slice 6: Iced App Integration
 
-Wire the command palette into the iced app's Elm architecture. The command palette core APIs (`crates/command-palette/`) are framework-agnostic; this slice is purely app-layer work in `crates/app/`.
+Wire the command palette into the iced app's Elm architecture. The command palette core APIs (`crates/cmdk/`) are framework-agnostic; this slice is purely app-layer work in `crates/app/`.
 
 **Three integration paths (not one):**
 

@@ -39,34 +39,34 @@ requires an `alignment` field on `Paragraph`, `Heading`, and `ListItem`.
 ### Generational load tracking
 
 **Not used.** `ParagraphCache` uses pessimistic `mark_all_dirty()` on every `layout()` call, with a code comment noting that generation-counter or per-block dirty tracking could replace this for very long documents. Performance optimization opportunity, not a correctness issue.
-- Code: `crates/rich-text-editor/src/widget/render.rs:477`
+- Code: `crates/rte/src/widget/render.rs:477`
 
 ### Component trait
 
 **Not used.** The editor is a standalone `Widget` trait implementation. It emits `Action`s that the host app processes via `EditorState::perform()`.
-- Code: `crates/rich-text-editor/src/widget/mod.rs` (Widget impl)
+- Code: `crates/rte/src/widget/mod.rs` (Widget impl)
 
 ### Token-to-Catalog theming
 
 **Not used.** Colors passed via builder methods. Font sizes hardcoded (H1=18, H2=16, H3=14, body=13). The `_theme` parameter in `draw()` is unused.
-- Code: `crates/rich-text-editor/src/widget/mod.rs:947`
+- Code: `crates/rte/src/widget/mod.rs:947`
 
 ### iced_drop drag-and-drop
 
 **Not applicable.** Internal drag selection implemented via mouse event handling with `DragState` tracking. External DND not implemented.
-- Code: `crates/rich-text-editor/src/widget/mod.rs` (mouse handling)
+- Code: `crates/rte/src/widget/mod.rs` (mouse handling)
 
 ### Subscription orchestration
 
 **Not used.** Cursor blink handled via `shell.request_redraw_at()`.
-- Code: `crates/rich-text-editor/src/widget/mod.rs:244-249`
+- Code: `crates/rte/src/widget/mod.rs:244-249`
 
 ### Core CRUD bypassed
 
 **Not applicable.** The editor is a pure UI component with no database or network access.
-- Code: `crates/rich-text-editor/src/compose.rs`
+- Code: `crates/rte/src/compose.rs`
 
 ### Dead code
 
 One instance: `prepare_move_up()` / `prepare_move_down()` -- public functions with tests, never called from the widget. Intentionally retained as infrastructure.
-- Code: `crates/rich-text-editor/src/widget/cursor.rs:413,463`
+- Code: `crates/rte/src/widget/cursor.rs:413,463`

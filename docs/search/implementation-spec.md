@@ -181,7 +181,7 @@ The `__LAST_7_DAYS__` / `__LAST_30_DAYS__` / `__TODAY__` token system in `crates
 - OR semantics for multiple folder values.
 
 **`in:` operator (universal folder shorthands):**
-- Map shorthands to provider-agnostic predicates. The `labels` table has no generic `role` column — system folders are identified via `SYSTEM_FOLDER_ROLES` in `crates/provider-utils/src/folder_roles.rs`, which maps well-known `label_id` values (e.g., `"INBOX"`, `"SENT"`, `"DRAFT"`, `"TRASH"`, `"SPAM"`) across providers. The SQL builder should match against these label IDs, not a role column:
+- Map shorthands to provider-agnostic predicates. The `labels` table has no generic `role` column — system folders are identified via `SYSTEM_FOLDER_ROLES` in `crates/common/src/folder_roles.rs`, which maps well-known `label_id` values (e.g., `"INBOX"`, `"SENT"`, `"DRAFT"`, `"TRASH"`, `"SPAM"`) across providers. The SQL builder should match against these label IDs, not a role column:
 
 | Shorthand | Predicate |
 |-----------|-----------|
@@ -390,7 +390,7 @@ Add as a DB migration. Keep `resolve_query_tokens` as a fallback for one release
 
 ### Labels table: system folder identification
 
-The `labels` table has no generic `role` column. System folders are identified by well-known `label_id` values (`"INBOX"`, `"SENT"`, `"DRAFT"`, `"TRASH"`, `"SPAM"`, etc.) defined in `SYSTEM_FOLDER_ROLES` (`crates/provider-utils/src/folder_roles.rs`). The `in:` operator's SQL builder matches against these IDs via `thread_labels.label_id`, not a role column. The `labels` table also has `label_type`, `imap_folder_path`, and `imap_special_use` for provider-specific metadata — these are used by the `folder:` operator for path matching. No migration needed for `in:` support.
+The `labels` table has no generic `role` column. System folders are identified by well-known `label_id` values (`"INBOX"`, `"SENT"`, `"DRAFT"`, `"TRASH"`, `"SPAM"`, etc.) defined in `SYSTEM_FOLDER_ROLES` (`crates/common/src/folder_roles.rs`). The `in:` operator's SQL builder matches against these IDs via `thread_labels.label_id`, not a role column. The `labels` table also has `label_type`, `imap_folder_path`, and `imap_special_use` for provider-specific metadata — these are used by the `folder:` operator for path matching. No migration needed for `in:` support.
 
 ## Dependency Graph
 

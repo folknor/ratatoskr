@@ -10,8 +10,8 @@ apply, and where the gaps are.
 
 1. [Accounts](#accounts)
 2. [Calendar](#calendar)
-3. [Command Palette — Problem Statement](#command-palette--problem-statement)
-4. [Command Palette — Roadmap](#command-palette--roadmap)
+3. [Command Palette — Problem Statement](#cmdk--problem-statement)
+4. [Command Palette — Roadmap](#cmdk--roadmap)
 5. [Contacts — Import Spec](#contacts--import-spec)
 6. [Contacts — Problem Statement](#contacts--problem-statement)
 7. [Iced Ecosystem Decisions](#iced-ecosystem-decisions)
@@ -89,7 +89,7 @@ apply, and where the gaps are.
 
 ## Command Palette — Problem Statement
 
-**Doc**: `docs/command-palette/problem-statement.md`
+**Doc**: `docs/cmdk/problem-statement.md`
 
 ### Requirements → Survey Matches
 
@@ -114,7 +114,7 @@ apply, and where the gaps are.
 
 ## Command Palette — Roadmap
 
-**Doc**: `docs/command-palette/roadmap.md`
+**Doc**: `docs/cmdk/roadmap.md`
 
 ### Requirements → Survey Matches
 

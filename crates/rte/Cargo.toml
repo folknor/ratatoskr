@@ -17,5 +17,5 @@ html5ever = "0.39"
 markup5ever = "0.39"
 
 iced = { path = "/home/folk/Programs/sluggrs/repos/iced", default-features = false, features = [
-    "wgpu", "tokio", "lazy", "advanced", "web-colors", "wayland", "x11",
+    "wgpu", "tokio", "lazy", "advanced", "web-colors", "wayland", "image", "svg",
 ], optional = true }

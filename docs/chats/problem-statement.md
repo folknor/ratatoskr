@@ -257,7 +257,7 @@ A layered approach, from most to least confident:
 
 1. **HTML client markers** (~100% confidence when present) — major email
    clients tag their own signatures with identifiable HTML structures.
-   Since we already parse HTML in `provider-utils`, these are free:
+   Since we already parse HTML in `common`, these are free:
 
    | Client | Signature marker |
    |---|---|

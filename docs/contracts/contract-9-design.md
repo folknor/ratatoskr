@@ -10,7 +10,7 @@ Adding a new email action requires ~15 coordinated edits across 5-6 files. But t
 | `CompletedAction` | main.rs | Bare tag — **loses parameters** |
 | `ActionParams` | commands.rs | Parameters as sidecar — **disconnected from action** |
 | `BatchAction` | batch.rs (core) | Core operation + params |
-| `UndoToken` | undo.rs (command-palette) | Compensation data — **wrong crate** |
+| `UndoToken` | undo.rs (cmdk) | Compensation data — **wrong crate** |
 
 Each transition between types is a lossy projection. `CompletedAction` loses the parameters, which then travel separately in `ActionParams`. The completion handler must re-associate them. The undo token carries mail-domain compensation data in a crate that should only know about palette mechanics.
 
@@ -321,7 +321,7 @@ The app instantiates `UndoStack<MailUndoPayload>`. The palette queries `has_undo
 | Toggle split/merge dance | Gone — per-target operations in flat vec |
 | `removes_from_view()` / `success_label()` | `CompletionBehavior` via exhaustive match |
 | Anonymous `rollback: Vec<(String, String, bool)>` | Typed `OptimisticMutation` |
-| `UndoToken` in command-palette | `MailUndoPayload` in app, `UndoStack<T>` in palette |
+| `UndoToken` in cmdk | `MailUndoPayload` in app, `UndoStack<T>` in palette |
 | `handle_action_completed` 3-branch dispatch | Single handler reads typed effects |
 
 Adding a new action:

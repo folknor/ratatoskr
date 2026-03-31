@@ -43,7 +43,7 @@ The sidebar has two layers:
 
 ### Scope as State
 
-Scope is **app model state**, not a command-palette action. Changing scope does not navigate — it re-filters the sidebar and the thread list behind it. If the user is viewing "Inbox" and switches scope from "All" to "Foo Corp," they stay on Inbox; the content narrows.
+Scope is **app model state**, not a cmdk action. Changing scope does not navigate — it re-filters the sidebar and the thread list behind it. If the user is viewing "Inbox" and switches scope from "All" to "Foo Corp," they stay on Inbox; the content narrows.
 
 The command palette can *set* scope (e.g., `Navigate > Switch Account > Foo Corp`), just as it can toggle the sidebar or switch themes — these are model state mutations exposed as commands for keyboard accessibility, not proof that they belong in the command system's dispatch model. The scope value lives in a single place in the iced app model (`selected_account: Option<usize>` in `crates/app/`) and the sidebar reads it via `SidebarModel`. There is no second implementation path.
 
@@ -270,12 +270,12 @@ These are explicitly out of scope for the sidebar, handled by the command palett
 
    This cascade covers the common cases (replying, composing in a scoped view) in steps 2 and 4, and the edge cases (fresh unified compose) degrade gracefully without requiring additional state beyond the sticky "last manually selected" preference.
 
-8. **Label navigation from unified view**: When the user navigates to a label via the command palette while in "All Accounts" scope, the scope should not auto-narrow to a single account. The label filter is applied across all accounts that have a matching label — if "Clients" exists on both Gmail and Exchange, the thread list shows threads from both. The scope stays on "All." This is consistent with how universal folders work (Inbox shows all accounts' inboxes) and avoids the jarring implicit scope switch. The palette's cross-account disambiguation (see `docs/command-palette/problem-statement.md`, "Cross-Account Label/Folder Disambiguation") lets the user pick a specific account's label if they want to narrow, but the default behavior is additive.
+8. **Label navigation from unified view**: When the user navigates to a label via the command palette while in "All Accounts" scope, the scope should not auto-narrow to a single account. The label filter is applied across all accounts that have a matching label — if "Clients" exists on both Gmail and Exchange, the thread list shows threads from both. The scope stays on "All." This is consistent with how universal folders work (Inbox shows all accounts' inboxes) and avoids the jarring implicit scope switch. The palette's cross-account disambiguation (see `docs/cmdk/problem-statement.md`, "Cross-Account Label/Folder Disambiguation") lets the user pick a specific account's label if they want to narrow, but the default behavior is additive.
 
 ## Dependencies
 
-- **Command palette Slice 2** (`docs/command-palette/roadmap.md`): The `NavigateToLabel` parameterized command with cross-account disambiguation must be implemented before labels can be removed from the unified sidebar (Phase 2). The resolver, `OptionItem` structure, and fuzzy search infrastructure are already scaffolded — what remains is the real `CommandInputResolver` implementation that queries account labels/folders from `DbState`. See "Cross-Account Label/Folder Disambiguation" in `docs/command-palette/problem-statement.md`.
-- **Command palette Slice 6** (`docs/command-palette/roadmap.md`): Phase 2 (stripping actions from sidebar) is gated on the palette implementation being far enough along to absorb label creation/editing/deletion and context menu actions.
+- **Command palette Slice 2** (`docs/cmdk/roadmap.md`): The `NavigateToLabel` parameterized command with cross-account disambiguation must be implemented before labels can be removed from the unified sidebar (Phase 2). The resolver, `OptionItem` structure, and fuzzy search infrastructure are already scaffolded — what remains is the real `CommandInputResolver` implementation that queries account labels/folders from `DbState`. See "Cross-Account Label/Folder Disambiguation" in `docs/cmdk/problem-statement.md`.
+- **Command palette Slice 6** (`docs/cmdk/roadmap.md`): Phase 2 (stripping actions from sidebar) is gated on the palette implementation being far enough along to absorb label creation/editing/deletion and context menu actions.
 
 Phase 1 has no palette dependency and can proceed independently.
 

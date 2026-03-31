@@ -130,7 +130,7 @@ These do not all count as product discrepancies, but they are still useful conte
    The previous audit treated missing clear-all UI as "not a discrepancy" because pinned searches auto-expire and can be dismissed individually. After re-reading `docs/search/pinned-searches.md`, this broader audit now treats it as a real spec mismatch because that doc explicitly promises a clear-all affordance.
 
 2. **Form-based smart-folder editor.**
-   The old settings-based smart-folder editor is still correctly treated as superseded. The current docs favor search-bar editing plus command-palette save/update flows, so the lack of a settings-form editor is not considered a gap.
+   The old settings-based smart-folder editor is still correctly treated as superseded. The current docs favor search-bar editing plus cmdk save/update flows, so the lack of a settings-form editor is not considered a gap.
 
 ---
 

@@ -4,7 +4,7 @@
 
 Enterprise users manage contacts in spreadsheets. The reality is Excel files with columns that are never consistently named, and CSV exports with unpredictable encoding and delimiters. A contact importer must handle this mess gracefully.
 
-This is a self-contained problem warranting its own crate (`crates/contact-import/`).
+This is a self-contained problem warranting its own crate (`crates/import/`).
 
 ## Supported Formats
 
@@ -98,7 +98,7 @@ The principle is: clean what is unambiguously wrong (stray whitespace, mixed-cas
 
 ## Crate Design
 
-`crates/contact-import/` — pure library crate, no UI. Responsibilities:
+`crates/import/` — pure library crate, no UI. Responsibilities:
 
 - File format detection and parsing
 - Encoding detection and conversion

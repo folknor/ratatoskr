@@ -4,7 +4,7 @@ Detailed implementation spec for email signature management, editing, and
 compose insertion. Covers four phases: data model + CRUD, management UI in
 Settings, compose insertion behavior, and account-switching replacement.
 
-**Depends on:** The rich text editor subsystem (see `docs/editor/architecture.md`; currently targeting `crates/rich-text-editor/`, though the final crate location may differ) — the signature editor IS the rich text editor. The editor must be at Phase 3 (HTML round-trip) before Phase 2 of this spec can start. This spec references editor types by logical name (`Document`, `Block`, `EditorAction`) rather than hard-coding import paths, so the crate location is not a blocking decision.
+**Depends on:** The rich text editor subsystem (see `docs/editor/architecture.md`; currently targeting `crates/rte/`, though the final crate location may differ) — the signature editor IS the rich text editor. The editor must be at Phase 3 (HTML round-trip) before Phase 2 of this spec can start. This spec references editor types by logical name (`Document`, `Block`, `EditorAction`) rather than hard-coding import paths, so the crate location is not a blocking decision.
 
 **References:**
 - `docs/editor/architecture.md` — Document model, Block tree, StyledRun, HTML
@@ -81,7 +81,7 @@ All basic CRUD exists:
   `sendAs.signature`, pushes local edits via `update_send_as_signature`
 - **JMAP:** `crates/jmap/src/signatures.rs` has `sync_jmap_identity_signatures`
   (pull) and `push_signature_to_jmap` (push)
-- **Inline images:** `crates/provider-utils/src/signature_images.rs` extracts
+- **Inline images:** `crates/common/src/signature_images.rs` extracts
   base64 data-URI images from signature HTML, deduplicates via xxh3, stores in
   the inline image store
 
@@ -394,7 +394,7 @@ pub struct SignatureEditorState {
   same layout. The toolbar is built in the app crate (not in the editor
   crate), sending messages that the editor interprets.
 - **Editor surface:** The `RichTextEditor` widget from
-  `crates/rich-text-editor/`. The signature's `body_html` is parsed into a
+  `crates/rte/`. The signature's `body_html` is parsed into a
   `Document` via `html_parse::parse_html()` when the overlay opens. On save,
   the `Document` is serialized back to HTML via `html_serialize::to_html()`.
 - **Delete button:** Only shown when editing an existing signature (not for
@@ -421,7 +421,7 @@ pub enum SignatureEditorMessage {
     NameChanged(String),
     ToggleDefault(bool),
     ToggleReplyDefault(bool),
-    EditorAction(EditorAction),  // from crates/rich-text-editor
+    EditorAction(EditorAction),  // from crates/rte
     Save,
     Delete,
     DeleteConfirmed,

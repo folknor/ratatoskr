@@ -4,7 +4,7 @@
 
 Ratatoskr's main window is where users spend 90% of their time. The layout must serve enterprise power users processing 200+ emails/day across 3+ accounts — people who are stuck on Outlook because nothing else handles their volume. The design takes cues from Superhuman's speed and focus, but adds the depth (folder trees, multi-account, bulk operations) that enterprise users require.
 
-This document covers the main window's structure, the thread list, the conversation/reading pane, and the interaction model that ties them together. It does not cover the sidebar (see `docs/sidebar/problem-statement.md`) or the command palette (see `docs/command-palette/problem-statement.md`), though both are integral to the experience.
+This document covers the main window's structure, the thread list, the conversation/reading pane, and the interaction model that ties them together. It does not cover the sidebar (see `docs/sidebar/problem-statement.md`) or the command palette (see `docs/cmdk/problem-statement.md`), though both are integral to the experience.
 
 ## Design Principles
 
@@ -577,7 +577,7 @@ This document introduces several categories of persisted and non-persisted UI st
 ## Dependencies
 
 - **Message body rendering**: The conversation view needs rendered email bodies. This is a separate technical challenge (HTML email in iced via iced_webview_v2 or litehtml). Phase 2 can proceed with snippet-only rendering while body rendering is developed in parallel.
-- **Command palette iced integration**: Keyboard shortcuts and action dispatch depend on the palette's iced integration (see `docs/command-palette/roadmap.md`, "Future: Iced Integration"). Phase 1-2 can use direct message dispatch; palette integration lands in Phase 3.
+- **Command palette iced integration**: Keyboard shortcuts and action dispatch depend on the palette's iced integration (see `docs/cmdk/roadmap.md`, "Future: Iced Integration"). Phase 1-2 can use direct message dispatch; palette integration lands in Phase 3.
 - **Compose window**: The inline reply composer (Phase 3) is a simplified version of the full compose window. Full compose is a separate feature with its own design considerations (rich text editing, attachments, signature management). The rich text editor architecture is documented in `docs/editor/architecture.md`.
 
 ## Ecosystem Patterns

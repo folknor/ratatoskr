@@ -89,7 +89,7 @@ impl App {
             return Task::none();
         }
 
-        // 3. Convert iced key to command-palette Chord
+        // 3. Convert iced key to cmdk Chord
         let Some(chord) = command_dispatch::iced_key_to_chord(key, &modifiers) else {
             return Task::none();
         };

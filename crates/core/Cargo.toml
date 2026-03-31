@@ -24,12 +24,12 @@ quick-xml.workspace = true
 # Extracted workspace crates
 db = { path = "../db" }
 store = { path = "../stores" }
-cmdk = { path = "../command-palette" }
+cmdk = { path = "../cmdk" }
 search = { path = "../search" }
 ratatoskr-smart-folder = { path = "../smart-folder" }
 ratatoskr-label-colors = { path = "../label-colors" }
 ratatoskr-seen-addresses = { path = "../seen-addresses" }
-common = { path = "../provider-utils" }
+common = { path = "../common" }
 smtp = { path = "../smtp" }
 sync = { path = "../sync" }
 gmail = { path = "../gmail" }

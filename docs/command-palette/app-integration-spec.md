@@ -23,7 +23,7 @@ Four pieces of infrastructure that all three integration paths depend on. These 
 
 ### 1.1 `CommandArgs` Enum
 
-**File:** `crates/command-palette/src/args.rs` (new), re-exported from `crates/command-palette/src/lib.rs`
+**File:** `crates/cmdk/src/args.rs` (new), re-exported from `crates/cmdk/src/lib.rs`
 
 The typed execution payload for parameterized commands. One variant per command or command family. Non-parameterized commands execute with `CommandId` alone — no `CommandArgs` needed.
 
@@ -987,7 +987,7 @@ fn handle_key_pressed(
         return Task::none();
     }
 
-    // 3. Convert iced key to command-palette Chord
+    // 3. Convert iced key to cmdk Chord
     let Some(chord) = iced_key_to_chord(&key, &modifiers) else {
         return Task::none();
     };
@@ -1023,7 +1023,7 @@ fn handle_key_pressed(
 ### 3.5 iced Key → Command Palette Chord Conversion
 
 ```rust
-/// Convert iced keyboard types to command-palette Chord.
+/// Convert iced keyboard types to cmdk Chord.
 ///
 /// Returns None for keys we don't handle (modifiers alone, etc.)
 fn iced_key_to_chord(
@@ -1054,7 +1054,7 @@ fn iced_key_to_chord(
     })
 }
 
-/// Map iced named keys to command-palette NamedKey.
+/// Map iced named keys to cmdk NamedKey.
 fn iced_named_to_cp(named: iced::keyboard::key::Named) -> Option<NamedKey> {
     use iced::keyboard::key::Named as I;
     match named {
@@ -1147,7 +1147,7 @@ The palette open trigger is a keyboard shortcut. It should be registered as a `C
 **Option B:** Hardcode `Ctrl+K` in the key handler before `BindingTable` resolution. This is simpler but breaks the "every action is a registered command" principle.
 
 **This spec recommends Option A.** Required changes:
-- Add `AppOpenPalette` to `CommandId` enum in `crates/command-palette/src/id.rs`
+- Add `AppOpenPalette` to `CommandId` enum in `crates/cmdk/src/id.rs`
 - Add to `ALL_IDS` and `TABLE`
 - Register in `register_app()` with binding `KeyBinding::cmd_or_ctrl('k')` and `is_available: always`
 - Map in `dispatch_command`: `CommandId::AppOpenPalette => Some(Message::Palette(PaletteMessage::Open))`
@@ -1276,7 +1276,7 @@ Six independently shippable slices with a clear dependency graph. Each slice pro
 **Goal:** Every existing keyboard shortcut works via the command system. No visible UI changes except behavior.
 
 **What's built:**
-1. `CommandArgs` enum in `crates/command-palette/src/args.rs`
+1. `CommandArgs` enum in `crates/cmdk/src/args.rs`
 2. `command_dispatch.rs` — `build_context()`, `dispatch_command()`, `dispatch_parameterized()`
 3. `CommandRegistry` and `BindingTable` initialization in `boot()`
 4. `KeyEventMessage`, `iced_key_to_chord()`, `iced_named_to_cp()`
@@ -1288,10 +1288,10 @@ Six independently shippable slices with a clear dependency graph. Each slice pro
 10. `AppOpenPalette` command ID (binding only — palette UI is next slice)
 
 **Files changed:**
-- `crates/command-palette/src/args.rs` (new)
-- `crates/command-palette/src/lib.rs` (re-export `CommandArgs`)
-- `crates/command-palette/src/id.rs` (add `AppOpenPalette`)
-- `crates/command-palette/src/registry.rs` (register `AppOpenPalette`)
+- `crates/cmdk/src/args.rs` (new)
+- `crates/cmdk/src/lib.rs` (re-export `CommandArgs`)
+- `crates/cmdk/src/id.rs` (add `AppOpenPalette`)
+- `crates/cmdk/src/registry.rs` (register `AppOpenPalette`)
 - `crates/app/Cargo.toml` (add `cmdk` dependency)
 - `crates/app/src/command_dispatch.rs` (new)
 - `crates/app/src/main.rs` (new fields, new `Message` variants, subscription, key handler)
@@ -1460,15 +1460,15 @@ How patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md) and [
 ## Appendix A: File Inventory
 
 New files:
-- `crates/command-palette/src/args.rs` — `CommandArgs` enum
+- `crates/cmdk/src/args.rs` — `CommandArgs` enum
 - `crates/app/src/command_dispatch.rs` — context assembly, dispatch map, key conversion
 - `crates/app/src/command_resolver.rs` — `AppInputResolver` implementation
 - `crates/app/src/ui/palette.rs` — palette state, messages, view
 
 Modified files:
-- `crates/command-palette/src/lib.rs` — re-export `CommandArgs`
-- `crates/command-palette/src/id.rs` — add `AppOpenPalette`
-- `crates/command-palette/src/registry.rs` — register `AppOpenPalette`
+- `crates/cmdk/src/lib.rs` — re-export `CommandArgs`
+- `crates/cmdk/src/id.rs` — add `AppOpenPalette`
+- `crates/cmdk/src/registry.rs` — register `AppOpenPalette`
 - `crates/app/Cargo.toml` — add `cmdk` dependency
 - `crates/app/src/main.rs` — `App` fields, `Message` variants, `boot()`, `subscription()`, `update()`, `view()`
 - `crates/app/src/ui/mod.rs` — add `pub mod palette;`

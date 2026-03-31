@@ -167,7 +167,7 @@ When consecutive messages have different `thread_id` AND different `subject`, sh
 
 ## Signature Stripping
 
-Reusable module in `crates/provider-utils/src/signature_strip.rs`.
+Reusable module in `crates/common/src/signature_strip.rs`.
 
 **Important distinction:** "signature stripping" and "quote collapsing" are separate transforms. Both are useful in chat view, but they're different operations:
 
@@ -317,7 +317,7 @@ While the timeline loads, `chat_timeline.loading = true`. The component renders 
 
 - `crates/app/src/ui/chat_timeline.rs` — Component: state, messages, view
 - `crates/app/src/handlers/chat.rs` — enter/exit, load, mark-read, older-load
-- `crates/provider-utils/src/signature_strip.rs` — `strip_signature` + `collapse_quotes`
+- `crates/common/src/signature_strip.rs` — `strip_signature` + `collapse_quotes`
 
 ## Files to Modify
 
@@ -329,7 +329,7 @@ While the timeline loads, `chat_timeline.loading = true`. The component renders 
 - `crates/app/src/ui/theme.rs` — `ChatBubbleSent`, `ChatBubbleReceived` variants
 - `crates/core/src/generation.rs` — `Chat` brand tag
 - `crates/core/src/chat.rs` — `mark_chat_read_local`, `mark_chat_read_remote`, update `get_chat_timeline` for tuple cursor
-- `crates/provider-utils/src/lib.rs` — register `signature_strip` module
+- `crates/common/src/lib.rs` — register `signature_strip` module
 
 ## Verification
 

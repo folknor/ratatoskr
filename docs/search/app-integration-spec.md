@@ -759,7 +759,7 @@ Smart folder management moves from the settings UI to the command palette. The s
 
 #### New CommandId variants
 
-Add to `crates/command-palette/src/id.rs`:
+Add to `crates/cmdk/src/id.rs`:
 
 ```rust
 CommandId::SmartFolderSave,     // "Save as Smart Folder"
@@ -771,7 +771,7 @@ CommandId::SmartFolderRename,   // "Rename Smart Folder"
 #### Registration in the registry
 
 ```rust
-// In register_app() in crates/command-palette/src/registry.rs:
+// In register_app() in crates/cmdk/src/registry.rs:
 
 // SmartFolderSave — parameterized (Text input for name)
 // Available when search_query is non-empty.

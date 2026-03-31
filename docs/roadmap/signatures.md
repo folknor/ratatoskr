@@ -31,7 +31,7 @@
 - ✅ Gmail `sendAs` signature fetch — pulled on initial sync and delta sync (`sync_signatures` in `crates/gmail/src/sync/labels.rs`)
 - ✅ Gmail bidirectional sync — local edits pushed via `update_send_as_signature` (`crates/gmail/src/api.rs`), conflict resolution by server HTML hash
 - ✅ JMAP Identity signature sync — `sync_jmap_identity_signatures` in `crates/jmap/src/signatures.rs`, upserts `htmlSignature`/`textSignature` keyed by `(account_id, server_id)`
-- ✅ Inline image handling — `crates/provider-utils/src/signature_images.rs` extracts base64 data-URIs and CID references from signature HTML, deduplicates via xxh3, stores in inline image store
+- ✅ Inline image handling — `crates/common/src/signature_images.rs` extracts base64 data-URIs and CID references from signature HTML, deduplicates via xxh3, stores in inline image store
 - ✗ Exchange — **permanently blocked.** No public API exists and Microsoft has explicitly confirmed there never will be (see Research §1–2). Sent-mail heuristic not worth the effort. Exchange users create their signature locally on first account add.
 - ⬚ Signature placement in compose (iced UI work)
 

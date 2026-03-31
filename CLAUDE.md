@@ -9,7 +9,7 @@ Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 - **`squeeze`** (`crates/squeeze/`) — Attachment compression (CLI + library). Images (mozjpeg-rs + oxipng), PDFs (lopdf), OOXML/ODF.
 - **`store`** (`crates/stores/`) — Content stores: email body store (zstd-compressed), inline image store, attachment file cache.
 - **`sync`** (`crates/sync/`) — Sync pipeline, threading (JWZ), categorization, filters, smart labels.
-- **`provider`** (`crates/provider-utils/`) — Shared provider helpers, encryption (AES-256-GCM), email parsing, HTML sanitization.
+- **`provider`** (`crates/common/`) — Shared provider helpers, encryption (AES-256-GCM), email parsing, HTML sanitization.
 - **`ratatoskr-label-colors`** (`crates/label-colors/`) — Label color resolution + Exchange category color presets.
 - **Providers**: `gmail`, `jmap`, `graph`, `imap` — each in `crates/{name}/`.
 
@@ -44,7 +44,7 @@ Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 
 **Multiple content stores** (`crates/stores/`): Message bodies live outside the main `messages` table in `bodies.db` (zstd-compressed), and inline multipart images have their own attachment database. Use `BodyStoreState` / `InlineImageStoreState` rather than assuming message content is in the main SQLite database. The attachment file cache is also in this crate.
 
-**Four email providers**: `gmail_api`, `jmap`, `graph` (Microsoft), `imap`. All unified behind the `ProviderOps` trait (`provider-utils/src/ops.rs`). Folder-accepting methods use `&FolderId`, tag-accepting methods use `&TagId` (`provider-utils/src/typed_ids.rs`). Typed IDs flow from `MailActionIntent` through `MailOperation` to the provider — no raw string boundaries in the action pipeline.
+**Four email providers**: `gmail_api`, `jmap`, `graph` (Microsoft), `imap`. All unified behind the `ProviderOps` trait (`common/src/ops.rs`). Folder-accepting methods use `&FolderId`, tag-accepting methods use `&TagId` (`common/src/typed_ids.rs`). Typed IDs flow from `MailActionIntent` through `MailOperation` to the provider — no raw string boundaries in the action pipeline.
 
 **Action pipeline**: `MailActionIntent → resolve_intent() → build_execution_plan() → batch_execute() → handle_action_completed()`. All 12 action types flow through one path. `MailOperation` (core) is the canonical execution type. `CompletionBehavior` (app) drives toast, auto-advance, and undo via exhaustive match. See `docs/architecture.md` § "Adding a New Email Action" for the checklist.
 
@@ -52,7 +52,7 @@ Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 
 **Core crate boundary**: Business logic belongs in `rtsk`. The app crate calls core functions directly (no command wrappers needed — the Tauri app shell has been removed). When adding new core functionality, add it to `crates/core/src/`.
 
-**iced is depended on in 3 places**: `crates/app/Cargo.toml` (full iced umbrella), `crates/rich-text-editor/Cargo.toml` (iced umbrella, optional behind `widget` feature), and `crates/iced-drop/Cargo.toml` (iced_core + iced_widget + iced_runtime individually). All three must point to the same iced source. When switching between the git URL and local path, update all three.
+**iced is depended on in 3 places**: `crates/app/Cargo.toml` (full iced umbrella), `crates/rte/Cargo.toml` (iced umbrella, optional behind `widget` feature), and `crates/iced-drop/Cargo.toml` (iced_core + iced_widget + iced_runtime individually). All three must point to the same iced source. When switching between the git URL and local path, update all three.
 
 ## `jmap-client` crate gotchas
 

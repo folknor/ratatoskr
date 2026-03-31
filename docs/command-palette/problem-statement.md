@@ -8,21 +8,21 @@ This document describes the backend: the command registry, search, and dispatch 
 
 ## Current State
 
-The command palette backend is implemented in the `cmdk` crate (`crates/command-palette/`). The old TypeScript frontend (which had duplicate registries, duplicate execution paths, substring-only search, no parameterized commands, and no context filtering) has been removed entirely. The Rust crate is the single source of truth.
+The command palette backend is implemented in the `cmdk` crate (`crates/cmdk/`). The old TypeScript frontend (which had duplicate registries, duplicate execution paths, substring-only search, no parameterized commands, and no context filtering) has been removed entirely. The Rust crate is the single source of truth.
 
 ### What Exists (Slices 1-4 Complete)
 
-1. **`CommandId` enum** (`crates/command-palette/src/id.rs`) — 55 commands across 6 categories (Navigation, Email, Compose, Tasks, View, App). Each variant has a stable `as_str()` / `parse()` round-trip for persistence.
+1. **`CommandId` enum** (`crates/cmdk/src/id.rs`) — 55 commands across 6 categories (Navigation, Email, Compose, Tasks, View, App). Each variant has a stable `as_str()` / `parse()` round-trip for persistence.
 
-2. **`CommandRegistry`** (`crates/command-palette/src/registry.rs`) — All 55 commands registered with labels, categories, default keybindings, context predicates (`is_available`), toggle labels (`is_active`), input schemas for parameterized commands, and keyword aliases. Fuzzy search via `nucleo-matcher` with context boost and availability bonus scoring.
+2. **`CommandRegistry`** (`crates/cmdk/src/registry.rs`) — All 55 commands registered with labels, categories, default keybindings, context predicates (`is_available`), toggle labels (`is_active`), input schemas for parameterized commands, and keyword aliases. Fuzzy search via `nucleo-matcher` with context boost and availability bonus scoring.
 
-3. **`CommandContext`** (`crates/command-palette/src/context.rs`) — Context snapshot struct with selection state, view type, account/provider info, entity state (read/starred/muted/pinned/draft/trash/spam), app state (online, composer open), and focused UI region.
+3. **`CommandContext`** (`crates/cmdk/src/context.rs`) — Context snapshot struct with selection state, view type, account/provider info, entity state (read/starred/muted/pinned/draft/trash/spam), app state (online, composer open), and focused UI region.
 
-4. **`BindingTable`** (`crates/command-palette/src/keybinding.rs`) — Keybinding resolution with single chords, two-key sequences (`g then i`), user override support, conflict detection, platform-aware display (`Cmd` vs `Ctrl`).
+4. **`BindingTable`** (`crates/cmdk/src/keybinding.rs`) — Keybinding resolution with single chords, two-key sequences (`g then i`), user override support, conflict detection, platform-aware display (`Cmd` vs `Ctrl`).
 
-5. **`InputSchema` / `ParamDef`** (`crates/command-palette/src/input.rs`) — Parameterized command schemas (ListPicker, DateTime, Enum, Text), option items with hierarchical path display, and fuzzy search over options.
+5. **`InputSchema` / `ParamDef`** (`crates/cmdk/src/input.rs`) — Parameterized command schemas (ListPicker, DateTime, Enum, Text), option items with hierarchical path display, and fuzzy search over options.
 
-6. **`CommandInputResolver` trait** (`crates/command-palette/src/resolver.rs`) — Core-defined trait for resolving dynamic options and validating selections. The iced app layer provides the concrete implementation.
+6. **`CommandInputResolver` trait** (`crates/cmdk/src/resolver.rs`) — Core-defined trait for resolving dynamic options and validating selections. The iced app layer provides the concrete implementation.
 
 7. **`UsageTracker`** — Per-command usage counts for recency-based ranking. Persistence deferred to Slice 6.
 

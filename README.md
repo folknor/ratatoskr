@@ -61,7 +61,7 @@ Cargo workspace with 23 crates. Key boundaries:
 | `store` | Body store (zstd), inline images, attachment cache |
 | `squeeze` | Attachment compression (CLI + library) |
 | `gmail` / `jmap` / `graph` / `imap` | Provider implementations |
-| `command-palette` | Fuzzy command search with context-sensitive keybindings |
+| `cmdk` | Fuzzy command search with context-sensitive keybindings |
 | `smart-folder` | Query parser, date tokens, SQL builder |
 
 ## Building

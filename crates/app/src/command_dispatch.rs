@@ -615,7 +615,7 @@ pub fn dispatch_parameterized(
 
 use cmdk::{Chord, Key, Modifiers, NamedKey};
 
-/// Convert iced keyboard types to command-palette Chord.
+/// Convert iced keyboard types to cmdk Chord.
 ///
 /// Returns `None` for keys we don't handle (modifiers alone, etc.)
 pub fn iced_key_to_chord(
@@ -646,7 +646,7 @@ pub fn iced_key_to_chord(
     })
 }
 
-/// Map iced named keys to command-palette NamedKey.
+/// Map iced named keys to cmdk NamedKey.
 fn iced_named_to_cp(named: iced::keyboard::key::Named) -> Option<NamedKey> {
     use iced::keyboard::key::Named as I;
     match named {

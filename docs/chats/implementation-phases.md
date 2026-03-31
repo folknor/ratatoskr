@@ -109,7 +109,7 @@ New `ChatTimeline` component:
 - User's own signatures (match against `signatures` table for sent messages)
 - Quoted reply blocks (`On <date>, <person> wrote:` + `>` prefixed lines)
 
-Build stripping as a reusable module in `provider-utils` — it's useful beyond chats.
+Build stripping as a reusable module in `common` — it's useful beyond chats.
 
 **Body loading:**
 - Messages in the timeline need body text from `bodies.db` via `BodyStoreState`

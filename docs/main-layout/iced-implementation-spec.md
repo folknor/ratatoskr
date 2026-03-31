@@ -1226,7 +1226,7 @@ Add `DateDisplay` to the `SelectField` enum in settings. The setting value flows
 
 Phase 3 work resumes when:
 1. Backend Slice 4 (`FocusedRegion` on `CommandContext`) is implemented
-2. The command palette has an iced integration path (see `docs/command-palette/problem-statement.md`)
+2. The command palette has an iced integration path (see `docs/cmdk/problem-statement.md`)
 
 Until then, all interaction is mouse-only: click to select threads, click to expand/collapse messages, click action buttons.
 
