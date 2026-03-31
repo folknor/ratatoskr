@@ -586,17 +586,17 @@ pub fn dispatch_parameterized(id: CommandId, args: CommandArgs) -> Option<Messag
     match (id, args) {
         (CommandId::EmailMoveToFolder, CommandArgs::MoveToFolder { folder_id }) => {
             Some(Message::EmailAction(MailActionIntent::MoveToFolder {
-                folder_id: rtsk::actions::FolderId::from(folder_id),
+                folder_id,
             }))
         }
         (CommandId::EmailAddLabel, CommandArgs::AddLabel { label_id }) => {
             Some(Message::EmailAction(MailActionIntent::AddLabel {
-                label_id: rtsk::actions::TagId::from(label_id),
+                label_id,
             }))
         }
         (CommandId::EmailRemoveLabel, CommandArgs::RemoveLabel { label_id }) => {
             Some(Message::EmailAction(MailActionIntent::RemoveLabel {
-                label_id: rtsk::actions::TagId::from(label_id),
+                label_id,
             }))
         }
         (CommandId::EmailSnooze, CommandArgs::Snooze { until }) => {

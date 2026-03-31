@@ -1,3 +1,5 @@
+use types::{FolderId, TagId};
+
 /// Typed execution payload for parameterized commands.
 ///
 /// Each variant carries exactly the fields that command needs.
@@ -6,11 +8,11 @@
 #[derive(Debug, Clone)]
 pub enum CommandArgs {
     /// EmailMoveToFolder -- folder_id from ListPicker selection
-    MoveToFolder { folder_id: String },
+    MoveToFolder { folder_id: FolderId },
     /// EmailAddLabel -- label_id from ListPicker selection
-    AddLabel { label_id: String },
+    AddLabel { label_id: TagId },
     /// EmailRemoveLabel -- label_id from ListPicker selection
-    RemoveLabel { label_id: String },
+    RemoveLabel { label_id: TagId },
     /// EmailSnooze -- unix timestamp from DateTime picker
     Snooze { until: i64 },
     /// NavigateToLabel -- label_id from ListPicker selection.

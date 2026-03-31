@@ -1,6 +1,6 @@
 [package]
-name = "cmdk"
-description = "Command palette engine for Ratatoskr"
+name = "types"
+description = "Shared lightweight types for Ratatoskr workspace"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,6 +12,3 @@ workspace = true
 
 [dependencies]
 serde.workspace = true
-serde_json.workspace = true
-nucleo-matcher = "0.3"
-types = { path = "../types" }

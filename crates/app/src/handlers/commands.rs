@@ -634,13 +634,13 @@ impl App {
 pub(crate) fn build_command_args(command_id: CommandId, item: &OptionItem) -> Option<CommandArgs> {
     match command_id {
         CommandId::EmailMoveToFolder => Some(CommandArgs::MoveToFolder {
-            folder_id: item.id.clone(),
+            folder_id: item.id.clone().into(),
         }),
         CommandId::EmailAddLabel => Some(CommandArgs::AddLabel {
-            label_id: item.id.clone(),
+            label_id: item.id.clone().into(),
         }),
         CommandId::EmailRemoveLabel => Some(CommandArgs::RemoveLabel {
-            label_id: item.id.clone(),
+            label_id: item.id.clone().into(),
         }),
         CommandId::EmailSnooze => item
             .id

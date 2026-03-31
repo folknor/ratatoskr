@@ -25,6 +25,7 @@ members = [
     "crates/iced-drop",
     "crates/import",
     "crates/dev-seed",
+    "crates/types",
 ]
 
 exclude = [
