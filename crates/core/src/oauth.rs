@@ -37,6 +37,8 @@ const MICROSOFT_GRAPH_AUTH_URL: &str =
     "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 const MICROSOFT_GRAPH_TOKEN_URL: &str =
     "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+const MICROSOFT_GRAPH_ME_URL: &str =
+    "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName,displayName";
 const MICROSOFT_GRAPH_SCOPES: [&str; 10] = [
     "Mail.ReadWrite",
     "Mail.ReadWrite.Shared",
@@ -641,7 +643,7 @@ async fn fetch_provider_userinfo(
     tokens: &TokenExchangeResult,
 ) -> Result<OAuthUserInfo, String> {
     if provider.is_microsoft {
-        return parse_microsoft_userinfo(tokens);
+        return fetch_microsoft_userinfo(&tokens.access_token).await;
     }
 
     let user_info_url = provider.user_info_url.as_deref().ok_or_else(|| {
@@ -696,40 +698,45 @@ async fn fetch_provider_userinfo(
     })
 }
 
-fn parse_microsoft_userinfo(tokens: &TokenExchangeResult) -> Result<OAuthUserInfo, String> {
-    let id_token = tokens
-        .id_token
-        .as_deref()
-        .ok_or("Microsoft OAuth response did not include an ID token")?;
-    let payload = id_token
-        .split('.')
-        .nth(1)
-        .ok_or("Invalid ID token format")?;
-    let decoded = URL_SAFE_NO_PAD
-        .decode(payload)
-        .map_err(|e| format!("Failed to decode ID token payload: {e}"))?;
-    let claims = serde_json::from_slice::<serde_json::Value>(&decoded)
-        .map_err(|e| format!("Failed to parse ID token payload: {e}"))?;
+async fn fetch_microsoft_userinfo(access_token: &str) -> Result<OAuthUserInfo, String> {
+    let response = shared_http_client()
+        .get(MICROSOFT_GRAPH_ME_URL)
+        .header(AUTHORIZATION, format!("Bearer {access_token}"))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch Microsoft user info: {e}"))?;
 
-    let email = claims
-        .get("email")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| {
-            claims
-                .get("preferred_username")
-                .and_then(serde_json::Value::as_str)
-        })
+    if !response.status().is_success() {
+        let status = response.status();
+        return Err(format!(
+            "Failed to fetch Microsoft user info (HTTP {status})"
+        ));
+    }
+
+    let data = response
+        .json::<MicrosoftGraphMe>()
+        .await
+        .map_err(|e| format!("Failed to parse Microsoft user info: {e}"))?;
+
+    microsoft_userinfo_from_me(data)
+}
+
+fn microsoft_userinfo_from_me(data: MicrosoftGraphMe) -> Result<OAuthUserInfo, String> {
+    let email = data
+        .mail
+        .as_deref()
         .filter(|s| !s.is_empty())
-        .ok_or("Microsoft ID token did not contain an email or preferred_username claim")?
+        .or_else(|| {
+            data.user_principal_name
+                .as_deref()
+                .filter(|s| !s.is_empty())
+        })
+        .ok_or("Microsoft user info did not contain a mail or userPrincipalName value")?
         .to_string();
 
     Ok(OAuthUserInfo {
         email,
-        name: claims
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
+        name: data.display_name.unwrap_or_default(),
         picture: None,
     })
 }
@@ -741,6 +748,14 @@ struct GoogleUserInfo {
     picture: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MicrosoftGraphMe {
+    mail: Option<String>,
+    user_principal_name: Option<String>,
+    display_name: Option<String>,
+}
+
 pub fn random_base64url(size: usize) -> Result<String, String> {
     let mut buf = vec![0u8; size];
     getrandom::getrandom(&mut buf).map_err(|e| format!("Failed to generate random bytes: {e}"))?;
@@ -750,4 +765,47 @@ pub fn random_base64url(size: usize) -> Result<String, String> {
 pub fn sha256_base64url(input: &[u8]) -> String {
     let digest = Sha256::digest(input);
     URL_SAFE_NO_PAD.encode(digest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MicrosoftGraphMe, microsoft_userinfo_from_me};
+
+    #[test]
+    fn microsoft_userinfo_prefers_mail() {
+        let user = microsoft_userinfo_from_me(MicrosoftGraphMe {
+            mail: Some("alice@example.com".to_string()),
+            user_principal_name: Some("alice@tenant.onmicrosoft.com".to_string()),
+            display_name: Some("Alice".to_string()),
+        })
+        .expect("userinfo should parse");
+
+        assert_eq!(user.email, "alice@example.com");
+        assert_eq!(user.name, "Alice");
+    }
+
+    #[test]
+    fn microsoft_userinfo_falls_back_to_upn() {
+        let user = microsoft_userinfo_from_me(MicrosoftGraphMe {
+            mail: None,
+            user_principal_name: Some("alice@tenant.onmicrosoft.com".to_string()),
+            display_name: None,
+        })
+        .expect("userinfo should parse");
+
+        assert_eq!(user.email, "alice@tenant.onmicrosoft.com");
+        assert!(user.name.is_empty());
+    }
+
+    #[test]
+    fn microsoft_userinfo_requires_identity() {
+        let err = microsoft_userinfo_from_me(MicrosoftGraphMe {
+            mail: None,
+            user_principal_name: None,
+            display_name: Some("Alice".to_string()),
+        })
+        .expect_err("userinfo should fail without an email-like identity");
+
+        assert!(err.contains("mail or userPrincipalName"));
+    }
 }
