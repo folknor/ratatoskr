@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use iced::Task;
 
-use crate::command_dispatch::NavigationTarget;
 use crate::ui::chat_timeline::{ChatTimeline, ChatTimelineEvent};
 use crate::{App, Message};
 
@@ -11,9 +10,7 @@ impl App {
     pub(crate) fn enter_chat_view(&mut self, email: String) -> Task<Message> {
         self.clear_search_state();
         self.clear_pinned_search_context();
-        self.navigation_target = Some(NavigationTarget::Chat {
-            email: email.clone(),
-        });
+        self.active_chat = Some(email.clone());
         self.clear_thread_selection();
         self.chat_timeline = Some(ChatTimeline::new(email.clone()));
 

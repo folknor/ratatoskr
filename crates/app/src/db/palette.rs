@@ -78,8 +78,9 @@ impl Db {
 
     /// All user labels across all accounts, with account name in path.
     ///
-    /// Each `OptionItem.id` is encoded as `"account_id:label_id"` so
-    /// the palette can split them when building `CommandArgs`.
+    /// Each `OptionItem.id` is encoded as `"account_id:kind:label_id"` where
+    /// kind is `f` (folder/container) or `t` (tag) so the palette can
+    /// construct the correct typed `SidebarSelection` variant.
     pub fn get_all_labels_cross_account(&self) -> Result<Vec<cmdk::OptionItem>, String> {
         self.with_conn_sync(|conn| {
             let mut stmt = conn
@@ -87,7 +88,8 @@ impl Db {
                     "SELECT a.id AS account_id,
                             COALESCE(a.display_name, a.email) AS account_name,
                             l.id AS label_id,
-                            l.name AS label_name
+                            l.name AS label_name,
+                            l.label_kind
                      FROM labels l
                      INNER JOIN accounts a ON a.id = l.account_id
                      WHERE l.type != 'system' AND l.visible = 1 AND a.is_active = 1
@@ -100,11 +102,12 @@ impl Db {
                 let account_name: String = row.get("account_name")?;
                 let label_id: String = row.get("label_id")?;
                 let label_name: String = row.get("label_name")?;
-                Ok((account_id, account_name, label_id, label_name))
+                let label_kind: String = row.get("label_kind")?;
+                Ok((account_id, account_name, label_id, label_name, label_kind))
             })
             .map_err(|e| e.to_string())?
             .map(|r| {
-                let (account_id, account_name, label_id, label_name) =
+                let (account_id, account_name, label_id, label_name, label_kind) =
                     r.map_err(|e| e.to_string())?;
                 let mut item = label_name_to_option_item(label_id.clone(), &label_name);
                 // Prefix path with account name
@@ -113,8 +116,9 @@ impl Db {
                     new_path.extend(existing);
                 }
                 item.path = Some(new_path);
-                // Encode account_id into item.id for disambiguation
-                item.id = format!("{account_id}:{label_id}");
+                // Encode account_id + kind into item.id for disambiguation
+                let kind = if label_kind == "tag" { "t" } else { "f" };
+                item.id = format!("{account_id}:{kind}:{label_id}");
                 Ok(item)
             })
             .collect::<Result<Vec<_>, String>>()

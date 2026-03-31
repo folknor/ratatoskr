@@ -269,6 +269,9 @@ fn build_account_labels(
         .into_iter()
         .filter(|label| !system_ids.contains(&label.id.as_str()))
         .filter(|label| label.visible)
+        // Only container-type labels here — tags come from
+        // build_all_account_tags() to avoid duplication.
+        .filter(|label| label.label_kind != "tag")
         .map(|label| {
             let unread_count = unread_by_label.get(&label.id).copied().unwrap_or(0);
 
@@ -283,17 +286,11 @@ fn build_account_labels(
                 .parent_label_id
                 .filter(|pid| !system_ids.contains(&pid.as_str()));
 
-            let kind = if label.label_kind == "tag" {
-                FolderKind::AccountTag
-            } else {
-                FolderKind::AccountLabel
-            };
-
             NavigationFolder {
                 is_subscribed: label.is_subscribed,
                 id: label.id,
                 name: label.name,
-                folder_kind: kind,
+                folder_kind: FolderKind::AccountLabel,
                 unread_count,
                 account_id: Some(label.account_id),
                 parent_id,

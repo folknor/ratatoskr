@@ -8,7 +8,7 @@ impl App {
     /// Handle navigation to a specific target.
     ///
     /// Sidebar-backed targets update `sidebar.selection` directly.
-    /// Non-sidebar targets (chat, search) are stored in `navigation_target`.
+    /// Chat targets set `active_chat`.
     pub(crate) fn handle_navigate_to(&mut self, target: NavigationTarget) -> Task<Message> {
         match target {
             NavigationTarget::Chat { ref email } => {
@@ -18,19 +18,17 @@ impl App {
                 ref selection,
                 ref account_id,
             } => {
-                // Scope to the correct account if specified
                 if let Some(aid) = account_id {
                     self.select_account_by_id(aid);
                 }
                 self.sidebar.selection = selection.clone();
             }
             NavigationTarget::Search { .. } | NavigationTarget::PinnedSearch { .. } => {
-                // These are handled by the search pipeline, not sidebar selection
+                // Handled by the search pipeline, not sidebar selection
             }
         }
 
-        // Full view reset + load
-        self.reset_view_state(Some(target));
+        self.reset_view_state();
         let token = self.nav_generation.next();
         self.load_threads_for_current_view(token)
     }

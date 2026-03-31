@@ -209,13 +209,9 @@ fn current_view_and_label(app: &App) -> (ViewType, Option<String>) {
         _ => {}
     }
 
-    // Non-sidebar navigation targets (chat)
-    if let Some(target) = &app.navigation_target {
-        match target {
-            NavigationTarget::Chat { .. } => return (ViewType::Chat, None),
-            // Search/PinnedSearch handled above via thread list mode / active_pinned_search
-            _ => {}
-        }
+    // Chat view
+    if app.active_chat.is_some() {
+        return (ViewType::Chat, None);
     }
 
     // Derive from sidebar selection
@@ -551,12 +547,22 @@ pub fn dispatch_parameterized(id: CommandId, args: CommandArgs) -> Option<Messag
         }
         (
             CommandId::NavigateToLabel,
-            CommandArgs::NavigateToLabel {
-                label_id,
+            CommandArgs::NavigateToFolder {
+                folder_id,
                 account_id,
             },
         ) => Some(Message::NavigateTo(NavigationTarget::Sidebar {
-            selection: SidebarSelection::ProviderFolder(types::FolderId::from(label_id)),
+            selection: SidebarSelection::ProviderFolder(folder_id),
+            account_id: Some(account_id),
+        })),
+        (
+            CommandId::NavigateToLabel,
+            CommandArgs::NavigateToTag {
+                tag_id,
+                account_id,
+            },
+        ) => Some(Message::NavigateTo(NavigationTarget::Sidebar {
+            selection: SidebarSelection::Tag(tag_id),
             account_id: Some(account_id),
         })),
         (CommandId::SmartFolderSave, CommandArgs::SmartFolderSave { name }) => {

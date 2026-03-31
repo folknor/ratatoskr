@@ -404,8 +404,8 @@ struct App {
     /// Currently held keyboard modifiers (for Ctrl+click, Shift+click).
     current_modifiers: iced::keyboard::Modifiers,
 
-    /// The current navigation target, set by `Message::NavigateTo`.
-    navigation_target: Option<NavigationTarget>,
+    /// Active chat contact email, set when entering chat view.
+    active_chat: Option<String>,
 
     // Sync progress pipeline
     sync_receiver: SyncProgressReceiver,
@@ -573,7 +573,7 @@ impl App {
             no_accounts: false,
             add_account_wizard: None,
             current_modifiers: iced::keyboard::Modifiers::empty(),
-            navigation_target: None,
+            active_chat: None,
             sync_receiver,
             sync_reporter,
             jmap_push_tx,
@@ -1005,8 +1005,7 @@ impl App {
                     }
                 }
                 // Reload navigation + threads (or chat timeline) to reflect sync changes
-                if let Some(NavigationTarget::Chat { ref email }) = self.navigation_target {
-                    let email = email.clone();
+                if let Some(email) = self.active_chat.clone() {
                     return self.enter_chat_view(email);
                 }
                 let _ = self.nav_generation.next();
@@ -1368,7 +1367,7 @@ impl App {
                     .width(SIDEBAR_MIN_WIDTH)
                     .height(Length::Fill);
 
-                let is_chat = matches!(self.navigation_target, Some(NavigationTarget::Chat { .. }));
+                let is_chat = self.active_chat.is_some();
 
                 if is_chat {
                     // Chat view: sidebar + full-width chat timeline
@@ -1492,15 +1491,15 @@ impl App {
     fn handle_sidebar_event(&mut self, event: SidebarEvent) -> Task<Message> {
         match event {
             SidebarEvent::AccountSelected(_idx) => {
-                self.reset_view_state(None);
+                self.reset_view_state();
                 self.load_navigation_and_threads()
             }
             SidebarEvent::AllAccountsSelected => {
-                self.reset_view_state(None);
+                self.reset_view_state();
                 self.load_navigation_and_threads()
             }
             SidebarEvent::SelectionChanged(_sel) => {
-                self.reset_view_state(None);
+                self.reset_view_state();
                 let token = self.nav_generation.next();
                 self.load_threads_for_current_view(token)
             }
@@ -1521,29 +1520,24 @@ impl App {
                 self.update(Message::RefreshPinnedSearch(id))
             }
             SidebarEvent::SharedMailboxSelected { .. } => {
-                self.reset_view_state(None);
+                self.reset_view_state();
                 self.load_navigation_and_threads()
             }
             SidebarEvent::PublicFolderSelected { .. } => {
-                self.reset_view_state(None);
+                self.reset_view_state();
                 self.load_navigation_and_threads()
             }
         }
     }
 
     /// Full view-transition reset: clear search, pinned search, thread
-    /// selection, bump generations, and update thread list context.
+    /// Reset view state: clear search, thread selection, chat, bump
+    /// generations, and update thread list context.
     /// Call before loading threads/navigation for the new view.
-    ///
-    /// `navigation_target` is set to the provided value (Some for folder
-    /// navigation, None for account/label switch).
-    fn reset_view_state(
-        &mut self,
-        navigation_target: Option<crate::command_dispatch::NavigationTarget>,
-    ) {
+    fn reset_view_state(&mut self) {
         self.clear_search_state();
         self.clear_pinned_search_context();
-        self.navigation_target = navigation_target;
+        self.active_chat = None;
         self.clear_thread_selection();
         self.chat_timeline = None;
         let _ = self.nav_generation.next();
@@ -2394,9 +2388,7 @@ impl App {
                 ),
             })
             .collect();
-        if let Some(first) = self.sidebar.accounts.first() {
-            self.sidebar.selected_scope = ViewScope::Account(first.id.clone());
-        }
+        self.sidebar.selected_scope = ViewScope::AllAccounts;
         self.status = format!("Loaded {} accounts", self.sidebar.accounts.len());
         let sig_task =
             handlers::signatures::load_signatures_async(&self.db).map(Message::SignatureOp);

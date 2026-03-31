@@ -61,10 +61,11 @@ impl App {
         let generation = self.search_generation.next();
         let db = Arc::clone(&self.db);
         let ss = self.search_state.clone();
+        let scope = self.current_account_scope();
 
         Task::perform(
             async move {
-                let result = execute_search(db, ss, query).await;
+                let result = execute_search(db, ss, query, scope).await;
                 (generation, result)
             },
             |(g, result)| Message::SearchResultsLoaded(g, result),
@@ -155,11 +156,12 @@ impl App {
         let generation = self.search_generation.next();
         let db = Arc::clone(&self.db);
         let ss = self.search_state.clone();
+        let scope = self.current_account_scope();
 
         let search_query = self.search_query.text().to_string();
         Task::perform(
             async move {
-                let result = execute_search(db, ss, search_query).await;
+                let result = execute_search(db, ss, search_query, scope).await;
                 (generation, result)
             },
             |(g, result)| Message::SearchResultsLoaded(g, result),
@@ -551,13 +553,15 @@ pub(crate) async fn execute_search(
     db: Arc<db::Db>,
     search_state: Option<Arc<rtsk::search::SearchState>>,
     query: String,
+    scope: rtsk::db::types::AccountScope,
 ) -> Result<Vec<Thread>, String> {
     db.with_conn(move |conn| {
         if let Some(ref ss) = search_state {
+            // TODO: Tantivy path also ignores scope — needs post-filtering or re-indexing
             let results = rtsk::search_pipeline::search(&query, ss, conn)?;
             Ok(results.into_iter().map(unified_result_to_thread).collect())
         } else {
-            execute_search_sql_fallback(conn, &query)
+            execute_search_sql_fallback(conn, &query, &scope)
         }
     })
     .await
@@ -567,9 +571,10 @@ pub(crate) async fn execute_search(
 fn execute_search_sql_fallback(
     conn: &rusqlite::Connection,
     query: &str,
+    scope: &rtsk::db::types::AccountScope,
 ) -> Result<Vec<Thread>, String> {
     let parsed = rtsk::smart_folder::parse_query(query);
-    let scope = rtsk::db::types::AccountScope::All;
+    let scope = scope.clone();
 
     if parsed.has_any_operator() || parsed.free_text.is_empty() {
         let db_threads =
@@ -581,39 +586,64 @@ fn execute_search_sql_fallback(
     } else {
         // Free text only, no Tantivy — do a simple LIKE search
         let pattern = format!("%{}%", parsed.free_text);
+        let (scope_clause, scope_params): (String, Vec<String>) = match &scope {
+            rtsk::db::types::AccountScope::All => (String::new(), vec![]),
+            rtsk::db::types::AccountScope::Single(id) => {
+                ("AND t.account_id = ?2".to_string(), vec![id.clone()])
+            }
+            rtsk::db::types::AccountScope::Multiple(ids) => {
+                let placeholders: Vec<String> = (0..ids.len())
+                    .map(|i| format!("?{}", i + 2))
+                    .collect();
+                (
+                    format!("AND t.account_id IN ({})", placeholders.join(",")),
+                    ids.clone(),
+                )
+            }
+        };
+        let sql = format!(
+            "SELECT t.id, t.account_id, t.subject, t.snippet,
+                    t.last_message_at, t.message_count,
+                    t.is_read, t.is_starred, t.has_attachments,
+                    t.from_name, t.from_address
+             FROM threads t
+             WHERE (t.subject LIKE ?1 OR t.snippet LIKE ?1)
+             {scope_clause}
+             ORDER BY t.last_message_at DESC
+             LIMIT 200"
+        );
         let mut stmt = conn
-            .prepare(
-                "SELECT t.id, t.account_id, t.subject, t.snippet,
-                        t.last_message_at, t.message_count,
-                        t.is_read, t.is_starred, t.has_attachments,
-                        t.from_name, t.from_address
-                 FROM threads t
-                 WHERE t.subject LIKE ?1 OR t.snippet LIKE ?1
-                 ORDER BY t.last_message_at DESC
-                 LIMIT 200",
-            )
+            .prepare(&sql)
             .map_err(|e| format!("prepare search: {e}"))?;
-        let rows = stmt
-            .query_map([&pattern], |row| {
-                Ok(Thread {
-                    id: row.get(0)?,
-                    account_id: row.get(1)?,
-                    subject: row.get(2)?,
-                    snippet: row.get(3)?,
-                    last_message_at: row
-                        .get::<_, Option<String>>(4)?
-                        .and_then(|s| s.parse().ok()),
-                    message_count: row.get(5)?,
-                    is_read: row.get(6)?,
-                    is_starred: row.get(7)?,
-                    is_pinned: false,
-                    is_muted: false,
-                    has_attachments: row.get(8)?,
-                    from_name: row.get(9)?,
-                    from_address: row.get(10)?,
-                    is_local_draft: false,
-                })
+        let row_mapper = |row: &rusqlite::Row<'_>| -> rusqlite::Result<Thread> {
+            Ok(Thread {
+                id: row.get(0)?,
+                account_id: row.get(1)?,
+                subject: row.get(2)?,
+                snippet: row.get(3)?,
+                last_message_at: row
+                    .get::<_, Option<String>>(4)?
+                    .and_then(|s| s.parse().ok()),
+                message_count: row.get(5)?,
+                is_read: row.get(6)?,
+                is_starred: row.get(7)?,
+                is_pinned: false,
+                is_muted: false,
+                has_attachments: row.get(8)?,
+                from_name: row.get(9)?,
+                from_address: row.get(10)?,
+                is_local_draft: false,
             })
+        };
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
+            vec![Box::new(pattern)];
+        for p in &scope_params {
+            params.push(Box::new(p.clone()));
+        }
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+        let rows = stmt
+            .query_map(&*param_refs, row_mapper)
             .map_err(|e| format!("search query: {e}"))?;
         let mut threads = Vec::new();
         for row in rows {

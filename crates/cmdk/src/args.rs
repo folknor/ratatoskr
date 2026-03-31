@@ -15,11 +15,16 @@ pub enum CommandArgs {
     RemoveLabel { label_id: TagId },
     /// EmailSnooze -- unix timestamp from DateTime picker
     Snooze { until: i64 },
-    /// NavigateToLabel -- label_id from ListPicker selection.
-    /// Includes account_id because cross-account navigation needs
-    /// to know which account the label belongs to.
-    NavigateToLabel {
-        label_id: String,
+    /// Navigate to a provider folder. Includes account_id because
+    /// cross-account navigation needs to scope the sidebar.
+    NavigateToFolder {
+        folder_id: FolderId,
+        account_id: String,
+    },
+    /// Navigate to a tag-type label. Includes account_id because
+    /// cross-account navigation needs to scope the sidebar.
+    NavigateToTag {
+        tag_id: TagId,
         account_id: String,
     },
     /// SmartFolderSave -- name from Text input
