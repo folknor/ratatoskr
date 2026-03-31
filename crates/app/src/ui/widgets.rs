@@ -1839,7 +1839,7 @@ pub fn color_palette_grid<'a, M: Clone + 'a>(
     used_colors: &[String],
     on_select: impl Fn(usize) -> M + 'a,
 ) -> Element<'a, M> {
-    let presets = label_colors::category_colors::all_presets();
+    let presets = label_colors::preset_colors::all_presets();
     let mut grid = column![].spacing(SPACE_XS);
     let mut current_row = row![].spacing(SPACE_XS);
 

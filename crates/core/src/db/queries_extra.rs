@@ -1,14 +1,14 @@
 use rusqlite::Connection;
 
 // Re-export from the db crate so existing callers (`sync/notifications.rs`,
-// `bundles_categories.rs`) can keep importing via this path.
-pub use db::db::queries::load_recent_rule_categorized_threads;
+// `bundles.rs`) can keep importing via this path.
+pub use db::db::queries::load_recent_rule_bundled_threads;
 
 mod accounts_crud;
 mod accounts_messages;
 mod ai_state;
 mod allowlists;
-mod bundles_categories;
+mod bundles;
 pub mod calendars;
 pub(crate) mod compose;
 pub mod contact_groups;
@@ -28,7 +28,7 @@ pub use accounts_crud::*;
 pub use accounts_messages::*;
 pub use ai_state::*;
 pub use allowlists::*;
-pub use bundles_categories::*;
+pub use bundles::*;
 pub use calendars::*;
 pub use compose::*;
 pub use contact_groups::*;

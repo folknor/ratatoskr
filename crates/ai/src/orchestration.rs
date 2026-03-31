@@ -4,7 +4,7 @@ use crate::parsing;
 use crate::prompts;
 use crate::types::{
     AiCompleter, AiCompletionRequest, AiError, AiMessageInput, AiSearchResult, AutoDraftMode,
-    ExtractedTask, TextTransformType, ThreadCategory, ThreadForCategorization, WritingStyleProfile,
+    ExtractedTask, TextTransformType, ThreadBundle, ThreadForBundling, WritingStyleProfile,
 };
 use rtsk::db::DbState;
 
@@ -176,14 +176,14 @@ pub async fn ask_inbox(
 }
 
 // ---------------------------------------------------------------------------
-// 4. categorize_threads
+// 4. bundle_threads
 // ---------------------------------------------------------------------------
 
 /// Categorize threads into Primary/Updates/Promotions/Social/Newsletters.
-pub async fn categorize_threads(
+pub async fn bundle_threads(
     ai: &dyn AiCompleter,
-    threads: &[ThreadForCategorization],
-) -> Result<Vec<(String, ThreadCategory)>, AiError> {
+    threads: &[ThreadForBundling],
+) -> Result<Vec<(String, ThreadBundle)>, AiError> {
     let input: String = threads
         .iter()
         .map(|t| {
@@ -197,17 +197,17 @@ pub async fn categorize_threads(
 
     let response = ai
         .complete(&AiCompletionRequest {
-            system_prompt: prompts::CATEGORIZE_PROMPT.to_string(),
+            system_prompt: prompts::BUNDLE_PROMPT.to_string(),
             user_content: input,
             max_tokens: None,
         })
         .await?;
 
-    // Use parsing module, then filter to valid thread IDs and map to our ThreadCategory
+    // Use parsing module, then filter to valid thread IDs and map to our ThreadBundle
     let valid_ids: std::collections::HashSet<&str> =
         threads.iter().map(|t| t.thread_id.as_str()).collect();
 
-    let results: Vec<(String, ThreadCategory)> = response
+    let results: Vec<(String, ThreadBundle)> = response
         .lines()
         .filter_map(|line| {
             let trimmed = line.trim();
@@ -220,7 +220,7 @@ pub async fn categorize_threads(
             if thread_id.is_empty() || !valid_ids.contains(thread_id) {
                 return None;
             }
-            ThreadCategory::parse(category_str).map(|cat| (thread_id.to_string(), cat))
+            ThreadBundle::parse(category_str).map(|cat| (thread_id.to_string(), cat))
         })
         .collect();
 
@@ -234,7 +234,7 @@ pub async fn categorize_threads(
 /// Classify threads against user-defined smart label rules.
 pub async fn classify_by_smart_labels(
     ai: &dyn AiCompleter,
-    threads: &[ThreadForCategorization],
+    threads: &[ThreadForBundling],
     label_rules: &[(String, String)],
 ) -> Result<Vec<(String, Vec<String>)>, AiError> {
     let label_defs: String = label_rules
@@ -606,15 +606,15 @@ mod tests {
     }
 
     #[test]
-    fn thread_for_categorization_formatting() {
+    fn thread_for_bundling_formatting() {
         let threads = vec![
-            ThreadForCategorization {
+            ThreadForBundling {
                 thread_id: "t1".to_string(),
                 subject: "Meeting notes".to_string(),
                 snippet: "Here are the notes".to_string(),
                 from_address: "alice@example.com".to_string(),
             },
-            ThreadForCategorization {
+            ThreadForBundling {
                 thread_id: "t2".to_string(),
                 subject: "Sale!".to_string(),
                 snippet: "50% off everything".to_string(),
@@ -705,15 +705,15 @@ mod tests {
     #[test]
     fn thread_category_roundtrip() {
         for (s, expected) in [
-            ("Primary", ThreadCategory::Primary),
-            ("Updates", ThreadCategory::Updates),
-            ("Promotions", ThreadCategory::Promotions),
-            ("Social", ThreadCategory::Social),
-            ("Newsletters", ThreadCategory::Newsletters),
+            ("Primary", ThreadBundle::Primary),
+            ("Updates", ThreadBundle::Updates),
+            ("Promotions", ThreadBundle::Promotions),
+            ("Social", ThreadBundle::Social),
+            ("Newsletters", ThreadBundle::Newsletters),
         ] {
-            assert_eq!(ThreadCategory::parse(s), Some(expected.clone()));
+            assert_eq!(ThreadBundle::parse(s), Some(expected.clone()));
             assert_eq!(expected.as_str(), s);
         }
-        assert_eq!(ThreadCategory::parse("Invalid"), None);
+        assert_eq!(ThreadBundle::parse("Invalid"), None);
     }
 }

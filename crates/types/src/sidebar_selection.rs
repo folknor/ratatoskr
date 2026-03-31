@@ -67,11 +67,11 @@ impl Bundle {
     /// The canonical bundle ID string used in the database.
     pub fn as_id_str(&self) -> &'static str {
         match self {
-            Self::Primary => "CATEGORY_PRIMARY",
-            Self::Updates => "CATEGORY_UPDATES",
-            Self::Promotions => "CATEGORY_PROMOTIONS",
-            Self::Social => "CATEGORY_SOCIAL",
-            Self::Newsletters => "CATEGORY_NEWSLETTERS",
+            Self::Primary => "BUNDLE_PRIMARY",
+            Self::Updates => "BUNDLE_UPDATES",
+            Self::Promotions => "BUNDLE_PROMOTIONS",
+            Self::Social => "BUNDLE_SOCIAL",
+            Self::Newsletters => "BUNDLE_NEWSLETTERS",
         }
     }
 }

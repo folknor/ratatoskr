@@ -4,7 +4,7 @@ use regex::Regex;
 use serde::Deserialize;
 
 use crate::types::{ExtractedTask, TaskPriority};
-use rtsk::categorization::ThreadCategory;
+use rtsk::bundling::ThreadBundle;
 
 // ---------------------------------------------------------------------------
 // Compiled regexes
@@ -175,7 +175,7 @@ pub fn parse_extracted_task(response: &str, fallback_subject: &str) -> Extracted
 ///
 /// Only lines with a valid category are included. Invalid categories and
 /// empty lines are silently skipped.
-pub fn parse_category_response(response: &str) -> Vec<(String, ThreadCategory)> {
+pub fn parse_bundle_response(response: &str) -> Vec<(String, ThreadBundle)> {
     response
         .lines()
         .filter_map(|line| {
@@ -189,7 +189,7 @@ pub fn parse_category_response(response: &str) -> Vec<(String, ThreadCategory)> 
             if thread_id.is_empty() {
                 return None;
             }
-            ThreadCategory::parse(category_str).map(|cat| (thread_id.to_string(), cat))
+            ThreadBundle::parse(category_str).map(|cat| (thread_id.to_string(), cat))
         })
         .collect()
 }
@@ -377,57 +377,57 @@ mod tests {
     // -- Category parsing --
 
     #[test]
-    fn parse_category_response_valid() {
+    fn parse_bundle_response_valid() {
         let input = "thread-1:Primary\nthread-2:Updates\nthread-3:Newsletters";
-        let result = parse_category_response(input);
+        let result = parse_bundle_response(input);
         assert_eq!(result.len(), 3);
-        assert_eq!(result[0], ("thread-1".to_string(), ThreadCategory::Primary));
-        assert_eq!(result[1], ("thread-2".to_string(), ThreadCategory::Updates));
+        assert_eq!(result[0], ("thread-1".to_string(), ThreadBundle::Primary));
+        assert_eq!(result[1], ("thread-2".to_string(), ThreadBundle::Updates));
         assert_eq!(
             result[2],
-            ("thread-3".to_string(), ThreadCategory::Newsletters)
+            ("thread-3".to_string(), ThreadBundle::Newsletters)
         );
     }
 
     #[test]
-    fn parse_category_response_invalid_category_skipped() {
+    fn parse_bundle_response_invalid_category_skipped() {
         let input = "thread-1:Primary\nthread-2:InvalidCat\nthread-3:Social";
-        let result = parse_category_response(input);
+        let result = parse_bundle_response(input);
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].0, "thread-1");
         assert_eq!(result[1].0, "thread-3");
     }
 
     #[test]
-    fn parse_category_response_empty_lines_skipped() {
+    fn parse_bundle_response_empty_lines_skipped() {
         let input = "thread-1:Primary\n\n\nthread-2:Promotions\n";
-        let result = parse_category_response(input);
+        let result = parse_bundle_response(input);
         assert_eq!(result.len(), 2);
     }
 
     #[test]
-    fn parse_category_response_no_colon_skipped() {
+    fn parse_bundle_response_no_colon_skipped() {
         let input = "thread-1 Primary\nthread-2:Updates";
-        let result = parse_category_response(input);
+        let result = parse_bundle_response(input);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, "thread-2");
     }
 
     #[test]
-    fn parse_category_response_empty_thread_id_skipped() {
+    fn parse_bundle_response_empty_thread_id_skipped() {
         let input = ":Primary\nthread-2:Updates";
-        let result = parse_category_response(input);
+        let result = parse_bundle_response(input);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, "thread-2");
     }
 
     #[test]
-    fn parse_category_response_whitespace_handling() {
+    fn parse_bundle_response_whitespace_handling() {
         let input = "  thread-1 : Primary  \n  thread-2 : Social  ";
-        let result = parse_category_response(input);
+        let result = parse_bundle_response(input);
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0], ("thread-1".to_string(), ThreadCategory::Primary));
-        assert_eq!(result[1], ("thread-2".to_string(), ThreadCategory::Social));
+        assert_eq!(result[0], ("thread-1".to_string(), ThreadBundle::Primary));
+        assert_eq!(result[1], ("thread-2".to_string(), ThreadBundle::Social));
     }
 
     // -- Smart label parsing --

@@ -35,7 +35,7 @@ pub fn persist_refreshed_token(
     Ok(())
 }
 
-pub fn load_recent_rule_categorized_threads(
+pub fn load_recent_rule_bundled_threads(
     conn: &Connection,
     account_id: &str,
     limit: i64,

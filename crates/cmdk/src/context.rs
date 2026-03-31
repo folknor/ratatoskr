@@ -33,7 +33,7 @@ pub enum ViewType {
     AllMail,
     Label,
     SmartFolder,
-    Category,
+    Bundle,
     Tasks,
     Calendar,
     Settings,

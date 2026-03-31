@@ -2,17 +2,17 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::Connection;
 
-use crate::categorization::AiCategorizationCandidate;
+use crate::bundling::AiBundlingCandidate;
 use crate::filters::FilterableMessage;
 use crate::types::NotificationCandidate;
 use db::db::DbState;
-use db::db::queries::load_recent_rule_categorized_threads;
+use db::db::queries::load_recent_rule_bundled_threads;
 
 /// Check settings and return threads that need AI categorization.
-pub async fn get_ai_categorization_candidates(
+pub async fn get_ai_bundling_candidates(
     db: &DbState,
     account_id: &str,
-) -> Result<Vec<AiCategorizationCandidate>, String> {
+) -> Result<Vec<AiBundlingCandidate>, String> {
     let account_id = account_id.to_string();
     db.with_conn(move |conn| {
         let auto_categorize =
@@ -21,10 +21,10 @@ pub async fn get_ai_categorization_candidates(
             return Ok(Vec::new());
         }
 
-        load_recent_rule_categorized_threads(conn, &account_id, 20).map(|threads| {
+        load_recent_rule_bundled_threads(conn, &account_id, 20).map(|threads| {
             threads
                 .into_iter()
-                .map(|thread| AiCategorizationCandidate {
+                .map(|thread| AiBundlingCandidate {
                     id: thread.id,
                     subject: thread.subject,
                     snippet: thread.snippet,

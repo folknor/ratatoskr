@@ -357,16 +357,16 @@ pub struct BundleSummarySingle {
     pub latest_sender: Option<String>,
 }
 
-// ── Thread category with manual flag ───────────────────────
+// ── Thread bundle with manual flag ──────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct ThreadCategoryWithManual {
+pub struct ThreadBundleWithManual {
     pub category: String,
     pub is_manual: bool,
 }
 
-// ── Thread info for categorization ─────────────────────────
+// ── Thread info for bundling ────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]

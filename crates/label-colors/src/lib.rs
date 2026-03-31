@@ -4,9 +4,9 @@
 //! providers store `None`. This module provides a hash-based fallback that
 //! assigns a stable color from the 25-preset palette to any label.
 
-pub mod category_colors;
+pub mod preset_colors;
 
-use category_colors::all_presets;
+use preset_colors::all_presets;
 use db::db::types::DbLabel;
 
 /// Deterministic color assignment for a label that has no synced color.

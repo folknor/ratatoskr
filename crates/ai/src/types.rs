@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-// Re-export ThreadCategory from its canonical location in core/sync.
-pub use rtsk::categorization::ThreadCategory;
+// Re-export ThreadBundle from its canonical location in core/sync.
+pub use rtsk::bundling::ThreadBundle;
 
 /// Request sent to an AI completion provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,9 +159,9 @@ pub struct AiSearchResult {
     pub snippet: Option<String>,
 }
 
-/// Thread data for categorization.
+/// Thread data for AI bundling.
 #[derive(Debug, Clone)]
-pub struct ThreadForCategorization {
+pub struct ThreadForBundling {
     pub thread_id: String,
     pub subject: String,
     pub snippet: String,

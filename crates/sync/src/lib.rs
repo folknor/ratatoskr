@@ -1,4 +1,4 @@
-pub mod categorization;
+pub mod bundling;
 pub mod config;
 pub mod filters;
 pub mod notifications;

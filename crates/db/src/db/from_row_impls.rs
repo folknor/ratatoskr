@@ -543,7 +543,7 @@ impl_from_row!(FolderAccountUnreadCount {
     unread_count,
 });
 
-impl_from_row!(ThreadCategoryWithManual {
+impl_from_row!(ThreadBundleWithManual {
     category,
     bool is_manual,
 });

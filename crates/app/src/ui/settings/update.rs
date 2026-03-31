@@ -1189,7 +1189,7 @@ impl Settings {
             return;
         };
         // Resolve current color index from hex
-        let presets = label_colors::category_colors::all_presets();
+        let presets = label_colors::preset_colors::all_presets();
         let color_index = account
             .account_color
             .as_deref()
@@ -1223,7 +1223,7 @@ impl Settings {
             return (Task::none(), None);
         }
 
-        let presets = label_colors::category_colors::all_presets();
+        let presets = label_colors::preset_colors::all_presets();
         let color_hex = editor
             .account_color_index
             .and_then(|i| presets.get(i))

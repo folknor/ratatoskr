@@ -1,14 +1,14 @@
 use super::super::DbState;
 use super::super::sql_fragments::LATEST_MESSAGE_SUBQUERY;
 use super::super::types::{
-    BundleSummary, BundleSummarySingle, DbBundleRule, ThreadCategoryWithManual, ThreadInfoRow,
+    BundleSummary, BundleSummarySingle, DbBundleRule, ThreadBundleWithManual, ThreadInfoRow,
 };
-use super::load_recent_rule_categorized_threads;
+use super::load_recent_rule_bundled_threads;
 use crate::db::from_row::FromRow;
 use crate::db::{query_as, query_one};
 use rusqlite::params;
 
-pub async fn db_set_thread_category(
+pub async fn db_set_thread_bundle(
     db: &DbState,
     account_id: String,
     thread_id: String,
@@ -313,7 +313,7 @@ pub async fn db_get_bundle_summary(
     .await
 }
 
-pub async fn db_get_thread_category(
+pub async fn db_get_thread_bundle(
     db: &DbState,
     account_id: String,
     thread_id: String,
@@ -333,16 +333,16 @@ pub async fn db_get_thread_category(
     .await
 }
 
-pub async fn db_get_thread_category_with_manual(
+pub async fn db_get_thread_bundle_with_manual(
     db: &DbState,
     account_id: String,
     thread_id: String,
-) -> Result<Option<ThreadCategoryWithManual>, String> {
+) -> Result<Option<ThreadBundleWithManual>, String> {
     db.with_conn(move |conn| {
         let result = conn.query_row(
             "SELECT category, is_manual FROM thread_categories WHERE account_id = ?1 AND thread_id = ?2",
             params![account_id, thread_id],
-            ThreadCategoryWithManual::from_row,
+            ThreadBundleWithManual::from_row,
         );
         match result {
             Ok(tc) => Ok(Some(tc)),
@@ -353,19 +353,19 @@ pub async fn db_get_thread_category_with_manual(
     .await
 }
 
-pub async fn db_get_recent_rule_categorized_thread_ids(
+pub async fn db_get_recent_rule_bundled_thread_ids(
     db: &DbState,
     account_id: String,
     limit: Option<i64>,
 ) -> Result<Vec<ThreadInfoRow>, String> {
     db.with_conn(move |conn| {
         let lim = limit.unwrap_or(20);
-        load_recent_rule_categorized_threads(conn, &account_id, lim)
+        load_recent_rule_bundled_threads(conn, &account_id, lim)
     })
     .await
 }
 
-pub async fn db_set_thread_categories_batch(
+pub async fn db_set_thread_bundles_batch(
     db: &DbState,
     account_id: String,
     categories: Vec<(String, String)>,
@@ -389,7 +389,7 @@ pub async fn db_set_thread_categories_batch(
     .await
 }
 
-pub async fn db_get_uncategorized_inbox_thread_ids(
+pub async fn db_get_unbundled_inbox_thread_ids(
     db: &DbState,
     account_id: String,
     limit: Option<i64>,

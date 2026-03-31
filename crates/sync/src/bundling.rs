@@ -6,17 +6,17 @@ use std::sync::LazyLock;
 // Types
 // ---------------------------------------------------------------------------
 
-/// Input data for rule-based categorization.
+/// Input data for rule-based bundling.
 #[derive(Debug, Deserialize)]
-pub struct CategorizationInput {
+pub struct BundlingInput {
     pub label_ids: Vec<String>,
     pub from_address: Option<String>,
     pub list_unsubscribe: Option<String>,
 }
 
-/// Thread category — matches the TS `ThreadCategory` union.
+/// Thread bundle — AI inbox classification (Primary, Updates, etc.).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ThreadCategory {
+pub enum ThreadBundle {
     Primary,
     Updates,
     Promotions,
@@ -24,7 +24,7 @@ pub enum ThreadCategory {
     Newsletters,
 }
 
-impl ThreadCategory {
+impl ThreadBundle {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Primary => "Primary",
@@ -48,14 +48,14 @@ impl ThreadCategory {
 }
 
 #[derive(Debug, Clone)]
-pub struct AiCategorizationCandidate {
+pub struct AiBundlingCandidate {
     pub id: String,
     pub subject: Option<String>,
     pub snippet: Option<String>,
     pub from_address: Option<String>,
 }
 
-pub const CATEGORIZE_PROMPT: &str = r#"Categorize each email thread into exactly ONE of these categories:
+pub const BUNDLE_PROMPT: &str = r#"Categorize each email thread into exactly ONE of these categories:
 - Primary: Personal correspondence, direct work emails, important messages requiring action
 - Updates: Notifications, receipts, order confirmations, automated updates
 - Promotions: Marketing emails, deals, offers, advertisements
@@ -69,7 +69,7 @@ THREAD_ID:CATEGORY
 
 Do not include any other text. Only use the exact categories listed above: Primary, Updates, Promotions, Social, Newsletters."#;
 
-pub fn format_ai_categorization_input(threads: &[AiCategorizationCandidate]) -> String {
+pub fn format_ai_bundling_input(threads: &[AiBundlingCandidate]) -> String {
     threads
         .iter()
         .map(|thread| {
@@ -85,10 +85,10 @@ pub fn format_ai_categorization_input(threads: &[AiCategorizationCandidate]) -> 
         .join("\n")
 }
 
-pub fn parse_ai_categorization_output(
+pub fn parse_ai_bundling_output(
     output: &str,
     valid_thread_ids: &HashSet<String>,
-) -> Vec<(String, ThreadCategory)> {
+) -> Vec<(String, ThreadBundle)> {
     output
         .lines()
         .filter_map(|line| {
@@ -102,7 +102,7 @@ pub fn parse_ai_categorization_output(
             if !valid_thread_ids.contains(thread_id) || thread_id.is_empty() {
                 return None;
             }
-            ThreadCategory::parse(category).map(|parsed| (thread_id.to_string(), parsed))
+            ThreadBundle::parse(category).map(|parsed| (thread_id.to_string(), parsed))
         })
         .collect()
 }
@@ -221,15 +221,15 @@ fn get_local_part(email: &str) -> Option<String> {
 /// 2. Domain heuristics (social domains, newsletter platforms, promo prefixes)
 /// 3. `List-Unsubscribe` header presence
 /// 4. Default -> Primary
-pub fn categorize_by_rules(input: &CategorizationInput) -> ThreadCategory {
+pub fn bundle_by_rules(input: &BundlingInput) -> ThreadBundle {
     // Layer 1: Gmail category labels (highest priority -- Google's own ML)
     for label in &input.label_ids {
         match label.as_str() {
-            "CATEGORY_PROMOTIONS" => return ThreadCategory::Promotions,
-            "CATEGORY_SOCIAL" => return ThreadCategory::Social,
-            "CATEGORY_UPDATES" => return ThreadCategory::Updates,
+            "CATEGORY_PROMOTIONS" => return ThreadBundle::Promotions,
+            "CATEGORY_SOCIAL" => return ThreadBundle::Social,
+            "CATEGORY_UPDATES" => return ThreadBundle::Updates,
             // Forums map to Primary (closest match)
-            "CATEGORY_FORUMS" | "CATEGORY_PERSONAL" => return ThreadCategory::Primary,
+            "CATEGORY_FORUMS" | "CATEGORY_PERSONAL" => return ThreadBundle::Primary,
             _ => {}
         }
     }
@@ -241,19 +241,19 @@ pub fn categorize_by_rules(input: &CategorizationInput) -> ThreadCategory {
 
         if let Some(ref d) = domain {
             if SOCIAL_DOMAINS.contains(d.as_str()) {
-                return ThreadCategory::Social;
+                return ThreadBundle::Social;
             }
             if NEWSLETTER_DOMAINS.contains(d.as_str()) {
-                return ThreadCategory::Newsletters;
+                return ThreadBundle::Newsletters;
             }
         }
 
         if let Some(ref lp) = local_part {
             if PROMO_PREFIXES.contains(lp.as_str()) {
-                return ThreadCategory::Promotions;
+                return ThreadBundle::Promotions;
             }
             if UPDATE_PREFIXES.contains(lp.as_str()) {
-                return ThreadCategory::Updates;
+                return ThreadBundle::Updates;
             }
         }
     }
@@ -265,19 +265,19 @@ pub fn categorize_by_rules(input: &CategorizationInput) -> ThreadCategory {
             && let Some(d) = get_domain(from_address)
             && NEWSLETTER_DOMAINS.contains(d.as_str())
         {
-            return ThreadCategory::Newsletters;
+            return ThreadBundle::Newsletters;
         }
         // Generic unsubscribable mail -> Promotions
-        return ThreadCategory::Promotions;
+        return ThreadBundle::Promotions;
     }
 
     // Layer 4: Default
-    ThreadCategory::Primary
+    ThreadBundle::Primary
 }
 
 /// Batch-categorize multiple inputs. Returns categories in the same order.
-pub fn categorize_batch(inputs: &[CategorizationInput]) -> Vec<ThreadCategory> {
-    inputs.iter().map(categorize_by_rules).collect()
+pub fn bundle_batch(inputs: &[BundlingInput]) -> Vec<ThreadBundle> {
+    inputs.iter().map(bundle_by_rules).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -292,8 +292,8 @@ mod tests {
         label_ids: Vec<&str>,
         from_address: Option<&str>,
         list_unsubscribe: Option<&str>,
-    ) -> CategorizationInput {
-        CategorizationInput {
+    ) -> BundlingInput {
+        BundlingInput {
             label_ids: label_ids.into_iter().map(String::from).collect(),
             from_address: from_address.map(String::from),
             list_unsubscribe: list_unsubscribe.map(String::from),
@@ -305,38 +305,38 @@ mod tests {
     #[test]
     fn gmail_category_promotions() {
         let input = make_input(vec!["INBOX", "CATEGORY_PROMOTIONS"], None, None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Promotions);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Promotions);
     }
 
     #[test]
     fn gmail_category_social() {
         let input = make_input(vec!["CATEGORY_SOCIAL"], None, None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Social);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Social);
     }
 
     #[test]
     fn gmail_category_updates() {
         let input = make_input(vec!["CATEGORY_UPDATES"], None, None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Updates);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Updates);
     }
 
     #[test]
     fn gmail_category_forums_maps_to_primary() {
         let input = make_input(vec!["CATEGORY_FORUMS"], None, None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Primary);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Primary);
     }
 
     #[test]
     fn gmail_category_personal_maps_to_primary() {
         let input = make_input(vec!["CATEGORY_PERSONAL"], None, None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Primary);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Primary);
     }
 
     #[test]
     fn gmail_category_takes_priority_over_domain() {
         // Even though from a social domain, the Gmail label wins
         let input = make_input(vec!["CATEGORY_UPDATES"], Some("noreply@facebook.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Updates);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Updates);
     }
 
     // -- Layer 2: Domain heuristics --
@@ -344,97 +344,97 @@ mod tests {
     #[test]
     fn social_domain_facebook() {
         let input = make_input(vec![], Some("notifications@facebookmail.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Social);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Social);
     }
 
     #[test]
     fn social_domain_linkedin() {
         let input = make_input(vec![], Some("messages@linkedin.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Social);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Social);
     }
 
     #[test]
     fn social_domain_x() {
         let input = make_input(vec![], Some("info@x.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Social);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Social);
     }
 
     #[test]
     fn social_domain_discord() {
         let input = make_input(vec![], Some("noreply@discord.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Social);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Social);
     }
 
     #[test]
     fn newsletter_domain_substack() {
         let input = make_input(vec![], Some("newsletter@substack.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Newsletters);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Newsletters);
     }
 
     #[test]
     fn newsletter_domain_mailchimp() {
         let input = make_input(vec![], Some("campaign@mailchimp.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Newsletters);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Newsletters);
     }
 
     #[test]
     fn newsletter_domain_beehiiv() {
         let input = make_input(vec![], Some("hello@beehiiv.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Newsletters);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Newsletters);
     }
 
     #[test]
     fn promo_prefix_marketing() {
         let input = make_input(vec![], Some("marketing@acme.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Promotions);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Promotions);
     }
 
     #[test]
     fn promo_prefix_deals() {
         let input = make_input(vec![], Some("deals@shop.example.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Promotions);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Promotions);
     }
 
     #[test]
     fn promo_prefix_shop() {
         let input = make_input(vec![], Some("shop@retailer.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Promotions);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Promotions);
     }
 
     #[test]
     fn update_prefix_noreply() {
         let input = make_input(vec![], Some("noreply@github.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Updates);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Updates);
     }
 
     #[test]
     fn update_prefix_no_reply() {
         let input = make_input(vec![], Some("no-reply@amazon.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Updates);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Updates);
     }
 
     #[test]
     fn update_prefix_notifications() {
         let input = make_input(vec![], Some("notifications@bank.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Updates);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Updates);
     }
 
     #[test]
     fn update_prefix_billing() {
         let input = make_input(vec![], Some("billing@service.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Updates);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Updates);
     }
 
     #[test]
     fn update_prefix_security() {
         let input = make_input(vec![], Some("security@bank.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Updates);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Updates);
     }
 
     #[test]
     fn update_prefix_mailer_daemon() {
         let input = make_input(vec![], Some("mailer-daemon@mail.example.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Updates);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Updates);
     }
 
     // -- Layer 2: Case insensitivity --
@@ -442,13 +442,13 @@ mod tests {
     #[test]
     fn case_insensitive_domain() {
         let input = make_input(vec![], Some("user@FACEBOOK.COM"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Social);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Social);
     }
 
     #[test]
     fn case_insensitive_local_part() {
         let input = make_input(vec![], Some("NOREPLY@example.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Updates);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Updates);
     }
 
     // -- Layer 2: Social domains take priority over promo/update prefixes --
@@ -458,7 +458,7 @@ mod tests {
         // "noreply" is an update prefix, but discord.com is a social domain
         // Domain check runs first, so Social wins
         let input = make_input(vec![], Some("noreply@discord.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Social);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Social);
     }
 
     // -- Layer 3: List-Unsubscribe --
@@ -470,7 +470,7 @@ mod tests {
             Some("hello@substack.com"),
             Some("<https://substack.com/unsub>"),
         );
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Newsletters);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Newsletters);
     }
 
     #[test]
@@ -480,13 +480,13 @@ mod tests {
             Some("team@startup.io"),
             Some("<https://startup.io/unsubscribe>"),
         );
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Promotions);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Promotions);
     }
 
     #[test]
     fn list_unsubscribe_no_from_becomes_promotions() {
         let input = make_input(vec![], None, Some("<mailto:unsub@example.com>"));
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Promotions);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Promotions);
     }
 
     // -- Layer 4: Default --
@@ -494,19 +494,19 @@ mod tests {
     #[test]
     fn default_primary() {
         let input = make_input(vec![], Some("friend@personal.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Primary);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Primary);
     }
 
     #[test]
     fn empty_input_defaults_to_primary() {
         let input = make_input(vec![], None, None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Primary);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Primary);
     }
 
     #[test]
     fn no_labels_unknown_domain_no_header() {
         let input = make_input(vec!["INBOX", "UNREAD"], Some("bob@random.org"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Primary);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Primary);
     }
 
     // -- Edge cases --
@@ -514,14 +514,14 @@ mod tests {
     #[test]
     fn invalid_email_no_at() {
         let input = make_input(vec![], Some("not-an-email"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Primary);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Primary);
     }
 
     #[test]
     fn email_with_multiple_at_signs() {
         // lastIndexOf('@') in TS / rfind('@') in Rust — takes last @
         let input = make_input(vec![], Some("noreply@weird@discord.com"), None);
-        assert_eq!(categorize_by_rules(&input), ThreadCategory::Social);
+        assert_eq!(bundle_by_rules(&input), ThreadBundle::Social);
     }
 
     // -- Batch --
@@ -533,18 +533,18 @@ mod tests {
             make_input(vec![], Some("noreply@github.com"), None),
             make_input(vec![], Some("friend@personal.com"), None),
         ];
-        let results = categorize_batch(&inputs);
+        let results = bundle_batch(&inputs);
         assert_eq!(results.len(), 3);
-        assert_eq!(results[0], ThreadCategory::Social);
-        assert_eq!(results[1], ThreadCategory::Updates);
-        assert_eq!(results[2], ThreadCategory::Primary);
+        assert_eq!(results[0], ThreadBundle::Social);
+        assert_eq!(results[1], ThreadBundle::Updates);
+        assert_eq!(results[2], ThreadBundle::Primary);
     }
 
     #[test]
-    fn parse_ai_categorization_output_filters_invalid_rows() {
+    fn parse_ai_bundling_output_filters_invalid_rows() {
         let valid_thread_ids = HashSet::from(["thread-1".to_string(), "thread-2".to_string()]);
 
-        let parsed = parse_ai_categorization_output(
+        let parsed = parse_ai_bundling_output(
             "thread-1:Primary\nthread-2:Updates\nthread-3:Social\nthread-1:Unknown",
             &valid_thread_ids,
         );
@@ -552,8 +552,8 @@ mod tests {
         assert_eq!(
             parsed,
             vec![
-                ("thread-1".to_string(), ThreadCategory::Primary),
-                ("thread-2".to_string(), ThreadCategory::Updates),
+                ("thread-1".to_string(), ThreadBundle::Primary),
+                ("thread-2".to_string(), ThreadBundle::Updates),
             ]
         );
     }

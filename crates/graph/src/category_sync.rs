@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use super::client::GraphClient;
 use db::db::DbState;
-use label_colors::category_colors;
+use label_colors::preset_colors;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,7 +45,7 @@ pub async fn graph_label_sync(
             let (color_bg, color_fg) = if color_preset == "None" {
                 (None, None)
             } else {
-                match category_colors::preset_to_hex(color_preset) {
+                match preset_colors::preset_to_hex(color_preset) {
                     Some((bg, fg)) => (Some(bg), Some(fg)),
                     None => (None, None),
                 }

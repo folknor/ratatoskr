@@ -44,7 +44,7 @@ pub fn selection_to_view_type(sel: &SidebarSelection) -> (ViewType, Option<Strin
                 SystemFolder::AllMail => (ViewType::AllMail, None),
             }
         }
-        SidebarSelection::Bundle(_) => (ViewType::Category, None),
+        SidebarSelection::Bundle(_) => (ViewType::Bundle, None),
         SidebarSelection::FeatureView(fv) => {
             use types::FeatureView;
             match fv {

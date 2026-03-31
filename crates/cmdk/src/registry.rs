@@ -283,7 +283,7 @@ fn email_view_relevance(ctx: &CommandContext) -> u32 {
         | ViewType::AllMail
         | ViewType::Label
         | ViewType::SmartFolder
-        | ViewType::Category
+        | ViewType::Bundle
         | ViewType::Attachments
         | ViewType::Search
         | ViewType::PinnedSearch => 4,

@@ -394,7 +394,7 @@ impl AddAccountWizard {
     }
 
     fn new(is_first_launch: bool, used_colors: Vec<String>, db: Arc<Db>) -> Self {
-        let presets = label_colors::category_colors::all_presets();
+        let presets = label_colors::preset_colors::all_presets();
         let first_unused = presets
             .iter()
             .enumerate()
@@ -427,7 +427,7 @@ impl AddAccountWizard {
 
     /// Get the selected color hex, or fallback to first preset.
     fn selected_color_hex(&self) -> String {
-        let presets = label_colors::category_colors::all_presets();
+        let presets = label_colors::preset_colors::all_presets();
         self.identity
             .selected_color_index
             .and_then(|i| presets.get(i))
