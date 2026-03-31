@@ -311,23 +311,23 @@ impl Component for Sidebar {
         .height(SIDEBAR_HEADER_HEIGHT)
         .width(Length::Fill);
 
-        let mut col = column![header_row, Space::new().height(SPACE_XXS),]
+        let mut scroll_content = column![Space::new().height(SPACE_XXS)]
             .spacing(0)
             .width(Length::Fill);
 
         // Pinned searches (only if non-empty)
         if !self.pinned_searches.is_empty() {
-            col = col.push(pinned_searches_section(self));
-            col = col.push(Space::new().height(SPACE_XXS));
+            scroll_content = scroll_content.push(pinned_searches_section(self));
+            scroll_content = scroll_content.push(Space::new().height(SPACE_XXS));
         }
-        col = col.push(Space::new().height(SPACE_XS));
-        col = col.push(nav_items(self));
-        col = col.push(widgets::section_break());
-        col = col.push(smart_folders(self));
+        scroll_content = scroll_content.push(Space::new().height(SPACE_XS));
+        scroll_content = scroll_content.push(nav_items(self));
+        scroll_content = scroll_content.push(widgets::section_break());
+        scroll_content = scroll_content.push(smart_folders(self));
 
         if show_labels {
-            col = col.push(widgets::section_break::<SidebarMessage>());
-            col = col.push(provider_folders(self));
+            scroll_content = scroll_content.push(widgets::section_break::<SidebarMessage>());
+            scroll_content = scroll_content.push(provider_folders(self));
         }
 
         // Labels section (section 4) — tag-type labels, always visible
@@ -337,19 +337,20 @@ impl Component for Sidebar {
                 .any(|f| matches!(f.folder_kind, FolderKind::AccountTag))
         });
         if has_tags {
-            col = col.push(widgets::section_break::<SidebarMessage>());
-            col = col.push(tags_section(self));
+            scroll_content = scroll_content.push(widgets::section_break::<SidebarMessage>());
+            scroll_content = scroll_content.push(tags_section(self));
         }
 
         // Pinned public folders (if any)
         if !self.pinned_public_folders.is_empty() {
-            col = col.push(widgets::section_break::<SidebarMessage>());
-            col = col.push(pinned_public_folders_section(self));
+            scroll_content = scroll_content.push(widgets::section_break::<SidebarMessage>());
+            scroll_content = scroll_content.push(pinned_public_folders_section(self));
         }
 
         container(
             column![
-                scrollable(col)
+                header_row,
+                scrollable(scroll_content)
                     .spacing(SCROLLBAR_SPACING)
                     .height(Length::Fill),
                 widgets::settings_button(SidebarMessage::ToggleSettings),
@@ -448,6 +449,24 @@ fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
             on_press: SidebarMessage::SelectSharedMailbox(
                 sm.account_id.clone(),
                 sm.mailbox_id.clone(),
+            ),
+        });
+    }
+
+    // Pinned public folders
+    for pf in &sidebar.pinned_public_folders {
+        let selected = matches!(
+            &sidebar.selected_scope,
+            ViewScope::PublicFolder { account_id, folder_id }
+                if *account_id == pf.account_id && *folder_id == pf.folder_id
+        );
+        entries.push(DropdownEntry {
+            icon: DropdownIcon::Icon('\u{e0d7}'),
+            label: &pf.display_name,
+            selected,
+            on_press: SidebarMessage::SelectPublicFolder(
+                pf.account_id.clone(),
+                pf.folder_id.clone(),
             ),
         });
     }

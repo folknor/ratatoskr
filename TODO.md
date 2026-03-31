@@ -161,7 +161,6 @@ OneDrive and Google Drive upload both implemented. Remaining:
 
 EWS SOAP client, autodiscover routing, offline sync, IMAP NAMESPACE public folders, DB schema all done. Sidebar pins done (2026-03-22). Remaining:
 
-- [ ] **Thread loading on selection** — App handler for `PublicFolderSelected` event to load threads from `public_folder_items` into thread list.
 - [ ] **Public folder browser** — Lazy-load tree widget for browsing the hierarchy and pinning folders. Uses existing `browse_public_folders()` API.
 - [ ] **Reply/post wiring** — Connect compose to `CreateItem` EWS operation for replies and posts to public folders.
 
@@ -169,7 +168,6 @@ EWS SOAP client, autodiscover routing, offline sync, IMAP NAMESPACE public folde
 
 Exchange Graph sync + Autodiscover + sidebar integration done. Remaining:
 
-- [ ] **Thread loading on selection** — App handler for `SharedMailboxSelected` event to load navigation and threads for the selected shared mailbox.
 - [ ] **Gmail delegation support** — Blocked (API limitation). Send-As aliases work.
 - [ ] **Per-mailbox sync depth config** — Currently hardcoded to 30 days. No per-mailbox setting.
 
@@ -227,10 +225,6 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] Remote image loading with user consent (`block_remote_images` setting exists but disconnected from `render_html` — function signature needs context parameter)
 - [ ] Table rendering (table-for-layout is the hardest — no `<table>`/`<tr>`/`<td>` handling at all)
 - [ ] Image caching (`HashMap<String, image::Handle>`) — no `iced::widget::image` usage in app crate
-
-## Bug Hunt Findings (review agent, 2026-03-27)
-
-- [ ] **Scope dropdown missing public folder entries** — Dropdown has All Accounts + accounts + shared mailboxes but no public folders.
 
 ## Security / Bug Findings (unfixed)
 
