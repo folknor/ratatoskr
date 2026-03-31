@@ -313,11 +313,11 @@ impl App {
         };
 
         let generation = self.next_pop_out_generation();
-        let source_folder = self.sidebar.selection.source_folder_for_undo();
+        let source_selection = Some(self.sidebar.selection.clone());
         let state = MessageViewState::from_thread_message(
             &msg,
             generation,
-            source_folder,
+            source_selection,
             self.settings.default_rendering_mode,
         );
         let account_id = state.account_id.clone();
@@ -586,17 +586,14 @@ impl App {
             return Task::none();
         };
         let threads = vec![(state.account_id.clone(), state.thread_id.clone())];
-        let source_folder = state.source_folder.clone();
+        let selection = state
+            .source_selection
+            .clone()
+            .unwrap_or(types::SidebarSelection::Inbox);
         state.overflow_menu_open = false;
         drop(state);
 
         use crate::action_resolve::{self as ar, UiContext};
-        // Reconstruct a minimal selection for action resolution.
-        // Pop-out undo only needs the source folder.
-        let selection = match source_folder {
-            Some(fid) => types::SidebarSelection::ProviderFolder(fid),
-            None => types::SidebarSelection::Inbox,
-        };
         let ui_ctx = UiContext { selection };
         let outcome = ar::resolve_intent(intent, &ui_ctx);
         let Some(plan) = ar::build_execution_plan(outcome, &threads, &mut self.thread_list) else {
