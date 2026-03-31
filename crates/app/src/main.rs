@@ -91,6 +91,10 @@ const CHORD_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1000
 fn main() -> iced::Result {
     env_logger::init();
     log::info!("Ratatoskr starting");
+    let _hotpath = hotpath::HotpathGuardBuilder::new("ratatoskr::main")
+        .percentiles(&[50, 95, 99])
+        .with_functions_limit(0)
+        .build();
 
     #[cfg(feature = "dev-seed")]
     let app_data_dir = {
@@ -2244,6 +2248,7 @@ impl App {
         )
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub(crate) fn load_threads_for_current_view(
         &self,
         load_gen: GenerationToken<Nav>,
@@ -2402,7 +2407,9 @@ impl App {
                 ),
             })
             .collect();
-        self.sidebar.selected_scope = ViewScope::AllAccounts;
+        if let Some(first) = self.sidebar.accounts.first() {
+            self.sidebar.selected_scope = ViewScope::Account(first.id.clone());
+        }
         self.status = format!("Loaded {} accounts", self.sidebar.accounts.len());
         let sig_task =
             handlers::signatures::load_signatures_async(&self.db).map(Message::SignatureOp);
@@ -2706,6 +2713,7 @@ async fn load_navigation(db: Arc<Db>, scope: AccountScope) -> Result<NavigationS
         .await
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 async fn load_threads_scoped(
     db: Arc<Db>,
     scope: AccountScope,
@@ -2734,6 +2742,7 @@ async fn load_threads_scoped(
     .await
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 async fn load_threads_for_bundle_view(
     db: Arc<Db>,
     scope: AccountScope,

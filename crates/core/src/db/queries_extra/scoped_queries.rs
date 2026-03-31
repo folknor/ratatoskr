@@ -41,6 +41,7 @@ fn account_scope_clause(
 }
 
 /// Like `get_threads` but accepts an `AccountScope` to query across accounts.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_threads_scoped(
     conn: &Connection,
     scope: &AccountScope,

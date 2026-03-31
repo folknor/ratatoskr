@@ -803,6 +803,7 @@ pub fn label_dot<'a, M: 'a>(color: Color) -> Element<'a, M> {
 
 // ── Thread card ─────────────────────────────────────────
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn thread_card<'a, M: Clone + 'a>(
     thread: &'a Thread,
     index: usize,

@@ -192,6 +192,7 @@ impl ThreadList {
         }
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn set_threads(&mut self, threads: Vec<Thread>) {
         self.threads = threads;
         // Clear multi-selection when thread list changes — stale indices.
@@ -635,6 +636,7 @@ fn thread_list_header<'a>(
     container(header_col).padding(PAD_PANEL_HEADER).into()
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {
     let mut list = column![].spacing(0);
     for (i, thread) in state.threads.iter().enumerate() {

@@ -44,6 +44,10 @@ rfd = "0.17"
 store = { path = "../stores" }
 mime_guess = "2"
 dev-seed = { path = "../dev-seed", optional = true }
+hotpath = "0.14"
 
 [features]
+default = ["dev-seed"]
 dev-seed = ["dep:dev-seed"]
+hotpath = ["rtsk/hotpath", "hotpath/hotpath"]
+hotpath-alloc = ["hotpath", "rtsk/hotpath-alloc", "hotpath/hotpath-alloc"]

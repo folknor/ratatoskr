@@ -10,6 +10,10 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+hotpath = ["hotpath/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
+
 [dependencies]
 # Workspace deps
 serde.workspace = true
@@ -64,6 +68,7 @@ resvg = { version = "0.47", default-features = false }
 lol_html = "2"
 ammonia = "4"
 calcard = "0.3"
+hotpath = "0.14"
 
 [dev-dependencies]
 tempfile = "3"
