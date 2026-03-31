@@ -53,7 +53,9 @@ pub async fn create_folder(
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
-            let outcome = ActionOutcome::Failed { error: ActionError::remote(e) };
+            let outcome = ActionOutcome::Failed {
+                error: ActionError::remote(e),
+            };
             mlog.emit(&outcome);
             return (outcome, None);
         }
@@ -62,13 +64,21 @@ pub async fn create_folder(
     let provider_ctx = build_provider_ctx(ctx, account_id);
 
     let mutation = match provider
-        .create_folder(&provider_ctx, name, parent_id.map(FolderId::from).as_ref(), text_color, bg_color)
+        .create_folder(
+            &provider_ctx,
+            name,
+            parent_id.map(FolderId::from).as_ref(),
+            text_color,
+            bg_color,
+        )
         .await
     {
         Ok(m) => m,
         Err(e) => {
             let msg = e.to_string();
-            let outcome = ActionOutcome::Failed { error: ActionError::remote(msg) };
+            let outcome = ActionOutcome::Failed {
+                error: ActionError::remote(msg),
+            };
             mlog.emit(&outcome);
             return (outcome, None);
         }
@@ -84,7 +94,9 @@ pub async fn create_folder(
     let parent_id_for_db = parent_id.map(str::to_string);
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+        let conn = conn
+            .lock()
+            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         conn.execute(
             "INSERT INTO labels (id, account_id, name, type, color_bg, color_fg, \
              imap_folder_path, imap_special_use, parent_label_id, label_kind) \
@@ -141,7 +153,9 @@ pub async fn rename_folder(
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
-            let outcome = ActionOutcome::Failed { error: ActionError::remote(e) };
+            let outcome = ActionOutcome::Failed {
+                error: ActionError::remote(e),
+            };
             mlog.emit(&outcome);
             return (outcome, None);
         }
@@ -150,13 +164,21 @@ pub async fn rename_folder(
     let provider_ctx = build_provider_ctx(ctx, account_id);
 
     let mutation = match provider
-        .rename_folder(&provider_ctx, &FolderId::from(folder_id), new_name, text_color, bg_color)
+        .rename_folder(
+            &provider_ctx,
+            &FolderId::from(folder_id),
+            new_name,
+            text_color,
+            bg_color,
+        )
         .await
     {
         Ok(m) => m,
         Err(e) => {
             let msg = e.to_string();
-            let outcome = ActionOutcome::Failed { error: ActionError::remote(msg) };
+            let outcome = ActionOutcome::Failed {
+                error: ActionError::remote(msg),
+            };
             mlog.emit(&outcome);
             return (outcome, None);
         }
@@ -169,7 +191,9 @@ pub async fn rename_folder(
     let m = mutation.clone();
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+        let conn = conn
+            .lock()
+            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         conn.execute(
             "UPDATE labels SET name = ?1, type = ?2, color_bg = ?3, color_fg = ?4, \
              imap_folder_path = ?5, imap_special_use = ?6 \
@@ -217,7 +241,9 @@ pub async fn delete_folder(
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
-            let outcome = ActionOutcome::Failed { error: ActionError::remote(e) };
+            let outcome = ActionOutcome::Failed {
+                error: ActionError::remote(e),
+            };
             mlog.emit(&outcome);
             return outcome;
         }
@@ -225,9 +251,14 @@ pub async fn delete_folder(
 
     let provider_ctx = build_provider_ctx(ctx, account_id);
 
-    if let Err(e) = provider.delete_folder(&provider_ctx, &FolderId::from(folder_id)).await {
+    if let Err(e) = provider
+        .delete_folder(&provider_ctx, &FolderId::from(folder_id))
+        .await
+    {
         let msg = e.to_string();
-        let outcome = ActionOutcome::Failed { error: ActionError::remote(msg) };
+        let outcome = ActionOutcome::Failed {
+            error: ActionError::remote(msg),
+        };
         mlog.emit(&outcome);
         return outcome;
     }
@@ -238,7 +269,9 @@ pub async fn delete_folder(
     let fid = folder_id.to_string();
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+        let conn = conn
+            .lock()
+            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         // Delete thread_labels first — no FK cascade from labels to thread_labels.
         conn.execute(
             "DELETE FROM thread_labels WHERE account_id = ?1 AND label_id = ?2",

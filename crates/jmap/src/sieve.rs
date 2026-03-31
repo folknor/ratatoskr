@@ -44,13 +44,18 @@ pub async fn list_sieve_scripts(client: &JmapClient) -> Result<Vec<SieveScript>,
     let inner = client.inner();
 
     // Query all script IDs.
-    let query_response = inner
-        .sieve_script_query(
-            None::<jmap_client::core::query::Filter<jmap_client::sieve::query::Filter>>,
-            None::<Vec<jmap_client::core::query::Comparator<jmap_client::sieve::query::Comparator>>>,
-        )
-        .await
-        .map_err(|e| format!("SieveScript/query: {e}"))?;
+    let query_response =
+        inner
+            .sieve_script_query(
+                None::<jmap_client::core::query::Filter<jmap_client::sieve::query::Filter>>,
+                None::<
+                    Vec<
+                        jmap_client::core::query::Comparator<jmap_client::sieve::query::Comparator>,
+                    >,
+                >,
+            )
+            .await
+            .map_err(|e| format!("SieveScript/query: {e}"))?;
 
     let ids = query_response.ids();
     if ids.is_empty() {
@@ -99,10 +104,7 @@ pub async fn list_sieve_scripts(client: &JmapClient) -> Result<Vec<SieveScript>,
 // ---------------------------------------------------------------------------
 
 /// Fetch a single Sieve script including its content (downloaded from the blob store).
-pub async fn get_sieve_script(
-    client: &JmapClient,
-    script_id: &str,
-) -> Result<SieveScript, String> {
+pub async fn get_sieve_script(client: &JmapClient, script_id: &str) -> Result<SieveScript, String> {
     client.ensure_valid_token().await?;
     let inner = client.inner();
 
@@ -187,7 +189,11 @@ pub async fn update_sieve_script(
     let inner = client.inner();
 
     inner
-        .sieve_script_replace(script_id, content.as_bytes().to_vec(), activate.unwrap_or(false))
+        .sieve_script_replace(
+            script_id,
+            content.as_bytes().to_vec(),
+            activate.unwrap_or(false),
+        )
         .await
         .map_err(|e| format!("SieveScript/replace {script_id}: {e}"))?;
 
@@ -225,10 +231,7 @@ pub async fn rename_sieve_script(
 // ---------------------------------------------------------------------------
 
 /// Delete a Sieve script from the server.
-pub async fn delete_sieve_script(
-    client: &JmapClient,
-    script_id: &str,
-) -> Result<(), String> {
+pub async fn delete_sieve_script(client: &JmapClient, script_id: &str) -> Result<(), String> {
     client.ensure_valid_token().await?;
     let inner = client.inner();
 
@@ -246,10 +249,7 @@ pub async fn delete_sieve_script(
 // ---------------------------------------------------------------------------
 
 /// Activate a Sieve script (deactivates any previously active script).
-pub async fn activate_sieve_script(
-    client: &JmapClient,
-    script_id: &str,
-) -> Result<(), String> {
+pub async fn activate_sieve_script(client: &JmapClient, script_id: &str) -> Result<(), String> {
     client.ensure_valid_token().await?;
     let inner = client.inner();
 

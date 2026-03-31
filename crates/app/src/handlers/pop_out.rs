@@ -16,12 +16,8 @@ use iced::{Point, Size, Task};
 pub const DRAFT_AUTO_SAVE_INTERVAL: Duration = Duration::from_secs(30);
 
 use crate::db::Db;
-use crate::pop_out::compose::{
-    ComposeAttachment, ComposeMessage, ComposeMode, ComposeState,
-};
-use crate::pop_out::message_view::{
-    MessageViewMessage, MessageViewState, RenderingMode,
-};
+use crate::pop_out::compose::{ComposeAttachment, ComposeMessage, ComposeMode, ComposeState};
+use crate::pop_out::message_view::{MessageViewMessage, MessageViewState, RenderingMode};
 use crate::pop_out::session::{MessageViewSessionEntry, SessionState};
 use crate::pop_out::{PopOutMessage, PopOutWindow};
 use crate::ui::layout::{
@@ -29,7 +25,7 @@ use crate::ui::layout::{
     MESSAGE_VIEW_DEFAULT_HEIGHT, MESSAGE_VIEW_DEFAULT_WIDTH, MESSAGE_VIEW_MIN_HEIGHT,
     MESSAGE_VIEW_MIN_WIDTH,
 };
-use crate::{App, Message, APP_DATA_DIR};
+use crate::{APP_DATA_DIR, App, Message};
 
 use rtsk::actions::SendAttachment;
 use rusqlite::OptionalExtension;
@@ -71,23 +67,29 @@ impl App {
             // SetRenderingMode to Source — may need lazy load
             (
                 PopOutWindow::MessageView(_),
-                PopOutMessage::MessageView(
-                    MessageViewMessage::SetRenderingMode(RenderingMode::Source),
-                ),
+                PopOutMessage::MessageView(MessageViewMessage::SetRenderingMode(
+                    RenderingMode::Source,
+                )),
             ) => self.handle_set_source_mode(window_id),
             // Archive — route through action service for DB + provider dispatch
             (
                 PopOutWindow::MessageView(_),
                 PopOutMessage::MessageView(MessageViewMessage::Archive),
             ) => {
-                return self.dispatch_pop_out_action(window_id, crate::action_resolve::MailActionIntent::Archive);
+                return self.dispatch_pop_out_action(
+                    window_id,
+                    crate::action_resolve::MailActionIntent::Archive,
+                );
             }
             // Delete — route through action service for DB + provider dispatch
             (
                 PopOutWindow::MessageView(_),
                 PopOutMessage::MessageView(MessageViewMessage::Delete),
             ) => {
-                return self.dispatch_pop_out_action(window_id, crate::action_resolve::MailActionIntent::Trash);
+                return self.dispatch_pop_out_action(
+                    window_id,
+                    crate::action_resolve::MailActionIntent::Trash,
+                );
             }
             // All other message view messages
             (PopOutWindow::MessageView(state), PopOutMessage::MessageView(_)) => {
@@ -97,18 +99,14 @@ impl App {
                 handle_message_view_update(state, msg)
             }
             // Compose discard
-            (
-                PopOutWindow::Compose(_),
-                PopOutMessage::Compose(ComposeMessage::Discard),
-            ) => {
+            (PopOutWindow::Compose(_), PopOutMessage::Compose(ComposeMessage::Discard)) => {
                 self.pop_out_windows.remove(&window_id);
                 iced::window::close(window_id)
             }
             // Compose send — build MIME, queue for outbox, close window
-            (
-                PopOutWindow::Compose(_),
-                PopOutMessage::Compose(ComposeMessage::Send),
-            ) => self.handle_compose_send(window_id),
+            (PopOutWindow::Compose(_), PopOutMessage::Compose(ComposeMessage::Send)) => {
+                self.handle_compose_send(window_id)
+            }
             // Compose from-account changed — swap signature for new account
             (
                 PopOutWindow::Compose(_),
@@ -120,16 +118,13 @@ impl App {
                 self.handle_compose_from_account_changed(window_id, msg)
             }
             // Compose attach files — launch async file picker
-            (
-                PopOutWindow::Compose(_),
-                PopOutMessage::Compose(ComposeMessage::AttachFiles),
-            ) => handle_compose_attach_files(window_id),
+            (PopOutWindow::Compose(_), PopOutMessage::Compose(ComposeMessage::AttachFiles)) => {
+                handle_compose_attach_files(window_id)
+            }
             // Compose expand group — needs DB access
             (
                 PopOutWindow::Compose(state),
-                PopOutMessage::Compose(ComposeMessage::ContextMenuExpandGroup {
-                    ..
-                }),
+                PopOutMessage::Compose(ComposeMessage::ContextMenuExpandGroup { .. }),
             ) => {
                 let PopOutMessage::Compose(ComposeMessage::ContextMenuExpandGroup {
                     field,
@@ -141,15 +136,9 @@ impl App {
                 // Find the group_id from the token
                 let group_id = {
                     let tokens = match field {
-                        crate::pop_out::compose::RecipientField::To => {
-                            &state.to.tokens
-                        }
-                        crate::pop_out::compose::RecipientField::Cc => {
-                            &state.cc.tokens
-                        }
-                        crate::pop_out::compose::RecipientField::Bcc => {
-                            &state.bcc.tokens
-                        }
+                        crate::pop_out::compose::RecipientField::To => &state.to.tokens,
+                        crate::pop_out::compose::RecipientField::Cc => &state.cc.tokens,
+                        crate::pop_out::compose::RecipientField::Bcc => &state.bcc.tokens,
                     };
                     tokens
                         .iter()
@@ -161,21 +150,15 @@ impl App {
                 };
                 let db_clone = Arc::clone(&db);
                 Task::perform(
-                    async move {
-                        db_clone
-                            .expand_contact_group(gid)
-                            .await
-                    },
+                    async move { db_clone.expand_contact_group(gid).await },
                     move |result| {
                         Message::PopOut(
                             window_id,
-                            PopOutMessage::Compose(
-                                ComposeMessage::GroupExpanded {
-                                    field,
-                                    token_id,
-                                    members: result,
-                                },
-                            ),
+                            PopOutMessage::Compose(ComposeMessage::GroupExpanded {
+                                field,
+                                token_id,
+                                members: result,
+                            }),
                         )
                     },
                 )
@@ -189,9 +172,7 @@ impl App {
                     crate::handlers::contacts::should_trigger_autocomplete(&msg);
                 crate::pop_out::compose::update_compose(state, msg);
                 if trigger_autocomplete {
-                    crate::handlers::contacts::dispatch_autocomplete_search(
-                        &db, window_id, state,
-                    )
+                    crate::handlers::contacts::dispatch_autocomplete_search(&db, window_id, state)
                 } else {
                     Task::none()
                 }
@@ -208,7 +189,9 @@ fn handle_message_view_update(
     msg: MessageViewMessage,
 ) -> Task<Message> {
     match msg {
-        MessageViewMessage::BodyLoaded(generation, _) if !state.is_current_generation(generation) => {
+        MessageViewMessage::BodyLoaded(generation, _)
+            if !state.is_current_generation(generation) =>
+        {
             Task::none() // Stale load — ignore
         }
         MessageViewMessage::BodyLoaded(_, Ok((body_text, body_html))) => {
@@ -225,7 +208,9 @@ fn handle_message_view_update(
             );
             Task::none()
         }
-        MessageViewMessage::AttachmentsLoaded(generation, _) if !state.is_current_generation(generation) => {
+        MessageViewMessage::AttachmentsLoaded(generation, _)
+            if !state.is_current_generation(generation) =>
+        {
             Task::none() // Stale load — ignore
         }
         MessageViewMessage::AttachmentsLoaded(_, Ok(attachments)) => {
@@ -270,9 +255,7 @@ fn handle_message_view_update(
 // ── Compose: attach files ───────────────────────────────
 
 /// Launch an async file picker and return the selected files as attachments.
-fn handle_compose_attach_files(
-    window_id: iced::window::Id,
-) -> Task<Message> {
+fn handle_compose_attach_files(window_id: iced::window::Id) -> Task<Message> {
     Task::perform(
         async {
             let handles = rfd::AsyncFileDialog::new()
@@ -288,8 +271,7 @@ fn handle_compose_attach_files(
             for handle in handles {
                 let name = handle.file_name();
                 let data = handle.read().await;
-                let mime_type =
-                    crate::pop_out::compose::mime_from_extension(&name);
+                let mime_type = crate::pop_out::compose::mime_from_extension(&name);
                 attachments.push(ComposeAttachment {
                     name,
                     mime_type,
@@ -303,16 +285,12 @@ fn handle_compose_attach_files(
                 // User cancelled — no-op
                 Message::PopOut(
                     window_id,
-                    PopOutMessage::Compose(ComposeMessage::FilesSelected(
-                        Vec::new(),
-                    )),
+                    PopOutMessage::Compose(ComposeMessage::FilesSelected(Vec::new())),
                 )
             } else {
                 Message::PopOut(
                     window_id,
-                    PopOutMessage::Compose(ComposeMessage::FilesSelected(
-                        files,
-                    )),
+                    PopOutMessage::Compose(ComposeMessage::FilesSelected(files)),
                 )
             }
         },
@@ -324,10 +302,7 @@ fn handle_compose_attach_files(
 impl App {
     /// Open a message view pop-out for the message at `message_index` in the
     /// reading pane's thread messages list.
-    pub(crate) fn open_message_view_window(
-        &mut self,
-        message_index: usize,
-    ) -> Task<Message> {
+    pub(crate) fn open_message_view_window(&mut self, message_index: usize) -> Task<Message> {
         let Some(msg) = self
             .reading_pane
             .thread_messages
@@ -339,19 +314,18 @@ impl App {
 
         let generation = self.next_pop_out_generation();
         let source_label_id = self.sidebar.selected_label.clone();
-        let state = MessageViewState::from_thread_message(&msg, generation, source_label_id, self.settings.default_rendering_mode);
+        let state = MessageViewState::from_thread_message(
+            &msg,
+            generation,
+            source_label_id,
+            self.settings.default_rendering_mode,
+        );
         let account_id = state.account_id.clone();
         let message_id = state.message_id.clone();
 
         let settings = iced::window::Settings {
-            size: Size::new(
-                MESSAGE_VIEW_DEFAULT_WIDTH,
-                MESSAGE_VIEW_DEFAULT_HEIGHT,
-            ),
-            min_size: Some(Size::new(
-                MESSAGE_VIEW_MIN_WIDTH,
-                MESSAGE_VIEW_MIN_HEIGHT,
-            )),
+            size: Size::new(MESSAGE_VIEW_DEFAULT_WIDTH, MESSAGE_VIEW_DEFAULT_HEIGHT),
+            min_size: Some(Size::new(MESSAGE_VIEW_MIN_WIDTH, MESSAGE_VIEW_MIN_HEIGHT)),
             exit_on_close_request: false,
             ..Default::default()
         };
@@ -360,20 +334,11 @@ impl App {
         self.pop_out_windows
             .insert(window_id, PopOutWindow::MessageView(Box::new(state)));
 
-        self.dispatch_message_view_loads(
-            window_id,
-            generation,
-            account_id,
-            message_id,
-            open_task,
-        )
+        self.dispatch_message_view_loads(window_id, generation, account_id, message_id, open_task)
     }
 
     /// Open a compose window with the given mode.
-    pub(crate) fn open_compose_window(
-        &mut self,
-        mode: ComposeMode,
-    ) -> Task<Message> {
+    pub(crate) fn open_compose_window(&mut self, mode: ComposeMode) -> Task<Message> {
         let state = ComposeState::new(&self.sidebar.accounts);
         self.open_compose_window_with_state(state, mode)
     }
@@ -443,9 +408,7 @@ impl App {
         window_id: iced::window::Id,
         action: &MessageViewMessage,
     ) -> Task<Message> {
-        let Some(PopOutWindow::MessageView(mv)) =
-            self.pop_out_windows.get(&window_id)
-        else {
+        let Some(PopOutWindow::MessageView(mv)) = self.pop_out_windows.get(&window_id) else {
             return Task::none();
         };
 
@@ -494,21 +457,15 @@ impl App {
             .unwrap_or_default();
 
         let mode = match *action {
-            crate::command_dispatch::ComposeAction::Reply => {
-                ComposeMode::Reply {
-                    original_subject: subject,
-                }
-            }
-            crate::command_dispatch::ComposeAction::ReplyAll => {
-                ComposeMode::ReplyAll {
-                    original_subject: subject,
-                }
-            }
-            crate::command_dispatch::ComposeAction::Forward => {
-                ComposeMode::Forward {
-                    original_subject: subject,
-                }
-            }
+            crate::command_dispatch::ComposeAction::Reply => ComposeMode::Reply {
+                original_subject: subject,
+            },
+            crate::command_dispatch::ComposeAction::ReplyAll => ComposeMode::ReplyAll {
+                original_subject: subject,
+            },
+            crate::command_dispatch::ComposeAction::Forward => ComposeMode::Forward {
+                original_subject: subject,
+            },
         };
 
         let to_email = last_message.and_then(|m| m.from_address.as_deref());
@@ -567,25 +524,20 @@ impl App {
                 move |result| {
                     Message::PopOut(
                         window_id,
-                        PopOutMessage::MessageView(
-                            MessageViewMessage::BodyLoaded(generation, result),
-                        ),
+                        PopOutMessage::MessageView(MessageViewMessage::BodyLoaded(
+                            generation, result,
+                        )),
                     )
                 },
             ),
             Task::perform(
-                async move {
-                    db2.load_message_attachments(account_id2, message_id2)
-                        .await
-                },
+                async move { db2.load_message_attachments(account_id2, message_id2).await },
                 move |result| {
                     Message::PopOut(
                         window_id,
-                        PopOutMessage::MessageView(
-                            MessageViewMessage::AttachmentsLoaded(
-                                generation, result,
-                            ),
-                        ),
+                        PopOutMessage::MessageView(MessageViewMessage::AttachmentsLoaded(
+                            generation, result,
+                        )),
                     )
                 },
             ),
@@ -593,12 +545,8 @@ impl App {
     }
 
     /// Handle switching to Source rendering mode — lazy-loads raw source if needed.
-    fn handle_set_source_mode(
-        &mut self,
-        window_id: iced::window::Id,
-    ) -> Task<Message> {
-        let Some(PopOutWindow::MessageView(state)) =
-            self.pop_out_windows.get_mut(&window_id)
+    fn handle_set_source_mode(&mut self, window_id: iced::window::Id) -> Task<Message> {
+        let Some(PopOutWindow::MessageView(state)) = self.pop_out_windows.get_mut(&window_id)
         else {
             return Task::none();
         };
@@ -612,15 +560,11 @@ impl App {
             let message_id = state.message_id.clone();
 
             Task::perform(
-                async move {
-                    db.load_raw_source(account_id, message_id).await
-                },
+                async move { db.load_raw_source(account_id, message_id).await },
                 move |result| {
                     Message::PopOut(
                         window_id,
-                        PopOutMessage::MessageView(
-                            MessageViewMessage::RawSourceLoaded(result),
-                        ),
+                        PopOutMessage::MessageView(MessageViewMessage::RawSourceLoaded(result)),
                     )
                 },
             )
@@ -647,26 +591,19 @@ impl App {
         drop(state);
 
         use crate::action_resolve::{self as ar, UiContext};
-        let ui_ctx = UiContext { selected_label: source_label_id };
+        let ui_ctx = UiContext {
+            selected_label: source_label_id,
+        };
         let outcome = ar::resolve_intent(intent, &ui_ctx);
-        let Some(plan) = ar::build_execution_plan(
-            outcome,
-            &threads,
-            &mut self.thread_list,
-        ) else {
+        let Some(plan) = ar::build_execution_plan(outcome, &threads, &mut self.thread_list) else {
             return Task::none();
         };
         self.dispatch_plan(plan)
     }
 
     /// Handle Save As action from the overflow menu.
-    fn handle_save_as(
-        &self,
-        window_id: iced::window::Id,
-    ) -> Task<Message> {
-        let Some(PopOutWindow::MessageView(state)) =
-            self.pop_out_windows.get(&window_id)
-        else {
+    fn handle_save_as(&self, window_id: iced::window::Id) -> Task<Message> {
+        let Some(PopOutWindow::MessageView(state)) = self.pop_out_windows.get(&window_id) else {
             return Task::none();
         };
 
@@ -679,9 +616,7 @@ impl App {
             .unwrap_or_else(|| "message".to_string());
 
         Task::perform(
-            async move {
-                save_message_dialog(db, account_id, message_id, subject).await
-            },
+            async move { save_message_dialog(db, account_id, message_id, subject).await },
             move |_result| {
                 Message::PopOut(
                     window_id,
@@ -692,7 +627,9 @@ impl App {
     }
 
     /// Increment and return the next pop-out generation token.
-    fn next_pop_out_generation(&mut self) -> rtsk::generation::GenerationToken<rtsk::generation::PopOut> {
+    fn next_pop_out_generation(
+        &mut self,
+    ) -> rtsk::generation::GenerationToken<rtsk::generation::PopOut> {
         self.pop_out_generation.next()
     }
 }
@@ -708,17 +645,15 @@ impl App {
             .pop_out_windows
             .values()
             .filter_map(|w| match w {
-                PopOutWindow::MessageView(state) => {
-                    Some(MessageViewSessionEntry {
-                        message_id: state.message_id.clone(),
-                        thread_id: state.thread_id.clone(),
-                        account_id: state.account_id.clone(),
-                        width: state.width,
-                        height: state.height,
-                        x: state.x,
-                        y: state.y,
-                    })
-                }
+                PopOutWindow::MessageView(state) => Some(MessageViewSessionEntry {
+                    message_id: state.message_id.clone(),
+                    thread_id: state.thread_id.clone(),
+                    account_id: state.account_id.clone(),
+                    width: state.width,
+                    height: state.height,
+                    x: state.x,
+                    y: state.y,
+                }),
                 PopOutWindow::Compose(_) | PopOutWindow::Calendar => None,
             })
             .collect();
@@ -736,10 +671,7 @@ impl App {
 
     /// Restore pop-out windows from session state during boot.
     /// Returns tasks to open restored windows and load their data.
-    pub(crate) fn restore_pop_out_windows(
-        &mut self,
-        session: &SessionState,
-    ) -> Vec<Task<Message>> {
+    pub(crate) fn restore_pop_out_windows(&mut self, session: &SessionState) -> Vec<Task<Message>> {
         let mut tasks = Vec::new();
 
         for entry in &session.message_views {
@@ -753,10 +685,7 @@ impl App {
             let settings = iced::window::Settings {
                 size: Size::new(entry.width, entry.height),
                 position,
-                min_size: Some(Size::new(
-                    MESSAGE_VIEW_MIN_WIDTH,
-                    MESSAGE_VIEW_MIN_HEIGHT,
-                )),
+                min_size: Some(Size::new(MESSAGE_VIEW_MIN_WIDTH, MESSAGE_VIEW_MIN_HEIGHT)),
                 exit_on_close_request: false,
                 ..Default::default()
             };
@@ -764,7 +693,11 @@ impl App {
             let (window_id, open_task) = iced::window::open(settings);
 
             let generation = self.next_pop_out_generation();
-            let state = MessageViewState::from_session_entry(entry, generation, self.settings.default_rendering_mode);
+            let state = MessageViewState::from_session_entry(
+                entry,
+                generation,
+                self.settings.default_rendering_mode,
+            );
             let account_id = entry.account_id.clone();
             let message_id = entry.message_id.clone();
 
@@ -772,11 +705,7 @@ impl App {
                 .insert(window_id, PopOutWindow::MessageView(Box::new(state)));
 
             tasks.push(self.dispatch_message_view_loads(
-                window_id,
-                generation,
-                account_id,
-                message_id,
-                open_task,
+                window_id, generation, account_id, message_id, open_task,
             ));
         }
 
@@ -828,27 +757,19 @@ async fn save_message_dialog(
     };
 
     let path = handle.path().to_path_buf();
-    let extension = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("eml");
+    let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("eml");
 
     match extension {
         "txt" => {
-            let (body_text, _body_html) = db
-                .load_message_body(account_id, message_id)
-                .await?;
+            let (body_text, _body_html) = db.load_message_body(account_id, message_id).await?;
             let txt_content = body_text.unwrap_or_default();
             std::fs::write(&path, txt_content.as_bytes())
                 .map_err(|e| format!("Write failed: {e}"))?;
         }
         _ => {
             // Default to .eml
-            let raw = db
-                .load_raw_source(account_id, message_id)
-                .await?;
-            std::fs::write(&path, raw.as_bytes())
-                .map_err(|e| format!("Write failed: {e}"))?;
+            let raw = db.load_raw_source(account_id, message_id).await?;
+            std::fs::write(&path, raw.as_bytes()).map_err(|e| format!("Write failed: {e}"))?;
         }
     }
 
@@ -968,9 +889,9 @@ impl App {
 
     /// Returns true if any compose window has `draft_dirty` set.
     pub(crate) fn has_dirty_compose_drafts(&self) -> bool {
-        self.pop_out_windows.values().any(|w| {
-            matches!(w, PopOutWindow::Compose(s) if s.draft_dirty)
-        })
+        self.pop_out_windows
+            .values()
+            .any(|w| matches!(w, PopOutWindow::Compose(s) if s.draft_dirty))
     }
 
     /// Save a single compose window's state as a local draft (async).
@@ -1015,8 +936,7 @@ impl App {
         let result = self.db.with_write_conn_sync(|conn| data.execute(conn));
         match result {
             Ok(()) => {
-                if let Some(PopOutWindow::Compose(state)) =
-                    self.pop_out_windows.get_mut(&window_id)
+                if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id)
                 {
                     state.draft_dirty = false;
                 }
@@ -1036,13 +956,8 @@ impl App {
     /// Validate compose state, build a SendRequest, and dispatch to the
     /// action service. The compose window stays open with a "Sending..." status
     /// until SendCompleted arrives.
-    fn handle_compose_send(
-        &mut self,
-        window_id: iced::window::Id,
-    ) -> Task<Message> {
-        let Some(PopOutWindow::Compose(state)) =
-            self.pop_out_windows.get_mut(&window_id)
-        else {
+    fn handle_compose_send(&mut self, window_id: iced::window::Id) -> Task<Message> {
+        let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id) else {
             return Task::none();
         };
 
@@ -1056,8 +971,7 @@ impl App {
             || !state.cc.tokens.is_empty()
             || !state.bcc.tokens.is_empty();
         if !has_recipients {
-            state.status =
-                Some("Add at least one recipient".to_string());
+            state.status = Some("Add at least one recipient".to_string());
             return Task::none();
         }
 
@@ -1076,24 +990,9 @@ impl App {
             account_info.email.clone()
         };
 
-        let to: Vec<String> = state
-            .to
-            .tokens
-            .iter()
-            .map(|t| t.email.clone())
-            .collect();
-        let cc: Vec<String> = state
-            .cc
-            .tokens
-            .iter()
-            .map(|t| t.email.clone())
-            .collect();
-        let bcc: Vec<String> = state
-            .bcc
-            .tokens
-            .iter()
-            .map(|t| t.email.clone())
-            .collect();
+        let to: Vec<String> = state.to.tokens.iter().map(|t| t.email.clone()).collect();
+        let cc: Vec<String> = state.cc.tokens.iter().map(|t| t.email.clone()).collect();
+        let bcc: Vec<String> = state.bcc.tokens.iter().map(|t| t.email.clone()).collect();
 
         let subject = if state.subject.is_empty() {
             None
@@ -1152,27 +1051,19 @@ impl App {
         request: rtsk::actions::SendRequest,
     ) -> Task<Message> {
         let Some(ctx) = self.action_ctx() else {
-            if let Some(PopOutWindow::Compose(state)) =
-                self.pop_out_windows.get_mut(&window_id)
-            {
+            if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id) {
                 state.sending = false;
-                state.status = Some(
-                    "Send unavailable \u{2014} action service not initialized"
-                        .to_string(),
-                );
+                state.status =
+                    Some("Send unavailable \u{2014} action service not initialized".to_string());
             }
             return Task::none();
         };
         Task::perform(
             async move {
-                let outcome =
-                    rtsk::actions::send_email(&ctx, request).await;
+                let outcome = rtsk::actions::send_email(&ctx, request).await;
                 (window_id, outcome)
             },
-            move |(window_id, outcome)| Message::SendCompleted {
-                window_id,
-                outcome,
-            },
+            move |(window_id, outcome)| Message::SendCompleted { window_id, outcome },
         )
     }
 
@@ -1183,8 +1074,7 @@ impl App {
         outcome: &rtsk::actions::ActionOutcome,
     ) -> Task<Message> {
         match outcome {
-            rtsk::actions::ActionOutcome::Success
-            | rtsk::actions::ActionOutcome::NoOp => {
+            rtsk::actions::ActionOutcome::Success | rtsk::actions::ActionOutcome::NoOp => {
                 self.pop_out_windows.remove(&window_id);
                 self.status_bar
                     .show_confirmation("Message sent".to_string());
@@ -1193,15 +1083,11 @@ impl App {
             // LocalOnly should not occur for send (send uses Failed for all
             // failures), but handle it defensively as failure for safety.
             rtsk::actions::ActionOutcome::Failed { error }
-            | rtsk::actions::ActionOutcome::LocalOnly {
-                reason: error, ..
-            } => {
-                if let Some(PopOutWindow::Compose(state)) =
-                    self.pop_out_windows.get_mut(&window_id)
+            | rtsk::actions::ActionOutcome::LocalOnly { reason: error, .. } => {
+                if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id)
                 {
                     state.sending = false;
-                    state.status =
-                        Some(format!("Send failed: {}", error.user_message()));
+                    state.status = Some(format!("Send failed: {}", error.user_message()));
                 }
                 Task::none()
             }
@@ -1217,9 +1103,7 @@ impl App {
         window_id: iced::window::Id,
         msg: ComposeMessage,
     ) -> Task<Message> {
-        let Some(PopOutWindow::Compose(state)) =
-            self.pop_out_windows.get_mut(&window_id)
-        else {
+        let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id) else {
             return Task::none();
         };
 
@@ -1235,13 +1119,8 @@ impl App {
     ///
     /// Used both on initial compose window open and when the user switches
     /// the From account.
-    fn resolve_compose_signature(
-        &self,
-        window_id: iced::window::Id,
-    ) -> Task<Message> {
-        let Some(PopOutWindow::Compose(state)) =
-            self.pop_out_windows.get(&window_id)
-        else {
+    fn resolve_compose_signature(&self, window_id: iced::window::Id) -> Task<Message> {
+        let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get(&window_id) else {
             return Task::none();
         };
 
@@ -1253,21 +1132,16 @@ impl App {
         let from_email = Some(account.email.clone());
         let is_reply = matches!(
             state.mode,
-            ComposeMode::Reply { .. }
-                | ComposeMode::ReplyAll { .. }
+            ComposeMode::Reply { .. } | ComposeMode::ReplyAll { .. }
         );
 
         let db = Arc::clone(&self.db);
 
         Task::perform(
             async move {
-                let core_db =
-                    rtsk::db::DbState::from_arc(db.conn_arc());
+                let core_db = rtsk::db::DbState::from_arc(db.conn_arc());
                 let sig = rtsk::db::queries_extra::db_resolve_signature_for_compose(
-                    &core_db,
-                    account_id,
-                    from_email,
-                    is_reply,
+                    &core_db, account_id, from_email, is_reply,
                 )
                 .await?;
                 Ok::<_, String>(sig)

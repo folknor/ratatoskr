@@ -10,7 +10,12 @@ use crate::email_actions::{insert_label, remove_label};
 use crate::progress::NoopProgressReporter;
 
 /// Local DB mutation for spam (idempotent).
-pub(crate) async fn spam_local(ctx: &ActionContext, account_id: &str, thread_id: &str, is_spam: bool) -> Result<(), ActionError> {
+pub(crate) async fn spam_local(
+    ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+    is_spam: bool,
+) -> Result<(), ActionError> {
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
@@ -54,7 +59,10 @@ async fn spam_dispatch(
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             let msg = e.to_string();
-            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
+            ActionOutcome::LocalOnly {
+                reason: ActionError::remote(msg),
+                retryable: true,
+            }
         }
     };
     enqueue_if_retryable(ctx, &outcome, account_id, "spam", thread_id, &params_json).await;
@@ -81,7 +89,10 @@ pub async fn spam(
     match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(provider) => spam_dispatch(ctx, &*provider, account_id, thread_id, is_spam).await,
         Err(e) => {
-            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            let outcome = ActionOutcome::LocalOnly {
+                reason: ActionError::remote(e),
+                retryable: true,
+            };
             enqueue_if_retryable(ctx, &outcome, account_id, "spam", thread_id, &params_json).await;
             mlog.emit(&outcome);
             outcome

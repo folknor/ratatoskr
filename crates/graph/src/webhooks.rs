@@ -234,9 +234,7 @@ pub async fn delete_subscription(
         if !e.contains("404") {
             return Err(e.clone());
         }
-        log::info!(
-            "[Graph webhooks] Subscription {subscription_id} already gone on server (404)"
-        );
+        log::info!("[Graph webhooks] Subscription {subscription_id} already gone on server (404)");
     }
 
     delete_graph_subscription_record(db, subscription_id).await?;
@@ -597,8 +595,7 @@ mod tests {
             "clientState": "secret123"
         }"#;
 
-        let resp: SubscriptionResponse =
-            serde_json::from_str(json).expect("should deserialize");
+        let resp: SubscriptionResponse = serde_json::from_str(json).expect("should deserialize");
         assert_eq!(resp.id, "sub-123");
         assert_eq!(resp.change_type, "created,updated,deleted");
         assert_eq!(resp.resource, "/me/messages");
@@ -615,8 +612,7 @@ mod tests {
             "expirationDateTime": "2024-06-15T12:00:00Z"
         }"#;
 
-        let resp: SubscriptionResponse =
-            serde_json::from_str(json).expect("should deserialize");
+        let resp: SubscriptionResponse = serde_json::from_str(json).expect("should deserialize");
         assert_eq!(resp.id, "sub-456");
         assert!(resp.client_state.is_none());
     }
@@ -651,10 +647,7 @@ mod tests {
         assert_eq!(notif.tenant_id.as_deref(), Some("tenant-abc"));
 
         let data = notif.resource_data.as_ref().expect("should have data");
-        assert_eq!(
-            data.odata_type.as_deref(),
-            Some("#Microsoft.Graph.Message")
-        );
+        assert_eq!(data.odata_type.as_deref(), Some("#Microsoft.Graph.Message"));
         assert_eq!(data.id.as_deref(), Some("AAMk123"));
     }
 
@@ -800,10 +793,7 @@ mod tests {
         let now = now_unix();
         // Should be approximately 3600 seconds in the future (allow 5s tolerance)
         let diff = expiry_unix - now;
-        assert!(
-            (3595..=3605).contains(&diff),
-            "expected ~3600, got {diff}"
-        );
+        assert!((3595..=3605).contains(&diff), "expected ~3600, got {diff}");
     }
 
     #[test]

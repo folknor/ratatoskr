@@ -32,7 +32,10 @@ pub fn gather_deletion_data(
             )
             .map_err(|e| format!("prepare account cached attachment query: {e}"))?;
         stmt.query_map(rusqlite::params![account_id], |row| {
-            Ok((row.get::<_, String>("local_path")?, row.get::<_, String>("content_hash")?))
+            Ok((
+                row.get::<_, String>("local_path")?,
+                row.get::<_, String>("content_hash")?,
+            ))
         })
         .map_err(|e| format!("query account cached attachments: {e}"))?
         .collect::<Result<Vec<_>, _>>()
@@ -100,9 +103,12 @@ pub fn referenced_hashes_excluding_account(
         for hash in chunk {
             params.push(Box::new((*hash).to_string()));
         }
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(std::convert::AsRef::as_ref).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(std::convert::AsRef::as_ref).collect();
         let rows = stmt
-            .query_map(param_refs.as_slice(), |row| row.get::<_, String>("content_hash"))
+            .query_map(param_refs.as_slice(), |row| {
+                row.get::<_, String>("content_hash")
+            })
             .map_err(|e| format!("query batch ref count: {e}"))?;
         for row in rows {
             let hash = row.map_err(|e| format!("read batch ref count row: {e}"))?;
@@ -252,7 +258,14 @@ mod tests {
              (id, message_id, account_id, content_hash, is_inline, local_path, cached_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, \
                      CASE WHEN ?6 IS NOT NULL THEN 1000 ELSE NULL END)",
-            params![id, message_id, account_id, content_hash, is_inline as i32, cached_path],
+            params![
+                id,
+                message_id,
+                account_id,
+                content_hash,
+                is_inline as i32,
+                cached_path
+            ],
         )
         .expect("insert attachment");
     }
@@ -266,12 +279,16 @@ mod tests {
         insert_message(&conn, "acct-a", "t1", "m2");
         insert_attachment(&conn, "att1", "acct-a", "m1", Some("hash1"), true, None);
         insert_attachment(
-            &conn, "att2", "acct-a", "m2", Some("hash2"), false,
+            &conn,
+            "att2",
+            "acct-a",
+            "m2",
+            Some("hash2"),
+            false,
             Some("attachment_cache/hash2"),
         );
 
-        let plan = super::delete_account_orchestrate(&conn, "acct-a")
-            .expect("orchestrate");
+        let plan = super::delete_account_orchestrate(&conn, "acct-a").expect("orchestrate");
 
         // Data was gathered before cascade
         assert_eq!(plan.data.message_ids.len(), 2);
@@ -283,7 +300,11 @@ mod tests {
 
         // Account row is gone after orchestrate
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM accounts WHERE id = 'acct-a'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM accounts WHERE id = 'acct-a'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 0);
 
@@ -314,8 +335,7 @@ mod tests {
         // Account-A-only inline hash
         insert_attachment(&conn, "a2", "acct-a", "ma1", Some("only-a"), true, None);
 
-        let plan = super::delete_account_orchestrate(&conn, "acct-a")
-            .expect("orchestrate");
+        let plan = super::delete_account_orchestrate(&conn, "acct-a").expect("orchestrate");
 
         assert!(plan.shared_inline_hashes.contains("shared"));
         assert!(!plan.shared_inline_hashes.contains("only-a"));
@@ -334,15 +354,35 @@ mod tests {
         insert_message(&conn, "acct-b", "tb1", "mb1");
 
         let cache = "attachment_cache/shared-cache";
-        insert_attachment(&conn, "a1", "acct-a", "ma1", Some("shared-cache"), false, Some(cache));
-        insert_attachment(&conn, "b1", "acct-b", "mb1", Some("shared-cache"), false, Some(cache));
         insert_attachment(
-            &conn, "a2", "acct-a", "ma1", Some("only-a"), false,
+            &conn,
+            "a1",
+            "acct-a",
+            "ma1",
+            Some("shared-cache"),
+            false,
+            Some(cache),
+        );
+        insert_attachment(
+            &conn,
+            "b1",
+            "acct-b",
+            "mb1",
+            Some("shared-cache"),
+            false,
+            Some(cache),
+        );
+        insert_attachment(
+            &conn,
+            "a2",
+            "acct-a",
+            "ma1",
+            Some("only-a"),
+            false,
             Some("attachment_cache/only-a"),
         );
 
-        let plan = super::delete_account_orchestrate(&conn, "acct-a")
-            .expect("orchestrate");
+        let plan = super::delete_account_orchestrate(&conn, "acct-a").expect("orchestrate");
 
         assert!(plan.shared_cache_hashes.contains("shared-cache"));
         assert!(!plan.shared_cache_hashes.contains("only-a"));
@@ -362,12 +402,16 @@ mod tests {
         insert_attachment(&conn, "a1", "acct-a", "ma1", Some("cross"), true, None);
         // Account B: cached (non-inline) file with same hash
         insert_attachment(
-            &conn, "b1", "acct-b", "mb1", Some("cross"), false,
+            &conn,
+            "b1",
+            "acct-b",
+            "mb1",
+            Some("cross"),
+            false,
             Some("attachment_cache/cross"),
         );
 
-        let plan = super::delete_account_orchestrate(&conn, "acct-a")
-            .expect("orchestrate");
+        let plan = super::delete_account_orchestrate(&conn, "acct-a").expect("orchestrate");
 
         // Non-inline ref from another account should NOT protect the inline blob
         assert!(!plan.shared_inline_hashes.contains("cross"));
@@ -378,8 +422,7 @@ mod tests {
         let conn = test_db();
         insert_account(&conn, "acct-empty");
 
-        let plan = super::delete_account_orchestrate(&conn, "acct-empty")
-            .expect("orchestrate");
+        let plan = super::delete_account_orchestrate(&conn, "acct-empty").expect("orchestrate");
 
         assert!(plan.data.message_ids.is_empty());
         assert!(plan.data.cached_files.is_empty());
@@ -388,7 +431,11 @@ mod tests {
         assert!(plan.shared_inline_hashes.is_empty());
 
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM accounts WHERE id = 'acct-empty'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM accounts WHERE id = 'acct-empty'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 0);
     }
@@ -406,8 +453,7 @@ mod tests {
         )
         .expect("insert pending op");
 
-        let _plan = super::delete_account_orchestrate(&conn, "acct-a")
-            .expect("orchestrate");
+        let _plan = super::delete_account_orchestrate(&conn, "acct-a").expect("orchestrate");
 
         let count: i64 = conn
             .query_row(
@@ -439,11 +485,13 @@ mod tests {
         // One with a real hash for contrast
         insert_attachment(&conn, "att3", "acct-a", "m1", Some("real"), true, None);
 
-        let plan = super::delete_account_orchestrate(&conn, "acct-a")
-            .expect("orchestrate");
+        let plan = super::delete_account_orchestrate(&conn, "acct-a").expect("orchestrate");
 
         // Only the real hash should appear
         assert_eq!(plan.data.inline_hashes, vec!["real".to_string()]);
-        assert!(plan.data.cached_files.is_empty(), "null-hash cached file should be excluded");
+        assert!(
+            plan.data.cached_files.is_empty(),
+            "null-hash cached file should be excluded"
+        );
     }
 }

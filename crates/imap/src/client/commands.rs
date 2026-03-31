@@ -45,7 +45,12 @@ pub async fn search_all_uids(session: &mut ImapSession, folder: &str) -> Result<
         session.uid_search("ALL"),
     )
     .await
-    .map_err(|_| timeout_err("UID SEARCH ALL", super::super::connection::IMAP_SEARCH_TIMEOUT))?
+    .map_err(|_| {
+        timeout_err(
+            "UID SEARCH ALL",
+            super::super::connection::IMAP_SEARCH_TIMEOUT,
+        )
+    })?
     .map_err(|e| format!("UID SEARCH ALL failed: {e}"))?;
 
     let mut result: Vec<u32> = uids.into_iter().collect();
@@ -306,15 +311,17 @@ pub async fn fetch_changed_flags(
     let query = format!("(FLAGS) (CHANGEDSINCE {since_modseq})");
     let stream = tokio::time::timeout(IMAP_FETCH_TIMEOUT, session.uid_fetch("1:*", &query))
         .await
-        .map_err(|_| timeout_err(&format!("UID FETCH CHANGEDSINCE {folder}"), IMAP_FETCH_TIMEOUT))?
+        .map_err(|_| {
+            timeout_err(
+                &format!("UID FETCH CHANGEDSINCE {folder}"),
+                IMAP_FETCH_TIMEOUT,
+            )
+        })?
         .map_err(|e| format!("UID FETCH CHANGEDSINCE {folder} failed: {e}"))?;
 
-    let raw: Vec<_> = tokio::time::timeout(
-        IMAP_FETCH_TIMEOUT,
-        stream.collect::<Vec<_>>(),
-    )
-    .await
-    .map_err(|_| timeout_err(&format!("CHANGEDSINCE stream {folder}"), IMAP_FETCH_TIMEOUT))?;
+    let raw: Vec<_> = tokio::time::timeout(IMAP_FETCH_TIMEOUT, stream.collect::<Vec<_>>())
+        .await
+        .map_err(|_| timeout_err(&format!("CHANGEDSINCE stream {folder}"), IMAP_FETCH_TIMEOUT))?;
 
     let mut changes = Vec::new();
     for item in raw {
@@ -376,12 +383,9 @@ pub async fn fetch_all_flags(
         .map_err(|_| timeout_err(&format!("UID FETCH FLAGS {folder}"), IMAP_FETCH_TIMEOUT))?
         .map_err(|e| format!("UID FETCH FLAGS {folder} failed: {e}"))?;
 
-    let raw: Vec<_> = tokio::time::timeout(
-        IMAP_FETCH_TIMEOUT,
-        stream.collect::<Vec<_>>(),
-    )
-    .await
-    .map_err(|_| timeout_err(&format!("FLAGS stream {folder}"), IMAP_FETCH_TIMEOUT))?;
+    let raw: Vec<_> = tokio::time::timeout(IMAP_FETCH_TIMEOUT, stream.collect::<Vec<_>>())
+        .await
+        .map_err(|_| timeout_err(&format!("FLAGS stream {folder}"), IMAP_FETCH_TIMEOUT))?;
 
     let mut flags = Vec::new();
     for item in raw {
@@ -414,9 +418,6 @@ pub async fn fetch_all_flags(
         }
     }
 
-    log::info!(
-        "IMAP fetch_all_flags {folder}: {} messages",
-        flags.len()
-    );
+    log::info!("IMAP fetch_all_flags {folder}: {} messages", flags.len());
     Ok(flags)
 }

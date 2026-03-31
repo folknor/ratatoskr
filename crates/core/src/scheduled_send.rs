@@ -7,9 +7,9 @@
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
+use crate::db::DbState;
 use crate::db::from_row::FromRow;
 use crate::db::types::DbScheduledEmail;
-use crate::db::DbState;
 
 // ── Delegation types ────────────────────────────────────────
 
@@ -178,7 +178,10 @@ pub async fn check_overdue_scheduled_emails(
             .map_err(|e| e.to_string())?;
 
         let rows = stmt
-            .query_map(params![now_unix], crate::db::types::DbScheduledEmail::from_row)
+            .query_map(
+                params![now_unix],
+                crate::db::types::DbScheduledEmail::from_row,
+            )
             .map_err(|e| e.to_string())?;
 
         let mut actions = Vec::new();
@@ -210,12 +213,8 @@ pub async fn apply_overdue_resolution(
         OverdueResolution::SendNow => ScheduledStatus::Sending.as_str(),
         OverdueResolution::NeedsReview => ScheduledStatus::NeedsReview.as_str(),
     };
-    crate::db::queries_extra::db_update_scheduled_email_status(
-        db,
-        email_id,
-        new_status.to_string(),
-    )
-    .await
+    crate::db::queries_extra::db_update_scheduled_email_status(db, email_id, new_status.to_string())
+        .await
 }
 
 /// Process all overdue scheduled emails: auto-send those within 24h,
@@ -283,10 +282,7 @@ mod tests {
 
     #[test]
     fn test_determine_delegation_graph() {
-        assert_eq!(
-            determine_send_delegation("graph"),
-            SendDelegation::Exchange
-        );
+        assert_eq!(determine_send_delegation("graph"), SendDelegation::Exchange);
     }
 
     #[test]

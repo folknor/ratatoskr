@@ -208,11 +208,7 @@ mod tests {
 
     #[test]
     fn auto_detect_first_last_name() {
-        let headers: Vec<String> = vec![
-            "First Name".into(),
-            "Last Name".into(),
-            "E-Mail".into(),
-        ];
+        let headers: Vec<String> = vec!["First Name".into(), "Last Name".into(), "E-Mail".into()];
         let mappings = auto_detect_mappings(&headers);
         assert_eq!(mappings[0].target_field, ContactField::FirstName);
         assert_eq!(mappings[1].target_field, ContactField::LastName);
@@ -221,11 +217,7 @@ mod tests {
 
     #[test]
     fn auto_detect_two_email_columns() {
-        let headers: Vec<String> = vec![
-            "Email".into(),
-            "Work Email".into(),
-            "Name".into(),
-        ];
+        let headers: Vec<String> = vec!["Email".into(), "Work Email".into(), "Name".into()];
         let mappings = auto_detect_mappings(&headers);
         assert_eq!(mappings[0].target_field, ContactField::Email);
         assert_eq!(mappings[1].target_field, ContactField::Email2);
@@ -234,10 +226,7 @@ mod tests {
 
     #[test]
     fn unknown_headers_are_ignored() {
-        let headers: Vec<String> = vec![
-            "ID".into(),
-            "Random Column".into(),
-        ];
+        let headers: Vec<String> = vec!["ID".into(), "Random Column".into()];
         let mappings = auto_detect_mappings(&headers);
         assert_eq!(mappings[0].target_field, ContactField::Ignore);
         assert_eq!(mappings[1].target_field, ContactField::Ignore);

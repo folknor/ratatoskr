@@ -1,8 +1,8 @@
 use sha2::{Digest, Sha256};
 
-use super::SyncCtx;
-use super::super::types::{GmailLabel, GmailSendAs};
 use super::super::client::GmailClient;
+use super::super::types::{GmailLabel, GmailSendAs};
+use super::SyncCtx;
 use db::db::DbState;
 
 // ---------------------------------------------------------------------------
@@ -136,7 +136,10 @@ pub(super) async fn sync_signatures(ctx: &SyncCtx<'_>) -> Result<(), String> {
 
                 let name = build_sig_name(alias, server_id);
                 let is_default = i64::from(alias.is_default.unwrap_or(false));
-                let id = format!("gmail_sig_{account_id}_{server_id}", account_id = ctx.account_id);
+                let id = format!(
+                    "gmail_sig_{account_id}_{server_id}",
+                    account_id = ctx.account_id
+                );
                 let aid = ctx.account_id.to_string();
                 let sid = server_id.clone();
                 let html = server_html.to_string();
@@ -147,8 +150,7 @@ pub(super) async fn sync_signatures(ctx: &SyncCtx<'_>) -> Result<(), String> {
                 ctx.db
                     .with_conn(move |conn| {
                         upsert_signature_from_server(
-                            conn, &id, &aid, &name, &html, is_default, sort,
-                            &sid, &hash, now,
+                            conn, &id, &aid, &name, &html, is_default, sort, &sid, &hash, now,
                         )
                     })
                     .await?;
@@ -324,11 +326,8 @@ fn html_hash(html: &str) -> String {
 /// Minimal hex encoding (same pattern as bimi.rs).
 fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
     use std::fmt::Write;
-    bytes
-        .as_ref()
-        .iter()
-        .fold(String::new(), |mut s, b| {
-            let _ = write!(s, "{b:02x}");
-            s
-        })
+    bytes.as_ref().iter().fold(String::new(), |mut s, b| {
+        let _ = write!(s, "{b:02x}");
+        s
+    })
 }

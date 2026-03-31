@@ -6,8 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::connection::{ImapSession, discover_myrights, discover_namespaces};
 use super::client::list_shared_folders;
+use super::connection::{ImapSession, discover_myrights, discover_namespaces};
 use super::types::{ImapFolder, NamespaceType};
 use db::db::DbState;
 
@@ -99,10 +99,7 @@ pub async fn discover_imap_public_folders(
         .map(|f| ImapPublicFolder {
             path: f.path.clone(),
             display_name: f.name.clone(),
-            namespace_type: f
-                .namespace_type
-                .clone()
-                .unwrap_or(NamespaceType::Shared),
+            namespace_type: f.namespace_type.clone().unwrap_or(NamespaceType::Shared),
             message_count: f.exists,
             unseen_count: f.unseen,
         })
@@ -180,16 +177,14 @@ pub async fn sync_imap_public_folder(
     let since_str = since_date.format("%d-%b-%Y").to_string();
 
     if last_sync_ts.is_none() {
-        log::info!("IMAP public folder {folder_path}: initial sync, looking back {depth_days} days");
+        log::info!(
+            "IMAP public folder {folder_path}: initial sync, looking back {depth_days} days"
+        );
     }
 
     // SEARCH SINCE to find relevant UIDs
-    let search_result = super::client::search_folder(
-        session,
-        folder_path,
-        Some(since_str.clone()),
-    )
-    .await?;
+    let search_result =
+        super::client::search_folder(session, folder_path, Some(since_str.clone())).await?;
 
     if search_result.uids.is_empty() {
         log::info!("IMAP public folder {folder_path}: no messages matching SINCE {since_str}");
@@ -210,13 +205,8 @@ pub async fn sync_imap_public_folder(
     );
 
     // Persist messages to public_folder_items
-    let new_items = upsert_public_folder_items(
-        db,
-        account_id,
-        folder_path,
-        &fetch_result.messages,
-    )
-    .await?;
+    let new_items =
+        upsert_public_folder_items(db, account_id, folder_path, &fetch_result.messages).await?;
 
     save_sync_state(db, account_id, folder_path, now).await?;
 
@@ -270,16 +260,16 @@ async fn persist_discovered_folders(
 
             stmt.execute(rusqlite::params![
                 account_id,
-                f.path,       // folder_id = decoded path
+                f.path, // folder_id = decoded path
                 parent_id,
-                f.name,       // display_name = last path segment
+                f.name, // display_name = last path segment
                 folder_class,
-                f.unseen,     // unread_count
-                f.exists,     // total_count
-                0,            // can_create_items — unknown until MYRIGHTS
-                0,            // can_modify — unknown until MYRIGHTS
-                0,            // can_delete — unknown until MYRIGHTS
-                1i32,         // can_read — assume readable (we listed it)
+                f.unseen, // unread_count
+                f.exists, // total_count
+                0,        // can_create_items — unknown until MYRIGHTS
+                0,        // can_modify — unknown until MYRIGHTS
+                0,        // can_delete — unknown until MYRIGHTS
+                1i32,     // can_read — assume readable (we listed it)
             ])
             .map_err(|e| format!("upsert public folder {}: {e}", f.path))?;
         }
@@ -304,7 +294,12 @@ async fn load_sync_state(
                  FROM public_folder_sync_state \
                  WHERE account_id = ?1 AND folder_id = ?2",
                 rusqlite::params![account_id, folder_id],
-                |row| Ok((row.get::<_, Option<i64>>("last_sync_timestamp")?, row.get::<_, Option<i64>>("last_full_scan_at")?)),
+                |row| {
+                    Ok((
+                        row.get::<_, Option<i64>>("last_sync_timestamp")?,
+                        row.get::<_, Option<i64>>("last_full_scan_at")?,
+                    ))
+                },
             )
             .ok();
 
@@ -386,18 +381,12 @@ async fn upsert_public_folder_items(
             .map_err(|e| format!("prepare upsert_public_folder_items: {e}"))?;
 
         let mut exists_stmt = conn
-            .prepare(
-                "SELECT 1 FROM public_folder_items WHERE account_id = ?1 AND item_id = ?2",
-            )
+            .prepare("SELECT 1 FROM public_folder_items WHERE account_id = ?1 AND item_id = ?2")
             .map_err(|e| format!("prepare exists check: {e}"))?;
 
         for msg in &messages {
             // Use message_id as item_id; fall back to UID-based ID
-            let item_id = msg
-                .message_id
-                .as_deref()
-                .unwrap_or("")
-                .to_string();
+            let item_id = msg.message_id.as_deref().unwrap_or("").to_string();
             if item_id.is_empty() {
                 // Skip messages without a Message-ID — we need a stable identifier
                 continue;
@@ -790,7 +779,14 @@ mod tests {
                 "SELECT can_read, can_create_items, can_modify, can_delete \
                  FROM public_folders WHERE account_id = 'acc1' AND folder_id = 'Shared/team'",
                 [],
-                |row| Ok((row.get("can_read")?, row.get("can_create_items")?, row.get("can_modify")?, row.get("can_delete")?)),
+                |row| {
+                    Ok((
+                        row.get("can_read")?,
+                        row.get("can_create_items")?,
+                        row.get("can_modify")?,
+                        row.get("can_delete")?,
+                    ))
+                },
             )
             .expect("query rights");
 

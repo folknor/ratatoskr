@@ -69,12 +69,10 @@ pub fn load_encryption_key(app_data_dir: &Path) -> Result<[u8; 32], String> {
 ///
 /// Expected format: `base64(iv):base64(ciphertext+tag)` (AES-256-GCM).
 pub fn decrypt_value(key: &[u8; 32], encrypted: &str) -> Result<String, String> {
-    let (iv_part, ct_part) = encrypted
-        .split_once(':')
-        .ok_or_else(|| {
-            log::error!("Decrypt failed: invalid format (missing ':' separator)");
-            "Invalid encrypted format: missing ':'".to_string()
-        })?;
+    let (iv_part, ct_part) = encrypted.split_once(':').ok_or_else(|| {
+        log::error!("Decrypt failed: invalid format (missing ':' separator)");
+        "Invalid encrypted format: missing ':'".to_string()
+    })?;
 
     let iv_bytes = STANDARD
         .decode(iv_part)
@@ -94,12 +92,10 @@ pub fn decrypt_value(key: &[u8; 32], encrypted: &str) -> Result<String, String> 
         Aes256Gcm::new_from_slice(key).map_err(|e| format!("Invalid encryption key: {e}"))?;
     let nonce = Nonce::from_slice(&iv_bytes);
 
-    let plaintext = cipher
-        .decrypt(nonce, ciphertext.as_ref())
-        .map_err(|e| {
-            log::error!("AES-256-GCM decryption failed: {e}");
-            format!("Decryption failed: {e}")
-        })?;
+    let plaintext = cipher.decrypt(nonce, ciphertext.as_ref()).map_err(|e| {
+        log::error!("AES-256-GCM decryption failed: {e}");
+        format!("Decryption failed: {e}")
+    })?;
 
     String::from_utf8(plaintext).map_err(|e| format!("Decrypted value is not valid UTF-8: {e}"))
 }
@@ -115,12 +111,10 @@ pub fn encrypt_value(key: &[u8; 32], plaintext: &str) -> Result<String, String> 
     getrandom::getrandom(&mut nonce_bytes).map_err(|e| format!("RNG failed: {e}"))?;
     let nonce = Nonce::from(nonce_bytes);
 
-    let ciphertext = cipher
-        .encrypt(&nonce, plaintext.as_bytes())
-        .map_err(|e| {
-            log::error!("AES-256-GCM encryption failed: {e}");
-            format!("Encryption failed: {e}")
-        })?;
+    let ciphertext = cipher.encrypt(&nonce, plaintext.as_bytes()).map_err(|e| {
+        log::error!("AES-256-GCM encryption failed: {e}");
+        format!("Encryption failed: {e}")
+    })?;
 
     Ok(format!(
         "{}:{}",
@@ -158,15 +152,11 @@ pub fn decrypt_or_raw(key: &[u8; 32], value: &str) -> String {
 /// Decrypt an `Option<String>` if it looks encrypted, pass through otherwise.
 ///
 /// Used by JMAP and IMAP where credentials may be `None`.
-pub fn decrypt_if_needed(
-    key: &[u8; 32],
-    value: Option<String>,
-) -> Result<Option<String>, String> {
+pub fn decrypt_if_needed(key: &[u8; 32], value: Option<String>) -> Result<Option<String>, String> {
     value
         .map(|raw| {
             if is_encrypted(&raw) {
-                decrypt_value(key, &raw)
-                    .map_err(|e| format!("decrypt credential: {e}"))
+                decrypt_value(key, &raw).map_err(|e| format!("decrypt credential: {e}"))
             } else {
                 Ok(raw)
             }

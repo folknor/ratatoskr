@@ -1,6 +1,6 @@
+use search::{SearchDocument, SearchState};
 use store::body_store::BodyStoreState;
 use store::inline_image_store::{InlineImage, InlineImageStoreState};
-use search::{SearchDocument, SearchState};
 
 use super::super::parse::ParsedGraphMessage;
 use super::SyncCtx;

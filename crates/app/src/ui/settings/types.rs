@@ -92,14 +92,14 @@ pub enum SettingsMessage {
     OllamaModelChanged(String),
     SaveAiSettings,
     // Editable list
-    ListGripPress(String, usize),         // grip pressed — start potential drag
-    ListDragMove(String, Point),          // cursor moved while grip held
-    ListDragEnd(String),                  // grip released — end drag
-    ListRowClick(String, usize),          // row clicked (not grip) — toggle
-    ListRemove(String, usize),            // (list_id, item index)
-    ListAdd(String),                      // (list_id)
-    ListToggle(String, usize, bool),      // (list_id, item index, new value)
-    ListMenu(String, usize),              // (list_id, item index)
+    ListGripPress(String, usize), // grip pressed — start potential drag
+    ListDragMove(String, Point),  // cursor moved while grip held
+    ListDragEnd(String),          // grip released — end drag
+    ListRowClick(String, usize),  // row clicked (not grip) — toggle
+    ListRemove(String, usize),    // (list_id, item index)
+    ListAdd(String),              // (list_id)
+    ListToggle(String, usize, bool), // (list_id, item index, new value)
+    ListMenu(String, usize),      // (list_id, item index)
     // Input/info rows
     FocusInput(String),
     CopyToClipboard(String),
@@ -138,11 +138,11 @@ pub enum SettingsMessage {
     DeleteAccountConfirmed(String),
     DeleteAccountCancelled,
     // Signatures
-    SignatureEdit(String),                     // signature_id — open editor overlay
-    SignatureCreate(String),                   // account_id — open editor for new sig
-    SignatureDelete(String),                   // signature_id — request delete (shows confirm)
-    SignatureDeleteConfirmed(String),          // signature_id — confirmed delete
-    SignatureDeleteCancelled,                  // cancel pending delete
+    SignatureEdit(String),            // signature_id — open editor overlay
+    SignatureCreate(String),          // account_id — open editor for new sig
+    SignatureDelete(String),          // signature_id — request delete (shows confirm)
+    SignatureDeleteConfirmed(String), // signature_id — confirmed delete
+    SignatureDeleteCancelled,         // cancel pending delete
     SignatureEditorNameChanged(String),
     SignatureEditorBodyChanged(String),
     SignatureEditorAction(rte::Action),
@@ -845,7 +845,8 @@ impl Settings {
     /// Whether the editing shadow differs from committed state.
     /// Returns `false` if no editing session is active.
     pub fn has_unsaved_changes(&self) -> bool {
-        self.editing_preferences.as_ref()
+        self.editing_preferences
+            .as_ref()
             .is_some_and(|editing| *editing != self.committed_preferences)
     }
 
@@ -952,14 +953,32 @@ impl Default for Settings {
             pinned_help: None,
             drag_state: None,
             demo_labels: vec![
-                EditableItem { label: "Important".into(), enabled: Some(true) },
-                EditableItem { label: "Personal".into(), enabled: Some(true) },
-                EditableItem { label: "Receipts".into(), enabled: Some(false) },
-                EditableItem { label: "Travel".into(), enabled: None },
+                EditableItem {
+                    label: "Important".into(),
+                    enabled: Some(true),
+                },
+                EditableItem {
+                    label: "Personal".into(),
+                    enabled: Some(true),
+                },
+                EditableItem {
+                    label: "Receipts".into(),
+                    enabled: Some(false),
+                },
+                EditableItem {
+                    label: "Travel".into(),
+                    enabled: None,
+                },
             ],
             demo_filters: vec![
-                EditableItem { label: "Auto-archive promotions".into(), enabled: Some(true) },
-                EditableItem { label: "Star from VIPs".into(), enabled: Some(true) },
+                EditableItem {
+                    label: "Auto-archive promotions".into(),
+                    enabled: Some(true),
+                },
+                EditableItem {
+                    label: "Star from VIPs".into(),
+                    enabled: Some(true),
+                },
             ],
             managed_accounts: Vec::new(),
             account_drag: None,

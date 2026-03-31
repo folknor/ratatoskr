@@ -5,7 +5,7 @@ use sync::state as sync_state;
 
 use super::super::client::GmailClient;
 use super::{
-    PEOPLE_API_BASE, PAGE_SIZE, OtherContactsResponse, Person, SyncContactsResult,
+    OtherContactsResponse, PAGE_SIZE, PEOPLE_API_BASE, Person, SyncContactsResult,
     extract_display_name, extract_primary_email,
 };
 
@@ -24,28 +24,21 @@ pub async fn sync_google_other_contacts(
     account_id: &str,
     db: &DbState,
 ) -> Result<SyncContactsResult, String> {
-    let existing_token =
-        sync_state::load_google_other_contacts_sync_token(db, account_id).await?;
+    let existing_token = sync_state::load_google_other_contacts_sync_token(db, account_id).await?;
 
     match existing_token {
-        Some(token) => {
-            match incremental_sync(client, account_id, db, &token).await {
-                Ok(result) => Ok(result),
-                Err(e)
-                    if e.contains("410")
-                        || e.contains("GONE")
-                        || e.contains("syncToken") =>
-                {
-                    log::warn!(
-                        "Google otherContacts sync token expired for {account_id}, \
+        Some(token) => match incremental_sync(client, account_id, db, &token).await {
+            Ok(result) => Ok(result),
+            Err(e) if e.contains("410") || e.contains("GONE") || e.contains("syncToken") => {
+                log::warn!(
+                    "Google otherContacts sync token expired for {account_id}, \
                          falling back to full sync"
-                    );
-                    sync_state::delete_google_other_contacts_sync_token(db, account_id).await?;
-                    full_sync(client, account_id, db).await
-                }
-                Err(e) => Err(e),
+                );
+                sync_state::delete_google_other_contacts_sync_token(db, account_id).await?;
+                full_sync(client, account_id, db).await
             }
-        }
+            Err(e) => Err(e),
+        },
         None => full_sync(client, account_id, db).await,
     }
 }
@@ -115,9 +108,7 @@ async fn full_sync(
         sync_state::save_google_other_contacts_sync_token(db, account_id, token).await?;
     }
 
-    log::info!(
-        "Google otherContacts full sync for {account_id}: {synced} contacts with emails"
-    );
+    log::info!("Google otherContacts full sync for {account_id}: {synced} contacts with emails");
 
     Ok(SyncContactsResult { synced, deleted: 0 })
 }
@@ -336,7 +327,9 @@ fn prune_stale_other_contacts(
         .map_err(|e| format!("prepare stale other contacts: {e}"))?;
 
     let all_mapped: Vec<String> = stmt
-        .query_map(rusqlite::params![account_id], |row| row.get::<_, String>("resource_name"))
+        .query_map(rusqlite::params![account_id], |row| {
+            row.get::<_, String>("resource_name")
+        })
         .map_err(|e| format!("query stale other contacts: {e}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("collect stale other contacts: {e}"))?;

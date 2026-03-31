@@ -1,14 +1,14 @@
 use chrono::{Datelike, Local, NaiveDate};
-use iced::widget::{button, column, container, scrollable, text, Space};
+use iced::widget::{Space, button, column, container, scrollable, text};
 use iced::{Element, Length, Padding};
 
+use crate::Message;
 use crate::db::Thread;
 use crate::ui::calendar::{CalendarMessage, CalendarState};
 use crate::ui::calendar_month;
 use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets;
-use crate::Message;
 
 /// Maximum number of starred threads to display in the sidebar.
 const MAX_STARRED_ITEMS: usize = 5;
@@ -34,11 +34,15 @@ pub fn view<'a>(open: bool, data: &RightSidebarData<'a>) -> Element<'a, Message>
     .spacing(0)
     .width(Length::Fill);
 
-    container(scrollable(content).spacing(SCROLLBAR_SPACING).height(Length::Fill))
-        .width(RIGHT_SIDEBAR_WIDTH)
-        .height(Length::Fill)
-        .style(theme::ContainerClass::Sidebar.style())
-        .into()
+    container(
+        scrollable(content)
+            .spacing(SCROLLBAR_SPACING)
+            .height(Length::Fill),
+    )
+    .width(RIGHT_SIDEBAR_WIDTH)
+    .height(Length::Fill)
+    .style(theme::ContainerClass::Sidebar.style())
+    .into()
 }
 
 fn calendar_section(cal: &CalendarState) -> Element<'_, Message> {
@@ -56,11 +60,9 @@ fn calendar_section(cal: &CalendarState) -> Element<'_, Message> {
         Message::Calendar(Box::new(CalendarMessage::NextMonth)),
     );
 
-    container(
-        column![widgets::section_header("CALENDAR"), mini].spacing(SPACE_XXS),
-    )
-    .padding(PAD_RIGHT_SIDEBAR)
-    .into()
+    container(column![widgets::section_header("CALENDAR"), mini].spacing(SPACE_XXS))
+        .padding(PAD_RIGHT_SIDEBAR)
+        .into()
 }
 
 /// Show today's calendar events as a compact time + title list.
@@ -84,11 +86,9 @@ fn agenda_section(cal: &CalendarState) -> Element<'_, Message> {
         container(items).padding(PAD_ICON_BTN).into()
     };
 
-    container(
-        column![widgets::section_header("TODAY'S AGENDA"), body].spacing(SPACE_XXS),
-    )
-    .padding(PAD_RIGHT_SIDEBAR)
-    .into()
+    container(column![widgets::section_header("TODAY'S AGENDA"), body].spacing(SPACE_XXS))
+        .padding(PAD_RIGHT_SIDEBAR)
+        .into()
 }
 
 /// A single agenda row: time range + title. Clicking opens the event detail.
@@ -109,14 +109,14 @@ fn agenda_item(event: &crate::ui::calendar_time_grid::TimeGridEvent) -> Element<
         .wrapping(text::Wrapping::None);
 
     let event_id = event.id.clone();
-    button(
-        column![time_text, title_text].spacing(SPACE_XXXS),
-    )
-    .on_press(Message::Calendar(Box::new(CalendarMessage::EventClicked(event_id))))
-    .padding(Padding::from([SPACE_XXXS, 0.0]))
-    .width(Length::Fill)
-    .style(theme::ButtonClass::Ghost.style())
-    .into()
+    button(column![time_text, title_text].spacing(SPACE_XXXS))
+        .on_press(Message::Calendar(Box::new(CalendarMessage::EventClicked(
+            event_id,
+        ))))
+        .padding(Padding::from([SPACE_XXXS, 0.0]))
+        .width(Length::Fill)
+        .style(theme::ButtonClass::Ghost.style())
+        .into()
 }
 
 fn pinned_section(threads: &[Thread]) -> Element<'_, Message> {
@@ -142,11 +142,9 @@ fn pinned_section(threads: &[Thread]) -> Element<'_, Message> {
         container(items).padding(PAD_ICON_BTN).into()
     };
 
-    container(
-        column![widgets::section_header("PINNED ITEMS"), body].spacing(SPACE_XXS),
-    )
-    .padding(PAD_RIGHT_SIDEBAR)
-    .into()
+    container(column![widgets::section_header("PINNED ITEMS"), body].spacing(SPACE_XXS))
+        .padding(PAD_RIGHT_SIDEBAR)
+        .into()
 }
 
 /// A compact starred thread row: sender on line 1, subject on line 2.
@@ -169,7 +167,9 @@ fn starred_item(thread: &Thread) -> Element<'_, Message> {
         .style(text::base)
         .wrapping(text::Wrapping::None);
 
-    column![sender_text, subject_text].spacing(SPACE_XXXS).into()
+    column![sender_text, subject_text]
+        .spacing(SPACE_XXXS)
+        .into()
 }
 
 // ── Helpers ─────────────────────────────────────────────

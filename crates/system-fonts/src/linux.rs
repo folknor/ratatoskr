@@ -21,10 +21,7 @@ async fn read_setting(
     namespace: &str,
     key: &str,
 ) -> Option<String> {
-    let reply: zbus::zvariant::OwnedValue = proxy
-        .call("ReadOne", &(namespace, key))
-        .await
-        .ok()?;
+    let reply: zbus::zvariant::OwnedValue = proxy.call("ReadOne", &(namespace, key)).await.ok()?;
 
     // The portal wraps the value in Variant(Variant(value)).
     // First unwrap: OwnedValue -> Value (outer variant)

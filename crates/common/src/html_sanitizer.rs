@@ -26,9 +26,8 @@ static DATA_IMAGE_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Regex matching `url(...)` values that reference external HTTP(S) URLs
 /// inside CSS style attributes. Used for detection.
-static CSS_URL_HTTP_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)url\(\s*['"]?https?://"#).expect("CSS_URL_HTTP_RE")
-});
+static CSS_URL_HTTP_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)url\(\s*['"]?https?://"#).expect("CSS_URL_HTTP_RE"));
 
 /// Regex matching the full `url(...)` token with an external HTTP(S) URL,
 /// used to strip tracking pixels from CSS. Handles optional quotes (single,
@@ -65,12 +64,11 @@ const REMOVE_TAGS_WITH_CONTENT: &[&str] = &[
 ];
 
 /// Tags that should be removed (opening + closing) but whose content is kept.
-const REMOVE_TAGS_KEEP_CONTENT: &[&str] = &[
-    "link", "input", "button", "select", "textarea", "meta",
-];
+const REMOVE_TAGS_KEEP_CONTENT: &[&str] =
+    &["link", "input", "button", "select", "textarea", "meta"];
 
 fn strip_dangerous_elements(html: &str) -> String {
-    use lol_html::{element, rewrite_str, RewriteStrSettings};
+    use lol_html::{RewriteStrSettings, element, rewrite_str};
 
     let mut element_handlers = Vec::new();
 
@@ -94,8 +92,11 @@ fn strip_dangerous_elements(html: &str) -> String {
     // and @import in inline styles on every element.
     element_handlers.push(element!("*", |el| {
         // Collect attribute names first to avoid borrowing issues.
-        let attr_names: Vec<String> =
-            el.attributes().iter().map(lol_html::html_content::Attribute::name).collect();
+        let attr_names: Vec<String> = el
+            .attributes()
+            .iter()
+            .map(lol_html::html_content::Attribute::name)
+            .collect();
 
         for name in &attr_names {
             // Remove event handler attributes (onclick, onload, etc.)
@@ -106,7 +107,9 @@ fn strip_dangerous_elements(html: &str) -> String {
 
             // Strip javascript: URLs in href and src.
             if (name.eq_ignore_ascii_case("href") || name.eq_ignore_ascii_case("src"))
-                && el.get_attribute(name).is_some_and(|val| JS_URL_RE.is_match(&val))
+                && el
+                    .get_attribute(name)
+                    .is_some_and(|val| JS_URL_RE.is_match(&val))
             {
                 el.remove_attribute(name);
             }
@@ -133,10 +136,9 @@ fn strip_dangerous_elements(html: &str) -> String {
                 && val.to_ascii_lowercase().contains("@import")
             {
                 let cleaned = IMPORT_RE.replace_all(&val, "").to_string();
-                el.set_attribute("style", &cleaned)
-                    .unwrap_or_else(|e| {
-                        log::warn!("failed to rewrite style attribute: {e}");
-                    });
+                el.set_attribute("style", &cleaned).unwrap_or_else(|e| {
+                    log::warn!("failed to rewrite style attribute: {e}");
+                });
             }
         }
 
@@ -166,32 +168,94 @@ fn build_ammonia() -> ammonia::Builder<'static> {
     let mut builder = ammonia::Builder::default();
 
     let tags: HashSet<&str> = [
-        "div", "span", "p", "br", "hr",
-        "h1", "h2", "h3", "h4", "h5", "h6",
-        "a", "img",
-        "table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption", "colgroup", "col",
-        "ul", "ol", "li", "dl", "dt", "dd",
-        "blockquote", "pre", "code",
-        "em", "strong", "b", "i", "u", "s", "sub", "sup",
-        "font", "center", "big", "small",
-        "abbr", "cite", "q", "mark", "wbr",
+        "div",
+        "span",
+        "p",
+        "br",
+        "hr",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "a",
+        "img",
+        "table",
+        "thead",
+        "tbody",
+        "tfoot",
+        "tr",
+        "td",
+        "th",
+        "caption",
+        "colgroup",
+        "col",
+        "ul",
+        "ol",
+        "li",
+        "dl",
+        "dt",
+        "dd",
+        "blockquote",
+        "pre",
+        "code",
+        "em",
+        "strong",
+        "b",
+        "i",
+        "u",
+        "s",
+        "sub",
+        "sup",
+        "font",
+        "center",
+        "big",
+        "small",
+        "abbr",
+        "cite",
+        "q",
+        "mark",
+        "wbr",
     ]
     .into_iter()
     .collect();
     builder.tags(tags);
 
     // Generic attributes allowed on all tags.
-    let generic: HashSet<&str> =
-        ["style", "class", "id", "dir", "lang", "title"].into_iter().collect();
+    let generic: HashSet<&str> = ["style", "class", "id", "dir", "lang", "title"]
+        .into_iter()
+        .collect();
     builder.generic_attributes(generic);
 
     // Tag-specific attributes.
     let tag_attr_list: &[(&str, &[&str])] = &[
         ("a", &["href"]),
         ("img", &["src", "alt", "width", "height"]),
-        ("td", &["colspan", "rowspan", "width", "height", "align", "valign", "bgcolor"]),
-        ("th", &["colspan", "rowspan", "width", "height", "align", "valign", "bgcolor"]),
-        ("table", &["width", "height", "align", "bgcolor", "border", "cellpadding", "cellspacing"]),
+        (
+            "td",
+            &[
+                "colspan", "rowspan", "width", "height", "align", "valign", "bgcolor",
+            ],
+        ),
+        (
+            "th",
+            &[
+                "colspan", "rowspan", "width", "height", "align", "valign", "bgcolor",
+            ],
+        ),
+        (
+            "table",
+            &[
+                "width",
+                "height",
+                "align",
+                "bgcolor",
+                "border",
+                "cellpadding",
+                "cellspacing",
+            ],
+        ),
         ("tr", &["align", "valign", "bgcolor"]),
         ("font", &["color", "face", "size"]),
         ("col", &["width", "span"]),
@@ -204,8 +268,7 @@ fn build_ammonia() -> ammonia::Builder<'static> {
     builder.tag_attributes(tag_attrs);
 
     // URL schemes.
-    let schemes: HashSet<&str> =
-        ["http", "https", "mailto", "cid"].into_iter().collect();
+    let schemes: HashSet<&str> = ["http", "https", "mailto", "cid"].into_iter().collect();
     builder.url_schemes(schemes);
 
     // Link security.
@@ -294,7 +357,7 @@ pub fn sanitize_html_body_with_image_policy(
 /// Replace remote `<img src="http(s)://...">` with a placeholder.
 /// Preserves `cid:` (inline attachments) and `data:` (embedded) URIs.
 fn strip_remote_images(html: &str) -> String {
-    use lol_html::{element, rewrite_str, RewriteStrSettings};
+    use lol_html::{RewriteStrSettings, element, rewrite_str};
 
     let settings = RewriteStrSettings {
         element_content_handlers: vec![
@@ -321,8 +384,9 @@ fn strip_remote_images(html: &str) -> String {
             element!("*[style]", |el| {
                 if let Some(style) = el.get_attribute("style") {
                     if CSS_URL_HTTP_RE.is_match(&style) {
-                        let cleaned =
-                            CSS_URL_HTTP_REPLACE_RE.replace_all(&style, "none").to_string();
+                        let cleaned = CSS_URL_HTTP_REPLACE_RE
+                            .replace_all(&style, "none")
+                            .to_string();
                         el.set_attribute("style", &cleaned).unwrap_or_else(|e| {
                             log::warn!("failed to rewrite style attribute: {e}");
                         });
@@ -371,7 +435,7 @@ const AMP_REMOVE_TAGS: &[&str] = &[
 /// We neutralize by stripping all `amp-*` custom elements and removing
 /// the `<html amp4email>` attribute.
 fn strip_amp_elements(html: &str) -> String {
-    use lol_html::{element, rewrite_str, RewriteStrSettings};
+    use lol_html::{RewriteStrSettings, element, rewrite_str};
 
     let mut handlers = Vec::new();
 
@@ -560,7 +624,8 @@ mod tests {
 
     #[test]
     fn import_in_inline_style_removed() {
-        let html = "<div style=\"@import url('https://evil.com/steal.css'); color: blue;\">Text</div>";
+        let html =
+            "<div style=\"@import url('https://evil.com/steal.css'); color: blue;\">Text</div>";
         let result = sanitize_html_body(html);
         assert!(!result.contains("@import"));
         assert!(result.contains("color"));
@@ -699,7 +764,8 @@ mod tests {
 
     #[test]
     fn multiple_event_handlers() {
-        let html = "<img src=\"https://example.com/photo.jpg\" onerror=\"alert(1)\" onload=\"track()\">";
+        let html =
+            "<img src=\"https://example.com/photo.jpg\" onerror=\"alert(1)\" onload=\"track()\">";
         let result = sanitize_html_body(html);
         assert!(!result.contains("onerror"));
         assert!(!result.contains("onload"));
@@ -752,7 +818,8 @@ mod tests {
 
     #[test]
     fn css_url_tracking_pixel_blocked() {
-        let html = r#"<div style="background:url(https://tracker.example.com/pixel.gif)">Text</div>"#;
+        let html =
+            r#"<div style="background:url(https://tracker.example.com/pixel.gif)">Text</div>"#;
         let result = sanitize_html_body_with_image_policy(html, true, false);
         assert!(!result.contains("tracker.example.com"));
         assert!(result.contains("Text"));

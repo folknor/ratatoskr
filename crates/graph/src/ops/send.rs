@@ -22,7 +22,10 @@ pub(super) async fn send_via_draft(
         .post_no_content::<()>(&format!("{me}/messages/{enc_draft_id}/send"), None, ctx.db)
         .await
         .map_err(|e| {
-            log::error!("[Graph] Send email failed for account {}: {e}", ctx.account_id);
+            log::error!(
+                "[Graph] Send email failed for account {}: {e}",
+                ctx.account_id
+            );
             e
         })?;
     log::info!("[Graph] Email sent successfully, draft_id={draft_id}");
@@ -134,7 +137,9 @@ pub(super) fn mime_to_graph_message(
     let bcc = addr_to_recipients(parsed.bcc());
     let reply_to = addr_to_recipients(parsed.reply_to());
 
-    fn addr_to_recipients(addr: Option<&mail_parser::Address<'_>>) -> Option<Vec<super::super::types::GraphRecipient>> {
+    fn addr_to_recipients(
+        addr: Option<&mail_parser::Address<'_>>,
+    ) -> Option<Vec<super::super::types::GraphRecipient>> {
         use super::super::types::{GraphEmailAddress, GraphRecipient};
         let addr = addr?;
         let recips: Vec<GraphRecipient> = addr
@@ -224,8 +229,7 @@ async fn upload_attachments_from_mime(
             .await?;
         } else {
             // Small attachment: inline base64
-            let content_bytes =
-                common::encoding::encode_base64_standard(raw_bytes);
+            let content_bytes = common::encoding::encode_base64_standard(raw_bytes);
             let content_id = attachment
                 .content_id()
                 .map(|id| id.trim_matches(&['<', '>'] as &[char]).to_string());
@@ -263,7 +267,9 @@ async fn upload_large_attachment(
     is_inline: bool,
     data: &[u8],
 ) -> Result<(), String> {
-    use super::super::types::{CreateUploadSessionRequest, UploadSession, UploadSessionAttachmentItem};
+    use super::super::types::{
+        CreateUploadSessionRequest, UploadSession, UploadSessionAttachmentItem,
+    };
 
     #[allow(clippy::cast_possible_wrap)]
     let size = data.len() as i64;
@@ -302,9 +308,7 @@ async fn upload_large_attachment(
         offset = end;
     }
 
-    log::info!(
-        "Uploaded large attachment '{name}' ({total} bytes) via resumable session"
-    );
+    log::info!("Uploaded large attachment '{name}' ({total} bytes) via resumable session");
     Ok(())
 }
 

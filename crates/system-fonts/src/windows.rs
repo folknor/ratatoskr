@@ -5,7 +5,11 @@
 
 use crate::{SystemFont, SystemFonts};
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap, clippy::cast_sign_loss)]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss
+)]
 pub(crate) async fn detect() -> SystemFonts {
     let mut fonts = SystemFonts::default();
 
@@ -57,9 +61,7 @@ pub(crate) async fn detect() -> SystemFonts {
 }
 
 /// Extract the font family name from a LOGFONTW's null-terminated UTF-16 `lfFaceName`.
-fn logfont_family_name(
-    logfont: &windows_sys::Win32::Graphics::Gdi::LOGFONTW,
-) -> Option<String> {
+fn logfont_family_name(logfont: &windows_sys::Win32::Graphics::Gdi::LOGFONTW) -> Option<String> {
     let face = &logfont.lfFaceName;
     let len = face.iter().position(|&c| c == 0).unwrap_or(face.len());
     let name = String::from_utf16_lossy(&face[..len]);

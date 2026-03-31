@@ -290,10 +290,10 @@ fn resolve_delete_char_backward(doc: &Document, pos: DocPosition) -> Vec<EditOp>
     let char_before_offset = pos.offset.saturating_sub(1);
 
     // Get the actual character that will be deleted (for DeletedContent).
-    let deleted_char: String = text.chars().nth(char_before_offset).map_or_else(
-        String::new,
-        |c| c.to_string(),
-    );
+    let deleted_char: String = text
+        .chars()
+        .nth(char_before_offset)
+        .map_or_else(String::new, |c| c.to_string());
 
     if deleted_char.is_empty() {
         return vec![];
@@ -558,20 +558,24 @@ fn resolve_split_block(doc: &Document, selection: DocSelection) -> Vec<EditOp> {
     if let Block::Heading { level, .. } = block
         && split_pos.offset >= block.char_len()
     {
-            // Splitting at the end of a heading: the heading stays, new block is paragraph.
-            // We do this by splitting (which creates two headings) and then changing the
-            // second heading to a paragraph.
-            ops.push(EditOp::SplitBlock { position: split_pos });
-            ops.push(EditOp::SetBlockType {
-                block_index: split_pos.block_index + 1,
-                old: BlockKind::Heading(*level),
-                new: BlockKind::Paragraph,
-            });
-            return ops;
+        // Splitting at the end of a heading: the heading stays, new block is paragraph.
+        // We do this by splitting (which creates two headings) and then changing the
+        // second heading to a paragraph.
+        ops.push(EditOp::SplitBlock {
+            position: split_pos,
+        });
+        ops.push(EditOp::SetBlockType {
+            block_index: split_pos.block_index + 1,
+            old: BlockKind::Heading(*level),
+            new: BlockKind::Paragraph,
+        });
+        return ops;
     }
 
     // Rule 4: normal split, preserving block type.
-    ops.push(EditOp::SplitBlock { position: split_pos });
+    ops.push(EditOp::SplitBlock {
+        position: split_pos,
+    });
     ops
 }
 
@@ -624,11 +628,7 @@ fn resolve_toggle_style(
 ///
 /// If the cursor is inside a block of a different type, emits a `SetBlockType`
 /// op. If the block is already the target type, toggles back to Paragraph.
-fn resolve_set_block_type(
-    doc: &Document,
-    selection: DocSelection,
-    kind: BlockKind,
-) -> Vec<EditOp> {
+fn resolve_set_block_type(doc: &Document, selection: DocSelection, kind: BlockKind) -> Vec<EditOp> {
     let block_index = selection.focus.block_index;
     let Some(block) = doc.block(block_index) else {
         return vec![];
@@ -687,9 +687,7 @@ fn find_link_boundaries(doc: &Document, pos: DocPosition) -> Option<(DocPosition
     // recognize the caret as "at the link boundary" for formatting purposes.
     let href = match run.link.as_ref() {
         Some(h) => h,
-        None if offset_in_run == 0 && run_idx > 0 => {
-            runs[run_idx - 1].link.as_ref()?
-        }
+        None if offset_in_run == 0 && run_idx > 0 => runs[run_idx - 1].link.as_ref()?,
         None => return None,
     };
 
@@ -794,7 +792,9 @@ fn extract_deleted_runs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::{Block, DocPosition, DocSelection, Document, HeadingLevel, InlineStyle, StyledRun};
+    use crate::document::{
+        Block, DocPosition, DocSelection, Document, HeadingLevel, InlineStyle, StyledRun,
+    };
     use crate::operations::EditOp;
 
     /// Helper: apply a sequence of ops to a document.
@@ -816,7 +816,12 @@ mod tests {
     fn insert_text_at_start() {
         let mut doc = Document::from_blocks(vec![Block::paragraph("hello")]);
         let sel = DocSelection::caret(DocPosition::new(0, 0));
-        let ops = resolve(&doc, sel, EditAction::InsertText("X".into()), InlineStyle::empty());
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::InsertText("X".into()),
+            InlineStyle::empty(),
+        );
         apply_ops(&mut doc, &ops);
         assert_eq!(block_text(&doc, 0), "Xhello");
     }
@@ -825,7 +830,12 @@ mod tests {
     fn insert_text_at_middle() {
         let mut doc = Document::from_blocks(vec![Block::paragraph("hllo")]);
         let sel = DocSelection::caret(DocPosition::new(0, 1));
-        let ops = resolve(&doc, sel, EditAction::InsertText("e".into()), InlineStyle::empty());
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::InsertText("e".into()),
+            InlineStyle::empty(),
+        );
         apply_ops(&mut doc, &ops);
         assert_eq!(block_text(&doc, 0), "hello");
     }
@@ -834,7 +844,12 @@ mod tests {
     fn insert_text_at_end() {
         let mut doc = Document::from_blocks(vec![Block::paragraph("hello")]);
         let sel = DocSelection::caret(DocPosition::new(0, 5));
-        let ops = resolve(&doc, sel, EditAction::InsertText("!".into()), InlineStyle::empty());
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::InsertText("!".into()),
+            InlineStyle::empty(),
+        );
         apply_ops(&mut doc, &ops);
         assert_eq!(block_text(&doc, 0), "hello!");
     }
@@ -845,7 +860,12 @@ mod tests {
             runs: vec![StyledRun::styled("hllo", InlineStyle::BOLD)],
         }]);
         let sel = DocSelection::caret(DocPosition::new(0, 1));
-        let ops = resolve(&doc, sel, EditAction::InsertText("e".into()), InlineStyle::empty());
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::InsertText("e".into()),
+            InlineStyle::empty(),
+        );
         apply_ops(&mut doc, &ops);
         let runs = doc.block(0).and_then(Block::runs).expect("runs");
         assert_eq!(runs[0].text, "hello");
@@ -855,26 +875,28 @@ mod tests {
     #[test]
     fn insert_replacing_selection() {
         let mut doc = Document::from_blocks(vec![Block::paragraph("hello world")]);
-        let sel = DocSelection::range(
-            DocPosition::new(0, 5),
-            DocPosition::new(0, 11),
+        let sel = DocSelection::range(DocPosition::new(0, 5), DocPosition::new(0, 11));
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::InsertText("!".into()),
+            InlineStyle::empty(),
         );
-        let ops = resolve(&doc, sel, EditAction::InsertText("!".into()), InlineStyle::empty());
         apply_ops(&mut doc, &ops);
         assert_eq!(block_text(&doc, 0), "hello!");
     }
 
     #[test]
     fn insert_replacing_cross_block_selection() {
-        let mut doc = Document::from_blocks(vec![
-            Block::paragraph("hello"),
-            Block::paragraph("world"),
-        ]);
-        let sel = DocSelection::range(
-            DocPosition::new(0, 3),
-            DocPosition::new(1, 2),
+        let mut doc =
+            Document::from_blocks(vec![Block::paragraph("hello"), Block::paragraph("world")]);
+        let sel = DocSelection::range(DocPosition::new(0, 3), DocPosition::new(1, 2));
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::InsertText("X".into()),
+            InlineStyle::empty(),
         );
-        let ops = resolve(&doc, sel, EditAction::InsertText("X".into()), InlineStyle::empty());
         apply_ops(&mut doc, &ops);
         assert_eq!(doc.block_count(), 1);
         assert_eq!(block_text(&doc, 0), "helXrld");
@@ -884,7 +906,12 @@ mod tests {
     fn insert_multichar() {
         let mut doc = Document::from_blocks(vec![Block::paragraph("ac")]);
         let sel = DocSelection::caret(DocPosition::new(0, 1));
-        let ops = resolve(&doc, sel, EditAction::InsertText("bb".into()), InlineStyle::empty());
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::InsertText("bb".into()),
+            InlineStyle::empty(),
+        );
         apply_ops(&mut doc, &ops);
         assert_eq!(block_text(&doc, 0), "abbc");
     }
@@ -920,10 +947,8 @@ mod tests {
 
     #[test]
     fn backspace_at_block_start_merges_with_previous() {
-        let mut doc = Document::from_blocks(vec![
-            Block::paragraph("hello"),
-            Block::paragraph("world"),
-        ]);
+        let mut doc =
+            Document::from_blocks(vec![Block::paragraph("hello"), Block::paragraph("world")]);
         let sel = DocSelection::caret(DocPosition::new(1, 0));
         let ops = resolve(&doc, sel, EditAction::DeleteBackward, InlineStyle::empty());
         apply_ops(&mut doc, &ops);
@@ -945,7 +970,10 @@ mod tests {
         apply_ops(&mut doc, &ops);
         assert!(matches!(
             doc.block(0),
-            Some(Block::Heading { level: HeadingLevel::H1, .. })
+            Some(Block::Heading {
+                level: HeadingLevel::H1,
+                ..
+            })
         ));
         assert_eq!(block_text(&doc, 0), "Titlerest");
     }
@@ -953,10 +981,7 @@ mod tests {
     #[test]
     fn backspace_with_selection_deletes_selection() {
         let mut doc = Document::from_blocks(vec![Block::paragraph("hello world")]);
-        let sel = DocSelection::range(
-            DocPosition::new(0, 5),
-            DocPosition::new(0, 11),
-        );
+        let sel = DocSelection::range(DocPosition::new(0, 5), DocPosition::new(0, 11));
         let ops = resolve(&doc, sel, EditAction::DeleteBackward, InlineStyle::empty());
         apply_ops(&mut doc, &ops);
         assert_eq!(block_text(&doc, 0), "hello");
@@ -968,7 +993,12 @@ mod tests {
         let sel = DocSelection::caret(DocPosition::new(0, 3));
         let ops = resolve(&doc, sel, EditAction::DeleteBackward, InlineStyle::empty());
         assert_eq!(ops.len(), 1);
-        if let EditOp::DeleteRange { start, end, deleted } = &ops[0] {
+        if let EditOp::DeleteRange {
+            start,
+            end,
+            deleted,
+        } = &ops[0]
+        {
             assert_eq!(start.offset, 2);
             assert_eq!(end.offset, 3);
             let deleted_text = deleted.blocks[0].flattened_text();
@@ -1020,10 +1050,8 @@ mod tests {
 
     #[test]
     fn delete_forward_at_block_end_merges() {
-        let mut doc = Document::from_blocks(vec![
-            Block::paragraph("hello"),
-            Block::paragraph("world"),
-        ]);
+        let mut doc =
+            Document::from_blocks(vec![Block::paragraph("hello"), Block::paragraph("world")]);
         let sel = DocSelection::caret(DocPosition::new(0, 5));
         let ops = resolve(&doc, sel, EditAction::DeleteForward, InlineStyle::empty());
         apply_ops(&mut doc, &ops);
@@ -1033,10 +1061,7 @@ mod tests {
 
     #[test]
     fn delete_forward_at_last_block_end_is_noop() {
-        let doc = Document::from_blocks(vec![
-            Block::paragraph("hello"),
-            Block::paragraph("world"),
-        ]);
+        let doc = Document::from_blocks(vec![Block::paragraph("hello"), Block::paragraph("world")]);
         let sel = DocSelection::caret(DocPosition::new(1, 5));
         let ops = resolve(&doc, sel, EditAction::DeleteForward, InlineStyle::empty());
         assert!(ops.is_empty());
@@ -1045,10 +1070,7 @@ mod tests {
     #[test]
     fn delete_forward_with_selection_deletes_selection() {
         let mut doc = Document::from_blocks(vec![Block::paragraph("hello world")]);
-        let sel = DocSelection::range(
-            DocPosition::new(0, 0),
-            DocPosition::new(0, 5),
-        );
+        let sel = DocSelection::range(DocPosition::new(0, 0), DocPosition::new(0, 5));
         let ops = resolve(&doc, sel, EditAction::DeleteForward, InlineStyle::empty());
         apply_ops(&mut doc, &ops);
         assert_eq!(block_text(&doc, 0), " world");
@@ -1115,10 +1137,7 @@ mod tests {
     #[test]
     fn delete_selection_single_block() {
         let mut doc = Document::from_blocks(vec![Block::paragraph("hello world")]);
-        let sel = DocSelection::range(
-            DocPosition::new(0, 5),
-            DocPosition::new(0, 11),
-        );
+        let sel = DocSelection::range(DocPosition::new(0, 5), DocPosition::new(0, 11));
         let ops = resolve(&doc, sel, EditAction::DeleteSelection, InlineStyle::empty());
         apply_ops(&mut doc, &ops);
         assert_eq!(block_text(&doc, 0), "hello");
@@ -1126,14 +1145,9 @@ mod tests {
 
     #[test]
     fn delete_selection_cross_block() {
-        let mut doc = Document::from_blocks(vec![
-            Block::paragraph("hello"),
-            Block::paragraph("world"),
-        ]);
-        let sel = DocSelection::range(
-            DocPosition::new(0, 3),
-            DocPosition::new(1, 2),
-        );
+        let mut doc =
+            Document::from_blocks(vec![Block::paragraph("hello"), Block::paragraph("world")]);
+        let sel = DocSelection::range(DocPosition::new(0, 3), DocPosition::new(1, 2));
         let ops = resolve(&doc, sel, EditAction::DeleteSelection, InlineStyle::empty());
         apply_ops(&mut doc, &ops);
         assert_eq!(doc.block_count(), 1);
@@ -1190,11 +1204,17 @@ mod tests {
         assert_eq!(doc.block_count(), 2);
         assert!(matches!(
             doc.block(0),
-            Some(Block::Heading { level: HeadingLevel::H2, .. })
+            Some(Block::Heading {
+                level: HeadingLevel::H2,
+                ..
+            })
         ));
         assert!(matches!(
             doc.block(1),
-            Some(Block::Heading { level: HeadingLevel::H2, .. })
+            Some(Block::Heading {
+                level: HeadingLevel::H2,
+                ..
+            })
         ));
         assert_eq!(block_text(&doc, 0), "My ");
         assert_eq!(block_text(&doc, 1), "Title");
@@ -1213,7 +1233,10 @@ mod tests {
         // First block stays as heading.
         assert!(matches!(
             doc.block(0),
-            Some(Block::Heading { level: HeadingLevel::H1, .. })
+            Some(Block::Heading {
+                level: HeadingLevel::H1,
+                ..
+            })
         ));
         // Second block becomes paragraph.
         assert!(matches!(doc.block(1), Some(Block::Paragraph { .. })));
@@ -1224,10 +1247,7 @@ mod tests {
     #[test]
     fn split_with_selection_deletes_first() {
         let mut doc = Document::from_blocks(vec![Block::paragraph("hello world")]);
-        let sel = DocSelection::range(
-            DocPosition::new(0, 5),
-            DocPosition::new(0, 11),
-        );
+        let sel = DocSelection::range(DocPosition::new(0, 5), DocPosition::new(0, 11));
         let ops = resolve(&doc, sel, EditAction::SplitBlock, InlineStyle::empty());
         apply_ops(&mut doc, &ops);
         assert_eq!(doc.block_count(), 2);
@@ -1240,10 +1260,7 @@ mod tests {
     #[test]
     fn toggle_bold_with_selection_produces_op() {
         let doc = Document::from_blocks(vec![Block::paragraph("hello world")]);
-        let sel = DocSelection::range(
-            DocPosition::new(0, 0),
-            DocPosition::new(0, 5),
-        );
+        let sel = DocSelection::range(DocPosition::new(0, 0), DocPosition::new(0, 5));
         let ops = resolve(
             &doc,
             sel,
@@ -1252,7 +1269,12 @@ mod tests {
         );
         assert_eq!(ops.len(), 1);
         assert!(matches!(ops[0], EditOp::ToggleInlineStyle { .. }));
-        if let EditOp::ToggleInlineStyle { start, end, style_bit } = &ops[0] {
+        if let EditOp::ToggleInlineStyle {
+            start,
+            end,
+            style_bit,
+        } = &ops[0]
+        {
             assert_eq!(start.offset, 0);
             assert_eq!(end.offset, 5);
             assert_eq!(*style_bit, InlineStyle::BOLD);
@@ -1274,14 +1296,8 @@ mod tests {
 
     #[test]
     fn toggle_italic_with_cross_block_selection() {
-        let doc = Document::from_blocks(vec![
-            Block::paragraph("hello"),
-            Block::paragraph("world"),
-        ]);
-        let sel = DocSelection::range(
-            DocPosition::new(0, 2),
-            DocPosition::new(1, 3),
-        );
+        let doc = Document::from_blocks(vec![Block::paragraph("hello"), Block::paragraph("world")]);
+        let sel = DocSelection::range(DocPosition::new(0, 2), DocPosition::new(1, 3));
         let ops = resolve(
             &doc,
             sel,
@@ -1289,7 +1305,12 @@ mod tests {
             InlineStyle::empty(),
         );
         assert_eq!(ops.len(), 1);
-        if let EditOp::ToggleInlineStyle { start, end, style_bit } = &ops[0] {
+        if let EditOp::ToggleInlineStyle {
+            start,
+            end,
+            style_bit,
+        } = &ops[0]
+        {
             assert_eq!(*start, DocPosition::new(0, 2));
             assert_eq!(*end, DocPosition::new(1, 3));
             assert_eq!(*style_bit, InlineStyle::ITALIC);
@@ -1299,10 +1320,7 @@ mod tests {
     #[test]
     fn toggle_bold_with_selection_applies_correctly() {
         let mut doc = Document::from_blocks(vec![Block::paragraph("hello world")]);
-        let sel = DocSelection::range(
-            DocPosition::new(0, 0),
-            DocPosition::new(0, 5),
-        );
+        let sel = DocSelection::range(DocPosition::new(0, 0), DocPosition::new(0, 5));
         let ops = resolve(
             &doc,
             sel,
@@ -1426,10 +1444,8 @@ mod tests {
 
     #[test]
     fn backspace_merge_undoes_correctly() {
-        let mut doc = Document::from_blocks(vec![
-            Block::paragraph("hello"),
-            Block::paragraph("world"),
-        ]);
+        let mut doc =
+            Document::from_blocks(vec![Block::paragraph("hello"), Block::paragraph("world")]);
         let sel = DocSelection::caret(DocPosition::new(1, 0));
         let ops = resolve(&doc, sel, EditAction::DeleteBackward, InlineStyle::empty());
         apply_ops(&mut doc, &ops);
@@ -1463,7 +1479,10 @@ mod tests {
         assert_eq!(doc.block_count(), 1);
         assert!(matches!(
             doc.block(0),
-            Some(Block::Heading { level: HeadingLevel::H1, .. })
+            Some(Block::Heading {
+                level: HeadingLevel::H1,
+                ..
+            })
         ));
         assert_eq!(block_text(&doc, 0), "Title");
     }
@@ -1474,7 +1493,12 @@ mod tests {
     fn insert_into_empty_document() {
         let mut doc = Document::new();
         let sel = DocSelection::caret(DocPosition::zero());
-        let ops = resolve(&doc, sel, EditAction::InsertText("hello".into()), InlineStyle::empty());
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::InsertText("hello".into()),
+            InlineStyle::empty(),
+        );
         apply_ops(&mut doc, &ops);
         assert_eq!(block_text(&doc, 0), "hello");
     }
@@ -1490,10 +1514,8 @@ mod tests {
 
     #[test]
     fn backspace_at_start_of_second_empty_block() {
-        let mut doc = Document::from_blocks(vec![
-            Block::paragraph("hello"),
-            Block::empty_paragraph(),
-        ]);
+        let mut doc =
+            Document::from_blocks(vec![Block::paragraph("hello"), Block::empty_paragraph()]);
         let sel = DocSelection::caret(DocPosition::new(1, 0));
         let ops = resolve(&doc, sel, EditAction::DeleteBackward, InlineStyle::empty());
         apply_ops(&mut doc, &ops);
@@ -1503,10 +1525,8 @@ mod tests {
 
     #[test]
     fn delete_forward_at_end_of_first_block_with_empty_second() {
-        let mut doc = Document::from_blocks(vec![
-            Block::paragraph("hello"),
-            Block::empty_paragraph(),
-        ]);
+        let mut doc =
+            Document::from_blocks(vec![Block::paragraph("hello"), Block::empty_paragraph()]);
         let sel = DocSelection::caret(DocPosition::new(0, 5));
         let ops = resolve(&doc, sel, EditAction::DeleteForward, InlineStyle::empty());
         apply_ops(&mut doc, &ops);
@@ -1520,7 +1540,12 @@ mod tests {
         let sel = DocSelection::caret(DocPosition::new(0, 0));
         let ops = resolve(&doc, sel, EditAction::DeleteForward, InlineStyle::empty());
         assert_eq!(ops.len(), 1);
-        if let EditOp::DeleteRange { start, end, deleted } = &ops[0] {
+        if let EditOp::DeleteRange {
+            start,
+            end,
+            deleted,
+        } = &ops[0]
+        {
             assert_eq!(start.offset, 0);
             assert_eq!(end.offset, 1);
             assert_eq!(deleted.blocks[0].flattened_text(), "h");
@@ -1533,7 +1558,12 @@ mod tests {
     fn insert_unicode_text() {
         let mut doc = Document::from_blocks(vec![Block::paragraph("caf")]);
         let sel = DocSelection::caret(DocPosition::new(0, 3));
-        let ops = resolve(&doc, sel, EditAction::InsertText("\u{00e9}".into()), InlineStyle::empty());
+        let ops = resolve(
+            &doc,
+            sel,
+            EditAction::InsertText("\u{00e9}".into()),
+            InlineStyle::empty(),
+        );
         apply_ops(&mut doc, &ops);
         assert_eq!(block_text(&doc, 0), "caf\u{00e9}");
     }
@@ -1558,7 +1588,10 @@ mod tests {
         apply_ops(&mut doc, &ops);
         assert!(matches!(
             doc.block(0),
-            Some(Block::Heading { level: HeadingLevel::H3, .. })
+            Some(Block::Heading {
+                level: HeadingLevel::H3,
+                ..
+            })
         ));
         assert!(matches!(doc.block(1), Some(Block::Paragraph { .. })));
     }
@@ -1575,11 +1608,17 @@ mod tests {
         // Both should be H1.
         assert!(matches!(
             doc.block(0),
-            Some(Block::Heading { level: HeadingLevel::H1, .. })
+            Some(Block::Heading {
+                level: HeadingLevel::H1,
+                ..
+            })
         ));
         assert!(matches!(
             doc.block(1),
-            Some(Block::Heading { level: HeadingLevel::H1, .. })
+            Some(Block::Heading {
+                level: HeadingLevel::H1,
+                ..
+            })
         ));
     }
 
@@ -1603,7 +1642,12 @@ mod tests {
         let text = "hello";
         for (i, ch) in text.chars().enumerate() {
             let sel = DocSelection::caret(DocPosition::new(0, i));
-            let ops = resolve(&doc, sel, EditAction::InsertText(ch.to_string()), InlineStyle::empty());
+            let ops = resolve(
+                &doc,
+                sel,
+                EditAction::InsertText(ch.to_string()),
+                InlineStyle::empty(),
+            );
             apply_ops(&mut doc, &ops);
         }
         assert_eq!(block_text(&doc, 0), "hello");
@@ -1745,7 +1789,12 @@ mod tests {
             InlineStyle::empty(),
         );
         assert_eq!(ops.len(), 1);
-        if let EditOp::ToggleInlineStyle { start, end, style_bit } = &ops[0] {
+        if let EditOp::ToggleInlineStyle {
+            start,
+            end,
+            style_bit,
+        } = &ops[0]
+        {
             assert_eq!(*start, DocPosition::new(0, 7));
             assert_eq!(*end, DocPosition::new(0, 17));
             assert_eq!(*style_bit, InlineStyle::ITALIC);
@@ -1757,9 +1806,11 @@ mod tests {
     #[test]
     fn toggle_bold_inside_plain_link_formats_whole_link() {
         let doc = Document::from_blocks(vec![Block::Paragraph {
-            runs: vec![
-                StyledRun::linked("my link", InlineStyle::empty(), "https://example.com"),
-            ],
+            runs: vec![StyledRun::linked(
+                "my link",
+                InlineStyle::empty(),
+                "https://example.com",
+            )],
         }]);
         let sel = DocSelection::caret(DocPosition::new(0, 3));
         let ops = resolve(
@@ -1769,7 +1820,12 @@ mod tests {
             InlineStyle::empty(),
         );
         assert_eq!(ops.len(), 1);
-        if let EditOp::ToggleInlineStyle { start, end, style_bit } = &ops[0] {
+        if let EditOp::ToggleInlineStyle {
+            start,
+            end,
+            style_bit,
+        } = &ops[0]
+        {
             assert_eq!(*start, DocPosition::new(0, 0));
             assert_eq!(*end, DocPosition::new(0, 7));
             assert_eq!(*style_bit, InlineStyle::BOLD);
@@ -1870,7 +1926,12 @@ mod tests {
             InlineStyle::empty(),
         );
         assert_eq!(ops.len(), 1);
-        if let EditOp::ToggleInlineStyle { start, end, style_bit } = &ops[0] {
+        if let EditOp::ToggleInlineStyle {
+            start,
+            end,
+            style_bit,
+        } = &ops[0]
+        {
             // Should span the whole contiguous link: "bold part" = offsets 4..13.
             assert_eq!(*start, DocPosition::new(0, 4));
             assert_eq!(*end, DocPosition::new(0, 13));

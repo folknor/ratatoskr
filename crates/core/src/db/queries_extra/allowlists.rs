@@ -50,7 +50,9 @@ pub async fn db_get_allowlisted_senders(
             let param_refs: Vec<&dyn rusqlite::types::ToSql> =
                 param_values.iter().map(AsRef::as_ref).collect();
             let rows = stmt
-                .query_map(param_refs.as_slice(), |row| row.get::<_, String>("sender_address"))
+                .query_map(param_refs.as_slice(), |row| {
+                    row.get::<_, String>("sender_address")
+                })
                 .map_err(|e| e.to_string())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())?;
@@ -119,10 +121,12 @@ pub async fn db_get_vip_senders(db: &DbState, account_id: String) -> Result<Vec<
         let mut stmt = conn
             .prepare("SELECT email_address FROM notification_vips WHERE account_id = ?1")
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id], |row| row.get::<_, String>("email_address"))
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
+        stmt.query_map(params![account_id], |row| {
+            row.get::<_, String>("email_address")
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
     })
     .await
 }

@@ -4,13 +4,13 @@ use std::collections::{HashMap, HashSet};
 
 use db::progress::{self, ProgressReporter};
 
-use store::body_store::BodyStoreState;
 use db::db::DbState;
-use store::inline_image_store::InlineImageStoreState;
 use search::SearchState;
+use store::body_store::BodyStoreState;
+use store::inline_image_store::InlineImageStoreState;
 use sync::pipeline;
-use sync::types::{ImapSyncResult, MessageMeta, SyncProgressEvent};
 use sync::threading;
+use sync::types::{ImapSyncResult, MessageMeta, SyncProgressEvent};
 
 use super::client;
 use super::connection::connect;
@@ -78,7 +78,8 @@ pub async fn imap_initial_sync(
     let all_folders = {
         let mut session = connect(config).await?;
         let folders = client::list_folders(&mut session).await?;
-        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+        let _ =
+            tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         folders
     };
 
@@ -252,10 +253,8 @@ pub async fn imap_initial_sync(
     let skipped = {
         let aid = account_id.to_string();
         let tids = thread_ids.clone();
-        db.with_conn(move |conn| {
-            sync::pending::get_blocked_thread_ids(conn, &aid, &tids)
-        })
-        .await?
+        db.with_conn(move |conn| sync::pending::get_blocked_thread_ids(conn, &aid, &tids))
+            .await?
     };
 
     let affected_thread_ids = {
@@ -295,10 +294,8 @@ pub async fn imap_initial_sync(
     if stored_count > 0 || total_messages_found == 0 {
         let aid = account_id.to_string();
         let marker = format!("imap-synced-{}", chrono::Utc::now().timestamp_millis());
-        db.with_conn(move |conn| {
-            sync::state::update_account_sync_state(conn, &aid, &marker)
-        })
-        .await?;
+        db.with_conn(move |conn| sync::state::update_account_sync_state(conn, &aid, &marker))
+            .await?;
     }
 
     let new_inbox_message_ids: Vec<String> = all_meta
@@ -327,7 +324,8 @@ pub async fn imap_initial_sync(
 
     log::info!(
         "[IMAP] Initial sync complete for account {account_id}: {} messages stored, {} threads",
-        stored_count, thread_groups.len()
+        stored_count,
+        thread_groups.len()
     );
 
     Ok(ImapSyncResult {
@@ -371,7 +369,8 @@ async fn sync_single_folder(
     let uids = search_result.uids;
     let kw_cap = search_result.folder_status.supports_custom_keywords;
     if uids.is_empty() {
-        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+        let _ =
+            tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         return Ok((0, 0, 0, kw_cap));
     }
 
@@ -498,7 +497,13 @@ async fn sync_single_folder(
         let sync_at = chrono::Utc::now().timestamp();
         db.with_conn(move |conn| {
             sync_pipeline::upsert_folder_sync_state(
-                conn, &aid, &fp, uidvalidity, last_uid, sync_at, highest_modseq,
+                conn,
+                &aid,
+                &fp,
+                uidvalidity,
+                last_uid,
+                sync_at,
+                highest_modseq,
             )
         })
         .await?;

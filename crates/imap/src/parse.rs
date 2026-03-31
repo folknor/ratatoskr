@@ -102,9 +102,7 @@ pub fn parse_message(
             && let Some(part) = message.parts.get(part_idx as usize)
             && let Some(ct) = part.content_type()
             && let Some(subtype) = ct.subtype()
-            && common::email_parsing::is_amp_content_type(
-                &format!("{}/{subtype}", ct.ctype()),
-            )
+            && common::email_parsing::is_amp_content_type(&format!("{}/{subtype}", ct.ctype()))
         {
             return None;
         }

@@ -25,8 +25,12 @@ pub struct WindowState {
     pub right_sidebar_open: bool,
 }
 
-fn default_sidebar_width() -> f32 { 180.0 }
-fn default_thread_list_width() -> f32 { 400.0 }
+fn default_sidebar_width() -> f32 {
+    180.0
+}
+fn default_thread_list_width() -> f32 {
+    400.0
+}
 
 impl Default for WindowState {
     fn default() -> Self {

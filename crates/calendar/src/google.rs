@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
-use rtsk::db::DbState;
 use gmail::client::GmailClient;
+use rtsk::db::DbState;
 use rtsk::provider::http;
 
 use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
@@ -147,23 +147,25 @@ pub async fn google_calendar_sync_events_impl(
             .join("&");
         let url = format!("{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_id}/events?{query}");
 
-        let response =
-            match google_calendar_request::<GoogleEventListResponse>(http, client, db, &url).await
-            {
-                Ok(value) => value,
-                Err(error) => {
-                    if error.contains("410") || error.to_lowercase().contains("sync token") {
-                        return Ok(CalendarSyncResultDto {
-                            created: Vec::new(),
-                            updated: Vec::new(),
-                            deleted_remote_ids: Vec::new(),
-                            new_sync_token: None,
-                            new_ctag: None,
-                        });
-                    }
-                    return Err(error);
+        let response = match google_calendar_request::<GoogleEventListResponse>(
+            http, client, db, &url,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                if error.contains("410") || error.to_lowercase().contains("sync token") {
+                    return Ok(CalendarSyncResultDto {
+                        created: Vec::new(),
+                        updated: Vec::new(),
+                        deleted_remote_ids: Vec::new(),
+                        new_sync_token: None,
+                        new_ctag: None,
+                    });
                 }
-            };
+                return Err(error);
+            }
+        };
 
         for item in response.items {
             if item.status.as_deref() == Some("cancelled") {
@@ -218,8 +220,7 @@ pub async fn google_calendar_fetch_events_impl(
     .collect::<Vec<_>>()
     .join("&");
     let url = format!("{GOOGLE_CALENDAR_API_BASE}/calendars/{encoded_id}/events?{query}");
-    let response: GoogleEventListResponse =
-        google_calendar_request(http, client, db, &url).await?;
+    let response: GoogleEventListResponse = google_calendar_request(http, client, db, &url).await?;
 
     response.items.into_iter().map(map_google_event).collect()
 }
@@ -426,14 +427,21 @@ fn map_google_event(event: GoogleCalendarEvent) -> Result<CalendarEventDto, Stri
 
     // Google uses "transparent" for free time, "opaque" for busy (default).
     let availability = event.transparency.map(|t| {
-        if t == "transparent" { "free".to_string() } else { "busy".to_string() }
+        if t == "transparent" {
+            "free".to_string()
+        } else {
+            "busy".to_string()
+        }
     });
 
-    let recurrence_rule = event.recurrence.and_then(|rules| {
-        rules.into_iter().find(|r| r.starts_with("RRULE:"))
-    });
+    let recurrence_rule = event
+        .recurrence
+        .and_then(|rules| rules.into_iter().find(|r| r.starts_with("RRULE:")));
 
-    let organizer_name = event.organizer.as_ref().and_then(|o| o.display_name.clone());
+    let organizer_name = event
+        .organizer
+        .as_ref()
+        .and_then(|o| o.display_name.clone());
     let organizer_email = event.organizer.map(|o| o.email);
 
     let timezone = event.start.time_zone.clone();

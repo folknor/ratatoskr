@@ -69,13 +69,7 @@ fn serialize_list_group(
                     } = blocks[i + 1].as_ref()
                     && *next_indent > base_indent
                 {
-                    i = serialize_list_group(
-                        blocks,
-                        i + 1,
-                        *next_ordered,
-                        *next_indent,
-                        buf,
-                    );
+                    i = serialize_list_group(blocks, i + 1, *next_ordered, *next_indent, buf);
                     buf.push_str("</li>");
                     continue;
                 }
@@ -119,10 +113,7 @@ fn serialize_block(block: &Block, buf: &mut String) {
             //
             // This shouldn't normally happen in our own output, but handle
             // gracefully.
-            if let Block::ListItem {
-                ordered, runs, ..
-            } = block
-            {
+            if let Block::ListItem { ordered, runs, .. } = block {
                 let tag = if *ordered { "ol" } else { "ul" };
                 buf.push('<');
                 buf.push_str(tag);
@@ -363,10 +354,7 @@ mod tests {
             Block::list_item("First", true),
             Block::list_item("Second", true),
         ]);
-        assert_eq!(
-            to_html(&doc),
-            "<ol><li>First</li><li>Second</li></ol>"
-        );
+        assert_eq!(to_html(&doc), "<ol><li>First</li><li>Second</li></ol>");
     }
 
     #[test]
@@ -410,7 +398,11 @@ mod tests {
     #[test]
     fn link_with_styles() {
         let doc = Document::from_blocks(vec![Block::Paragraph {
-            runs: vec![StyledRun::linked("click here", InlineStyle::BOLD, "https://example.com")],
+            runs: vec![StyledRun::linked(
+                "click here",
+                InlineStyle::BOLD,
+                "https://example.com",
+            )],
         }]);
         assert_eq!(
             to_html(&doc),

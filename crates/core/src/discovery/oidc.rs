@@ -127,8 +127,7 @@ pub async fn probe_issuer(issuer_url: &str) -> Option<OidcEndpoints> {
     }
 
     // Validate endpoints are HTTPS
-    if !is_valid_https_url(&doc.authorization_endpoint)
-        || !is_valid_https_url(&doc.token_endpoint)
+    if !is_valid_https_url(&doc.authorization_endpoint) || !is_valid_https_url(&doc.token_endpoint)
     {
         log::warn!("OIDC discovery: non-HTTPS endpoints from {url}");
         return None;
@@ -143,8 +142,7 @@ pub async fn probe_issuer(issuer_url: &str) -> Option<OidcEndpoints> {
     }
 
     let supports_pkce_s256 = detect_pkce_s256(&doc.code_challenge_methods_supported);
-    let supports_public_client =
-        detect_public_client(&doc.token_endpoint_auth_methods_supported);
+    let supports_public_client = detect_public_client(&doc.token_endpoint_auth_methods_supported);
 
     log::info!(
         "OIDC discovery: found endpoints at {normalized_issuer} \

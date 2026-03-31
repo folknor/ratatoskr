@@ -115,10 +115,7 @@ pub(super) async fn upsert_event(
         serde_json::to_string(&event.attendees).ok()
     };
 
-    let ical_data = event
-        .recurrence
-        .as_ref()
-        .map(|rules| rules.join("\n"));
+    let ical_data = event.recurrence.as_ref().map(|rules| rules.join("\n"));
 
     // Clone values for the closure
     let aid = account_id.to_string();
@@ -325,8 +322,8 @@ fn parse_single_datetime(dt: &super::types::EventDateTime) -> (i64, bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::EventDateTime;
+    use super::*;
 
     #[test]
     fn parse_timed_event() {

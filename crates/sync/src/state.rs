@@ -155,7 +155,10 @@ pub async fn load_graph_delta_tokens(
             )
             .map_err(|e| format!("prepare: {e}"))?;
         stmt.query_map(rusqlite::params![aid], |row| {
-            Ok((row.get::<_, String>("folder_id")?, row.get::<_, String>("delta_link")?))
+            Ok((
+                row.get::<_, String>("folder_id")?,
+                row.get::<_, String>("delta_link")?,
+            ))
         })
         .map_err(|e| format!("query: {e}"))?
         .collect::<Result<HashMap<_, _>, _>>()
@@ -223,7 +226,10 @@ pub async fn load_graph_contact_delta_tokens(
             )
             .map_err(|e| format!("prepare: {e}"))?;
         stmt.query_map(rusqlite::params![aid], |row| {
-            Ok((row.get::<_, String>("folder_id")?, row.get::<_, String>("delta_link")?))
+            Ok((
+                row.get::<_, String>("folder_id")?,
+                row.get::<_, String>("delta_link")?,
+            ))
         })
         .map_err(|e| format!("query: {e}"))?
         .collect::<Result<HashMap<_, _>, _>>()
@@ -391,7 +397,10 @@ pub async fn load_shared_mailbox_delta_tokens(
             )
             .map_err(|e| format!("prepare: {e}"))?;
         stmt.query_map(rusqlite::params![aid, mid], |row| {
-            Ok((row.get::<_, String>("folder_id")?, row.get::<_, String>("delta_link")?))
+            Ok((
+                row.get::<_, String>("folder_id")?,
+                row.get::<_, String>("delta_link")?,
+            ))
         })
         .map_err(|e| format!("query: {e}"))?
         .collect::<Result<HashMap<_, _>, _>>()

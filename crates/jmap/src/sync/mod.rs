@@ -7,19 +7,16 @@ use jmap_client::core::query::QueryResponse;
 use jmap_client::email;
 use serde::Serialize;
 
-use store::body_store::BodyStoreState;
 use db::db::DbState;
-use store::inline_image_store::InlineImageStoreState;
 use db::progress::ProgressReporter;
 use search::SearchState;
+use store::body_store::BodyStoreState;
+use store::inline_image_store::InlineImageStoreState;
 
 use super::client::JmapClient;
 use super::mailbox_mapper::MailboxInfo;
 use super::parse::{ParsedJmapMessage, email_get_properties, parse_jmap_email};
-use sync::{
-    pending as sync_pending, progress as sync_progress,
-    state as sync_state,
-};
+use sync::{pending as sync_pending, progress as sync_progress, state as sync_state};
 
 const BATCH_SIZE: usize = 50;
 
@@ -170,7 +167,9 @@ pub async fn jmap_initial_sync(
 
     // Phase 4: Contacts sync
     match super::contacts_sync::jmap_contacts_initial_sync(client, account_id, db).await {
-        Ok(count) => log::info!("[JMAP] Initial contacts sync: {count} contacts for account {account_id}"),
+        Ok(count) => {
+            log::info!("[JMAP] Initial contacts sync: {count} contacts for account {account_id}")
+        }
         Err(e) => log::warn!("[JMAP] Contacts initial sync failed for account {account_id}: {e}"),
     }
 
@@ -277,18 +276,17 @@ pub async fn jmap_delta_sync(
 
     loop {
         let inner = client.inner();
-        let changes = inner
-            .email_changes(&since_state, None)
-            .await
-            .map_err(|e| {
-                let msg = e.to_string();
-                if msg.contains("cannotCalculateChanges") {
-                    log::warn!("[JMAP] Email state expired for account {account_id}, full re-sync needed");
-                    return "JMAP_STATE_EXPIRED".to_string();
-                }
-                log::error!("[JMAP] Email/changes failed for account {account_id}: {msg}");
-                format!("Email/changes: {msg}")
-            })?;
+        let changes = inner.email_changes(&since_state, None).await.map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("cannotCalculateChanges") {
+                log::warn!(
+                    "[JMAP] Email state expired for account {account_id}, full re-sync needed"
+                );
+                return "JMAP_STATE_EXPIRED".to_string();
+            }
+            log::error!("[JMAP] Email/changes failed for account {account_id}: {msg}");
+            format!("Email/changes: {msg}")
+        })?;
 
         let created = changes.created();
         let updated = changes.updated();
@@ -365,7 +363,8 @@ pub async fn jmap_delta_sync(
 
     log::info!(
         "[JMAP] Delta sync complete for account {account_id}: {} new inbox, {} threads affected",
-        new_inbox_ids.len(), affected_thread_ids.len()
+        new_inbox_ids.len(),
+        affected_thread_ids.len()
     );
 
     Ok(JmapSyncResult {
@@ -554,11 +553,7 @@ pub(crate) fn emit_progress(ctx: &SyncCtx<'_>, phase: &str, current: u64, total:
 ///    are no longer in the Session (access revoked server-side).
 ///
 /// Does not fail the overall sync — discovery errors are logged and skipped.
-pub(crate) async fn discover_shared_accounts(
-    client: &JmapClient,
-    account_id: &str,
-    db: &DbState,
-) {
+pub(crate) async fn discover_shared_accounts(client: &JmapClient, account_id: &str, db: &DbState) {
     let session = client.inner().session();
 
     // Collect non-personal accounts from the Session.
@@ -570,10 +565,7 @@ pub(crate) async fn discover_shared_accounts(
         if account.is_personal() {
             continue;
         }
-        session_shared_ids.push((
-            jmap_account_id.clone(),
-            account.name().to_string(),
-        ));
+        session_shared_ids.push((jmap_account_id.clone(), account.name().to_string()));
     }
 
     // Enable sync for newly-discovered shared accounts.
@@ -583,12 +575,8 @@ pub(crate) async fn discover_shared_accounts(
         } else {
             Some(display_name.as_str())
         };
-        if let Err(e) =
-            sync_state::enable_shared_mailbox_sync(db, account_id, jmap_id, dn).await
-        {
-            log::warn!(
-                "[JMAP] Failed to enable shared account {jmap_id} for {account_id}: {e}"
-            );
+        if let Err(e) = sync_state::enable_shared_mailbox_sync(db, account_id, jmap_id, dn).await {
+            log::warn!("[JMAP] Failed to enable shared account {jmap_id} for {account_id}: {e}");
         }
     }
 
@@ -620,9 +608,7 @@ pub(crate) async fn discover_shared_accounts(
             )
             .await
             {
-                log::warn!(
-                    "[JMAP] Failed to disable revoked shared account {known_id}: {e}"
-                );
+                log::warn!("[JMAP] Failed to disable revoked shared account {known_id}: {e}");
             }
         }
     }
@@ -703,7 +689,10 @@ pub(crate) async fn resolve_shared_account_identities(
             let account_name = account.name();
             if account_name.contains('@') {
                 if let Err(e) = sync_state::set_shared_mailbox_email(
-                    db, account_id, jmap_account_id, account_name,
+                    db,
+                    account_id,
+                    jmap_account_id,
+                    account_name,
                 )
                 .await
                 {
@@ -728,9 +717,7 @@ pub(crate) async fn resolve_shared_account_identities(
                 continue;
             }
             Err(e) => {
-                log::debug!(
-                    "[JMAP] Failed to fetch principal {principal_id}: {e}"
-                );
+                log::debug!("[JMAP] Failed to fetch principal {principal_id}: {e}");
                 continue;
             }
         };
@@ -740,9 +727,7 @@ pub(crate) async fn resolve_shared_account_identities(
         {
             log::warn!("[JMAP] Failed to cache shared account email: {e}");
         } else {
-            log::info!(
-                "[JMAP] Resolved shared account {jmap_account_id} email: {email}"
-            );
+            log::info!("[JMAP] Resolved shared account {jmap_account_id} email: {email}");
         }
     }
 }
@@ -794,11 +779,7 @@ async fn fetch_principal_email(
 ///
 /// On any mailbox-related notification, re-runs session discovery to pick up
 /// grants or revocations. Non-fatal — errors are logged and skipped.
-pub(crate) async fn poll_share_notifications(
-    client: &JmapClient,
-    account_id: &str,
-    db: &DbState,
-) {
+pub(crate) async fn poll_share_notifications(client: &JmapClient, account_id: &str, db: &DbState) {
     let inner = client.inner();
     let session = inner.session();
 
@@ -808,27 +789,23 @@ pub(crate) async fn poll_share_notifications(
     }
 
     // Load existing state token.
-    let since_state = match sync_state::load_jmap_sync_state(
-        db, account_id, "ShareNotification",
-    )
-    .await
-    {
-        Ok(state) => state,
-        Err(e) => {
-            log::warn!("[JMAP] Failed to load ShareNotification state: {e}");
-            return;
-        }
-    };
+    let since_state =
+        match sync_state::load_jmap_sync_state(db, account_id, "ShareNotification").await {
+            Ok(state) => state,
+            Err(e) => {
+                log::warn!("[JMAP] Failed to load ShareNotification state: {e}");
+                return;
+            }
+        };
 
     // If no state yet, do an initial get to capture the current state token
     // without processing existing notifications (they predate our tracking).
     if since_state.is_none() {
         match get_share_notification_state(client).await {
             Ok(state) => {
-                if let Err(e) = sync_state::save_jmap_sync_state(
-                    db, account_id, "ShareNotification", &state,
-                )
-                .await
+                if let Err(e) =
+                    sync_state::save_jmap_sync_state(db, account_id, "ShareNotification", &state)
+                        .await
                 {
                     log::warn!("[JMAP] Failed to save initial ShareNotification state: {e}");
                 }
@@ -851,7 +828,10 @@ pub(crate) async fn poll_share_notifications(
                 // State expired — reset by capturing fresh state.
                 if let Ok(state) = get_share_notification_state(client).await {
                     let _ = sync_state::save_jmap_sync_state(
-                        db, account_id, "ShareNotification", &state,
+                        db,
+                        account_id,
+                        "ShareNotification",
+                        &state,
                     )
                     .await;
                 }
@@ -875,7 +855,10 @@ pub(crate) async fn poll_share_notifications(
         let mut has_mailbox_change = false;
         for notif_id in created {
             match inner
-                .share_notification_get(notif_id, None::<Vec<jmap_client::share_notification::Property>>)
+                .share_notification_get(
+                    notif_id,
+                    None::<Vec<jmap_client::share_notification::Property>>,
+                )
                 .await
             {
                 Ok(Some(notif)) => {
@@ -906,7 +889,9 @@ pub(crate) async fn poll_share_notifications(
                     }
                 }
                 Ok(None) => {
-                    log::debug!("[JMAP] ShareNotification {notif_id} not found (already destroyed?)");
+                    log::debug!(
+                        "[JMAP] ShareNotification {notif_id} not found (already destroyed?)"
+                    );
                 }
                 Err(e) => {
                     log::debug!("[JMAP] Failed to fetch ShareNotification {notif_id}: {e}");
@@ -923,10 +908,8 @@ pub(crate) async fn poll_share_notifications(
     }
 
     // Save updated state.
-    if let Err(e) = sync_state::save_jmap_sync_state(
-        db, account_id, "ShareNotification", &new_state,
-    )
-    .await
+    if let Err(e) =
+        sync_state::save_jmap_sync_state(db, account_id, "ShareNotification", &new_state).await
     {
         log::warn!("[JMAP] Failed to save ShareNotification state: {e}");
     }

@@ -71,9 +71,7 @@ impl Db {
     }
 
     /// Load pinned public folders for sidebar display, across all accounts.
-    pub async fn get_pinned_public_folders(
-        &self,
-    ) -> Result<Vec<PinnedPublicFolder>, String> {
+    pub async fn get_pinned_public_folders(&self) -> Result<Vec<PinnedPublicFolder>, String> {
         self.with_conn(|conn| {
             let mut stmt = conn
                 .prepare(
@@ -130,10 +128,7 @@ impl Db {
         .await
     }
 
-    pub async fn get_labels(
-        &self,
-        account_id: String,
-    ) -> Result<Vec<Label>, String> {
+    pub async fn get_labels(&self, account_id: String) -> Result<Vec<Label>, String> {
         self.with_conn(move |conn| {
             let mut stmt = conn
                 .prepare(

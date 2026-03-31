@@ -22,13 +22,10 @@ fn make_test_ctx() -> (ActionContext, tempfile::TempDir) {
     let db = DbState::from_arc(Arc::new(Mutex::new(conn)));
 
     // Stores: tempdir-backed
-    let body_store =
-        store::body_store::BodyStoreState::init(tmp.path()).expect("body store");
+    let body_store = store::body_store::BodyStoreState::init(tmp.path()).expect("body store");
     let inline_images =
-        store::inline_image_store::InlineImageStoreState::init(tmp.path())
-            .expect("inline images");
-    let search =
-        search::SearchState::init(tmp.path()).expect("search");
+        store::inline_image_store::InlineImageStoreState::init(tmp.path()).expect("inline images");
+    let search = search::SearchState::init(tmp.path()).expect("search");
 
     let ctx = ActionContext {
         db,
@@ -80,7 +77,12 @@ fn insert_thread_label(ctx: &ActionContext, account_id: &str, thread_id: &str, l
 }
 
 /// Check if a thread_labels row exists.
-fn has_thread_label(ctx: &ActionContext, account_id: &str, thread_id: &str, label_id: &str) -> bool {
+fn has_thread_label(
+    ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+    label_id: &str,
+) -> bool {
     let db = ctx.db.clone();
     let conn = db.conn();
     let conn = conn.lock().expect("lock");
@@ -108,7 +110,12 @@ fn get_thread_starred(ctx: &ActionContext, account_id: &str, thread_id: &str) ->
 }
 
 /// Count pending ops for a resource.
-fn count_pending_ops(ctx: &ActionContext, account_id: &str, resource_id: &str, op_type: &str) -> i64 {
+fn count_pending_ops(
+    ctx: &ActionContext,
+    account_id: &str,
+    resource_id: &str,
+    op_type: &str,
+) -> i64 {
     let db = ctx.db.clone();
     let conn = db.conn();
     let conn = conn.lock().expect("lock");
@@ -160,7 +167,10 @@ fn flight_guard_different_accounts_independent() {
     let g1 = ctx.try_acquire_flight("acc1", "thread1");
     let g2 = ctx.try_acquire_flight("acc2", "thread1");
     assert!(g1.is_some());
-    assert!(g2.is_some(), "same thread_id on different accounts should be independent");
+    assert!(
+        g2.is_some(),
+        "same thread_id on different accounts should be independent"
+    );
     drop(g1);
     drop(g2);
 }
@@ -227,7 +237,10 @@ async fn archive_nonexistent_thread_does_not_succeed() {
     let (ctx, _tmp) = make_test_ctx();
     // No account/thread in DB → archive_local finds no INBOX label → NoOp or Failed
     let outcome = super::archive::archive(&ctx, "nonexistent", "t1").await;
-    assert!(!outcome.is_success(), "archiving nonexistent thread should not return Success, got {outcome:?}");
+    assert!(
+        !outcome.is_success(),
+        "archiving nonexistent thread should not return Success, got {outcome:?}"
+    );
 }
 
 #[tokio::test]
@@ -293,11 +306,27 @@ async fn enqueue_replaces_existing_pending_op() {
         reason: ActionError::remote("network error"),
         retryable: true,
     };
-    super::pending::enqueue_if_retryable(&ctx, &outcome, "acc1", "star", "t1", r#"{"starred":true}"#).await;
+    super::pending::enqueue_if_retryable(
+        &ctx,
+        &outcome,
+        "acc1",
+        "star",
+        "t1",
+        r#"{"starred":true}"#,
+    )
+    .await;
     assert_eq!(count_pending_ops(&ctx, "acc1", "t1", "star"), 1);
 
     // Second enqueue with opposite params — should replace, not duplicate
-    super::pending::enqueue_if_retryable(&ctx, &outcome, "acc1", "star", "t1", r#"{"starred":false}"#).await;
+    super::pending::enqueue_if_retryable(
+        &ctx,
+        &outcome,
+        "acc1",
+        "star",
+        "t1",
+        r#"{"starred":false}"#,
+    )
+    .await;
     assert_eq!(count_pending_ops(&ctx, "acc1", "t1", "star"), 1);
 
     // Verify params were updated to the latest
@@ -403,8 +432,16 @@ async fn batch_pin_is_local_only_success() {
     let outcomes = super::batch::batch_execute(
         &ctx,
         vec![
-            ("acc1".to_string(), "t1".to_string(), super::MailOperation::SetPinned { to: true }),
-            ("acc1".to_string(), "t2".to_string(), super::MailOperation::SetPinned { to: true }),
+            (
+                "acc1".to_string(),
+                "t1".to_string(),
+                super::MailOperation::SetPinned { to: true },
+            ),
+            (
+                "acc1".to_string(),
+                "t2".to_string(),
+                super::MailOperation::SetPinned { to: true },
+            ),
         ],
     )
     .await;
@@ -427,9 +464,21 @@ async fn batch_preserves_target_order() {
     let outcomes = super::batch::batch_execute(
         &ctx,
         vec![
-            ("acc1".to_string(), "t1".to_string(), super::MailOperation::SetPinned { to: true }),
-            ("acc2".to_string(), "t2".to_string(), super::MailOperation::SetPinned { to: true }),
-            ("acc1".to_string(), "t3".to_string(), super::MailOperation::SetPinned { to: true }),
+            (
+                "acc1".to_string(),
+                "t1".to_string(),
+                super::MailOperation::SetPinned { to: true },
+            ),
+            (
+                "acc2".to_string(),
+                "t2".to_string(),
+                super::MailOperation::SetPinned { to: true },
+            ),
+            (
+                "acc1".to_string(),
+                "t3".to_string(),
+                super::MailOperation::SetPinned { to: true },
+            ),
         ],
     )
     .await;
@@ -447,8 +496,16 @@ async fn batch_archive_without_accounts_returns_local_only() {
     let outcomes = super::batch::batch_execute(
         &ctx,
         vec![
-            ("nonexistent".to_string(), "t1".to_string(), super::MailOperation::Archive),
-            ("nonexistent".to_string(), "t2".to_string(), super::MailOperation::Archive),
+            (
+                "nonexistent".to_string(),
+                "t1".to_string(),
+                super::MailOperation::Archive,
+            ),
+            (
+                "nonexistent".to_string(),
+                "t2".to_string(),
+                super::MailOperation::Archive,
+            ),
         ],
     )
     .await;
@@ -473,8 +530,16 @@ async fn batch_respects_flight_guard() {
     let outcomes = super::batch::batch_execute(
         &ctx,
         vec![
-            ("acc1".to_string(), "t1".to_string(), super::MailOperation::SetPinned { to: true }),
-            ("acc1".to_string(), "t2".to_string(), super::MailOperation::SetPinned { to: true }),
+            (
+                "acc1".to_string(),
+                "t1".to_string(),
+                super::MailOperation::SetPinned { to: true },
+            ),
+            (
+                "acc1".to_string(),
+                "t2".to_string(),
+                super::MailOperation::SetPinned { to: true },
+            ),
         ],
     )
     .await;
@@ -491,7 +556,9 @@ fn action_error_retryable_classification() {
     assert!(ActionError::remote("err").is_retryable()); // Unknown → retryable
     assert!(ActionError::remote_with_kind(RemoteFailureKind::Transient, "err").is_retryable());
     assert!(!ActionError::remote_with_kind(RemoteFailureKind::Permanent, "err").is_retryable());
-    assert!(!ActionError::remote_with_kind(RemoteFailureKind::NotImplemented, "err").is_retryable());
+    assert!(
+        !ActionError::remote_with_kind(RemoteFailureKind::NotImplemented, "err").is_retryable()
+    );
     assert!(!ActionError::db("err").is_retryable());
     assert!(!ActionError::not_found("err").is_retryable());
 }

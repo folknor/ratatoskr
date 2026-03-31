@@ -1,19 +1,19 @@
 use std::path::Path;
 
 use iced::widget::{
-    button, canvas, column, container, image, row, rule, scrollable, text, text_input, tooltip,
-    Canvas, Space,
+    Canvas, Space, button, canvas, column, container, image, row, rule, scrollable, text,
+    text_input, tooltip,
 };
-use iced::{mouse, Alignment, Color, Element, Length, Rectangle, Renderer, Theme};
+use iced::{Alignment, Color, Element, Length, Rectangle, Renderer, Theme, mouse};
 
 use cmdk::{BindingTable, CommandContext, CommandId, CommandRegistry};
 
+use crate::Message;
 use crate::db::{DateDisplay, ResolvedLabel, Thread, ThreadAttachment, ThreadMessage};
 use crate::font;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
-use crate::Message;
 
 // ── Command button ──────────────────────────────────────
 // Builds a button from a CommandId, pulling label, availability,
@@ -45,11 +45,9 @@ pub fn command_button<'a>(
     };
 
     let label_text = text(label).size(TEXT_SM).style(label_style);
-    let mut btn = button(
-        container(label_text).align_y(Alignment::Center),
-    )
-    .padding(PAD_ICON_BTN)
-    .style(theme::ButtonClass::Action.style());
+    let mut btn = button(container(label_text).align_y(Alignment::Center))
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Action.style());
 
     if available {
         btn = btn.on_press(Message::ExecuteCommand(id));
@@ -83,10 +81,8 @@ pub fn command_icon_button<'a>(
     let icon_style: fn(&Theme) -> text::Style = label_style;
 
     let content = row![
-        container(ico.size(ICON_MD).style(icon_style))
-            .align_y(Alignment::Center),
-        container(text(label).size(TEXT_SM).style(label_style))
-            .align_y(Alignment::Center),
+        container(ico.size(ICON_MD).style(icon_style)).align_y(Alignment::Center),
+        container(text(label).size(TEXT_SM).style(label_style)).align_y(Alignment::Center),
     ]
     .spacing(SPACE_XXS)
     .align_y(Alignment::Center);
@@ -107,10 +103,7 @@ pub fn command_icon_button<'a>(
 // Wraps any content (icon, avatar, dot) in a fixed-size
 // centered container so all list items align their labels.
 
-pub fn leading_slot<'a, M: 'a>(
-    content: impl Into<Element<'a, M>>,
-    size: f32,
-) -> Element<'a, M> {
+pub fn leading_slot<'a, M: 'a>(content: impl Into<Element<'a, M>>, size: f32) -> Element<'a, M> {
     container(content)
         .width(Length::Fixed(size))
         .height(Length::Fixed(size))
@@ -134,7 +127,10 @@ pub fn avatar_circle<'a, M: 'a>(name: &str, size: f32) -> Element<'a, M> {
             text(letter)
                 .size(size * 0.45)
                 .color(theme::ON_AVATAR)
-                .font(iced::Font { weight: iced::font::Weight::Bold, ..font::text() }),
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..font::text()
+                }),
         )
         .center(Length::Fill),
     ]
@@ -144,11 +140,7 @@ pub fn avatar_circle<'a, M: 'a>(name: &str, size: f32) -> Element<'a, M> {
 }
 
 /// Render a sender avatar: BIMI logo if available, initials circle otherwise.
-pub fn sender_avatar<'a, M: 'a>(
-    name: &str,
-    bimi_logo: Option<&Path>,
-    size: f32,
-) -> Element<'a, M> {
+pub fn sender_avatar<'a, M: 'a>(name: &str, bimi_logo: Option<&Path>, size: f32) -> Element<'a, M> {
     match bimi_logo {
         Some(path) => {
             let handle = image::Handle::from_path(path);
@@ -178,19 +170,13 @@ pub fn color_dot<'a, M: 'a>(color: Color) -> Element<'a, M> {
     let dot = Canvas::new(DotPainter { color })
         .width(DOT_SIZE)
         .height(DOT_SIZE);
-    container(dot)
-        .center_y(Length::Shrink)
-        .into()
+    container(dot).center_y(Length::Shrink).into()
 }
 
 /// A color dot at a custom size.
 pub fn color_dot_sized<'a, M: 'a>(color: Color, size: f32) -> Element<'a, M> {
-    let dot = Canvas::new(DotPainter { color })
-        .width(size)
-        .height(size);
-    container(dot)
-        .center_y(Length::Shrink)
-        .into()
+    let dot = Canvas::new(DotPainter { color }).width(size).height(size);
+    container(dot).center_y(Length::Shrink).into()
 }
 
 // ── Badges ──────────────────────────────────────────────
@@ -257,16 +243,12 @@ pub fn nav_button<'a, M: Clone + 'a>(
     let mut content = row![].spacing(SPACE_XS).align_y(Alignment::Center);
 
     if let Some(ico) = ico {
-        content = content.push(
-            container(ico.size(icon_size).style(icon_style))
-                .align_y(Alignment::Center),
-        );
+        content = content
+            .push(container(ico.size(icon_size).style(icon_style)).align_y(Alignment::Center));
     }
 
-    content = content.push(
-        container(text(label).size(text_size).style(label_style))
-            .align_y(Alignment::Center),
-    );
+    content = content
+        .push(container(text(label).size(text_size).style(label_style)).align_y(Alignment::Center));
 
     if let Some(count) = badge
         && count > 0
@@ -334,8 +316,7 @@ pub fn label_nav_item<'a, M: Clone + 'a>(
     button(
         row![
             color_dot(color),
-            container(text(name).size(TEXT_MD).style(lbl_style))
-                .align_y(Alignment::Center),
+            container(text(name).size(TEXT_MD).style(lbl_style)).align_y(Alignment::Center),
         ]
         .spacing(SPACE_XS)
         .align_y(Alignment::Center),
@@ -350,7 +331,9 @@ pub fn label_nav_item<'a, M: Clone + 'a>(
 // ── Dividers & section breaks ───────────────────────────
 
 pub fn divider<'a, M: 'a>() -> Element<'a, M> {
-    rule::horizontal(1).style(theme::RuleClass::Divider.style()).into()
+    rule::horizontal(1)
+        .style(theme::RuleClass::Divider.style())
+        .into()
 }
 
 pub fn section_break<'a, M: 'a>() -> Element<'a, M> {
@@ -378,11 +361,19 @@ pub fn collapsible_section<'a, M: Clone + 'a>(
 
     let header = button(
         row![
-            container(text(title).size(TEXT_XS).style(theme::TextClass::Tertiary.style()))
-                .align_y(Alignment::Center),
+            container(
+                text(title)
+                    .size(TEXT_XS)
+                    .style(theme::TextClass::Tertiary.style())
+            )
+            .align_y(Alignment::Center),
             Space::new().width(Length::Fill),
-            container(chevron.size(ICON_XS).style(theme::TextClass::Tertiary.style()))
-                .align_y(Alignment::Center),
+            container(
+                chevron
+                    .size(ICON_XS)
+                    .style(theme::TextClass::Tertiary.style())
+            )
+            .align_y(Alignment::Center),
         ]
         .align_y(Alignment::Center),
     )
@@ -463,8 +454,12 @@ pub fn dropdown<'a, M: Clone + 'a>(
                 .width(Length::Fill)
                 .align_y(Alignment::Center),
             // chevron_slot
-            container(icon::chevron_down().size(ICON_SM).style(theme::TextClass::Tertiary.style()))
-                .align_y(Alignment::Center),
+            container(
+                icon::chevron_down()
+                    .size(ICON_SM)
+                    .style(theme::TextClass::Tertiary.style())
+            )
+            .align_y(Alignment::Center),
         ]
         .spacing(SPACE_XS)
         .align_y(Alignment::Center),
@@ -502,18 +497,21 @@ pub fn dropdown<'a, M: Clone + 'a>(
             .on_press(entry.on_press)
             .padding(PAD_NAV_ITEM)
             .height(DROPDOWN_ITEM_HEIGHT)
-            .style(theme::ButtonClass::Dropdown { selected: entry.selected }.style())
+            .style(
+                theme::ButtonClass::Dropdown {
+                    selected: entry.selected,
+                }
+                .style(),
+            )
             .width(Length::Fill)
             .into()
         })
         .collect();
 
-    let menu = container(
-        column(menu_items).spacing(SPACE_XXS).width(Length::Fill),
-    )
-    .padding(PAD_DROPDOWN)
-    .style(theme::ContainerClass::SelectMenu.style())
-    .width(Length::Fill);
+    let menu = container(column(menu_items).spacing(SPACE_XXS).width(Length::Fill))
+        .padding(PAD_DROPDOWN)
+        .style(theme::ContainerClass::SelectMenu.style())
+        .width(Length::Fill);
 
     crate::ui::popover::popover(trigger)
         .popup(menu)
@@ -545,8 +543,7 @@ pub fn select<'a, M: Clone + 'a>(
             // right-align spacer
             Space::new().width(Length::Fill),
             // label_slot
-            container(text(selected).size(TEXT_MD).style(text::base))
-                .align_y(Alignment::Center),
+            container(text(selected).size(TEXT_MD).style(text::base)).align_y(Alignment::Center),
             // chevron_slot
             container(icon::chevron_down().size(ICON_MD).style(text::secondary))
                 .align_y(Alignment::Center),
@@ -568,8 +565,7 @@ pub fn select<'a, M: Clone + 'a>(
         .map(|&option| {
             let is_selected = option == selected;
             let mut label_row = row![
-                container(text(option).size(TEXT_MD).style(text::base))
-                    .align_y(Alignment::Center),
+                container(text(option).size(TEXT_MD).style(text::base)).align_y(Alignment::Center),
             ]
             .spacing(SPACE_XS)
             .align_y(Alignment::Center);
@@ -589,17 +585,20 @@ pub fn select<'a, M: Clone + 'a>(
             .on_press(on_select(option.to_string()))
             .padding(PAD_NAV_ITEM)
             .height(DROPDOWN_ITEM_HEIGHT)
-            .style(theme::ButtonClass::Dropdown { selected: is_selected }.style())
+            .style(
+                theme::ButtonClass::Dropdown {
+                    selected: is_selected,
+                }
+                .style(),
+            )
             .width(Length::Fill)
             .into()
         })
         .collect();
 
-    let menu = container(
-        column(menu_items).spacing(SPACE_XXS).width(Length::Fill),
-    )
-    .padding(PAD_DROPDOWN)
-    .style(theme::ContainerClass::SelectMenu.style());
+    let menu = container(column(menu_items).spacing(SPACE_XXS).width(Length::Fill))
+        .padding(PAD_DROPDOWN)
+        .style(theme::ContainerClass::SelectMenu.style());
 
     crate::ui::popover::popover(trigger)
         .popup(menu)
@@ -722,29 +721,13 @@ impl<M> canvas::Program<M> for ThemePreviewPainter {
 fn rounded_rect(builder: &mut canvas::path::Builder, w: f32, h: f32, r: f32) {
     builder.move_to(iced::Point::new(r, 0.0));
     builder.line_to(iced::Point::new(w - r, 0.0));
-    builder.arc_to(
-        iced::Point::new(w, 0.0),
-        iced::Point::new(w, r),
-        r,
-    );
+    builder.arc_to(iced::Point::new(w, 0.0), iced::Point::new(w, r), r);
     builder.line_to(iced::Point::new(w, h - r));
-    builder.arc_to(
-        iced::Point::new(w, h),
-        iced::Point::new(w - r, h),
-        r,
-    );
+    builder.arc_to(iced::Point::new(w, h), iced::Point::new(w - r, h), r);
     builder.line_to(iced::Point::new(r, h));
-    builder.arc_to(
-        iced::Point::new(0.0, h),
-        iced::Point::new(0.0, h - r),
-        r,
-    );
+    builder.arc_to(iced::Point::new(0.0, h), iced::Point::new(0.0, h - r), r);
     builder.line_to(iced::Point::new(0.0, r));
-    builder.arc_to(
-        iced::Point::new(0.0, 0.0),
-        iced::Point::new(r, 0.0),
-        r,
-    );
+    builder.arc_to(iced::Point::new(0.0, 0.0), iced::Point::new(r, 0.0), r);
     builder.close();
 }
 
@@ -761,7 +744,6 @@ pub fn theme_preview<'a, M: Clone + 'a>(
         palette.success,
         palette.warning,
         palette.danger,
-
     ];
 
     let preview_width: f32 = 120.0;
@@ -810,10 +792,7 @@ impl<M> canvas::Program<M> for CirclePainter {
     ) -> Vec<canvas::Geometry<Renderer>> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let radius = self.size / 2.0;
-        let circle = canvas::path::Path::circle(
-            iced::Point::new(radius, radius),
-            radius,
-        );
+        let circle = canvas::path::Path::circle(iced::Point::new(radius, radius), radius);
         frame.fill(&circle, self.color);
         vec![frame.into_geometry()]
     }
@@ -825,9 +804,7 @@ pub fn label_dot<'a, M: 'a>(color: Color) -> Element<'a, M> {
     let dot = Canvas::new(DotPainter { color })
         .width(LABEL_DOT_SIZE)
         .height(LABEL_DOT_SIZE);
-    container(dot)
-        .center_y(Length::Shrink)
-        .into()
+    container(dot).center_y(Length::Shrink).into()
 }
 
 // ── Thread card ─────────────────────────────────────────
@@ -897,7 +874,11 @@ pub fn thread_card<'a, M: Clone + 'a>(
         indicators = indicators.push(label_dot(color));
     }
     if thread.has_attachments {
-        indicators = indicators.push(icon::paperclip().size(ICON_XS).style(theme::TextClass::Tertiary.style()));
+        indicators = indicators.push(
+            icon::paperclip()
+                .size(ICON_XS)
+                .style(theme::TextClass::Tertiary.style()),
+        );
     }
 
     // Line 1: sender + date
@@ -909,7 +890,11 @@ pub fn thread_card<'a, M: Clone + 'a>(
                 .font(sender_font),
         )
         .width(Length::Fill),
-        container(text(date_str).size(TEXT_XS).style(theme::TextClass::Tertiary.style())),
+        container(
+            text(date_str)
+                .size(TEXT_XS)
+                .style(theme::TextClass::Tertiary.style())
+        ),
     ]
     .align_y(Alignment::Center);
 
@@ -956,7 +941,13 @@ pub fn thread_card<'a, M: Clone + 'a>(
     )
     .on_press(on_select(index))
     .padding(0)
-    .style(theme::ButtonClass::ThreadCard { selected, starred: thread.is_starred }.style())
+    .style(
+        theme::ButtonClass::ThreadCard {
+            selected,
+            starred: thread.is_starred,
+        }
+        .style(),
+    )
     .width(Length::Fill)
     .into()
 }
@@ -970,10 +961,8 @@ pub fn action_icon_button<'a, M: Clone + 'a>(
 ) -> Element<'a, M> {
     button(
         row![
-            container(ico.size(ICON_MD).style(text::secondary))
-                .align_y(Alignment::Center),
-            container(text(label).size(TEXT_SM).style(text::secondary))
-                .align_y(Alignment::Center),
+            container(ico.size(ICON_MD).style(text::secondary)).align_y(Alignment::Center),
+            container(text(label).size(TEXT_SM).style(text::secondary)).align_y(Alignment::Center),
         ]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
@@ -1027,7 +1016,9 @@ pub fn message_card<'a, M: 'a>(thread: &'a Thread) -> Element<'a, M> {
             row![
                 text(sender).size(TEXT_LG).style(text::base),
                 Space::new().width(Length::Fill),
-                text(date_str).size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
+                text(date_str)
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Tertiary.style()),
             ],
             text(thread.from_address.as_deref().unwrap_or(""))
                 .size(TEXT_SM)
@@ -1039,9 +1030,11 @@ pub fn message_card<'a, M: 'a>(thread: &'a Thread) -> Element<'a, M> {
     .spacing(SPACE_SM)
     .align_y(Alignment::Start);
 
-    let body_text = thread.snippet.as_deref().unwrap_or("(no preview available)");
-    let body = container(text(body_text).size(TEXT_LG).style(text::secondary))
-        .padding(PAD_BODY);
+    let body_text = thread
+        .snippet
+        .as_deref()
+        .unwrap_or("(no preview available)");
+    let body = container(text(body_text).size(TEXT_LG).style(text::secondary)).padding(PAD_BODY);
 
     container(column![header, body].spacing(SPACE_XS))
         .padding(PAD_CARD)
@@ -1076,10 +1069,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         .as_deref()
         .or(msg.from_address.as_deref())
         .unwrap_or("(unknown)");
-    let sender_email_str = msg
-        .from_address
-        .as_deref()
-        .unwrap_or("");
+    let sender_email_str = msg.from_address.as_deref().unwrap_or("");
 
     let avatar = avatar_circle(sender_name, AVATAR_MESSAGE_CARD);
     let date_str = format_message_date(msg.date, first_message_date, date_display);
@@ -1087,12 +1077,10 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     let recipients = msg.to_addresses.as_deref().unwrap_or("");
 
     // Pop-out icon button
-    let pop_out_btn = button(
-        icon::external_link().size(ICON_SM).style(text::secondary),
-    )
-    .on_press(on_pop_out(index))
-    .padding(PAD_ICON_BTN)
-    .style(theme::ButtonClass::Ghost.style());
+    let pop_out_btn = button(icon::external_link().size(ICON_SM).style(text::secondary))
+        .on_press(on_pop_out(index))
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Ghost.style());
 
     // Sender name — clickable to open contact editing
     let sender_email_owned = msg.from_address.clone().unwrap_or_default();
@@ -1108,12 +1096,10 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     .into();
 
     // Collapse chevron button
-    let collapse_btn = button(
-        icon::chevron_down().size(ICON_SM).style(text::secondary),
-    )
-    .on_press(on_toggle(index))
-    .padding(PAD_ICON_BTN)
-    .style(theme::ButtonClass::Ghost.style());
+    let collapse_btn = button(icon::chevron_down().size(ICON_SM).style(text::secondary))
+        .on_press(on_toggle(index))
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Ghost.style());
 
     // Row 1-2: avatar spanning sender name + sender email
     let avatar_rows = row![
@@ -1151,11 +1137,14 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
                 .style(theme::TextClass::Tertiary.style()),
         )
         .width(AVATAR_MESSAGE_CARD + SPACE_SM) // avatar width + gap
-        .padding(iced::Padding { top: 0.0, right: SPACE_XS, bottom: 0.0, left: 0.0 })
+        .padding(iced::Padding {
+            top: 0.0,
+            right: SPACE_XS,
+            bottom: 0.0,
+            left: 0.0
+        })
         .align_x(Alignment::End),
-        text(recipients)
-            .size(TEXT_SM)
-            .style(text::base),
+        text(recipients).size(TEXT_SM).style(text::base),
     ]
     .spacing(0)
     .align_y(Alignment::Start);
@@ -1178,9 +1167,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         let mut pills_row = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
 
         // Indent to align with text content (avatar width + gap)
-        pills_row = pills_row.push(
-            Space::new().width(AVATAR_MESSAGE_CARD + SPACE_SM),
-        );
+        pills_row = pills_row.push(Space::new().width(AVATAR_MESSAGE_CARD + SPACE_SM));
 
         for label in &tag_labels {
             let bg = theme::hex_to_color(&label.color_bg);
@@ -1207,16 +1194,24 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         // Use pre-parsed HTML cache when available to avoid re-parsing on every view.
         let link_cb = on_link.clone();
         let rendered = if let Some(cached) = cached_html {
-            super::html_render::render_cached_html(cached, msg.body_text.as_deref(), move |url| link_cb(url), inline_images)
+            super::html_render::render_cached_html(
+                cached,
+                msg.body_text.as_deref(),
+                move |url| link_cb(url),
+                inline_images,
+            )
         } else if let Some(html) = msg.body_html.as_deref() {
             let link_cb2 = on_link.clone();
-            super::html_render::render_html(html, msg.body_text.as_deref(), move |url| link_cb2(url), inline_images)
+            super::html_render::render_html(
+                html,
+                msg.body_text.as_deref(),
+                move |url| link_cb2(url),
+                inline_images,
+            )
         } else {
             unreachable!()
         };
-        container(rendered)
-            .padding(PAD_BODY)
-            .into()
+        container(rendered).padding(PAD_BODY).into()
     } else {
         let display = msg
             .body_text
@@ -1243,7 +1238,9 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         row![
             icon::calendar().size(ICON_SM).style(text::secondary),
             text("Event").size(TEXT_SM).style(text::secondary),
-        ].spacing(SPACE_XXS).align_y(Alignment::Center),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
     )
     .on_press(on_create_event(index))
     .padding(PAD_ICON_BTN)
@@ -1282,17 +1279,19 @@ pub fn collapsed_message_row<'a, M: Clone + 'a>(
     let short_date = msg
         .date
         .and_then(|ts| {
-            chrono::DateTime::from_timestamp(ts, 0).map(|dt| {
-                dt.format("%b %d").to_string()
-            })
+            chrono::DateTime::from_timestamp(ts, 0).map(|dt| dt.format("%b %d").to_string())
         })
         .unwrap_or_default();
 
     let snippet = truncate_snippet(msg.snippet.as_deref(), 60);
 
     let content = row![
-        container(icon::chevron_right().size(ICON_XS).style(theme::TextClass::Tertiary.style()))
-            .align_y(Alignment::Center),
+        container(
+            icon::chevron_right()
+                .size(ICON_XS)
+                .style(theme::TextClass::Tertiary.style())
+        )
+        .align_y(Alignment::Center),
         container(
             text(sender)
                 .size(TEXT_SM)
@@ -1300,12 +1299,24 @@ pub fn collapsed_message_row<'a, M: Clone + 'a>(
                 .style(text::base),
         )
         .align_y(Alignment::Center),
-        container(text("\u{00B7}").size(TEXT_SM).style(theme::TextClass::Tertiary.style()))
-            .align_y(Alignment::Center),
-        container(text(short_date).size(TEXT_SM).style(theme::TextClass::Tertiary.style()))
-            .align_y(Alignment::Center),
-        container(text("\u{00B7}").size(TEXT_SM).style(theme::TextClass::Tertiary.style()))
-            .align_y(Alignment::Center),
+        container(
+            text("\u{00B7}")
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style())
+        )
+        .align_y(Alignment::Center),
+        container(
+            text(short_date)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style())
+        )
+        .align_y(Alignment::Center),
+        container(
+            text("\u{00B7}")
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style())
+        )
+        .align_y(Alignment::Center),
         container(
             text(snippet)
                 .size(TEXT_SM)
@@ -1318,26 +1329,26 @@ pub fn collapsed_message_row<'a, M: Clone + 'a>(
     .spacing(SPACE_XS)
     .align_y(Alignment::Center);
 
-    button(
-        container(content).width(Length::Fill),
-    )
-    .on_press(on_toggle(index))
-    .padding(0)
-    .style(theme::ButtonClass::CollapsedMessage.style())
-    .width(Length::Fill)
-    .into()
+    button(container(content).width(Length::Fill))
+        .on_press(on_toggle(index))
+        .padding(0)
+        .style(theme::ButtonClass::CollapsedMessage.style())
+        .width(Length::Fill)
+        .into()
 }
 
 // ── Attachment card ─────────────────────────────────────
 
-pub fn attachment_card<'a, M: 'a>(att: &'a ThreadAttachment, version_count: usize) -> Element<'a, M> {
+pub fn attachment_card<'a, M: 'a>(
+    att: &'a ThreadAttachment,
+    version_count: usize,
+) -> Element<'a, M> {
     let filename = att.filename.as_deref().unwrap_or("(unnamed)");
     let file_icon = file_type_icon(att.mime_type.as_deref());
     let meta = format_attachment_meta(att);
 
     let mut line1 = row![
-        container(file_icon.size(ICON_MD).style(text::secondary))
-            .align_y(Alignment::Center),
+        container(file_icon.size(ICON_MD).style(text::secondary)).align_y(Alignment::Center),
         container(
             text(filename)
                 .size(TEXT_MD)
@@ -1362,15 +1373,15 @@ pub fn attachment_card<'a, M: 'a>(att: &'a ThreadAttachment, version_count: usiz
         );
     }
 
-    let line2 = text(meta).size(TEXT_SM).style(theme::TextClass::Tertiary.style());
+    let line2 = text(meta)
+        .size(TEXT_SM)
+        .style(theme::TextClass::Tertiary.style());
 
-    container(
-        column![line1, line2].spacing(SPACE_XXXS),
-    )
-    .padding(PAD_NAV_ITEM)
-    .style(theme::ContainerClass::Elevated.style())
-    .width(Length::Fill)
-    .into()
+    container(column![line1, line2].spacing(SPACE_XXXS))
+        .padding(PAD_NAV_ITEM)
+        .style(theme::ContainerClass::Elevated.style())
+        .width(Length::Fill)
+        .into()
 }
 
 // ── Helpers ─────────────────────────────────────────────
@@ -1389,8 +1400,12 @@ fn format_message_date(
     first_message_timestamp: Option<i64>,
     display: DateDisplay,
 ) -> String {
-    let Some(ts) = timestamp else { return String::new() };
-    let Some(dt) = chrono::DateTime::from_timestamp(ts, 0) else { return String::new() };
+    let Some(ts) = timestamp else {
+        return String::new();
+    };
+    let Some(dt) = chrono::DateTime::from_timestamp(ts, 0) else {
+        return String::new();
+    };
 
     match display {
         DateDisplay::RelativeOffset => {
@@ -1407,9 +1422,11 @@ fn format_message_date(
                 None => abs.trim().to_string(),
             }
         }
-        DateDisplay::Absolute => {
-            dt.format("%b %d, %Y, %l:%M %p").to_string().trim().to_string()
-        }
+        DateDisplay::Absolute => dt
+            .format("%b %d, %Y, %l:%M %p")
+            .to_string()
+            .trim()
+            .to_string(),
     }
 }
 
@@ -1425,7 +1442,8 @@ fn truncate_snippet(snippet: Option<&str>, max_chars: usize) -> String {
 fn format_attachment_meta(att: &ThreadAttachment) -> String {
     let type_label = mime_to_type_label(att.mime_type.as_deref());
     let size = format_file_size(att.size);
-    let date = att.date
+    let date = att
+        .date
         .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
         .map(|dt| dt.format("%b %d").to_string())
         .unwrap_or_default();
@@ -1458,8 +1476,12 @@ fn format_file_size(size: Option<i64>) -> String {
 pub fn empty_placeholder<'a, M: 'a>(title: &'a str, subtitle: &'a str) -> Element<'a, M> {
     container(
         column![
-            text(title).size(TEXT_TITLE).style(theme::TextClass::Tertiary.style()),
-            text(subtitle).size(TEXT_MD).style(theme::TextClass::Tertiary.style()),
+            text(title)
+                .size(TEXT_TITLE)
+                .style(theme::TextClass::Tertiary.style()),
+            text(subtitle)
+                .size(TEXT_MD)
+                .style(theme::TextClass::Tertiary.style()),
         ]
         .spacing(SPACE_XXS)
         .align_x(Alignment::Center),
@@ -1474,16 +1496,22 @@ pub fn empty_placeholder<'a, M: 'a>(title: &'a str, subtitle: &'a str) -> Elemen
 // ── Section header / stat row ───────────────────────────
 
 pub fn section_header<'a, M: 'a>(label: &'a str) -> Element<'a, M> {
-    container(text(label).size(TEXT_XS).style(theme::TextClass::Tertiary.style()))
-        .padding(PAD_SECTION_HEADER)
-        .width(Length::Fill)
-        .into()
+    container(
+        text(label)
+            .size(TEXT_XS)
+            .style(theme::TextClass::Tertiary.style()),
+    )
+    .padding(PAD_SECTION_HEADER)
+    .width(Length::Fill)
+    .into()
 }
 
 pub fn stat_row<'a, M: 'a>(label: &'a str, value: &'a str) -> Element<'a, M> {
     container(
         row![
-            text(label).size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
+            text(label)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
             Space::new().width(Length::Fill),
             text(value).size(TEXT_SM).style(text::secondary),
         ]
@@ -1513,10 +1541,7 @@ impl<M> canvas::Program<M> for DotPainter {
     ) -> Vec<canvas::Geometry<Renderer>> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let radius = DOT_SIZE / 2.0;
-        let circle = canvas::path::Path::circle(
-            iced::Point::new(radius, radius),
-            radius,
-        );
+        let circle = canvas::path::Path::circle(iced::Point::new(radius, radius), radius);
         frame.fill(&circle, self.color);
         vec![frame.into_geometry()]
     }
@@ -1524,7 +1549,7 @@ impl<M> canvas::Program<M> for DotPainter {
 
 // ── Emoji picker ────────────────────────────────────────
 
-use super::emoji_picker::{EmojiCategory, EmojiEntry, EMOJI_TABLE};
+use super::emoji_picker::{EMOJI_TABLE, EmojiCategory, EmojiEntry};
 
 /// Builds the emoji picker widget. The caller owns visibility state and positioning.
 ///
@@ -1606,32 +1631,26 @@ pub fn emoji_picker<'a, M: 'a + Clone>(
     // Push trailing partial row if any.
     if col_idx > 0 {
         for _ in col_idx..EMOJI_GRID_COLUMNS {
-            current_row = current_row
-                .push(Space::new().width(EMOJI_BUTTON_SIZE).height(EMOJI_BUTTON_SIZE));
+            current_row = current_row.push(
+                Space::new()
+                    .width(EMOJI_BUTTON_SIZE)
+                    .height(EMOJI_BUTTON_SIZE),
+            );
         }
         grid_col = grid_col.push(current_row);
     }
 
-    let grid_scrollable = scrollable(
-        container(grid_col).padding([SPACE_XXS, 0.0]),
-    )
-    .spacing(SCROLLBAR_SPACING)
-    .height(Length::Fill);
+    let grid_scrollable = scrollable(container(grid_col).padding([SPACE_XXS, 0.0]))
+        .spacing(SCROLLBAR_SPACING)
+        .height(Length::Fill);
 
     // Assemble
-    container(
-        column![
-            search,
-            tab_row,
-            grid_scrollable,
-        ]
-        .spacing(SPACE_XS),
-    )
-    .padding(SPACE_XS)
-    .width(EMOJI_PICKER_WIDTH)
-    .height(EMOJI_PICKER_MAX_HEIGHT)
-    .style(theme::ContainerClass::SelectMenu.style())
-    .into()
+    container(column![search, tab_row, grid_scrollable,].spacing(SPACE_XS))
+        .padding(SPACE_XS)
+        .width(EMOJI_PICKER_WIDTH)
+        .height(EMOJI_PICKER_MAX_HEIGHT)
+        .style(theme::ContainerClass::SelectMenu.style())
+        .into()
 }
 
 // ── Color palette grid ──────────────────────────────────
@@ -1660,8 +1679,7 @@ impl<M> canvas::Program<M> for SwatchPainter {
     ) -> Vec<canvas::Geometry<Renderer>> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let radius = bounds.width.min(bounds.height) / 2.0;
-        let center =
-            iced::Point::new(bounds.width / 2.0, bounds.height / 2.0);
+        let center = iced::Point::new(bounds.width / 2.0, bounds.height / 2.0);
 
         let circle = canvas::path::Path::circle(center, radius);
 
@@ -1685,11 +1703,7 @@ impl<M> canvas::Program<M> for SwatchPainter {
 }
 
 /// Draw a small check-mark inside a swatch circle.
-fn swatch_check_mark(
-    frame: &mut canvas::Frame<Renderer>,
-    bounds: Rectangle,
-    radius: f32,
-) {
+fn swatch_check_mark(frame: &mut canvas::Frame<Renderer>, bounds: Rectangle, radius: f32) {
     let check_color = Color::WHITE;
     let check = canvas::path::Path::new(|b| {
         let cx = bounds.width / 2.0;
@@ -1714,10 +1728,7 @@ fn swatch_check_mark(
 /// Splits the body into segments: plain text and highlighted spans.
 /// Highlighted spans get a semi-transparent accent background via
 /// a container with a background color.
-fn highlighted_text_body<'a, M: 'a>(
-    body: &'a str,
-    terms: &'a [String],
-) -> Element<'a, M> {
+fn highlighted_text_body<'a, M: 'a>(body: &'a str, terms: &'a [String]) -> Element<'a, M> {
     // Build a rich text by splitting on term matches (case-insensitive)
     let lower_body = body.to_lowercase();
     let mut segments: Vec<(usize, usize, bool)> = Vec::new(); // (start, end, is_match)
@@ -1800,23 +1811,21 @@ fn highlighted_text_body<'a, M: 'a>(
             if is_match {
                 has_highlight = true;
                 line_row = line_row.push(
-                    container(
-                        text(segment_text).size(TEXT_LG).style(text::secondary),
-                    )
-                    .style(theme::ContainerClass::Badge.style()),
+                    container(text(segment_text).size(TEXT_LG).style(text::secondary))
+                        .style(theme::ContainerClass::Badge.style()),
                 );
             } else {
-                line_row = line_row.push(
-                    text(segment_text).size(TEXT_LG).style(text::secondary),
-                );
+                line_row = line_row.push(text(segment_text).size(TEXT_LG).style(text::secondary));
             }
         }
 
         // If no segments matched this line, render plain
-        if !has_highlight && segments.iter().all(|&(s, e, _)| e <= line_start || s >= line_end) {
-            line_row = line_row.push(
-                text(line).size(TEXT_LG).style(text::secondary),
-            );
+        if !has_highlight
+            && segments
+                .iter()
+                .all(|&(s, e, _)| e <= line_start || s >= line_end)
+        {
+            line_row = line_row.push(text(line).size(TEXT_LG).style(text::secondary));
         }
 
         col = col.push(line_row);

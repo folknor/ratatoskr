@@ -55,8 +55,7 @@ mod tests {
     #[test]
     fn default_is_expanded() {
         let conn = setup_db();
-        let collapsed =
-            get_attachments_collapsed(&conn, "acc-1", "thread-1").expect("query");
+        let collapsed = get_attachments_collapsed(&conn, "acc-1", "thread-1").expect("query");
         assert!(!collapsed);
     }
 
@@ -64,8 +63,7 @@ mod tests {
     fn set_and_get() {
         let conn = setup_db();
         set_attachments_collapsed(&conn, "acc-1", "thread-1", true).expect("set");
-        let collapsed =
-            get_attachments_collapsed(&conn, "acc-1", "thread-1").expect("get");
+        let collapsed = get_attachments_collapsed(&conn, "acc-1", "thread-1").expect("get");
         assert!(collapsed);
     }
 
@@ -74,8 +72,7 @@ mod tests {
         let conn = setup_db();
         set_attachments_collapsed(&conn, "acc-1", "thread-1", true).expect("set true");
         set_attachments_collapsed(&conn, "acc-1", "thread-1", false).expect("set false");
-        let collapsed =
-            get_attachments_collapsed(&conn, "acc-1", "thread-1").expect("get");
+        let collapsed = get_attachments_collapsed(&conn, "acc-1", "thread-1").expect("get");
         assert!(!collapsed);
     }
 }

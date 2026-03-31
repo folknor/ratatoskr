@@ -41,13 +41,13 @@ pub async fn designate_chat_contact(
     // Refuse to designate one of the user's own emails as a chat contact —
     // threads between two of the user's own accounts are not 1:1 chats.
     if user_emails.iter().any(|ue| ue == &email) {
-        return Err(
-            "Cannot designate your own email address as a chat contact".to_string(),
-        );
+        return Err("Cannot designate your own email address as a chat contact".to_string());
     }
 
     db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| format!("begin: {e}"))?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| format!("begin: {e}"))?;
 
         // Insert the chat contact
         tx.execute(
@@ -93,14 +93,13 @@ pub async fn designate_chat_contact(
 /// Remove chat contact designation.
 ///
 /// Clears `is_chat_thread` on all affected threads and deletes the contact row.
-pub async fn undesignate_chat_contact(
-    db: &DbState,
-    email: &str,
-) -> Result<(), String> {
+pub async fn undesignate_chat_contact(db: &DbState, email: &str) -> Result<(), String> {
     let email = email.to_lowercase();
 
     db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| format!("begin: {e}"))?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| format!("begin: {e}"))?;
 
         // Clear is_chat_thread on all threads involving this contact
         tx.execute(
@@ -128,9 +127,7 @@ pub async fn undesignate_chat_contact(
 }
 
 /// List all chat contacts with sidebar summary data.
-pub async fn get_chat_contacts(
-    db: &DbState,
-) -> Result<Vec<ChatContactSummary>, String> {
+pub async fn get_chat_contacts(db: &DbState) -> Result<Vec<ChatContactSummary>, String> {
     db.with_conn(|conn| {
         let mut stmt = conn
             .prepare(
@@ -181,12 +178,10 @@ pub async fn get_chat_timeline(
         // Single query: join messages against chat threads for this contact,
         // ORDER BY date DESC LIMIT N to get the most recent N messages,
         // then reverse in Rust for chronological order.
-        let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(
-            (before_ts, before_id),
-        ) = before
-        {
-            (
-                "SELECT m.id, m.account_id, m.thread_id, m.from_address, m.from_name, \
+        let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
+            if let Some((before_ts, before_id)) = before {
+                (
+                    "SELECT m.id, m.account_id, m.thread_id, m.from_address, m.from_name, \
                         m.date, m.is_read, m.subject \
                  FROM messages m \
                  INNER JOIN threads t ON t.id = m.thread_id AND t.account_id = m.account_id \
@@ -196,17 +191,17 @@ pub async fn get_chat_timeline(
                    AND (m.date < ?2 OR (m.date = ?2 AND m.id < ?3)) \
                  ORDER BY m.date DESC, m.id DESC \
                  LIMIT ?4"
-                    .to_string(),
-                vec![
-                    Box::new(email.clone()),
-                    Box::new(before_ts),
-                    Box::new(before_id),
-                    Box::new(limit_i64),
-                ],
-            )
-        } else {
-            (
-                "SELECT m.id, m.account_id, m.thread_id, m.from_address, m.from_name, \
+                        .to_string(),
+                    vec![
+                        Box::new(email.clone()),
+                        Box::new(before_ts),
+                        Box::new(before_id),
+                        Box::new(limit_i64),
+                    ],
+                )
+            } else {
+                (
+                    "SELECT m.id, m.account_id, m.thread_id, m.from_address, m.from_name, \
                         m.date, m.is_read, m.subject \
                  FROM messages m \
                  INNER JOIN threads t ON t.id = m.thread_id AND t.account_id = m.account_id \
@@ -215,10 +210,10 @@ pub async fn get_chat_timeline(
                  WHERE t.is_chat_thread = 1 AND tp.email = ?1 \
                  ORDER BY m.date DESC, m.id DESC \
                  LIMIT ?2"
-                    .to_string(),
-                vec![Box::new(email.clone()), Box::new(limit_i64)],
-            )
-        };
+                        .to_string(),
+                    vec![Box::new(email.clone()), Box::new(limit_i64)],
+                )
+            };
 
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(AsRef::as_ref).collect();
@@ -299,8 +294,7 @@ fn set_chat_thread_flags(
     for ue in user_emails {
         params.push(Box::new(ue.clone()));
     }
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-        params.iter().map(AsRef::as_ref).collect();
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(AsRef::as_ref).collect();
 
     tx.execute(&sql, param_refs.as_slice())
         .map_err(|e| format!("set chat flags: {e}"))?;
@@ -309,10 +303,7 @@ fn set_chat_thread_flags(
 }
 
 /// Update the denormalized summary columns on `chat_contacts`.
-fn update_chat_summary(
-    tx: &rusqlite::Transaction,
-    email: &str,
-) -> Result<(), String> {
+fn update_chat_summary(tx: &rusqlite::Transaction, email: &str) -> Result<(), String> {
     // Latest message (from either direction)
     let latest: Option<(Option<String>, i64)> = tx
         .query_row(
@@ -365,7 +356,9 @@ fn chat_message_from_row(
     row: &rusqlite::Row<'_>,
     user_emails: &[String],
 ) -> rusqlite::Result<ChatMessage> {
-    let from_address: String = row.get::<_, Option<String>>("from_address")?.unwrap_or_default();
+    let from_address: String = row
+        .get::<_, Option<String>>("from_address")?
+        .unwrap_or_default();
     let is_from_user = user_emails
         .iter()
         .any(|ue| ue.eq_ignore_ascii_case(&from_address));

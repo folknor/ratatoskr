@@ -48,8 +48,7 @@ pub struct MergeResult {
 /// different IDs. The primary contact is determined by source priority:
 /// `user` > `google`/`graph`/`carddav` > `seen`.
 pub async fn find_duplicates(db: &DbState) -> Result<Vec<DuplicatePair>, String> {
-    db.with_conn(move |conn| find_duplicates_inner(conn))
-        .await
+    db.with_conn(move |conn| find_duplicates_inner(conn)).await
 }
 
 /// Auto-merge duplicate contacts, preferring synced data over local data
@@ -96,11 +95,7 @@ pub async fn auto_merge_duplicates(db: &DbState) -> Result<MergeResult, String> 
 ///
 /// The `keep_id` contact is preserved; the `merge_id` contact's non-null
 /// fields fill in any blanks, then the `merge_id` contact is deleted.
-pub async fn merge_contacts(
-    db: &DbState,
-    keep_id: String,
-    merge_id: String,
-) -> Result<(), String> {
+pub async fn merge_contacts(db: &DbState, keep_id: String, merge_id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         let tx = conn
             .unchecked_transaction()
@@ -149,22 +144,24 @@ fn find_duplicates_inner(conn: &Connection) -> Result<Vec<DuplicatePair>, String
 
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(rusqlite::params![crate::constants::DEFAULT_QUERY_LIMIT], |row| {
-            Ok(DuplicatePair {
-                email: row.get("email")?,
-                primary_id: row.get("id")?,
-                secondary_id: format!(
-                    "seen-{}-{}",
-                    row.get::<_, String>("seen_account_id")
-                        .unwrap_or_default(),
-                    row.get::<_, String>("email").unwrap_or_default()
-                ),
-                primary_name: row.get("display_name")?,
-                secondary_name: row.get("seen_name")?,
-                primary_source: row.get("source")?,
-                secondary_source: "seen".to_string(),
-            })
-        })
+        .query_map(
+            rusqlite::params![crate::constants::DEFAULT_QUERY_LIMIT],
+            |row| {
+                Ok(DuplicatePair {
+                    email: row.get("email")?,
+                    primary_id: row.get("id")?,
+                    secondary_id: format!(
+                        "seen-{}-{}",
+                        row.get::<_, String>("seen_account_id").unwrap_or_default(),
+                        row.get::<_, String>("email").unwrap_or_default()
+                    ),
+                    primary_name: row.get("display_name")?,
+                    secondary_name: row.get("seen_name")?,
+                    primary_source: row.get("source")?,
+                    secondary_source: "seen".to_string(),
+                })
+            },
+        )
         .map_err(|e| e.to_string())?;
 
     for row in rows {
@@ -185,9 +182,7 @@ fn merge_pair(conn: &Connection, pair: &DuplicatePair) -> Result<bool, String> {
 
     // The pair is contacts vs seen_addresses, so we update the contact's
     // display name if it's null and the seen address has one
-    if pair.primary_name.is_none()
-        && pair.secondary_name.is_some()
-    {
+    if pair.primary_name.is_none() && pair.secondary_name.is_some() {
         conn.execute(
             "UPDATE contacts SET display_name = ?1, updated_at = unixepoch() \
              WHERE id = ?2 AND display_name IS NULL",
@@ -199,11 +194,7 @@ fn merge_pair(conn: &Connection, pair: &DuplicatePair) -> Result<bool, String> {
     Ok(true)
 }
 
-fn merge_by_id(
-    conn: &Connection,
-    keep_id: &str,
-    merge_id: &str,
-) -> Result<(), String> {
+fn merge_by_id(conn: &Connection, keep_id: &str, merge_id: &str) -> Result<(), String> {
     // Get the merge source contact's fields
     let merge_row: Option<(
         Option<String>,

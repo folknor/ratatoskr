@@ -1,18 +1,20 @@
 use std::collections::HashMap;
 
-use iced::widget::{button, column, container, row, scrollable, text, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding, Task};
 
 use cmdk::{BindingTable, CommandContext, CommandId, CommandRegistry};
 
+use crate::Message;
 use crate::component::Component;
-use crate::db::{AppThreadDetail, DateDisplay, ResolvedLabel, Thread, ThreadAttachment, ThreadMessage};
+use crate::db::{
+    AppThreadDetail, DateDisplay, ResolvedLabel, Thread, ThreadAttachment, ThreadMessage,
+};
 use crate::font;
 use crate::icon;
 use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets;
-use crate::Message;
 
 // ── Messages & Events ──────────────────────────────────
 
@@ -45,19 +47,34 @@ pub enum ReadingPaneMessage {
 /// Events the reading pane emits upward to the App.
 #[derive(Debug, Clone)]
 pub enum ReadingPaneEvent {
-    AttachmentCollapseChanged { thread_key: String, collapsed: bool },
+    AttachmentCollapseChanged {
+        thread_key: String,
+        collapsed: bool,
+    },
     /// User clicked the pop-out button on a message; open it in a new window.
-    OpenMessagePopOut { message_index: usize },
+    OpenMessagePopOut {
+        message_index: usize,
+    },
     /// User clicked Reply on a specific message.
-    ReplyToMessage { message_index: usize },
+    ReplyToMessage {
+        message_index: usize,
+    },
     /// User clicked Reply All on a specific message.
-    ReplyAllToMessage { message_index: usize },
+    ReplyAllToMessage {
+        message_index: usize,
+    },
     /// User clicked Forward on a specific message.
-    ForwardMessage { message_index: usize },
+    ForwardMessage {
+        message_index: usize,
+    },
     /// User clicked a sender/recipient to edit their contact info.
-    EditContact { email: String },
+    EditContact {
+        email: String,
+    },
     /// User clicked 📅 on a message to create a calendar event.
-    CreateEventFromEmail { message_index: usize },
+    CreateEventFromEmail {
+        message_index: usize,
+    },
     /// User toggled the star on the thread.
     ToggleStar,
 }
@@ -137,7 +154,10 @@ impl ReadingPane {
         self.attachments_collapsed = thread
             .map(|t| {
                 let key = format!("{}:{}", t.account_id, t.id);
-                self.attachment_collapse_cache.get(&key).copied().unwrap_or(false)
+                self.attachment_collapse_cache
+                    .get(&key)
+                    .copied()
+                    .unwrap_or(false)
             })
             .unwrap_or(false);
     }
@@ -243,7 +263,9 @@ impl ReadingPane {
     }
 
     fn thread_key(&self) -> Option<String> {
-        self.current_thread.as_ref().map(|t| format!("{}:{}", t.account_id, t.id))
+        self.current_thread
+            .as_ref()
+            .map(|t| format!("{}:{}", t.account_id, t.id))
     }
 
     /// Update the star state for a thread if it's currently displayed.
@@ -258,9 +280,7 @@ impl ReadingPane {
     /// Get the message ID of the currently focused message (for CommandContext).
     pub fn focused_message_id(&self) -> Option<String> {
         let idx = self.focused_message?;
-        self.thread_messages
-            .get(idx)
-            .map(|m| m.id.clone())
+        self.thread_messages.get(idx).map(|m| m.id.clone())
     }
 }
 
@@ -306,27 +326,33 @@ impl Component for ReadingPane {
                 };
                 (Task::none(), Some(event))
             }
-            ReadingPaneMessage::Reply(index) => {
-                (Task::none(), Some(ReadingPaneEvent::ReplyToMessage {
+            ReadingPaneMessage::Reply(index) => (
+                Task::none(),
+                Some(ReadingPaneEvent::ReplyToMessage {
                     message_index: index,
-                }))
-            }
-            ReadingPaneMessage::ReplyAll(index) => {
-                (Task::none(), Some(ReadingPaneEvent::ReplyAllToMessage {
+                }),
+            ),
+            ReadingPaneMessage::ReplyAll(index) => (
+                Task::none(),
+                Some(ReadingPaneEvent::ReplyAllToMessage {
                     message_index: index,
-                }))
-            }
-            ReadingPaneMessage::Forward(index) => {
-                (Task::none(), Some(ReadingPaneEvent::ForwardMessage {
+                }),
+            ),
+            ReadingPaneMessage::Forward(index) => (
+                Task::none(),
+                Some(ReadingPaneEvent::ForwardMessage {
                     message_index: index,
-                }))
-            }
+                }),
+            ),
             ReadingPaneMessage::EditContact(email) => {
                 (Task::none(), Some(ReadingPaneEvent::EditContact { email }))
             }
-            ReadingPaneMessage::CreateEventFromEmail(index) => {
-                (Task::none(), Some(ReadingPaneEvent::CreateEventFromEmail { message_index: index }))
-            }
+            ReadingPaneMessage::CreateEventFromEmail(index) => (
+                Task::none(),
+                Some(ReadingPaneEvent::CreateEventFromEmail {
+                    message_index: index,
+                }),
+            ),
             ReadingPaneMessage::NextMessage => {
                 let len = self.thread_messages.len();
                 if len == 0 {
@@ -358,9 +384,7 @@ impl Component for ReadingPane {
                 }
                 (Task::none(), None)
             }
-            ReadingPaneMessage::ToggleStar => {
-                (Task::none(), Some(ReadingPaneEvent::ToggleStar))
-            }
+            ReadingPaneMessage::ToggleStar => (Task::none(), Some(ReadingPaneEvent::ToggleStar)),
             ReadingPaneMessage::LinkClicked(url) => {
                 open_url_in_browser(&url);
                 (Task::none(), None)
@@ -413,8 +437,14 @@ fn thread_view_with_commands<'a>(
 
     // Thread header (subject, expand/collapse) — uses ReadingPaneMessage internally
     col = col.push(
-        thread_header(thread_ref, &pane.message_expanded, &pane.thread_messages, &pane.thread_labels, ctx.allows_set_keywords())
-            .map(Message::ReadingPane),
+        thread_header(
+            thread_ref,
+            &pane.message_expanded,
+            &pane.thread_messages,
+            &pane.thread_labels,
+            ctx.allows_set_keywords(),
+        )
+        .map(Message::ReadingPane),
     );
 
     // Command-backed toolbar
@@ -422,8 +452,12 @@ fn thread_view_with_commands<'a>(
 
     if !pane.thread_attachments.is_empty() {
         col = col.push(
-            attachment_group(&pane.thread_attachments, &pane.deduped_attachments, pane.attachments_collapsed)
-                .map(Message::ReadingPane),
+            attachment_group(
+                &pane.thread_attachments,
+                &pane.deduped_attachments,
+                pane.attachments_collapsed,
+            )
+            .map(Message::ReadingPane),
         );
     }
 
@@ -507,10 +541,20 @@ fn thread_view<'a>(
     let mut col = column![].spacing(0).width(Length::Fill);
 
     // No command context → allow star by default (non-command path)
-    col = col.push(thread_header(thread_ref, &pane.message_expanded, &pane.thread_messages, &pane.thread_labels, true));
+    col = col.push(thread_header(
+        thread_ref,
+        &pane.message_expanded,
+        &pane.thread_messages,
+        &pane.thread_labels,
+        true,
+    ));
 
     if !pane.thread_attachments.is_empty() {
-        col = col.push(attachment_group(&pane.thread_attachments, &pane.deduped_attachments, pane.attachments_collapsed));
+        col = col.push(attachment_group(
+            &pane.thread_attachments,
+            &pane.deduped_attachments,
+            pane.attachments_collapsed,
+        ));
     }
 
     col = col.push(message_list(pane));
@@ -573,18 +617,21 @@ fn thread_header<'a>(
         let bg = theme::hex_to_color(&label.color_bg);
         let fg = theme::hex_to_color(&label.color_fg);
         info_row = info_row.push(
-            container(
-                text(&label.name).size(TEXT_XS).color(fg),
-            )
-            .padding(Padding { top: 2.0, right: 6.0, bottom: 2.0, left: 6.0 })
-            .style(move |_theme: &iced::Theme| container::Style {
-                background: Some(bg.into()),
-                border: iced::Border {
-                    radius: RADIUS_LG.into(),
+            container(text(&label.name).size(TEXT_XS).color(fg))
+                .padding(Padding {
+                    top: 2.0,
+                    right: 6.0,
+                    bottom: 2.0,
+                    left: 6.0,
+                })
+                .style(move |_theme: &iced::Theme| container::Style {
+                    background: Some(bg.into()),
+                    border: iced::Border {
+                        radius: RADIUS_LG.into(),
+                        ..Default::default()
+                    },
                     ..Default::default()
-                },
-                ..Default::default()
-            }),
+                }),
         );
     }
 
@@ -594,8 +641,7 @@ fn thread_header<'a>(
     container(
         column![
             row![
-                container(text(subject).size(TEXT_HEADING).style(text::base))
-                    .width(Length::Fill),
+                container(text(subject).size(TEXT_HEADING).style(text::base)).width(Length::Fill),
                 star_btn,
             ]
             .align_y(Alignment::Center),
@@ -674,7 +720,6 @@ fn attachment_group<'a>(
     deduped_indices: &'a [(usize, usize)],
     collapsed: bool,
 ) -> Element<'a, ReadingPaneMessage> {
-
     let chevron = if collapsed {
         icon::chevron_right()
     } else {
@@ -683,8 +728,12 @@ fn attachment_group<'a>(
 
     let header = button(
         row![
-            container(chevron.size(ICON_XS).style(theme::TextClass::Tertiary.style()))
-                .align_y(Alignment::Center),
+            container(
+                chevron
+                    .size(ICON_XS)
+                    .style(theme::TextClass::Tertiary.style())
+            )
+            .align_y(Alignment::Center),
             Space::new().width(SPACE_XXS),
             container(
                 text(format!("Attachments ({})", deduped_indices.len()))
@@ -730,9 +779,8 @@ fn attachment_group<'a>(
 /// Open a URL in the system default browser.
 fn open_url_in_browser(url: &str) {
     // Only allow safe URL schemes from untrusted email content
-    let allowed = url.starts_with("http://")
-        || url.starts_with("https://")
-        || url.starts_with("mailto:");
+    let allowed =
+        url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:");
     if !allowed {
         log::warn!("Blocked URL with disallowed scheme: {url}");
         return;
@@ -740,15 +788,11 @@ fn open_url_in_browser(url: &str) {
 
     #[cfg(target_os = "linux")]
     {
-        let _ = std::process::Command::new("xdg-open")
-            .arg(url)
-            .spawn();
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
     }
     #[cfg(target_os = "macos")]
     {
-        let _ = std::process::Command::new("open")
-            .arg(url)
-            .spawn();
+        let _ = std::process::Command::new("open").arg(url).spawn();
     }
     #[cfg(target_os = "windows")]
     {

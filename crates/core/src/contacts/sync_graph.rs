@@ -26,10 +26,7 @@ use crate::db::DbState;
 ///
 /// This is called after `graph_contacts_initial_sync()` or
 /// `graph_contacts_delta_sync()` from the Graph crate.
-pub async fn enrich_graph_contacts(
-    db: &DbState,
-    account_id: &str,
-) -> Result<usize, String> {
+pub async fn enrich_graph_contacts(db: &DbState, account_id: &str) -> Result<usize, String> {
     let aid = account_id.to_string();
     db.with_conn(move |conn| {
         let changed = conn

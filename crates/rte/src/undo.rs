@@ -58,11 +58,12 @@ impl UndoStack {
         // Try to merge with the last group if allowed.
         if !self.force_new_group
             && let Some(last) = self.undo.last_mut()
-                && can_merge(last, &ops, &cursor_before) {
-                    last.ops.extend(ops);
-                    last.cursor_after = cursor_after;
-                    return;
-                }
+            && can_merge(last, &ops, &cursor_before)
+        {
+            last.ops.extend(ops);
+            last.cursor_after = cursor_after;
+            return;
+        }
 
         self.force_new_group = false;
 
@@ -347,11 +348,7 @@ mod tests {
     fn insert_then_delete_do_not_merge() {
         let mut stack = UndoStack::default();
         stack.push(vec![insert_op(0, 0, "a")], caret(0, 0), caret(0, 1));
-        stack.push(
-            vec![delete_op(0, 0, 0, 1)],
-            caret(0, 1),
-            caret(0, 0),
-        );
+        stack.push(vec![delete_op(0, 0, 0, 1)], caret(0, 1), caret(0, 0));
 
         assert_eq!(stack.undo_len(), 2);
     }
@@ -399,11 +396,7 @@ mod tests {
         for i in 0..5 {
             // Use break_group to ensure each is its own group.
             stack.break_group();
-            stack.push(
-                vec![insert_op(0, i, "x")],
-                caret(0, i),
-                caret(0, i + 1),
-            );
+            stack.push(vec![insert_op(0, i, "x")], caret(0, i), caret(0, i + 1));
         }
 
         assert_eq!(stack.undo_len(), 3);
@@ -546,11 +539,7 @@ mod tests {
         use crate::operations::PosMapEntry;
 
         let mut stack = UndoStack::default();
-        stack.push(
-            vec![insert_op(0, 0, "a")],
-            caret(0, 8),
-            caret(0, 10),
-        );
+        stack.push(vec![insert_op(0, 0, "a")], caret(0, 8), caret(0, 10));
 
         // Simulate an insert of 3 chars at offset 2 in block 0.
         let pos_map = PosMap {
@@ -576,16 +565,8 @@ mod tests {
     #[test]
     fn multi_char_insert_merges_correctly() {
         let mut stack = UndoStack::default();
-        stack.push(
-            vec![insert_op(0, 0, "hello")],
-            caret(0, 0),
-            caret(0, 5),
-        );
-        stack.push(
-            vec![insert_op(0, 5, " world")],
-            caret(0, 5),
-            caret(0, 11),
-        );
+        stack.push(vec![insert_op(0, 0, "hello")], caret(0, 0), caret(0, 5));
+        stack.push(vec![insert_op(0, 5, " world")], caret(0, 5), caret(0, 11));
 
         assert_eq!(stack.undo_len(), 1);
         let group = stack.undo().expect("undo");

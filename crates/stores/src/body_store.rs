@@ -327,7 +327,9 @@ impl BodyStoreState {
     pub async fn stats(&self) -> Result<BodyStoreStats, String> {
         self.with_conn(|conn| {
             let count: i64 = conn
-                .query_row("SELECT COUNT(*) AS cnt FROM bodies", [], |row| row.get("cnt"))
+                .query_row("SELECT COUNT(*) AS cnt FROM bodies", [], |row| {
+                    row.get("cnt")
+                })
                 .map_err(|e| format!("count: {e}"))?;
 
             let total_html_bytes: i64 = conn

@@ -14,9 +14,7 @@ use iced::time::{Duration, Instant};
 use iced::touch;
 use iced::widget::toggler::{self, Status, Style};
 use iced::window;
-use iced::{
-    border, Border, Element, Event, Length, Pixels, Rectangle, Size, Theme,
-};
+use iced::{Border, Element, Event, Length, Pixels, Rectangle, Size, Theme, border};
 
 const ANIMATION_DURATION: Duration = Duration::from_millis(150);
 
@@ -57,10 +55,7 @@ impl<'a, Message> AnimatedToggler<'a, Message> {
         self
     }
 
-    pub fn style(
-        mut self,
-        style: impl Fn(&Theme, Status) -> Style + 'a,
-    ) -> Self {
+    pub fn style(mut self, style: impl Fn(&Theme, Status) -> Style + 'a) -> Self {
         self.style_fn = Box::new(style);
         self
     }
@@ -143,10 +138,7 @@ impl<Message> Widget<Message, Theme, iced::Renderer> for AnimatedToggler<'_, Mes
             state.last_status = Some(current_status);
         } else {
             let current_status = self.current_status(cursor, layout);
-            if state
-                .last_status
-                .is_some_and(|s| s != current_status)
-            {
+            if state.last_status.is_some_and(|s| s != current_status) {
                 shell.request_redraw();
             }
         }
@@ -186,11 +178,9 @@ impl<Message> Widget<Message, Theme, iced::Renderer> for AnimatedToggler<'_, Mes
         let now = Instant::now();
 
         // Get styles for both states so we can interpolate the background color.
-        let base_status = state
-            .last_status
-            .unwrap_or(Status::Disabled {
-                is_toggled: self.is_toggled,
-            });
+        let base_status = state.last_status.unwrap_or(Status::Disabled {
+            is_toggled: self.is_toggled,
+        });
         let style_off = (self.style_fn)(theme, with_toggled(base_status, false));
         let style_on = (self.style_fn)(theme, with_toggled(base_status, true));
         // Use the target style for non-interpolated properties.
@@ -289,11 +279,7 @@ fn with_toggled(status: Status, is_toggled: bool) -> Status {
 
 /// Linearly interpolate between two `Background` values.
 /// Only handles solid colors; gradients fall back to `to`.
-fn lerp_background(
-    from: iced::Background,
-    to: iced::Background,
-    t: f32,
-) -> iced::Background {
+fn lerp_background(from: iced::Background, to: iced::Background, t: f32) -> iced::Background {
     match (from, to) {
         (iced::Background::Color(a), iced::Background::Color(b)) => {
             iced::Background::Color(iced::Color {

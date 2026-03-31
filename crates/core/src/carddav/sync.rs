@@ -103,10 +103,7 @@ pub async fn sync_carddav_contacts(
         match parse::parse_vcard(vcard_data) {
             Ok(parsed) => {
                 if parsed.email.is_some() {
-                    let etag = etag_map
-                        .get(uri.as_str())
-                        .unwrap_or(&"")
-                        .to_string();
+                    let etag = etag_map.get(uri.as_str()).unwrap_or(&"").to_string();
                     parsed_contacts.push((uri.clone(), etag, parsed));
                 } else {
                     skipped_no_email += 1;
@@ -173,16 +170,10 @@ fn persist_carddav_contact(
     etag: &str,
     parsed: &ParsedVCard,
 ) -> Result<(), String> {
-    let email = parsed
-        .email
-        .as_ref()
-        .ok_or("contact has no email")?;
+    let email = parsed.email.as_ref().ok_or("contact has no email")?;
 
     let local_id = format!("carddav-{account_id}-{email}");
-    let display_name = parsed
-        .display_name
-        .as_deref()
-        .unwrap_or(email.as_str());
+    let display_name = parsed.display_name.as_deref().unwrap_or(email.as_str());
     let avatar_url = parsed.photo_url.as_deref();
 
     // Upsert into contacts table — don't overwrite user-edited or higher-priority sources
@@ -337,9 +328,7 @@ async fn load_stored_etags(
     let aid = account_id.to_string();
     db.with_conn(move |conn| {
         let mut stmt = conn
-            .prepare(
-                "SELECT uri, etag FROM carddav_contact_map WHERE account_id = ?1",
-            )
+            .prepare("SELECT uri, etag FROM carddav_contact_map WHERE account_id = ?1")
             .map_err(|e| format!("prepare etag query: {e}"))?;
 
         let rows = stmt

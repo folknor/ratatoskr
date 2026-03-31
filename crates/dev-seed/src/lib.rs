@@ -24,7 +24,9 @@ pub fn next_uuid(rng: &mut impl Rng) -> String {
         u16::from_be_bytes([bytes[4], bytes[5]]),
         u16::from_be_bytes([bytes[6], bytes[7]]),
         u16::from_be_bytes([bytes[8], bytes[9]]),
-        u64::from_be_bytes([0, 0, bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]])
+        u64::from_be_bytes([
+            0, 0, bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+        ])
     )
 }
 
@@ -41,8 +43,7 @@ pub fn next_message_id(rng: &mut impl Rng) -> String {
 /// Creates `ratatoskr.db` (with schema via migrations) and `bodies.db`
 /// (via the body store API), then populates both with synthetic data.
 pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(app_data_dir)
-        .map_err(|e| format!("create data dir: {e}"))?;
+    std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create data dir: {e}"))?;
 
     let start = std::time::Instant::now();
     let mut rng = SmallRng::seed_from_u64(config.seed);
@@ -51,8 +52,7 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
     let db_path = app_data_dir.join("ratatoskr.db");
     log::info!("Dev-seed: creating {}", db_path.display());
 
-    let conn = rusqlite::Connection::open(&db_path)
-        .map_err(|e| format!("open db: {e}"))?;
+    let conn = rusqlite::Connection::open(&db_path).map_err(|e| format!("open db: {e}"))?;
 
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
@@ -71,8 +71,14 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
 
     let accs = accounts::seed_accounts(&conn, &mut rng, config.accounts)?;
     let pools = people::generate_pools(&mut rng);
-    let (pending_bodies, stats) =
-        threads::generate_threads(&conn, &mut rng, &accs, &pools, &config.locale, config.threads)?;
+    let (pending_bodies, stats) = threads::generate_threads(
+        &conn,
+        &mut rng,
+        &accs,
+        &pools,
+        &config.locale,
+        config.threads,
+    )?;
     contacts::seed_vips(&conn, &mut rng, &pools.combined, &accs)?;
 
     conn.execute_batch("COMMIT")
@@ -83,7 +89,9 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
         .map_err(|e| format!("init body store: {e}"))?;
 
     let bs_conn = body_store.conn();
-    let bs_conn = bs_conn.lock().map_err(|e| format!("body store lock: {e}"))?;
+    let bs_conn = bs_conn
+        .lock()
+        .map_err(|e| format!("body store lock: {e}"))?;
     bs_conn
         .execute_batch("BEGIN")
         .map_err(|e| format!("body begin: {e}"))?;

@@ -5,8 +5,8 @@ use rusqlite::Connection;
 
 use crate::accounts::Account;
 use crate::contacts;
-use crate::people::{Person, PeoplePools, I18N_LOCALES};
-use crate::templates::{self, Category, CATEGORIES, CATEGORY_WEIGHTS};
+use crate::people::{I18N_LOCALES, PeoplePools, Person};
+use crate::templates::{self, CATEGORIES, CATEGORY_WEIGHTS, Category};
 
 /// Fixed reference timestamp for deterministic output.
 /// 2026-03-15 12:00:00 UTC — arbitrary but stable across runs.
@@ -19,20 +19,76 @@ struct AttachmentInfo {
 }
 
 static ATTACHMENT_POOL: &[AttachmentInfo] = &[
-    AttachmentInfo { filename: "report.pdf", mime_type: "application/pdf", base_size: 245_000 },
-    AttachmentInfo { filename: "screenshot.png", mime_type: "image/png", base_size: 890_000 },
-    AttachmentInfo { filename: "proposal.docx", mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base_size: 156_000 },
-    AttachmentInfo { filename: "data.xlsx", mime_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base_size: 78_000 },
-    AttachmentInfo { filename: "design-v3.fig", mime_type: "application/octet-stream", base_size: 2_400_000 },
-    AttachmentInfo { filename: "meeting-notes.md", mime_type: "text/markdown", base_size: 4_200 },
-    AttachmentInfo { filename: "invoice-2024.pdf", mime_type: "application/pdf", base_size: 67_000 },
-    AttachmentInfo { filename: "photo.jpg", mime_type: "image/jpeg", base_size: 3_100_000 },
-    AttachmentInfo { filename: "logo.svg", mime_type: "image/svg+xml", base_size: 12_000 },
-    AttachmentInfo { filename: "archive.zip", mime_type: "application/zip", base_size: 15_600_000 },
-    AttachmentInfo { filename: "presentation.pptx", mime_type: "application/vnd.openxmlformats-officedocument.presentationml.presentation", base_size: 4_500_000 },
-    AttachmentInfo { filename: "contract-final.pdf", mime_type: "application/pdf", base_size: 189_000 },
-    AttachmentInfo { filename: "wireframes.pdf", mime_type: "application/pdf", base_size: 1_200_000 },
-    AttachmentInfo { filename: "budget.csv", mime_type: "text/csv", base_size: 23_000 },
+    AttachmentInfo {
+        filename: "report.pdf",
+        mime_type: "application/pdf",
+        base_size: 245_000,
+    },
+    AttachmentInfo {
+        filename: "screenshot.png",
+        mime_type: "image/png",
+        base_size: 890_000,
+    },
+    AttachmentInfo {
+        filename: "proposal.docx",
+        mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        base_size: 156_000,
+    },
+    AttachmentInfo {
+        filename: "data.xlsx",
+        mime_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        base_size: 78_000,
+    },
+    AttachmentInfo {
+        filename: "design-v3.fig",
+        mime_type: "application/octet-stream",
+        base_size: 2_400_000,
+    },
+    AttachmentInfo {
+        filename: "meeting-notes.md",
+        mime_type: "text/markdown",
+        base_size: 4_200,
+    },
+    AttachmentInfo {
+        filename: "invoice-2024.pdf",
+        mime_type: "application/pdf",
+        base_size: 67_000,
+    },
+    AttachmentInfo {
+        filename: "photo.jpg",
+        mime_type: "image/jpeg",
+        base_size: 3_100_000,
+    },
+    AttachmentInfo {
+        filename: "logo.svg",
+        mime_type: "image/svg+xml",
+        base_size: 12_000,
+    },
+    AttachmentInfo {
+        filename: "archive.zip",
+        mime_type: "application/zip",
+        base_size: 15_600_000,
+    },
+    AttachmentInfo {
+        filename: "presentation.pptx",
+        mime_type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        base_size: 4_500_000,
+    },
+    AttachmentInfo {
+        filename: "contract-final.pdf",
+        mime_type: "application/pdf",
+        base_size: 189_000,
+    },
+    AttachmentInfo {
+        filename: "wireframes.pdf",
+        mime_type: "application/pdf",
+        base_size: 1_200_000,
+    },
+    AttachmentInfo {
+        filename: "budget.csv",
+        mime_type: "text/csv",
+        base_size: 23_000,
+    },
 ];
 
 /// Weighted random selection.
@@ -71,7 +127,11 @@ pub fn generate_threads(
     num_threads: u32,
 ) -> Result<(Vec<PendingBody>, SeedStats), String> {
     let mut bodies = Vec::new();
-    let mut stats = SeedStats { threads: 0, messages: 0, attachments: 0 };
+    let mut stats = SeedStats {
+        threads: 0,
+        messages: 0,
+        attachments: 0,
+    };
     let mut imap_uid_counter: HashMap<(String, String), u32> = HashMap::new();
     let now = FIXED_NOW;
 
@@ -131,12 +191,9 @@ pub fn generate_threads(
 
         // Participants
         let max_participants = thread_people.len().min(5);
-        let num_participants: usize = weighted_choice(
-            rng,
-            &[1usize, 2, 3, 4, 5],
-            &[0.1, 0.4, 0.25, 0.15, 0.1],
-        )
-        .min(max_participants);
+        let num_participants: usize =
+            weighted_choice(rng, &[1usize, 2, 3, 4, 5], &[0.1, 0.4, 0.25, 0.15, 0.1])
+                .min(max_participants);
 
         // Sample participants (Fisher-Yates partial shuffle on indices)
         let mut indices: Vec<usize> = (0..thread_people.len()).collect();
@@ -177,10 +234,18 @@ pub fn generate_threads(
              is_important, is_pinned, is_snoozed, snooze_until, is_muted)
              VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, 0, ?8, ?9, ?10, ?11, ?12)",
             rusqlite::params![
-                thread_id, acc.id, subject, thread_start,
-                num_msgs, is_read as i32, is_starred as i32,
-                is_important as i32, is_pinned as i32, is_snoozed as i32,
-                snooze_until, is_muted as i32,
+                thread_id,
+                acc.id,
+                subject,
+                thread_start,
+                num_msgs,
+                is_read as i32,
+                is_starred as i32,
+                is_important as i32,
+                is_pinned as i32,
+                is_snoozed as i32,
+                snooze_until,
+                is_muted as i32,
             ],
         )
         .map_err(|e| format!("insert thread: {e}"))?;
@@ -195,7 +260,11 @@ pub fn generate_threads(
             let msg_id = crate::next_uuid(rng);
             let msg_id_header = crate::next_message_id(rng);
 
-            let in_reply_to = if mi == 0 { None } else { msg_refs.last().cloned() };
+            let in_reply_to = if mi == 0 {
+                None
+            } else {
+                msg_refs.last().cloned()
+            };
             let references = if mi == 0 {
                 None
             } else {
@@ -255,7 +324,10 @@ pub fn generate_threads(
             // Attachments (~20% of work/personal/commerce)
             let mut msg_attachment_ids: Vec<(String, &'static str, &'static str, i64)> = Vec::new();
             if rng.random::<f64>() < 0.20
-                && matches!(cat, Category::Work | Category::Personal | Category::Commerce)
+                && matches!(
+                    cat,
+                    Category::Work | Category::Personal | Category::Commerce
+                )
             {
                 let num_att: u32 = weighted_choice(rng, &[1, 2, 3], &[0.6, 0.3, 0.1]);
                 for _ in 0..num_att {
@@ -284,7 +356,9 @@ pub fn generate_threads(
                 rng.fill(&mut bytes);
                 let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
                 (
-                    Some(format!("<https://newsletter.example.com/unsubscribe/{hex}>")),
+                    Some(format!(
+                        "<https://newsletter.example.com/unsubscribe/{hex}>"
+                    )),
                     Some("List-Unsubscribe=One-Click".to_string()),
                 )
             } else {
@@ -303,12 +377,26 @@ pub fn generate_threads(
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
                          ?11, ?12, 1, ?13, ?10, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
                 rusqlite::params![
-                    msg_id, acc.id, thread_id, sender_email, sender_name,
-                    to_addr, cc, msg_subject, snippet, msg_date,
+                    msg_id,
+                    acc.id,
+                    thread_id,
+                    sender_email,
+                    sender_name,
+                    to_addr,
+                    cc,
+                    msg_subject,
+                    snippet,
+                    msg_date,
                     msg_is_read as i32,
                     (is_starred && mi == 0) as i32,
-                    raw_size, msg_id_header, references, in_reply_to,
-                    imap_uid, folder_name, list_unsub, list_unsub_post,
+                    raw_size,
+                    msg_id_header,
+                    references,
+                    in_reply_to,
+                    imap_uid,
+                    folder_name,
+                    list_unsub,
+                    list_unsub_post,
                 ],
             )
             .map_err(|e| format!("insert message: {e}"))?;
@@ -353,8 +441,11 @@ pub fn generate_threads(
             "UPDATE threads SET snippet = ?1, last_message_at = ?2, has_attachments = ?3
              WHERE account_id = ?4 AND id = ?5",
             rusqlite::params![
-                latest_snippet, latest_date, has_attachments as i32,
-                acc.id, thread_id,
+                latest_snippet,
+                latest_date,
+                has_attachments as i32,
+                acc.id,
+                thread_id,
             ],
         )
         .map_err(|e| format!("update thread: {e}"))?;

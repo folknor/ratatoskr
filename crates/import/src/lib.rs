@@ -11,6 +11,8 @@ mod types;
 mod vcard_parser;
 
 pub use csv_parser::parse_csv;
-pub use mapping::{auto_detect_mappings, ColumnMapping};
-pub use types::{ContactField, ImportError, ImportFormat, ImportPreview, ImportSource, ImportedContact};
+pub use mapping::{ColumnMapping, auto_detect_mappings};
+pub use types::{
+    ContactField, ImportError, ImportFormat, ImportPreview, ImportSource, ImportedContact,
+};
 pub use vcard_parser::parse_vcf;

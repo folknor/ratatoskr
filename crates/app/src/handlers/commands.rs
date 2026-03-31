@@ -9,7 +9,6 @@ use cmdk::{CommandArgs, CommandId, KeyBinding, OptionItem};
 use rtsk::actions::{ActionOutcome, FolderId, MailOperation, TagId};
 use rtsk::scope::ViewScope;
 
-
 impl App {
     /// Save keybinding overrides to disk. Call this after any mutation
     /// to `self.binding_table` overrides (`set_override`, `unbind`,
@@ -120,29 +119,36 @@ impl App {
         }
 
         // ── Resolve → Plan → Dispatch ───────────────────────────
-        use crate::action_resolve::{
-            self as ar, OptimisticMutation, UiContext,
-        };
+        use crate::action_resolve::{self as ar, OptimisticMutation, UiContext};
         let ui_ctx = UiContext {
             selected_label: self.sidebar.selected_label.clone(),
         };
         let outcome = ar::resolve_intent(intent, &ui_ctx);
 
-        let Some(plan) = ar::build_execution_plan(
-            outcome,
-            &selected_threads,
-            &mut self.thread_list,
-        ) else {
+        let Some(plan) =
+            ar::build_execution_plan(outcome, &selected_threads, &mut self.thread_list)
+        else {
             // NoOp (Unsubscribe)
-            self.status_bar.show_confirmation("Unsubscribed".to_string());
+            self.status_bar
+                .show_confirmation("Unsubscribed".to_string());
             return Task::none();
         };
 
         // Star optimistic UI → sync reading pane
-        if plan.optimistic.iter().any(|m| matches!(m, OptimisticMutation::SetStarred { .. })) {
+        if plan
+            .optimistic
+            .iter()
+            .any(|m| matches!(m, OptimisticMutation::SetStarred { .. }))
+        {
             for m in &plan.optimistic {
-                if let OptimisticMutation::SetStarred { account_id, thread_id, previous } = m {
-                    self.reading_pane.update_star(account_id, thread_id, !previous);
+                if let OptimisticMutation::SetStarred {
+                    account_id,
+                    thread_id,
+                    previous,
+                } = m
+                {
+                    self.reading_pane
+                        .update_star(account_id, thread_id, !previous);
                 }
             }
         }
@@ -171,13 +177,8 @@ impl App {
         let operations = plan.operations.clone();
 
         Task::perform(
-            async move {
-                rtsk::actions::batch_execute(&ctx, operations).await
-            },
-            move |outcomes| Message::ActionCompleted {
-                plan,
-                outcomes,
-            },
+            async move { rtsk::actions::batch_execute(&ctx, operations).await },
+            move |outcomes| Message::ActionCompleted { plan, outcomes },
         )
     }
 
@@ -186,32 +187,61 @@ impl App {
         use crate::action_resolve::OptimisticMutation;
         for m in mutations {
             match m {
-                OptimisticMutation::SetStarred { account_id, thread_id, previous } => {
-                    if let Some(t) = self.thread_list.threads.iter_mut().find(
-                        |t| t.account_id == *account_id && t.id == *thread_id,
-                    ) {
+                OptimisticMutation::SetStarred {
+                    account_id,
+                    thread_id,
+                    previous,
+                } => {
+                    if let Some(t) = self
+                        .thread_list
+                        .threads
+                        .iter_mut()
+                        .find(|t| t.account_id == *account_id && t.id == *thread_id)
+                    {
                         t.is_starred = *previous;
                     }
-                    self.reading_pane.update_star(account_id, thread_id, *previous);
+                    self.reading_pane
+                        .update_star(account_id, thread_id, *previous);
                 }
-                OptimisticMutation::SetRead { account_id, thread_id, previous } => {
-                    if let Some(t) = self.thread_list.threads.iter_mut().find(
-                        |t| t.account_id == *account_id && t.id == *thread_id,
-                    ) {
+                OptimisticMutation::SetRead {
+                    account_id,
+                    thread_id,
+                    previous,
+                } => {
+                    if let Some(t) = self
+                        .thread_list
+                        .threads
+                        .iter_mut()
+                        .find(|t| t.account_id == *account_id && t.id == *thread_id)
+                    {
                         t.is_read = *previous;
                     }
                 }
-                OptimisticMutation::SetPinned { account_id, thread_id, previous } => {
-                    if let Some(t) = self.thread_list.threads.iter_mut().find(
-                        |t| t.account_id == *account_id && t.id == *thread_id,
-                    ) {
+                OptimisticMutation::SetPinned {
+                    account_id,
+                    thread_id,
+                    previous,
+                } => {
+                    if let Some(t) = self
+                        .thread_list
+                        .threads
+                        .iter_mut()
+                        .find(|t| t.account_id == *account_id && t.id == *thread_id)
+                    {
                         t.is_pinned = *previous;
                     }
                 }
-                OptimisticMutation::SetMuted { account_id, thread_id, previous } => {
-                    if let Some(t) = self.thread_list.threads.iter_mut().find(
-                        |t| t.account_id == *account_id && t.id == *thread_id,
-                    ) {
+                OptimisticMutation::SetMuted {
+                    account_id,
+                    thread_id,
+                    previous,
+                } => {
+                    if let Some(t) = self
+                        .thread_list
+                        .threads
+                        .iter_mut()
+                        .find(|t| t.account_id == *account_id && t.id == *thread_id)
+                    {
                         t.is_muted = *previous;
                     }
                 }
@@ -226,9 +256,7 @@ impl App {
         plan: &crate::action_resolve::ActionExecutionPlan,
         outcomes: &[ActionOutcome],
     ) -> Task<Message> {
-        use crate::action_resolve::{
-            self as ar, ViewEffect, PostSuccessEffect, UndoBehavior,
-        };
+        use crate::action_resolve::{self as ar, PostSuccessEffect, UndoBehavior, ViewEffect};
 
         let behavior = &plan.behavior;
 
@@ -250,9 +278,11 @@ impl App {
                     _ => None,
                 })
                 .collect();
-            self.status_bar.show_confirmation(
-                format!("\u{26A0} {} failed: {}", behavior.success_label, errors.join("; ")),
-            );
+            self.status_bar.show_confirmation(format!(
+                "\u{26A0} {} failed: {}",
+                behavior.success_label,
+                errors.join("; ")
+            ));
             // Rollback all optimistic toggle mutations on total failure
             if !plan.optimistic.is_empty() {
                 self.rollback_optimistic(&plan.optimistic);
@@ -268,7 +298,9 @@ impl App {
 
         // Rollback failed toggle optimistic mutations
         if any_failed && !plan.optimistic.is_empty() {
-            let failed_mutations: Vec<_> = plan.optimistic.iter()
+            let failed_mutations: Vec<_> = plan
+                .optimistic
+                .iter()
                 .zip(outcomes.iter())
                 .filter(|(_, o)| o.is_failed())
                 .map(|(m, _)| m.clone())
@@ -292,9 +324,8 @@ impl App {
         // Post-success effects
         match behavior.view_effect {
             ViewEffect::LeavesCurrentView if !all_failed => {
-                return self.handle_thread_list(
-                    crate::ui::thread_list::ThreadListMessage::AutoAdvance,
-                );
+                return self
+                    .handle_thread_list(crate::ui::thread_list::ThreadListMessage::AutoAdvance);
             }
             _ => {}
         }
@@ -329,16 +360,13 @@ impl App {
                 let mut all_outcomes = Vec::new();
                 // C8: payload execution order is stored entry order
                 for payload in &entry.payloads {
-                    all_outcomes.extend(
-                        execute_undo_compensation(&ctx, payload).await,
-                    );
+                    all_outcomes.extend(execute_undo_compensation(&ctx, payload).await);
                 }
                 (desc, all_outcomes)
             },
             |(desc, outcomes)| Message::UndoCompleted { desc, outcomes },
         )
     }
-
 }
 
 // ── Undo compensation ───────────────────────────────────────────────
@@ -353,23 +381,38 @@ async fn execute_undo_compensation(
     use rtsk::db::pending_ops::db_pending_ops_cancel_for_resource;
 
     match payload {
-        MailUndoPayload::Archive { account_id, thread_ids } => {
+        MailUndoPayload::Archive {
+            account_id,
+            thread_ids,
+        } => {
             let mut outcomes = Vec::with_capacity(thread_ids.len());
             let inbox = TagId::from("INBOX");
             for tid in thread_ids {
                 let _ = db_pending_ops_cancel_for_resource(
-                    &ctx.db, account_id.clone(), tid.clone(), "archive".to_string(),
-                ).await;
+                    &ctx.db,
+                    account_id.clone(),
+                    tid.clone(),
+                    "archive".to_string(),
+                )
+                .await;
                 outcomes.push(actions::add_label(ctx, account_id, tid, &inbox).await);
             }
             outcomes
         }
-        MailUndoPayload::Trash { account_id, thread_ids, source } => {
+        MailUndoPayload::Trash {
+            account_id,
+            thread_ids,
+            source,
+        } => {
             let mut outcomes = Vec::with_capacity(thread_ids.len());
             for tid in thread_ids {
                 let _ = db_pending_ops_cancel_for_resource(
-                    &ctx.db, account_id.clone(), tid.clone(), "trash".to_string(),
-                ).await;
+                    &ctx.db,
+                    account_id.clone(),
+                    tid.clone(),
+                    "trash".to_string(),
+                )
+                .await;
                 let outcome = if let Some(folder) = source {
                     actions::move_to_folder(ctx, account_id, tid, folder, None).await
                 } else {
@@ -380,83 +423,140 @@ async fn execute_undo_compensation(
             }
             outcomes
         }
-        MailUndoPayload::MoveToFolder { account_id, thread_ids, source } => {
+        MailUndoPayload::MoveToFolder {
+            account_id,
+            thread_ids,
+            source,
+        } => {
             let mut outcomes = Vec::with_capacity(thread_ids.len());
             for tid in thread_ids {
                 let _ = db_pending_ops_cancel_for_resource(
-                    &ctx.db, account_id.clone(), tid.clone(), "moveToFolder".to_string(),
-                ).await;
-                outcomes.push(
-                    actions::move_to_folder(ctx, account_id, tid, source, None).await,
-                );
+                    &ctx.db,
+                    account_id.clone(),
+                    tid.clone(),
+                    "moveToFolder".to_string(),
+                )
+                .await;
+                outcomes.push(actions::move_to_folder(ctx, account_id, tid, source, None).await);
             }
             outcomes
         }
-        MailUndoPayload::SetSpam { account_id, thread_ids, was_spam } => {
+        MailUndoPayload::SetSpam {
+            account_id,
+            thread_ids,
+            was_spam,
+        } => {
             let mut outcomes = Vec::with_capacity(thread_ids.len());
             for tid in thread_ids {
                 let _ = db_pending_ops_cancel_for_resource(
-                    &ctx.db, account_id.clone(), tid.clone(), "spam".to_string(),
-                ).await;
+                    &ctx.db,
+                    account_id.clone(),
+                    tid.clone(),
+                    "spam".to_string(),
+                )
+                .await;
                 outcomes.push(actions::spam(ctx, account_id, tid, *was_spam).await);
             }
             outcomes
         }
-        MailUndoPayload::SetRead { account_id, thread_ids, was_read } => {
+        MailUndoPayload::SetRead {
+            account_id,
+            thread_ids,
+            was_read,
+        } => {
             let mut outcomes = Vec::with_capacity(thread_ids.len());
             for tid in thread_ids {
                 let _ = db_pending_ops_cancel_for_resource(
-                    &ctx.db, account_id.clone(), tid.clone(), "markRead".to_string(),
-                ).await;
+                    &ctx.db,
+                    account_id.clone(),
+                    tid.clone(),
+                    "markRead".to_string(),
+                )
+                .await;
                 outcomes.push(actions::mark_read(ctx, account_id, tid, *was_read).await);
             }
             outcomes
         }
-        MailUndoPayload::SetStarred { account_id, thread_ids, was_starred } => {
+        MailUndoPayload::SetStarred {
+            account_id,
+            thread_ids,
+            was_starred,
+        } => {
             let mut outcomes = Vec::with_capacity(thread_ids.len());
             for tid in thread_ids {
                 let _ = db_pending_ops_cancel_for_resource(
-                    &ctx.db, account_id.clone(), tid.clone(), "star".to_string(),
-                ).await;
+                    &ctx.db,
+                    account_id.clone(),
+                    tid.clone(),
+                    "star".to_string(),
+                )
+                .await;
                 outcomes.push(actions::star(ctx, account_id, tid, *was_starred).await);
             }
             outcomes
         }
-        MailUndoPayload::SetPinned { account_id, thread_ids, was_pinned } => {
+        MailUndoPayload::SetPinned {
+            account_id,
+            thread_ids,
+            was_pinned,
+        } => {
             let mut outcomes = Vec::with_capacity(thread_ids.len());
             for tid in thread_ids {
                 outcomes.push(actions::pin(ctx, account_id, tid, *was_pinned).await);
             }
             outcomes
         }
-        MailUndoPayload::SetMuted { account_id, thread_ids, was_muted } => {
+        MailUndoPayload::SetMuted {
+            account_id,
+            thread_ids,
+            was_muted,
+        } => {
             let mut outcomes = Vec::with_capacity(thread_ids.len());
             for tid in thread_ids {
                 outcomes.push(actions::mute(ctx, account_id, tid, *was_muted).await);
             }
             outcomes
         }
-        MailUndoPayload::AddLabel { account_id, thread_ids, label_id } => {
+        MailUndoPayload::AddLabel {
+            account_id,
+            thread_ids,
+            label_id,
+        } => {
             let mut outcomes = Vec::with_capacity(thread_ids.len());
             for tid in thread_ids {
                 let _ = db_pending_ops_cancel_for_resource(
-                    &ctx.db, account_id.clone(), tid.clone(), "addLabel".to_string(),
-                ).await;
+                    &ctx.db,
+                    account_id.clone(),
+                    tid.clone(),
+                    "addLabel".to_string(),
+                )
+                .await;
                 outcomes.push(actions::remove_label(ctx, account_id, tid, label_id).await);
             }
             outcomes
         }
-        MailUndoPayload::RemoveLabel { account_id, thread_ids, label_id } => {
+        MailUndoPayload::RemoveLabel {
+            account_id,
+            thread_ids,
+            label_id,
+        } => {
             let mut outcomes = Vec::with_capacity(thread_ids.len());
             for tid in thread_ids {
                 let _ = db_pending_ops_cancel_for_resource(
-                    &ctx.db, account_id.clone(), tid.clone(), "removeLabel".to_string(),
-                ).await;
+                    &ctx.db,
+                    account_id.clone(),
+                    tid.clone(),
+                    "removeLabel".to_string(),
+                )
+                .await;
                 outcomes.push(actions::add_label(ctx, account_id, tid, label_id).await);
             }
             outcomes
         }
-        MailUndoPayload::Snooze { account_id, thread_ids } => {
+        MailUndoPayload::Snooze {
+            account_id,
+            thread_ids,
+        } => {
             let mut outcomes = Vec::with_capacity(thread_ids.len());
             for tid in thread_ids {
                 outcomes.push(actions::unsnooze(ctx, account_id, tid).await);
@@ -479,21 +579,14 @@ impl App {
         Task::perform(
             async move {
                 let now = chrono::Utc::now().timestamp();
-                let due = rtsk::db::queries_extra::db_get_snoozed_threads_due(
-                    &ctx.db, now,
-                )
-                .await?;
+                let due = rtsk::db::queries_extra::db_get_snoozed_threads_due(&ctx.db, now).await?;
                 if due.is_empty() {
                     return Ok(0);
                 }
                 let mut success_count = 0usize;
                 for thread in &due {
-                    let outcome = rtsk::actions::unsnooze(
-                        &ctx,
-                        &thread.account_id,
-                        &thread.id,
-                    )
-                    .await;
+                    let outcome =
+                        rtsk::actions::unsnooze(&ctx, &thread.account_id, &thread.id).await;
                     match outcome {
                         rtsk::actions::ActionOutcome::Success => {
                             success_count += 1;
@@ -549,12 +642,11 @@ pub(crate) fn build_command_args(command_id: CommandId, item: &OptionItem) -> Op
         CommandId::EmailRemoveLabel => Some(CommandArgs::RemoveLabel {
             label_id: item.id.clone(),
         }),
-        CommandId::EmailSnooze => {
-            item.id
-                .parse::<i64>()
-                .ok()
-                .map(|ts| CommandArgs::Snooze { until: ts })
-        }
+        CommandId::EmailSnooze => item
+            .id
+            .parse::<i64>()
+            .ok()
+            .map(|ts| CommandArgs::Snooze { until: ts }),
         CommandId::NavigateToLabel => {
             let (account_id, label_id) = split_cross_account_id(&item.id)?;
             Some(CommandArgs::NavigateToLabel {
@@ -589,4 +681,3 @@ fn split_cross_account_id(encoded: &str) -> Option<(String, String)> {
     }
     Some((account_id, label_id))
 }
-

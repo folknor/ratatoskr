@@ -31,8 +31,7 @@ struct ImageInfo {
 
 /// Compress a PDF document: image recompression, stream dedup, structural cleanup.
 pub fn compress_pdf(input: &[u8], config: &Config) -> Result<CompressResult, SqueezeError> {
-    let mut doc =
-        Document::load_mem(input).map_err(|e| SqueezeError::PdfParse(e.to_string()))?;
+    let mut doc = Document::load_mem(input).map_err(|e| SqueezeError::PdfParse(e.to_string()))?;
 
     // Phase 1: Recompress image XObjects.
     recompress_images(&mut doc, config);
@@ -259,18 +258,14 @@ fn try_recompress_flat(doc: &mut Document, id: ObjectId, info: &ImageInfo, confi
     }
 
     let img: Option<DynamicImage> = match info.components {
-        3 => image::RgbImage::from_raw(
-            info.width,
-            info.height,
-            raw_pixels[..expected_len].to_vec(),
-        )
-        .map(DynamicImage::ImageRgb8),
-        1 => image::GrayImage::from_raw(
-            info.width,
-            info.height,
-            raw_pixels[..expected_len].to_vec(),
-        )
-        .map(DynamicImage::ImageLuma8),
+        3 => {
+            image::RgbImage::from_raw(info.width, info.height, raw_pixels[..expected_len].to_vec())
+                .map(DynamicImage::ImageRgb8)
+        }
+        1 => {
+            image::GrayImage::from_raw(info.width, info.height, raw_pixels[..expected_len].to_vec())
+                .map(DynamicImage::ImageLuma8)
+        }
         _ => None,
     };
 
@@ -321,9 +316,9 @@ fn has_predictor(dict: &lopdf::Dictionary) -> bool {
     match params {
         Object::Dictionary(d) => check(d),
         // Filter arrays can have per-filter DecodeParms.
-        Object::Array(arr) => arr.iter().any(|item| {
-            matches!(item, Object::Dictionary(d) if check(d))
-        }),
+        Object::Array(arr) => arr
+            .iter()
+            .any(|item| matches!(item, Object::Dictionary(d) if check(d))),
         _ => false,
     }
 }
@@ -358,16 +353,15 @@ fn deduplicate_streams(doc: &mut Document) {
         if let Some(&canonical_id) = hash_map.get(&h) {
             if canonical_id != *id {
                 // Verify actual content equality (hash collision guard).
-                let content_matches = doc
-                    .objects
-                    .get(&canonical_id)
-                    .is_some_and(|canonical_obj| {
-                        if let (Object::Stream(a), Object::Stream(b)) = (canonical_obj, &Object::Stream(stream.clone())) {
-                            a.content == b.content
-                        } else {
-                            false
-                        }
-                    });
+                let content_matches = doc.objects.get(&canonical_id).is_some_and(|canonical_obj| {
+                    if let (Object::Stream(a), Object::Stream(b)) =
+                        (canonical_obj, &Object::Stream(stream.clone()))
+                    {
+                        a.content == b.content
+                    } else {
+                        false
+                    }
+                });
                 if content_matches {
                     duplicates.push((*id, canonical_id));
                 }
@@ -426,7 +420,11 @@ fn replace_references(obj: &mut Object, map: &HashMap<ObjectId, ObjectId>, depth
     }
 }
 
-fn replace_refs_in_dict(dict: &mut lopdf::Dictionary, map: &HashMap<ObjectId, ObjectId>, depth: usize) {
+fn replace_refs_in_dict(
+    dict: &mut lopdf::Dictionary,
+    map: &HashMap<ObjectId, ObjectId>,
+    depth: usize,
+) {
     for (_, value) in dict.iter_mut() {
         replace_references(value, map, depth);
     }

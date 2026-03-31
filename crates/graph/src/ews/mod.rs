@@ -307,7 +307,10 @@ mod tests {
         assert_eq!(result.items[0].item_id, "AAMkItem1=");
         assert_eq!(result.items[0].change_key.as_deref(), Some("CK1"));
         assert_eq!(result.items[0].subject.as_deref(), Some("Q1 Results"));
-        assert_eq!(result.items[0].sender_email.as_deref(), Some("jane@contoso.com"));
+        assert_eq!(
+            result.items[0].sender_email.as_deref(),
+            Some("jane@contoso.com")
+        );
         assert_eq!(result.items[0].sender_name.as_deref(), Some("Jane Doe"));
         assert!(result.items[0].is_read);
 
@@ -603,7 +606,10 @@ mod tests {
         assert!(folder.replica_list.is_some());
 
         // Verify the replica list decodes back to our GUID
-        let replica_bytes = folder.replica_list.as_ref().expect("should have replica list");
+        let replica_bytes = folder
+            .replica_list
+            .as_ref()
+            .expect("should have replica list");
         let b64_round = BASE64.encode(replica_bytes);
         let guids = decode_replica_list(&b64_round).expect("decode should succeed");
         assert_eq!(guids.len(), 1);

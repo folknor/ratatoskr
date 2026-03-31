@@ -14,10 +14,10 @@
 pub mod widget;
 
 use iced_core::widget::Id;
-use iced_core::{renderer, Element, Point, Rectangle};
+use iced_core::{Element, Point, Rectangle, renderer};
+use iced_runtime::Task;
 use iced_runtime::futures::MaybeSend;
 use iced_runtime::task::widget as operate;
-use iced_runtime::Task;
 use widget::droppable::*;
 use widget::operation::drop;
 

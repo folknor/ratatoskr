@@ -1,9 +1,9 @@
 use std::borrow::Cow;
 use std::sync::OnceLock;
 
+use iced::Pixels;
 use iced::font::{Style, Weight};
 use iced::widget::text::LineHeight;
-use iced::Pixels;
 
 // ── Runtime font family ─────────────────────────────────
 
@@ -94,9 +94,7 @@ pub fn line_height() -> LineHeight {
 
 /// Resolve the absolute line height in pixels for a given font size.
 pub fn resolve_line_height(font_size: f32) -> f32 {
-    line_height()
-        .to_absolute(Pixels(font_size))
-        .0
+    line_height().to_absolute(Pixels(font_size)).0
 }
 
 // ── Font loading ─────────────────────────────────────────

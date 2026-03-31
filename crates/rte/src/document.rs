@@ -245,11 +245,7 @@ impl Block {
     }
 
     /// Create a list item with a specific indent level.
-    pub fn list_item_with_indent(
-        text: impl Into<String>,
-        ordered: bool,
-        indent_level: u8,
-    ) -> Self {
+    pub fn list_item_with_indent(text: impl Into<String>, ordered: bool, indent_level: u8) -> Self {
         Self::ListItem {
             ordered,
             indent_level,
@@ -263,9 +259,9 @@ impl Block {
     /// `None` for all others.
     pub fn runs(&self) -> Option<&[StyledRun]> {
         match self {
-            Self::Paragraph { runs }
-            | Self::Heading { runs, .. }
-            | Self::ListItem { runs, .. } => Some(runs),
+            Self::Paragraph { runs } | Self::Heading { runs, .. } | Self::ListItem { runs, .. } => {
+                Some(runs)
+            }
             _ => None,
         }
     }
@@ -273,9 +269,9 @@ impl Block {
     /// Get a mutable reference to the inline runs, if this block has any.
     pub fn runs_mut(&mut self) -> Option<&mut Vec<StyledRun>> {
         match self {
-            Self::Paragraph { runs }
-            | Self::Heading { runs, .. }
-            | Self::ListItem { runs, .. } => Some(runs),
+            Self::Paragraph { runs } | Self::Heading { runs, .. } | Self::ListItem { runs, .. } => {
+                Some(runs)
+            }
             _ => None,
         }
     }
@@ -353,9 +349,7 @@ impl Block {
                 indent_level: attrs.indent_level,
                 runs: runs.clone(),
             }),
-            Self::Paragraph { .. }
-            | Self::Heading { .. }
-            | Self::BlockQuote { .. } => {
+            Self::Paragraph { .. } | Self::Heading { .. } | Self::BlockQuote { .. } => {
                 // These block types don't currently have mutable attrs fields,
                 // but we accept the call to allow uniform handling.
                 // Indent level changes are silently ignored for non-list blocks.
@@ -422,12 +416,18 @@ pub struct DocPosition {
 
 impl DocPosition {
     pub fn new(block_index: usize, offset: usize) -> Self {
-        Self { block_index, offset }
+        Self {
+            block_index,
+            offset,
+        }
     }
 
     /// Position at the start of the document.
     pub fn zero() -> Self {
-        Self { block_index: 0, offset: 0 }
+        Self {
+            block_index: 0,
+            offset: 0,
+        }
     }
 }
 
@@ -456,7 +456,10 @@ pub struct DocSelection {
 
 impl DocSelection {
     pub fn caret(pos: DocPosition) -> Self {
-        Self { anchor: pos, focus: pos }
+        Self {
+            anchor: pos,
+            focus: pos,
+        }
     }
 
     pub fn range(anchor: DocPosition, focus: DocPosition) -> Self {
@@ -494,7 +497,11 @@ pub struct DocSlice {
 
 impl DocSlice {
     pub fn single(block: Block) -> Self {
-        Self { blocks: vec![block], open_start: false, open_end: false }
+        Self {
+            blocks: vec![block],
+            open_start: false,
+            open_end: false,
+        }
     }
 
     pub fn inline_fragment(runs: Vec<StyledRun>) -> Self {
@@ -522,22 +529,32 @@ pub struct Document {
 
 impl Document {
     pub fn new() -> Self {
-        Self { blocks: vec![Arc::new(Block::empty_paragraph())] }
+        Self {
+            blocks: vec![Arc::new(Block::empty_paragraph())],
+        }
     }
 
     pub fn from_blocks(blocks: Vec<Block>) -> Self {
-        if blocks.is_empty() { return Self::new(); }
-        Self { blocks: blocks.into_iter().map(Arc::new).collect() }
+        if blocks.is_empty() {
+            return Self::new();
+        }
+        Self {
+            blocks: blocks.into_iter().map(Arc::new).collect(),
+        }
     }
 
-    pub fn block_count(&self) -> usize { self.blocks.len() }
+    pub fn block_count(&self) -> usize {
+        self.blocks.len()
+    }
 
     pub fn block(&self, index: usize) -> Option<&Block> {
         self.blocks.get(index).map(AsRef::as_ref)
     }
 
     pub fn replace_block(&mut self, index: usize, block: Block) -> Option<Arc<Block>> {
-        self.blocks.get_mut(index).map(|slot| std::mem::replace(slot, Arc::new(block)))
+        self.blocks
+            .get_mut(index)
+            .map(|slot| std::mem::replace(slot, Arc::new(block)))
     }
 
     pub fn insert_block(&mut self, index: usize, block: Block) {
@@ -545,7 +562,9 @@ impl Document {
     }
 
     pub fn remove_block(&mut self, index: usize) -> Option<Arc<Block>> {
-        if self.blocks.len() <= 1 { return None; }
+        if self.blocks.len() <= 1 {
+            return None;
+        }
         Some(self.blocks.remove(index))
     }
 
@@ -556,14 +575,18 @@ impl Document {
     pub fn flattened_text(&self) -> String {
         let mut buf = String::new();
         for (i, block) in self.blocks.iter().enumerate() {
-            if i > 0 { buf.push('\n'); }
+            if i > 0 {
+                buf.push('\n');
+            }
             buf.push_str(&block.flattened_text());
         }
         buf
     }
 
     pub fn slice(&self, start: DocPosition, end: DocPosition) -> Option<DocSlice> {
-        if start >= end { return None; }
+        if start >= end {
+            return None;
+        }
 
         let mut blocks = Vec::new();
         let start_block = self.block(start.block_index)?;
@@ -592,7 +615,9 @@ impl Document {
         }
 
         for i in (start.block_index + 1)..end.block_index {
-            if let Some(block) = self.block(i) { blocks.push(block.clone()); }
+            if let Some(block) = self.block(i) {
+                blocks.push(block.clone());
+            }
         }
 
         if let Some(runs) = end_block.runs() {
@@ -602,7 +627,11 @@ impl Document {
             blocks.push(end_block.clone());
         }
 
-        Some(DocSlice { blocks, open_start, open_end })
+        Some(DocSlice {
+            blocks,
+            open_start,
+            open_end,
+        })
     }
 
     pub fn is_valid_position(&self, pos: DocPosition) -> bool {
@@ -627,7 +656,9 @@ impl Document {
 }
 
 impl Default for Document {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ── Helpers ─────────────────────────────────────────────
@@ -642,17 +673,28 @@ fn extract_runs(runs: &[StyledRun], start_offset: usize, end_offset: usize) -> V
         let run_len = run.char_len();
         let run_start = pos;
         let run_end = pos + run_len;
-        if run_end <= start_offset { pos = run_end; continue; }
-        if run_start >= end_offset { break; }
+        if run_end <= start_offset {
+            pos = run_end;
+            continue;
+        }
+        if run_start >= end_offset {
+            break;
+        }
         let overlap_start = start_offset.max(run_start) - run_start;
         let overlap_end = end_offset.min(run_end) - run_start;
         let byte_start = run.char_to_byte_offset(overlap_start);
         let byte_end = run.char_to_byte_offset(overlap_end);
         let text = run.text[byte_start..byte_end].to_owned();
-        result.push(StyledRun { text, style: run.style, link: run.link.clone() });
+        result.push(StyledRun {
+            text,
+            style: run.style,
+            link: run.link.clone(),
+        });
         pos = run_end;
     }
-    if result.is_empty() { result.push(StyledRun::plain(String::new())); }
+    if result.is_empty() {
+        result.push(StyledRun::plain(String::new()));
+    }
     result
 }
 
@@ -661,7 +703,9 @@ fn extract_runs(runs: &[StyledRun], start_offset: usize, end_offset: usize) -> V
 /// Isolate the runs covering character range `[start..end)` within a run list.
 pub fn isolate_runs(runs: &mut Vec<StyledRun>, start: usize, end: usize) -> Range<usize> {
     assert!(start <= end, "isolate_runs: start ({start}) > end ({end})");
-    if runs.is_empty() || start == end { return 0..0; }
+    if runs.is_empty() || start == end {
+        return 0..0;
+    }
     let start_idx = split_runs_at(runs, start);
     let end_idx = split_runs_at(runs, end);
     start_idx..end_idx
@@ -671,7 +715,9 @@ fn split_runs_at(runs: &mut Vec<StyledRun>, offset: usize) -> usize {
     let mut pos = 0;
     for i in 0..runs.len() {
         let run_len = runs[i].char_len();
-        if pos == offset { return i; }
+        if pos == offset {
+            return i;
+        }
         if pos + run_len > offset {
             let local_offset = offset - pos;
             let (left, right) = runs[i].split_at(local_offset);
@@ -755,7 +801,10 @@ mod tests {
     #[test]
     fn image_block_char_len_is_zero() {
         let img = Block::Image {
-            src: String::new(), alt: "x".into(), width: None, height: None,
+            src: String::new(),
+            alt: "x".into(),
+            width: None,
+            height: None,
         };
         assert_eq!(img.char_len(), 0);
     }
@@ -806,7 +855,10 @@ mod tests {
         });
         assert!(result.is_some());
         // Paragraph ignores indent_level
-        assert_eq!(result.as_ref().map(Block::flattened_text).as_deref(), Some("hello"));
+        assert_eq!(
+            result.as_ref().map(Block::flattened_text).as_deref(),
+            Some("hello")
+        );
     }
 
     #[test]

@@ -16,7 +16,7 @@ use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::{Clipboard, Layout, Shell, Widget};
 use iced::keyboard;
 use iced::mouse;
-use iced::{border, Element, Event, Length, Point, Rectangle, Size, Theme, Vector};
+use iced::{Element, Event, Length, Point, Rectangle, Size, Theme, Vector, border};
 
 use crate::font;
 use crate::ui::layout::*;
@@ -205,14 +205,10 @@ fn estimate_token_width(token: &Token) -> f32 {
 }
 
 /// Compute the text area origin from the token bounds.
-fn text_area_origin(
-    token_bounds: &[Rectangle],
-    field_width: f32,
-) -> (f32, f32) {
+fn text_area_origin(token_bounds: &[Rectangle], field_width: f32) -> (f32, f32) {
     if let Some(last) = token_bounds.last() {
         let next_x = last.x + last.width + TOKEN_SPACING;
-        let inner_width =
-            field_width - PAD_TOKEN_INPUT.left - PAD_TOKEN_INPUT.right;
+        let inner_width = field_width - PAD_TOKEN_INPUT.left - PAD_TOKEN_INPUT.right;
         let remaining = inner_width - (next_x - PAD_TOKEN_INPUT.left);
         if remaining < TOKEN_TEXT_MIN_WIDTH {
             (
@@ -288,8 +284,7 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
     ) -> layout::Node {
         let state = tree.state.downcast_mut::<TokenInputState>();
         let max_width = limits.max().width;
-        let inner_width =
-            max_width - PAD_TOKEN_INPUT.left - PAD_TOKEN_INPUT.right;
+        let inner_width = max_width - PAD_TOKEN_INPUT.left - PAD_TOKEN_INPUT.right;
 
         let mut x: f32 = 0.0;
         let mut y: f32 = 0.0;
@@ -317,8 +312,7 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
             y += TOKEN_HEIGHT + TOKEN_ROW_SPACING;
         }
 
-        let total_height =
-            PAD_TOKEN_INPUT.top + y + TOKEN_HEIGHT + PAD_TOKEN_INPUT.bottom;
+        let total_height = PAD_TOKEN_INPUT.top + y + TOKEN_HEIGHT + PAD_TOKEN_INPUT.bottom;
 
         layout::Node::new(Size::new(max_width, total_height))
     }
@@ -372,9 +366,7 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
             };
 
             let is_selected = self.selected_token == Some(token.id);
-            let is_hovered = cursor
-                .position()
-                .is_some_and(|pos| abs.contains(pos));
+            let is_hovered = cursor.position().is_some_and(|pos| abs.contains(pos));
 
             let chip_bg = if is_selected {
                 palette.primary.base.color
@@ -476,9 +468,7 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                                 };
                                 if abs.contains(pos) {
                                     shell.publish((self.on_message)(
-                                        TokenInputMessage::TokenContextMenu(
-                                            token.id, pos,
-                                        ),
+                                        TokenInputMessage::TokenContextMenu(token.id, pos),
                                     ));
                                     shell.capture_event();
                                     return;
@@ -507,8 +497,7 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                                     height: chip.height,
                                 };
                                 if abs.contains(pos) {
-                                    state.drag_tracking =
-                                        Some((token.id, pos));
+                                    state.drag_tracking = Some((token.id, pos));
                                     break;
                                 }
                             }
@@ -528,26 +517,20 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                     if dx * dx + dy * dy > 16.0 {
                         // 4px threshold
                         state.drag_tracking = None;
-                        shell.publish((self.on_message)(
-                            TokenInputMessage::DragStarted(token_id),
-                        ));
+                        shell.publish((self.on_message)(TokenInputMessage::DragStarted(token_id)));
                     }
                 }
             }
 
             // ── Mouse up: cancel drag tracking ──────────────
-            Event::Mouse(mouse::Event::ButtonReleased(
-                mouse::Button::Left,
-            )) => {
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 state.drag_tracking = None;
             }
 
             // ── Keyboard events (only when focused) ────────
-            Event::Keyboard(keyboard::Event::KeyPressed {
-                key,
-                modifiers,
-                ..
-            }) if state.is_focused => {
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
+                if state.is_focused =>
+            {
                 handle_key_press(self, key, modifiers, clipboard, shell);
             }
 
@@ -613,13 +596,11 @@ fn handle_left_click<M: Clone>(
                 if abs.contains(pos) {
                     if !state.is_focused {
                         state.is_focused = true;
-                        shell.publish((widget.on_message)(
-                            TokenInputMessage::Focused,
-                        ));
+                        shell.publish((widget.on_message)(TokenInputMessage::Focused));
                     }
-                    shell.publish((widget.on_message)(
-                        TokenInputMessage::SelectToken(token.id),
-                    ));
+                    shell.publish((widget.on_message)(TokenInputMessage::SelectToken(
+                        token.id,
+                    )));
                     shell.capture_event();
                     return;
                 }
@@ -629,13 +610,9 @@ fn handle_left_click<M: Clone>(
         // Clicked in field, not on token — focus
         if !state.is_focused {
             state.is_focused = true;
-            shell.publish((widget.on_message)(
-                TokenInputMessage::Focused,
-            ));
+            shell.publish((widget.on_message)(TokenInputMessage::Focused));
         }
-        shell.publish((widget.on_message)(
-            TokenInputMessage::DeselectTokens,
-        ));
+        shell.publish((widget.on_message)(TokenInputMessage::DeselectTokens));
         shell.capture_event();
         return;
     }
@@ -657,15 +634,10 @@ fn handle_key_press<M: Clone>(
     match key {
         // Paste: Ctrl+V / Cmd+V
         keyboard::Key::Character(c)
-            if (c.as_str() == "v" || c.as_str() == "V")
-                && modifiers.command() =>
+            if (c.as_str() == "v" || c.as_str() == "V") && modifiers.command() =>
         {
-            if let Some(content) =
-                clipboard.read(iced::advanced::clipboard::Kind::Standard)
-            {
-                shell.publish((widget.on_message)(
-                    TokenInputMessage::Paste(content),
-                ));
+            if let Some(content) = clipboard.read(iced::advanced::clipboard::Kind::Standard) {
+                shell.publish((widget.on_message)(TokenInputMessage::Paste(content)));
                 shell.capture_event();
             }
         }
@@ -673,9 +645,9 @@ fn handle_key_press<M: Clone>(
         // Delete key: remove selected token
         keyboard::Key::Named(keyboard::key::Named::Delete) => {
             if let Some(selected) = widget.selected_token {
-                shell.publish((widget.on_message)(
-                    TokenInputMessage::RemoveToken(selected),
-                ));
+                shell.publish((widget.on_message)(TokenInputMessage::RemoveToken(
+                    selected,
+                )));
                 shell.capture_event();
             }
         }
@@ -686,15 +658,11 @@ fn handle_key_press<M: Clone>(
         }
 
         // Arrow Up/Down: autocomplete navigation when dropdown open
-        keyboard::Key::Named(keyboard::key::Named::ArrowUp)
-            if widget.autocomplete_open =>
-        {
+        keyboard::Key::Named(keyboard::key::Named::ArrowUp) if widget.autocomplete_open => {
             shell.publish((widget.on_message)(TokenInputMessage::AutocompleteUp));
             shell.capture_event();
         }
-        keyboard::Key::Named(keyboard::key::Named::ArrowDown)
-            if widget.autocomplete_open =>
-        {
+        keyboard::Key::Named(keyboard::key::Named::ArrowDown) if widget.autocomplete_open => {
             shell.publish((widget.on_message)(TokenInputMessage::AutocompleteDown));
             shell.capture_event();
         }
@@ -722,55 +690,42 @@ fn handle_key_press<M: Clone>(
         }
 
         // Enter / Tab: accept autocomplete if open, otherwise tokenize
-        keyboard::Key::Named(
-            keyboard::key::Named::Enter | keyboard::key::Named::Tab,
-        ) => {
+        keyboard::Key::Named(keyboard::key::Named::Enter | keyboard::key::Named::Tab) => {
             if widget.autocomplete_open {
-                shell.publish((widget.on_message)(
-                    TokenInputMessage::AutocompleteAccept,
-                ));
+                shell.publish((widget.on_message)(TokenInputMessage::AutocompleteAccept));
                 shell.capture_event();
             } else if !widget.text.is_empty() {
                 let text = widget.text.to_string();
-                shell.publish((widget.on_message)(
-                    TokenInputMessage::TokenizeText(text),
-                ));
+                shell.publish((widget.on_message)(TokenInputMessage::TokenizeText(text)));
                 shell.capture_event();
             }
         }
 
         // Comma / Semicolon: always tokenize
         keyboard::Key::Character(c)
-            if !modifiers.command()
-                && (c.as_str() == "," || c.as_str() == ";") =>
+            if !modifiers.command() && (c.as_str() == "," || c.as_str() == ";") =>
         {
             if !widget.text.is_empty() {
                 let text = widget.text.to_string();
-                shell.publish((widget.on_message)(
-                    TokenInputMessage::TokenizeText(text),
-                ));
+                shell.publish((widget.on_message)(TokenInputMessage::TokenizeText(text)));
             }
             shell.capture_event();
         }
 
         // Space: tokenize if looks like email, else append
-        keyboard::Key::Named(keyboard::key::Named::Space)
-            if !modifiers.command() =>
-        {
+        keyboard::Key::Named(keyboard::key::Named::Space) if !modifiers.command() => {
             handle_space(widget, shell);
         }
 
         // Regular character input
         keyboard::Key::Character(c) if !modifiers.command() => {
             if widget.selected_token.is_some() {
-                shell.publish((widget.on_message)(
-                    TokenInputMessage::DeselectTokens,
-                ));
+                shell.publish((widget.on_message)(TokenInputMessage::DeselectTokens));
             }
             let new_text = format!("{}{}", widget.text, c.as_str());
-            shell.publish((widget.on_message)(
-                TokenInputMessage::TextChanged(new_text),
-            ));
+            shell.publish((widget.on_message)(TokenInputMessage::TextChanged(
+                new_text,
+            )));
             shell.capture_event();
         }
 
@@ -778,38 +733,30 @@ fn handle_key_press<M: Clone>(
     }
 }
 
-fn handle_backspace<M: Clone>(
-    widget: &TokenInputWidget<'_, M>,
-    shell: &mut Shell<'_, M>,
-) {
+fn handle_backspace<M: Clone>(widget: &TokenInputWidget<'_, M>, shell: &mut Shell<'_, M>) {
     if widget.text.is_empty() {
         if let Some(selected) = widget.selected_token {
-            shell.publish((widget.on_message)(
-                TokenInputMessage::RemoveToken(selected),
-            ));
+            shell.publish((widget.on_message)(TokenInputMessage::RemoveToken(
+                selected,
+            )));
             shell.capture_event();
             return;
         }
         if !widget.tokens.is_empty() {
-            shell.publish((widget.on_message)(
-                TokenInputMessage::BackspaceAtStart,
-            ));
+            shell.publish((widget.on_message)(TokenInputMessage::BackspaceAtStart));
             shell.capture_event();
         }
     } else {
         let mut new_text = widget.text.to_string();
         new_text.pop();
-        shell.publish((widget.on_message)(
-            TokenInputMessage::TextChanged(new_text),
-        ));
+        shell.publish((widget.on_message)(TokenInputMessage::TextChanged(
+            new_text,
+        )));
         shell.capture_event();
     }
 }
 
-fn handle_arrow_left<M: Clone>(
-    widget: &TokenInputWidget<'_, M>,
-    shell: &mut Shell<'_, M>,
-) {
+fn handle_arrow_left<M: Clone>(widget: &TokenInputWidget<'_, M>, shell: &mut Shell<'_, M>) {
     if widget.tokens.is_empty() {
         return;
     }
@@ -817,11 +764,9 @@ fn handle_arrow_left<M: Clone>(
     match selected_index(widget.tokens, widget.selected_token) {
         Some(idx) if idx > 0 => {
             // Move selection to previous token
-            shell.publish((widget.on_message)(
-                TokenInputMessage::ArrowSelectToken(
-                    widget.tokens[idx - 1].id,
-                ),
-            ));
+            shell.publish((widget.on_message)(TokenInputMessage::ArrowSelectToken(
+                widget.tokens[idx - 1].id,
+            )));
             shell.capture_event();
         }
         Some(_) => {
@@ -831,9 +776,9 @@ fn handle_arrow_left<M: Clone>(
         None if widget.text.is_empty() => {
             // At text position 0 with no text: select last token
             if let Some(last) = widget.tokens.last() {
-                shell.publish((widget.on_message)(
-                    TokenInputMessage::ArrowSelectToken(last.id),
-                ));
+                shell.publish((widget.on_message)(TokenInputMessage::ArrowSelectToken(
+                    last.id,
+                )));
                 shell.capture_event();
             }
         }
@@ -841,10 +786,7 @@ fn handle_arrow_left<M: Clone>(
     }
 }
 
-fn handle_arrow_right<M: Clone>(
-    widget: &TokenInputWidget<'_, M>,
-    shell: &mut Shell<'_, M>,
-) {
+fn handle_arrow_right<M: Clone>(widget: &TokenInputWidget<'_, M>, shell: &mut Shell<'_, M>) {
     if widget.tokens.is_empty() {
         return;
     }
@@ -852,35 +794,26 @@ fn handle_arrow_right<M: Clone>(
     if let Some(idx) = selected_index(widget.tokens, widget.selected_token) {
         if idx + 1 < widget.tokens.len() {
             // Move selection to next token
-            shell.publish((widget.on_message)(
-                TokenInputMessage::ArrowSelectToken(
-                    widget.tokens[idx + 1].id,
-                ),
-            ));
+            shell.publish((widget.on_message)(TokenInputMessage::ArrowSelectToken(
+                widget.tokens[idx + 1].id,
+            )));
         } else {
             // At last token: deselect and focus text
-            shell.publish((widget.on_message)(
-                TokenInputMessage::ArrowToText,
-            ));
+            shell.publish((widget.on_message)(TokenInputMessage::ArrowToText));
         }
         shell.capture_event();
     }
 }
 
-fn handle_space<M: Clone>(
-    widget: &TokenInputWidget<'_, M>,
-    shell: &mut Shell<'_, M>,
-) {
+fn handle_space<M: Clone>(widget: &TokenInputWidget<'_, M>, shell: &mut Shell<'_, M>) {
     if !widget.text.is_empty() && widget.text.contains('@') {
         let text = widget.text.to_string();
-        shell.publish((widget.on_message)(
-            TokenInputMessage::TokenizeText(text),
-        ));
+        shell.publish((widget.on_message)(TokenInputMessage::TokenizeText(text)));
     } else if !widget.text.is_empty() {
         let new_text = format!("{} ", widget.text);
-        shell.publish((widget.on_message)(
-            TokenInputMessage::TextChanged(new_text),
-        ));
+        shell.publish((widget.on_message)(TokenInputMessage::TextChanged(
+            new_text,
+        )));
     }
     shell.capture_event();
 }
@@ -892,26 +825,22 @@ fn draw_text_area(
     palette: &iced::theme::Palette,
     bounds: Rectangle,
 ) {
-    let (text_x, text_y) =
-        text_area_origin(&state.token_bounds, bounds.width);
+    let (text_x, text_y) = text_area_origin(&state.token_bounds, bounds.width);
 
-    let display_text =
-        if widget.text.is_empty() && widget.tokens.is_empty() {
-            widget.placeholder
-        } else {
-            widget.text
-        };
+    let display_text = if widget.text.is_empty() && widget.tokens.is_empty() {
+        widget.placeholder
+    } else {
+        widget.text
+    };
 
-    let text_color =
-        if widget.text.is_empty() && widget.tokens.is_empty() {
-            palette.background.base.text.scale_alpha(0.4)
-        } else {
-            palette.background.base.text
-        };
+    let text_color = if widget.text.is_empty() && widget.tokens.is_empty() {
+        palette.background.base.text.scale_alpha(0.4)
+    } else {
+        palette.background.base.text
+    };
 
     if !display_text.is_empty() {
-        let text_area_width =
-            bounds.width - text_x - PAD_TOKEN_INPUT.right;
+        let text_area_width = bounds.width - text_x - PAD_TOKEN_INPUT.right;
         renderer.fill_text(
             iced::advanced::text::Text {
                 content: display_text.to_string(),

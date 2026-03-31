@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use iced::widget::{button, column, container, row, scrollable, svg, text, text_input, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, svg, text, text_input};
 use iced::{Alignment, Element, Length, Task};
 
 use crate::component::Component;
@@ -16,8 +16,8 @@ use crate::ui::theme;
 use crate::ui::widgets;
 
 use rtsk::db::queries_extra::{
-    CreateAccountParams, ReauthAccountParams, account_exists_by_email_sync,
-    create_account_sync, get_account_auth_info_sync, update_account_tokens_sync,
+    CreateAccountParams, ReauthAccountParams, account_exists_by_email_sync, create_account_sync,
+    get_account_auth_info_sync, update_account_tokens_sync,
 };
 use rtsk::discovery::types::{
     AuthMethod, DiscoveredConfig, DiscoverySource, Protocol, ProtocolOption, Security,
@@ -213,7 +213,10 @@ pub enum AddAccountMessage {
     SubmitEmail,
 
     // Step 2: Discovery result
-    DiscoveryComplete(rtsk::generation::GenerationToken<rtsk::generation::AddAccount>, Result<DiscoveredConfig, String>),
+    DiscoveryComplete(
+        rtsk::generation::GenerationToken<rtsk::generation::AddAccount>,
+        Result<DiscoveredConfig, String>,
+    ),
     SelectProtocol(usize),
     ConfirmProtocol,
 
@@ -231,7 +234,10 @@ pub enum AddAccountMessage {
 
     // Step 3: Authentication
     // OAuth
-    OAuthComplete(rtsk::generation::GenerationToken<rtsk::generation::AddAccount>, Result<OAuthSuccess, String>),
+    OAuthComplete(
+        rtsk::generation::GenerationToken<rtsk::generation::AddAccount>,
+        Result<OAuthSuccess, String>,
+    ),
     CancelOAuth,
     RetryOAuth,
 
@@ -249,7 +255,10 @@ pub enum AddAccountMessage {
     AuthSmtpPortChanged(String),
     AuthSmtpSecurityChanged(SecurityOption),
     SubmitCredentials,
-    ValidationComplete(rtsk::generation::GenerationToken<rtsk::generation::AddAccount>, Result<(), String>),
+    ValidationComplete(
+        rtsk::generation::GenerationToken<rtsk::generation::AddAccount>,
+        Result<(), String>,
+    ),
 
     // Step 4: Identity
     AccountNameChanged(String),
@@ -257,10 +266,16 @@ pub enum AddAccountMessage {
     SubmitIdentity,
 
     // Step 5: Creation
-    AccountCreated(rtsk::generation::GenerationToken<rtsk::generation::AddAccount>, Result<String, String>),
+    AccountCreated(
+        rtsk::generation::GenerationToken<rtsk::generation::AddAccount>,
+        Result<String, String>,
+    ),
 
     // Re-auth: token/credential update
-    ReauthTokensSaved(rtsk::generation::GenerationToken<rtsk::generation::AddAccount>, Result<(), String>),
+    ReauthTokensSaved(
+        rtsk::generation::GenerationToken<rtsk::generation::AddAccount>,
+        Result<(), String>,
+    ),
 
     // General
     Cancel,
@@ -327,9 +342,7 @@ impl AddAccountWizard {
         email: String,
         db: Arc<Db>,
     ) -> Result<(Self, Task<AddAccountMessage>), String> {
-        let auth_info = db.with_conn_sync(|conn| {
-            get_account_auth_info_sync(conn, &account_id)
-        })?;
+        let auth_info = db.with_conn_sync(|conn| get_account_auth_info_sync(conn, &account_id))?;
 
         let mut wizard = Self::new(false, Vec::new(), db);
         wizard.email = email;
@@ -453,9 +466,7 @@ impl Component for AddAccountWizard {
                     self.error = Some(e);
                     self.step = AddAccountStep::EmailInput;
                 } else {
-                    self.error = Some(format!(
-                        "We couldn't auto-detect your mail server. {e}"
-                    ));
+                    self.error = Some(format!("We couldn't auto-detect your mail server. {e}"));
                     self.step = AddAccountStep::ManualConfiguration;
                 }
                 (Task::none(), None)
@@ -489,9 +500,11 @@ impl Component for AddAccountWizard {
                     let aid = account_id.clone();
                     let task = Task::perform(
                         async move {
-                            let result = db.with_write_conn(move |conn| {
-                                update_account_tokens_sync(conn, &aid, reauth_params)
-                            }).await;
+                            let result = db
+                                .with_write_conn(move |conn| {
+                                    update_account_tokens_sync(conn, &aid, reauth_params)
+                                })
+                                .await;
                             (generation, result)
                         },
                         |(g, result)| AddAccountMessage::ReauthTokensSaved(g, result),
@@ -512,9 +525,7 @@ impl Component for AddAccountWizard {
             AddAccountMessage::OAuthComplete(g, _) if !self.generation.is_current(g) => {
                 (Task::none(), None)
             }
-            AddAccountMessage::OAuthComplete(_, Ok(success)) => {
-                self.handle_oauth_success(success)
-            }
+            AddAccountMessage::OAuthComplete(_, Ok(success)) => self.handle_oauth_success(success),
             AddAccountMessage::OAuthComplete(_, Err(e)) => {
                 self.error = Some(e);
                 (Task::none(), None)
@@ -524,9 +535,10 @@ impl Component for AddAccountWizard {
             AddAccountMessage::AccountCreated(g, _) if !self.generation.is_current(g) => {
                 (Task::none(), None)
             }
-            AddAccountMessage::AccountCreated(_, Ok(account_id)) => {
-                (Task::none(), Some(AddAccountEvent::AccountAdded(account_id)))
-            }
+            AddAccountMessage::AccountCreated(_, Ok(account_id)) => (
+                Task::none(),
+                Some(AddAccountEvent::AccountAdded(account_id)),
+            ),
             AddAccountMessage::AccountCreated(_, Err(e)) => {
                 self.error = Some(e);
                 self.step = AddAccountStep::Identity;
@@ -536,9 +548,11 @@ impl Component for AddAccountWizard {
                 (Task::none(), None)
             }
             AddAccountMessage::ReauthTokensSaved(_, Ok(())) => {
-                let account_id = self.reauth_account_id.clone()
-                    .unwrap_or_default();
-                (Task::none(), Some(AddAccountEvent::ReauthComplete(account_id)))
+                let account_id = self.reauth_account_id.clone().unwrap_or_default();
+                (
+                    Task::none(),
+                    Some(AddAccountEvent::ReauthComplete(account_id)),
+                )
             }
             AddAccountMessage::ReauthTokensSaved(_, Err(e)) => {
                 self.error = Some(format!("Failed to save credentials: {e}"));
@@ -580,9 +594,7 @@ impl Component for AddAccountWizard {
 // ── Update helpers ───────────────────────────────────────
 
 impl AddAccountWizard {
-    fn handle_submit_email(
-        &mut self,
-    ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
+    fn handle_submit_email(&mut self) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
         let email = self.email.trim().to_lowercase();
         if email.is_empty() || !email.contains('@') {
             self.error = Some("Please enter a valid email address.".to_string());
@@ -598,9 +610,9 @@ impl AddAccountWizard {
             async move {
                 // Duplicate check — run synchronously inside spawn_blocking
                 let email_for_dup = email.clone();
-                let dup = db.with_conn(move |conn| {
-                    account_exists_by_email_sync(conn, &email_for_dup)
-                }).await;
+                let dup = db
+                    .with_conn(move |conn| account_exists_by_email_sync(conn, &email_for_dup))
+                    .await;
                 match dup {
                     Ok(true) => {
                         return (
@@ -628,9 +640,7 @@ impl AddAccountWizard {
         config: &DiscoveredConfig,
     ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
         if config.options.is_empty() {
-            self.error = Some(
-                "We couldn't auto-detect your mail server.".to_string(),
-            );
+            self.error = Some("We couldn't auto-detect your mail server.".to_string());
             self.step = AddAccountStep::ManualConfiguration;
             return (Task::none(), None);
         }
@@ -638,8 +648,8 @@ impl AddAccountWizard {
         self.discovery = Some(config.clone());
 
         // Auto-proceed when exactly one high-confidence option
-        let auto_proceed = config.options.len() == 1
-            && config.options[0].source.is_high_confidence();
+        let auto_proceed =
+            config.options.len() == 1 && config.options[0].source.is_high_confidence();
 
         if auto_proceed {
             self.selected_option = Some(0);
@@ -652,9 +662,7 @@ impl AddAccountWizard {
         (Task::none(), None)
     }
 
-    fn handle_confirm_protocol(
-        &mut self,
-    ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
+    fn handle_confirm_protocol(&mut self) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
         let config = match &self.discovery {
             Some(c) => c.clone(),
             None => return (Task::none(), None),
@@ -702,19 +710,14 @@ impl AddAccountWizard {
 
                 let task = Task::perform(
                     async move {
-                        let provider =
-                            rtsk::oauth::GenericOAuthProvider::from_request(request);
-                        let open_url = |url: &str| -> Result<(), String> {
-                            open_browser_url(url)
-                        };
-                        let result = rtsk::oauth::authorize_with_provider(
-                            &provider, &open_url,
-                        )
-                        .await;
+                        let provider = rtsk::oauth::GenericOAuthProvider::from_request(request);
+                        let open_url = |url: &str| -> Result<(), String> { open_browser_url(url) };
+                        let result =
+                            rtsk::oauth::authorize_with_provider(&provider, &open_url).await;
                         let mapped = result.map(|bundle| {
                             #[allow(clippy::cast_possible_wrap)]
-                            let expires_at = chrono::Utc::now().timestamp()
-                                + bundle.tokens.expires_in as i64;
+                            let expires_at =
+                                chrono::Utc::now().timestamp() + bundle.tokens.expires_in as i64;
                             OAuthSuccess {
                                 access_token: bundle.tokens.access_token,
                                 refresh_token: bundle.tokens.refresh_token,
@@ -767,8 +770,7 @@ impl AddAccountWizard {
         };
 
         // Look up the full OAuth config from the discovery registry.
-        let oauth_config =
-            rtsk::discovery::registry::oauth_config_for_provider(&provider_id);
+        let oauth_config = rtsk::discovery::registry::oauth_config_for_provider(&provider_id);
 
         // For built-in providers, we can resolve endpoints synchronously.
         // For generic OIDC providers (oidc:https://...), we need to
@@ -809,56 +811,45 @@ impl AddAccountWizard {
         Task::perform(
             async move {
                 // Resolve endpoints: either from registry or OIDC discovery.
-                let (auth_url, token_url, scopes, use_pkce) =
-                    if let Some(r) = resolved {
-                        r
-                    } else if let Some(issuer) = oidc_issuer {
-                        let endpoints =
-                            rtsk::discovery::oidc::probe_issuer(&issuer)
-                                .await
-                                .ok_or_else(|| {
-                                    format!(
-                                        "OIDC discovery failed for issuer \
+                let (auth_url, token_url, scopes, use_pkce) = if let Some(r) = resolved {
+                    r
+                } else if let Some(issuer) = oidc_issuer {
+                    let endpoints = rtsk::discovery::oidc::probe_issuer(&issuer)
+                        .await
+                        .ok_or_else(|| {
+                            format!(
+                                "OIDC discovery failed for issuer \
                                          '{issuer}'"
-                                    )
-                                })?;
-                        (
-                            endpoints.auth_url,
-                            endpoints.token_url,
-                            endpoints.scopes,
-                            endpoints.supports_pkce_s256,
-                        )
-                    } else {
-                        return Err("No OAuth configuration available".into());
-                    };
-
-                let request =
-                    rtsk::oauth::OAuthProviderAuthorizationRequest {
-                        provider_id: provider_id_clone.clone(),
-                        auth_url,
-                        token_url,
-                        scopes,
-                        user_info_url: None,
-                        use_pkce,
-                        client_id: client_id_clone.clone(),
-                        client_secret: None,
-                    };
-
-                let provider =
-                    rtsk::oauth::GenericOAuthProvider::from_request(
-                        request,
-                    );
-                let open_url = |url: &str| -> Result<(), String> {
-                    open_browser_url(url)
+                            )
+                        })?;
+                    (
+                        endpoints.auth_url,
+                        endpoints.token_url,
+                        endpoints.scopes,
+                        endpoints.supports_pkce_s256,
+                    )
+                } else {
+                    return Err("No OAuth configuration available".into());
                 };
-                let result = rtsk::oauth::authorize_with_provider(
-                    &provider, &open_url,
-                )
-                .await;
+
+                let request = rtsk::oauth::OAuthProviderAuthorizationRequest {
+                    provider_id: provider_id_clone.clone(),
+                    auth_url,
+                    token_url,
+                    scopes,
+                    user_info_url: None,
+                    use_pkce,
+                    client_id: client_id_clone.clone(),
+                    client_secret: None,
+                };
+
+                let provider = rtsk::oauth::GenericOAuthProvider::from_request(request);
+                let open_url = |url: &str| -> Result<(), String> { open_browser_url(url) };
+                let result = rtsk::oauth::authorize_with_provider(&provider, &open_url).await;
                 let mapped = result.map(|bundle| {
                     #[allow(clippy::cast_possible_wrap)]
-                    let expires_at = chrono::Utc::now().timestamp()
-                        + bundle.tokens.expires_in as i64;
+                    let expires_at =
+                        chrono::Utc::now().timestamp() + bundle.tokens.expires_in as i64;
                     OAuthSuccess {
                         access_token: bundle.tokens.access_token,
                         refresh_token: bundle.tokens.refresh_token,
@@ -871,18 +862,9 @@ impl AddAccountWizard {
                 });
                 Ok(mapped)
             },
-            move |result: Result<
-                Result<OAuthSuccess, String>,
-                String,
-            >| match result {
-                Ok(inner) => AddAccountMessage::OAuthComplete(
-                    generation,
-                    inner,
-                ),
-                Err(e) => AddAccountMessage::OAuthComplete(
-                    generation,
-                    Err(e),
-                ),
+            move |result: Result<Result<OAuthSuccess, String>, String>| match result {
+                Ok(inner) => AddAccountMessage::OAuthComplete(generation, inner),
+                Err(e) => AddAccountMessage::OAuthComplete(generation, Err(e)),
             },
         )
     }
@@ -929,9 +911,11 @@ impl AddAccountWizard {
             let aid = account_id.clone();
             let task = Task::perform(
                 async move {
-                    let result = db.with_write_conn(move |conn| {
-                        update_account_tokens_sync(conn, &aid, reauth_params)
-                    }).await;
+                    let result = db
+                        .with_write_conn(move |conn| {
+                            update_account_tokens_sync(conn, &aid, reauth_params)
+                        })
+                        .await;
                     (generation, result)
                 },
                 |(g, result)| AddAccountMessage::ReauthTokensSaved(g, result),
@@ -946,17 +930,15 @@ impl AddAccountWizard {
         (Task::none(), None)
     }
 
-    fn handle_retry_oauth(
-        &mut self,
-    ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
+    fn handle_retry_oauth(&mut self) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
         // Re-auth mode: re-run using stored provider info
         if self.reauth_account_id.is_some() {
             self.error = None;
             // Look up auth info again for the retry
             let aid = self.reauth_account_id.clone().unwrap_or_default();
-            let auth_info = self.db.with_conn_sync(|conn| {
-                get_account_auth_info_sync(conn, &aid)
-            });
+            let auth_info = self
+                .db
+                .with_conn_sync(|conn| get_account_auth_info_sync(conn, &aid));
             match auth_info {
                 Ok(info) => {
                     let task = self.start_reauth_oauth(
@@ -1008,10 +990,7 @@ impl AddAccountWizard {
                 match self.manual_config.auth_method {
                     ManualAuthMethod::OAuth => {
                         self.resolved_auth_method = "oauth".to_string();
-                        let task = self.start_reauth_oauth(
-                            Some(provider_id),
-                            None,
-                        );
+                        let task = self.start_reauth_oauth(Some(provider_id), None);
                         (task, None)
                     }
                     ManualAuthMethod::Password => {
@@ -1032,7 +1011,8 @@ impl AddAccountWizard {
                         self.step = AddAccountStep::OAuthWaiting;
                         self.error = Some(
                             "JMAP OAuth is not yet supported for manual configuration. \
-                             Please use password authentication.".to_string()
+                             Please use password authentication."
+                                .to_string(),
                         );
                         self.step = AddAccountStep::ManualConfiguration;
                         (Task::none(), None)
@@ -1052,9 +1032,7 @@ impl AddAccountWizard {
         }
     }
 
-    fn handle_submit_credentials(
-        &mut self,
-    ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
+    fn handle_submit_credentials(&mut self) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
         if self.auth_state.username.trim().is_empty() {
             self.error = Some("Username is required.".to_string());
             return (Task::none(), None);
@@ -1094,9 +1072,7 @@ impl AddAccountWizard {
         (task, None)
     }
 
-    fn handle_submit_identity(
-        &mut self,
-    ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
+    fn handle_submit_identity(&mut self) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
         if self.identity.name.trim().is_empty() {
             self.error = Some("Please enter an account name.".to_string());
             return (Task::none(), None);
@@ -1111,18 +1087,14 @@ impl AddAccountWizard {
         let task = Task::perform(
             async move {
                 let result = db
-                    .with_write_conn(move |conn| {
-                        create_account_sync(conn, &create_params)
-                    })
+                    .with_write_conn(move |conn| create_account_sync(conn, &create_params))
                     .await;
                 match result {
                     Ok(id) => (generation, Ok(id)),
                     Err(e) => (generation, Err(e)),
                 }
             },
-            |(g, result)| {
-                AddAccountMessage::AccountCreated(g, result)
-            },
+            |(g, result)| AddAccountMessage::AccountCreated(g, result),
         );
         (task, None)
     }
@@ -1185,16 +1157,12 @@ impl AddAccountWizard {
                 oauth_client_id: None,
                 imap_host: Some(self.auth_state.imap_host.clone()),
                 imap_port,
-                imap_security: Some(
-                    self.auth_state.imap_security.to_db_string().to_string(),
-                ),
+                imap_security: Some(self.auth_state.imap_security.to_db_string().to_string()),
                 imap_username: Some(self.auth_state.username.clone()),
                 imap_password: Some(self.auth_state.password.clone()),
                 smtp_host: Some(self.auth_state.smtp_host.clone()),
                 smtp_port,
-                smtp_security: Some(
-                    self.auth_state.smtp_security.to_db_string().to_string(),
-                ),
+                smtp_security: Some(self.auth_state.smtp_security.to_db_string().to_string()),
                 smtp_username: smtp_user,
                 smtp_password: smtp_pass,
                 jmap_url: None,
@@ -1383,9 +1351,7 @@ fn source_display(source: &DiscoverySource) -> &str {
 
 fn resolve_client_id(provider_id: &str) -> String {
     match provider_id {
-        "microsoft" | "microsoft_graph" => {
-            rtsk::oauth::MICROSOFT_DEFAULT_CLIENT_ID.to_string()
-        }
+        "microsoft" | "microsoft_graph" => rtsk::oauth::MICROSOFT_DEFAULT_CLIENT_ID.to_string(),
         // For Google, the client_id is typically embedded in the app.
         // If not available, the OAuth flow will use the discovery registry value.
         _ => String::new(),
@@ -1471,10 +1437,15 @@ impl AddAccountWizard {
             .width(Length::Fill);
 
         if self.is_first_launch {
-            let logo_handle = svg::Handle::from_memory(include_bytes!("../../../../assets/icon.svg"));
+            let logo_handle =
+                svg::Handle::from_memory(include_bytes!("../../../../assets/icon.svg"));
             col = col.push(
-                container(svg(logo_handle).width(WELCOME_ICON_SIZE).height(WELCOME_ICON_SIZE))
-                    .align_x(Alignment::Center),
+                container(
+                    svg(logo_handle)
+                        .width(WELCOME_ICON_SIZE)
+                        .height(WELCOME_ICON_SIZE),
+                )
+                .align_x(Alignment::Center),
             );
             col = col.push(Space::new().height(SPACE_SM));
             col = col.push(
@@ -1563,7 +1534,6 @@ impl AddAccountWizard {
                 .font(iced::Font {
                     weight: iced::font::Weight::Bold,
                     ..font::text()
-
                 }),
             Space::new().height(SPACE_XS),
             text(&self.email).size(TEXT_LG).style(text::secondary),
@@ -1594,23 +1564,17 @@ fn protocol_card_view(
     index: usize,
     selected: bool,
 ) -> Element<'_, AddAccountMessage> {
-    let name = protocol_display_name(
-        &option.protocol,
-        option.provider_name.as_deref(),
-    );
+    let name = protocol_display_name(&option.protocol, option.provider_name.as_deref());
     let detail = protocol_detail(&option.protocol);
     let source_label = source_display(&option.source);
 
     let content = row![
         container(
             column![
-                text(name)
-                    .size(TEXT_LG)
-                    .style(text::base)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..font::text()
-                    }),
+                text(name).size(TEXT_LG).style(text::base).font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..font::text()
+                }),
                 text(detail).size(TEXT_SM).style(text::secondary),
             ]
             .spacing(SPACE_XXXS),
@@ -1722,30 +1686,31 @@ impl AddAccountWizard {
                 col = col.push(Space::new().height(SPACE_XS));
                 col = col.push(
                     column![
-                        text("JMAP Session URL").size(TEXT_SM).style(text::secondary),
-                        text_input("https://jmap.example.com/.well-known/jmap", &self.manual_config.jmap_url)
-                            .on_input(AddAccountMessage::ManualJmapUrlChanged)
-                            .size(TEXT_LG)
-                            .padding(PAD_INPUT)
-                            .style(theme::TextInputClass::Settings.style())
-                            .width(Length::Fill),
+                        text("JMAP Session URL")
+                            .size(TEXT_SM)
+                            .style(text::secondary),
+                        text_input(
+                            "https://jmap.example.com/.well-known/jmap",
+                            &self.manual_config.jmap_url
+                        )
+                        .on_input(AddAccountMessage::ManualJmapUrlChanged)
+                        .size(TEXT_LG)
+                        .padding(PAD_INPUT)
+                        .style(theme::TextInputClass::Settings.style())
+                        .width(Length::Fill),
                     ]
                     .spacing(SPACE_XXXS),
                 );
 
                 // Auth method selector
                 col = col.push(text("Authentication").size(TEXT_SM).style(text::secondary));
-                col = col.push(auth_method_selector(
-                    self.manual_config.auth_method,
-                ));
+                col = col.push(auth_method_selector(self.manual_config.auth_method));
             }
             Some(ManualProvider::Gmail) | Some(ManualProvider::Microsoft365) => {
                 col = col.push(Space::new().height(SPACE_XS));
                 // Auth method selector
                 col = col.push(text("Authentication").size(TEXT_SM).style(text::secondary));
-                col = col.push(auth_method_selector(
-                    self.manual_config.auth_method,
-                ));
+                col = col.push(auth_method_selector(self.manual_config.auth_method));
 
                 // If password auth, show IMAP/SMTP fields
                 if self.manual_config.auth_method == ManualAuthMethod::Password {
@@ -1827,9 +1792,7 @@ impl AddAccountWizard {
 
         // Show the account email for re-auth context
         if self.reauth_account_id.is_some() {
-            col = col.push(
-                text(&self.email).size(TEXT_LG).style(text::secondary),
-            );
+            col = col.push(text(&self.email).size(TEXT_LG).style(text::secondary));
         }
         col = col.push(Space::new().height(SPACE_MD));
         col = col.push(
@@ -1876,9 +1839,7 @@ impl AddAccountWizard {
 
         // Show the account email for re-auth context
         if self.reauth_account_id.is_some() {
-            col = col.push(
-                text(&self.email).size(TEXT_LG).style(text::secondary),
-            );
+            col = col.push(text(&self.email).size(TEXT_LG).style(text::secondary));
         }
 
         // IMAP section
@@ -2017,9 +1978,7 @@ impl AddAccountWizard {
     fn view_identity(&self) -> Element<'_, AddAccountMessage> {
         let mut col = column![].spacing(SPACE_MD).width(Length::Fill);
 
-        col = col.push(
-            text(&self.email).size(TEXT_LG).style(text::secondary),
-        );
+        col = col.push(text(&self.email).size(TEXT_LG).style(text::secondary));
         col = col.push(Space::new().height(SPACE_XS));
         col = col.push(labeled_input(
             "Account name",
@@ -2029,9 +1988,7 @@ impl AddAccountWizard {
         ));
 
         col = col.push(Space::new().height(SPACE_SM));
-        col = col.push(
-            text("Pick a color").size(TEXT_SM).style(text::secondary),
-        );
+        col = col.push(text("Pick a color").size(TEXT_SM).style(text::secondary));
         col = col.push(widgets::color_palette_grid(
             self.identity.selected_color_index,
             &self.used_colors,
@@ -2071,30 +2028,21 @@ fn primary_button<'a>(
     label: &'a str,
     on_press: AddAccountMessage,
 ) -> Element<'a, AddAccountMessage> {
-    button(
-        container(text(label).size(TEXT_LG).color(theme::ON_AVATAR))
-            .center_x(Length::Fill),
-    )
-    .on_press(on_press)
-    .padding(PAD_BUTTON)
-    .style(theme::ButtonClass::Primary.style())
-    .width(Length::Fill)
-    .into()
+    button(container(text(label).size(TEXT_LG).color(theme::ON_AVATAR)).center_x(Length::Fill))
+        .on_press(on_press)
+        .padding(PAD_BUTTON)
+        .style(theme::ButtonClass::Primary.style())
+        .width(Length::Fill)
+        .into()
 }
 
-fn ghost_button<'a>(
-    label: &'a str,
-    on_press: AddAccountMessage,
-) -> Element<'a, AddAccountMessage> {
-    button(
-        container(text(label).size(TEXT_LG).style(text::secondary))
-            .center_x(Length::Fill),
-    )
-    .on_press(on_press)
-    .padding(PAD_BUTTON)
-    .style(theme::ButtonClass::Ghost.style())
-    .width(Length::Fill)
-    .into()
+fn ghost_button<'a>(label: &'a str, on_press: AddAccountMessage) -> Element<'a, AddAccountMessage> {
+    button(container(text(label).size(TEXT_LG).style(text::secondary)).center_x(Length::Fill))
+        .on_press(on_press)
+        .padding(PAD_BUTTON)
+        .style(theme::ButtonClass::Ghost.style())
+        .width(Length::Fill)
+        .into()
 }
 
 fn labeled_input<'a>(
@@ -2190,9 +2138,7 @@ fn security_selector<'a>(
     .into()
 }
 
-fn auth_method_selector(
-    current: ManualAuthMethod,
-) -> Element<'static, AddAccountMessage> {
+fn auth_method_selector(current: ManualAuthMethod) -> Element<'static, AddAccountMessage> {
     row![
         iced::widget::radio(
             ManualAuthMethod::OAuth.label(),

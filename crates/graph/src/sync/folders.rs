@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use db::db::DbState;
 use common::types::ProviderCtx;
+use db::db::DbState;
 
 use super::super::client::GraphClient;
 use super::super::folder_mapper::FolderMap;

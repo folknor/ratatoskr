@@ -10,8 +10,8 @@
 
 use iced::advanced::layout;
 use iced::advanced::renderer;
-use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::widget::Operation;
+use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::{Clipboard, Layout, Shell, Widget};
 use iced::keyboard;
 use iced::mouse;
@@ -122,10 +122,7 @@ impl<'a, Message: Clone + 'a> UndoableTextInput<'a, Message> {
     }
 
     /// Sets the line height.
-    pub fn line_height(
-        mut self,
-        line_height: impl Into<iced::widget::text::LineHeight>,
-    ) -> Self {
+    pub fn line_height(mut self, line_height: impl Into<iced::widget::text::LineHeight>) -> Self {
         self.inner = self.inner.line_height(line_height);
         self
     }
@@ -142,9 +139,7 @@ impl<'a, Message: Clone + 'a> UndoableTextInput<'a, Message> {
 
 // ── Into<Element> (builder → widget conversion) ─────────
 
-impl<'a, Message: Clone + 'a> From<UndoableTextInput<'a, Message>>
-    for Element<'a, Message>
-{
+impl<'a, Message: Clone + 'a> From<UndoableTextInput<'a, Message>> for Element<'a, Message> {
     fn from(builder: UndoableTextInput<'a, Message>) -> Self {
         let wrapper = UndoableWrapper {
             inner: Element::new(builder.inner),
@@ -214,12 +209,9 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
         renderer: &iced::Renderer,
         operation: &mut dyn Operation,
     ) {
-        self.inner.as_widget_mut().operate(
-            &mut tree.children[0],
-            layout,
-            renderer,
-            operation,
-        );
+        self.inner
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
     }
 
     fn update(
@@ -283,8 +275,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
         renderer: &iced::Renderer,
         viewport: &Rectangle,
         translation: Vector,
-    ) -> Option<iced::advanced::overlay::Element<'b, Message, Theme, iced::Renderer>>
-    {
+    ) -> Option<iced::advanced::overlay::Element<'b, Message, Theme, iced::Renderer>> {
         self.inner.as_widget_mut().overlay(
             &mut tree.children[0],
             layout,
@@ -418,8 +409,9 @@ mod tests {
     }
 
     fn make_wrapper<'a>() -> UndoableWrapper<'a, Msg> {
-        let builder: UndoableTextInput<'a, Msg> =
-            undoable_text_input("", "").on_undo(Msg::Undo).on_redo(Msg::Redo);
+        let builder: UndoableTextInput<'a, Msg> = undoable_text_input("", "")
+            .on_undo(Msg::Undo)
+            .on_redo(Msg::Redo);
         UndoableWrapper {
             inner: Element::new(builder.inner),
             on_undo: builder.on_undo,
@@ -430,11 +422,7 @@ mod tests {
     #[test]
     fn ctrl_z_triggers_undo() {
         let w = make_wrapper();
-        let event = make_key_event(
-            "z",
-            keyboard::key::Code::KeyZ,
-            keyboard::Modifiers::CTRL,
-        );
+        let event = make_key_event("z", keyboard::key::Code::KeyZ, keyboard::Modifiers::CTRL);
         assert_eq!(w.check_undo_redo(&event), Some(Msg::Undo));
     }
 
@@ -452,11 +440,7 @@ mod tests {
     #[test]
     fn ctrl_y_triggers_redo() {
         let w = make_wrapper();
-        let event = make_key_event(
-            "y",
-            keyboard::key::Code::KeyY,
-            keyboard::Modifiers::CTRL,
-        );
+        let event = make_key_event("y", keyboard::key::Code::KeyY, keyboard::Modifiers::CTRL);
         assert_eq!(w.check_undo_redo(&event), Some(Msg::Redo));
     }
 
@@ -468,22 +452,14 @@ mod tests {
             on_undo: None,
             on_redo: None,
         };
-        let event = make_key_event(
-            "z",
-            keyboard::key::Code::KeyZ,
-            keyboard::Modifiers::CTRL,
-        );
+        let event = make_key_event("z", keyboard::key::Code::KeyZ, keyboard::Modifiers::CTRL);
         assert_eq!(w.check_undo_redo(&event), None);
     }
 
     #[test]
     fn unrelated_key_returns_none() {
         let w = make_wrapper();
-        let event = make_key_event(
-            "a",
-            keyboard::key::Code::KeyA,
-            keyboard::Modifiers::CTRL,
-        );
+        let event = make_key_event("a", keyboard::key::Code::KeyA, keyboard::Modifiers::CTRL);
         assert_eq!(w.check_undo_redo(&event), None);
     }
 }

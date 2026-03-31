@@ -142,7 +142,9 @@ pub fn store_threads(
                 let param_refs: Vec<&dyn rusqlite::types::ToSql> =
                     params.iter().map(AsRef::as_ref).collect();
 
-                let mut stmt = tx.prepare(&sql).map_err(|e| format!("prepare old thread query: {e}"))?;
+                let mut stmt = tx
+                    .prepare(&sql)
+                    .map_err(|e| format!("prepare old thread query: {e}"))?;
                 let rows = stmt
                     .query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))
                     .map_err(|e| format!("query old thread ids: {e}"))?;
@@ -275,17 +277,14 @@ pub fn store_threads(
                     Option<String>,
                     Option<String>,
                 )> = addr_stmt
-                    .query_map(
-                        rusqlite::params![account_id, group.thread_id],
-                        |row| {
-                            Ok((
-                                row.get::<_, Option<String>>(0)?,
-                                row.get::<_, Option<String>>(1)?,
-                                row.get::<_, Option<String>>(2)?,
-                                row.get::<_, Option<String>>(3)?,
-                            ))
-                        },
-                    )
+                    .query_map(rusqlite::params![account_id, group.thread_id], |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                        ))
+                    })
                     .map_err(|e| format!("query addr: {e}"))?
                     .filter_map(Result::ok)
                     .collect();
@@ -302,7 +301,10 @@ pub fn store_threads(
                 }
             }
             super::persistence::maybe_update_chat_state(
-                &tx, account_id, &group.thread_id, &user_emails,
+                &tx,
+                account_id,
+                &group.thread_id,
+                &user_emails,
             )?;
 
             affected_thread_ids.push(group.thread_id.clone());

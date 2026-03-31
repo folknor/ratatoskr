@@ -164,12 +164,20 @@ fn extract_text_value(value: &VCardValue) -> Option<String> {
     match value {
         VCardValue::Text(s) => {
             let trimmed = s.trim().to_string();
-            if trimmed.is_empty() { None } else { Some(trimmed) }
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
         }
         VCardValue::Component(parts) => {
             let joined = parts.join(";");
             let trimmed = joined.trim().to_string();
-            if trimmed.is_empty() { None } else { Some(trimmed) }
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
         }
         _ => None,
     }
@@ -221,6 +229,9 @@ mod tests {
             last_name: Some("Smith".into()),
             ..Default::default()
         };
-        assert_eq!(contact.effective_display_name().as_deref(), Some("Alice Smith"));
+        assert_eq!(
+            contact.effective_display_name().as_deref(),
+            Some("Alice Smith")
+        );
     }
 }

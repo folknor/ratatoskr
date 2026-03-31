@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
+use search::{SearchDocument, SearchState};
 use store::attachment_cache::hash_bytes;
 use store::body_store::BodyStoreState;
 use store::inline_image_store::{InlineImage, MAX_INLINE_SIZE};
-use search::{SearchDocument, SearchState};
 
 use super::super::parse::ParsedJmapMessage;
 use super::SyncCtx;
@@ -44,7 +44,14 @@ pub(crate) async fn persist_messages(
                 .map_err(|e| format!("begin tx: {e}"))?;
             let user_emails = sync_persistence::query_user_emails(&tx)?;
             for (thread_id, msgs) in &thread_groups {
-                store_thread_to_db(&tx, &aid, thread_id, msgs, shared_mb_id.as_deref(), &user_emails)?;
+                store_thread_to_db(
+                    &tx,
+                    &aid,
+                    thread_id,
+                    msgs,
+                    shared_mb_id.as_deref(),
+                    &user_emails,
+                )?;
             }
             tx.commit().map_err(|e| format!("commit: {e}"))?;
             Ok(())
@@ -354,7 +361,9 @@ async fn store_inline_images(ctx: &SyncCtx<'_>, messages: &[ParsedJmapMessage]) 
     // Deduplicate blob IDs so each unique blob is downloaded once
     let mut unique_blobs: HashMap<String, String> = HashMap::new(); // blob_id -> mime_type
     for (_, blob_id, mime_type) in &eligible {
-        unique_blobs.entry(blob_id.clone()).or_insert_with(|| mime_type.clone());
+        unique_blobs
+            .entry(blob_id.clone())
+            .or_insert_with(|| mime_type.clone());
     }
 
     // Download unique blobs in parallel with bounded concurrency

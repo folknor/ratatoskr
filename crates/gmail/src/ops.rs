@@ -1,4 +1,4 @@
-use db::db::DbState;
+use async_trait::async_trait;
 use common::encoding::encode_base64url_nopad;
 use common::error::ProviderError;
 use common::ops::ProviderOps;
@@ -7,7 +7,7 @@ use common::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
     ProviderTestResult, SyncResult,
 };
-use async_trait::async_trait;
+use db::db::DbState;
 
 use super::client::GmailClient;
 
@@ -81,7 +81,11 @@ impl ProviderOps for GmailOps {
         Ok(())
     }
 
-    async fn permanent_delete(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn permanent_delete(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        thread_id: &str,
+    ) -> Result<(), ProviderError> {
         self.client.delete_thread(thread_id, ctx.db).await?;
         Ok(())
     }
@@ -189,7 +193,10 @@ impl ProviderOps for GmailOps {
             .send_message(&patched, thread_id, ctx.db)
             .await
             .map_err(|e| {
-                log::error!("[Gmail] Send email failed for account {}: {e}", ctx.account_id);
+                log::error!(
+                    "[Gmail] Send email failed for account {}: {e}",
+                    ctx.account_id
+                );
                 e
             })?;
         log::info!("[Gmail] Email sent successfully, message_id={}", msg.id);
@@ -223,7 +230,11 @@ impl ProviderOps for GmailOps {
         Ok(draft.id)
     }
 
-    async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), ProviderError> {
+    async fn delete_draft(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        draft_id: &str,
+    ) -> Result<(), ProviderError> {
         self.client.delete_draft(draft_id, ctx.db).await?;
         Ok(())
     }
@@ -292,7 +303,8 @@ impl ProviderOps for GmailOps {
         text_color: Option<&str>,
         bg_color: Option<&str>,
     ) -> Result<ProviderFolderMutation, ProviderError> {
-        let full_name = parent_id.map_or_else(|| name.to_string(), |p| format!("{}/{name}", p.as_str()));
+        let full_name =
+            parent_id.map_or_else(|| name.to_string(), |p| format!("{}/{name}", p.as_str()));
         let color = match (text_color, bg_color) {
             (Some(tc), Some(bc)) => Some((tc, bc)),
             _ => None,
@@ -342,12 +354,19 @@ impl ProviderOps for GmailOps {
         })
     }
 
-    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &FolderId) -> Result<(), ProviderError> {
+    async fn delete_folder(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        folder_id: &FolderId,
+    ) -> Result<(), ProviderError> {
         self.client.delete_label(folder_id.as_str(), ctx.db).await?;
         Ok(())
     }
 
-    async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, ProviderError> {
+    async fn test_connection(
+        &self,
+        ctx: &ProviderCtx<'_>,
+    ) -> Result<ProviderTestResult, ProviderError> {
         let profile = self.client.get_profile(ctx.db).await?;
         Ok(ProviderTestResult {
             success: true,
@@ -404,7 +423,9 @@ fn build_reaction_mime(
 
     // The reaction MIME part
     msg.push_str(&format!("--{boundary}\r\n"));
-    msg.push_str(&format!("Content-Type: {REACTION_MIME_TYPE}; charset=utf-8\r\n"));
+    msg.push_str(&format!(
+        "Content-Type: {REACTION_MIME_TYPE}; charset=utf-8\r\n"
+    ));
     msg.push_str("\r\n");
     msg.push_str(&payload);
     msg.push_str("\r\n");
@@ -454,7 +475,8 @@ pub async fn send_reaction(
         format!("Re: {original_subject}")
     };
 
-    let raw_bytes = build_reaction_mime(from, to, &subject, original_message_id, &references, emoji);
+    let raw_bytes =
+        build_reaction_mime(from, to, &subject, original_message_id, &references, emoji);
     let raw_b64url = encode_base64url_nopad(&raw_bytes);
 
     let msg = client

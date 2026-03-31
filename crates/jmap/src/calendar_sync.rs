@@ -5,10 +5,10 @@
 
 use std::collections::HashMap;
 
+use jmap_client::Get;
 use jmap_client::calendar::CalendarGet;
 use jmap_client::calendar_event::{CalendarEvent, CalendarEventGet, CalendarEventSet};
 use jmap_client::core::set::SetObject;
-use jmap_client::Get;
 
 use db::db::DbState;
 
@@ -163,12 +163,9 @@ pub async fn sync_events_delta(
         .map(|c| (c.remote_id.as_str(), c.local_id.as_str()))
         .collect();
 
-    let Some(mut since_state) =
-        load_calendar_sync_state(db, account_id, "CalendarEvent").await?
+    let Some(mut since_state) = load_calendar_sync_state(db, account_id, "CalendarEvent").await?
     else {
-        log::warn!(
-            "[JMAP] No CalendarEvent state for account {account_id} — running initial sync"
-        );
+        log::warn!("[JMAP] No CalendarEvent state for account {account_id} — running initial sync");
         return sync_all_events(client, account_id, calendars, db).await;
     };
 
@@ -363,10 +360,7 @@ pub async fn update_event_remote(
 }
 
 /// Delete a calendar event on the JMAP server.
-pub async fn delete_event_remote(
-    client: &JmapClient,
-    event_remote_id: &str,
-) -> Result<(), String> {
+pub async fn delete_event_remote(client: &JmapClient, event_remote_id: &str) -> Result<(), String> {
     let inner = client.inner();
     let mut request = inner.build();
     let req_account_id = request.default_account_id().to_string();
@@ -723,11 +717,7 @@ fn parse_jscalendar_times(event: &CalendarEvent<Get>) -> (i64, i64, bool) {
         None => return (0, 3600, is_all_day),
     };
 
-    let tz = event
-        .time_zone()
-        .as_value()
-        .copied()
-        .unwrap_or("UTC");
+    let tz = event.time_zone().as_value().copied().unwrap_or("UTC");
 
     let start_ts = if is_all_day {
         // All-day: parse as date only (e.g. "2025-03-15")
@@ -737,7 +727,9 @@ fn parse_jscalendar_times(event: &CalendarEvent<Get>) -> (i64, i64, bool) {
         parse_local_datetime(start_str, tz)
     };
 
-    let duration_str = event.duration().unwrap_or(if is_all_day { "P1D" } else { "PT1H" });
+    let duration_str = event
+        .duration()
+        .unwrap_or(if is_all_day { "P1D" } else { "PT1H" });
     let duration_secs = parse_iso8601_duration(duration_str);
 
     (start_ts, start_ts + duration_secs, is_all_day)
@@ -827,11 +819,7 @@ fn parse_iso8601_duration(s: &str) -> i64 {
 }
 
 /// Format Unix timestamps into JSCalendar start + duration strings.
-fn format_jscalendar_times(
-    start_time: i64,
-    end_time: i64,
-    is_all_day: bool,
-) -> (String, String) {
+fn format_jscalendar_times(start_time: i64, end_time: i64, is_all_day: bool) -> (String, String) {
     use chrono::TimeZone;
     let start_dt = chrono::Utc
         .timestamp_opt(start_time, 0)

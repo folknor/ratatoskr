@@ -3,9 +3,9 @@
 //! Public folders have no delta tokens — all sync is timestamp-based polling.
 //! Deletion detection is expensive (full ID scan) and throttled to once per hour.
 
-use db::db::DbState;
 use crate::ews::{EwsClient, EwsFolder, EwsHeaders, EwsItem};
 use crate::parse::parse_iso_datetime;
+use db::db::DbState;
 
 /// Result of syncing a single pinned public folder.
 #[derive(Debug, Default)]
@@ -43,7 +43,14 @@ async fn fetch_all_items(
 
     loop {
         let result = ews
-            .find_items(access_token, folder_id, since, offset, PAGE_SIZE, Some(headers))
+            .find_items(
+                access_token,
+                folder_id,
+                since,
+                offset,
+                PAGE_SIZE,
+                Some(headers),
+            )
             .await?;
 
         let batch_len: u32 = result
@@ -96,7 +103,10 @@ async fn load_sync_state(
 
         let result = stmt
             .query_row(rusqlite::params![account_id, folder_id], |row| {
-                Ok((row.get::<_, Option<i64>>("last_sync_timestamp")?, row.get::<_, Option<i64>>("last_full_scan_at")?))
+                Ok((
+                    row.get::<_, Option<i64>>("last_sync_timestamp")?,
+                    row.get::<_, Option<i64>>("last_full_scan_at")?,
+                ))
             })
             .ok();
 
@@ -283,10 +293,7 @@ async fn load_sync_depth_days(
 }
 
 /// Load all pinned folder IDs with sync_enabled = 1.
-async fn load_pinned_folder_ids(
-    db: &DbState,
-    account_id: &str,
-) -> Result<Vec<String>, String> {
+async fn load_pinned_folder_ids(db: &DbState, account_id: &str) -> Result<Vec<String>, String> {
     let account_id = account_id.to_string();
     db.with_conn(move |conn| {
         let mut stmt = conn
@@ -297,7 +304,9 @@ async fn load_pinned_folder_ids(
             .map_err(|e| format!("prepare load_pinned_folder_ids: {e}"))?;
 
         let rows = stmt
-            .query_map(rusqlite::params![account_id], |row| row.get::<_, String>("folder_id"))
+            .query_map(rusqlite::params![account_id], |row| {
+                row.get::<_, String>("folder_id")
+            })
             .map_err(|e| format!("query load_pinned_folder_ids: {e}"))?;
 
         let mut ids = Vec::new();
@@ -330,31 +339,20 @@ pub async fn sync_pinned_public_folder(
     // Determine the `since` filter for find_items
     let since_str = match last_sync_ts {
         Some(ts) => {
-            log::info!(
-                "Public folder {folder_id}: incremental sync from timestamp {ts}"
-            );
-            chrono::DateTime::from_timestamp(ts, 0)
-                .map(|dt| dt.to_rfc3339())
+            log::info!("Public folder {folder_id}: incremental sync from timestamp {ts}");
+            chrono::DateTime::from_timestamp(ts, 0).map(|dt| dt.to_rfc3339())
         }
         None => {
             let depth_days = load_sync_depth_days(db, account_id, folder_id).await?;
-            log::info!(
-                "Public folder {folder_id}: initial sync, looking back {depth_days} days"
-            );
+            log::info!("Public folder {folder_id}: initial sync, looking back {depth_days} days");
             let since = chrono::Utc::now() - chrono::Duration::days(i64::from(depth_days));
             Some(since.to_rfc3339())
         }
     };
 
     // Fetch items (new or changed since last sync)
-    let items = fetch_all_items(
-        ews,
-        access_token,
-        folder_id,
-        since_str.as_deref(),
-        headers,
-    )
-    .await?;
+    let items =
+        fetch_all_items(ews, access_token, folder_id, since_str.as_deref(), headers).await?;
 
     log::info!(
         "Public folder {folder_id}: fetched {} items from server",

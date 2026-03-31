@@ -53,9 +53,7 @@ pub(super) async fn resolve_graph_folder_id(
         && let Some(mapping) = folder_map.get_by_folder_id(&graph_folder_id)
         && mapping.label_type == "system"
     {
-        return Err(
-            "System folders cannot be renamed or deleted for Graph accounts.".to_string(),
-        );
+        return Err("System folders cannot be renamed or deleted for Graph accounts.".to_string());
     }
 
     Ok(graph_folder_id)
@@ -209,7 +207,11 @@ pub(super) async fn execute_batch(
                     .as_ref()
                     .map(ToString::to_string)
                     .unwrap_or_default();
-                log::error!("[Graph] Batch request {} failed with status {}: {detail}", resp.id, resp.status);
+                log::error!(
+                    "[Graph] Batch request {} failed with status {}: {detail}",
+                    resp.id,
+                    resp.status
+                );
                 return Err(format!(
                     "Batch request {} failed with status {}: {detail}",
                     resp.id, resp.status
@@ -275,9 +277,7 @@ pub(super) async fn batch_get_categories(
             })
             .collect();
 
-        let batch = BatchRequest {
-            requests: items,
-        };
+        let batch = BatchRequest { requests: items };
         let response = client.post_batch(&batch, ctx.db).await?;
 
         for resp in &response.responses {

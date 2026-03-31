@@ -210,10 +210,8 @@ pub(crate) async fn sync_exchange_groups(
                 let gid = group.id.clone();
                 let aid = account_id.to_string();
                 let members = result.members;
-                db.with_conn(move |conn| {
-                    persist_group_members(conn, &aid, &gid, &members)
-                })
-                .await?;
+                db.with_conn(move |conn| persist_group_members(conn, &aid, &gid, &members))
+                    .await?;
                 log::info!(
                     "Resolved {} members for group '{}' ({})",
                     result.resolved_count,
@@ -280,7 +278,12 @@ fn extract_member_email(member: &GraphGroupMember) -> Option<ResolvedGroupMember
         .mail
         .as_deref()
         .filter(|m| !m.is_empty())
-        .or_else(|| member.user_principal_name.as_deref().filter(|u| !u.is_empty()))?;
+        .or_else(|| {
+            member
+                .user_principal_name
+                .as_deref()
+                .filter(|u| !u.is_empty())
+        })?;
 
     Some(ResolvedGroupMember {
         email: email.to_lowercase(),
@@ -537,7 +540,12 @@ mod tests {
         assert_eq!(group.id, "abc-123");
         assert_eq!(group.display_name.as_deref(), Some("Test Group"));
         assert_eq!(group.mail.as_deref(), Some("test@example.com"));
-        assert!(group.group_types.as_ref().map_or(false, |t| t.contains(&"Unified".to_string())));
+        assert!(
+            group
+                .group_types
+                .as_ref()
+                .map_or(false, |t| t.contains(&"Unified".to_string()))
+        );
         assert_eq!(group.mail_enabled, Some(true));
         assert_eq!(group.security_enabled, Some(false));
     }

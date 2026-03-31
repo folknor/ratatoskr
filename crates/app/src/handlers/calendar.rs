@@ -4,8 +4,8 @@ use chrono::{Datelike, NaiveDate, Timelike};
 use iced::Task;
 
 use crate::ui::calendar::{
-    AttendeeEntry, CalendarEventData, CalendarMessage, CalendarOverlay, EventField,
-    EventTextField, ReminderEntry,
+    AttendeeEntry, CalendarEventData, CalendarMessage, CalendarOverlay, EventField, EventTextField,
+    ReminderEntry,
 };
 use crate::{App, Message};
 
@@ -64,14 +64,14 @@ impl App {
                         let Some(ev) = ev else {
                             return Err(format!("Event not found: {event_id}"));
                         };
-                        let attendees = db.get_event_attendees(
-                            ev.account_id.clone(),
-                            ev.id.clone(),
-                        ).await.unwrap_or_default();
-                        let reminders = db.get_event_reminders(
-                            ev.account_id.clone(),
-                            ev.id.clone(),
-                        ).await.unwrap_or_default();
+                        let attendees = db
+                            .get_event_attendees(ev.account_id.clone(), ev.id.clone())
+                            .await
+                            .unwrap_or_default();
+                        let reminders = db
+                            .get_event_reminders(ev.account_id.clone(), ev.id.clone())
+                            .await
+                            .unwrap_or_default();
                         let mut data = db_event_to_calendar_data(&ev);
                         data.attendees = attendees;
                         data.reminders = reminders;
@@ -87,8 +87,7 @@ impl App {
             CalendarMessage::EventLoaded(result) => {
                 match result {
                     Ok(data) => {
-                        self.calendar.overlay =
-                            CalendarOverlay::EventDetail { event: data };
+                        self.calendar.overlay = CalendarOverlay::EventDetail { event: data };
                     }
                     Err(e) => {
                         log::error!("Failed to load calendar event: {e}");
@@ -99,7 +98,12 @@ impl App {
             }
             CalendarMessage::CloseOverlay => {
                 // Check for unsaved changes in the editor.
-                if let CalendarOverlay::EventEditor { ref event, ref original_title, .. } = self.calendar.overlay {
+                if let CalendarOverlay::EventEditor {
+                    ref event,
+                    ref original_title,
+                    ..
+                } = self.calendar.overlay
+                {
                     if event.title != *original_title
                         || !event.description.is_empty()
                         || !event.location.is_empty()
@@ -136,8 +140,11 @@ impl App {
                 };
                 self.calendar.reset_editor_undo(&event);
                 let original_title = event.title.clone();
-                self.calendar.overlay =
-                    CalendarOverlay::EventEditor { event, is_new, original_title };
+                self.calendar.overlay = CalendarOverlay::EventEditor {
+                    event,
+                    is_new,
+                    original_title,
+                };
                 Task::none()
             }
             CalendarMessage::CreateEvent => {
@@ -180,8 +187,10 @@ impl App {
                 Task::none()
             }
             CalendarMessage::ConfirmDeleteEvent(id, title) => {
-                self.calendar.overlay =
-                    CalendarOverlay::ConfirmDelete { event_id: id, title };
+                self.calendar.overlay = CalendarOverlay::ConfirmDelete {
+                    event_id: id,
+                    title,
+                };
                 Task::none()
             }
             CalendarMessage::DeleteEvent(event_id) => {
@@ -212,10 +221,8 @@ impl App {
                 self.calendar.overlay = CalendarOverlay::None;
                 Task::perform(
                     async move {
-                        let outcome = cal::actions::delete_calendar_event(
-                            &ctx, &account_id, &event_id,
-                        )
-                        .await;
+                        let outcome =
+                            cal::actions::delete_calendar_event(&ctx, &account_id, &event_id).await;
                         calendar_outcome_to_result(outcome)
                     },
                     |r| Message::Calendar(Box::new(CalendarMessage::EventDeleted(r))),
@@ -239,9 +246,10 @@ impl App {
             }
             CalendarMessage::PopOutCalendar => {
                 // Check if a calendar pop-out already exists.
-                let existing = self.pop_out_windows.values().any(|w| {
-                    matches!(w, crate::pop_out::PopOutWindow::Calendar)
-                });
+                let existing = self
+                    .pop_out_windows
+                    .values()
+                    .any(|w| matches!(w, crate::pop_out::PopOutWindow::Calendar));
                 if existing {
                     // Bring existing pop-out to foreground.
                     // (iced doesn't have a bring-to-front API, so this is a no-op for now)
@@ -253,7 +261,8 @@ impl App {
                     ..Default::default()
                 };
                 let (id, open_task) = iced::window::open(settings);
-                self.pop_out_windows.insert(id, crate::pop_out::PopOutWindow::Calendar);
+                self.pop_out_windows
+                    .insert(id, crate::pop_out::PopOutWindow::Calendar);
                 // Switch main window back to mail mode.
                 self.app_mode = crate::AppMode::Mail;
                 open_task.discard()
@@ -277,15 +286,18 @@ impl App {
             }
             CalendarMessage::ToggleCalendarVisibility(calendar_id, visible) => {
                 // Update local state immediately for responsiveness.
-                if let Some(cal) = self.calendar.calendars.iter_mut().find(|c| c.id == calendar_id) {
+                if let Some(cal) = self
+                    .calendar
+                    .calendars
+                    .iter_mut()
+                    .find(|c| c.id == calendar_id)
+                {
                     cal.is_visible = visible;
                 }
                 // Persist to DB and reload events.
                 let db = Arc::clone(&self.db);
                 Task::perform(
-                    async move {
-                        db.set_calendar_visibility(calendar_id, visible).await
-                    },
+                    async move { db.set_calendar_visibility(calendar_id, visible).await },
                     |_| Message::Calendar(Box::new(CalendarMessage::EventSaved(Ok(())))),
                 )
             }
@@ -404,9 +416,7 @@ impl App {
         let account_id = event
             .account_id
             .clone()
-            .or_else(|| {
-                self.sidebar.accounts.first().map(|a| a.id.clone())
-            })
+            .or_else(|| self.sidebar.accounts.first().map(|a| a.id.clone()))
             .unwrap_or_default();
 
         let input = cal::actions::CalendarEventInput {
@@ -426,10 +436,7 @@ impl App {
             let aid = account_id.clone();
             Task::perform(
                 async move {
-                    let outcome = cal::actions::update_calendar_event(
-                        &ctx, &aid, &id, input,
-                    )
-                    .await;
+                    let outcome = cal::actions::update_calendar_event(&ctx, &aid, &id, input).await;
                     calendar_outcome_to_result(outcome)
                 },
                 |r| Message::Calendar(Box::new(CalendarMessage::EventSaved(r))),
@@ -439,10 +446,8 @@ impl App {
             let aid = account_id.clone();
             Task::perform(
                 async move {
-                    let outcome = cal::actions::create_calendar_event(
-                        &ctx, &aid, &cal_id, input,
-                    )
-                    .await;
+                    let outcome =
+                        cal::actions::create_calendar_event(&ctx, &aid, &cal_id, input).await;
                     calendar_outcome_to_result(outcome)
                 },
                 |r| Message::Calendar(Box::new(CalendarMessage::EventSaved(r))),
@@ -461,11 +466,18 @@ impl App {
         Task::batch([
             Task::perform(
                 async move { db.load_calendar_events_for_view().await },
-                move |r| Message::Calendar(Box::new(CalendarMessage::EventsLoaded(load_generation, r))),
+                move |r| {
+                    Message::Calendar(Box::new(CalendarMessage::EventsLoaded(load_generation, r)))
+                },
             ),
             Task::perform(
                 async move { db2.load_calendars_for_sidebar().await },
-                move |r| Message::Calendar(Box::new(CalendarMessage::CalendarsLoaded(load_generation, r))),
+                move |r| {
+                    Message::Calendar(Box::new(CalendarMessage::CalendarsLoaded(
+                        load_generation,
+                        r,
+                    )))
+                },
             ),
         ])
     }
@@ -475,9 +487,7 @@ impl App {
 ///
 /// LocalOnly maps to Ok(()) — the event is visible locally, the overlay closes.
 /// Phase 3 can add richer outcome reporting for the "saved locally, not synced" case.
-fn calendar_outcome_to_result(
-    outcome: rtsk::actions::ActionOutcome,
-) -> Result<(), String> {
+fn calendar_outcome_to_result(outcome: rtsk::actions::ActionOutcome) -> Result<(), String> {
     match outcome {
         rtsk::actions::ActionOutcome::Success
         | rtsk::actions::ActionOutcome::NoOp
@@ -489,12 +499,8 @@ fn calendar_outcome_to_result(
 /// Convert a CalendarEvent from the DB to CalendarEventData for the UI.
 fn db_event_to_calendar_data(ev: &crate::db::CalendarEvent) -> CalendarEventData {
     use chrono::TimeZone;
-    let start_dt = chrono::Local
-        .timestamp_opt(ev.start_time, 0)
-        .single();
-    let end_dt = chrono::Local
-        .timestamp_opt(ev.end_time, 0)
-        .single();
+    let start_dt = chrono::Local.timestamp_opt(ev.start_time, 0).single();
+    let end_dt = chrono::Local.timestamp_opt(ev.end_time, 0).single();
 
     let (date, sh, sm) = match start_dt {
         Some(dt) => (dt.date_naive(), dt.time().hour(), dt.time().minute()),

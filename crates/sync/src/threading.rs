@@ -212,7 +212,10 @@ pub fn build_threads(messages: &[ThreadableMessage]) -> Vec<ThreadGroup> {
         return Vec::new();
     }
 
-    log::debug!("Building threads from {} messages (JWZ algorithm)", messages.len());
+    log::debug!(
+        "Building threads from {} messages (JWZ algorithm)",
+        messages.len()
+    );
 
     let mut arena = Arena::new();
 
@@ -328,7 +331,10 @@ pub fn build_threads(messages: &[ThreadableMessage]) -> Vec<ThreadGroup> {
         });
     }
 
-    log::debug!("JWZ threading produced {} thread groups", thread_groups.len());
+    log::debug!(
+        "JWZ threading produced {} thread groups",
+        thread_groups.len()
+    );
 
     thread_groups
 }

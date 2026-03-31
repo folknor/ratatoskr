@@ -29,7 +29,8 @@ pub fn execute_smart_folder_query(
     let query = migrate_legacy_tokens(params.query);
     let parsed = parse_query(&query);
     log::debug!("Smart folder query parsed: {parsed:?}");
-    let result = sql_builder::query_threads(conn, &parsed, params.scope, params.limit, params.offset);
+    let result =
+        sql_builder::query_threads(conn, &parsed, params.scope, params.limit, params.offset);
     if let Err(ref e) = result {
         log::error!("Smart folder query execution failed: {e}");
     }

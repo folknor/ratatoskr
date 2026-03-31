@@ -493,13 +493,12 @@ pub fn is_known_jmap_provider(domain: &str) -> bool {
 /// the provider.
 pub fn oauth_config_for_provider(provider_id: &str) -> Option<AuthMethod> {
     // Check well-known OAuth constants first.
-    let well_known: &[&RegistryAuth] = &[
-        &GOOGLE_OAUTH,
-        &MICROSOFT_IMAP_OAUTH,
-        &YAHOO_OAUTH,
-    ];
+    let well_known: &[&RegistryAuth] = &[&GOOGLE_OAUTH, &MICROSOFT_IMAP_OAUTH, &YAHOO_OAUTH];
     for auth in well_known {
-        if let RegistryAuth::OAuth2 { provider_id: pid, .. } = auth {
+        if let RegistryAuth::OAuth2 {
+            provider_id: pid, ..
+        } = auth
+        {
             if *pid == provider_id {
                 return Some(auth_method_from_registry(auth));
             }

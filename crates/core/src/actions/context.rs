@@ -37,7 +37,10 @@ impl ActionContext {
     /// the thread is already in flight. The guard removes the key on drop.
     pub fn try_acquire_flight(&self, account_id: &str, thread_id: &str) -> Option<FlightGuard> {
         let key = format!("{account_id}:{thread_id}");
-        let mut set = self.in_flight.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut set = self
+            .in_flight
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         if set.insert(key.clone()) {
             Some(FlightGuard {
                 set: Arc::clone(&self.in_flight),
@@ -50,9 +53,15 @@ impl ActionContext {
 
     /// Verify that a thread exists in the database. Returns `Ok(())` if it does,
     /// or `Err(ActionError::NotFound)` if it doesn't.
-    pub fn verify_thread_exists(&self, account_id: &str, thread_id: &str) -> Result<(), super::outcome::ActionError> {
+    pub fn verify_thread_exists(
+        &self,
+        account_id: &str,
+        thread_id: &str,
+    ) -> Result<(), super::outcome::ActionError> {
         let conn = self.db.conn();
-        let conn = conn.lock().map_err(|e| super::outcome::ActionError::db(format!("db lock: {e}")))?;
+        let conn = conn
+            .lock()
+            .map_err(|e| super::outcome::ActionError::db(format!("db lock: {e}")))?;
         let exists: bool = conn
             .query_row(
                 "SELECT COUNT(*) FROM threads WHERE account_id = ?1 AND id = ?2",

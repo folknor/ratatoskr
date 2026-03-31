@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Color, Element, Length, Padding, Task};
 
 use crate::component::Component;
@@ -97,7 +97,10 @@ pub enum ThreadListMessage {
     /// Navigate typeahead suggestions up or down.
     TypeaheadNavigate(TypeaheadDirection),
     /// Typeahead suggestion items loaded from async query (carries generation).
-    TypeaheadItemsLoaded(rtsk::generation::GenerationToken<rtsk::generation::Typeahead>, Vec<TypeaheadItem>),
+    TypeaheadItemsLoaded(
+        rtsk::generation::GenerationToken<rtsk::generation::Typeahead>,
+        Vec<TypeaheadItem>,
+    ),
     /// User selected a typeahead suggestion by index.
     TypeaheadSelect(usize),
     /// Dismiss the typeahead dropdown.
@@ -126,7 +129,10 @@ pub enum ThreadListEvent {
     /// Batch action: apply email action to all selected thread indices.
     BatchAction(Vec<usize>),
     /// Typeahead operator query needs async data.
-    TypeaheadQuery { operator: String, partial_value: String },
+    TypeaheadQuery {
+        operator: String,
+        partial_value: String,
+    },
     /// User selected a typeahead suggestion.
     TypeaheadSelected(usize),
     /// Search undo requested.
@@ -217,8 +223,7 @@ impl ThreadList {
         if self.selected_threads.is_empty() {
             self.selected_thread.into_iter().collect()
         } else {
-            let mut indices: Vec<usize> =
-                self.selected_threads.iter().copied().collect();
+            let mut indices: Vec<usize> = self.selected_threads.iter().copied().collect();
             indices.sort_unstable();
             indices
         }
@@ -402,12 +407,11 @@ impl Component for ThreadList {
                 let event = self.auto_advance();
                 (Task::none(), event)
             }
-            ThreadListMessage::SearchInput(query) => {
-                (Task::none(), Some(ThreadListEvent::SearchQueryChanged(query)))
-            }
-            ThreadListMessage::SearchSubmit => {
-                (Task::none(), Some(ThreadListEvent::SearchExecute))
-            }
+            ThreadListMessage::SearchInput(query) => (
+                Task::none(),
+                Some(ThreadListEvent::SearchQueryChanged(query)),
+            ),
+            ThreadListMessage::SearchSubmit => (Task::none(), Some(ThreadListEvent::SearchExecute)),
             ThreadListMessage::SelectNext => {
                 let event = self.select_next();
                 (Task::none(), event)
@@ -509,15 +513,11 @@ impl Component for ThreadList {
             thread_list_body(self)
         };
 
-        container(
-            column![header, body]
-                .spacing(0)
-                .width(Length::Fill),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(theme::ContainerClass::Base.style())
-        .into()
+        container(column![header, body].spacing(0).width(Length::Fill))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(theme::ContainerClass::Base.style())
+            .into()
     }
 }
 
@@ -554,13 +554,9 @@ fn thread_list_header<'a>(
         .padding(0)
         .style(theme::ButtonClass::Ghost.style());
 
-        row![
-            count_text,
-            Space::new().width(Length::Fill),
-            deselect_link,
-        ]
-        .align_y(iced::Alignment::Center)
-        .into()
+        row![count_text, Space::new().width(Length::Fill), deselect_link,]
+            .align_y(iced::Alignment::Center)
+            .into()
     } else {
         match mode {
             ThreadListMode::Folder => row![
@@ -588,13 +584,9 @@ fn thread_list_header<'a>(
                 .padding(0)
                 .style(theme::ButtonClass::Ghost.style());
 
-                row![
-                    results_text,
-                    Space::new().width(Length::Fill),
-                    all_link,
-                ]
-                .align_y(iced::Alignment::Center)
-                .into()
+                row![results_text, Space::new().width(Length::Fill), all_link,]
+                    .align_y(iced::Alignment::Center)
+                    .into()
             }
         }
     };
@@ -611,11 +603,9 @@ fn thread_list_header<'a>(
             } else {
                 theme::ButtonClass::Action
             };
-            let mut item_row = row![
-                text(&item.label).size(TEXT_SM),
-            ]
-            .spacing(SPACE_XS)
-            .align_y(iced::Alignment::Center);
+            let mut item_row = row![text(&item.label).size(TEXT_SM),]
+                .spacing(SPACE_XS)
+                .align_y(iced::Alignment::Center);
             if let Some(ref detail) = item.detail {
                 item_row = item_row.push(
                     text(detail)
@@ -642,9 +632,7 @@ fn thread_list_header<'a>(
         );
     }
 
-    container(header_col)
-    .padding(PAD_PANEL_HEADER)
-    .into()
+    container(header_col).padding(PAD_PANEL_HEADER).into()
 }
 
 fn thread_list_body(state: &ThreadList) -> Element<'_, ThreadListMessage> {

@@ -216,11 +216,10 @@ impl SearchState {
             })?
         } else {
             log::info!("Creating new search index");
-            Index::create_in_dir(&index_dir, schema.clone())
-                .map_err(|e| {
-                    log::error!("Failed to create search index: {e}");
-                    format!("create index: {e}")
-                })?
+            Index::create_in_dir(&index_dir, schema.clone()).map_err(|e| {
+                log::error!("Failed to create search index: {e}");
+                format!("create index: {e}")
+            })?
         };
 
         let reader = index
@@ -360,9 +359,7 @@ impl SearchState {
         let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
 
         // Filter by account IDs (None = all accounts)
-        if let Some(filter) =
-            self.build_account_filter(params.account_ids.as_deref())
-        {
+        if let Some(filter) = self.build_account_filter(params.account_ids.as_deref()) {
             clauses.push((Occur::Must, filter));
         }
 
@@ -412,8 +409,7 @@ impl SearchState {
         // to → OR across all to values
         if !params.to.is_empty() {
             let mut to_clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
-            let to_qp =
-                QueryParser::for_index(searcher.index(), vec![self.fields.to_addresses]);
+            let to_qp = QueryParser::for_index(searcher.index(), vec![self.fields.to_addresses]);
             for to_val in &params.to {
                 if to_val.is_empty() {
                     continue;
@@ -621,7 +617,11 @@ pub fn group_by_thread(results: Vec<SearchResult>) -> Vec<SearchResult> {
     }
 
     let mut grouped: Vec<SearchResult> = best.into_values().collect();
-    grouped.sort_by(|a, b| b.rank.partial_cmp(&a.rank).unwrap_or(std::cmp::Ordering::Equal));
+    grouped.sort_by(|a, b| {
+        b.rank
+            .partial_cmp(&a.rank)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     grouped
 }
 

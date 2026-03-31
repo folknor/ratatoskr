@@ -1,6 +1,6 @@
 use super::super::DbState;
 use super::dynamic_update;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 /// Parameters for creating a new account.
 #[derive(Debug, Clone)]
@@ -54,7 +54,11 @@ pub fn create_account_sync(
     conn: &Connection,
     params: &CreateAccountParams,
 ) -> Result<String, String> {
-    log::info!("Creating account: email={}, provider={}", params.email, params.provider);
+    log::info!(
+        "Creating account: email={}, provider={}",
+        params.email,
+        params.provider
+    );
     let id = uuid::Uuid::new_v4().to_string();
     // Determine sort_order: one past the current maximum
     let max_sort: i64 = conn
@@ -122,10 +126,7 @@ pub fn create_account_sync(
 }
 
 /// Synchronous duplicate-email check — callable from any `&Connection`.
-pub fn account_exists_by_email_sync(
-    conn: &Connection,
-    email: &str,
-) -> Result<bool, String> {
+pub fn account_exists_by_email_sync(conn: &Connection, email: &str) -> Result<bool, String> {
     let count: i64 = conn
         .query_row(
             "SELECT COUNT(*) AS cnt FROM accounts WHERE email = ?1",
@@ -186,11 +187,11 @@ pub async fn db_update_account(
 ) -> Result<(), String> {
     log::info!("Updating account: id={id}");
     db.with_conn(move |conn| update_account_sync(conn, &id, params))
-    .await
-    .map_err(|e| {
-        log::error!("Failed to update account: {e}");
-        e
-    })
+        .await
+        .map_err(|e| {
+            log::error!("Failed to update account: {e}");
+            e
+        })
 }
 
 /// Update only the account color.
@@ -211,11 +212,7 @@ pub async fn db_update_account_color(
 }
 
 /// Update only the account name.
-pub async fn db_update_account_name(
-    db: &DbState,
-    id: String,
-    name: String,
-) -> Result<(), String> {
+pub async fn db_update_account_name(db: &DbState, id: String, name: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute(
             "UPDATE accounts SET account_name = ?1 WHERE id = ?2",
@@ -239,7 +236,8 @@ pub async fn db_update_account_sort_order(
                 .prepare("UPDATE accounts SET sort_order = ?1 WHERE id = ?2")
                 .map_err(|e| e.to_string())?;
             for (id, order) in &updates {
-                stmt.execute(params![order, id]).map_err(|e| e.to_string())?;
+                stmt.execute(params![order, id])
+                    .map_err(|e| e.to_string())?;
             }
         }
         tx.commit().map_err(|e| e.to_string())?;
@@ -336,10 +334,7 @@ pub fn get_account_auth_info_sync(
 }
 
 /// Check whether an account with the given email already exists.
-pub async fn db_account_exists_by_email(
-    db: &DbState,
-    email: String,
-) -> Result<bool, String> {
+pub async fn db_account_exists_by_email(db: &DbState, email: String) -> Result<bool, String> {
     db.with_conn(move |conn| account_exists_by_email_sync(conn, &email))
         .await
 }

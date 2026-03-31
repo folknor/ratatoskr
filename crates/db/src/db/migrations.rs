@@ -12,11 +12,10 @@ struct Migration {
 // delete it and re-seed (run_all will detect stale DBs and error).
 //
 // Future migrations go here as version 2, 3, etc.
-static MIGRATIONS: &[Migration] = &[
-    Migration {
-        version: 100,
-        description: "Initial schema (collapsed from v1-v80)",
-        sql: r#"
+static MIGRATIONS: &[Migration] = &[Migration {
+    version: 100,
+    description: "Initial schema (collapsed from v1-v80)",
+    sql: r#"
 
 -- ── Core ────────────────────────────────────────────────────
 
@@ -1080,8 +1079,7 @@ CREATE INDEX IF NOT EXISTS idx_pending_ops_status ON pending_operations(status, 
 CREATE INDEX IF NOT EXISTS idx_pending_ops_resource ON pending_operations(account_id, resource_id);
 
     "#,
-    },
-];
+}];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks
 /// (e.g. inside CREATE TRIGGER).
@@ -1279,7 +1277,11 @@ mod tests {
 
         // Verify latest migration recorded
         let max_ver: u32 = conn
-            .query_row("SELECT MAX(version) AS max_ver FROM _migrations", [], |row| row.get("max_ver"))
+            .query_row(
+                "SELECT MAX(version) AS max_ver FROM _migrations",
+                [],
+                |row| row.get("max_ver"),
+            )
             .expect("query");
         let expected = MIGRATIONS.last().expect("at least one migration").version;
         assert_eq!(max_ver, expected);

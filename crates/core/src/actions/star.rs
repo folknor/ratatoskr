@@ -10,14 +10,21 @@ use crate::db::queries::set_thread_starred;
 use crate::progress::NoopProgressReporter;
 
 /// Local DB mutation for star. Returns true if state changed.
-pub(crate) async fn star_local(ctx: &ActionContext, account_id: &str, thread_id: &str, starred: bool) -> Result<bool, ActionError> {
+pub(crate) async fn star_local(
+    ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+    starred: bool,
+) -> Result<bool, ActionError> {
     let ctx_clone = ctx.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
     tokio::task::spawn_blocking(move || {
         ctx_clone.verify_thread_exists(&aid, &tid)?;
         let conn = ctx_clone.db.conn();
-        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+        let conn = conn
+            .lock()
+            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         set_thread_starred(&conn, &aid, &tid, starred)
             .map(|n| n > 0)
             .map_err(ActionError::db)
@@ -50,7 +57,10 @@ async fn star_dispatch(
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             let msg = e.to_string();
-            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
+            ActionOutcome::LocalOnly {
+                reason: ActionError::remote(msg),
+                retryable: true,
+            }
         }
     };
     enqueue_if_retryable(ctx, &outcome, account_id, "star", thread_id, &params_json).await;
@@ -81,7 +91,10 @@ pub async fn star(
     match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(provider) => star_dispatch(ctx, &*provider, account_id, thread_id, starred).await,
         Err(e) => {
-            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            let outcome = ActionOutcome::LocalOnly {
+                reason: ActionError::remote(e),
+                retryable: true,
+            };
             enqueue_if_retryable(ctx, &outcome, account_id, "star", thread_id, &params_json).await;
             mlog.emit(&outcome);
             outcome

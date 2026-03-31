@@ -33,4 +33,4 @@ pub use rules::EditAction;
 pub use undo::UndoStack;
 
 #[cfg(feature = "widget")]
-pub use widget::{rich_text_editor, Action, EditorState, RichTextEditor};
+pub use widget::{Action, EditorState, RichTextEditor, rich_text_editor};

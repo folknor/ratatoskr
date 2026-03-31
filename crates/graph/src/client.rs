@@ -5,10 +5,10 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::sync::{Mutex, RwLock, Semaphore};
 
-use db::db::DbState;
 use common::crypto;
 use common::http::{self, RetryConfig};
 use common::token::{self, TokenState};
+use db::db::DbState;
 
 use super::folder_mapper::FolderMap;
 
@@ -462,11 +462,8 @@ impl GraphClient {
                 break;
             }
 
-            let delay_ms = common::http::compute_retry_delay(
-                last_response.as_ref(),
-                attempt,
-                &RETRY_CONFIG,
-            );
+            let delay_ms =
+                common::http::compute_retry_delay(last_response.as_ref(), attempt, &RETRY_CONFIG);
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         }
 
@@ -498,13 +495,10 @@ impl GraphClient {
             builder = builder.json(b);
         }
 
-        builder
-            .send()
-            .await
-            .map_err(|e| {
-                log::error!("[Graph] HTTP request failed: {method} {url}: {e}");
-                format!("Graph API request failed: {e}")
-            })
+        builder.send().await.map_err(|e| {
+            log::error!("[Graph] HTTP request failed: {method} {url}: {e}");
+            format!("Graph API request failed: {e}")
+        })
     }
 
     /// Get a valid access token, refreshing if needed.
@@ -542,7 +536,10 @@ impl GraphClient {
             }
         }
 
-        log::info!("[Graph] Refreshing OAuth token for account {}", self.inner.account_id);
+        log::info!(
+            "[Graph] Refreshing OAuth token for account {}",
+            self.inner.account_id
+        );
         let refresh_token = self.inner.token.read().await.refresh_token.clone();
 
         let result = token::refresh_oauth_token(
@@ -735,9 +732,6 @@ mod tests {
         assert_eq!(msg_path, "/users/shared%40example.com/messages/ABC123");
 
         let folder_path = format!("{prefix}/mailFolders/inbox");
-        assert_eq!(
-            folder_path,
-            "/users/shared%40example.com/mailFolders/inbox"
-        );
+        assert_eq!(folder_path, "/users/shared%40example.com/mailFolders/inbox");
     }
 }

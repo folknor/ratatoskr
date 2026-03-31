@@ -6,12 +6,12 @@
 //! all API paths use `client.api_path_prefix()` and delta token routing is
 //! handled by the wrapper functions in `sync.rs`.
 
-use store::body_store::BodyStoreState;
-use db::db::DbState;
-use store::inline_image_store::InlineImageStoreState;
-use db::progress::ProgressReporter;
 use common::types::{ProviderCtx, SyncResult};
+use db::db::DbState;
+use db::progress::ProgressReporter;
 use search::SearchState;
+use store::body_store::BodyStoreState;
+use store::inline_image_store::InlineImageStoreState;
 use sync::state as sync_state;
 
 use super::client::GraphClient;
@@ -48,15 +48,12 @@ pub async fn sync_shared_mailbox(
     };
 
     // Check if we have any delta tokens for this mailbox — if not, run initial sync.
-    let tokens =
-        sync_state::load_shared_mailbox_delta_tokens(db, account_id, mailbox_id).await?;
+    let tokens = sync_state::load_shared_mailbox_delta_tokens(db, account_id, mailbox_id).await?;
 
     let now = chrono::Utc::now().timestamp();
 
     if tokens.is_empty() {
-        log::info!(
-            "Shared mailbox {mailbox_id}: no delta tokens found, running initial sync"
-        );
+        log::info!("Shared mailbox {mailbox_id}: no delta tokens found, running initial sync");
         match graph_initial_sync(&scoped_client, &ctx, SHARED_MAILBOX_INITIAL_SYNC_DAYS).await {
             Ok(()) => {
                 sync_state::update_shared_mailbox_sync_status(
@@ -140,10 +137,7 @@ pub async fn sync_all_shared_mailboxes(
     let mut results = Vec::with_capacity(enabled.len());
 
     for entry in &enabled {
-        let display = entry
-            .display_name
-            .as_deref()
-            .unwrap_or(&entry.mailbox_id);
+        let display = entry.display_name.as_deref().unwrap_or(&entry.mailbox_id);
         log::info!("Starting sync for shared mailbox: {display}");
 
         let result = sync_shared_mailbox(
@@ -229,9 +223,6 @@ mod tests {
 
         // The api_path_prefix determines which mailbox API calls target
         assert_eq!(primary.api_path_prefix(), "/me");
-        assert_eq!(
-            shared.api_path_prefix(),
-            "/users/shared%40example.com"
-        );
+        assert_eq!(shared.api_path_prefix(), "/users/shared%40example.com");
     }
 }

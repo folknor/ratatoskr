@@ -11,10 +11,10 @@ pub fn inject_read_receipt_header(raw: &[u8]) -> Vec<u8> {
     let header_block = raw_str
         .split_once("\r\n\r\n")
         .map_or(raw_str.as_ref(), |(headers, _)| headers);
-    if header_block
-        .lines()
-        .any(|line| line.to_ascii_lowercase().starts_with("disposition-notification-to:"))
-    {
+    if header_block.lines().any(|line| {
+        line.to_ascii_lowercase()
+            .starts_with("disposition-notification-to:")
+    }) {
         return raw.to_vec();
     }
 
@@ -26,7 +26,9 @@ pub fn inject_read_receipt_header(raw: &[u8]) -> Vec<u8> {
         let value = line["from:".len()..].trim();
         // Extract email from "Name <email>" or bare "email" format
         if let Some(start) = value.rfind('<') {
-            value[start + 1..].find('>').map(|end| &value[start + 1..start + 1 + end])
+            value[start + 1..]
+                .find('>')
+                .map(|end| &value[start + 1..start + 1 + end])
         } else {
             Some(value)
         }
@@ -38,10 +40,7 @@ pub fn inject_read_receipt_header(raw: &[u8]) -> Vec<u8> {
 
     // Find header/body separator and inject before it
     let separator = b"\r\n\r\n";
-    let Some(pos) = raw
-        .windows(separator.len())
-        .position(|w| w == separator)
-    else {
+    let Some(pos) = raw.windows(separator.len()).position(|w| w == separator) else {
         return raw.to_vec();
     };
 

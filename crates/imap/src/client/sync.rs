@@ -76,7 +76,8 @@ pub async fn delta_check_folders(
 
         // CONDSTORE fast path: if server's HIGHESTMODSEQ matches our cached
         // value, nothing changed (no new messages, no flag changes, no deletions).
-        let modseq_unchanged = !modseq_reset && matches!((req.last_modseq, server_modseq), (Some(cached), Some(server)) if cached == server);
+        let modseq_unchanged = !modseq_reset
+            && matches!((req.last_modseq, server_modseq), (Some(cached), Some(server)) if cached == server);
 
         if modseq_unchanged {
             log::debug!(

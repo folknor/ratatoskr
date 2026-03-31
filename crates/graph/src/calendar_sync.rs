@@ -278,10 +278,7 @@ pub async fn graph_list_calendars(
         .value
         .into_iter()
         .map(|cal| {
-            let color = cal
-                .color
-                .as_deref()
-                .and_then(category_color_to_hex);
+            let color = cal.color.as_deref().and_then(category_color_to_hex);
             GraphCalendarInfo {
                 remote_id: cal.id,
                 display_name: cal.name,
@@ -379,11 +376,7 @@ pub async fn graph_create_event(
     let me = client.api_path_prefix();
     let enc_cal_id = urlencoding::encode(calendar_remote_id);
     let response: GraphEvent = client
-        .post(
-            &format!("{me}/calendars/{enc_cal_id}/events"),
-            event,
-            db,
-        )
+        .post(&format!("{me}/calendars/{enc_cal_id}/events"), event, db)
         .await?;
     map_graph_event(response)
 }

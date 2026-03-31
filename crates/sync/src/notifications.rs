@@ -3,10 +3,10 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::Connection;
 
 use crate::categorization::AiCategorizationCandidate;
-use db::db::queries::load_recent_rule_categorized_threads;
-use db::db::DbState;
 use crate::filters::FilterableMessage;
 use crate::types::NotificationCandidate;
+use db::db::DbState;
+use db::db::queries::load_recent_rule_categorized_threads;
 
 /// Check settings and return threads that need AI categorization.
 pub async fn get_ai_categorization_candidates(
@@ -15,8 +15,8 @@ pub async fn get_ai_categorization_candidates(
 ) -> Result<Vec<AiCategorizationCandidate>, String> {
     let account_id = account_id.to_string();
     db.with_conn(move |conn| {
-        let auto_categorize = db::db::queries::get_setting(conn, "ai_auto_categorize")
-            .unwrap_or(None);
+        let auto_categorize =
+            db::db::queries::get_setting(conn, "ai_auto_categorize").unwrap_or(None);
         if auto_categorize.as_deref() == Some("false") {
             return Ok(Vec::new());
         }
@@ -64,8 +64,7 @@ fn evaluate_notifications_sync(
     thread_ids: &[String],
 ) -> Result<Vec<NotificationCandidate>, String> {
     use db::db::queries::get_setting;
-    let notifications_enabled = get_setting(conn, "notifications_enabled")
-        .unwrap_or(None);
+    let notifications_enabled = get_setting(conn, "notifications_enabled").unwrap_or(None);
     if notifications_enabled.as_deref() == Some("false") {
         return Ok(Vec::new());
     }
@@ -212,7 +211,10 @@ fn load_thread_categories(
             param_values.iter().map(AsRef::as_ref).collect();
         let rows = stmt
             .query_map(param_refs.as_slice(), |row| {
-                Ok((row.get::<_, String>("thread_id")?, row.get::<_, String>("category")?))
+                Ok((
+                    row.get::<_, String>("thread_id")?,
+                    row.get::<_, String>("category")?,
+                ))
             })
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()

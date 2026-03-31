@@ -146,10 +146,12 @@ pub async fn db_get_held_thread_ids(
                 "SELECT thread_id FROM bundled_threads WHERE account_id = ?1 AND held_until > ?2",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id, now], |row| row.get::<_, String>("thread_id"))
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
+        stmt.query_map(params![account_id, now], |row| {
+            row.get::<_, String>("thread_id")
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
     })
     .await
 }

@@ -5,7 +5,7 @@
 //! Built from iced primitives (no custom `advanced::Widget`).
 
 use chrono::{Datelike, NaiveDate, Timelike, Weekday};
-use iced::widget::{button, column, container, row, scrollable, text, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding, Theme};
 
 use super::layout::*;
@@ -149,9 +149,7 @@ pub fn time_grid_view<'a, M: 'a + Clone>(
     let all_day = build_all_day_bar(config, &on_event_click);
     let grid = build_time_grid(config, &on_event_click, &on_slot_click);
 
-    let scrollable_grid = scrollable(grid)
-        .height(Length::Fill)
-        .width(Length::Fill);
+    let scrollable_grid = scrollable(grid).height(Length::Fill).width(Length::Fill);
 
     column![header, all_day, scrollable_grid]
         .width(Length::Fill)
@@ -166,9 +164,7 @@ fn build_header<'a, M: 'a + Clone>(
     config: &'a TimeGridConfig,
     on_slot_click: &(impl Fn(NaiveDate, u32) -> M + 'a),
 ) -> Element<'a, M> {
-    let mut header_row = row![]
-        .spacing(SPACE_0)
-        .height(TIME_GRID_HEADER_HEIGHT);
+    let mut header_row = row![].spacing(SPACE_0).height(TIME_GRID_HEADER_HEIGHT);
 
     // Left spacer for hour label column.
     header_row = header_row.push(
@@ -196,13 +192,11 @@ fn build_header<'a, M: 'a + Clone>(
         };
 
         let header_btn = button(
-            container(
-                text(label).size(TEXT_SM).style(text_style).font(font),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(Alignment::Center)
-            .align_y(Alignment::Center),
+            container(text(label).size(TEXT_SM).style(text_style).font(font))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
         )
         .on_press(on_slot_click(day.date, 8))
         .padding(0)
@@ -234,7 +228,10 @@ fn build_all_day_bar<'a, M: 'a + Clone>(
     config: &'a TimeGridConfig,
     on_event_click: &(impl Fn(&str) -> M + 'a),
 ) -> Element<'a, M> {
-    let has_all_day = config.days.iter().any(|d| d.events.iter().any(|e| e.all_day));
+    let has_all_day = config
+        .days
+        .iter()
+        .any(|d| d.events.iter().any(|e| e.all_day));
     if !has_all_day {
         return Space::new().height(SPACE_0).into();
     }
@@ -248,7 +245,9 @@ fn build_all_day_bar<'a, M: 'a + Clone>(
     // Label column.
     bar_row = bar_row.push(
         container(
-            text("All day").size(TEXT_XS).style(theme::TextClass::Muted.style()),
+            text("All day")
+                .size(TEXT_XS)
+                .style(theme::TextClass::Muted.style()),
         )
         .width(TIME_GRID_HOUR_LABEL_WIDTH)
         .padding(Padding::from([SPACE_XXXS, SPACE_XXS]))
@@ -256,8 +255,7 @@ fn build_all_day_bar<'a, M: 'a + Clone>(
     );
 
     for day in &config.days {
-        let all_day_events: Vec<&TimeGridEvent> =
-            day.events.iter().filter(|e| e.all_day).collect();
+        let all_day_events: Vec<&TimeGridEvent> = day.events.iter().filter(|e| e.all_day).collect();
         let cell = if all_day_events.is_empty() {
             container(Space::new().height(TIME_GRID_ALL_DAY_HEIGHT))
                 .width(Length::Fill)
@@ -288,10 +286,7 @@ fn build_all_day_bar<'a, M: 'a + Clone>(
 }
 
 /// A small chip for an all-day event.
-fn all_day_event_chip<'a, M: 'a + Clone>(
-    event: &'a TimeGridEvent,
-    on_click: M,
-) -> Element<'a, M> {
+fn all_day_event_chip<'a, M: 'a + Clone>(event: &'a TimeGridEvent, on_click: M) -> Element<'a, M> {
     let bg_color = theme::hex_to_color(&event.color);
     let text_color = contrasting_text_color(bg_color);
 
@@ -364,10 +359,7 @@ fn build_time_grid<'a, M: 'a + Clone>(
 }
 
 /// Left column of hour labels (8:00, 9:00, etc.).
-fn build_hour_labels<'a, M: 'a>(
-    config: &'a TimeGridConfig,
-    grid_height: f32,
-) -> Element<'a, M> {
+fn build_hour_labels<'a, M: 'a>(config: &'a TimeGridConfig, grid_height: f32) -> Element<'a, M> {
     let mut col = column![].spacing(SPACE_0);
 
     for hour in config.hour_start..config.hour_end {
@@ -404,8 +396,7 @@ fn build_day_column<'a, M: 'a + Clone>(
     let slots = build_hour_slots(day, config, on_slot_click);
 
     // Overlay: positioned events + now line via a stack.
-    let timed_events: Vec<&TimeGridEvent> =
-        day.events.iter().filter(|e| !e.all_day).collect();
+    let timed_events: Vec<&TimeGridEvent> = day.events.iter().filter(|e| !e.all_day).collect();
 
     if timed_events.is_empty() {
         // No events: just the slot background.
@@ -418,13 +409,8 @@ fn build_day_column<'a, M: 'a + Clone>(
 
     // Lay out events with overlap algorithm, render, and stack on top of slots.
     let layouts = compute_overlap_layout(&timed_events, config, day.date);
-    let events_layer = build_events_layer(
-        &timed_events,
-        &layouts,
-        config,
-        grid_height,
-        on_event_click,
-    );
+    let events_layer =
+        build_events_layer(&timed_events, &layouts, config, grid_height, on_event_click);
 
     // Build now-line for today's column.
     let now_line: Element<'a, M> = if day.is_today {
@@ -602,11 +588,9 @@ fn build_events_layer<'a, M: 'a + Clone>(
 
     for layout in layouts {
         let event = &events[layout.index];
-        let top = (layout.start_minutes - config.hour_start as f32 * 60.0)
-            / 60.0
+        let top = (layout.start_minutes - config.hour_start as f32 * 60.0) / 60.0
             * config.pixels_per_hour;
-        let height = ((layout.end_minutes - layout.start_minutes) / 60.0
-            * config.pixels_per_hour)
+        let height = ((layout.end_minutes - layout.start_minutes) / 60.0 * config.pixels_per_hour)
             .max(TIME_GRID_MIN_EVENT_HEIGHT);
 
         let block = event_block(event, height, layout, on_event_click(&event.id));
@@ -703,7 +687,9 @@ fn event_block<'a, M: 'a + Clone>(
                 Space::new()
                     .width(Length::FillPortion(
                         #[allow(clippy::cast_possible_truncation)]
-                        { col_idx as u16 }
+                        {
+                            col_idx as u16
+                        },
                     ))
                     .height(height),
             );
@@ -723,7 +709,9 @@ fn event_block<'a, M: 'a + Clone>(
                 Space::new()
                     .width(Length::FillPortion(
                         #[allow(clippy::cast_possible_truncation)]
-                        { remaining as u16 }
+                        {
+                            remaining as u16
+                        },
                     ))
                     .height(height),
             );
@@ -805,10 +793,8 @@ pub fn events_for_date(events: &[TimeGridEvent], date: NaiveDate) -> Vec<TimeGri
 /// Rewind a date to the previous (or same) occurrence of `target` weekday.
 fn rewind_to_weekday(date: NaiveDate, target: Weekday) -> NaiveDate {
     let current = date.weekday();
-    let diff = (current.num_days_from_monday() as i64
-        - target.num_days_from_monday() as i64
-        + 7)
-        % 7;
+    let diff =
+        (current.num_days_from_monday() as i64 - target.num_days_from_monday() as i64 + 7) % 7;
     date - chrono::Duration::days(diff)
 }
 

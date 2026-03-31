@@ -10,7 +10,11 @@ use crate::email_actions::{insert_label, remove_label};
 use crate::progress::NoopProgressReporter;
 
 /// Local DB mutation for trash (idempotent).
-pub(crate) async fn trash_local(ctx: &ActionContext, account_id: &str, thread_id: &str) -> Result<(), ActionError> {
+pub(crate) async fn trash_local(
+    ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<(), ActionError> {
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
@@ -47,7 +51,10 @@ async fn trash_dispatch(
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             let msg = e.to_string();
-            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
+            ActionOutcome::LocalOnly {
+                reason: ActionError::remote(msg),
+                retryable: true,
+            }
         }
     };
     enqueue_if_retryable(ctx, &outcome, account_id, "trash", thread_id, "{}").await;
@@ -56,11 +63,7 @@ async fn trash_dispatch(
 }
 
 /// Trash a single thread.
-pub async fn trash(
-    ctx: &ActionContext,
-    account_id: &str,
-    thread_id: &str,
-) -> ActionOutcome {
+pub async fn trash(ctx: &ActionContext, account_id: &str, thread_id: &str) -> ActionOutcome {
     let mlog = MutationLog::begin("trash", account_id, thread_id);
 
     if let Err(e) = trash_local(ctx, account_id, thread_id).await {
@@ -72,7 +75,10 @@ pub async fn trash(
     match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(provider) => trash_dispatch(ctx, &*provider, account_id, thread_id).await,
         Err(e) => {
-            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            let outcome = ActionOutcome::LocalOnly {
+                reason: ActionError::remote(e),
+                retryable: true,
+            };
             enqueue_if_retryable(ctx, &outcome, account_id, "trash", thread_id, "{}").await;
             mlog.emit(&outcome);
             outcome

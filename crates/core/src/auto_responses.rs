@@ -165,10 +165,7 @@ fn normalize_dotnet_datetime(s: &str) -> String {
     }
     // Fallback: append Z and hope for the best.
     let mut owned = s.to_string();
-    if !owned.ends_with('Z')
-        && !owned.contains('+')
-        && !owned.rfind('-').is_some_and(|i| i > 10)
-    {
+    if !owned.ends_with('Z') && !owned.contains('+') && !owned.rfind('-').is_some_and(|i| i > 10) {
         owned.push('Z');
     }
     owned
@@ -261,8 +258,7 @@ pub async fn push_graph_auto_response(
     }
     if let Some(ref end) = config.end_date {
         let tz = config.end_date_tz.as_deref().unwrap_or("UTC");
-        setting["scheduledEndDateTime"] =
-            serde_json::json!({ "dateTime": end, "timeZone": tz });
+        setting["scheduledEndDateTime"] = serde_json::json!({ "dateTime": end, "timeZone": tz });
     }
 
     let body = serde_json::json!({ "automaticRepliesSetting": setting });
@@ -354,14 +350,12 @@ pub async fn push_gmail_auto_response(
 
     if let Some(ref start) = config.start_date {
         if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(start) {
-            body["startTime"] =
-                serde_json::Value::String((dt.timestamp() * 1000).to_string());
+            body["startTime"] = serde_json::Value::String((dt.timestamp() * 1000).to_string());
         }
     }
     if let Some(ref end) = config.end_date {
         if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(end) {
-            body["endTime"] =
-                serde_json::Value::String((dt.timestamp() * 1000).to_string());
+            body["endTime"] = serde_json::Value::String((dt.timestamp() * 1000).to_string());
         }
     }
 
@@ -467,6 +461,9 @@ pub async fn push_jmap_auto_response(
         .updated("singleton")
         .map_err(|e| format!("VacationResponse/set: {e}"))?;
 
-    log::info!("[JMAP] Updated VacationResponse (enabled={})", config.enabled);
+    log::info!(
+        "[JMAP] Updated VacationResponse (enabled={})",
+        config.enabled
+    );
     Ok(())
 }

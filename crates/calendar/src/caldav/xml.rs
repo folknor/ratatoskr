@@ -1,5 +1,4 @@
 /// XML namespace prefix discovery and element extraction helpers for CalDAV.
-
 use quick_xml::Reader;
 use quick_xml::events::Event;
 

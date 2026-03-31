@@ -42,8 +42,7 @@ pub async fn start_jmap_push_for_account(
     encryption_key: [u8; 32],
     notify_tx: tokio::sync::mpsc::UnboundedSender<String>,
 ) -> Result<(), String> {
-    let client =
-        jmap::client::JmapClient::from_account(db, account_id, &encryption_key).await?;
+    let client = jmap::client::JmapClient::from_account(db, account_id, &encryption_key).await?;
 
     let (tx, mut rx) = jmap::push::create_push_channel();
     let manager = jmap::push::start_push(&client, account_id, db, tx).await?;
@@ -67,9 +66,7 @@ pub async fn start_jmap_push_for_account(
                 coalesced += 1;
             }
             if coalesced > 0 {
-                log::debug!(
-                    "[JMAP Push] Coalesced {coalesced} additional changes for {email}"
-                );
+                log::debug!("[JMAP Push] Coalesced {coalesced} additional changes for {email}");
             }
             if notify_tx.send(aid.clone()).is_err() {
                 log::info!("[JMAP Push] Notify channel closed for {email}");

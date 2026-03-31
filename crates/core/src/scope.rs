@@ -41,8 +41,9 @@ impl ViewScope {
         match self {
             Self::AllAccounts => None,
             Self::Account(id) => Some(id),
-            Self::SharedMailbox { account_id, .. }
-            | Self::PublicFolder { account_id, .. } => Some(account_id),
+            Self::SharedMailbox { account_id, .. } | Self::PublicFolder { account_id, .. } => {
+                Some(account_id)
+            }
         }
     }
 }

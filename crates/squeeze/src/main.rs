@@ -55,11 +55,7 @@ fn main() -> ExitCode {
     // For format detection we only need the file extension + a few magic bytes.
     let magic_header = read_magic_header(&cli.file);
     let format = if mime_type.is_empty() {
-        let ext = cli
-            .file
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = cli.file.extension().and_then(|e| e.to_str()).unwrap_or("");
         detect::detect_from_extension(ext, &magic_header)
     } else {
         detect::detect(&mime_type, &magic_header)
@@ -123,14 +119,8 @@ fn main() -> ExitCode {
     };
 
     if cli.verbose || cli.dry_run {
-        eprintln!(
-            "original:   {} bytes",
-            result.original_size
-        );
-        eprintln!(
-            "compressed: {} bytes",
-            result.compressed_size
-        );
+        eprintln!("original:   {} bytes", result.original_size);
+        eprintln!("compressed: {} bytes", result.compressed_size);
         eprintln!("savings:    {:.1}%", result.savings_pct());
         if let Some(ref mime) = result.new_mime_type {
             eprintln!("new type:   {mime}");
@@ -154,18 +144,11 @@ fn main() -> ExitCode {
     // If writing in-place, create .orig backup.
     if output_path == cli.file {
         let mut backup = cli.file.clone();
-        let mut ext = cli
-            .file
-            .extension()
-            .unwrap_or_default()
-            .to_os_string();
+        let mut ext = cli.file.extension().unwrap_or_default().to_os_string();
         ext.push(".orig");
         backup.set_extension(ext);
         if let Err(e) = fs::rename(&cli.file, &backup) {
-            eprintln!(
-                "error: failed to create backup {}: {e}",
-                backup.display()
-            );
+            eprintln!("error: failed to create backup {}: {e}", backup.display());
             return ExitCode::FAILURE;
         }
         if cli.verbose {
@@ -175,10 +158,7 @@ fn main() -> ExitCode {
 
     let bytes = result.into_bytes(&input);
     if let Err(e) = fs::write(&output_path, &bytes) {
-        eprintln!(
-            "error: failed to write {}: {e}",
-            output_path.display()
-        );
+        eprintln!("error: failed to write {}: {e}", output_path.display());
         return ExitCode::FAILURE;
     }
 

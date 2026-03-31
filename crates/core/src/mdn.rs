@@ -69,11 +69,7 @@ pub fn resolve_read_receipt_policy(
 }
 
 /// Helper: look up a single policy row.
-fn query_policy(
-    conn: &Connection,
-    account_id: &str,
-    scope: &str,
-) -> Option<ReadReceiptPolicy> {
+fn query_policy(conn: &Connection, account_id: &str, scope: &str) -> Option<ReadReceiptPolicy> {
     conn.query_row(
         "SELECT policy FROM read_receipt_policy WHERE account_id = ?1 AND scope = ?2",
         params![account_id, scope],
@@ -234,10 +230,7 @@ pub async fn mark_mdn_sent_imap(
     folder: &str,
     uid: u32,
 ) -> Result<(), String> {
-    crate::imap::client::set_keyword_if_supported(
-        session, folder, uid, "+FLAGS", "$MDNSent",
-    )
-    .await
+    crate::imap::client::set_keyword_if_supported(session, folder, uid, "+FLAGS", "$MDNSent").await
 }
 
 /// Check whether the `$MDNSent` keyword is already set on an IMAP message.
@@ -277,11 +270,7 @@ pub async fn is_mdn_sent_imap(
 /// This function checks whether the original message had
 /// `isReadReceiptRequested` set, using the `mdn_requested` column that
 /// was populated during sync.
-pub fn is_mdn_requested_graph(
-    conn: &Connection,
-    account_id: &str,
-    message_id: &str,
-) -> bool {
+pub fn is_mdn_requested_graph(conn: &Connection, account_id: &str, message_id: &str) -> bool {
     conn.query_row(
         "SELECT mdn_requested FROM messages WHERE account_id = ?1 AND id = ?2",
         params![account_id, message_id],

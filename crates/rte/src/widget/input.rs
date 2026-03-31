@@ -79,32 +79,29 @@ pub enum MoveAction {
 /// - Clipboard (Ctrl+C/X/V)
 /// - Undo/Redo (Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y)
 /// - Text input (characters)
-pub fn map_key_event(
-    key: &Key,
-    modifiers: Modifiers,
-    text: Option<&str>,
-) -> KeyAction {
+pub fn map_key_event(key: &Key, modifiers: Modifiers, text: Option<&str>) -> KeyAction {
     let cmd = modifiers.command();
     let shift = modifiers.shift();
 
     // First: check command (Ctrl/Cmd) shortcuts on character keys.
-    if cmd
-        && let Some(action) = map_command_shortcut(key, shift) {
-            return action;
-        }
+    if cmd && let Some(action) = map_command_shortcut(key, shift) {
+        return action;
+    }
 
     // Second: named keys (arrows, Home/End, Backspace, Delete, Enter).
     if let Key::Named(named) = key
-        && let Some(action) = map_named_key(*named, cmd, shift) {
-            return action;
-        }
+        && let Some(action) = map_named_key(*named, cmd, shift)
+    {
+        return action;
+    }
 
     // Third: text input (non-control characters) when no command modifier is held.
     if !cmd
         && let Some(text) = text
-            && let Some(ch) = text.chars().find(|c| !c.is_control()) {
-                return KeyAction::Edit(EditAction::InsertText(ch.to_string()));
-            }
+        && let Some(ch) = text.chars().find(|c| !c.is_control())
+    {
+        return KeyAction::Edit(EditAction::InsertText(ch.to_string()));
+    }
 
     KeyAction::None
 }
@@ -188,12 +185,7 @@ fn map_named_key(named: Named, cmd: bool, shift: bool) -> Option<KeyAction> {
 }
 
 /// Resolve an arrow/home/end key into Move or Select, with optional Ctrl widening.
-fn arrow_action(
-    base: MoveAction,
-    widened: MoveAction,
-    cmd: bool,
-    shift: bool,
-) -> KeyAction {
+fn arrow_action(base: MoveAction, widened: MoveAction, cmd: bool, shift: bool) -> KeyAction {
     let motion = if cmd { widened } else { base };
     if shift {
         KeyAction::Select(motion)
@@ -249,7 +241,9 @@ pub fn move_left(doc: &Document, pos: DocPosition) -> DocPosition {
 /// Move cursor right by one character.
 /// At end of block, moves to start of next block.
 pub fn move_right(doc: &Document, pos: DocPosition) -> DocPosition {
-    let block_len = doc.block(pos.block_index).map_or(0, super::super::document::Block::char_len);
+    let block_len = doc
+        .block(pos.block_index)
+        .map_or(0, super::super::document::Block::char_len);
 
     if pos.offset < block_len {
         return DocPosition::new(pos.block_index, pos.offset + 1);
@@ -340,7 +334,9 @@ pub fn home(pos: DocPosition) -> DocPosition {
 
 /// Move to end of current block.
 pub fn end(doc: &Document, pos: DocPosition) -> DocPosition {
-    let block_len = doc.block(pos.block_index).map_or(0, super::super::document::Block::char_len);
+    let block_len = doc
+        .block(pos.block_index)
+        .map_or(0, super::super::document::Block::char_len);
     DocPosition::new(pos.block_index, block_len)
 }
 
@@ -605,11 +601,7 @@ mod tests {
 
         #[test]
         fn ctrl_b_toggles_bold() {
-            let action = map_key_event(
-                &Key::Character("b".into()),
-                ctrl(),
-                Option::None,
-            );
+            let action = map_key_event(&Key::Character("b".into()), ctrl(), Option::None);
             assert_eq!(
                 action,
                 KeyAction::Edit(EditAction::ToggleInlineStyle(InlineStyle::BOLD))
@@ -618,11 +610,7 @@ mod tests {
 
         #[test]
         fn ctrl_i_toggles_italic() {
-            let action = map_key_event(
-                &Key::Character("i".into()),
-                ctrl(),
-                Option::None,
-            );
+            let action = map_key_event(&Key::Character("i".into()), ctrl(), Option::None);
             assert_eq!(
                 action,
                 KeyAction::Edit(EditAction::ToggleInlineStyle(InlineStyle::ITALIC))
@@ -631,11 +619,7 @@ mod tests {
 
         #[test]
         fn ctrl_u_toggles_underline() {
-            let action = map_key_event(
-                &Key::Character("u".into()),
-                ctrl(),
-                Option::None,
-            );
+            let action = map_key_event(&Key::Character("u".into()), ctrl(), Option::None);
             assert_eq!(
                 action,
                 KeyAction::Edit(EditAction::ToggleInlineStyle(InlineStyle::UNDERLINE))
@@ -646,31 +630,19 @@ mod tests {
 
         #[test]
         fn ctrl_c_copies() {
-            let action = map_key_event(
-                &Key::Character("c".into()),
-                ctrl(),
-                Option::None,
-            );
+            let action = map_key_event(&Key::Character("c".into()), ctrl(), Option::None);
             assert_eq!(action, KeyAction::Copy);
         }
 
         #[test]
         fn ctrl_x_cuts() {
-            let action = map_key_event(
-                &Key::Character("x".into()),
-                ctrl(),
-                Option::None,
-            );
+            let action = map_key_event(&Key::Character("x".into()), ctrl(), Option::None);
             assert_eq!(action, KeyAction::Cut);
         }
 
         #[test]
         fn ctrl_v_pastes() {
-            let action = map_key_event(
-                &Key::Character("v".into()),
-                ctrl(),
-                Option::None,
-            );
+            let action = map_key_event(&Key::Character("v".into()), ctrl(), Option::None);
             assert_eq!(action, KeyAction::Paste);
         }
 
@@ -678,31 +650,19 @@ mod tests {
 
         #[test]
         fn ctrl_z_undoes() {
-            let action = map_key_event(
-                &Key::Character("z".into()),
-                ctrl(),
-                Option::None,
-            );
+            let action = map_key_event(&Key::Character("z".into()), ctrl(), Option::None);
             assert_eq!(action, KeyAction::Undo);
         }
 
         #[test]
         fn ctrl_shift_z_redoes() {
-            let action = map_key_event(
-                &Key::Character("z".into()),
-                ctrl_shift(),
-                Option::None,
-            );
+            let action = map_key_event(&Key::Character("z".into()), ctrl_shift(), Option::None);
             assert_eq!(action, KeyAction::Redo);
         }
 
         #[test]
         fn ctrl_y_redoes() {
-            let action = map_key_event(
-                &Key::Character("y".into()),
-                ctrl(),
-                Option::None,
-            );
+            let action = map_key_event(&Key::Character("y".into()), ctrl(), Option::None);
             assert_eq!(action, KeyAction::Redo);
         }
 
@@ -710,11 +670,7 @@ mod tests {
 
         #[test]
         fn ctrl_a_selects_all() {
-            let action = map_key_event(
-                &Key::Character("a".into()),
-                ctrl(),
-                Option::None,
-            );
+            let action = map_key_event(&Key::Character("a".into()), ctrl(), Option::None);
             assert_eq!(action, KeyAction::SelectAll);
         }
 
@@ -722,31 +678,19 @@ mod tests {
 
         #[test]
         fn character_inserts_text() {
-            let action = map_key_event(
-                &Key::Character("h".into()),
-                no_mod(),
-                Some("h"),
-            );
+            let action = map_key_event(&Key::Character("h".into()), no_mod(), Some("h"));
             assert_eq!(action, KeyAction::Edit(EditAction::InsertText("h".into())));
         }
 
         #[test]
         fn shift_character_inserts_text() {
-            let action = map_key_event(
-                &Key::Character("H".into()),
-                shift(),
-                Some("H"),
-            );
+            let action = map_key_event(&Key::Character("H".into()), shift(), Some("H"));
             assert_eq!(action, KeyAction::Edit(EditAction::InsertText("H".into())));
         }
 
         #[test]
         fn space_inserts_text() {
-            let action = map_key_event(
-                &Key::Character(" ".into()),
-                no_mod(),
-                Some(" "),
-            );
+            let action = map_key_event(&Key::Character(" ".into()), no_mod(), Some(" "));
             assert_eq!(action, KeyAction::Edit(EditAction::InsertText(" ".into())));
         }
 
@@ -766,11 +710,7 @@ mod tests {
         #[test]
         fn control_character_text_is_ignored() {
             // Tab produces a control character in `text`, but we don't handle it.
-            let action = map_key_event(
-                &Key::Named(Named::Tab),
-                no_mod(),
-                Some("\t"),
-            );
+            let action = map_key_event(&Key::Named(Named::Tab), no_mod(), Some("\t"));
             assert_eq!(action, KeyAction::None);
         }
 
@@ -782,11 +722,7 @@ mod tests {
 
         #[test]
         fn ctrl_with_unknown_char_returns_none() {
-            let action = map_key_event(
-                &Key::Character("q".into()),
-                ctrl(),
-                Option::None,
-            );
+            let action = map_key_event(&Key::Character("q".into()), ctrl(), Option::None);
             assert_eq!(action, KeyAction::None);
         }
     }

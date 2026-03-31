@@ -239,9 +239,7 @@ pub async fn jmap_contacts_initial_sync(
     // Save state for delta sync
     sync_state::save_jmap_sync_state(db, account_id, "ContactCard", &state).await?;
 
-    log::info!(
-        "[JMAP-Contacts] Initial sync complete for account {account_id}: {count} contacts"
-    );
+    log::info!("[JMAP-Contacts] Initial sync complete for account {account_id}: {count} contacts");
 
     Ok(count)
 }
@@ -378,7 +376,10 @@ pub async fn jmap_contacts_push_update(
     if let Some(phone_val) = phone {
         let mut phones_map = serde_json::Map::new();
         let mut phone_entry = serde_json::Map::new();
-        phone_entry.insert("number".into(), serde_json::Value::String(phone_val.to_string()));
+        phone_entry.insert(
+            "number".into(),
+            serde_json::Value::String(phone_val.to_string()),
+        );
         phones_map.insert("ph1".into(), serde_json::Value::Object(phone_entry));
         update.phones(phones_map);
     }
@@ -387,7 +388,10 @@ pub async fn jmap_contacts_push_update(
     if let Some(company_val) = company {
         let mut orgs_map = serde_json::Map::new();
         let mut org_entry = serde_json::Map::new();
-        org_entry.insert("name".into(), serde_json::Value::String(company_val.to_string()));
+        org_entry.insert(
+            "name".into(),
+            serde_json::Value::String(company_val.to_string()),
+        );
         orgs_map.insert("org1".into(), serde_json::Value::Object(org_entry));
         update.organizations(orgs_map);
     }
@@ -396,7 +400,10 @@ pub async fn jmap_contacts_push_update(
     if let Some(notes_val) = notes {
         let mut notes_map = serde_json::Map::new();
         let mut note_entry = serde_json::Map::new();
-        note_entry.insert("note".into(), serde_json::Value::String(notes_val.to_string()));
+        note_entry.insert(
+            "note".into(),
+            serde_json::Value::String(notes_val.to_string()),
+        );
         notes_map.insert("n1".into(), serde_json::Value::Object(note_entry));
         update.notes(notes_map);
     }

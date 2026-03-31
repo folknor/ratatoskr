@@ -8,11 +8,11 @@
 use std::collections::HashMap;
 
 use rtsk::body_store::BodyStoreState;
+use rtsk::db::queries_extra::set_attachments_collapsed;
 use rtsk::db::queries_extra::thread_detail::{
     self, ThreadDetail, assemble_thread_detail, fetch_thread_bodies, query_inline_cid_hashes,
     query_thread_from_db,
 };
-use rtsk::db::queries_extra::set_attachments_collapsed;
 use store::inline_image_store::InlineImageStoreState;
 
 use super::connection::Db;
@@ -46,11 +46,7 @@ pub struct AppThreadDetail {
 
 /// Convert core's ThreadDetail into app display types.
 fn convert_thread_detail(detail: ThreadDetail) -> AppThreadDetail {
-    let messages = detail
-        .messages
-        .into_iter()
-        .map(convert_message)
-        .collect();
+    let messages = detail.messages.into_iter().map(convert_message).collect();
 
     let labels = detail
         .labels
@@ -137,9 +133,7 @@ pub async fn load_thread_detail(
     tokio::task::spawn_blocking(move || {
         // Phase 1: hold main DB lock only for DB queries, then release.
         let (db_data, cid_hashes) = {
-            let conn = db_conn
-                .lock()
-                .map_err(|e| format!("db lock: {e}"))?;
+            let conn = db_conn.lock().map_err(|e| format!("db lock: {e}"))?;
             let data = query_thread_from_db(&conn, &account_id, &thread_id)?;
             let cids = query_inline_cid_hashes(&conn, &account_id, &thread_id)?;
             (data, cids)
@@ -186,15 +180,12 @@ pub async fn persist_attachments_collapsed(
 ) -> Result<(), String> {
     let conn = db.write_conn_arc();
     tokio::task::spawn_blocking(move || {
-        let conn = conn
-            .lock()
-            .map_err(|e| format!("db write lock: {e}"))?;
+        let conn = conn.lock().map_err(|e| format!("db write lock: {e}"))?;
         set_attachments_collapsed(&conn, &account_id, &thread_id, collapsed)
     })
     .await
     .map_err(|e| format!("spawn_blocking: {e}"))?
 }
-
 
 // ── Per-message queries — delegated to core ─────────────
 //
@@ -229,9 +220,8 @@ impl Db {
         let conn = self.conn_arc();
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-            let core_atts = message_queries::get_message_attachments(
-                &conn, &account_id, &message_id,
-            )?;
+            let core_atts =
+                message_queries::get_message_attachments(&conn, &account_id, &message_id)?;
             Ok(core_atts
                 .into_iter()
                 .map(|a| super::types::MessageViewAttachment {

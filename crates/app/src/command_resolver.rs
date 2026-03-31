@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use cmdk::{
-    CommandContext, CommandId, CommandInputResolver, OptionItem,
-};
+use cmdk::{CommandContext, CommandId, CommandInputResolver, OptionItem};
 
 use crate::db::Db;
 
@@ -51,12 +49,9 @@ impl CommandInputResolver for AppInputResolver {
                     .selected_thread_ids
                     .first()
                     .ok_or_else(|| "no thread selected".to_string())?;
-                self.db
-                    .get_thread_labels_for_palette(account_id, thread_id)
+                self.db.get_thread_labels_for_palette(account_id, thread_id)
             }
-            (CommandId::NavigateToLabel, 0) => {
-                self.db.get_all_labels_cross_account()
-            }
+            (CommandId::NavigateToLabel, 0) => self.db.get_all_labels_cross_account(),
             _ => Ok(vec![]),
         }
     }

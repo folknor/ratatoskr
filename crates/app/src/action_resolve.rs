@@ -253,17 +253,59 @@ pub fn completion_behavior(op: &MailOperation) -> CompletionBehavior {
 /// No `description()` method — description is set at push time on `UndoEntry` (C3).
 #[derive(Debug, Clone)]
 pub enum MailUndoPayload {
-    Archive { account_id: String, thread_ids: Vec<String> },
-    Trash { account_id: String, thread_ids: Vec<String>, source: Option<FolderId> },
-    MoveToFolder { account_id: String, thread_ids: Vec<String>, source: FolderId },
-    SetSpam { account_id: String, thread_ids: Vec<String>, was_spam: bool },
-    SetStarred { account_id: String, thread_ids: Vec<String>, was_starred: bool },
-    SetRead { account_id: String, thread_ids: Vec<String>, was_read: bool },
-    SetPinned { account_id: String, thread_ids: Vec<String>, was_pinned: bool },
-    SetMuted { account_id: String, thread_ids: Vec<String>, was_muted: bool },
-    AddLabel { account_id: String, thread_ids: Vec<String>, label_id: TagId },
-    RemoveLabel { account_id: String, thread_ids: Vec<String>, label_id: TagId },
-    Snooze { account_id: String, thread_ids: Vec<String> },
+    Archive {
+        account_id: String,
+        thread_ids: Vec<String>,
+    },
+    Trash {
+        account_id: String,
+        thread_ids: Vec<String>,
+        source: Option<FolderId>,
+    },
+    MoveToFolder {
+        account_id: String,
+        thread_ids: Vec<String>,
+        source: FolderId,
+    },
+    SetSpam {
+        account_id: String,
+        thread_ids: Vec<String>,
+        was_spam: bool,
+    },
+    SetStarred {
+        account_id: String,
+        thread_ids: Vec<String>,
+        was_starred: bool,
+    },
+    SetRead {
+        account_id: String,
+        thread_ids: Vec<String>,
+        was_read: bool,
+    },
+    SetPinned {
+        account_id: String,
+        thread_ids: Vec<String>,
+        was_pinned: bool,
+    },
+    SetMuted {
+        account_id: String,
+        thread_ids: Vec<String>,
+        was_muted: bool,
+    },
+    AddLabel {
+        account_id: String,
+        thread_ids: Vec<String>,
+        label_id: TagId,
+    },
+    RemoveLabel {
+        account_id: String,
+        thread_ids: Vec<String>,
+        label_id: TagId,
+    },
+    Snooze {
+        account_id: String,
+        thread_ids: Vec<String>,
+    },
 }
 
 /// Compute a direction-aware undo description from undo payloads.
@@ -293,9 +335,12 @@ pub fn undo_description(payloads: &[MailUndoPayload]) -> String {
         MailUndoPayload::SetStarred { was_starred, .. } => {
             if *was_starred { "Unstarred" } else { "Starred" }.to_string()
         }
-        MailUndoPayload::SetRead { was_read, .. } => {
-            if *was_read { "Marked as unread" } else { "Marked as read" }.to_string()
+        MailUndoPayload::SetRead { was_read, .. } => if *was_read {
+            "Marked as unread"
+        } else {
+            "Marked as read"
         }
+        .to_string(),
         MailUndoPayload::SetPinned { was_pinned, .. } => {
             if *was_pinned { "Unpinned" } else { "Pinned" }.to_string()
         }
@@ -315,7 +360,10 @@ pub fn undo_description(payloads: &[MailUndoPayload]) -> String {
 /// entirely to this function.
 pub fn format_outcome_toast(behavior: &CompletionBehavior, outcomes: &[ActionOutcome]) -> String {
     let total = outcomes.len();
-    let succeeded = outcomes.iter().filter(|o| o.is_success() || o.is_local_only() || o.is_noop()).count();
+    let succeeded = outcomes
+        .iter()
+        .filter(|o| o.is_success() || o.is_local_only() || o.is_noop())
+        .count();
     let failed = outcomes.iter().filter(|o| o.is_failed()).count();
     let any_local_only = outcomes.iter().any(ActionOutcome::is_local_only);
 
@@ -378,12 +426,26 @@ fn build_toggle_undo_payloads(
             continue;
         }
         let (account_id, thread_id, previous) = match mutation {
-            OptimisticMutation::SetStarred { account_id, thread_id, previous }
-            | OptimisticMutation::SetRead { account_id, thread_id, previous }
-            | OptimisticMutation::SetPinned { account_id, thread_id, previous }
-            | OptimisticMutation::SetMuted { account_id, thread_id, previous } => {
-                (account_id.as_str(), thread_id.clone(), *previous)
+            OptimisticMutation::SetStarred {
+                account_id,
+                thread_id,
+                previous,
             }
+            | OptimisticMutation::SetRead {
+                account_id,
+                thread_id,
+                previous,
+            }
+            | OptimisticMutation::SetPinned {
+                account_id,
+                thread_id,
+                previous,
+            }
+            | OptimisticMutation::SetMuted {
+                account_id,
+                thread_id,
+                previous,
+            } => (account_id.as_str(), thread_id.clone(), *previous),
         };
         by_key
             .entry((account_id, previous))
@@ -574,18 +636,14 @@ pub fn resolve_intent(intent: MailActionIntent, ctx: &UiContext) -> ResolveOutco
                 compensation: CompensationContext::None,
             })
         }
-        MailActionIntent::AddLabel { label_id } => {
-            ResolveOutcome::Resolved(ResolvedIntent {
-                operation: MailOperation::AddLabel { label_id },
-                compensation: CompensationContext::None,
-            })
-        }
-        MailActionIntent::RemoveLabel { label_id } => {
-            ResolveOutcome::Resolved(ResolvedIntent {
-                operation: MailOperation::RemoveLabel { label_id },
-                compensation: CompensationContext::None,
-            })
-        }
+        MailActionIntent::AddLabel { label_id } => ResolveOutcome::Resolved(ResolvedIntent {
+            operation: MailOperation::AddLabel { label_id },
+            compensation: CompensationContext::None,
+        }),
+        MailActionIntent::RemoveLabel { label_id } => ResolveOutcome::Resolved(ResolvedIntent {
+            operation: MailOperation::RemoveLabel { label_id },
+            compensation: CompensationContext::None,
+        }),
         MailActionIntent::Snooze { until } => ResolveOutcome::Resolved(ResolvedIntent {
             operation: MailOperation::Snooze { until },
             compensation: CompensationContext::None,

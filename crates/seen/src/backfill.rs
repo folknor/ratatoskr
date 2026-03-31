@@ -14,10 +14,7 @@ const BATCH_SIZE: i64 = 1000;
 /// with a settings key to avoid re-running.
 ///
 /// Returns the number of addresses ingested.
-pub async fn backfill_seen_addresses(
-    db: &DbState,
-    account_id: String,
-) -> Result<u64, String> {
+pub async fn backfill_seen_addresses(db: &DbState, account_id: String) -> Result<u64, String> {
     let settings_key = format!("seen_addresses_backfill_{account_id}");
 
     db.with_conn(move |conn| {

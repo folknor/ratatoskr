@@ -1,6 +1,7 @@
 use iced::widget::{button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding};
 
+use crate::Message;
 use crate::db::{self, ThreadMessage};
 use crate::font;
 use crate::icon;
@@ -8,7 +9,6 @@ use crate::pop_out::session::MessageViewSessionEntry;
 use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets;
-use crate::Message;
 
 use super::PopOutMessage;
 
@@ -31,9 +31,15 @@ pub enum RenderingMode {
 #[derive(Debug, Clone)]
 pub enum MessageViewMessage {
     /// Body content loaded from the body store.
-    BodyLoaded(rtsk::generation::GenerationToken<rtsk::generation::PopOut>, Result<(Option<String>, Option<String>), String>),
+    BodyLoaded(
+        rtsk::generation::GenerationToken<rtsk::generation::PopOut>,
+        Result<(Option<String>, Option<String>), String>,
+    ),
     /// Attachments loaded for this message.
-    AttachmentsLoaded(rtsk::generation::GenerationToken<rtsk::generation::PopOut>, Result<Vec<MessageViewAttachment>, String>),
+    AttachmentsLoaded(
+        rtsk::generation::GenerationToken<rtsk::generation::PopOut>,
+        Result<Vec<MessageViewAttachment>, String>,
+    ),
     /// Raw source loaded (for Source rendering mode).
     RawSourceLoaded(Result<String, String>),
     /// User changed the rendering mode toggle.
@@ -179,7 +185,10 @@ impl MessageViewState {
     }
 
     /// Check if a loaded result matches this window's current generation.
-    pub fn is_current_generation(&self, token: rtsk::generation::GenerationToken<rtsk::generation::PopOut>) -> bool {
+    pub fn is_current_generation(
+        &self,
+        token: rtsk::generation::GenerationToken<rtsk::generation::PopOut>,
+    ) -> bool {
         self.generation == token
     }
 }
@@ -195,8 +204,7 @@ pub fn view_message_window<'a>(
     let mode_toggle = rendering_mode_toggle(state.rendering_mode, window_id);
     let body = message_view_body(window_id, state);
 
-    let mut content = column![header, widgets::divider(), mode_toggle]
-        .spacing(SPACE_0);
+    let mut content = column![header, widgets::divider(), mode_toggle].spacing(SPACE_0);
 
     // Error banner (shown above body for failed loads / deleted messages)
     if let Some(ref error) = state.error_banner {
@@ -204,9 +212,7 @@ pub fn view_message_window<'a>(
     }
 
     // Remote content banner for Original HTML mode
-    if state.rendering_mode == RenderingMode::OriginalHtml
-        && !state.remote_content_loaded
-    {
+    if state.rendering_mode == RenderingMode::OriginalHtml && !state.remote_content_loaded {
         content = content.push(remote_content_banner(window_id));
     }
 
@@ -353,10 +359,7 @@ fn action_buttons_with_overflow<'a>(
 
 // ── Overflow menu ──────────────────────────────────────
 
-fn overflow_menu<'a>(
-    open: bool,
-    window_id: iced::window::Id,
-) -> Element<'a, Message> {
+fn overflow_menu<'a>(open: bool, window_id: iced::window::Id) -> Element<'a, Message> {
     let trigger = button(
         icon::ellipsis_vertical()
             .size(ICON_MD)
@@ -430,10 +433,8 @@ fn overflow_menu_item<'a>(
 ) -> Element<'a, Message> {
     button(
         row![
-            container(ico.size(ICON_MD).style(text::secondary))
-                .align_y(Alignment::Center),
-            container(text(label).size(TEXT_MD).style(text::base))
-                .align_y(Alignment::Center),
+            container(ico.size(ICON_MD).style(text::secondary)).align_y(Alignment::Center),
+            container(text(label).size(TEXT_MD).style(text::base)).align_y(Alignment::Center),
         ]
         .spacing(SPACE_XS)
         .align_y(Alignment::Center),
@@ -470,17 +471,10 @@ fn rendering_mode_toggle<'a>(
             }))
             .on_press(Message::PopOut(
                 window_id,
-                PopOutMessage::MessageView(
-                    MessageViewMessage::SetRenderingMode(mode),
-                ),
+                PopOutMessage::MessageView(MessageViewMessage::SetRenderingMode(mode)),
             ))
             .padding(PAD_ICON_BTN)
-            .style(
-                theme::ButtonClass::Chip {
-                    active: is_active,
-                }
-                .style(),
-            ),
+            .style(theme::ButtonClass::Chip { active: is_active }.style()),
         );
     }
 
@@ -520,10 +514,7 @@ fn message_view_body<'a>(
             text(txt).size(TEXT_LG).style(text::secondary).into()
         }
         RenderingMode::Source => {
-            let src = state
-                .raw_source
-                .as_deref()
-                .unwrap_or("Loading source...");
+            let src = state.raw_source.as_deref().unwrap_or("Loading source...");
             text(src)
                 .size(TEXT_SM)
                 .font(font::monospace())
@@ -543,9 +534,7 @@ fn message_view_body<'a>(
 fn error_banner_view<'a>(error: &'a str) -> Element<'a, Message> {
     container(
         row![
-            icon::alert_triangle()
-                .size(ICON_MD)
-                .style(text::secondary),
+            icon::alert_triangle().size(ICON_MD).style(text::secondary),
             text(error)
                 .size(TEXT_MD)
                 .style(theme::TextClass::Tertiary.style()),
@@ -561,9 +550,7 @@ fn error_banner_view<'a>(error: &'a str) -> Element<'a, Message> {
 
 // ── Remote content banner ──────────────────────────────
 
-fn remote_content_banner<'a>(
-    window_id: iced::window::Id,
-) -> Element<'a, Message> {
+fn remote_content_banner<'a>(window_id: iced::window::Id) -> Element<'a, Message> {
     container(
         row![
             text("Remote content is blocked.")
@@ -576,9 +563,7 @@ fn remote_content_banner<'a>(
             )
             .on_press(Message::PopOut(
                 window_id,
-                PopOutMessage::MessageView(
-                    MessageViewMessage::LoadRemoteContent,
-                ),
+                PopOutMessage::MessageView(MessageViewMessage::LoadRemoteContent,),
             ))
             .padding(PAD_ICON_BTN)
             .style(theme::ButtonClass::Ghost.style()),
@@ -594,9 +579,7 @@ fn remote_content_banner<'a>(
 
 // ── Attachments ────────────────────────────────────────
 
-fn message_view_attachments<'a>(
-    attachments: &'a [MessageViewAttachment],
-) -> Element<'a, Message> {
+fn message_view_attachments<'a>(attachments: &'a [MessageViewAttachment]) -> Element<'a, Message> {
     let header = text(format!("Attachments ({})", attachments.len()))
         .size(TEXT_MD)
         .font(font::text_semibold())
@@ -653,9 +636,7 @@ fn file_type_icon<'a>(mime_type: Option<&str>) -> iced::widget::Text<'a> {
     match mime_type.unwrap_or("") {
         t if t.starts_with("image/") => icon::image(),
         t if t.contains("pdf") => icon::file_text(),
-        t if t.contains("spreadsheet") || t.contains("excel") => {
-            icon::file_spreadsheet()
-        }
+        t if t.contains("spreadsheet") || t.contains("excel") => icon::file_spreadsheet(),
         _ => icon::file(),
     }
 }

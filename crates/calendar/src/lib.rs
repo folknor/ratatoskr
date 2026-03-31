@@ -1,5 +1,5 @@
-pub(crate) use rtsk::provider::http::shared_http_client;
 use rtsk::provider::http::RetryConfig;
+pub(crate) use rtsk::provider::http::shared_http_client;
 
 pub mod actions;
 pub mod caldav;

@@ -20,9 +20,8 @@ static SRC_ATTR_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)\bsrc\s*=\s*["']([^"']+)["']"#).expect("SRC_ATTR_RE"));
 
 /// Parses a data URI: `data:<mime>;base64,<payload>`.
-static DATA_URI_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^data:([^;]+);base64,(.+)$").expect("DATA_URI_RE")
-});
+static DATA_URI_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^data:([^;]+);base64,(.+)$").expect("DATA_URI_RE"));
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -47,7 +46,10 @@ pub struct ProcessedSignatureImages {
 /// This is a **synchronous** extraction step. Call
 /// [`store_signature_images`] afterwards to persist the images.
 pub fn process_signature_images(html: &str) -> ProcessedSignatureImages {
-    log::debug!("Extracting signature images from HTML ({} bytes)", html.len());
+    log::debug!(
+        "Extracting signature images from HTML ({} bytes)",
+        html.len()
+    );
     let mut images: Vec<InlineImage> = Vec::new();
     let mut seen_hashes: std::collections::HashSet<String> = std::collections::HashSet::new();
 

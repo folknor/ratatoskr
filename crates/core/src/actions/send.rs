@@ -3,7 +3,7 @@ use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
 use crate::progress::NoopProgressReporter;
-use crate::send::{build_mime_message_base64url, mark_draft_failed, mark_draft_sent, SendRequest};
+use crate::send::{SendRequest, build_mime_message_base64url, mark_draft_failed, mark_draft_sent};
 use common::types::ProviderCtx;
 
 /// Send an email: build MIME, persist draft, dispatch to provider.
@@ -40,7 +40,9 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
             .map_err(|e| ActionError::build(format!("{e}")))?;
 
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+        let conn = conn
+            .lock()
+            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
         // Persist draft as 'pending'.
         // Field mapping: SendRequest → local_drafts columns
@@ -133,11 +135,7 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
     };
 
     let outcome = match provider
-        .send_email(
-            &provider_ctx,
-            &mime_base64url,
-            thread_id_outer.as_deref(),
-        )
+        .send_email(&provider_ctx, &mime_base64url, thread_id_outer.as_deref())
         .await
     {
         Ok(sent_message_id) => {
@@ -162,11 +160,7 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
 ///
 /// Forward-looking: no call site in Phase 2.3 (no auto-save yet).
 /// Becomes useful when auto-save or outbox UI land.
-pub async fn delete_draft(
-    ctx: &ActionContext,
-    account_id: &str,
-    draft_id: &str,
-) -> ActionOutcome {
+pub async fn delete_draft(ctx: &ActionContext, account_id: &str, draft_id: &str) -> ActionOutcome {
     let mlog = MutationLog::begin("delete_draft", account_id, draft_id);
 
     // 1. Look up remote_draft_id and delete locally in one spawn_blocking call
@@ -174,7 +168,9 @@ pub async fn delete_draft(
     let did = draft_id.to_string();
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+        let conn = conn
+            .lock()
+            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
         let remote_id: Option<String> = match conn.query_row(
             "SELECT remote_draft_id FROM local_drafts WHERE id = ?1",

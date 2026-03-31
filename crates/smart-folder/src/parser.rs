@@ -89,9 +89,7 @@ pub fn analyze_cursor_context(query: &str, cursor_pos: usize) -> CursorContext {
     for (colon_pos, _) in before.rmatch_indices(':') {
         // Extract the word before the colon (the potential operator name).
         let before_colon = &before[..colon_pos];
-        let op_start = before_colon
-            .rfind(char::is_whitespace)
-            .map_or(0, |p| p + 1);
+        let op_start = before_colon.rfind(char::is_whitespace).map_or(0, |p| p + 1);
         let candidate = &before_colon[op_start..];
 
         if candidate.is_empty() {
@@ -218,7 +216,12 @@ pub fn parse_query(input: &str) -> ParsedQuery {
 
     // Remove only recognized spans from input to get free text (process in reverse).
     // Unrecognized operator spans (e.g. `is:important`) stay as free text.
-    for (span, _) in spans.iter().zip(recognized.iter()).rev().filter(|(_, r)| **r) {
+    for (span, _) in spans
+        .iter()
+        .zip(recognized.iter())
+        .rev()
+        .filter(|(_, r)| **r)
+    {
         remaining = format!("{}{}", &remaining[..span.start], &remaining[span.end..]);
     }
 
@@ -321,9 +324,7 @@ fn extract_value(input: &str, pos: usize) -> (String, usize) {
     }
 
     // Unquoted -- take until whitespace.
-    let token_end = trimmed
-        .find(char::is_whitespace)
-        .unwrap_or(trimmed.len());
+    let token_end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
     let value = trimmed[..token_end].to_owned();
     (value, start + token_end)
 }
@@ -346,9 +347,7 @@ fn extract_date_value(input: &str, pos: usize) -> (String, usize) {
     }
 
     // Take the first non-whitespace token.
-    let token_end = trimmed
-        .find(char::is_whitespace)
-        .unwrap_or(trimmed.len());
+    let token_end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
     let first_token = &trimmed[..token_end];
 
     // Only attempt greedy consumption for pure-digit year tokens (4 digits).
@@ -803,7 +802,10 @@ mod tests {
     fn has_document_union() {
         let q = parse_query("has:document");
         // Should contain word types + pdf.
-        assert!(q.attachment_types.contains(&"application/msword".to_owned()));
+        assert!(
+            q.attachment_types
+                .contains(&"application/msword".to_owned())
+        );
         assert!(q.attachment_types.contains(&"application/pdf".to_owned()));
         assert!(q.attachment_types.contains(&"application/rtf".to_owned()));
     }
@@ -865,56 +867,56 @@ mod tests {
     #[test]
     fn date_year_only() {
         let q = parse_query("after:2025");
-        let expected = chrono::NaiveDate::from_ymd_opt(2025, 1, 1)
-            .and_then(|d| naive_date_to_timestamp(d));
+        let expected =
+            chrono::NaiveDate::from_ymd_opt(2025, 1, 1).and_then(|d| naive_date_to_timestamp(d));
         assert_eq!(q.after, expected);
     }
 
     #[test]
     fn date_year_month_compact() {
         let q = parse_query("after:202603");
-        let expected = chrono::NaiveDate::from_ymd_opt(2026, 3, 1)
-            .and_then(|d| naive_date_to_timestamp(d));
+        let expected =
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 1).and_then(|d| naive_date_to_timestamp(d));
         assert_eq!(q.after, expected);
     }
 
     #[test]
     fn date_full_compact() {
         let q = parse_query("after:20260311");
-        let expected = chrono::NaiveDate::from_ymd_opt(2026, 3, 11)
-            .and_then(|d| naive_date_to_timestamp(d));
+        let expected =
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(|d| naive_date_to_timestamp(d));
         assert_eq!(q.after, expected);
     }
 
     #[test]
     fn date_slash_separated() {
         let q = parse_query("before:2026/03/11");
-        let expected = chrono::NaiveDate::from_ymd_opt(2026, 3, 11)
-            .and_then(|d| naive_date_to_timestamp(d));
+        let expected =
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(|d| naive_date_to_timestamp(d));
         assert_eq!(q.before, expected);
     }
 
     #[test]
     fn date_dash_separated() {
         let q = parse_query("before:2026-03-11");
-        let expected = chrono::NaiveDate::from_ymd_opt(2026, 3, 11)
-            .and_then(|d| naive_date_to_timestamp(d));
+        let expected =
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(|d| naive_date_to_timestamp(d));
         assert_eq!(q.before, expected);
     }
 
     #[test]
     fn date_space_separated_greedy() {
         let q = parse_query("after:2026 03 11");
-        let expected = chrono::NaiveDate::from_ymd_opt(2026, 3, 11)
-            .and_then(|d| naive_date_to_timestamp(d));
+        let expected =
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(|d| naive_date_to_timestamp(d));
         assert_eq!(q.after, expected);
     }
 
     #[test]
     fn date_space_separated_year_month_only() {
         let q = parse_query("after:2026 03 hello");
-        let expected = chrono::NaiveDate::from_ymd_opt(2026, 3, 1)
-            .and_then(|d| naive_date_to_timestamp(d));
+        let expected =
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 1).and_then(|d| naive_date_to_timestamp(d));
         assert_eq!(q.after, expected);
         assert_eq!(q.free_text, "hello");
     }
@@ -922,8 +924,8 @@ mod tests {
     #[test]
     fn date_space_greedy_does_not_consume_non_digits() {
         let q = parse_query("after:2026 hello");
-        let expected = chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
-            .and_then(|d| naive_date_to_timestamp(d));
+        let expected =
+            chrono::NaiveDate::from_ymd_opt(2026, 1, 1).and_then(|d| naive_date_to_timestamp(d));
         assert_eq!(q.after, expected);
         assert_eq!(q.free_text, "hello");
     }

@@ -41,9 +41,7 @@ pub use editor_state::{Action, EditorState};
 
 use crate::document::Block;
 
-use cursor::{
-    BlockSelectionKind, SelectionRect, CURSOR_WIDTH, SELECTION_ALPHA,
-};
+use cursor::{BlockSelectionKind, CURSOR_WIDTH, SELECTION_ALPHA, SelectionRect};
 use input::KeyAction;
 use render::ParagraphCache;
 
@@ -270,68 +268,68 @@ impl<Message> RichTextEditor<'_, Message> {
         }) = event
             && widget_state.focus.is_some()
         {
-                let text_str = text.as_deref();
-                let key_action = input::map_key_event(key, *modifiers, text_str);
+            let text_str = text.as_deref();
+            let key_action = input::map_key_event(key, *modifiers, text_str);
 
-                match key_action {
-                    KeyAction::Edit(edit_action) => {
-                        shell.publish(on_action(Action::Edit(edit_action)));
-                        shell.capture_event();
-                    }
-                    KeyAction::Move(move_action) => {
-                        shell.publish(on_action(Action::Move(move_action)));
-                        shell.capture_event();
-                    }
-                    KeyAction::Select(move_action) => {
-                        shell.publish(on_action(Action::Select(move_action)));
-                        shell.capture_event();
-                    }
-                    KeyAction::SelectAll => {
-                        shell.publish(on_action(Action::SelectAll));
-                        shell.capture_event();
-                    }
-                    KeyAction::Copy => {
-                        let text = self.state.selection_text();
-                        if !text.is_empty() {
-                            clipboard.write(iced::advanced::clipboard::Kind::Standard, text);
-                        }
-                        // Emit Action::Copy so EditorState captures the structured slice.
-                        shell.publish(on_action(Action::Copy));
-                        shell.capture_event();
-                    }
-                    KeyAction::Cut => {
-                        let text = self.state.selection_text();
-                        if !text.is_empty() {
-                            clipboard.write(iced::advanced::clipboard::Kind::Standard, text.clone());
-                            // Emit Action::Cut so EditorState captures the structured
-                            // slice and then deletes the selection.
-                            shell.publish(on_action(Action::Cut));
-                        }
-                        shell.capture_event();
-                    }
-                    KeyAction::Paste => {
-                        if let Some(contents) =
-                            clipboard.read(iced::advanced::clipboard::Kind::Standard)
-                        {
-                            shell.publish(on_action(Action::Paste(contents)));
-                        }
-                        shell.capture_event();
-                    }
-                    KeyAction::Undo => {
-                        shell.publish(on_action(Action::Undo));
-                        shell.capture_event();
-                    }
-                    KeyAction::Redo => {
-                        shell.publish(on_action(Action::Redo));
-                        shell.capture_event();
-                    }
-                    KeyAction::None => {}
+            match key_action {
+                KeyAction::Edit(edit_action) => {
+                    shell.publish(on_action(Action::Edit(edit_action)));
+                    shell.capture_event();
                 }
+                KeyAction::Move(move_action) => {
+                    shell.publish(on_action(Action::Move(move_action)));
+                    shell.capture_event();
+                }
+                KeyAction::Select(move_action) => {
+                    shell.publish(on_action(Action::Select(move_action)));
+                    shell.capture_event();
+                }
+                KeyAction::SelectAll => {
+                    shell.publish(on_action(Action::SelectAll));
+                    shell.capture_event();
+                }
+                KeyAction::Copy => {
+                    let text = self.state.selection_text();
+                    if !text.is_empty() {
+                        clipboard.write(iced::advanced::clipboard::Kind::Standard, text);
+                    }
+                    // Emit Action::Copy so EditorState captures the structured slice.
+                    shell.publish(on_action(Action::Copy));
+                    shell.capture_event();
+                }
+                KeyAction::Cut => {
+                    let text = self.state.selection_text();
+                    if !text.is_empty() {
+                        clipboard.write(iced::advanced::clipboard::Kind::Standard, text.clone());
+                        // Emit Action::Cut so EditorState captures the structured
+                        // slice and then deletes the selection.
+                        shell.publish(on_action(Action::Cut));
+                    }
+                    shell.capture_event();
+                }
+                KeyAction::Paste => {
+                    if let Some(contents) =
+                        clipboard.read(iced::advanced::clipboard::Kind::Standard)
+                    {
+                        shell.publish(on_action(Action::Paste(contents)));
+                    }
+                    shell.capture_event();
+                }
+                KeyAction::Undo => {
+                    shell.publish(on_action(Action::Undo));
+                    shell.capture_event();
+                }
+                KeyAction::Redo => {
+                    shell.publish(on_action(Action::Redo));
+                    shell.capture_event();
+                }
+                KeyAction::None => {}
+            }
 
-                // Reset blink on any handled key.
-                if let Some(focus) = &mut widget_state.focus {
-                    focus.updated_at = Instant::now();
-                }
+            // Reset blink on any handled key.
+            if let Some(focus) = &mut widget_state.focus {
+                focus.updated_at = Instant::now();
+            }
         }
     }
 
@@ -351,8 +349,7 @@ impl<Message> RichTextEditor<'_, Message> {
             // Cursor is above the viewport — scroll up.
             let overshoot = bounds.y - position.y;
             let scroll_amount = (overshoot * DRAG_SCROLL_SPEED).min(DRAG_SCROLL_MAX);
-            widget_state.scroll_offset =
-                (widget_state.scroll_offset - scroll_amount).max(0.0);
+            widget_state.scroll_offset = (widget_state.scroll_offset - scroll_amount).max(0.0);
 
             let content_pos = Point::new(position.x - bounds.x - self.padding.left, 0.0);
             let doc_pos =
@@ -404,7 +401,10 @@ impl<Message> RichTextEditor<'_, Message> {
     ) {
         let scroll_offset = widget_state.scroll_offset;
         match event {
-            Event::Mouse(mouse::Event::ButtonPressed { button: mouse::Button::Left, .. }) => {
+            Event::Mouse(mouse::Event::ButtonPressed {
+                button: mouse::Button::Left,
+                ..
+            }) => {
                 if let Some(position) = cursor_pos.position_in(bounds) {
                     // Translate to content coordinates (account for padding and scroll).
                     let content_pos = Point::new(
@@ -419,7 +419,11 @@ impl<Message> RichTextEditor<'_, Message> {
                     );
 
                     // Detect double/triple click using iced's Click type.
-                    let click = Click::new(position, mouse::Button::Left, widget_state.last_click.take());
+                    let click = Click::new(
+                        position,
+                        mouse::Button::Left,
+                        widget_state.last_click.take(),
+                    );
                     let click_kind = click.kind();
                     widget_state.last_click = Some(click);
 
@@ -456,21 +460,16 @@ impl<Message> RichTextEditor<'_, Message> {
                 if widget_state.dragging
                     && let Some(position) = cursor_pos.position() =>
             {
-                self.handle_drag(
-                    widget_state, position, bounds, cursor_pos, on_action, shell,
-                );
+                self.handle_drag(widget_state, position, bounds, cursor_pos, on_action, shell);
             }
-            Event::Mouse(mouse::Event::WheelScrolled { delta })
-                if cursor_pos.is_over(bounds) =>
-            {
+            Event::Mouse(mouse::Event::WheelScrolled { delta }) if cursor_pos.is_over(bounds) => {
                 let delta_y = match delta {
                     mouse::ScrollDelta::Lines { y, .. } => -y * SCROLL_LINE_HEIGHT,
                     mouse::ScrollDelta::Pixels { y, .. } => -y,
                 };
 
                 let total_height = widget_state.cache.total_height();
-                let viewport_height =
-                    bounds.height - self.padding.top - self.padding.bottom;
+                let viewport_height = bounds.height - self.padding.top - self.padding.bottom;
                 let max_scroll = (total_height - viewport_height).max(0.0);
 
                 widget_state.scroll_offset =
@@ -577,24 +576,17 @@ impl<Message> RichTextEditor<'_, Message> {
                 continue;
             };
 
-            let block_origin = Point::new(
-                text_bounds.x,
-                text_bounds.y + entry.y_offset(),
-            );
+            let block_origin = Point::new(text_bounds.x, text_bounds.y + entry.y_offset());
 
             match block.as_ref() {
                 Block::HorizontalRule => {
-                    let hr_bounds = Rectangle::new(
-                        block_origin,
-                        Size::new(text_bounds.width, entry.height()),
-                    );
+                    let hr_bounds =
+                        Rectangle::new(block_origin, Size::new(text_bounds.width, entry.height()));
                     render::draw_horizontal_rule(renderer, hr_bounds, self.text_color);
                 }
                 Block::BlockQuote { .. } => {
-                    let bq_bounds = Rectangle::new(
-                        block_origin,
-                        Size::new(text_bounds.width, entry.height()),
-                    );
+                    let bq_bounds =
+                        Rectangle::new(block_origin, Size::new(text_bounds.width, entry.height()));
                     render::draw_blockquote_border(renderer, bq_bounds, self.text_color);
 
                     for child in entry.child_paragraphs() {
@@ -611,11 +603,21 @@ impl<Message> RichTextEditor<'_, Message> {
                         );
                     }
                 }
-                Block::ListItem { ordered, indent_level, .. } => {
+                Block::ListItem {
+                    ordered,
+                    indent_level,
+                    ..
+                } => {
                     if let Some(paragraph) = entry.paragraph() {
                         self.draw_list_item(
-                            renderer, paragraph, i, *ordered, *indent_level,
-                            block_origin, entry.height(), text_bounds,
+                            renderer,
+                            paragraph,
+                            i,
+                            *ordered,
+                            *indent_level,
+                            block_origin,
+                            entry.height(),
+                            text_bounds,
                         );
                     }
                 }
@@ -632,10 +634,8 @@ impl<Message> RichTextEditor<'_, Message> {
                 }
                 Block::Image { .. } => {
                     // Draw a placeholder rectangle with a 1px border.
-                    let img_bounds = Rectangle::new(
-                        block_origin,
-                        Size::new(text_bounds.width, entry.height()),
-                    );
+                    let img_bounds =
+                        Rectangle::new(block_origin, Size::new(text_bounds.width, entry.height()));
                     let border_color = Color {
                         a: 0.3,
                         ..self.text_color
@@ -797,15 +797,14 @@ impl<Message> RichTextEditor<'_, Message> {
         let para_origin_x = text_bounds.x + content_x_off;
         let para_origin_y = text_bounds.y + entry.y_offset();
 
-        let (cursor_x, cursor_y, cursor_height) =
-            if let Some(paragraph) = entry.paragraph() {
-                let gp = grapheme_pixel_position(paragraph, pos.offset);
-                let lh = paragraph_line_height_px(paragraph);
-                (para_origin_x + gp.x, para_origin_y + gp.y, lh)
-            } else {
-                let lh = render::FONT_SIZE_BODY * render::LINE_HEIGHT_MULTIPLIER;
-                (para_origin_x, para_origin_y, lh)
-            };
+        let (cursor_x, cursor_y, cursor_height) = if let Some(paragraph) = entry.paragraph() {
+            let gp = grapheme_pixel_position(paragraph, pos.offset);
+            let lh = paragraph_line_height_px(paragraph);
+            (para_origin_x + gp.x, para_origin_y + gp.y, lh)
+        } else {
+            let lh = render::FONT_SIZE_BODY * render::LINE_HEIGHT_MULTIPLIER;
+            (para_origin_x, para_origin_y, lh)
+        };
 
         // Draw the cursor directly. We're inside with_layer(bounds)
         // which clips to the viewport, so no manual intersection
@@ -878,9 +877,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
                 layout::Node::new(limits.max())
             }
             Length::Shrink => {
-                let size = limits
-                    .height(Length::Fixed(content_height))
-                    .max();
+                let size = limits.height(Length::Fixed(content_height)).max();
                 layout::Node::new(size)
             }
         };
@@ -964,12 +961,9 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for RichTextEditor<'_
         // Clip to the widget bounds and translate by -scroll_offset so
         // content scrolls upward as scroll_offset increases.
         renderer.with_layer(bounds, |renderer| {
-            renderer.with_translation(
-                Vector::new(0.0, -scroll_offset),
-                |renderer| {
-                    self.draw_content(renderer, cache, &text_bounds, cursor_visible);
-                },
-            );
+            renderer.with_translation(Vector::new(0.0, -scroll_offset), |renderer| {
+                self.draw_content(renderer, cache, &text_bounds, cursor_visible);
+            });
         });
     }
 
@@ -1064,10 +1058,7 @@ fn build_line_starts(paragraph: &IcedParagraph) -> Vec<(usize, usize)> {
 
 /// Find which visual line a character offset falls on within a paragraph.
 /// Returns the line index and the character offset at the start of that line.
-fn find_line_for_offset(
-    paragraph: &IcedParagraph,
-    char_offset: usize,
-) -> LineInfo {
+fn find_line_for_offset(paragraph: &IcedParagraph, char_offset: usize) -> LineInfo {
     let line_starts = build_line_starts(paragraph);
 
     // Find the last line whose start_offset <= char_offset.
@@ -1091,10 +1082,7 @@ fn find_line_for_offset(
 
 /// Compute the pixel position of a character offset within a paragraph.
 /// Returns a point relative to the paragraph origin, or `(0, 0)` as fallback.
-fn grapheme_pixel_position(
-    paragraph: &IcedParagraph,
-    char_offset: usize,
-) -> Point {
+fn grapheme_pixel_position(paragraph: &IcedParagraph, char_offset: usize) -> Point {
     let line_info = find_line_for_offset(paragraph, char_offset);
     let within_line = char_offset.saturating_sub(line_info.start_offset);
 

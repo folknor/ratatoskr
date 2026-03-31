@@ -34,10 +34,7 @@ pub fn parse_csv(source: &ImportSource, preview_rows: usize) -> Result<ImportPre
     };
 
     let total_rows = data_rows.len();
-    let sample_rows: Vec<Vec<String>> = data_rows
-        .into_iter()
-        .take(preview_rows)
-        .collect();
+    let sample_rows: Vec<Vec<String>> = data_rows.into_iter().take(preview_rows).collect();
 
     Ok(ImportPreview {
         headers,
@@ -81,10 +78,7 @@ pub fn parse_csv_with_header(
     };
 
     let total_rows = data_rows.len();
-    let sample_rows: Vec<Vec<String>> = data_rows
-        .into_iter()
-        .take(preview_rows)
-        .collect();
+    let sample_rows: Vec<Vec<String>> = data_rows.into_iter().take(preview_rows).collect();
 
     Ok(ImportPreview {
         headers,
@@ -245,7 +239,9 @@ mod tests {
 
     #[test]
     fn parse_basic_csv() {
-        let source = make_source("Name,Email,Phone\nAlice,alice@test.com,555-1234\nBob,bob@test.com,555-5678\n");
+        let source = make_source(
+            "Name,Email,Phone\nAlice,alice@test.com,555-1234\nBob,bob@test.com,555-5678\n",
+        );
         let preview = parse_csv(&source, 10).expect("should parse");
         assert_eq!(preview.headers, vec!["Name", "Email", "Phone"]);
         assert_eq!(preview.sample_rows.len(), 2);
@@ -270,7 +266,8 @@ mod tests {
 
     #[test]
     fn parse_csv_no_header() {
-        let source = make_source("alice@test.com,Alice,+1-555-1234\nbob@test.com,Bob,+1-555-5678\n");
+        let source =
+            make_source("alice@test.com,Alice,+1-555-1234\nbob@test.com,Bob,+1-555-5678\n");
         let preview = parse_csv(&source, 10).expect("should parse");
         assert!(!preview.has_header);
         assert_eq!(preview.total_rows, 2);
@@ -280,9 +277,21 @@ mod tests {
     fn execute_csv_with_mappings() {
         let source = make_source("Name,Email,Phone\nAlice,alice@test.com,555-1234\n");
         let mappings = vec![
-            ColumnMapping { source_index: 0, source_column: "Name".into(), target_field: crate::types::ContactField::DisplayName },
-            ColumnMapping { source_index: 1, source_column: "Email".into(), target_field: crate::types::ContactField::Email },
-            ColumnMapping { source_index: 2, source_column: "Phone".into(), target_field: crate::types::ContactField::Phone },
+            ColumnMapping {
+                source_index: 0,
+                source_column: "Name".into(),
+                target_field: crate::types::ContactField::DisplayName,
+            },
+            ColumnMapping {
+                source_index: 1,
+                source_column: "Email".into(),
+                target_field: crate::types::ContactField::Email,
+            },
+            ColumnMapping {
+                source_index: 2,
+                source_column: "Phone".into(),
+                target_field: crate::types::ContactField::Phone,
+            },
         ];
         let contacts = execute_csv_import(&source, &mappings, true).expect("should import");
         assert_eq!(contacts.len(), 1);

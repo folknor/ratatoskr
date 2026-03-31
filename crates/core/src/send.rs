@@ -12,8 +12,7 @@
 
 use chrono::Utc;
 use lettre::message::{
-    Attachment, Mailbox, MessageBuilder, MultiPart, SinglePart,
-    header::ContentType,
+    Attachment, Mailbox, MessageBuilder, MultiPart, SinglePart, header::ContentType,
 };
 use rusqlite::params;
 
@@ -118,9 +117,7 @@ fn parse_mailbox(addr: &str) -> Result<Mailbox, SendError> {
 pub fn build_mime_message(req: &SendRequest) -> Result<Vec<u8>, SendError> {
     // ── Headers ──────────────────────────────────────────
     let from_mbox = parse_mailbox(&req.from)?;
-    let mut builder: MessageBuilder = lettre::Message::builder()
-        .from(from_mbox)
-        .date_now();
+    let mut builder: MessageBuilder = lettre::Message::builder().from(from_mbox).date_now();
 
     for addr in &req.to {
         builder = builder.to(parse_mailbox(addr)?);
@@ -132,9 +129,7 @@ pub fn build_mime_message(req: &SendRequest) -> Result<Vec<u8>, SendError> {
         builder = builder.bcc(parse_mailbox(addr)?);
     }
 
-    builder = builder.subject(
-        req.subject.as_deref().unwrap_or("").to_string()
-    );
+    builder = builder.subject(req.subject.as_deref().unwrap_or("").to_string());
 
     if let Some(ref in_reply_to) = req.in_reply_to {
         builder = builder.in_reply_to(in_reply_to.clone());
@@ -185,11 +180,9 @@ pub fn build_mime_message(req: &SendRequest) -> Result<Vec<u8>, SendError> {
 
             let attachment = if let Some(ref cid) = att.content_id {
                 // Inline attachment (e.g. embedded image referenced by cid)
-                Attachment::new_inline(cid.clone())
-                    .body(att.data.clone(), content_type)
+                Attachment::new_inline(cid.clone()).body(att.data.clone(), content_type)
             } else {
-                Attachment::new(att.filename.clone())
-                    .body(att.data.clone(), content_type)
+                Attachment::new(att.filename.clone()).body(att.data.clone(), content_type)
             };
 
             mixed = mixed.singlepart(attachment);
@@ -259,10 +252,7 @@ pub async fn mark_draft_sent(
 /// Transition a local draft to `'failed'` status after a send error.
 ///
 /// The error message is stored so the UI can display it.
-pub async fn mark_draft_failed(
-    db: &DbState,
-    draft_id: String,
-) -> Result<(), String> {
+pub async fn mark_draft_failed(db: &DbState, draft_id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute(
             "UPDATE local_drafts SET sync_status = 'failed' WHERE id = ?1",

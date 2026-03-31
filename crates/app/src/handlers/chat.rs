@@ -2,16 +2,18 @@ use std::sync::Arc;
 
 use iced::Task;
 
+use crate::command_dispatch::NavigationTarget;
 use crate::ui::chat_timeline::{ChatTimeline, ChatTimelineEvent};
 use crate::{App, Message};
-use crate::command_dispatch::NavigationTarget;
 
 impl App {
     /// Enter chat view for a contact.
     pub(crate) fn enter_chat_view(&mut self, email: String) -> Task<Message> {
         self.clear_search_state();
         self.clear_pinned_search_context();
-        self.navigation_target = Some(NavigationTarget::Chat { email: email.clone() });
+        self.navigation_target = Some(NavigationTarget::Chat {
+            email: email.clone(),
+        });
         self.clear_thread_selection();
         self.chat_timeline = Some(ChatTimeline::new(email.clone()));
 
@@ -21,10 +23,7 @@ impl App {
 
         Task::perform(
             async move {
-                rtsk::chat::get_chat_timeline(
-                    &db_state, &email, &user_emails, 50, None,
-                )
-                .await
+                rtsk::chat::get_chat_timeline(&db_state, &email, &user_emails, 50, None).await
             },
             move |result| Message::ChatTimelineLoaded(token, result),
         )
@@ -44,16 +43,16 @@ impl App {
     }
 
     /// Handle events from the chat timeline component.
-    pub(crate) fn handle_chat_timeline_event(
-        &mut self,
-        event: ChatTimelineEvent,
-    ) -> Task<Message> {
+    pub(crate) fn handle_chat_timeline_event(&mut self, event: ChatTimelineEvent) -> Task<Message> {
         match event {
             ChatTimelineEvent::LoadOlderRequested => {
                 let Some(ref timeline) = self.chat_timeline else {
                     return Task::none();
                 };
-                let oldest = timeline.messages.first().map(|m| (m.date, m.message_id.clone()));
+                let oldest = timeline
+                    .messages
+                    .first()
+                    .map(|m| (m.date, m.message_id.clone()));
                 let Some(before) = oldest else {
                     return Task::none();
                 };
@@ -65,7 +64,11 @@ impl App {
                 Task::perform(
                     async move {
                         rtsk::chat::get_chat_timeline(
-                            &db_state, &email, &user_emails, 50, Some(before),
+                            &db_state,
+                            &email,
+                            &user_emails,
+                            50,
+                            Some(before),
                         )
                         .await
                     },
@@ -90,7 +93,8 @@ impl App {
 
     /// Get all user email addresses across accounts, including send-as aliases.
     pub(crate) fn user_emails(&self) -> Vec<String> {
-        let mut emails: Vec<String> = self.sidebar
+        let mut emails: Vec<String> = self
+            .sidebar
             .accounts
             .iter()
             .map(|a| a.email.clone())

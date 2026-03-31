@@ -11,8 +11,8 @@
 
 // Re-export the core types for consumers.
 pub use seen::{
-    AddressObservation, Direction, MessageAddresses, SeenAddressMatch,
-    backfill_seen_addresses, ingest_from_messages,
+    AddressObservation, Direction, MessageAddresses, SeenAddressMatch, backfill_seen_addresses,
+    ingest_from_messages,
 };
 
 use rusqlite::{Connection, params};
@@ -28,10 +28,7 @@ use crate::db::DbState;
 /// Copies the display name from `seen_addresses` into the `contacts` table
 /// with `source = 'user'`. If the email already exists in contacts, this is
 /// a no-op (the contact already has higher priority).
-pub async fn promote_seen_to_contact(
-    db: &DbState,
-    email: String,
-) -> Result<(), String> {
+pub async fn promote_seen_to_contact(db: &DbState, email: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         let normalized = email.to_lowercase();
 
@@ -79,10 +76,8 @@ pub async fn get_seen_address_stats(
     db: &DbState,
     email: String,
 ) -> Result<Option<SeenAddressStats>, String> {
-    db.with_conn(move |conn| {
-        get_seen_stats_inner(conn, &email)
-    })
-    .await
+    db.with_conn(move |conn| get_seen_stats_inner(conn, &email))
+        .await
 }
 
 /// Aggregate stats for a seen address.

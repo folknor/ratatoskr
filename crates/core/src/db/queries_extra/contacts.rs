@@ -1,9 +1,9 @@
 use super::super::DbState;
-use crate::db::FromRow;
 use super::super::types::{
     ContactAttachmentRow, ContactStats, DbContact, RecentThread, SameDomainContact,
 };
-use rusqlite::{params, Connection};
+use crate::db::FromRow;
+use rusqlite::{Connection, params};
 
 pub async fn db_get_all_contacts(
     db: &DbState,
@@ -123,7 +123,18 @@ pub fn db_upsert_contact_full(
              notes = excluded.notes,
              account_id = excluded.account_id,
              updated_at = excluded.updated_at",
-        params![id, email, display_name, email2, phone, company, notes, account_id, source, now],
+        params![
+            id,
+            email,
+            display_name,
+            email2,
+            phone,
+            company,
+            notes,
+            account_id,
+            source,
+            now
+        ],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -177,7 +188,10 @@ pub async fn db_get_contacts_from_same_domain(
                      ORDER BY frequency DESC LIMIT ?3",
             )
             .map_err(|e| e.to_string())?;
-        stmt.query_map(params![domain, normalized, lim], SameDomainContact::from_row)
+        stmt.query_map(
+            params![domain, normalized, lim],
+            SameDomainContact::from_row,
+        )
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
@@ -223,9 +237,9 @@ pub async fn db_get_recent_threads_with_contact(
             )
             .map_err(|e| e.to_string())?;
         stmt.query_map(params![normalized, lim], RecentThread::from_row)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     })
     .await
 }
@@ -248,9 +262,9 @@ pub async fn db_get_attachments_from_contact(
             )
             .map_err(|e| e.to_string())?;
         stmt.query_map(params![normalized, lim], ContactAttachmentRow::from_row)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     })
     .await
 }
@@ -315,22 +329,15 @@ pub fn load_contacts_for_settings_sync(
          LIMIT 200"
     };
 
-    let db_params: &[&dyn rusqlite::types::ToSql] = if trimmed.is_empty() {
-        &[]
-    } else {
-        &[&pattern]
-    };
+    let db_params: &[&dyn rusqlite::types::ToSql] =
+        if trimmed.is_empty() { &[] } else { &[&pattern] };
 
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(db_params, |row| {
             let group_names: Option<String> = row.get("group_names")?;
             let groups = group_names
-                .map(|s| {
-                    s.split("||")
-                        .map(String::from)
-                        .collect::<Vec<_>>()
-                })
+                .map(|s| s.split("||").map(String::from).collect::<Vec<_>>())
                 .unwrap_or_default();
             Ok(ContactSettingsEntry {
                 id: row.get("id")?,
@@ -388,10 +395,7 @@ pub fn save_contact_sync(
 }
 
 /// Delete a contact by ID (synchronous).
-pub fn delete_contact_sync(
-    conn: &rusqlite::Connection,
-    id: &str,
-) -> Result<(), String> {
+pub fn delete_contact_sync(conn: &rusqlite::Connection, id: &str) -> Result<(), String> {
     conn.execute("DELETE FROM contacts WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
     Ok(())

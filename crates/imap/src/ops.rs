@@ -4,15 +4,15 @@ use async_trait::async_trait;
 use rusqlite::Connection;
 
 use common::error::ProviderError;
-use common::typed_ids::{FolderId, TagId};
 use common::folder_roles::{imap_name_to_special_use, imap_special_use_to_label_id};
 use common::ops::ProviderOps;
+use common::typed_ids::{FolderId, TagId};
 use common::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderParsedAttachment, ProviderParsedMessage, ProviderProfile, ProviderTestResult,
     SyncResult,
 };
-use smtp as smtp;
+use smtp;
 
 use super::client as imap_client;
 use super::connection::connect;
@@ -56,10 +56,8 @@ impl ImapOps {
 
     /// Shorthand for loading the IMAP config from the database.
     async fn load_config(&self, ctx: &ProviderCtx<'_>) -> Result<super::types::ImapConfig, String> {
-        crate::account_config::load_imap_config(ctx.db, ctx.account_id, &self.encryption_key)
-            .await
+        crate::account_config::load_imap_config(ctx.db, ctx.account_id, &self.encryption_key).await
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -452,7 +450,11 @@ impl ProviderOps for ImapOps {
         Ok(())
     }
 
-    async fn permanent_delete(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn permanent_delete(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        thread_id: &str,
+    ) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
         let config = self.load_config(ctx).await?;
@@ -615,12 +617,9 @@ impl ProviderOps for ImapOps {
         _thread_id: Option<&str>,
     ) -> Result<String, ProviderError> {
         let account_id = ctx.account_id.to_string();
-        let configs = crate::account_config::load_both_configs(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let configs =
+            crate::account_config::load_both_configs(ctx.db, &account_id, &self.encryption_key)
+                .await?;
         let smtp_config = configs.smtp;
         let imap_config = configs.imap;
 
@@ -631,14 +630,27 @@ impl ProviderOps for ImapOps {
             .unwrap_or_else(|| "Sent".to_string());
 
         // Inject read-receipt header and send via SMTP
-        log::info!("[IMAP] Sending email via SMTP for account {}", ctx.account_id);
+        log::info!(
+            "[IMAP] Sending email via SMTP for account {}",
+            ctx.account_id
+        );
         let patched = common::headers::inject_read_receipt_header_base64url(raw_base64url)?;
         let result = smtp::client::send_raw_email(&smtp_config, &patched).await?;
         if !result.success {
-            log::error!("[IMAP] SMTP send failed for account {}: {}", ctx.account_id, result.message);
-            return Err(ProviderError::Server(format!("SMTP send failed: {}", result.message)));
+            log::error!(
+                "[IMAP] SMTP send failed for account {}: {}",
+                ctx.account_id,
+                result.message
+            );
+            return Err(ProviderError::Server(format!(
+                "SMTP send failed: {}",
+                result.message
+            )));
         }
-        log::info!("[IMAP] Email sent successfully via SMTP for account {}", ctx.account_id);
+        log::info!(
+            "[IMAP] Email sent successfully via SMTP for account {}",
+            ctx.account_id
+        );
 
         let message_id = format!(
             "imap-sent-{}-{}",
@@ -706,7 +718,11 @@ impl ProviderOps for ImapOps {
         self.create_draft(ctx, raw_base64url, thread_id).await
     }
 
-    async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), ProviderError> {
+    async fn delete_draft(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        draft_id: &str,
+    ) -> Result<(), ProviderError> {
         // Generated draft IDs (imap-draft-...) can't be mapped to a server UID
         let prefix = format!("imap-{}-", ctx.account_id);
         if !draft_id.starts_with(&prefix) {
@@ -865,22 +881,26 @@ impl ProviderOps for ImapOps {
         ))
     }
 
-    async fn delete_folder(&self, _ctx: &ProviderCtx<'_>, _folder_id: &FolderId) -> Result<(), ProviderError> {
+    async fn delete_folder(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        _folder_id: &FolderId,
+    ) -> Result<(), ProviderError> {
         Err(ProviderError::Client(
             "Deleting folders is not supported for IMAP accounts via the current provider API."
                 .to_string(),
         ))
     }
 
-    async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, ProviderError> {
+    async fn test_connection(
+        &self,
+        ctx: &ProviderCtx<'_>,
+    ) -> Result<ProviderTestResult, ProviderError> {
         let account_id = ctx.account_id.to_string();
         let imap_config = self.load_config(ctx).await?;
-        let smtp_config = crate::account_config::load_smtp_config(
-            ctx.db,
-            &account_id,
-            &self.encryption_key,
-        )
-        .await?;
+        let smtp_config =
+            crate::account_config::load_smtp_config(ctx.db, &account_id, &self.encryption_key)
+                .await?;
 
         let imap_result = imap_client::test_connection(&imap_config).await?;
         let smtp_result = smtp::client::test_connection(&smtp_config).await?;

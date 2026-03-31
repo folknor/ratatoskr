@@ -78,11 +78,7 @@ pub fn strip_tracking_params(url: &str) -> String {
                 if v.is_empty() {
                     urlencoding::encode(k).into_owned()
                 } else {
-                    format!(
-                        "{}={}",
-                        urlencoding::encode(k),
-                        urlencoding::encode(v)
-                    )
+                    format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
                 }
             })
             .collect();
@@ -110,8 +106,7 @@ static HREF_RE: LazyLock<Regex> = LazyLock::new(|| {
     // Match href="..." or href='...' (case-insensitive on href).
     // Uses alternation instead of backreference (\2) since the regex crate
     // does not support backreferences.
-    Regex::new(r#"(?i)(href\s*=\s*)(?:"([^"]*)"|'([^']*)')"#)
-        .expect("href regex should compile")
+    Regex::new(r#"(?i)(href\s*=\s*)(?:"([^"]*)"|'([^']*)')"#).expect("href regex should compile")
 });
 
 /// Strip tracking query parameters from all `href` attribute URLs in an HTML string.
@@ -224,10 +219,7 @@ mod tests {
     fn html_single_quote_href() {
         let html = "<a href='https://example.com/?utm_campaign=test'>Link</a>";
         let result = strip_tracking_params_from_html(html);
-        assert_eq!(
-            result,
-            "<a href='https://example.com/'>Link</a>"
-        );
+        assert_eq!(result, "<a href='https://example.com/'>Link</a>");
     }
 
     #[test]

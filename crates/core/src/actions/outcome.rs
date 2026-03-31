@@ -14,7 +14,10 @@ pub enum ActionOutcome {
     /// worker (Phase 3.4) should also check `reason.is_retryable()` before
     /// actually enqueuing — a Permanent error shouldn't be retried even if
     /// the action class says "generally retry this action."
-    LocalOnly { reason: ActionError, retryable: bool },
+    LocalOnly {
+        reason: ActionError,
+        retryable: bool,
+    },
     /// The action failed entirely (local not applied).
     Failed { error: ActionError },
 }

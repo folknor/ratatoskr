@@ -20,13 +20,32 @@ pub enum MailOperation {
     Archive,
     Trash,
     PermanentDelete,
-    SetSpam { to: bool },
-    SetStarred { to: bool },
-    SetRead { to: bool },
-    SetPinned { to: bool },
-    SetMuted { to: bool },
-    MoveToFolder { dest: FolderId, source: Option<FolderId> },
-    AddLabel { label_id: TagId },
-    RemoveLabel { label_id: TagId },
-    Snooze { until: i64 },
+    SetSpam {
+        to: bool,
+    },
+    SetStarred {
+        to: bool,
+    },
+    SetRead {
+        to: bool,
+    },
+    SetPinned {
+        to: bool,
+    },
+    SetMuted {
+        to: bool,
+    },
+    MoveToFolder {
+        dest: FolderId,
+        source: Option<FolderId>,
+    },
+    AddLabel {
+        label_id: TagId,
+    },
+    RemoveLabel {
+        label_id: TagId,
+    },
+    Snooze {
+        until: i64,
+    },
 }

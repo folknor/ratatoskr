@@ -115,7 +115,10 @@ fn upgrade_oauth2_unsupported(
         .unwrap_or("");
 
     for opt in options.iter_mut() {
-        if let types::AuthMethod::OAuth2Unsupported { ref provider_domain } = opt.auth.method {
+        if let types::AuthMethod::OAuth2Unsupported {
+            ref provider_domain,
+        } = opt.auth.method
+        {
             if !domains_related(provider_domain, issuer_domain) {
                 log::debug!(
                     "OIDC upgrade skipped: provider_domain={provider_domain} \

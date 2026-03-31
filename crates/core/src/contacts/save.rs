@@ -49,10 +49,7 @@ pub enum WriteBackResult {
 // ---------------------------------------------------------------------------
 
 /// Determine whether a contact is local or synced.
-pub async fn get_contact_source(
-    db: &DbState,
-    email: String,
-) -> Result<ContactSource, String> {
+pub async fn get_contact_source(db: &DbState, email: String) -> Result<ContactSource, String> {
     db.with_conn(move |conn| {
         let source: Option<String> = conn
             .query_row(
@@ -74,10 +71,7 @@ pub async fn get_contact_source(
 ///
 /// For `source = 'user'` contacts, this persists all field changes
 /// directly to the database.
-pub async fn save_local_contact(
-    db: &DbState,
-    update: ContactUpdate,
-) -> Result<(), String> {
+pub async fn save_local_contact(db: &DbState, update: ContactUpdate) -> Result<(), String> {
     db.with_conn(move |conn| {
         apply_contact_update(conn, &update, true)?;
         Ok(())
@@ -91,10 +85,7 @@ pub async fn save_local_contact(
 /// for provider write-back. Display name changes always set
 /// `display_name_overridden = 1` and are NOT pushed to the provider.
 /// Other fields (email2, phone, company, notes) are pushed.
-pub async fn save_synced_contact(
-    db: &DbState,
-    update: ContactUpdate,
-) -> Result<(), String> {
+pub async fn save_synced_contact(db: &DbState, update: ContactUpdate) -> Result<(), String> {
     db.with_conn(move |conn| {
         apply_contact_update(conn, &update, false)?;
         Ok(())

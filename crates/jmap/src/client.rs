@@ -3,10 +3,10 @@ use std::sync::{Arc, RwLock as StdRwLock};
 use jmap_client::client::{Client, Credentials};
 use tokio::sync::RwLock;
 
-use db::db::DbState;
 use common::crypto::{decrypt_if_needed, encrypt_value};
 use common::http::shared_http_client;
 use common::token::{get_refresh_lock, oauth_token_endpoint, refresh_oauth_token};
+use db::db::DbState;
 
 /// Cached mailbox list entry: (mailbox_id, role, name).
 pub type MailboxListEntry = (String, Option<String>, String);
@@ -95,7 +95,15 @@ impl JmapClient {
 
         // Double-check after acquiring lock — another task may have refreshed
         let aid = self.account_id.clone();
-        let (fresh_access, fresh_expires, fresh_refresh, oauth_provider, oauth_client_id, oauth_client_secret, oauth_token_url) = db
+        let (
+            fresh_access,
+            fresh_expires,
+            fresh_refresh,
+            oauth_provider,
+            oauth_client_id,
+            oauth_client_secret,
+            oauth_token_url,
+        ) = db
             .with_conn(move |conn| {
                 conn.query_row(
                     "SELECT access_token, token_expires_at, refresh_token, \
@@ -143,12 +151,7 @@ impl JmapClient {
             })?;
         let client_id = oauth_client_id
             .filter(|v| !v.is_empty())
-            .ok_or_else(|| {
-                format!(
-                    "JMAP OAuth account {} has no client ID",
-                    self.account_id
-                )
-            })?;
+            .ok_or_else(|| format!("JMAP OAuth account {} has no client ID", self.account_id))?;
         let client_secret = decrypt_if_needed(&key, oauth_client_secret)?;
         let provider = oauth_provider.unwrap_or_default();
         let token_url = oauth_token_endpoint(&provider, oauth_token_url.as_deref())?;
@@ -167,19 +170,11 @@ impl JmapClient {
         let aid = self.account_id.clone();
         let new_expires = refreshed.expires_at;
         db.with_conn(move |conn| {
-            db::db::queries::persist_refreshed_token(
-                conn,
-                &aid,
-                &encrypted_access,
-                new_expires,
-            )
+            db::db::queries::persist_refreshed_token(conn, &aid, &encrypted_access, new_expires)
         })
         .await?;
 
-        log::info!(
-            "JMAP OAuth token refreshed for account {}",
-            self.account_id
-        );
+        log::info!("JMAP OAuth token refreshed for account {}", self.account_id);
 
         // Rebuild the inner client with the new token
         self.rebuild_client_with_token(&refreshed.access_token)
@@ -196,10 +191,7 @@ impl JmapClient {
             .await
             .map_err(|e| format!("JMAP reconnect with new token failed: {e}"))?;
 
-        *self
-            .inner
-            .write()
-            .expect("JMAP client lock poisoned") = Arc::new(client);
+        *self.inner.write().expect("JMAP client lock poisoned") = Arc::new(client);
 
         // Invalidate mailbox cache — session may have changed
         *self.mailbox_cache.write().await = None;
@@ -260,7 +252,11 @@ impl JmapClient {
             }
         };
 
-        log::info!("[JMAP] Connecting to {} for account {account_id} (auth={})", creds.jmap_url, creds.auth_method);
+        log::info!(
+            "[JMAP] Connecting to {} for account {account_id} (auth={})",
+            creds.jmap_url,
+            creds.auth_method
+        );
         let client = Client::new()
             .credentials(jmap_credentials)
             .connect(&creds.jmap_url)

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use iced::widget::{column, container, row, scrollable, text, Space};
+use iced::widget::{Space, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length};
 
 use crate::component::Component;
@@ -63,16 +63,19 @@ impl Component for ChatTimeline {
                 }
                 (iced::Task::none(), None)
             }
-            ChatTimelineMessage::LoadOlder => {
-                (iced::Task::none(), Some(ChatTimelineEvent::LoadOlderRequested))
-            }
+            ChatTimelineMessage::LoadOlder => (
+                iced::Task::none(),
+                Some(ChatTimelineEvent::LoadOlderRequested),
+            ),
         }
     }
 
     fn view(&self) -> Element<'_, ChatTimelineMessage> {
         if self.loading && self.messages.is_empty() {
             return container(
-                text("Loading...").size(TEXT_SM).style(theme::TextClass::Muted.style()),
+                text("Loading...")
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Muted.style()),
             )
             .center_x(Length::Fill)
             .center_y(Length::Fill)
@@ -93,9 +96,7 @@ impl Component for ChatTimeline {
             .on_press(ChatTimelineMessage::LoadOlder)
             .padding(SPACE_XS)
             .style(theme::ButtonClass::Ghost.style());
-            col = col.push(
-                container(load_btn).center_x(Length::Fill).padding(SPACE_SM),
-            );
+            col = col.push(container(load_btn).center_x(Length::Fill).padding(SPACE_SM));
         }
 
         let mut prev: Option<&ChatMessage> = None;
@@ -122,9 +123,7 @@ impl Component for ChatTimeline {
 
                 // Extra spacing on sender change
                 if p.is_from_user != msg.is_from_user {
-                    col = col.push(Space::new().height(
-                        CHAT_GROUP_SPACING - CHAT_BUBBLE_SPACING,
-                    ));
+                    col = col.push(Space::new().height(CHAT_GROUP_SPACING - CHAT_BUBBLE_SPACING));
                 }
             } else {
                 // First message — add date separator
@@ -145,10 +144,7 @@ impl Component for ChatTimeline {
 
 // ── Bubble rendering ───────────────────────────────────
 
-fn chat_bubble<'a>(
-    msg: &'a ChatMessage,
-    _expanded: bool,
-) -> Element<'a, ChatTimelineMessage> {
+fn chat_bubble<'a>(msg: &'a ChatMessage, _expanded: bool) -> Element<'a, ChatTimelineMessage> {
     // TODO: load body text from body store. For now use subject as placeholder.
     let body = msg.subject.as_deref().unwrap_or("(no content)");
 
@@ -173,22 +169,16 @@ fn chat_bubble<'a>(
 
     if msg.is_from_user {
         // Right-aligned: spacer + bubble
-        row![
-            Space::new().width(Length::Fill),
-            bubble,
-        ]
-        .align_y(Alignment::End)
-        .width(Length::Fill)
-        .into()
+        row![Space::new().width(Length::Fill), bubble,]
+            .align_y(Alignment::End)
+            .width(Length::Fill)
+            .into()
     } else {
         // Left-aligned: bubble + spacer
-        row![
-            bubble,
-            Space::new().width(Length::Fill),
-        ]
-        .align_y(Alignment::Start)
-        .width(Length::Fill)
-        .into()
+        row![bubble, Space::new().width(Length::Fill),]
+            .align_y(Alignment::Start)
+            .width(Length::Fill)
+            .into()
     }
 }
 

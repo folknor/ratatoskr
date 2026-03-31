@@ -1,9 +1,9 @@
 use rusqlite::OptionalExtension;
 
-use db::db::DbState;
 use common::crypto::{decrypt_if_needed, encrypt_value};
 use common::http::shared_http_client;
 use common::token::{get_refresh_lock, oauth_token_endpoint, refresh_oauth_token};
+use db::db::DbState;
 use smtp::types::SmtpConfig;
 
 use super::types::ImapConfig;
@@ -44,7 +44,6 @@ fn map_security(security: Option<&str>) -> String {
         }
     }
 }
-
 
 async fn load_account_record(
     db: &DbState,
@@ -161,12 +160,7 @@ async fn ensure_oauth_access_token(
     let aid = account_id.to_string();
     let new_expires = refreshed.expires_at;
     db.with_conn(move |conn| {
-        db::db::queries::persist_refreshed_token(
-            conn,
-            &aid,
-            &encrypted_access_token,
-            new_expires,
-        )
+        db::db::queries::persist_refreshed_token(conn, &aid, &encrypted_access_token, new_expires)
     })
     .await?;
 

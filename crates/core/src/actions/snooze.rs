@@ -41,11 +41,7 @@ pub async fn snooze(
 
 /// Unsnooze a single thread: restore to inbox, clear snooze state.
 /// Local-only by design.
-pub async fn unsnooze(
-    ctx: &ActionContext,
-    account_id: &str,
-    thread_id: &str,
-) -> ActionOutcome {
+pub async fn unsnooze(ctx: &ActionContext, account_id: &str, thread_id: &str) -> ActionOutcome {
     let mlog = MutationLog::begin("unsnooze", account_id, thread_id);
 
     let db = ctx.db.clone();

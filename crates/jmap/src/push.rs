@@ -319,16 +319,12 @@ async fn connect_and_listen(
         HeaderValue::from_str(auth_header)
             .map_err(|e| format!("invalid auth header value: {e}"))?,
     );
-    headers.insert(
-        "Sec-WebSocket-Protocol",
-        HeaderValue::from_static("jmap"),
-    );
+    headers.insert("Sec-WebSocket-Protocol", HeaderValue::from_static("jmap"));
 
     // Connect using native-tls
     let tls_connector = native_tls::TlsConnector::new()
         .map_err(|e| format!("TLS connector creation failed: {e}"))?;
-    let connector =
-        tokio_tungstenite::Connector::NativeTls(tls_connector);
+    let connector = tokio_tungstenite::Connector::NativeTls(tls_connector);
 
     let (ws_stream, _response) =
         tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector))
@@ -343,8 +339,8 @@ async fn connect_and_listen(
         data_types: Some(PUSH_DATA_TYPES.iter().map(|s| (*s).to_string()).collect()),
         push_state: last_push_state.clone(),
     };
-    let enable_json = serde_json::to_string(&enable_msg)
-        .map_err(|e| format!("serialize push enable: {e}"))?;
+    let enable_json =
+        serde_json::to_string(&enable_msg).map_err(|e| format!("serialize push enable: {e}"))?;
 
     {
         use futures::SinkExt;
@@ -489,20 +485,16 @@ async fn load_push_state(db: &DbState, account_id: &str) -> Result<Option<String
         let mut stmt = conn
             .prepare("SELECT push_state FROM jmap_push_state WHERE account_id = ?1")
             .map_err(|e| format!("prepare load_push_state: {e}"))?;
-        stmt.query_row(rusqlite::params![aid], |row| row.get::<_, Option<String>>(0))
-            .map_err(|e| {
-                if matches!(e, rusqlite::Error::QueryReturnedNoRows) {
-                    return String::new(); // sentinel for "no row"
-                }
-                format!("load_push_state: {e}")
-            })
-            .or_else(|e| {
-                if e.is_empty() {
-                    Ok(None)
-                } else {
-                    Err(e)
-                }
-            })
+        stmt.query_row(rusqlite::params![aid], |row| {
+            row.get::<_, Option<String>>(0)
+        })
+        .map_err(|e| {
+            if matches!(e, rusqlite::Error::QueryReturnedNoRows) {
+                return String::new(); // sentinel for "no row"
+            }
+            format!("load_push_state: {e}")
+        })
+        .or_else(|e| if e.is_empty() { Ok(None) } else { Err(e) })
     })
     .await
 }
@@ -615,15 +607,11 @@ mod tests {
             }
         }"#;
 
-        let sc: StateChange =
-            serde_json::from_str(json).expect("should deserialize StateChange");
+        let sc: StateChange = serde_json::from_str(json).expect("should deserialize StateChange");
         assert_eq!(sc.type_name, "StateChange");
         assert_eq!(sc.changed.len(), 1);
         let account = sc.changed.get("a1").expect("should have account a1");
-        assert_eq!(
-            account.get("Email").map(String::as_str),
-            Some("state_abc")
-        );
+        assert_eq!(account.get("Email").map(String::as_str), Some("state_abc"));
         assert_eq!(
             account.get("Mailbox").map(String::as_str),
             Some("state_def")
@@ -640,8 +628,7 @@ mod tests {
             }
         }"#;
 
-        let sc: StateChange =
-            serde_json::from_str(json).expect("should deserialize");
+        let sc: StateChange = serde_json::from_str(json).expect("should deserialize");
         assert_eq!(sc.changed.len(), 2);
         assert_eq!(sc.changed["account2"].len(), 2);
     }
@@ -649,8 +636,7 @@ mod tests {
     #[test]
     fn state_change_empty_changed() {
         let json = r#"{ "@type": "StateChange", "changed": {} }"#;
-        let sc: StateChange =
-            serde_json::from_str(json).expect("should deserialize empty");
+        let sc: StateChange = serde_json::from_str(json).expect("should deserialize empty");
         assert!(sc.changed.is_empty());
     }
 
@@ -660,8 +646,7 @@ mod tests {
             "@type": "StateChange",
             "changed": { "a": { "Email": "x" } }
         }"#;
-        let msg: IncomingMessage =
-            serde_json::from_str(json).expect("should parse");
+        let msg: IncomingMessage = serde_json::from_str(json).expect("should parse");
         assert_eq!(msg.type_name, "StateChange");
         assert!(msg.changed.is_some());
     }
@@ -669,8 +654,7 @@ mod tests {
     #[test]
     fn incoming_message_non_state_change() {
         let json = r#"{ "@type": "Response", "methodResponses": [] }"#;
-        let msg: IncomingMessage =
-            serde_json::from_str(json).expect("should parse");
+        let msg: IncomingMessage = serde_json::from_str(json).expect("should parse");
         assert_eq!(msg.type_name, "Response");
         assert!(msg.changed.is_none());
     }
@@ -679,10 +663,7 @@ mod tests {
     fn push_enable_serialization() {
         let msg = WebSocketPushEnable {
             type_name: "WebSocketPushEnable".to_string(),
-            data_types: Some(vec![
-                "Email".to_string(),
-                "Mailbox".to_string(),
-            ]),
+            data_types: Some(vec!["Email".to_string(), "Mailbox".to_string()]),
             push_state: Some("prev_state".to_string()),
         };
         let json = serde_json::to_string(&msg).expect("should serialize");

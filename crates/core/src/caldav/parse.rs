@@ -1,7 +1,7 @@
+use calcard::Parser;
 use calcard::icalendar::{
     ICalendarComponentType, ICalendarParameterName, ICalendarProperty, ICalendarValue,
 };
-use calcard::Parser;
 
 /// Parsed event data extracted from an iCalendar VEVENT.
 #[derive(Debug, Clone)]
@@ -225,13 +225,10 @@ fn extract_datetime(
         .and_then(|v| v.as_text())
         .is_some_and(|t| t.eq_ignore_ascii_case("DATE"));
 
-    let timestamp = entry
-        .values
-        .first()
-        .and_then(|v| match v {
-            ICalendarValue::PartialDateTime(dt) => dt.to_timestamp(),
-            _ => None,
-        });
+    let timestamp = entry.values.first().and_then(|v| match v {
+        ICalendarValue::PartialDateTime(dt) => dt.to_timestamp(),
+        _ => None,
+    });
 
     // For DATE-only values without time, the PartialDateTime may not have
     // hour/minute/second set. `to_timestamp()` handles this via `to_datetime()`

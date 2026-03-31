@@ -13,9 +13,7 @@ use std::sync::Arc;
 
 use html5ever::Attribute;
 
-use crate::document::{
-    Block, Document, HeadingLevel, InlineStyle, StyledRun,
-};
+use crate::document::{Block, Document, HeadingLevel, InlineStyle, StyledRun};
 
 use dom::{Handle, NodeData};
 
@@ -135,14 +133,13 @@ fn collect_inline_runs(node: &Handle, ctx: &StyleContext, runs: &mut Vec<StyledR
             let collapsed = collapse_whitespace(text);
             if !collapsed.is_empty() {
                 // Try to merge with the previous run if same formatting.
-                let can_merge = runs.last().is_some_and(|last| {
-                    last.style == ctx.style && last.link == ctx.link
-                });
-                if can_merge
-                    && let Some(last) = runs.last_mut() {
-                        last.text.push_str(&collapsed);
-                        return;
-                    }
+                let can_merge = runs
+                    .last()
+                    .is_some_and(|last| last.style == ctx.style && last.link == ctx.link);
+                if can_merge && let Some(last) = runs.last_mut() {
+                    last.text.push_str(&collapsed);
+                    return;
+                }
                 runs.push(StyledRun {
                     text: collapsed,
                     style: ctx.style,
@@ -211,9 +208,7 @@ fn node_to_blocks(node: &Handle, blocks: &mut Vec<Block>) {
                 });
             }
         }
-        NodeData::Element {
-            ref name, ..
-        } => {
+        NodeData::Element { ref name, .. } => {
             let tag = name.local.as_ref();
 
             match tag {
@@ -238,8 +233,7 @@ fn node_to_blocks(node: &Handle, blocks: &mut Vec<Block>) {
                     // A <br> at block level creates an empty paragraph.
                     blocks.push(Block::empty_paragraph());
                 }
-                "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
-                | "td" | "th" | "pre" => {
+                "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "td" | "th" | "pre" => {
                     parse_inline_element_to_blocks(tag, node, &borrow, blocks);
                 }
                 _ => {
@@ -267,11 +261,9 @@ fn parse_inline_element_to_blocks(
     match tag {
         "p" => {
             if tree_has_img(&borrow.children) {
-                collect_blocks_with_inline_images(
-                    &borrow.children,
-                    blocks,
-                    |runs| Block::Paragraph { runs },
-                );
+                collect_blocks_with_inline_images(&borrow.children, blocks, |runs| {
+                    Block::Paragraph { runs }
+                });
             } else {
                 let runs = collect_element_runs(node, &borrow.children);
                 blocks.push(Block::Paragraph { runs });
@@ -286,11 +278,9 @@ fn parse_inline_element_to_blocks(
             };
             let has_img = tree_has_img(&borrow.children);
             if has_img {
-                collect_blocks_with_inline_images(
-                    &borrow.children,
-                    blocks,
-                    |runs| Block::Heading { level, runs },
-                );
+                collect_blocks_with_inline_images(&borrow.children, blocks, |runs| {
+                    Block::Heading { level, runs }
+                });
             } else {
                 let runs = collect_element_runs(node, &borrow.children);
                 blocks.push(Block::Heading { level, runs });
@@ -298,11 +288,9 @@ fn parse_inline_element_to_blocks(
         }
         "td" | "th" => {
             if tree_has_img(&borrow.children) {
-                collect_blocks_with_inline_images(
-                    &borrow.children,
-                    blocks,
-                    |runs| Block::Paragraph { runs },
-                );
+                collect_blocks_with_inline_images(&borrow.children, blocks, |runs| {
+                    Block::Paragraph { runs }
+                });
             } else {
                 let runs = collect_element_runs(node, &borrow.children);
                 if !runs_are_empty(&runs) {
@@ -327,11 +315,7 @@ fn parse_inline_element_to_blocks(
 ///
 /// Called after the caller has dropped its borrow on `node`, so this
 /// function re-borrows as needed.
-fn parse_container_to_blocks(
-    tag: &str,
-    node: &Handle,
-    blocks: &mut Vec<Block>,
-) {
+fn parse_container_to_blocks(tag: &str, node: &Handle, blocks: &mut Vec<Block>) {
     match tag {
         "ul" | "ol" => {
             let ordered = tag == "ol";
@@ -453,12 +437,7 @@ fn parse_list_to_items(
 ///
 /// Inline content becomes a single `ListItem`. Nested `<ul>`/`<ol>` elements
 /// recurse with `indent_level + 1`.
-fn parse_li_to_items(
-    li_node: &Handle,
-    ordered: bool,
-    indent_level: u8,
-    blocks: &mut Vec<Block>,
-) {
+fn parse_li_to_items(li_node: &Handle, ordered: bool, indent_level: u8, blocks: &mut Vec<Block>) {
     let borrow = li_node.borrow();
 
     // Separate children into inline content and nested lists.
@@ -585,11 +564,7 @@ enum InlineOrImage {
 
 /// Collect inline runs and images from a node, handling `<img>` at any
 /// nesting depth within inline wrappers.
-fn collect_inline_or_images(
-    node: &Handle,
-    ctx: &StyleContext,
-    out: &mut Vec<InlineOrImage>,
-) {
+fn collect_inline_or_images(node: &Handle, ctx: &StyleContext, out: &mut Vec<InlineOrImage>) {
     let borrow = node.borrow();
     match borrow.data {
         NodeData::Text(ref text) => {
@@ -597,9 +572,7 @@ fn collect_inline_or_images(
             if !collapsed.is_empty() {
                 // Try to merge with the previous run if same formatting.
                 let can_merge = matches!(out.last(), Some(InlineOrImage::Run(last)) if last.style == ctx.style && last.link == ctx.link);
-                if can_merge
-                    && let Some(InlineOrImage::Run(last)) = out.last_mut()
-                {
+                if can_merge && let Some(InlineOrImage::Run(last)) = out.last_mut() {
                     last.text.push_str(&collapsed);
                     return;
                 }
@@ -716,10 +689,7 @@ fn flush_pending_runs(
 }
 
 /// Collect inline runs from an element's children.
-fn collect_element_runs(
-    _parent: &Handle,
-    children: &[Handle],
-) -> Vec<StyledRun> {
+fn collect_element_runs(_parent: &Handle, children: &[Handle]) -> Vec<StyledRun> {
     let ctx = StyleContext::new();
     let mut runs = Vec::new();
     for child in children {
@@ -841,7 +811,10 @@ mod tests {
     fn paragraph_with_bold() {
         let doc = from_html("<p><strong>bold</strong> normal</p>");
         assert_eq!(doc.block_count(), 1);
-        let runs = doc.block(0).and_then(Block::runs).expect("should have runs");
+        let runs = doc
+            .block(0)
+            .and_then(Block::runs)
+            .expect("should have runs");
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0].text, "bold");
         assert_eq!(runs[0].style, InlineStyle::BOLD);
@@ -902,7 +875,12 @@ mod tests {
     fn unordered_list() {
         let doc = from_html("<ul><li>one</li><li>two</li></ul>");
         assert_eq!(doc.block_count(), 2);
-        if let Block::ListItem { ordered, runs, indent_level } = doc.block(0).expect("block") {
+        if let Block::ListItem {
+            ordered,
+            runs,
+            indent_level,
+        } = doc.block(0).expect("block")
+        {
             assert!(!ordered);
             assert_eq!(*indent_level, 0);
             assert_eq!(runs[0].text, "one");
@@ -955,10 +933,7 @@ mod tests {
         let runs = doc.block(0).and_then(Block::runs).expect("runs");
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].text, "bold italic");
-        assert_eq!(
-            runs[0].style,
-            InlineStyle::BOLD | InlineStyle::ITALIC
-        );
+        assert_eq!(runs[0].style, InlineStyle::BOLD | InlineStyle::ITALIC);
     }
 
     #[test]
@@ -994,10 +969,7 @@ mod tests {
     fn bare_text_without_tags() {
         let doc = from_html("hello world");
         assert_eq!(doc.block_count(), 1);
-        assert_eq!(
-            doc.block(0).expect("block").flattened_text(),
-            "hello world"
-        );
+        assert_eq!(doc.block(0).expect("block").flattened_text(), "hello world");
     }
 
     #[test]
@@ -1011,7 +983,8 @@ mod tests {
 
     #[test]
     fn mixed_inline_styles() {
-        let doc = from_html("<p>normal <b>bold</b> <i>italic</i> <u>underline</u> <s>strike</s></p>");
+        let doc =
+            from_html("<p>normal <b>bold</b> <i>italic</i> <u>underline</u> <s>strike</s></p>");
         let runs = doc.block(0).and_then(Block::runs).expect("runs");
         assert_eq!(runs[0].text, "normal ");
         assert_eq!(runs[0].style, InlineStyle::empty());
@@ -1048,9 +1021,8 @@ mod tests {
 
     #[test]
     fn nested_blockquote() {
-        let doc = from_html(
-            "<blockquote><p>outer</p><blockquote><p>inner</p></blockquote></blockquote>",
-        );
+        let doc =
+            from_html("<blockquote><p>outer</p><blockquote><p>inner</p></blockquote></blockquote>");
         let block = doc.block(0).expect("block");
         if let Block::BlockQuote { blocks } = block {
             assert_eq!(blocks.len(), 2);
@@ -1199,7 +1171,13 @@ mod tests {
         let doc = from_html(r#"<img src="https://example.com/img.png" alt="A photo">"#);
         assert_eq!(doc.block_count(), 1);
         let block = doc.block(0).expect("block");
-        if let Block::Image { src, alt, width, height } = block {
+        if let Block::Image {
+            src,
+            alt,
+            width,
+            height,
+        } = block
+        {
             assert_eq!(src, "https://example.com/img.png");
             assert_eq!(alt, "A photo");
             assert_eq!(*width, None);
@@ -1214,7 +1192,13 @@ mod tests {
         let doc = from_html(r#"<img src="cid:abc" alt="logo" width="100" height="50">"#);
         assert_eq!(doc.block_count(), 1);
         let block = doc.block(0).expect("block");
-        if let Block::Image { src, alt, width, height } = block {
+        if let Block::Image {
+            src,
+            alt,
+            width,
+            height,
+        } = block
+        {
             assert_eq!(src, "cid:abc");
             assert_eq!(alt, "logo");
             assert_eq!(*width, Some(100));
@@ -1229,15 +1213,16 @@ mod tests {
         let doc = from_html(r#"<p>before<img src="test.png" alt="img">after</p>"#);
         // Should produce: paragraph("before"), Image, paragraph("after")
         assert!(doc.block_count() >= 2, "got {} blocks", doc.block_count());
-        let has_image = (0..doc.block_count())
-            .any(|i| matches!(doc.block(i), Some(Block::Image { .. })));
+        let has_image =
+            (0..doc.block_count()).any(|i| matches!(doc.block(i), Some(Block::Image { .. })));
         assert!(has_image, "should contain an Image block");
     }
 
     #[test]
     fn round_trip_image() {
         use crate::html_serialize::to_html;
-        let html = r#"<img src="https://example.com/img.png" alt="A photo" width="100" height="50">"#;
+        let html =
+            r#"<img src="https://example.com/img.png" alt="A photo" width="100" height="50">"#;
         let doc = from_html(html);
         assert_eq!(to_html(&doc), html);
     }
@@ -1253,23 +1238,28 @@ mod tests {
     #[test]
     fn image_inside_inline_wrapper_in_heading() {
         // <img> wrapped in <a> inside a heading — must not be dropped.
-        let doc = from_html(r#"<h1>before<a href="https://x.com"><img src="logo.png" alt="logo"></a>after</h1>"#);
+        let doc = from_html(
+            r#"<h1>before<a href="https://x.com"><img src="logo.png" alt="logo"></a>after</h1>"#,
+        );
         // Should produce: heading "before", image block, heading "after"
         assert!(doc.block_count() >= 2, "got {} blocks", doc.block_count());
-        let has_image = (0..doc.block_count()).any(|i| {
-            matches!(doc.block(i), Some(Block::Image { .. }))
-        });
-        assert!(has_image, "expected an Image block, got: {:?}",
-            (0..doc.block_count()).map(|i| doc.block(i).map(Block::kind)).collect::<Vec<_>>());
+        let has_image =
+            (0..doc.block_count()).any(|i| matches!(doc.block(i), Some(Block::Image { .. })));
+        assert!(
+            has_image,
+            "expected an Image block, got: {:?}",
+            (0..doc.block_count())
+                .map(|i| doc.block(i).map(Block::kind))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
     fn image_inside_strong_in_paragraph() {
         // <img> wrapped in <strong> inside a paragraph.
         let doc = from_html(r#"<p><strong><img src="pic.jpg" alt="pic"></strong></p>"#);
-        let has_image = (0..doc.block_count()).any(|i| {
-            matches!(doc.block(i), Some(Block::Image { .. }))
-        });
+        let has_image =
+            (0..doc.block_count()).any(|i| matches!(doc.block(i), Some(Block::Image { .. })));
         assert!(has_image, "expected an Image block");
     }
 
@@ -1278,13 +1268,19 @@ mod tests {
         let doc = from_html("<ul><li><p>text</p><ul><li>nested</li></ul></li></ul>");
         // Flattened model: first item at indent 0, nested item at indent 1.
         assert_eq!(doc.block_count(), 2);
-        if let Block::ListItem { indent_level, runs, .. } = doc.block(0).expect("block") {
+        if let Block::ListItem {
+            indent_level, runs, ..
+        } = doc.block(0).expect("block")
+        {
             assert_eq!(*indent_level, 0);
             assert_eq!(runs[0].text, "text");
         } else {
             panic!("expected ListItem at indent 0");
         }
-        if let Block::ListItem { indent_level, runs, .. } = doc.block(1).expect("block") {
+        if let Block::ListItem {
+            indent_level, runs, ..
+        } = doc.block(1).expect("block")
+        {
             assert_eq!(*indent_level, 1);
             assert_eq!(runs[0].text, "nested");
         } else {
@@ -1294,7 +1290,8 @@ mod tests {
 
     #[test]
     fn html_parse_nested_list_indent_levels() {
-        let doc = from_html("<ul><li>a</li><li>b<ol><li>b1</li><li>b2</li></ol></li><li>c</li></ul>");
+        let doc =
+            from_html("<ul><li>a</li><li>b<ol><li>b1</li><li>b2</li></ol></li><li>c</li></ul>");
         // Should produce: a(0), b(0), b1(1), b2(1), c(0)
         assert_eq!(doc.block_count(), 5);
         let expected = [
@@ -1305,7 +1302,12 @@ mod tests {
             ("c", 0, false),
         ];
         for (i, (text, indent, ordered)) in expected.iter().enumerate() {
-            if let Block::ListItem { indent_level, runs, ordered: o } = doc.block(i).expect("block") {
+            if let Block::ListItem {
+                indent_level,
+                runs,
+                ordered: o,
+            } = doc.block(i).expect("block")
+            {
                 assert_eq!(runs[0].text, *text, "block {i} text");
                 assert_eq!(*indent_level, *indent, "block {i} indent");
                 assert_eq!(*o, *ordered, "block {i} ordered");

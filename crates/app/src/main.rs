@@ -36,56 +36,48 @@ mod pop_out;
 mod ui;
 mod window_state;
 
+use cmdk::{
+    BindingTable, Chord, CommandId, CommandRegistry, FocusedRegion, UndoStack, current_platform,
+};
 use command_dispatch::{
-    ComposeAction, KeyEventMessage, MailActionIntent, NavigationTarget,
-    ReadingPanePosition, TaskAction,
+    ComposeAction, KeyEventMessage, MailActionIntent, NavigationTarget, ReadingPanePosition,
+    TaskAction,
 };
 use component::Component;
 use db::{Db, Thread};
-use iced::widget::{column, container, mouse_area, row, stack, Space};
+use handlers::provider::{JmapPushReceiver, create_jmap_push_channel, jmap_push_subscription};
+use iced::widget::{Space, column, container, mouse_area, row, stack};
 use iced::{Element, Length, Point, Size, Task, Theme};
-use pop_out::{PopOutMessage, PopOutWindow};
 use pop_out::compose::ComposeMode;
-use ui::palette::{Palette, PaletteMessage};
-use cmdk::{
-    BindingTable, Chord, CommandId, CommandRegistry,
-    FocusedRegion, UndoStack, current_platform,
-};
+use pop_out::{PopOutMessage, PopOutWindow};
 use rtsk::db::queries_extra::navigation::{
     NavigationState, get_navigation_state, get_shared_mailbox_navigation,
 };
 use rtsk::db::queries_extra::{
-    get_threads_scoped, get_threads_for_shared_mailbox, get_public_folder_items,
+    get_public_folder_items, get_threads_for_shared_mailbox, get_threads_scoped,
 };
 use rtsk::db::types::{AccountScope, DbThread};
-use rtsk::generation::{
-    GenerationCounter, GenerationToken, Nav, ThreadDetail, Search, PopOut,
-};
+use rtsk::generation::{GenerationCounter, GenerationToken, Nav, PopOut, Search, ThreadDetail};
 use rtsk::scope::ViewScope;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use ui::add_account::{AddAccountMessage, AddAccountWizard};
+use ui::calendar::{CalendarMessage, CalendarOverlay, CalendarState, CalendarView};
 use ui::layout::{
     READING_PANE_MIN_WIDTH, RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH,
     THREAD_LIST_MIN_WIDTH,
 };
-use ui::add_account::{AddAccountMessage, AddAccountWizard};
-use ui::undoable::UndoableText;
-use ui::calendar::{
-    CalendarMessage, CalendarOverlay, CalendarState, CalendarView,
-};
+use ui::palette::{Palette, PaletteMessage};
 use ui::reading_pane::{ReadingPane, ReadingPaneEvent, ReadingPaneMessage};
 use ui::settings::{Settings, SettingsEvent, SettingsMessage};
 use ui::sidebar::{Sidebar, SidebarEvent, SidebarMessage};
 use ui::status_bar::{
-    AccountWarning, StatusBar, StatusBarEvent, StatusBarMessage, SyncEvent,
-    SyncProgressReceiver, WarningKind, create_sync_progress_channel, shared_receiver,
-    sync_progress_subscription,
-};
-use handlers::provider::{
-    JmapPushReceiver, create_jmap_push_channel, jmap_push_subscription,
+    AccountWarning, StatusBar, StatusBarEvent, StatusBarMessage, SyncEvent, SyncProgressReceiver,
+    WarningKind, create_sync_progress_channel, shared_receiver, sync_progress_subscription,
 };
 use ui::thread_list::{ThreadList, ThreadListEvent, ThreadListMessage};
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
+use ui::undoable::UndoableText;
 
 static DB: std::sync::OnceLock<Arc<Db>> = std::sync::OnceLock::new();
 static APP_DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
@@ -112,9 +104,11 @@ fn main() -> iced::Result {
         }
         std::fs::create_dir_all(&dev_dir).expect("create dev data dir");
 
-        log::info!("Dev-seed: generating ephemeral database in {}", dev_dir.display());
-        dev_seed::seed_database(&config, &dev_dir)
-            .expect("dev-seed failed");
+        log::info!(
+            "Dev-seed: generating ephemeral database in {}",
+            dev_dir.display()
+        );
+        dev_seed::seed_database(&config, &dev_dir).expect("dev-seed failed");
 
         dev_dir
     };
@@ -124,8 +118,7 @@ fn main() -> iced::Result {
         .expect("no data dir")
         .join("org.folknor.ratatoskr");
 
-    let db = Db::open(&app_data_dir)
-        .map_err(|e| iced::Error::WindowCreationFailed(e.into()))?;
+    let db = Db::open(&app_data_dir).map_err(|e| iced::Error::WindowCreationFailed(e.into()))?;
     let _ = DB.set(Arc::new(db));
 
     let detected_scale = display::detect_default_scale();
@@ -180,7 +173,6 @@ const DIVIDER_WIDTH: f32 = 2.0;
 struct PendingChord {
     first: Chord,
 }
-
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -259,7 +251,11 @@ pub enum Message {
     // Pinned searches
     PinnedSearchesLoaded(Result<Vec<db::PinnedSearch>, String>),
     SelectPinnedSearch(i64),
-    PinnedSearchThreadIdsLoaded(GenerationToken<Nav>, i64, Result<Vec<(String, String)>, String>),
+    PinnedSearchThreadIdsLoaded(
+        GenerationToken<Nav>,
+        i64,
+        Result<Vec<(String, String)>, String>,
+    ),
     PinnedSearchThreadsLoaded(GenerationToken<Nav>, Result<Vec<Thread>, String>),
     DismissPinnedSearch(i64),
     PinnedSearchDismissed(i64, Result<(), String>),
@@ -297,10 +293,16 @@ pub enum Message {
     LocalDraftLoaded(Result<Option<rtsk::db::types::DbLocalDraft>, String>),
 
     // Thread detail via core
-    ThreadDetailLoaded(GenerationToken<ThreadDetail>, Result<db::AppThreadDetail, String>),
+    ThreadDetailLoaded(
+        GenerationToken<ThreadDetail>,
+        Result<db::AppThreadDetail, String>,
+    ),
     // Chat
     ChatTimeline(ui::chat_timeline::ChatTimelineMessage),
-    ChatTimelineLoaded(GenerationToken<rtsk::generation::Chat>, Result<Vec<rtsk::chat::ChatMessage>, String>),
+    ChatTimelineLoaded(
+        GenerationToken<rtsk::generation::Chat>,
+        Result<Vec<rtsk::chat::ChatMessage>, String>,
+    ),
     ChatOlderLoaded(String, Result<Vec<rtsk::chat::ChatMessage>, String>),
     ChatReadMarked,
 
@@ -435,8 +437,7 @@ impl App {
         let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
         let window = window_state::WindowState::load(data_dir);
 
-        let (main_window_id, open_task) =
-            iced::window::open(window.to_window_settings());
+        let (main_window_id, open_task) = iced::window::open(window.to_window_settings());
 
         let mut registry = CommandRegistry::new();
         let mut binding_table = BindingTable::new(&registry, current_platform());
@@ -467,13 +468,14 @@ impl App {
             }
         };
 
-        let inline_image_store = match store::inline_image_store::InlineImageStoreState::init(data_dir) {
-            Ok(store) => Some(store),
-            Err(e) => {
-                log::error!("Failed to init inline image store: {e}");
-                None
-            }
-        };
+        let inline_image_store =
+            match store::inline_image_store::InlineImageStoreState::init(data_dir) {
+                Ok(store) => Some(store),
+                Err(e) => {
+                    log::error!("Failed to init inline image store: {e}");
+                    None
+                }
+            };
 
         let encryption_key = match rtsk::load_encryption_key(data_dir) {
             Ok(key) => Some(key),
@@ -485,24 +487,25 @@ impl App {
 
         // Initialize search state once — shared between the app and action service.
         let search_state: Option<Arc<rtsk::search::SearchState>> =
-            rtsk::search::SearchState::init(data_dir)
-                .map(Arc::new)
-                .ok();
+            rtsk::search::SearchState::init(data_dir).map(Arc::new).ok();
 
-        let action_ctx = match (&body_store, &inline_image_store, &search_state, encryption_key) {
-            (Some(bs), Some(iis), Some(ss), Some(key)) => {
-                Some(rtsk::actions::ActionContext {
-                    db: rtsk::db::DbState::from_arc(db.write_conn_arc()),
-                    body_store: bs.clone(),
-                    inline_images: iis.clone(),
-                    search: (**ss).clone(),
-                    encryption_key: key,
-                    suppress_pending_enqueue: false,
-                    in_flight: std::sync::Arc::new(std::sync::Mutex::new(
-                        std::collections::HashSet::new(),
-                    )),
-                })
-            }
+        let action_ctx = match (
+            &body_store,
+            &inline_image_store,
+            &search_state,
+            encryption_key,
+        ) {
+            (Some(bs), Some(iis), Some(ss), Some(key)) => Some(rtsk::actions::ActionContext {
+                db: rtsk::db::DbState::from_arc(db.write_conn_arc()),
+                body_store: bs.clone(),
+                inline_images: iis.clone(),
+                search: (**ss).clone(),
+                encryption_key: key,
+                suppress_pending_enqueue: false,
+                in_flight: std::sync::Arc::new(std::sync::Mutex::new(
+                    std::collections::HashSet::new(),
+                )),
+            }),
             _ => {
                 log::error!("Action service unavailable: one or more stores failed to initialize");
                 None
@@ -511,14 +514,18 @@ impl App {
 
         let session = pop_out::session::SessionState::load(data_dir);
 
-        let calendar_default_view = db.with_conn_sync(|conn| {
-            let view_name = conn.query_row(
-                "SELECT value FROM settings WHERE key = 'calendar_default_view'",
-                [],
-                |row| row.get::<_, String>(0),
-            ).unwrap_or_else(|_| "month".to_string());
-            Ok(CalendarState::parse_view_name(&view_name))
-        }).unwrap_or(CalendarView::Month);
+        let calendar_default_view = db
+            .with_conn_sync(|conn| {
+                let view_name = conn
+                    .query_row(
+                        "SELECT value FROM settings WHERE key = 'calendar_default_view'",
+                        [],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .unwrap_or_else(|_| "month".to_string());
+                Ok(CalendarState::parse_view_name(&view_name))
+            })
+            .unwrap_or(CalendarView::Month);
 
         let bimi_cache = Arc::new(rtsk::bimi::BimiLruCache::new());
 
@@ -527,9 +534,7 @@ impl App {
             sidebar: Sidebar::new(),
             thread_list: ThreadList::new(Arc::clone(&bimi_cache)),
             reading_pane: ReadingPane::new(),
-            settings: Settings::with_scale(
-                *DEFAULT_SCALE.get().unwrap_or(&1.0),
-            ),
+            settings: Settings::with_scale(*DEFAULT_SCALE.get().unwrap_or(&1.0)),
             status_bar: StatusBar::new(),
             status: "Loading...".to_string(),
             mode: appearance::Mode::Dark,
@@ -552,10 +557,7 @@ impl App {
             focused_region: None,
             is_online: true,
             pending_chord: None,
-            palette: Palette::new(
-                CommandRegistry::new(),
-                resolver,
-            ),
+            palette: Palette::new(CommandRegistry::new(), resolver),
             undo_stack: UndoStack::default(),
             search_state,
             chat_timeline: None,
@@ -674,7 +676,9 @@ impl App {
                 ui::theme::theme_by_index(idx)
             }
             _ => match self.mode {
-                appearance::Mode::Light => Theme::custom(String::from("Light"), iced::theme::palette::Seed::LIGHT),
+                appearance::Mode::Light => {
+                    Theme::custom(String::from("Light"), iced::theme::palette::Seed::LIGHT)
+                }
                 _ => Theme::custom(String::from("Dark"), iced::theme::palette::Seed::DARK),
             },
         }
@@ -683,9 +687,7 @@ impl App {
     fn subscription(&self) -> iced::Subscription<Message> {
         let mut subs = vec![
             appearance::subscription().map(Message::AppearanceChanged),
-            iced::window::resize_events().map(|(id, size)| {
-                Message::WindowResized(id, size)
-            }),
+            iced::window::resize_events().map(|(id, size)| Message::WindowResized(id, size)),
             iced::window::close_requests().map(Message::WindowCloseRequested),
             iced::event::listen_with(|event, _status, id| {
                 if let iced::Event::Window(iced::window::Event::Moved(point)) = event {
@@ -694,33 +696,26 @@ impl App {
                     None
                 }
             }),
-            iced::event::listen_with(|event, status, id| {
-                match &event {
-                    iced::Event::Keyboard(
-                        iced::keyboard::Event::KeyPressed { key, modifiers, .. }
-                    ) => {
-                        Some(Message::KeyEvent(KeyEventMessage::KeyPressed {
-                            key: key.clone(),
-                            modifiers: *modifiers,
-                            status,
-                            window_id: id,
-                        }))
-                    }
-                    iced::Event::Keyboard(
-                        iced::keyboard::Event::ModifiersChanged(modifiers)
-                    ) => {
-                        Some(Message::ModifiersChanged(*modifiers))
-                    }
-                    _ => None,
+            iced::event::listen_with(|event, status, id| match &event {
+                iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                    key, modifiers, ..
+                }) => Some(Message::KeyEvent(KeyEventMessage::KeyPressed {
+                    key: key.clone(),
+                    modifiers: *modifiers,
+                    status,
+                    window_id: id,
+                })),
+                iced::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
+                    Some(Message::ModifiersChanged(*modifiers))
                 }
+                _ => None,
             }),
             self.sidebar.subscription().map(Message::Sidebar),
             self.thread_list.subscription().map(Message::ThreadList),
             self.reading_pane.subscription().map(Message::ReadingPane),
             self.settings.subscription().map(Message::Settings),
             self.status_bar.subscription().map(Message::StatusBar),
-            sync_progress_subscription(&self.sync_receiver)
-                .map(Message::SyncProgress),
+            sync_progress_subscription(&self.sync_receiver).map(Message::SyncProgress),
             jmap_push_subscription(&self.jmap_push_receiver)
                 .map(|account_id| Message::SyncComplete(account_id, Ok(()))),
         ];
@@ -764,16 +759,14 @@ impl App {
         // Periodic sync — delta sync all accounts every 5 minutes
         if !self.sidebar.accounts.is_empty() && self.encryption_key.is_some() {
             subs.push(
-                iced::time::every(std::time::Duration::from_secs(300))
-                    .map(|_| Message::SyncTick),
+                iced::time::every(std::time::Duration::from_secs(300)).map(|_| Message::SyncTick),
             );
         }
 
         // Snooze resurface — check every 60 seconds for due threads
         if self.action_ctx.is_some() {
             subs.push(
-                iced::time::every(std::time::Duration::from_secs(60))
-                    .map(|_| Message::SnoozeTick),
+                iced::time::every(std::time::Duration::from_secs(60)).map(|_| Message::SnoozeTick),
             );
         }
 
@@ -783,7 +776,11 @@ impl App {
                 .map(|_| Message::GalRefreshTick),
         );
 
-        if self.settings.overlay_anim.is_animating(iced::time::Instant::now()) {
+        if self
+            .settings
+            .overlay_anim
+            .is_animating(iced::time::Instant::now())
+        {
             subs.push(
                 iced::window::frames()
                     .map(|at| Message::Settings(SettingsMessage::OverlayAnimTick(at))),
@@ -885,9 +882,7 @@ impl App {
             Message::WindowResized(id, size) => {
                 if id == self.main_window_id {
                     self.window.set_size(size);
-                    if size.width < RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH
-                        && self.right_sidebar_open
-                    {
+                    if size.width < RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH && self.right_sidebar_open {
                         self.right_sidebar_open = false;
                     }
                     // Clamp panel widths so minimums are respected after
@@ -929,9 +924,7 @@ impl App {
             // Command system
             Message::KeyEvent(msg) => self.handle_key_event(msg),
             Message::ExecuteCommand(id) => self.handle_execute_command(id),
-            Message::ExecuteParameterized(id, args) => {
-                self.handle_execute_parameterized(id, args)
-            }
+            Message::ExecuteParameterized(id, args) => self.handle_execute_parameterized(id, args),
             Message::NavigateTo(target) => self.handle_navigate_to(target),
             Message::Escape => {
                 if !matches!(self.calendar.overlay, CalendarOverlay::None) {
@@ -952,12 +945,14 @@ impl App {
                 Task::none()
             }
             Message::EmailAction(action) => self.handle_email_action(action),
-            Message::ActionCompleted { ref plan, ref outcomes } => {
-                self.handle_action_completed(plan, outcomes)
-            }
-            Message::SendCompleted { window_id, ref outcome } => {
-                self.handle_send_completed(window_id, outcome)
-            }
+            Message::ActionCompleted {
+                ref plan,
+                ref outcomes,
+            } => self.handle_action_completed(plan, outcomes),
+            Message::SendCompleted {
+                window_id,
+                ref outcome,
+            } => self.handle_send_completed(window_id, outcome),
             Message::ComposeAction(ref action) => self.handle_compose_action(action),
             Message::TaskAction(_action) => Task::none(),
             Message::SetTheme(theme) => {
@@ -989,23 +984,19 @@ impl App {
                             || lower.contains("refresh");
                         let email = self.email_for_account(&account_id);
                         if is_auth_error {
-                            self.status_bar.set_warning(
-                                ui::status_bar::AccountWarning {
-                                    account_id: account_id.clone(),
-                                    email,
-                                    kind: ui::status_bar::WarningKind::TokenExpiry,
-                                },
-                            );
+                            self.status_bar.set_warning(ui::status_bar::AccountWarning {
+                                account_id: account_id.clone(),
+                                email,
+                                kind: ui::status_bar::WarningKind::TokenExpiry,
+                            });
                         } else {
-                            self.status_bar.set_warning(
-                                ui::status_bar::AccountWarning {
-                                    account_id: account_id.clone(),
-                                    email,
-                                    kind: ui::status_bar::WarningKind::ConnectionFailure {
-                                        message: e.clone(),
-                                    },
+                            self.status_bar.set_warning(ui::status_bar::AccountWarning {
+                                account_id: account_id.clone(),
+                                email,
+                                kind: ui::status_bar::WarningKind::ConnectionFailure {
+                                    message: e.clone(),
                                 },
-                            );
+                            });
                         }
                     }
                     Ok(()) => {
@@ -1029,7 +1020,9 @@ impl App {
             // Search — delegated to handlers/search.rs
             Message::SearchQueryChanged(query) => self.handle_search_query_changed(query),
             Message::SearchExecute => self.handle_search_execute(),
-            Message::SearchResultsLoaded(g, _) if !self.search_generation.is_current(g) => Task::none(),
+            Message::SearchResultsLoaded(g, _) if !self.search_generation.is_current(g) => {
+                Task::none()
+            }
             Message::SearchResultsLoaded(_, result) => self.handle_search_results(result),
             Message::SearchClear => self.handle_search_clear(),
             Message::FocusSearchBar => self.handle_focus_search_bar(),
@@ -1067,9 +1060,7 @@ impl App {
                 self.handle_pinned_search_dismissed(id, result)
             }
             Message::PinnedSearchSaved(result) => self.handle_pinned_search_saved(result),
-            Message::PinnedSearchesExpired(result) => {
-                self.handle_pinned_searches_expired(result)
-            }
+            Message::PinnedSearchesExpired(result) => self.handle_pinned_searches_expired(result),
             Message::RefreshPinnedSearch(id) => self.handle_refresh_pinned_search(id),
             Message::ExpiryTick => self.handle_expiry_tick(),
             Message::SearchHere(prefix) => self.handle_search_here(prefix),
@@ -1124,9 +1115,7 @@ impl App {
                 }
                 self.update(Message::Calendar(Box::new(CalendarMessage::Today)))
             }
-            Message::CalendarSyncComplete => {
-                self.reload_calendar_events()
-            }
+            Message::CalendarSyncComplete => self.reload_calendar_events(),
 
             // Account management
             Message::AddAccount(msg) => self.handle_add_account(msg),
@@ -1148,16 +1137,20 @@ impl App {
                 Task::none()
             }
             Message::OpenAddAccount => {
-                let used_colors = self.sidebar.accounts.iter()
+                let used_colors = self
+                    .sidebar
+                    .accounts
+                    .iter()
                     .filter_map(|a| a.account_color.clone())
                     .collect();
-                self.add_account_wizard =
-                    Some(AddAccountWizard::new_add_account(used_colors, Arc::clone(&self.db)));
+                self.add_account_wizard = Some(AddAccountWizard::new_add_account(
+                    used_colors,
+                    Arc::clone(&self.db),
+                ));
                 Task::none()
             }
             Message::ReloadSignatures => {
-                handlers::signatures::load_signatures_async(&self.db)
-                    .map(Message::SignatureOp)
+                handlers::signatures::load_signatures_async(&self.db).map(Message::SignatureOp)
             }
             Message::SignatureOp(result) => self.handle_signature_op(result),
 
@@ -1165,9 +1158,7 @@ impl App {
             Message::PopOut(window_id, pop_out_msg) => {
                 self.handle_pop_out_message(window_id, pop_out_msg)
             }
-            Message::OpenMessageView(message_index) => {
-                self.open_message_view_window(message_index)
-            }
+            Message::OpenMessageView(message_index) => self.open_message_view_window(message_index),
             Message::ComposeDraftTick => self.auto_save_compose_drafts(),
             Message::LocalDraftLoaded(Ok(Some(draft))) => {
                 let state = crate::pop_out::compose::ComposeState::from_local_draft(
@@ -1189,7 +1180,9 @@ impl App {
             }
 
             // Thread detail via core (replaces separate messages/attachments loads)
-            Message::ThreadDetailLoaded(g, _) if !self.thread_generation.is_current(g) => Task::none(),
+            Message::ThreadDetailLoaded(g, _) if !self.thread_generation.is_current(g) => {
+                Task::none()
+            }
             Message::ThreadDetailLoaded(_, Ok(detail)) => {
                 self.reading_pane.load_thread_detail(detail);
                 Task::none()
@@ -1226,7 +1219,10 @@ impl App {
                 Task::none()
             }
             Message::ChatOlderLoaded(ref email, Ok(ref messages))
-                if self.chat_timeline.as_ref().is_some_and(|t| t.contact_email == *email) =>
+                if self
+                    .chat_timeline
+                    .as_ref()
+                    .is_some_and(|t| t.contact_email == *email) =>
             {
                 let msgs = messages.clone();
                 self.handle_chat_older_loaded(msgs)
@@ -1259,17 +1255,15 @@ impl App {
                 let all_failed = outcomes.iter().all(rtsk::actions::ActionOutcome::is_failed);
                 let any_failed = outcomes.iter().any(rtsk::actions::ActionOutcome::is_failed);
                 if all_failed {
-                    self.status_bar.show_confirmation(
-                        format!("\u{26A0} Undo failed: {desc}"),
-                    );
+                    self.status_bar
+                        .show_confirmation(format!("\u{26A0} Undo failed: {desc}"));
                 } else if any_failed {
                     self.status_bar.show_confirmation(
                         "\u{26A0} Undo partially failed \u{2014} some changes may revert"
                             .to_string(),
                     );
                 } else {
-                    self.status_bar
-                        .show_confirmation(format!("Undone: {desc}"));
+                    self.status_bar.show_confirmation(format!("Undone: {desc}"));
                 }
                 {
                     let token = self.nav_generation.next();
@@ -1296,7 +1290,9 @@ impl App {
                 Task::none()
             }
             Message::SnoozeTick => self.handle_snooze_tick(),
-            Message::SnoozeResurfaceComplete(result) => self.handle_snooze_resurface_complete(result),
+            Message::SnoozeResurfaceComplete(result) => {
+                self.handle_snooze_resurface_complete(result)
+            }
             Message::GalRefreshTick => {
                 // Refresh GAL cache for all connected accounts.
                 // Currently a placeholder — the actual directory API calls
@@ -1337,10 +1333,8 @@ impl App {
                 PopOutWindow::Compose(state) => {
                     pop_out::compose::view_compose_window(window_id, state)
                 }
-                PopOutWindow::Calendar => {
-                    ui::calendar::calendar_layout(&self.calendar)
-                        .map(|m| Message::Calendar(Box::new(m)))
-                }
+                PopOutWindow::Calendar => ui::calendar::calendar_layout(&self.calendar)
+                    .map(|m| Message::Calendar(Box::new(m))),
             };
         }
 
@@ -1374,10 +1368,7 @@ impl App {
                     .width(SIDEBAR_MIN_WIDTH)
                     .height(Length::Fill);
 
-                let is_chat = matches!(
-                    self.navigation_target,
-                    Some(NavigationTarget::Chat { .. })
-                );
+                let is_chat = matches!(self.navigation_target, Some(NavigationTarget::Chat { .. }));
 
                 if is_chat {
                     // Chat view: sidebar + full-width chat timeline
@@ -1397,10 +1388,7 @@ impl App {
                     };
 
                     let status_bar = self.status_bar_view();
-                    let content_area = column![
-                        chat_view,
-                        status_bar,
-                    ];
+                    let content_area = column![chat_view, status_bar,];
 
                     let divider_sidebar = self.build_divider(Divider::Sidebar);
                     row![sidebar, divider_sidebar, content_area].height(Length::Fill)
@@ -1413,9 +1401,11 @@ impl App {
                     let divider_thread = self.build_divider(Divider::ThreadList);
 
                     let ctx = command_dispatch::build_context(self);
-                    let reading_pane = container(
-                        self.reading_pane.view_with_commands(&self.registry, &self.binding_table, &ctx),
-                    )
+                    let reading_pane = container(self.reading_pane.view_with_commands(
+                        &self.registry,
+                        &self.binding_table,
+                        &ctx,
+                    ))
                     .width(Length::Fill)
                     .height(Length::Fill);
 
@@ -1515,18 +1505,12 @@ impl App {
                 self.load_threads_for_current_view(token)
             }
             SidebarEvent::Compose => self.update(Message::Compose),
-            SidebarEvent::ToggleSettings => {
-                self.update(Message::ToggleSettings)
-            }
-            SidebarEvent::PinnedSearchSelected(id) => {
-                self.update(Message::SelectPinnedSearch(id))
-            }
+            SidebarEvent::ToggleSettings => self.update(Message::ToggleSettings),
+            SidebarEvent::PinnedSearchSelected(id) => self.update(Message::SelectPinnedSearch(id)),
             SidebarEvent::PinnedSearchDismissed(id) => {
                 self.update(Message::DismissPinnedSearch(id))
             }
-            SidebarEvent::ModeToggled => {
-                self.update(Message::ToggleAppMode)
-            }
+            SidebarEvent::ModeToggled => self.update(Message::ToggleAppMode),
             SidebarEvent::SearchHere { query_prefix } => {
                 self.update(Message::SearchHere(query_prefix))
             }
@@ -1553,7 +1537,10 @@ impl App {
     ///
     /// `navigation_target` is set to the provided value (Some for folder
     /// navigation, None for account/label switch).
-    fn reset_view_state(&mut self, navigation_target: Option<crate::command_dispatch::NavigationTarget>) {
+    fn reset_view_state(
+        &mut self,
+        navigation_target: Option<crate::command_dispatch::NavigationTarget>,
+    ) {
         self.clear_search_state();
         self.clear_pinned_search_context();
         self.navigation_target = navigation_target;
@@ -1586,14 +1573,10 @@ impl App {
             ThreadListEvent::ThreadSelected(idx) => {
                 // Check modifier keys for multi-select behavior.
                 if self.current_modifiers.control() {
-                    return self.handle_thread_list(
-                        ThreadListMessage::ToggleThread(idx),
-                    );
+                    return self.handle_thread_list(ThreadListMessage::ToggleThread(idx));
                 }
                 if self.current_modifiers.shift() {
-                    return self.handle_thread_list(
-                        ThreadListMessage::RangeSelectThread(idx),
-                    );
+                    return self.handle_thread_list(ThreadListMessage::RangeSelectThread(idx));
                 }
                 // Plain click: clear multi-select, single-select.
                 self.thread_list.clear_multi_select();
@@ -1602,9 +1585,7 @@ impl App {
             ThreadListEvent::SearchQueryChanged(query) => {
                 self.update(Message::SearchQueryChanged(query))
             }
-            ThreadListEvent::SearchExecute => {
-                self.update(Message::SearchExecute)
-            }
+            ThreadListEvent::SearchExecute => self.update(Message::SearchExecute),
             ThreadListEvent::SearchUndo => {
                 if let Some(text) = self.search_query.undo() {
                     let query = text.to_owned();
@@ -1632,12 +1613,8 @@ impl App {
                 self.update_thread_list_context_from_sidebar();
                 self.update(Message::SearchExecute)
             }
-            ThreadListEvent::TypeaheadQuery { .. } => {
-                Task::none()
-            }
-            ThreadListEvent::TypeaheadSelected(idx) => {
-                self.handle_typeahead_select(idx)
-            }
+            ThreadListEvent::TypeaheadQuery { .. } => Task::none(),
+            ThreadListEvent::TypeaheadSelected(idx) => self.handle_typeahead_select(idx),
             ThreadListEvent::MultiSelectionChanged(_count) => {
                 // Selection count changed — no action needed yet.
                 Task::none()
@@ -1668,7 +1645,10 @@ impl App {
 
     fn handle_reading_pane_event(&mut self, event: ReadingPaneEvent) -> Task<Message> {
         match event {
-            ReadingPaneEvent::AttachmentCollapseChanged { thread_key, collapsed } => {
+            ReadingPaneEvent::AttachmentCollapseChanged {
+                thread_key,
+                collapsed,
+            } => {
                 // thread_key format is "account_id:thread_id"
                 if let Some((account_id, thread_id)) = thread_key.split_once(':') {
                     let db = Arc::clone(&self.db);
@@ -1695,21 +1675,25 @@ impl App {
             ReadingPaneEvent::OpenMessagePopOut { message_index } => {
                 self.open_message_view_window(message_index)
             }
-            ReadingPaneEvent::ReplyToMessage { message_index } => {
-                self.handle_reading_pane_compose(message_index, ComposeMode::Reply {
+            ReadingPaneEvent::ReplyToMessage { message_index } => self.handle_reading_pane_compose(
+                message_index,
+                ComposeMode::Reply {
                     original_subject: self.current_subject(),
-                })
-            }
-            ReadingPaneEvent::ReplyAllToMessage { message_index } => {
-                self.handle_reading_pane_compose(message_index, ComposeMode::ReplyAll {
+                },
+            ),
+            ReadingPaneEvent::ReplyAllToMessage { message_index } => self
+                .handle_reading_pane_compose(
+                    message_index,
+                    ComposeMode::ReplyAll {
+                        original_subject: self.current_subject(),
+                    },
+                ),
+            ReadingPaneEvent::ForwardMessage { message_index } => self.handle_reading_pane_compose(
+                message_index,
+                ComposeMode::Forward {
                     original_subject: self.current_subject(),
-                })
-            }
-            ReadingPaneEvent::ForwardMessage { message_index } => {
-                self.handle_reading_pane_compose(message_index, ComposeMode::Forward {
-                    original_subject: self.current_subject(),
-                })
-            }
+                },
+            ),
             ReadingPaneEvent::EditContact { email } => {
                 // Open the contact editor in settings for this email.
                 // Find or create the contact, then open settings with editor.
@@ -1726,8 +1710,8 @@ impl App {
 
     /// Create a calendar event pre-filled from the given email message.
     fn create_event_from_email(&mut self, message_index: usize) -> Task<Message> {
-        use chrono::Timelike;
         use crate::ui::calendar::{CalendarEventData, CalendarMessage, CalendarOverlay};
+        use chrono::Timelike;
 
         let msg = self.reading_pane.thread_messages.get(message_index);
         let Some(msg) = msg else { return Task::none() };
@@ -1756,9 +1740,11 @@ impl App {
         };
 
         // If calendar is popped out, focus that window instead of switching main to calendar.
-        if let Some((&win_id, _)) = self.pop_out_windows.iter().find(|(_, w)| {
-            matches!(w, crate::pop_out::PopOutWindow::Calendar)
-        }) {
+        if let Some((&win_id, _)) = self
+            .pop_out_windows
+            .iter()
+            .find(|(_, w)| matches!(w, crate::pop_out::PopOutWindow::Calendar))
+        {
             return iced::window::gain_focus(win_id);
         }
 
@@ -1817,9 +1803,11 @@ impl App {
         self.open_settings(crate::ui::settings::types::Tab::People);
 
         // Look up existing contact or create new editor state
-        let found = self.settings.contacts.iter().find(|c| {
-            c.email.eq_ignore_ascii_case(&email)
-        });
+        let found = self
+            .settings
+            .contacts
+            .iter()
+            .find(|c| c.email.eq_ignore_ascii_case(&email));
 
         if let Some(contact) = found {
             let id = contact.id.clone();
@@ -1852,7 +1840,11 @@ impl App {
         mode: ComposeMode,
     ) -> Task<Message> {
         // Clone all data upfront to avoid borrow checker conflicts with &mut self.
-        let msg = self.reading_pane.thread_messages.get(message_index).cloned();
+        let msg = self
+            .reading_pane
+            .thread_messages
+            .get(message_index)
+            .cloned();
         let to_email = msg.as_ref().and_then(|m| m.from_address.clone());
         let to_name = msg.as_ref().and_then(|m| m.from_name.clone());
         let cc_emails = msg.as_ref().and_then(|m| m.cc_addresses.clone());
@@ -1897,12 +1889,16 @@ impl App {
 
     fn handle_sync_event(&mut self, event: SyncEvent) {
         match event {
-            SyncEvent::Progress { account_id, phase, current, total } => {
+            SyncEvent::Progress {
+                account_id,
+                phase,
+                current,
+                total,
+            } => {
                 log::info!("Sync progress: account={account_id} phase={phase} {current}/{total}");
                 let email = self.email_for_account(&account_id);
-                self.status_bar.report_sync_progress(
-                    account_id, email, current, total, phase,
-                );
+                self.status_bar
+                    .report_sync_progress(account_id, email, current, total, phase);
             }
             SyncEvent::Complete { account_id } => {
                 log::info!("Sync complete: account={account_id}");
@@ -1925,7 +1921,9 @@ impl App {
     /// Look up the email address for an account ID from the sidebar's
     /// account list. Returns the account ID itself if not found.
     fn email_for_account(&self, account_id: &str) -> String {
-        self.sidebar.accounts.iter()
+        self.sidebar
+            .accounts
+            .iter()
             .find(|a| a.id == account_id)
             .map(|a| a.email.clone())
             .unwrap_or_else(|| account_id.to_string())
@@ -1979,15 +1977,12 @@ impl App {
                 Task::none()
             }
             SettingsEvent::OpenAddAccountWizard => self.handle_open_add_account_wizard(),
-            SettingsEvent::DeleteAccount(account_id) => {
-                self.handle_delete_account(account_id)
-            }
+            SettingsEvent::DeleteAccount(account_id) => self.handle_delete_account(account_id),
             SettingsEvent::SaveAccountChanges { account_id, params } => {
                 self.handle_save_account_changes(account_id, params)
             }
             SettingsEvent::SaveSignature(req) => {
-                handlers::signatures::handle_save_signature(&self.db, req)
-                    .map(Message::SignatureOp)
+                handlers::signatures::handle_save_signature(&self.db, req).map(Message::SignatureOp)
             }
             SettingsEvent::DeleteSignature(id) => {
                 handlers::signatures::handle_delete_signature(&self.db, id)
@@ -2004,12 +1999,12 @@ impl App {
             SettingsEvent::SaveGroup(group, members) => self.handle_save_group(group, members),
             SettingsEvent::DeleteGroup(id) => self.handle_delete_group(id),
             SettingsEvent::LoadGroupMembers(group_id) => self.handle_load_group_members(group_id),
-            SettingsEvent::ExecuteContactImport { contacts, account_id, update_existing } => {
-                self.handle_import_contacts(contacts, account_id, update_existing)
-            }
-            SettingsEvent::ReorderAccounts(orders) => {
-                self.handle_reorder_accounts(orders)
-            }
+            SettingsEvent::ExecuteContactImport {
+                contacts,
+                account_id,
+                update_existing,
+            } => self.handle_import_contacts(contacts, account_id, update_existing),
+            SettingsEvent::ReorderAccounts(orders) => self.handle_reorder_accounts(orders),
             SettingsEvent::ReauthenticateAccount(account_id) => {
                 self.handle_open_reauth_wizard(account_id)
             }
@@ -2046,8 +2041,7 @@ impl App {
                 Task::none()
             }
             handlers::SignatureResult::Saved(_) | handlers::SignatureResult::Deleted(_) => {
-                handlers::signatures::load_signatures_async(&self.db)
-                    .map(Message::SignatureOp)
+                handlers::signatures::load_signatures_async(&self.db).map(Message::SignatureOp)
             }
         }
     }
@@ -2056,8 +2050,12 @@ impl App {
         // If the deleted account is referenced by the current scope, revert to All Accounts
         let scope_references_account = match &self.sidebar.selected_scope {
             ViewScope::Account(id) => *id == account_id,
-            ViewScope::SharedMailbox { account_id: aid, .. }
-            | ViewScope::PublicFolder { account_id: aid, .. } => *aid == account_id,
+            ViewScope::SharedMailbox {
+                account_id: aid, ..
+            }
+            | ViewScope::PublicFolder {
+                account_id: aid, ..
+            } => *aid == account_id,
             ViewScope::AllAccounts => false,
         };
         if scope_references_account {
@@ -2077,16 +2075,12 @@ impl App {
                 // fired yet when we query attachment rows)
                 let plan = db
                     .with_write_conn(move |conn| {
-                        rtsk::account::delete::delete_account_orchestrate(
-                            conn,
-                            &account_id,
-                        )
+                        rtsk::account::delete::delete_account_orchestrate(conn, &account_id)
                     })
                     .await?;
 
                 // Phase 2: best-effort cleanup of external stores
-                let mut report =
-                    rtsk::account::types::AccountDeletionCleanupReport::default();
+                let mut report = rtsk::account::types::AccountDeletionCleanupReport::default();
 
                 // Body store
                 if let Some(ref bs) = body_store {
@@ -2110,9 +2104,7 @@ impl App {
                         match iis.delete_hashes(to_delete).await {
                             Ok(n) => report.inline_images_deleted = n,
                             Err(e) => {
-                                log::error!(
-                                    "Account deletion: inline image cleanup failed: {e}"
-                                );
+                                log::error!("Account deletion: inline image cleanup failed: {e}");
                             }
                         }
                     }
@@ -2127,10 +2119,7 @@ impl App {
                     if plan.shared_cache_hashes.contains(hash) {
                         continue;
                     }
-                    match rtsk::attachment_cache::remove_cached_relative(
-                        &app_data_dir,
-                        path,
-                    ) {
+                    match rtsk::attachment_cache::remove_cached_relative(&app_data_dir, path) {
                         Ok(()) => report.cache_files_deleted += 1,
                         Err(e) => report.cache_file_errors.push((path.clone(), e)),
                     }
@@ -2176,9 +2165,7 @@ impl App {
         Task::perform(
             async move {
                 db.with_write_conn(move |conn| {
-                    rtsk::db::queries_extra::update_account_sync(
-                        conn, &account_id, params,
-                    )
+                    rtsk::db::queries_extra::update_account_sync(conn, &account_id, params)
                 })
                 .await
             },
@@ -2186,18 +2173,13 @@ impl App {
         )
     }
 
-    fn handle_reorder_accounts(
-        &mut self,
-        orders: Vec<(String, i64)>,
-    ) -> Task<Message> {
+    fn handle_reorder_accounts(&mut self, orders: Vec<(String, i64)>) -> Task<Message> {
         let db = Arc::clone(&self.db);
         Task::perform(
             async move {
                 db.with_write_conn(move |conn| {
                     let mut stmt = conn
-                        .prepare(
-                            "UPDATE accounts SET sort_order = ?1 WHERE id = ?2",
-                        )
+                        .prepare("UPDATE accounts SET sort_order = ?1 WHERE id = ?2")
                         .map_err(|e| e.to_string())?;
                     for (account_id, sort_order) in &orders {
                         stmt.execute(rusqlite::params![sort_order, account_id])
@@ -2239,7 +2221,10 @@ impl App {
         Task::perform(
             async move {
                 let r = match &view_scope {
-                    ViewScope::SharedMailbox { account_id, mailbox_id } => {
+                    ViewScope::SharedMailbox {
+                        account_id,
+                        mailbox_id,
+                    } => {
                         let aid = account_id.clone();
                         let mid = mailbox_id.clone();
                         load_shared_mailbox_navigation(db, aid, mid).await
@@ -2253,8 +2238,7 @@ impl App {
                         })
                     }
                     _ => {
-                        let scope = view_scope.to_account_scope()
-                            .unwrap_or(AccountScope::All);
+                        let scope = view_scope.to_account_scope().unwrap_or(AccountScope::All);
                         load_navigation(db, scope).await
                     }
                 };
@@ -2264,26 +2248,34 @@ impl App {
         )
     }
 
-    pub(crate) fn load_threads_for_current_view(&self, load_gen: GenerationToken<Nav>) -> Task<Message> {
+    pub(crate) fn load_threads_for_current_view(
+        &self,
+        load_gen: GenerationToken<Nav>,
+    ) -> Task<Message> {
         let db = Arc::clone(&self.db);
         let view_scope = self.sidebar.selected_scope.clone();
         let label_id = self.sidebar.selected_label.clone();
         Task::perform(
             async move {
                 let r = match &view_scope {
-                    ViewScope::SharedMailbox { account_id, mailbox_id } => {
+                    ViewScope::SharedMailbox {
+                        account_id,
+                        mailbox_id,
+                    } => {
                         let aid = account_id.clone();
                         let mid = mailbox_id.clone();
                         load_shared_mailbox_threads(db, aid, mid, label_id).await
                     }
-                    ViewScope::PublicFolder { account_id, folder_id } => {
+                    ViewScope::PublicFolder {
+                        account_id,
+                        folder_id,
+                    } => {
                         let aid = account_id.clone();
                         let fid = folder_id.clone();
                         load_public_folder_items(db, aid, fid).await
                     }
                     _ => {
-                        let scope = view_scope.to_account_scope()
-                            .unwrap_or(AccountScope::All);
+                        let scope = view_scope.to_account_scope().unwrap_or(AccountScope::All);
                         load_threads_scoped(db, scope, label_id).await
                     }
                 };
@@ -2314,13 +2306,8 @@ impl App {
                 let db = Arc::clone(&self.db);
                 return Task::perform(
                     async move {
-                        let core_db =
-                            rtsk::db::DbState::from_arc(db.conn_arc());
-                        rtsk::db::queries_extra::db_get_local_draft(
-                            &core_db,
-                            draft_id,
-                        )
-                        .await
+                        let core_db = rtsk::db::DbState::from_arc(db.conn_arc());
+                        rtsk::db::queries_extra::db_get_local_draft(&core_db, draft_id).await
                     },
                     Message::LocalDraftLoaded,
                 );
@@ -2362,7 +2349,11 @@ impl App {
                 return Task::perform(
                     async move {
                         let r = db::threads::load_thread_detail(
-                            &db, &bs, iis.as_ref(), account_id, thread_id,
+                            &db,
+                            &bs,
+                            iis.as_ref(),
+                            account_id,
+                            thread_id,
                         )
                         .await;
                         (load_gen, r)
@@ -2370,7 +2361,6 @@ impl App {
                     |(g, result)| Message::ThreadDetailLoaded(g, result),
                 );
             }
-
         }
         Task::none()
     }
@@ -2379,9 +2369,8 @@ impl App {
         self.sidebar.accounts = accounts;
         if self.sidebar.accounts.is_empty() {
             self.no_accounts = true;
-            self.add_account_wizard = Some(AddAccountWizard::new_first_launch(
-                Arc::clone(&self.db),
-            ));
+            self.add_account_wizard =
+                Some(AddAccountWizard::new_first_launch(Arc::clone(&self.db)));
             self.status = "Welcome".to_string();
             return Task::none();
         }
@@ -2398,25 +2387,32 @@ impl App {
                 account_color: a.account_color.clone(),
                 display_name: a.display_name.clone(),
                 last_sync_at: a.last_sync_at,
-                health: ui::settings::compute_health(a.last_sync_at, a.token_expires_at, a.is_active),
+                health: ui::settings::compute_health(
+                    a.last_sync_at,
+                    a.token_expires_at,
+                    a.is_active,
+                ),
             })
             .collect();
         if let Some(first) = self.sidebar.accounts.first() {
             self.sidebar.selected_scope = ViewScope::Account(first.id.clone());
         }
         self.status = format!("Loaded {} accounts", self.sidebar.accounts.len());
-        let sig_task = handlers::signatures::load_signatures_async(&self.db)
-            .map(Message::SignatureOp);
+        let sig_task =
+            handlers::signatures::load_signatures_async(&self.db).map(Message::SignatureOp);
         let sync_task = self.sync_all_accounts();
         let push_task = self.start_jmap_push();
         let auto_reply_task = self.check_auto_reply_status();
-        Task::batch([self.load_navigation_and_threads(), sig_task, sync_task, push_task, auto_reply_task])
+        Task::batch([
+            self.load_navigation_and_threads(),
+            sig_task,
+            sync_task,
+            push_task,
+            auto_reply_task,
+        ])
     }
 
-    fn view_first_launch_modal<'a>(
-        &'a self,
-        wizard: &'a AddAccountWizard,
-    ) -> Element<'a, Message> {
+    fn view_first_launch_modal<'a>(&'a self, wizard: &'a AddAccountWizard) -> Element<'a, Message> {
         use ui::layout::{ACCOUNT_MODAL_MAX_HEIGHT, ACCOUNT_MODAL_WIDTH};
 
         let modal_content = wizard.view().map(Message::AddAccount);
@@ -2477,24 +2473,23 @@ impl App {
             .width(self.sidebar_width)
             .height(Length::Fill);
         let divider_sidebar = self.build_divider(Divider::Sidebar);
-        let thread_list =
-            container(self.thread_list.view().map(Message::ThreadList))
-                .width(self.thread_list_width)
-                .height(Length::Fill);
+        let thread_list = container(self.thread_list.view().map(Message::ThreadList))
+            .width(self.thread_list_width)
+            .height(Length::Fill);
         let divider_thread = self.build_divider(Divider::ThreadList);
         let ctx = command_dispatch::build_context(self);
-        let reading_pane = container(
-            self.reading_pane
-                .view_with_commands(&self.registry, &self.binding_table, &ctx),
-        )
+        let reading_pane = container(self.reading_pane.view_with_commands(
+            &self.registry,
+            &self.binding_table,
+            &ctx,
+        ))
         .width(Length::Fill)
         .height(Length::Fill);
         let rs_data = ui::right_sidebar::RightSidebarData {
             calendar: &self.calendar,
             threads: &self.thread_list.threads,
         };
-        let right_sidebar =
-            ui::right_sidebar::view(self.right_sidebar_open, &rs_data);
+        let right_sidebar = ui::right_sidebar::view(self.right_sidebar_open, &rs_data);
         let layout = row![
             sidebar,
             divider_sidebar,
@@ -2516,23 +2511,23 @@ impl App {
         } else {
             0.0
         };
-        let available =
-            self.window.width - 2.0 * DIVIDER_WIDTH - right_sidebar_used;
+        let available = self.window.width - 2.0 * DIVIDER_WIDTH - right_sidebar_used;
 
         match self.dragging {
             Some(Divider::Sidebar) => {
                 // max: leave room for thread list min + reading pane min
-                let max_sidebar =
-                    available - THREAD_LIST_MIN_WIDTH - READING_PANE_MIN_WIDTH;
-                self.sidebar_width =
-                    point.x.clamp(SIDEBAR_MIN_WIDTH, max_sidebar.max(SIDEBAR_MIN_WIDTH));
+                let max_sidebar = available - THREAD_LIST_MIN_WIDTH - READING_PANE_MIN_WIDTH;
+                self.sidebar_width = point
+                    .x
+                    .clamp(SIDEBAR_MIN_WIDTH, max_sidebar.max(SIDEBAR_MIN_WIDTH));
             }
             Some(Divider::ThreadList) => {
                 // max: leave room for reading pane min
-                let max_thread_list =
-                    available - self.sidebar_width - READING_PANE_MIN_WIDTH;
-                let new_width = (point.x - self.sidebar_width - DIVIDER_WIDTH)
-                    .clamp(THREAD_LIST_MIN_WIDTH, max_thread_list.max(THREAD_LIST_MIN_WIDTH));
+                let max_thread_list = available - self.sidebar_width - READING_PANE_MIN_WIDTH;
+                let new_width = (point.x - self.sidebar_width - DIVIDER_WIDTH).clamp(
+                    THREAD_LIST_MIN_WIDTH,
+                    max_thread_list.max(THREAD_LIST_MIN_WIDTH),
+                );
                 self.thread_list_width = new_width;
             }
             None => {}
@@ -2549,23 +2544,21 @@ impl App {
         } else {
             0.0
         };
-        let available =
-            self.window.width - 2.0 * DIVIDER_WIDTH - right_sidebar_used;
+        let available = self.window.width - 2.0 * DIVIDER_WIDTH - right_sidebar_used;
 
         // 1. Ensure sidebar doesn't exceed what leaves room for the other
         //    two panels at their minimums.
         let max_sidebar =
-            (available - THREAD_LIST_MIN_WIDTH - READING_PANE_MIN_WIDTH)
-                .max(SIDEBAR_MIN_WIDTH);
+            (available - THREAD_LIST_MIN_WIDTH - READING_PANE_MIN_WIDTH).max(SIDEBAR_MIN_WIDTH);
         self.sidebar_width = self.sidebar_width.clamp(SIDEBAR_MIN_WIDTH, max_sidebar);
 
         // 2. Ensure thread list doesn't exceed what leaves room for the
         //    reading pane at its minimum.
         let max_thread_list =
-            (available - self.sidebar_width - READING_PANE_MIN_WIDTH)
-                .max(THREAD_LIST_MIN_WIDTH);
-        self.thread_list_width =
-            self.thread_list_width.clamp(THREAD_LIST_MIN_WIDTH, max_thread_list);
+            (available - self.sidebar_width - READING_PANE_MIN_WIDTH).max(THREAD_LIST_MIN_WIDTH);
+        self.thread_list_width = self
+            .thread_list_width
+            .clamp(THREAD_LIST_MIN_WIDTH, max_thread_list);
     }
 
     fn handle_clear_all_pinned_searches(&mut self) -> Task<Message> {
@@ -2574,9 +2567,7 @@ impl App {
         self.sidebar.pinned_searches.clear();
         let db = Arc::clone(&self.db);
         Task::perform(
-            async move {
-                db.delete_all_pinned_searches().await.map(|_| ())
-            },
+            async move { db.delete_all_pinned_searches().await.map(|_| ()) },
             |result| {
                 if let Err(e) = result {
                     log::error!("Failed to clear pinned searches: {e}");
@@ -2617,7 +2608,10 @@ impl App {
             return Task::batch(tasks);
         }
 
-        if matches!(self.pop_out_windows.get(&id), Some(PopOutWindow::Compose(_))) {
+        if matches!(
+            self.pop_out_windows.get(&id),
+            Some(PopOutWindow::Compose(_))
+        ) {
             if !self.save_compose_draft_sync(id) {
                 // Save failed — keep the window open so the user doesn't lose work
                 log::warn!("Compose draft save failed, aborting window close");
@@ -2631,9 +2625,7 @@ impl App {
     }
 
     fn build_divider(&self, divider: Divider) -> Element<'_, Message> {
-        let class = if self.hovered_divider == Some(divider)
-            || self.dragging == Some(divider)
-        {
+        let class = if self.hovered_divider == Some(divider) || self.dragging == Some(divider) {
             ui::theme::ContainerClass::DividerHover
         } else {
             ui::theme::ContainerClass::Divider
@@ -2668,27 +2660,30 @@ impl App {
             .unwrap_or_else(|| "Inbox".to_string());
         let scope_name = match &self.sidebar.selected_scope {
             ViewScope::AllAccounts => "All".to_string(),
-            ViewScope::Account(id) => {
-                self.sidebar.accounts.iter()
-                    .find(|a| a.id == *id)
-                    .and_then(|a| a.display_name.as_deref().or(Some(a.email.as_str())))
-                    .unwrap_or("Account")
-                    .to_string()
-            }
-            ViewScope::SharedMailbox { mailbox_id, .. } => {
-                self.sidebar.shared_mailboxes.iter()
-                    .find(|sm| sm.mailbox_id == *mailbox_id)
-                    .and_then(|sm| sm.display_name.as_deref())
-                    .unwrap_or(mailbox_id.as_str())
-                    .to_string()
-            }
-            ViewScope::PublicFolder { folder_id, .. } => {
-                self.sidebar.pinned_public_folders.iter()
-                    .find(|pf| pf.folder_id == *folder_id)
-                    .map(|pf| pf.display_name.as_str())
-                    .unwrap_or(folder_id.as_str())
-                    .to_string()
-            }
+            ViewScope::Account(id) => self
+                .sidebar
+                .accounts
+                .iter()
+                .find(|a| a.id == *id)
+                .and_then(|a| a.display_name.as_deref().or(Some(a.email.as_str())))
+                .unwrap_or("Account")
+                .to_string(),
+            ViewScope::SharedMailbox { mailbox_id, .. } => self
+                .sidebar
+                .shared_mailboxes
+                .iter()
+                .find(|sm| sm.mailbox_id == *mailbox_id)
+                .and_then(|sm| sm.display_name.as_deref())
+                .unwrap_or(mailbox_id.as_str())
+                .to_string(),
+            ViewScope::PublicFolder { folder_id, .. } => self
+                .sidebar
+                .pinned_public_folders
+                .iter()
+                .find(|pf| pf.folder_id == *folder_id)
+                .map(|pf| pf.display_name.as_str())
+                .unwrap_or(folder_id.as_str())
+                .to_string(),
         };
         self.thread_list.set_context(folder_name, scope_name);
     }
@@ -2700,10 +2695,7 @@ pub(crate) async fn load_accounts(db: Arc<Db>) -> Result<Vec<db::Account>, Strin
     db.get_accounts().await
 }
 
-async fn load_navigation(
-    db: Arc<Db>,
-    scope: AccountScope,
-) -> Result<NavigationState, String> {
+async fn load_navigation(db: Arc<Db>, scope: AccountScope) -> Result<NavigationState, String> {
     db.with_conn(move |conn| get_navigation_state(conn, &scope))
         .await
 }
@@ -2714,8 +2706,7 @@ async fn load_threads_scoped(
     label_id: Option<String>,
 ) -> Result<Vec<Thread>, String> {
     db.with_conn(move |conn| {
-        let db_threads =
-            get_threads_scoped(conn, &scope, label_id.as_deref(), Some(1000), None)?;
+        let db_threads = get_threads_scoped(conn, &scope, label_id.as_deref(), Some(1000), None)?;
         let mut threads: Vec<Thread> = db_threads
             .into_iter()
             .map(db_thread_to_app_thread)
@@ -2723,13 +2714,10 @@ async fn load_threads_scoped(
 
         // When viewing Drafts, also include local-only drafts
         if label_id.as_deref() == Some("DRAFT") {
-            let local = rtsk::db::queries_extra::get_local_draft_summaries(
-                conn, &scope, Some(1000), None,
-            )?;
-            let local_threads: Vec<Thread> = local
-                .into_iter()
-                .map(local_draft_to_app_thread)
-                .collect();
+            let local =
+                rtsk::db::queries_extra::get_local_draft_summaries(conn, &scope, Some(1000), None)?;
+            let local_threads: Vec<Thread> =
+                local.into_iter().map(local_draft_to_app_thread).collect();
             threads.extend(local_threads);
             // Sort all drafts together by updated_at DESC
             threads.sort_by_key(|t| std::cmp::Reverse(t.last_message_at));
@@ -2745,10 +2733,8 @@ async fn load_shared_mailbox_navigation(
     account_id: String,
     mailbox_id: String,
 ) -> Result<NavigationState, String> {
-    db.with_conn(move |conn| {
-        get_shared_mailbox_navigation(conn, &account_id, &mailbox_id)
-    })
-    .await
+    db.with_conn(move |conn| get_shared_mailbox_navigation(conn, &account_id, &mailbox_id))
+        .await
 }
 
 async fn load_shared_mailbox_threads(
@@ -2765,7 +2751,10 @@ async fn load_shared_mailbox_threads(
             label_id.as_deref(),
             Some(1000),
         )?;
-        Ok(db_threads.into_iter().map(db_thread_to_app_thread).collect())
+        Ok(db_threads
+            .into_iter()
+            .map(db_thread_to_app_thread)
+            .collect())
     })
     .await
 }
@@ -2819,9 +2808,7 @@ fn db_thread_to_app_thread(t: DbThread) -> Thread {
     }
 }
 
-fn local_draft_to_app_thread(
-    d: rtsk::db::queries_extra::LocalDraftSummary,
-) -> Thread {
+fn local_draft_to_app_thread(d: rtsk::db::queries_extra::LocalDraftSummary) -> Thread {
     Thread {
         id: d.id,
         account_id: d.account_id,

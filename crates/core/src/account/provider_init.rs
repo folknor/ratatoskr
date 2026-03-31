@@ -32,15 +32,14 @@ fn next_account_color(conn: &Connection) -> String {
         }
     }
     // All used — return the first preset
-    presets.first().map_or("#3498db".to_string(), |(_, bg, _)| (*bg).to_string())
+    presets
+        .first()
+        .map_or("#3498db".to_string(), |(_, bg, _)| (*bg).to_string())
 }
 
 /// Check if a Gmail account with the given email already exists.
 /// Returns `Some(id)` if a duplicate exists.
-pub fn check_gmail_duplicate(
-    conn: &Connection,
-    email: &str,
-) -> Result<Option<String>, String> {
+pub fn check_gmail_duplicate(conn: &Connection, email: &str) -> Result<Option<String>, String> {
     conn.query_row(
         "SELECT id FROM accounts WHERE email = ?1 AND provider = 'gmail_api' LIMIT 1",
         rusqlite::params![email],
@@ -303,8 +302,7 @@ pub fn resolve_gmail_reauth_credentials(
     .map_err(|e| format!("Failed to read account credentials: {e}"))
     .and_then(|(cid, cs)| {
         let cid = cid.filter(|s| !s.is_empty()).ok_or_else(|| {
-            "Account has no stored OAuth credentials. Provide client_id to reauthorize."
-                .to_string()
+            "Account has no stored OAuth credentials. Provide client_id to reauthorize.".to_string()
         })?;
         let cid = if is_encrypted(&cid) {
             decrypt_value(encryption_key, &cid).unwrap_or(cid)

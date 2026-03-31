@@ -96,4 +96,3 @@ pub async fn db_delete_account(db: &DbState, id: String) -> Result<(), String> {
     })
     .await
 }
-

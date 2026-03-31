@@ -192,10 +192,7 @@ fn decompress_body(data: &[u8]) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|e| format!("utf8 decode: {e}"))
 }
 
-fn fetch_bodies(
-    body_store_conn: &Connection,
-    message_ids: &[String],
-) -> Result<BodyMap, String> {
+fn fetch_bodies(body_store_conn: &Connection, message_ids: &[String]) -> Result<BodyMap, String> {
     let mut body_map: BodyMap = HashMap::new();
     if message_ids.is_empty() {
         return Ok(body_map);
@@ -257,10 +254,7 @@ fn fetch_bodies_chunk(
 
 // ── Identity detection ──────────────────────────────────────
 
-fn query_identity_emails(
-    conn: &Connection,
-    account_id: &str,
-) -> Result<HashSet<String>, String> {
+fn query_identity_emails(conn: &Connection, account_id: &str) -> Result<HashSet<String>, String> {
     let mut emails = HashSet::new();
 
     let mut stmt = conn
@@ -292,10 +286,7 @@ const SUMMARY_MAX_LEN: usize = 60;
 
 /// Strip quoted lines and signature blocks, return the first ~60 chars
 /// of meaningful body text.
-fn make_collapsed_summary(
-    body_text: Option<&str>,
-    body_html: Option<&str>,
-) -> Option<String> {
+fn make_collapsed_summary(body_text: Option<&str>, body_html: Option<&str>) -> Option<String> {
     let source = match (body_text, body_html) {
         (Some(text), _) if !text.trim().is_empty() => text.to_string(),
         (_, Some(html)) if !html.trim().is_empty() => strip_html_tags(html),
@@ -385,10 +376,7 @@ fn query_thread_labels(
     account_id: &str,
     thread_id: &str,
 ) -> Result<Vec<ThreadLabel>, String> {
-    let system_ids: HashSet<&str> = SYSTEM_FOLDER_ROLES
-        .iter()
-        .map(|r| r.label_id)
-        .collect();
+    let system_ids: HashSet<&str> = SYSTEM_FOLDER_ROLES.iter().map(|r| r.label_id).collect();
 
     let mut stmt = conn
         .prepare(
@@ -672,14 +660,13 @@ pub fn get_thread_detail(
 ) -> Result<ThreadDetail, String> {
     let db_data = query_thread_from_db(conn, account_id, thread_id)?;
     let body_map = fetch_thread_bodies(body_store_conn, &db_data.messages)?;
-    Ok(assemble_thread_detail(db_data, body_map, account_id, thread_id))
+    Ok(assemble_thread_detail(
+        db_data, body_map, account_id, thread_id,
+    ))
 }
 
 /// Set `is_own_message` and `collapsed_summary` on each message.
-fn annotate_messages(
-    messages: &mut [ThreadDetailMessage],
-    identity_emails: &HashSet<String>,
-) {
+fn annotate_messages(messages: &mut [ThreadDetailMessage], identity_emails: &HashSet<String>) {
     for msg in messages.iter_mut() {
         // Ownership detection
         msg.is_own_message = msg
@@ -688,10 +675,8 @@ fn annotate_messages(
             .is_some_and(|addr| identity_emails.contains(&addr.to_lowercase()));
 
         // Collapsed summary
-        msg.collapsed_summary = make_collapsed_summary(
-            msg.body_text.as_deref(),
-            msg.body_html.as_deref(),
-        );
+        msg.collapsed_summary =
+            make_collapsed_summary(msg.body_text.as_deref(), msg.body_html.as_deref());
     }
 }
 

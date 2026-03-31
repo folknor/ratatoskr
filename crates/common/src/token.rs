@@ -134,10 +134,7 @@ pub fn get_refresh_lock(account_id: &str) -> Arc<tokio::sync::Mutex<()>> {
 /// If a `stored_url` is present and non-empty, it takes precedence. Otherwise,
 /// the provider ID is matched against known providers (Microsoft, Google,
 /// Fastmail, Yahoo). Returns an error for unknown providers without a stored URL.
-pub fn oauth_token_endpoint(
-    provider_id: &str,
-    stored_url: Option<&str>,
-) -> Result<String, String> {
+pub fn oauth_token_endpoint(provider_id: &str, stored_url: Option<&str>) -> Result<String, String> {
     if let Some(url) = stored_url.filter(|u| !u.is_empty()) {
         return Ok(url.to_string());
     }

@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use iced::advanced::graphics::futures::subscription;
 use iced::advanced::subscription::Hasher;
-use iced::futures::stream::BoxStream;
 use iced::futures::StreamExt;
+use iced::futures::stream::BoxStream;
 use iced::{Subscription, Task};
 
 use crate::db::Db;
@@ -25,10 +25,8 @@ pub type JmapPushReceiver = Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceive
 /// Returns `(sender, shared_receiver)`. Clone the sender for each
 /// account's push setup. Wrap the receiver in a subscription to
 /// receive account-ID notifications that trigger syncs.
-pub fn create_jmap_push_channel() -> (
-    tokio::sync::mpsc::UnboundedSender<String>,
-    JmapPushReceiver,
-) {
+pub fn create_jmap_push_channel() -> (tokio::sync::mpsc::UnboundedSender<String>, JmapPushReceiver)
+{
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     (tx, Arc::new(Mutex::new(Some(rx))))
 }
@@ -46,24 +44,15 @@ impl subscription::Recipe for JmapPushRecipe {
         std::any::TypeId::of::<Marker>().hash(state);
     }
 
-    fn stream(
-        self: Box<Self>,
-        _input: subscription::EventStream,
-    ) -> BoxStream<'static, String> {
-        let taken = self
-            .receiver
-            .lock()
-            .ok()
-            .and_then(|mut guard| guard.take());
+    fn stream(self: Box<Self>, _input: subscription::EventStream) -> BoxStream<'static, String> {
+        let taken = self.receiver.lock().ok().and_then(|mut guard| guard.take());
 
         match taken {
-            Some(rx) => {
-                iced::futures::stream::unfold(rx, |mut rx| async {
-                    let account_id = rx.recv().await?;
-                    Some((account_id, rx))
-                })
-                .boxed()
-            }
+            Some(rx) => iced::futures::stream::unfold(rx, |mut rx| async {
+                let account_id = rx.recv().await?;
+                Some((account_id, rx))
+            })
+            .boxed(),
             None => iced::futures::stream::empty().boxed(),
         }
     }
@@ -71,9 +60,7 @@ impl subscription::Recipe for JmapPushRecipe {
 
 /// Build an iced `Subscription` that yields account IDs from JMAP
 /// push state-change notifications.
-pub fn jmap_push_subscription(
-    receiver: &JmapPushReceiver,
-) -> Subscription<String> {
+pub fn jmap_push_subscription(receiver: &JmapPushReceiver) -> Subscription<String> {
     subscription::from_recipe(JmapPushRecipe {
         receiver: Arc::clone(receiver),
     })
@@ -83,10 +70,7 @@ pub fn jmap_push_subscription(
 
 impl App {
     /// Dispatch a delta sync for a specific account as a background task.
-    pub(crate) fn dispatch_sync_delta(
-        &self,
-        account_id: String,
-    ) -> Task<Message> {
+    pub(crate) fn dispatch_sync_delta(&self, account_id: String) -> Task<Message> {
         let Some(encryption_key) = self.encryption_key else {
             log::error!("Cannot sync: no encryption key");
             return Task::none();
@@ -225,12 +209,7 @@ impl App {
         // Pass all accounts — calendar_sync_account returns Err for unsupported
         // providers, which is logged as a warning. This avoids filtering out
         // IMAP/JMAP accounts that have calendar_provider = "caldav" set.
-        let account_ids: Vec<String> = self
-            .sidebar
-            .accounts
-            .iter()
-            .map(|a| a.id.clone())
-            .collect();
+        let account_ids: Vec<String> = self.sidebar.accounts.iter().map(|a| a.id.clone()).collect();
 
         if account_ids.is_empty() {
             return Task::none();
@@ -244,11 +223,7 @@ impl App {
                 for account_id in &account_ids {
                     match tokio::time::timeout(
                         std::time::Duration::from_secs(60),
-                        cal::sync::calendar_sync_account(
-                            account_id,
-                            &core_db,
-                            encryption_key,
-                        ),
+                        cal::sync::calendar_sync_account(account_id, &core_db, encryption_key),
                     )
                     .await
                     {
@@ -319,7 +294,9 @@ impl App {
                 move |result| {
                     match result {
                         Ok(()) => log::info!("[JMAP Push] Started for {email_log}"),
-                        Err(ref e) => log::warn!("[JMAP Push] Failed to start for {email_log}: {e}"),
+                        Err(ref e) => {
+                            log::warn!("[JMAP Push] Failed to start for {email_log}: {e}")
+                        }
                     }
                     Message::Noop
                 },

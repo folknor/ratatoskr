@@ -90,10 +90,7 @@ pub struct DeletedContent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditOp {
     /// Insert text at a position within an inline block.
-    InsertText {
-        position: DocPosition,
-        text: String,
-    },
+    InsertText { position: DocPosition, text: String },
 
     /// Delete a range of content. `deleted` captures enough to reconstruct on undo.
     DeleteRange {
@@ -287,7 +284,9 @@ impl EditOp {
         match self {
             Self::InsertText { position, text } => apply_insert_text(doc, *position, text),
             Self::DeleteRange {
-                start, end, deleted,
+                start,
+                end,
+                deleted,
             } => apply_delete_range(doc, *start, *end, deleted),
             Self::SplitBlock { position } => apply_split_block(doc, *position),
             Self::MergeBlocks {
@@ -1068,7 +1067,10 @@ fn apply_insert_block(doc: &mut Document, index: usize, block: &Block) -> PosMap
     PosMap {
         block_index: index,
         entries: Vec::new(),
-        structural: Some(StructuralChange::Insert { block_index: index, count: 1 }),
+        structural: Some(StructuralChange::Insert {
+            block_index: index,
+            count: 1,
+        }),
     }
 }
 
@@ -1255,10 +1257,8 @@ mod tests {
 
     #[test]
     fn insert_text_preserves_other_blocks() {
-        let mut doc = Document::from_blocks(vec![
-            Block::paragraph("first"),
-            Block::paragraph("second"),
-        ]);
+        let mut doc =
+            Document::from_blocks(vec![Block::paragraph("first"), Block::paragraph("second")]);
         let original_second = Arc::clone(&doc.blocks[1]);
         EditOp::InsertText {
             position: DocPosition::new(0, 5),
@@ -1436,10 +1436,8 @@ mod tests {
 
     #[test]
     fn delete_cross_two_blocks() {
-        let mut doc = Document::from_blocks(vec![
-            Block::paragraph("hello"),
-            Block::paragraph(" world"),
-        ]);
+        let mut doc =
+            Document::from_blocks(vec![Block::paragraph("hello"), Block::paragraph(" world")]);
         EditOp::DeleteRange {
             start: DocPosition::new(0, 3),
             end: DocPosition::new(1, 4),
@@ -1553,11 +1551,17 @@ mod tests {
         .apply(&mut doc);
         assert!(matches!(
             doc.block(0),
-            Some(Block::Heading { level: HeadingLevel::H1, .. })
+            Some(Block::Heading {
+                level: HeadingLevel::H1,
+                ..
+            })
         ));
         assert!(matches!(
             doc.block(1),
-            Some(Block::Heading { level: HeadingLevel::H1, .. })
+            Some(Block::Heading {
+                level: HeadingLevel::H1,
+                ..
+            })
         ));
         assert_eq!(block_text(&doc, 0), "My ");
         assert_eq!(block_text(&doc, 1), "Title");
@@ -1589,10 +1593,8 @@ mod tests {
 
     #[test]
     fn merge_basic() {
-        let mut doc = Document::from_blocks(vec![
-            Block::paragraph("hello"),
-            Block::paragraph(" world"),
-        ]);
+        let mut doc =
+            Document::from_blocks(vec![Block::paragraph("hello"), Block::paragraph(" world")]);
         EditOp::MergeBlocks {
             block_index: 1,
             saved: Block::paragraph(" world"),
@@ -1620,17 +1622,18 @@ mod tests {
         .apply(&mut doc);
         assert!(matches!(
             doc.block(0),
-            Some(Block::Heading { level: HeadingLevel::H2, .. })
+            Some(Block::Heading {
+                level: HeadingLevel::H2,
+                ..
+            })
         ));
         assert_eq!(block_text(&doc, 0), "Title extra");
     }
 
     #[test]
     fn merge_invert_splits_back() {
-        let mut doc = Document::from_blocks(vec![
-            Block::paragraph("hello"),
-            Block::paragraph(" world"),
-        ]);
+        let mut doc =
+            Document::from_blocks(vec![Block::paragraph("hello"), Block::paragraph(" world")]);
         let op = EditOp::MergeBlocks {
             block_index: 1,
             saved: Block::paragraph(" world"),
@@ -1645,10 +1648,8 @@ mod tests {
 
     #[test]
     fn merge_empty_blocks() {
-        let mut doc = Document::from_blocks(vec![
-            Block::empty_paragraph(),
-            Block::empty_paragraph(),
-        ]);
+        let mut doc =
+            Document::from_blocks(vec![Block::empty_paragraph(), Block::empty_paragraph()]);
         EditOp::MergeBlocks {
             block_index: 1,
             saved: Block::empty_paragraph(),
@@ -1747,10 +1748,7 @@ mod tests {
 
     #[test]
     fn toggle_cross_block() {
-        let mut doc = Document::from_blocks(vec![
-            Block::paragraph("aaa"),
-            Block::paragraph("bbb"),
-        ]);
+        let mut doc = Document::from_blocks(vec![Block::paragraph("aaa"), Block::paragraph("bbb")]);
         EditOp::ToggleInlineStyle {
             start: DocPosition::new(0, 1),
             end: DocPosition::new(1, 2),
@@ -1813,7 +1811,10 @@ mod tests {
         .apply(&mut doc);
         assert!(matches!(
             doc.block(0),
-            Some(Block::Heading { level: HeadingLevel::H1, .. })
+            Some(Block::Heading {
+                level: HeadingLevel::H1,
+                ..
+            })
         ));
         assert_eq!(block_text(&doc, 0), "hello");
     }
@@ -1847,10 +1848,8 @@ mod tests {
 
     #[test]
     fn remove_block() {
-        let mut doc = Document::from_blocks(vec![
-            Block::paragraph("first"),
-            Block::paragraph("second"),
-        ]);
+        let mut doc =
+            Document::from_blocks(vec![Block::paragraph("first"), Block::paragraph("second")]);
         EditOp::RemoveBlock {
             index: 1,
             saved: Block::paragraph("second"),
@@ -2010,7 +2009,10 @@ mod tests {
         let pm = PosMap {
             block_index: 2,
             entries: Vec::new(),
-            structural: Some(StructuralChange::Insert { block_index: 2, count: 1 }),
+            structural: Some(StructuralChange::Insert {
+                block_index: 2,
+                count: 1,
+            }),
         };
         assert_eq!(pm.map(DocPosition::new(1, 5)), DocPosition::new(1, 5));
         assert_eq!(pm.map(DocPosition::new(2, 0)), DocPosition::new(3, 0));
@@ -2021,7 +2023,10 @@ mod tests {
         let pm = PosMap {
             block_index: 1,
             entries: Vec::new(),
-            structural: Some(StructuralChange::Insert { block_index: 1, count: 3 }),
+            structural: Some(StructuralChange::Insert {
+                block_index: 1,
+                count: 3,
+            }),
         };
         assert_eq!(pm.map(DocPosition::new(0, 5)), DocPosition::new(0, 5));
         assert_eq!(pm.map(DocPosition::new(1, 0)), DocPosition::new(4, 0));
@@ -2121,10 +2126,8 @@ mod tests {
 
     #[test]
     fn round_trip_merge_split() {
-        let original = Document::from_blocks(vec![
-            Block::paragraph("hello"),
-            Block::paragraph(" world"),
-        ]);
+        let original =
+            Document::from_blocks(vec![Block::paragraph("hello"), Block::paragraph(" world")]);
         let mut doc = original.clone();
         let op = EditOp::MergeBlocks {
             block_index: 1,
@@ -2240,9 +2243,7 @@ mod tests {
     fn set_block_attrs_invert_restores() {
         use crate::document::BlockAttrs;
 
-        let mut doc = Document::from_blocks(vec![
-            Block::list_item_with_indent("item", false, 1),
-        ]);
+        let mut doc = Document::from_blocks(vec![Block::list_item_with_indent("item", false, 1)]);
         let old = BlockAttrs {
             indent_level: 1,
             ..Default::default()
@@ -2257,10 +2258,16 @@ mod tests {
             new,
         };
         op.apply(&mut doc);
-        assert_eq!(doc.block(0).map(Block::attrs).map(|a| a.indent_level), Some(3));
+        assert_eq!(
+            doc.block(0).map(Block::attrs).map(|a| a.indent_level),
+            Some(3)
+        );
 
         op.invert().apply(&mut doc);
-        assert_eq!(doc.block(0).map(Block::attrs).map(|a| a.indent_level), Some(1));
+        assert_eq!(
+            doc.block(0).map(Block::attrs).map(|a| a.indent_level),
+            Some(1)
+        );
     }
 
     #[test]

@@ -72,7 +72,11 @@ fn extract_text_value(value: &VCardValue) -> Option<String> {
         VCardValue::Text(s) => Some(s.clone()),
         VCardValue::Component(parts) => {
             let joined = parts.join(";");
-            if joined.is_empty() { None } else { Some(joined) }
+            if joined.is_empty() {
+                None
+            } else {
+                Some(joined)
+            }
         }
         _ => None,
     }

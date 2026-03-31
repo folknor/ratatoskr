@@ -1,6 +1,6 @@
 use common::text::truncate_graphemes;
-use sync::types::MessageMeta;
 use sync::threading::ThreadableMessage;
+use sync::types::MessageMeta;
 
 use super::folder_mapper::get_labels_for_message;
 use super::types::ImapMessage;

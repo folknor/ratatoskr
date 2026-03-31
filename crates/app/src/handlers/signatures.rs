@@ -64,10 +64,7 @@ pub fn handle_save_signature(
 }
 
 /// Delete a signature by ID via core CRUD.
-pub fn handle_delete_signature(
-    db: &Arc<Db>,
-    sig_id: String,
-) -> Task<super::SignatureResult> {
+pub fn handle_delete_signature(db: &Arc<Db>, sig_id: String) -> Task<super::SignatureResult> {
     let db = Arc::clone(db);
     Task::perform(
         async move {
@@ -86,9 +83,7 @@ pub fn handle_delete_signature(
 }
 
 /// Load all signatures from the DB asynchronously via core CRUD.
-pub fn load_signatures_async(
-    db: &Arc<Db>,
-) -> Task<super::SignatureResult> {
+pub fn load_signatures_async(db: &Arc<Db>) -> Task<super::SignatureResult> {
     let db = Arc::clone(db);
     Task::perform(
         async move {

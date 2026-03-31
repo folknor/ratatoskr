@@ -219,12 +219,9 @@ fn build_smart_folders(
         .into_iter()
         .map(|sf| {
             // Smart folders are scope-exempt: always count across all accounts.
-            let unread_count = smart_folder::count_smart_folder_unread(
-                conn,
-                &sf.query,
-                &AccountScope::All,
-            )
-            .unwrap_or(0);
+            let unread_count =
+                smart_folder::count_smart_folder_unread(conn, &sf.query, &AccountScope::All)
+                    .unwrap_or(0);
 
             NavigationFolder {
                 id: sf.id,
@@ -247,9 +244,7 @@ fn build_smart_folders(
 /// The old `query_smart_folders_sync` filtered by `AccountScope`, hiding
 /// account-specific smart folders in the unified view.  Per the sidebar spec
 /// (Phase 1B), smart folders must always be listed.
-fn query_all_smart_folders_sync(
-    conn: &Connection,
-) -> Result<Vec<DbSmartFolder>, String> {
+fn query_all_smart_folders_sync(conn: &Connection) -> Result<Vec<DbSmartFolder>, String> {
     let mut stmt = conn
         .prepare("SELECT * FROM smart_folders ORDER BY sort_order, created_at")
         .map_err(|e| e.to_string())?;
@@ -275,10 +270,7 @@ fn build_account_labels(
         .filter(|label| !system_ids.contains(&label.id.as_str()))
         .filter(|label| label.visible)
         .map(|label| {
-            let unread_count = unread_by_label
-                .get(&label.id)
-                .copied()
-                .unwrap_or(0);
+            let unread_count = unread_by_label.get(&label.id).copied().unwrap_or(0);
 
             let rights = rights_from_label(&label);
 
@@ -287,9 +279,9 @@ fn build_account_labels(
             // not in the label tree. Without this, children of system
             // folders become orphans in the tree and get promoted to
             // depth-0 by the orphan recovery path.
-            let parent_id = label.parent_label_id.filter(|pid| {
-                !system_ids.contains(&pid.as_str())
-            });
+            let parent_id = label
+                .parent_label_id
+                .filter(|pid| !system_ids.contains(&pid.as_str()));
 
             let kind = if label.label_kind == "tag" {
                 FolderKind::AccountTag
@@ -317,9 +309,7 @@ fn build_account_labels(
 ///
 /// Returns one NavigationFolder per unique normalized label name, with
 /// an aggregated unread count across all accounts that have that label.
-fn build_all_account_tags(
-    conn: &Connection,
-) -> Result<Vec<NavigationFolder>, String> {
+fn build_all_account_tags(conn: &Connection) -> Result<Vec<NavigationFolder>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT l.name,
@@ -365,10 +355,7 @@ fn label_semantics_for_provider(provider: &str) -> LabelSemantics {
 }
 
 /// Look up the provider string for an account.
-fn get_account_provider(
-    conn: &Connection,
-    account_id: &str,
-) -> Result<String, String> {
+fn get_account_provider(conn: &Connection, account_id: &str) -> Result<String, String> {
     conn.query_row(
         "SELECT provider FROM accounts WHERE id = ?1",
         rusqlite::params![account_id],

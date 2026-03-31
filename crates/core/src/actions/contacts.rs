@@ -39,14 +39,20 @@ pub struct ContactSaveInput {
 /// Returns `Success` if local + provider both succeeded, `LocalOnly` if
 /// local succeeded but provider failed/stubbed, `Failed` if local failed.
 pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> ActionOutcome {
-    let mlog = MutationLog::begin("save_contact", input.account_id.as_deref().unwrap_or(""), &input.id);
+    let mlog = MutationLog::begin(
+        "save_contact",
+        input.account_id.as_deref().unwrap_or(""),
+        &input.id,
+    );
 
     // 1. Local DB save
     let db = ctx.db.clone();
     let inp = input.clone();
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+        let conn = conn
+            .lock()
+            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         let source = inp.source.as_deref().unwrap_or("user");
         db_upsert_contact_full(
             &conn,
@@ -89,7 +95,10 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
             "Synced contact {} has source={source} but missing account_id or server_id",
             input.email
         );
-        let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: false };
+        let outcome = ActionOutcome::LocalOnly {
+            reason: ActionError::remote(msg),
+            retryable: false,
+        };
         mlog.emit(&outcome);
         return outcome;
     };
@@ -106,7 +115,10 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
     .await
     {
         Ok(()) => ActionOutcome::Success,
-        Err(e) => ActionOutcome::LocalOnly { reason: e, retryable: false },
+        Err(e) => ActionOutcome::LocalOnly {
+            reason: e,
+            retryable: false,
+        },
     };
     mlog.emit(&outcome);
     outcome
@@ -124,7 +136,9 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
     let cid = contact_id.to_string();
     let meta_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+        let conn = conn
+            .lock()
+            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         conn.query_row(
             "SELECT source, server_id, account_id FROM contacts WHERE id = ?1",
             rusqlite::params![cid],
@@ -187,13 +201,18 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
 
     // 3. Delete locally
     if let Err(e) = db_delete_contact(&ctx.db, contact_id.to_string()).await {
-        let outcome = ActionOutcome::Failed { error: ActionError::db(e) };
+        let outcome = ActionOutcome::Failed {
+            error: ActionError::db(e),
+        };
         mlog.emit(&outcome);
         return outcome;
     }
 
     let outcome = match provider_outcome {
-        Some(reason) => ActionOutcome::LocalOnly { reason, retryable: false },
+        Some(reason) => ActionOutcome::LocalOnly {
+            reason,
+            retryable: false,
+        },
         None => ActionOutcome::Success,
     };
     mlog.emit(&outcome);
@@ -217,13 +236,10 @@ async fn dispatch_write_back(
 ) -> Result<(), ActionError> {
     match source {
         "jmap" => {
-            let client = jmap::client::JmapClient::from_account(
-                &ctx.db,
-                account_id,
-                &ctx.encryption_key,
-            )
-            .await
-            .map_err(ActionError::remote)?;
+            let client =
+                jmap::client::JmapClient::from_account(&ctx.db, account_id, &ctx.encryption_key)
+                    .await
+                    .map_err(ActionError::remote)?;
             jmap::contacts_sync::jmap_contacts_push_update(
                 &client, server_id, phone, company, notes,
             )
@@ -246,13 +262,10 @@ async fn dispatch_write_back(
                 return Ok(()); // nothing to push
             }
 
-            let client = gmail::client::GmailClient::from_account(
-                &ctx.db,
-                account_id,
-                ctx.encryption_key,
-            )
-            .await
-            .map_err(ActionError::remote)?;
+            let client =
+                gmail::client::GmailClient::from_account(&ctx.db, account_id, ctx.encryption_key)
+                    .await
+                    .map_err(ActionError::remote)?;
             let body = crate::contacts::sync_google::build_google_contact_update_body(
                 phone, company, notes, "*", // etag "*" = skip optimistic locking
             );
@@ -269,14 +282,12 @@ async fn dispatch_write_back(
             Ok(())
         }
         "graph" => {
-            let client = graph::client::GraphClient::from_account(
-                &ctx.db,
-                account_id,
-                ctx.encryption_key,
-            )
-            .await
-            .map_err(ActionError::remote)?;
-            let body = crate::contacts::sync_graph::build_graph_contact_update_body(phone, company, notes);
+            let client =
+                graph::client::GraphClient::from_account(&ctx.db, account_id, ctx.encryption_key)
+                    .await
+                    .map_err(ActionError::remote)?;
+            let body =
+                crate::contacts::sync_graph::build_graph_contact_update_body(phone, company, notes);
             client
                 .patch(&format!("/me/contacts/{server_id}"), &body, &ctx.db)
                 .await
@@ -284,7 +295,9 @@ async fn dispatch_write_back(
             log::info!("[Graph-Contacts] Updated contact {server_id}");
             Ok(())
         }
-        "carddav" => Err(ActionError::not_implemented("CardDAV contact write-back not implemented (PUT + vCard needed)")),
+        "carddav" => Err(ActionError::not_implemented(
+            "CardDAV contact write-back not implemented (PUT + vCard needed)",
+        )),
         "user" => Ok(()),
         other => {
             log::warn!("Unknown contact source for write-back: {other}");
@@ -302,25 +315,19 @@ async fn dispatch_delete(
 ) -> Result<(), ActionError> {
     match source {
         "jmap" => {
-            let client = jmap::client::JmapClient::from_account(
-                &ctx.db,
-                account_id,
-                &ctx.encryption_key,
-            )
-            .await
-            .map_err(ActionError::remote)?;
+            let client =
+                jmap::client::JmapClient::from_account(&ctx.db, account_id, &ctx.encryption_key)
+                    .await
+                    .map_err(ActionError::remote)?;
             jmap_contact_delete(&client, server_id)
                 .await
                 .map_err(ActionError::remote)
         }
         "google" => {
-            let client = gmail::client::GmailClient::from_account(
-                &ctx.db,
-                account_id,
-                ctx.encryption_key,
-            )
-            .await
-            .map_err(ActionError::remote)?;
+            let client =
+                gmail::client::GmailClient::from_account(&ctx.db, account_id, ctx.encryption_key)
+                    .await
+                    .map_err(ActionError::remote)?;
             let url = format!(
                 "https://people.googleapis.com/v1/{}:deleteContact",
                 server_id,
@@ -333,13 +340,10 @@ async fn dispatch_delete(
             Ok(())
         }
         "graph" => {
-            let client = graph::client::GraphClient::from_account(
-                &ctx.db,
-                account_id,
-                ctx.encryption_key,
-            )
-            .await
-            .map_err(ActionError::remote)?;
+            let client =
+                graph::client::GraphClient::from_account(&ctx.db, account_id, ctx.encryption_key)
+                    .await
+                    .map_err(ActionError::remote)?;
             client
                 .delete(&format!("/me/contacts/{server_id}"), &ctx.db)
                 .await
@@ -347,7 +351,9 @@ async fn dispatch_delete(
             log::info!("[Graph-Contacts] Deleted contact {server_id}");
             Ok(())
         }
-        "carddav" => Err(ActionError::not_implemented("CardDAV contact delete not implemented")),
+        "carddav" => Err(ActionError::not_implemented(
+            "CardDAV contact delete not implemented",
+        )),
         _ => Ok(()),
     }
 }
@@ -360,8 +366,7 @@ async fn jmap_contact_delete(
     let inner = client.inner();
     let mut request = inner.build();
     let req_account_id = request.default_account_id().to_string();
-    let mut set =
-        jmap_client::contact_card::ContactCardSet::new(&req_account_id);
+    let mut set = jmap_client::contact_card::ContactCardSet::new(&req_account_id);
     set.destroy([server_id]);
     let handle = request
         .call(set)

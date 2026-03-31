@@ -1,7 +1,7 @@
-use store::body_store::BodyStoreState;
 use db::db::DbState;
-use store::inline_image_store::{InlineImage, InlineImageStoreState};
 use search::{SearchDocument, SearchState};
+use store::body_store::BodyStoreState;
+use store::inline_image_store::{InlineImage, InlineImageStoreState};
 
 use super::super::client::GmailClient;
 use super::super::parse::{ParsedGmailMessage, parse_gmail_message};

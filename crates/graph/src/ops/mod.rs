@@ -7,7 +7,6 @@ use async_trait::async_trait;
 /// when multiple operations query folders in quick succession.
 const FOLDER_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
 
-use db::db::DbState;
 use common::error::ProviderError;
 use common::ops::ProviderOps;
 use common::typed_ids::{FolderId, TagId};
@@ -15,12 +14,12 @@ use common::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
     ProviderTestResult, SyncResult,
 };
+use db::db::DbState;
 
 use super::client::GraphClient;
 use super::types::{
-    GraphAttachment, GraphCreateFolderRequest, GraphFlagInput,
-    GraphMailFolder, GraphMessagePatch, GraphRenameFolderRequest,
-    SingleValueExtendedProperty,
+    GraphAttachment, GraphCreateFolderRequest, GraphFlagInput, GraphMailFolder, GraphMessagePatch,
+    GraphRenameFolderRequest, SingleValueExtendedProperty,
 };
 
 use self::helpers::{
@@ -92,7 +91,11 @@ impl ProviderOps for GraphOps {
         Ok(move_messages(&self.client, ctx, &msg_ids, &trash_id).await?)
     }
 
-    async fn permanent_delete(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn permanent_delete(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        thread_id: &str,
+    ) -> Result<(), ProviderError> {
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
         Ok(helpers::delete_messages(&self.client, ctx, &msg_ids).await?)
     }
@@ -239,7 +242,11 @@ impl ProviderOps for GraphOps {
         Ok(create_draft_impl(&self.client, ctx, raw_base64url, thread_id).await?)
     }
 
-    async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), ProviderError> {
+    async fn delete_draft(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        draft_id: &str,
+    ) -> Result<(), ProviderError> {
         let enc_id = urlencoding::encode(draft_id);
         let me = self.me();
         self.client
@@ -278,7 +285,9 @@ impl ProviderOps for GraphOps {
                 )
                 .await?;
             if raw.is_empty() {
-                return Err(ProviderError::NotFound(format!("Attachment {attachment_id} has no content")));
+                return Err(ProviderError::NotFound(format!(
+                    "Attachment {attachment_id} has no content"
+                )));
             }
             raw
         };
@@ -380,7 +389,8 @@ impl ProviderOps for GraphOps {
         _text_color: Option<&str>,
         _bg_color: Option<&str>,
     ) -> Result<ProviderFolderMutation, ProviderError> {
-        let graph_folder_id = resolve_graph_folder_id(&self.client, ctx, folder_id.as_str(), true).await?;
+        let graph_folder_id =
+            resolve_graph_folder_id(&self.client, ctx, folder_id.as_str(), true).await?;
         let enc_folder_id = urlencoding::encode(&graph_folder_id);
         let body = GraphRenameFolderRequest {
             display_name: new_name.to_string(),
@@ -403,8 +413,13 @@ impl ProviderOps for GraphOps {
         })
     }
 
-    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &FolderId) -> Result<(), ProviderError> {
-        let graph_folder_id = resolve_graph_folder_id(&self.client, ctx, folder_id.as_str(), true).await?;
+    async fn delete_folder(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        folder_id: &FolderId,
+    ) -> Result<(), ProviderError> {
+        let graph_folder_id =
+            resolve_graph_folder_id(&self.client, ctx, folder_id.as_str(), true).await?;
         let enc_folder_id = urlencoding::encode(&graph_folder_id);
         let me = self.me();
         self.client
@@ -415,7 +430,10 @@ impl ProviderOps for GraphOps {
         Ok(())
     }
 
-    async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, ProviderError> {
+    async fn test_connection(
+        &self,
+        ctx: &ProviderCtx<'_>,
+    ) -> Result<ProviderTestResult, ProviderError> {
         let me = self.me();
         let profile: super::types::GraphProfile = self
             .client
@@ -473,9 +491,14 @@ impl GraphOps {
         thread_id: Option<&str>,
         send_at_utc: &str,
     ) -> Result<String, String> {
-        let draft_id =
-            send::create_draft_with_deferred_time(&self.client, ctx, raw_base64url, thread_id, send_at_utc)
-                .await?;
+        let draft_id = send::create_draft_with_deferred_time(
+            &self.client,
+            ctx,
+            raw_base64url,
+            thread_id,
+            send_at_utc,
+        )
+        .await?;
 
         // Send the draft — Exchange will hold it until the deferred time
         let enc_draft_id = urlencoding::encode(&draft_id);
@@ -529,9 +552,7 @@ impl GraphOps {
         self.client
             .patch(&format!("{me}/messages/{enc_id}"), &patch, ctx.db)
             .await?;
-        log::info!(
-            "Rescheduled deferred send to {new_send_at_utc} for message_id={message_id}"
-        );
+        log::info!("Rescheduled deferred send to {new_send_at_utc} for message_id={message_id}");
         Ok(())
     }
 }
@@ -578,11 +599,7 @@ impl GraphOps {
         let enc_user = urlencoding::encode(shared_mailbox_email);
         let draft: serde_json::Value = self
             .client
-            .post(
-                &format!("/users/{enc_user}/messages"),
-                &create_msg,
-                ctx.db,
-            )
+            .post(&format!("/users/{enc_user}/messages"), &create_msg, ctx.db)
             .await?;
 
         let draft_id = draft
@@ -592,14 +609,8 @@ impl GraphOps {
             .to_string();
 
         // Upload attachments to the shared mailbox draft
-        send::upload_attachments_to_user_mailbox(
-            &self.client,
-            ctx,
-            &enc_user,
-            &draft_id,
-            &parsed,
-        )
-        .await?;
+        send::upload_attachments_to_user_mailbox(&self.client, ctx, &enc_user, &draft_id, &parsed)
+            .await?;
 
         // Send the draft from the shared mailbox
         let enc_draft_id = urlencoding::encode(&draft_id);
@@ -611,9 +622,7 @@ impl GraphOps {
             )
             .await?;
 
-        log::info!(
-            "Sent as shared mailbox {shared_mailbox_email}, draft_id={draft_id}"
-        );
+        log::info!("Sent as shared mailbox {shared_mailbox_email}, draft_id={draft_id}");
         Ok(draft_id)
     }
 
@@ -675,11 +684,7 @@ impl GraphOps {
         let enc_user = urlencoding::encode(shared_mailbox_email);
         let draft: serde_json::Value = self
             .client
-            .post(
-                &format!("/users/{enc_user}/messages"),
-                &create_msg,
-                ctx.db,
-            )
+            .post(&format!("/users/{enc_user}/messages"), &create_msg, ctx.db)
             .await?;
 
         let draft_id = draft
@@ -688,14 +693,8 @@ impl GraphOps {
             .ok_or("Draft response missing id")?
             .to_string();
 
-        send::upload_attachments_to_user_mailbox(
-            &self.client,
-            ctx,
-            &enc_user,
-            &draft_id,
-            &parsed,
-        )
-        .await?;
+        send::upload_attachments_to_user_mailbox(&self.client, ctx, &enc_user, &draft_id, &parsed)
+            .await?;
 
         let enc_draft_id = urlencoding::encode(&draft_id);
         self.client
@@ -747,8 +746,6 @@ pub async fn create_reference_attachment(
 
     let _response: serde_json::Value = client.post_beta(&path, &body, db).await?;
 
-    log::info!(
-        "Created reference attachment '{file_name}' on message {message_id}"
-    );
+    log::info!("Created reference attachment '{file_name}' on message {message_id}");
     Ok(())
 }

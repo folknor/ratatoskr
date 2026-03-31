@@ -29,35 +29,21 @@ pub async fn create_provider(
 
     match provider.as_str() {
         "gmail_api" => {
-            let client = gmail::client::GmailClient::from_account(
-                db,
-                account_id,
-                encryption_key,
-            )
-            .await?;
+            let client =
+                gmail::client::GmailClient::from_account(db, account_id, encryption_key).await?;
             Ok(Box::new(gmail::ops::GmailOps::new(client)))
         }
         "graph" => {
-            let client = graph::client::GraphClient::from_account(
-                db,
-                account_id,
-                encryption_key,
-            )
-            .await?;
+            let client =
+                graph::client::GraphClient::from_account(db, account_id, encryption_key).await?;
             Ok(Box::new(graph::ops::GraphOps::new(client)))
         }
         "jmap" => {
-            let client = jmap::client::JmapClient::from_account(
-                db,
-                account_id,
-                &encryption_key,
-            )
-            .await?;
+            let client =
+                jmap::client::JmapClient::from_account(db, account_id, &encryption_key).await?;
             Ok(Box::new(jmap::ops::JmapOps::new(client)))
         }
-        "imap" => Ok(Box::new(imap::ops::ImapOps::new(
-            encryption_key,
-        ))),
+        "imap" => Ok(Box::new(imap::ops::ImapOps::new(encryption_key))),
         other => Err(format!("Unknown provider: {other}")),
     }
 }

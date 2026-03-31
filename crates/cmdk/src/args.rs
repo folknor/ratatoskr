@@ -16,7 +16,10 @@ pub enum CommandArgs {
     /// NavigateToLabel -- label_id from ListPicker selection.
     /// Includes account_id because cross-account navigation needs
     /// to know which account the label belongs to.
-    NavigateToLabel { label_id: String, account_id: String },
+    NavigateToLabel {
+        label_id: String,
+        account_id: String,
+    },
     /// SmartFolderSave -- name from Text input
     SmartFolderSave { name: String },
 }

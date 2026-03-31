@@ -128,8 +128,7 @@ impl ImportedContact {
 
     /// Whether this contact has a valid email for import.
     pub fn has_valid_email(&self) -> bool {
-        self.normalized_email()
-            .is_some_and(|e| e.contains('@'))
+        self.normalized_email().is_some_and(|e| e.contains('@'))
     }
 }
 

@@ -3,11 +3,9 @@ use quick_xml::events::Event;
 
 use super::ews::EwsHeaders;
 
-const AUTODISCOVER_URL: &str =
-    "https://outlook.office365.com/autodiscover/autodiscover.xml";
+const AUTODISCOVER_URL: &str = "https://outlook.office365.com/autodiscover/autodiscover.xml";
 
-const AUTODISCOVER_SOAP_URL: &str =
-    "https://outlook.office365.com/autodiscover/autodiscover.svc";
+const AUTODISCOVER_SOAP_URL: &str = "https://outlook.office365.com/autodiscover/autodiscover.svc";
 
 /// A shared/delegate mailbox discovered via Exchange Autodiscover.
 #[derive(Debug, Clone)]
@@ -82,9 +80,7 @@ pub async fn discover_shared_mailboxes(
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!(
-            "Autodiscover returned {status}: {body}"
-        ));
+        return Err(format!("Autodiscover returned {status}: {body}"));
     }
 
     let xml = resp
@@ -198,9 +194,8 @@ pub async fn discover_public_folder_routing(
         }
     }
 
-    let hierarchy_mailbox = hierarchy_mailbox.ok_or_else(|| {
-        "PublicFolderInformation not found in autodiscover response".to_string()
-    })?;
+    let hierarchy_mailbox = hierarchy_mailbox
+        .ok_or_else(|| "PublicFolderInformation not found in autodiscover response".to_string())?;
 
     log::info!(
         "Public folder routing: hierarchy_mailbox={hierarchy_mailbox}, server={hierarchy_server:?}"
@@ -532,10 +527,7 @@ mod tests {
 
     #[test]
     fn construct_replica_smtp_helper() {
-        let smtp = construct_replica_smtp(
-            "1A2B3C4D-5E6F-7A8B-9C0D-1E2F3A4B5C6D",
-            "contoso.com",
-        );
+        let smtp = construct_replica_smtp("1A2B3C4D-5E6F-7A8B-9C0D-1E2F3A4B5C6D", "contoso.com");
         assert_eq!(smtp, "1A2B3C4D-5E6F-7A8B-9C0D-1E2F3A4B5C6D@contoso.com");
     }
 

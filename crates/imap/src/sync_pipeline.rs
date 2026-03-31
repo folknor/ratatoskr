@@ -1,10 +1,10 @@
 use rusqlite::Connection;
 
-use store::body_store::BodyStoreState;
 use db::db::DbState;
-use store::inline_image_store::{InlineImage, InlineImageStoreState};
 use search::{SearchDocument, SearchState};
 use seen::MessageAddresses;
+use store::body_store::BodyStoreState;
+use store::inline_image_store::{InlineImage, InlineImageStoreState};
 use sync::persistence;
 
 use super::convert::ConvertedMessage;
@@ -397,11 +397,8 @@ pub fn sync_folders_to_labels(
         let mapping = map_folder_to_label(folder);
 
         // Derive parent_label_id from folder path by splitting on delimiter
-        let parent_label_id = derive_imap_parent_label_id(
-            &folder.path,
-            &folder.delimiter,
-            &path_to_label_id,
-        );
+        let parent_label_id =
+            derive_imap_parent_label_id(&folder.path, &folder.delimiter, &path_to_label_id);
 
         conn.execute(
             "INSERT INTO labels \
@@ -474,7 +471,14 @@ pub fn upsert_folder_sync_state(
         "INSERT OR REPLACE INTO folder_sync_state \
          (account_id, folder_path, uidvalidity, last_uid, modseq, last_sync_at) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![account_id, folder_path, uidvalidity, last_uid, modseq_i64, last_sync_at],
+        rusqlite::params![
+            account_id,
+            folder_path,
+            uidvalidity,
+            last_uid,
+            modseq_i64,
+            last_sync_at
+        ],
     )
     .map_err(|e| format!("upsert folder sync state: {e}"))?;
     Ok(())
@@ -672,7 +676,10 @@ pub fn get_local_uids_for_folder(
 
     let rows = stmt
         .query_map(rusqlite::params![account_id, folder_path], |row| {
-            Ok((row.get::<_, String>("id")?, u32::try_from(row.get::<_, i64>("imap_uid")?).unwrap_or(0)))
+            Ok((
+                row.get::<_, String>("id")?,
+                u32::try_from(row.get::<_, i64>("imap_uid")?).unwrap_or(0),
+            ))
         })
         .map_err(|e| format!("query local uids: {e}"))?;
 
@@ -736,8 +743,7 @@ pub fn remove_deleted_messages(
     let affected_threads =
         persistence::delete_messages_and_cleanup_threads(&tx, account_id, deleted_message_ids)?;
 
-    tx.commit()
-        .map_err(|e| format!("deletion commit: {e}"))?;
+    tx.commit().map_err(|e| format!("deletion commit: {e}"))?;
 
     log::info!(
         "[sync] Removed {} deleted messages, {} threads affected",

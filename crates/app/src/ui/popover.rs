@@ -1,6 +1,4 @@
-use iced::advanced::{
-    layout, overlay, renderer, widget, Clipboard, Layout, Shell, Widget,
-};
+use iced::advanced::{Clipboard, Layout, Shell, Widget, layout, overlay, renderer, widget};
 use iced::{Event, Length, Point, Rectangle, Renderer, Size, Theme, Vector, mouse};
 
 /// A widget that displays a base element and optionally floats a popup
@@ -199,10 +197,8 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Popover<'_, Message> {
         }));
 
         Some(
-            overlay::Group::with_children(
-                base.into_iter().chain(Some(overlay)).collect(),
-            )
-            .overlay(),
+            overlay::Group::with_children(base.into_iter().chain(Some(overlay)).collect())
+                .overlay(),
         )
     }
 }
@@ -313,7 +309,10 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
 
         // Clicks inside the overlay are captured so they don't propagate.
         // Clicks outside the overlay dismiss it.
-        if let Event::Mouse(mouse::Event::ButtonPressed { button: mouse::Button::Left, .. })
+        if let Event::Mouse(mouse::Event::ButtonPressed {
+            button: mouse::Button::Left,
+            ..
+        })
         | Event::Touch(iced::touch::Event::FingerPressed { .. }) = event
         {
             if cursor.is_over(layout.bounds()) {

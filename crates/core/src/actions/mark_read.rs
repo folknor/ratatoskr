@@ -10,7 +10,12 @@ use crate::db::queries::set_thread_read;
 use crate::progress::NoopProgressReporter;
 
 /// Local DB mutation for mark-read (idempotent).
-pub(crate) async fn mark_read_local(ctx: &ActionContext, account_id: &str, thread_id: &str, read: bool) -> Result<(), ActionError> {
+pub(crate) async fn mark_read_local(
+    ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+    read: bool,
+) -> Result<(), ActionError> {
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
@@ -48,10 +53,21 @@ async fn mark_read_dispatch(
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             let msg = e.to_string();
-            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
+            ActionOutcome::LocalOnly {
+                reason: ActionError::remote(msg),
+                retryable: true,
+            }
         }
     };
-    enqueue_if_retryable(ctx, &outcome, account_id, "markRead", thread_id, &params_json).await;
+    enqueue_if_retryable(
+        ctx,
+        &outcome,
+        account_id,
+        "markRead",
+        thread_id,
+        &params_json,
+    )
+    .await;
     mlog.emit(&outcome);
     outcome
 }
@@ -75,8 +91,19 @@ pub async fn mark_read(
     match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(provider) => mark_read_dispatch(ctx, &*provider, account_id, thread_id, read).await,
         Err(e) => {
-            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
-            enqueue_if_retryable(ctx, &outcome, account_id, "markRead", thread_id, &params_json).await;
+            let outcome = ActionOutcome::LocalOnly {
+                reason: ActionError::remote(e),
+                retryable: true,
+            };
+            enqueue_if_retryable(
+                ctx,
+                &outcome,
+                account_id,
+                "markRead",
+                thread_id,
+                &params_json,
+            )
+            .await;
             mlog.emit(&outcome);
             outcome
         }

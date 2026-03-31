@@ -335,9 +335,7 @@ async fn list_caldav_calendars(
             continue;
         };
         let remote_id = xml::resolve_href(home_url, &href)?;
-        if xml::normalize_url_for_compare(&remote_id)
-            == xml::normalize_url_for_compare(home_url)
-        {
+        if xml::normalize_url_for_compare(&remote_id) == xml::normalize_url_for_compare(home_url) {
             continue;
         }
 

@@ -49,7 +49,10 @@ impl Component for Settings {
                     prefs.date_display = self.date_display;
                 }
                 self.open_select = None;
-                return (Task::none(), Some(SettingsEvent::DateDisplayChanged(self.date_display)));
+                return (
+                    Task::none(),
+                    Some(SettingsEvent::DateDisplayChanged(self.date_display)),
+                );
             }
             SettingsMessage::AddAccountFromSettings => {
                 return (Task::none(), Some(SettingsEvent::OpenAddAccountWizard));
@@ -96,7 +99,9 @@ impl Component for Settings {
             SettingsMessage::SignatureDelete(ref id) => {
                 // Show confirmation instead of deleting immediately.
                 // If the editor isn't already open for this signature, open it.
-                let need_open = self.signature_editor.as_ref()
+                let need_open = self
+                    .signature_editor
+                    .as_ref()
                     .map_or(true, |e| e.signature_id.as_deref() != Some(id.as_str()));
                 if need_open {
                     if let Some(sig) = self.signatures.iter().find(|s| s.id == *id) {
@@ -143,7 +148,10 @@ impl Component for Settings {
                 self.active_tab = Tab::People;
                 self.pinned_help = None;
                 // LoadContacts handler in main.rs also loads groups.
-                return (Task::none(), Some(SettingsEvent::LoadContacts(self.contact_filter.clone())));
+                return (
+                    Task::none(),
+                    Some(SettingsEvent::LoadContacts(self.contact_filter.clone())),
+                );
             }
             SettingsMessage::ContactEditorSave => {
                 return self.handle_contact_save();
@@ -154,10 +162,7 @@ impl Component for Settings {
                 // Here we check if we should auto-save (local contact).
                 self.handle_remaining_message(message);
                 if let Some(ref editor) = self.contact_editor {
-                    let is_local = editor
-                        .source
-                        .as_deref()
-                        .is_none_or(|s| s == "user");
+                    let is_local = editor.source.as_deref().is_none_or(|s| s == "user");
                     if is_local && editor.contact_id.is_some() {
                         return self.handle_contact_save();
                     }
@@ -265,7 +270,10 @@ impl Component for Settings {
                             self.import_wizard = None;
                             self.overlay = None;
                             self.overlay_anim.go_mut(false, Instant::now());
-                            return (Task::none(), Some(SettingsEvent::LoadContacts(self.contact_filter.clone())));
+                            return (
+                                Task::none(),
+                                Some(SettingsEvent::LoadContacts(self.contact_filter.clone())),
+                            );
                         }
                         _ => {}
                     }
@@ -301,8 +309,12 @@ impl Settings {
             | SettingsMessage::CheckForUpdates
             | SettingsMessage::OpenGithub
             | SettingsMessage::OverlayAnimTick(_) => {}
-            SettingsMessage::UndoInput(field) => { self.undo_field(field); }
-            SettingsMessage::RedoInput(field) => { self.redo_field(field); }
+            SettingsMessage::UndoInput(field) => {
+                self.undo_field(field);
+            }
+            SettingsMessage::RedoInput(field) => {
+                self.redo_field(field);
+            }
             SettingsMessage::HelpHover(id) => self.hovered_help = Some(id),
             SettingsMessage::HelpUnhover(id) => {
                 if self.hovered_help.as_ref() == Some(&id) {
@@ -325,67 +337,102 @@ impl Settings {
                 self.pinned_help = None;
             }
             SettingsMessage::ToggleSelect(field) => {
-                self.open_select = if self.open_select == Some(field) { None } else { Some(field) };
+                self.open_select = if self.open_select == Some(field) {
+                    None
+                } else {
+                    Some(field)
+                };
             }
             SettingsMessage::ScaleDragged(v) => self.scale_preview = Some(v),
             SettingsMessage::ScaleReleased => {
                 if let Some(v) = self.scale_preview.take() {
                     self.scale = v;
-                    if let Some(ref mut prefs) = self.editing_preferences { prefs.scale = v; }
+                    if let Some(ref mut prefs) = self.editing_preferences {
+                        prefs.scale = v;
+                    }
                 }
             }
             SettingsMessage::EmailBodyBgChanged(v) => {
                 let bg = EmailBodyBackground::from_label(&v);
                 self.email_body_background = bg;
-                if let Some(ref mut prefs) = self.editing_preferences { prefs.email_body_background = bg; }
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.email_body_background = bg;
+                }
                 crate::ui::theme::set_email_body_background(bg);
                 self.open_select = None;
             }
             SettingsMessage::ThemeChanged(v) => {
                 self.theme = v.clone();
-                if let Some(ref mut prefs) = self.editing_preferences { prefs.theme = v; }
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.theme = v;
+                }
                 self.open_select = None;
             }
             SettingsMessage::DensityChanged(v) => {
                 self.density = v.clone();
-                if let Some(ref mut prefs) = self.editing_preferences { prefs.density = v; }
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.density = v;
+                }
                 self.open_select = None;
             }
             SettingsMessage::FontSizeChanged(v) => {
                 self.font_size = v.clone();
-                if let Some(ref mut prefs) = self.editing_preferences { prefs.font_size = v; }
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.font_size = v;
+                }
                 self.open_select = None;
             }
             SettingsMessage::ReadingPaneChanged(v) => {
                 self.reading_pane_position = v.clone();
-                if let Some(ref mut prefs) = self.editing_preferences { prefs.reading_pane_position = v; }
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.reading_pane_position = v;
+                }
                 self.open_select = None;
             }
             SettingsMessage::ThemeSelected(i) => {
                 self.selected_theme = Some(i);
                 self.theme = "Theme".into();
-                if let Some(ref mut prefs) = self.editing_preferences { prefs.theme = "Theme".into(); }
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.theme = "Theme".into();
+                }
             }
             SettingsMessage::ToggleSyncStatusBar(v) => {
                 self.sync_status_bar = v;
-                if let Some(ref mut prefs) = self.editing_preferences { prefs.sync_status_bar = v; }
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.sync_status_bar = v;
+                }
             }
             SettingsMessage::ToggleBlockRemoteImages(v) => {
                 self.block_remote_images = v;
-                if let Some(ref mut prefs) = self.editing_preferences { prefs.block_remote_images = v; }
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.block_remote_images = v;
+                }
             }
             SettingsMessage::TogglePhishingDetection(v) => {
                 self.phishing_detection = v;
-                if let Some(ref mut prefs) = self.editing_preferences { prefs.phishing_detection = v; }
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.phishing_detection = v;
+                }
             }
             SettingsMessage::PhishingSensitivityChanged(v) => {
                 self.phishing_sensitivity = v.clone();
-                if let Some(ref mut prefs) = self.editing_preferences { prefs.phishing_sensitivity = v; }
+                if let Some(ref mut prefs) = self.editing_preferences {
+                    prefs.phishing_sensitivity = v;
+                }
             }
             SettingsMessage::ToggleSendAndArchive(v) => self.send_and_archive = v,
-            SettingsMessage::UndoDelayChanged(v) => { self.undo_delay = v; self.open_select = None; }
-            SettingsMessage::DefaultReplyChanged(v) => { self.default_reply_mode = v; self.open_select = None; }
-            SettingsMessage::MarkAsReadChanged(v) => { self.mark_as_read = v; self.open_select = None; }
+            SettingsMessage::UndoDelayChanged(v) => {
+                self.undo_delay = v;
+                self.open_select = None;
+            }
+            SettingsMessage::DefaultReplyChanged(v) => {
+                self.default_reply_mode = v;
+                self.open_select = None;
+            }
+            SettingsMessage::MarkAsReadChanged(v) => {
+                self.mark_as_read = v;
+                self.open_select = None;
+            }
             _ => self.handle_remaining_message(message),
         }
     }
@@ -410,48 +457,67 @@ impl Settings {
                 }
             }
             SettingsMessage::RemoveVipSender(email) => self.vip_senders.retain(|e| e != &email),
-            SettingsMessage::AiProviderChanged(v) => { self.ai_provider = v; self.open_select = None; }
-            SettingsMessage::AiModelChanged(v) => { self.ai_model = v; self.open_select = None; }
+            SettingsMessage::AiProviderChanged(v) => {
+                self.ai_provider = v;
+                self.open_select = None;
+            }
+            SettingsMessage::AiModelChanged(v) => {
+                self.ai_model = v;
+                self.open_select = None;
+            }
             SettingsMessage::ToggleAiEnabled(v) => self.ai_enabled = v,
             SettingsMessage::ToggleAiAutoCategorize(v) => self.ai_auto_categorize = v,
             SettingsMessage::ToggleAiAutoSummarize(v) => self.ai_auto_summarize = v,
             SettingsMessage::ToggleAiAutoDraft(v) => self.ai_auto_draft = v,
             SettingsMessage::ToggleAiWritingStyle(v) => self.ai_writing_style = v,
             SettingsMessage::ToggleAiAutoArchiveUpdates(v) => self.ai_auto_archive_updates = v,
-            SettingsMessage::ToggleAiAutoArchivePromotions(v) => self.ai_auto_archive_promotions = v,
+            SettingsMessage::ToggleAiAutoArchivePromotions(v) => {
+                self.ai_auto_archive_promotions = v
+            }
             SettingsMessage::ToggleAiAutoArchiveSocial(v) => self.ai_auto_archive_social = v,
-            SettingsMessage::ToggleAiAutoArchiveNewsletters(v) => self.ai_auto_archive_newsletters = v,
+            SettingsMessage::ToggleAiAutoArchiveNewsletters(v) => {
+                self.ai_auto_archive_newsletters = v
+            }
             SettingsMessage::AiApiKeyChanged(v) => self.ai_api_key.set_text(v),
             SettingsMessage::OllamaUrlChanged(v) => self.ai_ollama_url.set_text(v),
             SettingsMessage::OllamaModelChanged(v) => self.ai_ollama_model.set_text(v),
             SettingsMessage::SaveAiSettings => self.ai_key_saved = true,
             SettingsMessage::ListGripPress(list_id, index) => {
                 self.drag_state = Some(DragState {
-                    list_id, dragging_index: index, start_y: -1.0, is_dragging: false,
+                    list_id,
+                    dragging_index: index,
+                    start_y: -1.0,
+                    is_dragging: false,
                 });
             }
             SettingsMessage::AccountGripPress(index) => {
                 self.account_drag = Some(AccountDragState {
-                    dragging_index: index, start_y: -1.0, is_dragging: false,
+                    dragging_index: index,
+                    start_y: -1.0,
+                    is_dragging: false,
                 });
             }
             SettingsMessage::ListDragEnd(_) => self.drag_state = None,
-            SettingsMessage::ListRowClick(list_id, index)
-                if self.drag_state.is_none() => {
-                    let items = self.list_items_mut(&list_id);
-                    if let Some(item) = items.get_mut(index)
-                        && let Some(ref mut enabled) = item.enabled
-                    {
-                        *enabled = !*enabled;
-                    }
+            SettingsMessage::ListRowClick(list_id, index) if self.drag_state.is_none() => {
+                let items = self.list_items_mut(&list_id);
+                if let Some(item) = items.get_mut(index)
+                    && let Some(ref mut enabled) = item.enabled
+                {
+                    *enabled = !*enabled;
                 }
+            }
             SettingsMessage::ListRemove(list_id, index) => {
                 let items = self.list_items_mut(&list_id);
-                if index < items.len() { items.remove(index); }
+                if index < items.len() {
+                    items.remove(index);
+                }
             }
             SettingsMessage::ListAdd(list_id) => {
                 let items = self.list_items_mut(&list_id);
-                items.push(EditableItem { label: format!("New item {}", items.len() + 1), enabled: None });
+                items.push(EditableItem {
+                    label: format!("New item {}", items.len() + 1),
+                    enabled: None,
+                });
             }
             SettingsMessage::ListToggle(list_id, index, value) => {
                 if let Some(item) = self.list_items_mut(&list_id).get_mut(index) {
@@ -654,8 +720,13 @@ impl Settings {
     }
 
     fn handle_drag_move(&mut self, list_id: &str, point: Point) -> Task<SettingsMessage> {
-        let has_drag = self.drag_state.as_ref().is_some_and(|d| d.list_id == list_id);
-        if !has_drag { return Task::none(); }
+        let has_drag = self
+            .drag_state
+            .as_ref()
+            .is_some_and(|d| d.list_id == list_id);
+        if !has_drag {
+            return Task::none();
+        }
 
         if let Some(ref mut drag) = self.drag_state
             && drag.start_y < 0.0
@@ -664,12 +735,18 @@ impl Settings {
             return Task::none();
         }
 
-        let Some(drag_ref) = self.drag_state.as_ref() else { return Task::none() };
+        let Some(drag_ref) = self.drag_state.as_ref() else {
+            return Task::none();
+        };
         let (from, start_y) = (drag_ref.dragging_index, drag_ref.start_y);
 
         if !drag_ref.is_dragging {
-            if (point.y - start_y).abs() < DRAG_START_THRESHOLD { return Task::none(); }
-            if let Some(ref mut drag) = self.drag_state { drag.is_dragging = true; }
+            if (point.y - start_y).abs() < DRAG_START_THRESHOLD {
+                return Task::none();
+            }
+            if let Some(ref mut drag) = self.drag_state {
+                drag.is_dragging = true;
+            }
         }
 
         let row_step = SETTINGS_ROW_HEIGHT + 1.0;
@@ -679,7 +756,9 @@ impl Settings {
 
         if target != from {
             self.list_items_mut(list_id).swap(from, target);
-            if let Some(ref mut drag) = self.drag_state { drag.dragging_index = target; }
+            if let Some(ref mut drag) = self.drag_state {
+                drag.dragging_index = target;
+            }
         }
         Task::none()
     }
@@ -716,8 +795,7 @@ impl Settings {
         let row_step = SETTINGS_TOGGLE_ROW_HEIGHT + 1.0;
         let count = self.managed_accounts.len();
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let target =
-            ((point.y / row_step).max(0.0) as usize).min(count.saturating_sub(1));
+        let target = ((point.y / row_step).max(0.0) as usize).min(count.saturating_sub(1));
 
         if target != from {
             self.managed_accounts.swap(from, target);
@@ -728,9 +806,7 @@ impl Settings {
         (Task::none(), None)
     }
 
-    fn handle_account_drag_end(
-        &mut self,
-    ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+    fn handle_account_drag_end(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
         let was_dragging = self.account_drag.as_ref().is_some_and(|d| d.is_dragging);
         self.account_drag = None;
 
@@ -752,24 +828,44 @@ impl Settings {
 
     fn undo_field(&mut self, field: InputField) {
         match field {
-            InputField::VipEmail => { self.vip_email_input.undo(); }
-            InputField::AiApiKey => { self.ai_api_key.undo(); }
-            InputField::OllamaUrl => { self.ai_ollama_url.undo(); }
-            InputField::OllamaModel => { self.ai_ollama_model.undo(); }
+            InputField::VipEmail => {
+                self.vip_email_input.undo();
+            }
+            InputField::AiApiKey => {
+                self.ai_api_key.undo();
+            }
+            InputField::OllamaUrl => {
+                self.ai_ollama_url.undo();
+            }
+            InputField::OllamaModel => {
+                self.ai_ollama_model.undo();
+            }
             InputField::SignatureName => {
-                if let Some(ref mut editor) = self.signature_editor { editor.name.undo(); }
+                if let Some(ref mut editor) = self.signature_editor {
+                    editor.name.undo();
+                }
             }
         }
     }
 
     fn redo_field(&mut self, field: InputField) {
         match field {
-            InputField::VipEmail => { self.vip_email_input.redo(); }
-            InputField::AiApiKey => { self.ai_api_key.redo(); }
-            InputField::OllamaUrl => { self.ai_ollama_url.redo(); }
-            InputField::OllamaModel => { self.ai_ollama_model.redo(); }
+            InputField::VipEmail => {
+                self.vip_email_input.redo();
+            }
+            InputField::AiApiKey => {
+                self.ai_api_key.redo();
+            }
+            InputField::OllamaUrl => {
+                self.ai_ollama_url.redo();
+            }
+            InputField::OllamaModel => {
+                self.ai_ollama_model.redo();
+            }
             InputField::SignatureName => {
-                if let Some(ref mut editor) = self.signature_editor { editor.name.redo(); }
+                if let Some(ref mut editor) = self.signature_editor {
+                    editor.name.redo();
+                }
             }
         }
     }
@@ -846,7 +942,10 @@ impl Settings {
             return (Task::none(), None);
         }
         let entry = crate::db::ContactEntry {
-            id: editor.contact_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            id: editor
+                .contact_id
+                .clone()
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             email,
             display_name: non_empty(editor.display_name.trim()),
             email2: non_empty(editor.email2.trim()),
@@ -865,7 +964,10 @@ impl Settings {
         (Task::none(), Some(SettingsEvent::SaveContact(entry)))
     }
 
-    fn handle_contact_delete(&mut self, id: String) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+    fn handle_contact_delete(
+        &mut self,
+        id: String,
+    ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
         self.overlay = None;
         self.overlay_anim.go_mut(false, Instant::now());
         self.contact_editor = None;
@@ -911,7 +1013,10 @@ impl Settings {
         #[allow(clippy::cast_possible_wrap)]
         let member_count = editor.members.len() as i64;
         let group = crate::db::GroupEntry {
-            id: editor.group_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            id: editor
+                .group_id
+                .clone()
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             name,
             member_count,
             created_at: 0,
@@ -924,14 +1029,21 @@ impl Settings {
         (Task::none(), Some(SettingsEvent::SaveGroup(group, members)))
     }
 
-    fn handle_group_delete(&mut self, id: String) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+    fn handle_group_delete(
+        &mut self,
+        id: String,
+    ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
         self.overlay = None;
         self.overlay_anim.go_mut(false, Instant::now());
         self.group_editor = None;
         (Task::none(), Some(SettingsEvent::DeleteGroup(id)))
     }
 
-    fn handle_import_file_selected(&mut self, path: String, data: Vec<u8>) -> Task<SettingsMessage> {
+    fn handle_import_file_selected(
+        &mut self,
+        path: String,
+        data: Vec<u8>,
+    ) -> Task<SettingsMessage> {
         let Some(ref mut wizard) = self.import_wizard else {
             return Task::none();
         };
@@ -951,38 +1063,34 @@ impl Settings {
         };
 
         match format {
-            import::ImportFormat::Csv => {
-                match import::parse_csv(&source, 20) {
-                    Ok(preview) => {
-                        let auto_mappings = import::auto_detect_mappings(&preview.headers);
-                        wizard.mappings = auto_mappings
-                            .iter()
-                            .map(|m| ImportContactField::from_import_field(m.target_field))
-                            .collect();
-                        wizard.has_header = preview.has_header;
-                        wizard.preview = Some(preview);
-                        wizard.source = Some(source);
-                        wizard.file_path = Some(path);
-                        wizard.step = ImportStep::Mapping;
-                    }
-                    Err(e) => {
-                        log::error!("CSV parse error: {e}");
-                    }
+            import::ImportFormat::Csv => match import::parse_csv(&source, 20) {
+                Ok(preview) => {
+                    let auto_mappings = import::auto_detect_mappings(&preview.headers);
+                    wizard.mappings = auto_mappings
+                        .iter()
+                        .map(|m| ImportContactField::from_import_field(m.target_field))
+                        .collect();
+                    wizard.has_header = preview.has_header;
+                    wizard.preview = Some(preview);
+                    wizard.source = Some(source);
+                    wizard.file_path = Some(path);
+                    wizard.step = ImportStep::Mapping;
                 }
-            }
-            import::ImportFormat::Vcf => {
-                match import::parse_vcf(&source.data) {
-                    Ok(contacts) => {
-                        wizard.vcf_contacts = contacts;
-                        wizard.source = Some(source);
-                        wizard.file_path = Some(path);
-                        wizard.step = ImportStep::VcfPreview;
-                    }
-                    Err(e) => {
-                        log::error!("VCF parse error: {e}");
-                    }
+                Err(e) => {
+                    log::error!("CSV parse error: {e}");
                 }
-            }
+            },
+            import::ImportFormat::Vcf => match import::parse_vcf(&source.data) {
+                Ok(contacts) => {
+                    wizard.vcf_contacts = contacts;
+                    wizard.source = Some(source);
+                    wizard.file_path = Some(path);
+                    wizard.step = ImportStep::VcfPreview;
+                }
+                Err(e) => {
+                    log::error!("VCF parse error: {e}");
+                }
+            },
         }
 
         Task::none()
@@ -997,7 +1105,9 @@ impl Settings {
         // Re-parse with new header setting
         if let Some(ref source) = wizard.source {
             if source.format == import::ImportFormat::Csv {
-                if let Ok(preview) = import::csv_parser::parse_csv_with_header(source, 20, has_header) {
+                if let Ok(preview) =
+                    import::csv_parser::parse_csv_with_header(source, 20, has_header)
+                {
                     let auto_mappings = import::auto_detect_mappings(&preview.headers);
                     wizard.mappings = auto_mappings
                         .iter()
@@ -1016,16 +1126,19 @@ impl Settings {
             return (Task::none(), None);
         };
 
-        let contacts: Vec<import::ImportedContact> = match wizard.source.as_ref().map(|s| s.format) {
+        let contacts: Vec<import::ImportedContact> = match wizard.source.as_ref().map(|s| s.format)
+        {
             Some(import::ImportFormat::Csv) => {
                 let Some(ref source) = wizard.source else {
                     return (Task::none(), None);
                 };
-                let mappings: Vec<import::ColumnMapping> = wizard.mappings
+                let mappings: Vec<import::ColumnMapping> = wizard
+                    .mappings
                     .iter()
                     .enumerate()
                     .map(|(i, field)| {
-                        let header = wizard.preview
+                        let header = wizard
+                            .preview
                             .as_ref()
                             .and_then(|p| p.headers.get(i))
                             .cloned()
@@ -1037,11 +1150,7 @@ impl Settings {
                         }
                     })
                     .collect();
-                match import::csv_parser::execute_csv_import(
-                    source,
-                    &mappings,
-                    wizard.has_header,
-                ) {
+                match import::csv_parser::execute_csv_import(source, &mappings, wizard.has_header) {
                     Ok(c) => c,
                     Err(e) => {
                         log::error!("CSV import error: {e}");
@@ -1049,9 +1158,7 @@ impl Settings {
                     }
                 }
             }
-            Some(import::ImportFormat::Vcf) => {
-                wizard.vcf_contacts.clone()
-            }
+            Some(import::ImportFormat::Vcf) => wizard.vcf_contacts.clone(),
             None => return (Task::none(), None),
         };
 
@@ -1059,11 +1166,14 @@ impl Settings {
         let account_id = wizard.account_id.clone();
         let update_existing = wizard.update_existing;
 
-        (Task::none(), Some(SettingsEvent::ExecuteContactImport {
-            contacts,
-            account_id,
-            update_existing,
-        }))
+        (
+            Task::none(),
+            Some(SettingsEvent::ExecuteContactImport {
+                contacts,
+                account_id,
+                update_existing,
+            }),
+        )
     }
 
     pub(super) fn list_items_mut(&mut self, list_id: &str) -> &mut Vec<EditableItem> {
@@ -1080,9 +1190,10 @@ impl Settings {
         };
         // Resolve current color index from hex
         let presets = label_colors::category_colors::all_presets();
-        let color_index = account.account_color.as_deref().and_then(|hex| {
-            presets.iter().position(|(_, bg, _)| *bg == hex)
-        });
+        let color_index = account
+            .account_color
+            .as_deref()
+            .and_then(|hex| presets.iter().position(|(_, bg, _)| *bg == hex));
 
         self.editing_account = Some(AccountEditor {
             account_id: account.id.clone(),
@@ -1100,9 +1211,7 @@ impl Settings {
         self.overlay_anim.go_mut(true, iced::time::Instant::now());
     }
 
-    fn handle_account_editor_save(
-        &mut self,
-    ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
+    fn handle_account_editor_save(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
         let Some(ref editor) = self.editing_account else {
             return (Task::none(), None);
         };
@@ -1115,7 +1224,8 @@ impl Settings {
         }
 
         let presets = label_colors::category_colors::all_presets();
-        let color_hex = editor.account_color_index
+        let color_hex = editor
+            .account_color_index
             .and_then(|i| presets.get(i))
             .map(|(_, bg, _)| (*bg).to_string());
 
@@ -1132,14 +1242,18 @@ impl Settings {
         self.editing_account = None;
         self.overlay = None;
         self.overlay_anim.go_mut(false, iced::time::Instant::now());
-        (Task::none(), Some(SettingsEvent::SaveAccountChanges {
-            account_id,
-            params,
-        }))
+        (
+            Task::none(),
+            Some(SettingsEvent::SaveAccountChanges { account_id, params }),
+        )
     }
 }
 
 /// Convert empty strings to `None`.
 fn non_empty(s: &str) -> Option<String> {
-    if s.is_empty() { None } else { Some(s.to_string()) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
 }

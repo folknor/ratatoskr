@@ -127,9 +127,7 @@ fn compress_png_lossless(input: &[u8], config: &Config) -> Result<CompressResult
 
 fn choose_output_format(input_format: Format, config: &Config) -> (ImageFormat, &'static str) {
     match input_format {
-        Format::Bmp | Format::Tiff if config.bmp_tiff_to_jpeg => {
-            (ImageFormat::Jpeg, "image/jpeg")
-        }
+        Format::Bmp | Format::Tiff if config.bmp_tiff_to_jpeg => (ImageFormat::Jpeg, "image/jpeg"),
         Format::Png if config.png_to_jpeg => (ImageFormat::Jpeg, "image/jpeg"),
         Format::Jpeg => (ImageFormat::Jpeg, "image/jpeg"),
         Format::Png => (ImageFormat::Png, "image/png"),

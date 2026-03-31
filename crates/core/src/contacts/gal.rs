@@ -7,7 +7,7 @@
 //! Autocomplete searches include GAL entries via the app-level
 //! `search_gal_cache()` function, so autocomplete is always local.
 
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{OptionalExtension, params};
 
 use crate::db::DbState;
 
@@ -160,7 +160,9 @@ pub async fn fetch_google_gal(
             Err(e) => {
                 // 403 = scope not granted (personal Gmail, not Workspace)
                 if e.contains("403") || e.contains("PERMISSION_DENIED") {
-                    log::debug!("[Google-GAL] Directory access not available (likely personal account)");
+                    log::debug!(
+                        "[Google-GAL] Directory access not available (likely personal account)"
+                    );
                     return Ok(Vec::new());
                 }
                 return Err(format!("Google listDirectoryPeople: {e}"));
@@ -188,9 +190,7 @@ pub async fn fetch_google_gal(
                     .and_then(|p| p["value"].as_str())
                     .map(str::to_string);
 
-                let org = person["organizations"]
-                    .as_array()
-                    .and_then(|a| a.first());
+                let org = person["organizations"].as_array().and_then(|a| a.first());
                 let company = org.and_then(|o| o["name"].as_str()).map(str::to_string);
                 let title = org.and_then(|o| o["title"].as_str()).map(str::to_string);
                 let department = org
@@ -251,10 +251,9 @@ pub async fn refresh_gal_for_account(
 
     let entries = match provider.as_str() {
         "graph" => {
-            let client = crate::graph::client::GraphClient::from_account(
-                db, account_id, encryption_key,
-            )
-            .await?;
+            let client =
+                crate::graph::client::GraphClient::from_account(db, account_id, encryption_key)
+                    .await?;
             fetch_graph_gal(&client, db).await?
         }
         "gmail_api" => {
@@ -292,10 +291,7 @@ async fn record_gal_refresh(db: &DbState, account_id: String) -> Result<(), Stri
 
 /// Get the timestamp of the last GAL refresh attempt for an account.
 /// Returns None if no refresh has ever been performed.
-pub async fn gal_cache_age(
-    db: &DbState,
-    account_id: String,
-) -> Result<Option<i64>, String> {
+pub async fn gal_cache_age(db: &DbState, account_id: String) -> Result<Option<i64>, String> {
     db.with_conn(move |conn| {
         let key = format!("gal_refresh_{account_id}");
         conn.query_row(
@@ -305,7 +301,10 @@ pub async fn gal_cache_age(
         )
         .optional()
         .map_err(|e| format!("query gal refresh age: {e}"))?
-        .map(|v| v.parse::<i64>().map_err(|e| format!("parse gal timestamp: {e}")))
+        .map(|v| {
+            v.parse::<i64>()
+                .map_err(|e| format!("parse gal timestamp: {e}"))
+        })
         .transpose()
     })
     .await

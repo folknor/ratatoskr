@@ -5,11 +5,11 @@ mod storage;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use store::body_store::BodyStoreState;
 use db::db::DbState;
-use store::inline_image_store::InlineImageStoreState;
 use db::progress::ProgressReporter;
 use search::SearchState;
+use store::body_store::BodyStoreState;
+use store::inline_image_store::InlineImageStoreState;
 
 use super::client::GmailClient;
 use sync::{progress as sync_progress, state as sync_state};
@@ -60,7 +60,10 @@ pub async fn gmail_initial_sync(
 }
 
 async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), String> {
-    log::info!("[Gmail] Starting initial sync for account {} (days_back={days_back})", ctx.account_id);
+    log::info!(
+        "[Gmail] Starting initial sync for account {} (days_back={days_back})",
+        ctx.account_id
+    );
     // Phase 1: Sync labels
     emit_progress(ctx, "labels", 0, 1);
     labels::sync_labels(ctx).await?;
@@ -81,8 +84,7 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
     }
 
     // Phase 4: Sync Google contacts (non-fatal)
-    if let Err(e) =
-        super::contacts::sync_google_contacts(ctx.client, ctx.account_id, ctx.db).await
+    if let Err(e) = super::contacts::sync_google_contacts(ctx.client, ctx.account_id, ctx.db).await
     {
         log::warn!("Google contacts initial sync failed (non-fatal): {e}");
     }
@@ -100,7 +102,11 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
     }
 
     let total = thread_ids.len() as u64;
-    log::info!("[Gmail] Initial sync complete for account {}: {} threads synced", ctx.account_id, total);
+    log::info!(
+        "[Gmail] Initial sync complete for account {}: {} threads synced",
+        ctx.account_id,
+        total
+    );
     emit_progress(ctx, "done", total, total);
     Ok(())
 }

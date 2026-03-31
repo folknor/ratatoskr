@@ -80,9 +80,7 @@ impl Db {
     ///
     /// Each `OptionItem.id` is encoded as `"account_id:label_id"` so
     /// the palette can split them when building `CommandArgs`.
-    pub fn get_all_labels_cross_account(
-        &self,
-    ) -> Result<Vec<cmdk::OptionItem>, String> {
+    pub fn get_all_labels_cross_account(&self) -> Result<Vec<cmdk::OptionItem>, String> {
         self.with_conn_sync(|conn| {
             let mut stmt = conn
                 .prepare(
@@ -126,10 +124,7 @@ impl Db {
     /// Check whether an account uses folder-based semantics (Exchange/IMAP/JMAP)
     /// as opposed to tag-based (Gmail). Folder-based providers don't support
     /// Add Label / Remove Label — only Move to Folder.
-    pub fn is_folder_based_provider(
-        &self,
-        account_id: &str,
-    ) -> Result<bool, String> {
+    pub fn is_folder_based_provider(&self, account_id: &str) -> Result<bool, String> {
         self.with_conn_sync(|conn| {
             let provider: String = conn
                 .query_row(
@@ -145,10 +140,7 @@ impl Db {
 
 /// Convert a label name to an `OptionItem`, splitting `/`-delimited names
 /// into path segments (Gmail convention).
-fn label_name_to_option_item(
-    id: String,
-    name: &str,
-) -> cmdk::OptionItem {
+fn label_name_to_option_item(id: String, name: &str) -> cmdk::OptionItem {
     let segments: Vec<&str> = name.split('/').collect();
     let (label, path) = if segments.len() > 1 {
         let label = segments.last().unwrap_or(&name).to_string();

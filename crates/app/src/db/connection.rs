@@ -21,8 +21,7 @@ impl Db {
         }
 
         log::info!("Opening database: {}", db_path.display());
-        let conn =
-            Connection::open(&db_path).map_err(|e| format!("open db: {e}"))?;
+        let conn = Connection::open(&db_path).map_err(|e| format!("open db: {e}"))?;
 
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
@@ -35,8 +34,7 @@ impl Db {
         .map_err(|e| format!("pragmas: {e}"))?;
 
         // Writable connection — same DB, no query_only restriction.
-        let write_conn =
-            Connection::open(&db_path).map_err(|e| format!("open write db: {e}"))?;
+        let write_conn = Connection::open(&db_path).map_err(|e| format!("open write db: {e}"))?;
         write_conn
             .execute_batch(
                 "PRAGMA journal_mode = WAL;
@@ -48,8 +46,7 @@ impl Db {
             .map_err(|e| format!("write pragmas: {e}"))?;
 
         // Run pending migrations on the writable connection.
-        rtsk::db::migrations::run_all(&write_conn)
-            .map_err(|e| format!("migrations: {e}"))?;
+        rtsk::db::migrations::run_all(&write_conn).map_err(|e| format!("migrations: {e}"))?;
 
         log::info!("Database opened, migrations applied");
         Ok(Self {
@@ -90,7 +87,10 @@ impl Db {
     where
         F: FnOnce(&Connection) -> Result<T, String>,
     {
-        let conn = self.write_conn.lock().map_err(|e| format!("db write lock: {e}"))?;
+        let conn = self
+            .write_conn
+            .lock()
+            .map_err(|e| format!("db write lock: {e}"))?;
         f(&conn)
     }
 
@@ -101,8 +101,7 @@ impl Db {
     {
         let conn = Arc::clone(&self.conn);
         tokio::task::spawn_blocking(move || {
-            let conn =
-                conn.lock().map_err(|e| format!("db lock poisoned: {e}"))?;
+            let conn = conn.lock().map_err(|e| format!("db lock poisoned: {e}"))?;
             f(&conn)
         })
         .await

@@ -64,10 +64,10 @@ pub async fn db_get_calendars_for_account(
 ) -> Result<Vec<DbCalendar>, String> {
     db.with_conn(move |conn| {
         let mut stmt = conn
-            .prepare(
-                &format!("SELECT {CALENDAR_COLS} FROM calendars WHERE account_id = ?1 \
-                     ORDER BY sort_order ASC, is_primary DESC, display_name ASC"),
-            )
+            .prepare(&format!(
+                "SELECT {CALENDAR_COLS} FROM calendars WHERE account_id = ?1 \
+                     ORDER BY sort_order ASC, is_primary DESC, display_name ASC"
+            ))
             .map_err(|e| e.to_string())?;
         stmt.query_map(params![account_id], DbCalendar::from_row)
             .map_err(|e| e.to_string())?
@@ -83,10 +83,10 @@ pub async fn db_get_visible_calendars(
 ) -> Result<Vec<DbCalendar>, String> {
     db.with_conn(move |conn| {
         let mut stmt = conn
-            .prepare(
-                &format!("SELECT {CALENDAR_COLS} FROM calendars WHERE account_id = ?1 AND is_visible = 1 \
-                     ORDER BY sort_order ASC, is_primary DESC, display_name ASC"),
-            )
+            .prepare(&format!(
+                "SELECT {CALENDAR_COLS} FROM calendars WHERE account_id = ?1 AND is_visible = 1 \
+                     ORDER BY sort_order ASC, is_primary DESC, display_name ASC"
+            ))
             .map_err(|e| e.to_string())?;
         stmt.query_map(params![account_id], DbCalendar::from_row)
             .map_err(|e| e.to_string())?
@@ -196,7 +196,11 @@ pub async fn db_upsert_calendar_event(
     db: &DbState,
     p: UpsertCalendarEventParams,
 ) -> Result<(), String> {
-    log::info!("Upserting calendar event: account_id={}, google_event_id={}", p.account_id, p.google_event_id);
+    log::info!(
+        "Upserting calendar event: account_id={}, google_event_id={}",
+        p.account_id,
+        p.google_event_id
+    );
     db.with_conn(move |conn| {
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
@@ -214,11 +218,33 @@ pub async fn db_upsert_calendar_event(
                    ical_data = ?17, uid = ?18, title = ?19, timezone = ?20, recurrence_rule = ?21,
                    organizer_name = ?22, rsvp_status = ?23, availability = ?24, visibility = ?25,
                    updated_at = unixepoch()",
-            params![id, p.account_id, p.google_event_id, p.summary, p.description, p.location,
-                    p.start_time, p.end_time, p.is_all_day as i64, p.status, p.organizer_email,
-                    p.attendees_json, p.html_link, p.calendar_id, p.remote_event_id, p.etag,
-                    p.ical_data, p.uid, p.title, p.timezone, p.recurrence_rule, p.organizer_name,
-                    p.rsvp_status, p.availability, p.visibility],
+            params![
+                id,
+                p.account_id,
+                p.google_event_id,
+                p.summary,
+                p.description,
+                p.location,
+                p.start_time,
+                p.end_time,
+                p.is_all_day as i64,
+                p.status,
+                p.organizer_email,
+                p.attendees_json,
+                p.html_link,
+                p.calendar_id,
+                p.remote_event_id,
+                p.etag,
+                p.ical_data,
+                p.uid,
+                p.title,
+                p.timezone,
+                p.recurrence_rule,
+                p.organizer_name,
+                p.rsvp_status,
+                p.availability,
+                p.visibility
+            ],
         )
         .map_err(|e| {
             log::error!("Failed to upsert calendar event: {e}");
@@ -238,11 +264,11 @@ pub async fn db_get_calendar_events_in_range(
     log::debug!("Loading calendar events: account_id={account_id}, range={start_time}..{end_time}");
     db.with_conn(move |conn| {
         let mut stmt = conn
-            .prepare(
-                &format!("SELECT {EVENT_COLS} FROM calendar_events \
+            .prepare(&format!(
+                "SELECT {EVENT_COLS} FROM calendar_events \
                      WHERE account_id = ?1 AND start_time < ?3 AND end_time > ?2 \
-                     ORDER BY start_time ASC"),
-            )
+                     ORDER BY start_time ASC"
+            ))
             .map_err(|e| e.to_string())?;
         stmt.query_map(
             params![account_id, start_time, end_time],
@@ -409,11 +435,11 @@ pub async fn db_get_event_attendees(
 ) -> Result<Vec<DbCalendarAttendee>, String> {
     db.with_conn(move |conn| {
         let mut stmt = conn
-            .prepare(
-                &format!("SELECT {ATTENDEE_COLS} FROM calendar_attendees \
+            .prepare(&format!(
+                "SELECT {ATTENDEE_COLS} FROM calendar_attendees \
                  WHERE account_id = ?1 AND event_id = ?2 \
-                 ORDER BY is_organizer DESC, email ASC"),
-            )
+                 ORDER BY is_organizer DESC, email ASC"
+            ))
             .map_err(|e| e.to_string())?;
         stmt.query_map(params![account_id, event_id], DbCalendarAttendee::from_row)
             .map_err(|e| e.to_string())?
@@ -471,11 +497,11 @@ pub async fn db_get_event_reminders(
 ) -> Result<Vec<DbCalendarReminder>, String> {
     db.with_conn(move |conn| {
         let mut stmt = conn
-            .prepare(
-                &format!("SELECT {REMINDER_COLS} FROM calendar_reminders \
+            .prepare(&format!(
+                "SELECT {REMINDER_COLS} FROM calendar_reminders \
                  WHERE account_id = ?1 AND event_id = ?2 \
-                 ORDER BY minutes_before ASC"),
-            )
+                 ORDER BY minutes_before ASC"
+            ))
             .map_err(|e| e.to_string())?;
         stmt.query_map(params![account_id, event_id], DbCalendarReminder::from_row)
             .map_err(|e| e.to_string())?
@@ -699,7 +725,8 @@ pub fn load_calendar_events_for_view_sync(
                 start_time: row.get("start_time")?,
                 end_time: row.get("end_time")?,
                 all_day: row.get::<_, i64>("is_all_day")? != 0,
-                color: row.get::<_, Option<String>>("color")?
+                color: row
+                    .get::<_, Option<String>>("color")?
                     .unwrap_or_else(|| "#3498db".to_string()),
                 calendar_name: row.get("calendar_name")?,
                 location: row.get("location")?,
@@ -815,7 +842,8 @@ fn advance_months(timestamp: i64, months: i64) -> i64 {
         return timestamp + months * 30 * 86400;
     };
     let new_naive = new_date.and_time(naive.time());
-    chrono::Local.from_local_datetime(&new_naive)
+    chrono::Local
+        .from_local_datetime(&new_naive)
         .single()
         .map_or(timestamp + months * 30 * 86400, |dt| dt.timestamp())
 }
@@ -826,7 +854,11 @@ fn days_in_month(year: i32, month: u32) -> u32 {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
         2 => {
-            if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 { 29 } else { 28 }
+            if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 {
+                29
+            } else {
+                28
+            }
         }
         _ => 30,
     }
@@ -845,15 +877,13 @@ fn parse_until_date(val: &str) -> Option<i64> {
 
 // ── All-account calendar queries (for unified calendar) ────
 
-pub async fn db_get_all_visible_calendars(
-    db: &DbState,
-) -> Result<Vec<DbCalendar>, String> {
+pub async fn db_get_all_visible_calendars(db: &DbState) -> Result<Vec<DbCalendar>, String> {
     db.with_conn(move |conn| {
         let mut stmt = conn
-            .prepare(
-                &format!("SELECT {CALENDAR_COLS} FROM calendars WHERE is_visible = 1 \
-                 ORDER BY account_id, is_primary DESC, sort_order, display_name ASC"),
-            )
+            .prepare(&format!(
+                "SELECT {CALENDAR_COLS} FROM calendars WHERE is_visible = 1 \
+                 ORDER BY account_id, is_primary DESC, sort_order, display_name ASC"
+            ))
             .map_err(|e| e.to_string())?;
         stmt.query_map([], DbCalendar::from_row)
             .map_err(|e| e.to_string())?

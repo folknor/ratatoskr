@@ -61,14 +61,28 @@ async fn move_dispatch(
         progress: &NoopProgressReporter,
     };
 
-    let outcome = match provider.move_to_folder(&provider_ctx, thread_id, folder_id).await {
+    let outcome = match provider
+        .move_to_folder(&provider_ctx, thread_id, folder_id)
+        .await
+    {
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             let msg = e.to_string();
-            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
+            ActionOutcome::LocalOnly {
+                reason: ActionError::remote(msg),
+                retryable: true,
+            }
         }
     };
-    enqueue_if_retryable(ctx, &outcome, account_id, "moveToFolder", thread_id, &params_json).await;
+    enqueue_if_retryable(
+        ctx,
+        &outcome,
+        account_id,
+        "moveToFolder",
+        thread_id,
+        &params_json,
+    )
+    .await;
     mlog.emit(&outcome);
     outcome
 }
@@ -95,10 +109,31 @@ pub async fn move_to_folder(
     }
 
     match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(provider) => move_dispatch(ctx, &*provider, account_id, thread_id, folder_id, source_label_id).await,
+        Ok(provider) => {
+            move_dispatch(
+                ctx,
+                &*provider,
+                account_id,
+                thread_id,
+                folder_id,
+                source_label_id,
+            )
+            .await
+        }
         Err(e) => {
-            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
-            enqueue_if_retryable(ctx, &outcome, account_id, "moveToFolder", thread_id, &params_json).await;
+            let outcome = ActionOutcome::LocalOnly {
+                reason: ActionError::remote(e),
+                retryable: true,
+            };
+            enqueue_if_retryable(
+                ctx,
+                &outcome,
+                account_id,
+                "moveToFolder",
+                thread_id,
+                &params_json,
+            )
+            .await;
             mlog.emit(&outcome);
             outcome
         }
@@ -123,5 +158,13 @@ pub(crate) async fn move_to_folder_with_provider(
         return outcome;
     }
 
-    move_dispatch(ctx, provider, account_id, thread_id, folder_id, source_label_id).await
+    move_dispatch(
+        ctx,
+        provider,
+        account_id,
+        thread_id,
+        folder_id,
+        source_label_id,
+    )
+    .await
 }

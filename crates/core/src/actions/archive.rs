@@ -10,14 +10,20 @@ use crate::email_actions::remove_inbox_label;
 use crate::progress::NoopProgressReporter;
 
 /// Local DB mutation for archive. Returns true if state changed.
-pub(crate) async fn archive_local(ctx: &ActionContext, account_id: &str, thread_id: &str) -> Result<bool, ActionError> {
+pub(crate) async fn archive_local(
+    ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<bool, ActionError> {
     let ctx_clone = ctx.clone();
     let aid = account_id.to_string();
     let tid = thread_id.to_string();
     tokio::task::spawn_blocking(move || {
         ctx_clone.verify_thread_exists(&aid, &tid)?;
         let conn = ctx_clone.db.conn();
-        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+        let conn = conn
+            .lock()
+            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         remove_inbox_label(&conn, &aid, &tid)
             .map(|n| n > 0)
             .map_err(ActionError::db)
@@ -48,7 +54,10 @@ async fn archive_dispatch(
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             let msg = e.to_string();
-            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
+            ActionOutcome::LocalOnly {
+                reason: ActionError::remote(msg),
+                retryable: true,
+            }
         }
     };
     enqueue_if_retryable(ctx, &outcome, account_id, "archive", thread_id, "{}").await;
@@ -57,11 +66,7 @@ async fn archive_dispatch(
 }
 
 /// Archive a single thread: remove from inbox locally, then dispatch to provider.
-pub async fn archive(
-    ctx: &ActionContext,
-    account_id: &str,
-    thread_id: &str,
-) -> ActionOutcome {
+pub async fn archive(ctx: &ActionContext, account_id: &str, thread_id: &str) -> ActionOutcome {
     let mlog = MutationLog::begin("archive", account_id, thread_id);
 
     match archive_local(ctx, account_id, thread_id).await {
@@ -77,7 +82,10 @@ pub async fn archive(
     match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(provider) => archive_dispatch(ctx, &*provider, account_id, thread_id).await,
         Err(e) => {
-            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
+            let outcome = ActionOutcome::LocalOnly {
+                reason: ActionError::remote(e),
+                retryable: true,
+            };
             enqueue_if_retryable(ctx, &outcome, account_id, "archive", thread_id, "{}").await;
             mlog.emit(&outcome);
             outcome

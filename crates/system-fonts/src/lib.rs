@@ -166,8 +166,7 @@ mod tests {
 
     #[test]
     fn parse_medium_weight() {
-        let font =
-            parse_font_description("IosevkaTerm Nerd Font Medium 15").expect("should parse");
+        let font = parse_font_description("IosevkaTerm Nerd Font Medium 15").expect("should parse");
         assert_eq!(font.family, "IosevkaTerm Nerd Font");
         assert_eq!(font.size, Some(15.0));
     }

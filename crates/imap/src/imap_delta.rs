@@ -4,13 +4,13 @@ use std::collections::{HashMap, HashSet};
 
 use db::progress::ProgressReporter;
 
-use store::body_store::BodyStoreState;
 use db::db::DbState;
-use store::inline_image_store::InlineImageStoreState;
 use search::SearchState;
+use store::body_store::BodyStoreState;
+use store::inline_image_store::InlineImageStoreState;
 use sync::pipeline;
-use sync::types::{ImapSyncResult, MessageMeta};
 use sync::threading;
+use sync::types::{ImapSyncResult, MessageMeta};
 
 use super::client;
 use super::connection::connect;
@@ -53,7 +53,8 @@ pub async fn imap_delta_sync(
     let all_folders = {
         let mut session = connect(config).await?;
         let folders = client::list_folders(&mut session).await?;
-        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+        let _ =
+            tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         folders
     };
     let syncable_folders = get_syncable_folders(&all_folders);
@@ -241,10 +242,8 @@ pub async fn imap_delta_sync(
     let skipped = {
         let aid = account_id.to_string();
         let t = tids.clone();
-        db.with_conn(move |conn| {
-            sync::pending::get_blocked_thread_ids(conn, &aid, &t)
-        })
-        .await?
+        db.with_conn(move |conn| sync::pending::get_blocked_thread_ids(conn, &aid, &t))
+            .await?
     };
 
     let mut affected = {
@@ -272,15 +271,15 @@ pub async fn imap_delta_sync(
     {
         let aid = account_id.to_string();
         let marker = format!("imap-synced-{}", chrono::Utc::now().timestamp_millis());
-        db.with_conn(move |conn| {
-            sync::state::update_account_sync_state(conn, &aid, &marker)
-        })
-        .await?;
+        db.with_conn(move |conn| sync::state::update_account_sync_state(conn, &aid, &marker))
+            .await?;
     }
 
     log::info!(
         "[IMAP] Delta sync complete for account {account_id}: {} messages stored, {} threads, {} affected",
-        stored, thread_groups.len(), affected.len()
+        stored,
+        thread_groups.len(),
+        affected.len()
     );
 
     Ok(ImapSyncResult {
@@ -306,7 +305,8 @@ async fn batch_delta_check(
     let result = async {
         let mut session = connect(config).await?;
         let results = client::delta_check_folders(&mut session, requests).await;
-        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+        let _ =
+            tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         results
     }
     .await;
@@ -331,24 +331,37 @@ async fn batch_delta_check(
                 // Attempt one reconnect and retry missed folders
                 match connect(config).await {
                     Ok(mut session) => {
-                        match client::delta_check_folders(&mut session, &missing.iter().copied().cloned().collect::<Vec<_>>()).await {
+                        match client::delta_check_folders(
+                            &mut session,
+                            &missing.iter().copied().cloned().collect::<Vec<_>>(),
+                        )
+                        .await
+                        {
                             Ok(retry_results) => {
                                 for r in retry_results {
                                     map.insert(r.folder.clone(), r);
                                 }
                             }
                             Err(e) => {
-                                log::warn!("[sync] Retry batch delta failed, per-folder fallback: {e}");
+                                log::warn!(
+                                    "[sync] Retry batch delta failed, per-folder fallback: {e}"
+                                );
                                 for req in &missing {
                                     if let Some(saved) = state_map.get(&req.folder) {
-                                        if let Ok(r) = per_folder_check(config, &req.folder, saved).await {
+                                        if let Ok(r) =
+                                            per_folder_check(config, &req.folder, saved).await
+                                        {
                                             map.insert(r.folder.clone(), r);
                                         }
                                     }
                                 }
                             }
                         }
-                        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+                        let _ = tokio::time::timeout(
+                            crate::connection::IMAP_LOGOUT_TIMEOUT,
+                            session.logout(),
+                        )
+                        .await;
                     }
                     Err(e) => {
                         log::error!("[sync] Reconnect for missed folders failed: {e}");
@@ -394,7 +407,8 @@ async fn per_folder_check(
     let changed = saved.uidvalidity.is_some() && saved.uidvalidity != Some(status.uidvalidity);
 
     if changed {
-        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+        let _ =
+            tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         return Ok(DeltaCheckResult {
             folder: folder_path.to_string(),
             uidvalidity: status.uidvalidity,
@@ -453,7 +467,8 @@ async fn fetch_folder_uids(
         client::search_folder(&mut session, &folder.raw_path, Some(since_date.to_string())).await?;
 
     if sr.uids.is_empty() {
-        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+        let _ =
+            tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         // Still persist sync state so this folder isn't treated as "new" on every delta cycle
         let aid = account_id.to_string();
         let fp = folder.raw_path.clone();
@@ -638,7 +653,8 @@ async fn process_folder_delta(
                 );
             }
         }
-        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+        let _ =
+            tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
 
         // Persist the server's new (lower) modseq so future syncs use CHANGEDSINCE
         // with the correct baseline.
@@ -673,7 +689,8 @@ async fn process_folder_delta(
         let sr = client::search_folder(&mut session, &folder.raw_path, Some(since_date)).await?;
 
         if sr.uids.is_empty() {
-            let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+            let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout())
+                .await;
             // Persist the new uidvalidity even for empty folders, so we don't
             // repeat the expensive UIDVALIDITY recovery on every sync cycle
             let aid = account_id.to_string();
@@ -714,7 +731,8 @@ async fn process_folder_delta(
         })
         .await?;
 
-        let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+        let _ =
+            tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         return Ok(());
     }
 
@@ -751,7 +769,8 @@ async fn process_folder_delta(
                     }
                 }
                 let _ =
-                    tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
+                    tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout())
+                        .await;
             }
         } else if delta.highest_modseq.is_none() {
             // Non-CONDSTORE fallback: server doesn't support CONDSTORE, so we
@@ -867,9 +886,7 @@ async fn sync_flags_on_session(
     let aid = account_id.to_string();
     let fp = folder_path.to_string();
     let last_sync = db
-        .with_conn(move |conn| {
-            sync_pipeline::get_last_deletion_check_at(conn, &aid, &fp)
-        })
+        .with_conn(move |conn| sync_pipeline::get_last_deletion_check_at(conn, &aid, &fp))
         .await;
 
     // Reuse the deletion check timestamp table for throttling. If we can't
@@ -913,9 +930,7 @@ async fn sync_flags_on_session(
         .collect();
 
     if changes.is_empty() {
-        log::debug!(
-            "[sync] Non-CONDSTORE flag sync for {folder_path}: no changes"
-        );
+        log::debug!("[sync] Non-CONDSTORE flag sync for {folder_path}: no changes");
         return Ok(0);
     }
 
@@ -1103,10 +1118,7 @@ pub async fn run_deletion_detection(
             }
             Ok(_) => {} // No deletions or throttled
             Err(e) => {
-                log::warn!(
-                    "[sync] Deletion detection failed for {}: {e}",
-                    folder.path
-                );
+                log::warn!("[sync] Deletion detection failed for {}: {e}", folder.path);
                 // Connection may be broken — try to reconnect and retry the failed folder
                 if is_connection_error(&e) {
                     log::info!("[sync] Reconnecting for remaining deletion checks...");
@@ -1124,12 +1136,16 @@ pub async fn run_deletion_detection(
                             {
                                 Ok(deleted_ids) if !deleted_ids.is_empty() => {
                                     if let Err(e) = body_store.delete(deleted_ids.clone()).await {
-                                        log::warn!("[sync] Failed to delete bodies for removed messages: {e}");
+                                        log::warn!(
+                                            "[sync] Failed to delete bodies for removed messages: {e}"
+                                        );
                                     }
                                     let id_refs: Vec<&str> =
                                         deleted_ids.iter().map(String::as_str).collect();
                                     if let Err(e) = search.delete_messages_batch(&id_refs).await {
-                                        log::warn!("[sync] Failed to remove deleted messages from search: {e}");
+                                        log::warn!(
+                                            "[sync] Failed to remove deleted messages from search: {e}"
+                                        );
                                     }
                                     let aid = account_id.to_string();
                                     let ids = deleted_ids;
@@ -1157,7 +1173,9 @@ pub async fn run_deletion_detection(
                             }
                         }
                         Err(e2) => {
-                            log::error!("[sync] Reconnect failed, aborting deletion detection: {e2}");
+                            log::error!(
+                                "[sync] Reconnect failed, aborting deletion detection: {e2}"
+                            );
                             break;
                         }
                     }

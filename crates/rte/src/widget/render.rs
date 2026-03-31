@@ -7,8 +7,8 @@
 
 use crate::document::{Block, HeadingLevel, InlineStyle, StyledRun};
 
-use iced::advanced::text::{Paragraph, Span, Text};
 use iced::advanced::renderer;
+use iced::advanced::text::{Paragraph, Span, Text};
 use iced::{Color, Font, Point, Rectangle, Size};
 
 // ── Font size constants ─────────────────────────────────
@@ -150,8 +150,7 @@ pub fn run_to_span<'a>(
     link_color: Color,
 ) -> Span<'a, String, Font> {
     let font = font_for_style(base_font, run.style);
-    let underline =
-        run.style.contains(InlineStyle::UNDERLINE) || run.link.is_some();
+    let underline = run.style.contains(InlineStyle::UNDERLINE) || run.link.is_some();
     let strikethrough = run.style.contains(InlineStyle::STRIKETHROUGH);
 
     let color = if run.link.is_some() {
@@ -240,12 +239,12 @@ fn collect_container_spans(
     }
 
     match block {
-        Block::Paragraph { runs }
-        | Block::Heading { runs, .. }
-        | Block::ListItem { runs, .. } => {
+        Block::Paragraph { runs } | Block::Heading { runs, .. } | Block::ListItem { runs, .. } => {
             let font_size = block_font_size(block);
             for run in runs {
-                spans.push(owned_run_to_span(run, base_font, font_size, text_color, link_color));
+                spans.push(owned_run_to_span(
+                    run, base_font, font_size, text_color, link_color,
+                ));
             }
         }
         Block::BlockQuote { blocks } => {
@@ -421,8 +420,7 @@ impl<P: Paragraph<Font = Font>> ParagraphCache<P> {
     pub fn resize(&mut self, block_count: usize) {
         match self.entries.len().cmp(&block_count) {
             std::cmp::Ordering::Less => {
-                self.entries
-                    .resize_with(block_count, CacheEntry::default);
+                self.entries.resize_with(block_count, CacheEntry::default);
             }
             std::cmp::Ordering::Greater => {
                 self.entries.truncate(block_count);
@@ -557,8 +555,7 @@ fn layout_block<P: Paragraph<Font = Font>>(
     match block {
         Block::Paragraph { .. } | Block::Heading { .. } | Block::ListItem { .. } => {
             let content_width = if let Block::ListItem { indent_level, .. } = block {
-                let indent = LIST_MARKER_WIDTH
-                    + (*indent_level as f32) * LIST_INDENT_PER_LEVEL;
+                let indent = LIST_MARKER_WIDTH + (*indent_level as f32) * LIST_INDENT_PER_LEVEL;
                 (available_width - indent).max(0.0)
             } else {
                 available_width
@@ -566,12 +563,7 @@ fn layout_block<P: Paragraph<Font = Font>>(
             let spans = build_spans_for_block(block, base_font, text_color, link_color);
             let font_size = block_font_size(block);
 
-            let paragraph = build_paragraph::<P>(
-                &spans,
-                content_width,
-                base_font,
-                font_size,
-            );
+            let paragraph = build_paragraph::<P>(&spans, content_width, base_font, font_size);
 
             let height = paragraph.min_bounds().height;
             entry.paragraph = Some(paragraph);
@@ -612,7 +604,9 @@ fn layout_block<P: Paragraph<Font = Font>>(
             entry.child_paragraphs.clear();
             block_height
         }
-        Block::BlockQuote { blocks: bq_children } => {
+        Block::BlockQuote {
+            blocks: bq_children,
+        } => {
             // Lay out each child block as a separate paragraph within a
             // narrower width, storing them as child_paragraphs.
             let inner_width = (available_width - BLOCKQUOTE_INDENT).max(0.0);
@@ -620,19 +614,11 @@ fn layout_block<P: Paragraph<Font = Font>>(
             let mut y = 0.0f32;
 
             for (i, child) in bq_children.iter().enumerate() {
-                let child_spans = build_spans_for_any_block(
-                    child.as_ref(),
-                    base_font,
-                    text_color,
-                    link_color,
-                );
+                let child_spans =
+                    build_spans_for_any_block(child.as_ref(), base_font, text_color, link_color);
                 let child_font_size = block_font_size(child.as_ref());
-                let child_para = build_paragraph::<P>(
-                    &child_spans,
-                    inner_width,
-                    base_font,
-                    child_font_size,
-                );
+                let child_para =
+                    build_paragraph::<P>(&child_spans, inner_width, base_font, child_font_size);
                 let h = child_para.min_bounds().height;
                 children.push(ChildParagraph {
                     paragraph: child_para,

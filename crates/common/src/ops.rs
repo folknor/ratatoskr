@@ -31,7 +31,11 @@ pub trait ProviderOps: Send + Sync {
 
     async fn archive(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError>;
     async fn trash(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError>;
-    async fn permanent_delete(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError>;
+    async fn permanent_delete(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        thread_id: &str,
+    ) -> Result<(), ProviderError>;
     async fn mark_read(
         &self,
         ctx: &ProviderCtx<'_>,
@@ -96,7 +100,11 @@ pub trait ProviderOps: Send + Sync {
         thread_id: Option<&str>,
     ) -> Result<String, ProviderError>;
 
-    async fn delete_draft(&self, ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), ProviderError>;
+    async fn delete_draft(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        draft_id: &str,
+    ) -> Result<(), ProviderError>;
 
     // ── Attachments ─────────────────────────────────────────────
 
@@ -112,7 +120,9 @@ pub trait ProviderOps: Send + Sync {
         _ctx: &ProviderCtx<'_>,
         _message_id: &str,
     ) -> Result<ProviderParsedMessage, ProviderError> {
-        Err(ProviderError::Client("Fetching parsed messages is not supported for this provider.".to_string()))
+        Err(ProviderError::Client(
+            "Fetching parsed messages is not supported for this provider.".to_string(),
+        ))
     }
 
     async fn fetch_raw_message(
@@ -120,13 +130,17 @@ pub trait ProviderOps: Send + Sync {
         _ctx: &ProviderCtx<'_>,
         _message_id: &str,
     ) -> Result<String, ProviderError> {
-        Err(ProviderError::Client("Fetching raw messages is not supported for this provider.".to_string()))
+        Err(ProviderError::Client(
+            "Fetching raw messages is not supported for this provider.".to_string(),
+        ))
     }
 
     // ── Folders ─────────────────────────────────────────────────
 
-    async fn list_folders(&self, ctx: &ProviderCtx<'_>)
-    -> Result<Vec<ProviderFolderEntry>, ProviderError>;
+    async fn list_folders(
+        &self,
+        ctx: &ProviderCtx<'_>,
+    ) -> Result<Vec<ProviderFolderEntry>, ProviderError>;
     async fn create_folder(
         &self,
         ctx: &ProviderCtx<'_>,
@@ -143,10 +157,17 @@ pub trait ProviderOps: Send + Sync {
         text_color: Option<&str>,
         bg_color: Option<&str>,
     ) -> Result<ProviderFolderMutation, ProviderError>;
-    async fn delete_folder(&self, ctx: &ProviderCtx<'_>, folder_id: &FolderId) -> Result<(), ProviderError>;
+    async fn delete_folder(
+        &self,
+        ctx: &ProviderCtx<'_>,
+        folder_id: &FolderId,
+    ) -> Result<(), ProviderError>;
 
     // ── Connection / Profile ────────────────────────────────────
 
-    async fn test_connection(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, ProviderError>;
+    async fn test_connection(
+        &self,
+        ctx: &ProviderCtx<'_>,
+    ) -> Result<ProviderTestResult, ProviderError>;
     async fn get_profile(&self, ctx: &ProviderCtx<'_>) -> Result<ProviderProfile, ProviderError>;
 }

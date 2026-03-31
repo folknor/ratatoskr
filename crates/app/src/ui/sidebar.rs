@@ -1,18 +1,16 @@
 use std::collections::{HashMap, HashSet};
 
-use iced::widget::{button, column, container, mouse_area, row, scrollable, text, Space};
+use iced::widget::{Space, button, column, container, mouse_area, row, scrollable, text};
 use iced::{Alignment, Element, Length, Task};
 
 use crate::component::Component;
 use crate::db::{Account, PinnedPublicFolder, PinnedSearch, SharedMailbox};
 use crate::icon;
-use rtsk::scope::ViewScope;
 use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::widgets::{self, DropdownEntry, DropdownIcon};
-use rtsk::db::queries_extra::navigation::{
-    FolderKind, NavigationFolder, NavigationState,
-};
+use rtsk::db::queries_extra::navigation::{FolderKind, NavigationFolder, NavigationState};
+use rtsk::scope::ViewScope;
 
 // ── Messages & Events ──────────────────────────────────
 
@@ -35,7 +33,10 @@ pub enum SidebarMessage {
     /// Right-click "Search here" on a label/folder.
     SearchHere(String),
     /// Click a smart folder — execute its query via the unified search pipeline.
-    SelectSmartFolder { id: String, query: String },
+    SelectSmartFolder {
+        id: String,
+        query: String,
+    },
     /// Select a shared/delegated mailbox in the scope dropdown.
     /// Carries (account_id, mailbox_id).
     SelectSharedMailbox(String, String),
@@ -57,15 +58,26 @@ pub enum SidebarEvent {
     PinnedSearchRefreshed(i64),
     ModeToggled,
     /// "Search here" — prefill search bar with a scope query prefix.
-    SearchHere { query_prefix: String },
+    SearchHere {
+        query_prefix: String,
+    },
     /// Smart folder selected — execute its query via the unified search pipeline.
-    SmartFolderSelected { id: String, query: String },
+    SmartFolderSelected {
+        id: String,
+        query: String,
+    },
     /// Shared mailbox selected in scope dropdown.
     /// Carries (account_id, mailbox_id).
-    SharedMailboxSelected { account_id: String, mailbox_id: String },
+    SharedMailboxSelected {
+        account_id: String,
+        mailbox_id: String,
+    },
     /// Pinned public folder selected.
     /// Carries (account_id, folder_id).
-    PublicFolderSelected { account_id: String, folder_id: String },
+    PublicFolderSelected {
+        account_id: String,
+        folder_id: String,
+    },
 }
 
 // ── Sidebar layout constants ─────────────────────────────
@@ -133,10 +145,7 @@ impl Component for Sidebar {
     type Message = SidebarMessage;
     type Event = SidebarEvent;
 
-    fn update(
-        &mut self,
-        message: SidebarMessage,
-    ) -> (Task<SidebarMessage>, Option<SidebarEvent>) {
+    fn update(&mut self, message: SidebarMessage) -> (Task<SidebarMessage>, Option<SidebarEvent>) {
         match message {
             SidebarMessage::SelectAccount(idx) => {
                 let account_id = self
@@ -193,12 +202,8 @@ impl Component for Sidebar {
                 }
                 (Task::none(), None)
             }
-            SidebarMessage::Compose => {
-                (Task::none(), Some(SidebarEvent::Compose))
-            }
-            SidebarMessage::ToggleSettings => {
-                (Task::none(), Some(SidebarEvent::ToggleSettings))
-            }
+            SidebarMessage::Compose => (Task::none(), Some(SidebarEvent::Compose)),
+            SidebarMessage::ToggleSettings => (Task::none(), Some(SidebarEvent::ToggleSettings)),
             SidebarMessage::SelectPinnedSearch(id) => {
                 (Task::none(), Some(SidebarEvent::PinnedSearchSelected(id)))
             }
@@ -208,15 +213,17 @@ impl Component for Sidebar {
             SidebarMessage::RefreshPinnedSearch(id) => {
                 (Task::none(), Some(SidebarEvent::PinnedSearchRefreshed(id)))
             }
-            SidebarMessage::ToggleMode => {
-                (Task::none(), Some(SidebarEvent::ModeToggled))
-            }
-            SidebarMessage::SearchHere(query_prefix) => {
-                (Task::none(), Some(SidebarEvent::SearchHere { query_prefix }))
-            }
+            SidebarMessage::ToggleMode => (Task::none(), Some(SidebarEvent::ModeToggled)),
+            SidebarMessage::SearchHere(query_prefix) => (
+                Task::none(),
+                Some(SidebarEvent::SearchHere { query_prefix }),
+            ),
             SidebarMessage::SelectSmartFolder { id, query } => {
                 self.selected_label = Some(id.clone());
-                (Task::none(), Some(SidebarEvent::SmartFolderSelected { id, query }))
+                (
+                    Task::none(),
+                    Some(SidebarEvent::SmartFolderSelected { id, query }),
+                )
             }
             SidebarMessage::SelectSharedMailbox(account_id, mailbox_id) => {
                 self.selected_scope = ViewScope::SharedMailbox {
@@ -225,10 +232,13 @@ impl Component for Sidebar {
                 };
                 self.selected_label = None;
                 self.scope_dropdown_open = false;
-                (Task::none(), Some(SidebarEvent::SharedMailboxSelected {
-                    account_id,
-                    mailbox_id,
-                }))
+                (
+                    Task::none(),
+                    Some(SidebarEvent::SharedMailboxSelected {
+                        account_id,
+                        mailbox_id,
+                    }),
+                )
             }
             SidebarMessage::SelectPublicFolder(account_id, folder_id) => {
                 self.selected_scope = ViewScope::PublicFolder {
@@ -237,10 +247,13 @@ impl Component for Sidebar {
                 };
                 self.selected_label = None;
                 self.scope_dropdown_open = false;
-                (Task::none(), Some(SidebarEvent::PublicFolderSelected {
-                    account_id,
-                    folder_id,
-                }))
+                (
+                    Task::none(),
+                    Some(SidebarEvent::PublicFolderSelected {
+                        account_id,
+                        folder_id,
+                    }),
+                )
             }
         }
     }
@@ -290,12 +303,9 @@ impl Component for Sidebar {
         .height(SIDEBAR_HEADER_HEIGHT)
         .width(Length::Fill);
 
-        let mut col = column![
-            header_row,
-            Space::new().height(SPACE_XXS),
-        ]
-        .spacing(0)
-        .width(Length::Fill);
+        let mut col = column![header_row, Space::new().height(SPACE_XXS),]
+            .spacing(0)
+            .width(Length::Fill);
 
         // Pinned searches (only if non-empty)
         if !self.pinned_searches.is_empty() {
@@ -314,7 +324,9 @@ impl Component for Sidebar {
 
         // Tags section (section 4) — always visible, all accounts
         let has_tags = self.nav_state.as_ref().is_some_and(|ns| {
-            ns.folders.iter().any(|f| matches!(f.folder_kind, FolderKind::AccountTag))
+            ns.folders
+                .iter()
+                .any(|f| matches!(f.folder_kind, FolderKind::AccountTag))
         });
         if has_tags {
             col = col.push(widgets::section_break::<SidebarMessage>());
@@ -329,7 +341,9 @@ impl Component for Sidebar {
 
         container(
             column![
-                scrollable(col).spacing(SCROLLBAR_SPACING).height(Length::Fill),
+                scrollable(col)
+                    .spacing(SCROLLBAR_SPACING)
+                    .height(Length::Fill),
                 widgets::settings_button(SidebarMessage::ToggleSettings),
             ]
             .spacing(SPACE_XS),
@@ -345,45 +359,44 @@ impl Component for Sidebar {
 // ── Scope dropdown ──────────────────────────────────────
 
 fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
-    let (trigger_icon, trigger_label): (DropdownIcon<'_>, &str) =
-        match &sidebar.selected_scope {
-            ViewScope::Account(id) => {
-                let acc = sidebar.accounts.iter().find(|a| a.id == *id);
-                if let Some(acc) = acc {
-                    let name = acc.account_name.as_deref()
-                        .or(acc.display_name.as_deref())
-                        .unwrap_or(&acc.email);
-                    let icon = match acc.account_color.as_deref() {
-                        Some(hex) => DropdownIcon::ColorDot(theme::hex_to_color(hex)),
-                        None => DropdownIcon::Avatar(name),
-                    };
-                    (icon, name)
-                } else {
-                    (DropdownIcon::Icon(icon::INBOX_CODEPOINT), "All Accounts")
-                }
-            }
-            ViewScope::SharedMailbox { mailbox_id, .. } => {
-                let name = sidebar
-                    .shared_mailboxes
-                    .iter()
-                    .find(|sm| sm.mailbox_id == *mailbox_id)
-                    .and_then(|sm| sm.display_name.as_deref())
-                    .unwrap_or(mailbox_id.as_str());
-                (DropdownIcon::Icon('\u{e1a4}'), name)
-            }
-            ViewScope::PublicFolder { folder_id, .. } => {
-                let name = sidebar
-                    .pinned_public_folders
-                    .iter()
-                    .find(|pf| pf.folder_id == *folder_id)
-                    .map(|pf| pf.display_name.as_str())
-                    .unwrap_or(folder_id.as_str());
-                (DropdownIcon::Icon('\u{e0d7}'), name)
-            }
-            ViewScope::AllAccounts => {
+    let (trigger_icon, trigger_label): (DropdownIcon<'_>, &str) = match &sidebar.selected_scope {
+        ViewScope::Account(id) => {
+            let acc = sidebar.accounts.iter().find(|a| a.id == *id);
+            if let Some(acc) = acc {
+                let name = acc
+                    .account_name
+                    .as_deref()
+                    .or(acc.display_name.as_deref())
+                    .unwrap_or(&acc.email);
+                let icon = match acc.account_color.as_deref() {
+                    Some(hex) => DropdownIcon::ColorDot(theme::hex_to_color(hex)),
+                    None => DropdownIcon::Avatar(name),
+                };
+                (icon, name)
+            } else {
                 (DropdownIcon::Icon(icon::INBOX_CODEPOINT), "All Accounts")
             }
-        };
+        }
+        ViewScope::SharedMailbox { mailbox_id, .. } => {
+            let name = sidebar
+                .shared_mailboxes
+                .iter()
+                .find(|sm| sm.mailbox_id == *mailbox_id)
+                .and_then(|sm| sm.display_name.as_deref())
+                .unwrap_or(mailbox_id.as_str());
+            (DropdownIcon::Icon('\u{e1a4}'), name)
+        }
+        ViewScope::PublicFolder { folder_id, .. } => {
+            let name = sidebar
+                .pinned_public_folders
+                .iter()
+                .find(|pf| pf.folder_id == *folder_id)
+                .map(|pf| pf.display_name.as_str())
+                .unwrap_or(folder_id.as_str());
+            (DropdownIcon::Icon('\u{e0d7}'), name)
+        }
+        ViewScope::AllAccounts => (DropdownIcon::Icon(icon::INBOX_CODEPOINT), "All Accounts"),
+    };
 
     let mut entries: Vec<DropdownEntry<'_, SidebarMessage>> = Vec::new();
 
@@ -395,7 +408,9 @@ fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
     });
 
     for (idx, acc) in sidebar.accounts.iter().enumerate() {
-        let name = acc.account_name.as_deref()
+        let name = acc
+            .account_name
+            .as_deref()
             .or(acc.display_name.as_deref())
             .unwrap_or(&acc.email);
         let icon = match acc.account_color.as_deref() {
@@ -412,10 +427,7 @@ fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
 
     // Shared/delegated mailboxes
     for sm in &sidebar.shared_mailboxes {
-        let name = sm
-            .display_name
-            .as_deref()
-            .unwrap_or(&sm.mailbox_id);
+        let name = sm.display_name.as_deref().unwrap_or(&sm.mailbox_id);
         let selected = matches!(
             &sidebar.selected_scope,
             ViewScope::SharedMailbox { account_id, mailbox_id }
@@ -483,10 +495,8 @@ fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
             on_press,
         );
         let query_prefix = build_search_here_folder_prefix(&f.name, sidebar);
-        col = col.push(
-            mouse_area(nav_btn)
-                .on_right_press(SidebarMessage::SearchHere(query_prefix)),
-        );
+        col =
+            col.push(mouse_area(nav_btn).on_right_press(SidebarMessage::SearchHere(query_prefix)));
     }
     col.into()
 }
@@ -559,9 +569,7 @@ fn labels(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
 
 // ── Pinned public folders ────────────────────────────────
 
-fn pinned_public_folders_section(
-    sidebar: &Sidebar,
-) -> Element<'_, SidebarMessage> {
+fn pinned_public_folders_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
     let items: Vec<Element<'_, SidebarMessage>> = sidebar
         .pinned_public_folders
         .iter()
@@ -613,9 +621,7 @@ fn pinned_public_folders_section(
         })
         .collect();
 
-    let header = text("PUBLIC FOLDERS")
-        .size(TEXT_XS)
-        .style(text::secondary);
+    let header = text("PUBLIC FOLDERS").size(TEXT_XS).style(text::secondary);
 
     let mut col = column![header].spacing(SPACE_XXXS);
     for item in items {
@@ -649,10 +655,7 @@ fn is_results_stale(updated_at: i64) -> bool {
     delta.num_hours() >= 1
 }
 
-fn pinned_search_card(
-    ps: &PinnedSearch,
-    active: bool,
-) -> Element<'_, SidebarMessage> {
+fn pinned_search_card(ps: &PinnedSearch, active: bool) -> Element<'_, SidebarMessage> {
     use iced::widget::text::Wrapping;
 
     let date_label = format_relative_time(ps.updated_at);
@@ -660,22 +663,17 @@ fn pinned_search_card(
     let stale = is_results_stale(ps.updated_at);
 
     // Spec 1E.4: query is primary text, date is secondary
-    let query_style: fn(&iced::Theme) -> text::Style = if active {
-        text::primary
-    } else {
-        text::base
-    };
+    let query_style: fn(&iced::Theme) -> text::Style =
+        if active { text::primary } else { text::base };
     let date_style: fn(&iced::Theme) -> text::Style = if active {
         text::secondary
     } else {
         theme::TextClass::Muted.style()
     };
 
-    let mut meta_row = row![
-        text(date_label).size(TEXT_SM).style(date_style),
-    ]
-    .spacing(SPACE_XXS)
-    .align_y(Alignment::Center);
+    let mut meta_row = row![text(date_label).size(TEXT_SM).style(date_style),]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center);
 
     // Staleness indicator: show when results are > 1 hour old
     if stale {
@@ -700,7 +698,9 @@ fn pinned_search_card(
 
     let dismiss_btn = button(
         container(
-            icon::x().size(ICON_XS).style(theme::TextClass::Muted.style()),
+            icon::x()
+                .size(ICON_XS)
+                .style(theme::TextClass::Muted.style()),
         )
         .center(Length::Shrink),
     )
@@ -731,14 +731,12 @@ fn pinned_search_card(
         .spacing(SPACE_XXS)
         .align_y(Alignment::Start);
 
-    button(
-        container(content).padding(PAD_NAV_ITEM),
-    )
-    .on_press(SidebarMessage::SelectPinnedSearch(ps.id))
-    .padding(0)
-    .style(theme::ButtonClass::PinnedSearch { active }.style())
-    .width(Length::Fill)
-    .into()
+    button(container(content).padding(PAD_NAV_ITEM))
+        .on_press(SidebarMessage::SelectPinnedSearch(ps.id))
+        .padding(0)
+        .style(theme::ButtonClass::PinnedSearch { active }.style())
+        .width(Length::Fill)
+        .into()
 }
 
 /// Formats a unix timestamp as a relative time string (e.g. "5 min ago", "2 hours ago").
@@ -859,9 +857,7 @@ fn is_hidden_by_collapsed_ancestor(
             break;
         }
         depth += 1;
-        current_parent = id_to_folder
-            .get(pid)
-            .and_then(|f| f.parent_id.as_deref());
+        current_parent = id_to_folder.get(pid).and_then(|f| f.parent_id.as_deref());
     }
     false
 }
@@ -880,8 +876,7 @@ fn render_label_tree<'a>(
 
     for node in &tree {
         // Skip if any ancestor is collapsed
-        if is_hidden_by_collapsed_ancestor(node.folder, &id_to_folder, &sidebar.collapsed_folders)
-        {
+        if is_hidden_by_collapsed_ancestor(node.folder, &id_to_folder, &sidebar.collapsed_folders) {
             continue;
         }
 
@@ -912,9 +907,7 @@ fn render_label_tree<'a>(
                         .size(ICON_XS)
                         .style(theme::TextClass::Tertiary.style()),
                 )
-                .on_press(SidebarMessage::ToggleFolderExpand(
-                    node.folder.id.clone(),
-                ))
+                .on_press(SidebarMessage::ToggleFolderExpand(node.folder.id.clone()))
                 .padding(SPACE_XXXS)
                 .style(theme::ButtonClass::Ghost.style()),
             );
@@ -942,9 +935,7 @@ fn render_label_tree<'a>(
                 .padding(PAD_NAV_ITEM)
                 .width(Length::Fill),
         )
-        .on_press(SidebarMessage::SelectLabel(Some(
-            node.folder.id.clone(),
-        )))
+        .on_press(SidebarMessage::SelectLabel(Some(node.folder.id.clone())))
         .padding(0)
         .style(theme::ButtonClass::Nav { active }.style())
         .width(Length::Fill)
@@ -1005,10 +996,7 @@ fn build_search_here_prefix(name: &str, sidebar: &Sidebar) -> String {
 }
 
 /// Build a scope query prefix for universal folders (Inbox, Sent, etc.).
-fn build_search_here_folder_prefix(
-    folder_name: &str,
-    sidebar: &Sidebar,
-) -> String {
+fn build_search_here_folder_prefix(folder_name: &str, sidebar: &Sidebar) -> String {
     if let Some(idx) = sidebar.selected_account_index() {
         let account_name = sidebar
             .accounts

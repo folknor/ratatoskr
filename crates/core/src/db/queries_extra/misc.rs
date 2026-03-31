@@ -29,9 +29,9 @@ pub async fn db_get_snoozed_threads_due(
             )
             .map_err(|e| e.to_string())?;
         stmt.query_map(params![now], SnoozedThread::from_row)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     })
     .await
 }
@@ -133,8 +133,10 @@ pub async fn db_get_imap_uids_for_messages(
         for id in &message_ids {
             param_values.push(Box::new(id.clone()));
         }
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-            param_values.iter().map(std::convert::AsRef::as_ref).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = param_values
+            .iter()
+            .map(std::convert::AsRef::as_ref)
+            .collect();
         let rows = stmt
             .query_map(param_refs.as_slice(), ImapMessageRow::from_row)
             .map_err(|e| e.to_string())?;
@@ -201,8 +203,10 @@ pub async fn db_update_message_imap_folder(
         for id in &message_ids {
             param_values.push(Box::new(id.clone()));
         }
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-            param_values.iter().map(std::convert::AsRef::as_ref).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = param_values
+            .iter()
+            .map(std::convert::AsRef::as_ref)
+            .collect();
         conn.execute(&sql, param_refs.as_slice())
             .map_err(|e| e.to_string())?;
         Ok(())
@@ -318,7 +322,10 @@ pub async fn db_get_inbox_threads_for_backfill(
                  LIMIT ?2 OFFSET ?3"
         );
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        stmt.query_map(params![account_id, batch_size, offset], BackfillRow::from_row)
+        stmt.query_map(
+            params![account_id, batch_size, offset],
+            BackfillRow::from_row,
+        )
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
@@ -384,8 +391,10 @@ pub async fn db_query_raw_select(
                 }
             })
             .collect();
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-            param_values.iter().map(std::convert::AsRef::as_ref).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = param_values
+            .iter()
+            .map(std::convert::AsRef::as_ref)
+            .collect();
 
         let rows = stmt
             .query_map(param_refs.as_slice(), |row| {
@@ -443,4 +452,3 @@ fn base64_encode(data: &[u8]) -> String {
     }
     s
 }
-

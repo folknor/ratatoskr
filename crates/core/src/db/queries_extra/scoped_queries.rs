@@ -162,10 +162,7 @@ pub fn get_thread_count_scoped(
 }
 
 /// Like `get_unread_count` but accepts an `AccountScope`.
-pub fn get_unread_count_scoped(
-    conn: &Connection,
-    scope: &AccountScope,
-) -> Result<i64, String> {
+pub fn get_unread_count_scoped(conn: &Connection, scope: &AccountScope) -> Result<i64, String> {
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
 
     let sql = format!(
@@ -454,10 +451,7 @@ fn flag_column(folder_id: &str) -> &'static str {
 /// This is the correct count for the sidebar's "Drafts" folder, per the
 /// documented requirement that draft counts include local-only drafts
 /// (docs/sidebar/problem-statement.md).
-pub fn get_draft_count_with_local(
-    conn: &Connection,
-    scope: &AccountScope,
-) -> Result<i64, String> {
+pub fn get_draft_count_with_local(conn: &Connection, scope: &AccountScope) -> Result<i64, String> {
     // Count server-synced drafts (threads with DRAFT label)
     let synced = get_thread_count_scoped(conn, scope, Some("DRAFT"))?;
 
@@ -646,10 +640,7 @@ pub fn get_threads_for_shared_mailbox(
 }
 
 /// Count local drafts that don't yet have a server-synced thread.
-fn count_local_drafts(
-    conn: &Connection,
-    scope: &AccountScope,
-) -> Result<i64, String> {
+fn count_local_drafts(conn: &Connection, scope: &AccountScope) -> Result<i64, String> {
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
     // Rewrite "t.account_id" references to just "account_id" for local_drafts table
     let clause = scope_clause.replace("t.account_id", "account_id");

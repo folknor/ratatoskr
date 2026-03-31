@@ -1,11 +1,11 @@
 pub mod add_account;
 pub mod animated_toggler;
 pub mod calendar;
-pub mod chat_timeline;
-pub mod html_render;
 pub mod calendar_month;
 pub mod calendar_time_grid;
+pub mod chat_timeline;
 pub mod emoji_picker;
+pub mod html_render;
 pub mod layout;
 pub mod palette;
 pub mod popover;

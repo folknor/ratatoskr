@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use log::{info, warn};
-use rusqlite::params;
 use rusqlite::OptionalExtension;
+use rusqlite::params;
 
 use crate::db::DbState;
 use store::attachment_cache::hash_bytes;
@@ -30,7 +30,9 @@ const PHOTO_CACHE_DIR: &str = "contact_photos";
 
 /// Build the on-disk path for a cached photo.
 fn photo_file_path(cache_dir: &Path, content_hash: &str) -> PathBuf {
-    cache_dir.join(PHOTO_CACHE_DIR).join(format!("{content_hash}.jpg"))
+    cache_dir
+        .join(PHOTO_CACHE_DIR)
+        .join(format!("{content_hash}.jpg"))
 }
 
 // ---------------------------------------------------------------------------
@@ -299,7 +301,13 @@ pub async fn evict_photos_to_size(
                      ORDER BY last_accessed_at ASC \
                      LIMIT 1",
                     [],
-                    |row| Ok((row.get("email")?, row.get("account_id")?, row.get("file_path")?)),
+                    |row| {
+                        Ok((
+                            row.get("email")?,
+                            row.get("account_id")?,
+                            row.get("file_path")?,
+                        ))
+                    },
                 )
                 .optional()
                 .map_err(|e| format!("query oldest contact photo: {e}"))
@@ -404,7 +412,10 @@ async fn sync_graph_photos(
 
             let rows = stmt
                 .query_map(params![account_id_owned], |row| {
-                    Ok((row.get::<_, String>("email")?, row.get::<_, String>("graph_contact_id")?))
+                    Ok((
+                        row.get::<_, String>("email")?,
+                        row.get::<_, String>("graph_contact_id")?,
+                    ))
                 })
                 .map_err(|e| format!("query graph contacts for photos: {e}"))?
                 .collect::<Result<Vec<_>, _>>()
@@ -474,7 +485,10 @@ async fn sync_google_photos(
 
             let rows = stmt
                 .query_map(params![account_id_owned], |row| {
-                    Ok((row.get::<_, String>("email")?, row.get::<_, String>("avatar_url")?))
+                    Ok((
+                        row.get::<_, String>("email")?,
+                        row.get::<_, String>("avatar_url")?,
+                    ))
                 })
                 .map_err(|e| format!("query google contacts for photos: {e}"))?
                 .collect::<Result<Vec<_>, _>>()
@@ -564,9 +578,10 @@ mod tests {
         let p1 = photo_file_path(cache_dir, &hash);
         let p2 = photo_file_path(cache_dir, &hash);
         assert_eq!(p1, p2);
-        assert!(p1
-            .to_str()
-            .is_some_and(|s| s.starts_with("/home/user/.cache/ratatoskr/contact_photos/")));
+        assert!(
+            p1.to_str()
+                .is_some_and(|s| s.starts_with("/home/user/.cache/ratatoskr/contact_photos/"))
+        );
         assert!(p1.extension().is_some_and(|e| e == "jpg"));
     }
 
@@ -595,7 +610,10 @@ mod tests {
         // correct by checking that timestamps can be compared as integers.
         let older: i64 = 1700000000;
         let newer: i64 = 1700001000;
-        assert!(older < newer, "older timestamps should sort first in ASC order");
+        assert!(
+            older < newer,
+            "older timestamps should sort first in ASC order"
+        );
     }
 
     #[test]

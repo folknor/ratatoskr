@@ -23,9 +23,8 @@ impl App {
                 self.add_account_wizard = None;
                 self.status_bar.clear_warning(&account_id);
                 let email = self.email_for_account(&account_id);
-                self.status_bar.show_confirmation(format!(
-                    "{email} re-authenticated successfully"
-                ));
+                self.status_bar
+                    .show_confirmation(format!("{email} re-authenticated successfully"));
                 Task::none()
             }
             AddAccountEvent::Cancelled => {
@@ -39,25 +38,23 @@ impl App {
 
     pub(crate) fn handle_open_add_account_wizard(&mut self) -> Task<Message> {
         self.dismiss_overlays();
-        let used_colors = self.sidebar.accounts.iter()
+        let used_colors = self
+            .sidebar
+            .accounts
+            .iter()
             .filter_map(|a| a.account_color.clone())
             .collect();
-        self.add_account_wizard =
-            Some(AddAccountWizard::new_add_account(used_colors, Arc::clone(&self.db)));
+        self.add_account_wizard = Some(AddAccountWizard::new_add_account(
+            used_colors,
+            Arc::clone(&self.db),
+        ));
         Task::none()
     }
 
     /// Open a re-auth wizard for an existing account.
-    pub(crate) fn handle_open_reauth_wizard(
-        &mut self,
-        account_id: String,
-    ) -> Task<Message> {
+    pub(crate) fn handle_open_reauth_wizard(&mut self, account_id: String) -> Task<Message> {
         let email = self.email_for_account(&account_id);
-        match AddAccountWizard::new_reauth(
-            account_id,
-            email.clone(),
-            Arc::clone(&self.db),
-        ) {
+        match AddAccountWizard::new_reauth(account_id, email.clone(), Arc::clone(&self.db)) {
             Ok((wizard, task)) => {
                 self.dismiss_overlays();
                 self.add_account_wizard = Some(wizard);
@@ -65,9 +62,8 @@ impl App {
             }
             Err(e) => {
                 log::error!("Failed to open re-auth wizard for {email}: {e}");
-                self.status_bar.show_confirmation(format!(
-                    "Could not re-authenticate {email}: {e}"
-                ));
+                self.status_bar
+                    .show_confirmation(format!("Could not re-authenticate {email}: {e}"));
                 Task::none()
             }
         }

@@ -3,9 +3,9 @@ use std::collections::HashSet;
 use rusqlite::Transaction;
 
 use db::db::lookups;
+use search::{SearchDocument, SearchState};
 use store::body_store::{BodyStoreState, MessageBody};
 use store::inline_image_store::{InlineImage, InlineImageStoreState};
-use search::{SearchDocument, SearchState};
 
 pub struct ThreadAggregate {
     pub subject: Option<String>,
@@ -216,7 +216,10 @@ pub fn upsert_thread_participants(
         }
     }
 
-    for field in [to_addresses, cc_addresses, bcc_addresses].into_iter().flatten() {
+    for field in [to_addresses, cc_addresses, bcc_addresses]
+        .into_iter()
+        .flatten()
+    {
         let parsed = seen::parse::parse_address_list(field);
         for (_, email) in parsed {
             emails.insert(email.to_lowercase());
@@ -492,24 +495,33 @@ pub fn delete_messages_and_cleanup_threads(
                      FROM messages WHERE account_id = ?1 AND thread_id = ?2",
                 )
                 .map_err(|e| format!("prepare addr: {e}"))?;
-            let rows: Vec<(Option<String>, Option<String>, Option<String>, Option<String>)> =
-                addr_stmt
-                    .query_map(rusqlite::params![account_id, tid], |row| {
-                        Ok((
-                            row.get::<_, Option<String>>(0)?,
-                            row.get::<_, Option<String>>(1)?,
-                            row.get::<_, Option<String>>(2)?,
-                            row.get::<_, Option<String>>(3)?,
-                        ))
-                    })
-                    .map_err(|e| format!("query addr: {e}"))?
-                    .filter_map(Result::ok)
-                    .collect();
+            let rows: Vec<(
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            )> = addr_stmt
+                .query_map(rusqlite::params![account_id, tid], |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                })
+                .map_err(|e| format!("query addr: {e}"))?
+                .filter_map(Result::ok)
+                .collect();
             drop(addr_stmt);
             for (from, to, cc, bcc) in &rows {
                 upsert_thread_participants(
-                    tx, account_id, tid,
-                    from.as_deref(), to.as_deref(), cc.as_deref(), bcc.as_deref(),
+                    tx,
+                    account_id,
+                    tid,
+                    from.as_deref(),
+                    to.as_deref(),
+                    cc.as_deref(),
+                    bcc.as_deref(),
                 )?;
             }
             // Re-evaluate chat state after participant change
@@ -572,7 +584,11 @@ pub async fn store_message_bodies<T, FId, FHtml, FText>(
         return;
     }
 
-    log::debug!("Storing {} message bodies for {}", bodies.len(), provider_name);
+    log::debug!(
+        "Storing {} message bodies for {}",
+        bodies.len(),
+        provider_name
+    );
     if let Err(error) = body_store.put_batch(bodies).await {
         log::warn!("Failed to store {provider_name} bodies: {error}");
     }
@@ -598,7 +614,11 @@ pub async fn index_search_documents(
     documents: Vec<SearchDocument>,
     provider_name: &str,
 ) {
-    log::debug!("Indexing {} search documents for {}", documents.len(), provider_name);
+    log::debug!(
+        "Indexing {} search documents for {}",
+        documents.len(),
+        provider_name
+    );
     if let Err(error) = search.index_messages_batch(&documents).await {
         log::warn!("Failed to index {provider_name} messages: {error}");
     }

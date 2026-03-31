@@ -1,11 +1,11 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use jmap_client::Set;
 use jmap_client::core::set::SetObject;
 use jmap_client::email::EmailSet;
 use jmap_client::email::import::EmailImportRequest;
 use jmap_client::email_submission::{Address as SubmissionAddress, EmailSubmissionSet, UndoStatus};
 use jmap_client::mailbox::Role;
-use jmap_client::Set;
 
 use common::error::ProviderError;
 use common::ops::ProviderOps;
@@ -115,9 +115,8 @@ impl ProviderOps for JmapOps {
     async fn archive(&self, _ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let mailboxes = get_mailbox_list(&self.client).await?;
-        let inbox_id =
-            find_mailbox_id_by_role(&mailboxes, "inbox")
-                .ok_or_else(|| ProviderError::NotFound("No inbox mailbox found".to_string()))?;
+        let inbox_id = find_mailbox_id_by_role(&mailboxes, "inbox")
+            .ok_or_else(|| ProviderError::NotFound("No inbox mailbox found".to_string()))?;
         let archive_id = find_mailbox_id_by_role(&mailboxes, "archive");
 
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
@@ -148,9 +147,8 @@ impl ProviderOps for JmapOps {
     async fn trash(&self, _ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let mailboxes = get_mailbox_list(&self.client).await?;
-        let trash_id =
-            find_mailbox_id_by_role(&mailboxes, "trash")
-                .ok_or_else(|| ProviderError::NotFound("No trash mailbox found".to_string()))?;
+        let trash_id = find_mailbox_id_by_role(&mailboxes, "trash")
+            .ok_or_else(|| ProviderError::NotFound("No trash mailbox found".to_string()))?;
         let inbox_id = find_mailbox_id_by_role(&mailboxes, "inbox");
 
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
@@ -267,12 +265,10 @@ impl ProviderOps for JmapOps {
     ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let mailboxes = get_mailbox_list(&self.client).await?;
-        let junk_id =
-            find_mailbox_id_by_role(&mailboxes, "junk")
-                .ok_or_else(|| ProviderError::NotFound("No junk/spam mailbox found".to_string()))?;
-        let inbox_id =
-            find_mailbox_id_by_role(&mailboxes, "inbox")
-                .ok_or_else(|| ProviderError::NotFound("No inbox mailbox found".to_string()))?;
+        let junk_id = find_mailbox_id_by_role(&mailboxes, "junk")
+            .ok_or_else(|| ProviderError::NotFound("No junk/spam mailbox found".to_string()))?;
+        let inbox_id = find_mailbox_id_by_role(&mailboxes, "inbox")
+            .ok_or_else(|| ProviderError::NotFound("No inbox mailbox found".to_string()))?;
 
         let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
         let client = self.client.inner();
@@ -528,9 +524,8 @@ impl ProviderOps for JmapOps {
         let raw_bytes = common::encoding::decode_base64url_nopad(raw_base64url)?;
 
         let mailboxes = get_mailbox_list(&self.client).await?;
-        let drafts_id =
-            find_mailbox_id_by_role(&mailboxes, "drafts")
-                .ok_or_else(|| ProviderError::NotFound("No drafts mailbox found".to_string()))?;
+        let drafts_id = find_mailbox_id_by_role(&mailboxes, "drafts")
+            .ok_or_else(|| ProviderError::NotFound("No drafts mailbox found".to_string()))?;
 
         let client = self.client.inner();
         let mut email = client
@@ -563,7 +558,11 @@ impl ProviderOps for JmapOps {
         self.create_draft(_ctx, raw_base64url, _thread_id).await
     }
 
-    async fn delete_draft(&self, _ctx: &ProviderCtx<'_>, draft_id: &str) -> Result<(), ProviderError> {
+    async fn delete_draft(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        draft_id: &str,
+    ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let client = self.client.inner();
         client
@@ -685,7 +684,11 @@ impl ProviderOps for JmapOps {
         })
     }
 
-    async fn delete_folder(&self, _ctx: &ProviderCtx<'_>, folder_id: &FolderId) -> Result<(), ProviderError> {
+    async fn delete_folder(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+        folder_id: &FolderId,
+    ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let mailbox_id = resolve_mailbox_id(&self.client, folder_id.as_str()).await?;
         let client = self.client.inner();
@@ -697,7 +700,10 @@ impl ProviderOps for JmapOps {
         Ok(())
     }
 
-    async fn test_connection(&self, _ctx: &ProviderCtx<'_>) -> Result<ProviderTestResult, ProviderError> {
+    async fn test_connection(
+        &self,
+        _ctx: &ProviderCtx<'_>,
+    ) -> Result<ProviderTestResult, ProviderError> {
         self.client.ensure_valid_token().await?;
         let session = self.client.inner().session();
         Ok(ProviderTestResult {
@@ -731,7 +737,8 @@ impl JmapOps {
         mailbox_id: &str,
         jmap_account_id: Option<&str>,
     ) -> Result<(), String> {
-        self.set_mailbox_subscription(mailbox_id, jmap_account_id, true).await
+        self.set_mailbox_subscription(mailbox_id, jmap_account_id, true)
+            .await
     }
 
     /// Unsubscribe from a mailbox.
@@ -740,7 +747,8 @@ impl JmapOps {
         mailbox_id: &str,
         jmap_account_id: Option<&str>,
     ) -> Result<(), String> {
-        self.set_mailbox_subscription(mailbox_id, jmap_account_id, false).await
+        self.set_mailbox_subscription(mailbox_id, jmap_account_id, false)
+            .await
     }
 
     async fn set_mailbox_subscription(
@@ -826,9 +834,7 @@ pub async fn schedule_send_jmap(
     if let Some(sub_caps) = session.submission_capabilities() {
         let max_delay = sub_caps.max_delayed_send(); // seconds
         if max_delay == 0 {
-            return Err(
-                "Server does not support scheduled send (maxDelayedSend = 0)".to_string(),
-            );
+            return Err("Server does not support scheduled send (maxDelayedSend = 0)".to_string());
         }
         let delay_secs = (send_at - Utc::now()).num_seconds();
         if delay_secs <= 0 {

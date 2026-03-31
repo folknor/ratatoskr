@@ -6,11 +6,7 @@ use super::super::DbState;
 use super::super::types::{DbContactGroup, DbContactGroupMember};
 use crate::db::from_row::FromRow;
 
-pub async fn db_create_contact_group(
-    db: &DbState,
-    id: String,
-    name: String,
-) -> Result<(), String> {
+pub async fn db_create_contact_group(db: &DbState, id: String, name: String) -> Result<(), String> {
     log::debug!("Creating contact group: id={id}, name={name}");
     db.with_conn(move |conn| {
         conn.execute(
@@ -23,11 +19,7 @@ pub async fn db_create_contact_group(
     .await
 }
 
-pub async fn db_update_contact_group(
-    db: &DbState,
-    id: String,
-    name: String,
-) -> Result<(), String> {
+pub async fn db_update_contact_group(db: &DbState, id: String, name: String) -> Result<(), String> {
     log::debug!("Updating contact group: id={id}, name={name}");
     db.with_conn(move |conn| {
         conn.execute(
@@ -68,9 +60,7 @@ pub async fn db_delete_contact_group(db: &DbState, id: String) -> Result<(), Str
     })
 }
 
-pub async fn db_get_all_contact_groups(
-    db: &DbState,
-) -> Result<Vec<DbContactGroup>, String> {
+pub async fn db_get_all_contact_groups(db: &DbState) -> Result<Vec<DbContactGroup>, String> {
     db.with_conn(move |conn| {
         let mut stmt = conn
             .prepare(
@@ -89,10 +79,7 @@ pub async fn db_get_all_contact_groups(
     .await
 }
 
-pub async fn db_get_contact_group(
-    db: &DbState,
-    id: String,
-) -> Result<DbContactGroup, String> {
+pub async fn db_get_contact_group(db: &DbState, id: String) -> Result<DbContactGroup, String> {
     db.with_conn(move |conn| {
         conn.query_row(
             "SELECT g.id, g.name,
@@ -122,9 +109,9 @@ pub async fn db_get_contact_group_members(
             )
             .map_err(|e| e.to_string())?;
         stmt.query_map(params![group_id], DbContactGroupMember::from_row)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     })
     .await
 }
@@ -265,11 +252,8 @@ pub fn load_groups_for_settings_sync(
          LIMIT 100"
     };
 
-    let db_params: &[&dyn rusqlite::types::ToSql] = if trimmed.is_empty() {
-        &[]
-    } else {
-        &[&pattern]
-    };
+    let db_params: &[&dyn rusqlite::types::ToSql] =
+        if trimmed.is_empty() { &[] } else { &[&pattern] };
 
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let rows = stmt
@@ -347,10 +331,7 @@ pub fn save_group_sync(
 }
 
 /// Delete a group and clean up inbound refs (synchronous).
-pub fn delete_group_sync(
-    conn: &rusqlite::Connection,
-    group_id: &str,
-) -> Result<(), String> {
+pub fn delete_group_sync(conn: &rusqlite::Connection, group_id: &str) -> Result<(), String> {
     let tx = conn
         .unchecked_transaction()
         .map_err(|e| format!("begin tx: {e}"))?;
@@ -389,14 +370,15 @@ fn expand_recursive(
     }
 
     let mut stmt = conn
-        .prepare(
-            "SELECT member_type, member_value FROM contact_group_members WHERE group_id = ?1",
-        )
+        .prepare("SELECT member_type, member_value FROM contact_group_members WHERE group_id = ?1")
         .map_err(|e| format!("prepare expand: {e}"))?;
 
     let members: Vec<(String, String)> = stmt
         .query_map(params![group_id], |row| {
-            Ok((row.get::<_, String>("member_type")?, row.get::<_, String>("member_value")?))
+            Ok((
+                row.get::<_, String>("member_type")?,
+                row.get::<_, String>("member_value")?,
+            ))
         })
         .map_err(|e| format!("query expand: {e}"))?
         .collect::<Result<Vec<_>, _>>()
@@ -418,4 +400,3 @@ fn expand_recursive(
 
     Ok(())
 }
-

@@ -26,7 +26,8 @@ pub async fn sync_jmap_identity_signatures(
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs().cast_signed();
+        .as_secs()
+        .cast_signed();
 
     // Collect data before moving into the closure.
     let rows: Vec<IdentityRow> = identities
@@ -177,11 +178,8 @@ fn sha256_hex(input: &str) -> String {
 /// Minimal hex encoding to avoid adding a dependency.
 fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
     use std::fmt::Write;
-    bytes
-        .as_ref()
-        .iter()
-        .fold(String::new(), |mut s, b| {
-            let _ = write!(s, "{b:02x}");
-            s
-        })
+    bytes.as_ref().iter().fold(String::new(), |mut s, b| {
+        let _ = write!(s, "{b:02x}");
+        s
+    })
 }

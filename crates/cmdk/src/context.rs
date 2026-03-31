@@ -77,7 +77,6 @@ pub struct CommandContext {
     // ── Mailbox rights (from JMAP/IMAP ACL) ─────────────────
     // `None` = unknown / not reported (allow by default).
     // `Some(false)` = explicitly denied by the server.
-
     /// Whether items can be removed from the current mailbox (archive, trash, move).
     pub may_remove_items: Option<bool>,
     /// Whether the seen/read flag can be changed.

@@ -1,8 +1,8 @@
+use iced::Subscription;
 use iced::advanced::graphics::futures::subscription;
 use iced::advanced::subscription::Hasher;
-use iced::futures::stream::BoxStream;
 use iced::futures::StreamExt;
-use iced::Subscription;
+use iced::futures::stream::BoxStream;
 use mundy::{ColorScheme, Interest, Preferences};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,10 +35,7 @@ impl subscription::Recipe for Appearance {
         std::any::TypeId::of::<Marker>().hash(state);
     }
 
-    fn stream(
-        self: Box<Self>,
-        _input: subscription::EventStream,
-    ) -> BoxStream<'static, Mode> {
+    fn stream(self: Box<Self>, _input: subscription::EventStream) -> BoxStream<'static, Mode> {
         Preferences::stream(Interest::ColorScheme)
             .map(|preference| Mode::from(preference.color_scheme))
             .boxed()

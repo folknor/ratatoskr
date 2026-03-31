@@ -31,7 +31,11 @@ pub fn query_threads(
     let thread_flag_str = ctx.thread_flag_where_string();
 
     let sql = build_thread_select_sql(&where_str, &thread_flag_str, ctx.next_idx);
-    log::debug!("Smart folder SQL built: msg_clauses={}, thread_flag_clauses={}", ctx.msg_clauses.len(), ctx.thread_flag_clauses.len());
+    log::debug!(
+        "Smart folder SQL built: msg_clauses={}, thread_flag_clauses={}",
+        ctx.msg_clauses.len(),
+        ctx.thread_flag_clauses.len()
+    );
     ctx.params.push(Box::new(lim));
     ctx.params.push(Box::new(off));
 
@@ -235,11 +239,7 @@ fn build_date_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
 
 /// When `account:` operators are present, they override the scope parameter.
 /// Otherwise, apply the scope normally.
-fn build_effective_scope(
-    ctx: &mut QueryContext,
-    parsed: &ParsedQuery,
-    scope: &AccountScope,
-) {
+fn build_effective_scope(ctx: &mut QueryContext, parsed: &ParsedQuery, scope: &AccountScope) {
     if parsed.account.is_empty() {
         build_scope_clause(ctx, scope);
     } else {
@@ -386,10 +386,8 @@ fn build_has_contact_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     if !parsed.has_contact {
         return;
     }
-    ctx.msg_clauses.push(
-        "EXISTS (SELECT 1 FROM contacts c WHERE c.email = m.from_address)"
-            .to_owned(),
-    );
+    ctx.msg_clauses
+        .push("EXISTS (SELECT 1 FROM contacts c WHERE c.email = m.from_address)".to_owned());
 }
 
 /// Add thread-level flag clauses (snoozed, pinned, muted, tagged).
@@ -463,11 +461,7 @@ fn build_label_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
 
 /// Build the main SELECT that returns `DbThread` rows from a message-based search,
 /// joined back to threads for the full thread shape.
-fn build_thread_select_sql(
-    msg_where: &str,
-    thread_flag_where: &str,
-    next_idx: usize,
-) -> String {
+fn build_thread_select_sql(msg_where: &str, thread_flag_where: &str, next_idx: usize) -> String {
     let limit_idx = next_idx;
     let offset_idx = next_idx + 1;
 
@@ -507,8 +501,7 @@ fn execute_thread_query(
     sql: &str,
     params: &[Box<dyn rusqlite::types::ToSql>],
 ) -> Result<Vec<DbThread>, String> {
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-        params.iter().map(AsRef::as_ref).collect();
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(AsRef::as_ref).collect();
 
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     stmt.query_map(param_refs.as_slice(), DbThread::from_row)
@@ -638,9 +631,7 @@ mod tests {
     fn account_filters_by_email() {
         let conn = setup_test_db();
         let parsed = parse_query("account:personal.com");
-        let threads =
-            query_threads(&conn, &parsed, &AccountScope::All, None, None)
-                .expect("query");
+        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].account_id, "acc2");
     }
@@ -651,8 +642,7 @@ mod tests {
         let parsed = parse_query("account:Work");
         // Scope says acc2, but account: operator should override.
         let scope = AccountScope::Single("acc2".to_owned());
-        let threads =
-            query_threads(&conn, &parsed, &scope, None, None).expect("query");
+        let threads = query_threads(&conn, &parsed, &scope, None, None).expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].account_id, "acc1");
     }
@@ -663,9 +653,7 @@ mod tests {
     fn folder_filters_by_label_name() {
         let conn = setup_test_db();
         let parsed = parse_query("folder:Projects");
-        let threads =
-            query_threads(&conn, &parsed, &AccountScope::All, None, None)
-                .expect("query");
+        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
     }
@@ -676,9 +664,7 @@ mod tests {
     fn in_inbox_finds_both_accounts() {
         let conn = setup_test_db();
         let parsed = parse_query("in:inbox");
-        let threads =
-            query_threads(&conn, &parsed, &AccountScope::All, None, None)
-                .expect("query");
+        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 2);
     }
 
@@ -686,9 +672,7 @@ mod tests {
     fn in_starred_uses_thread_flag() {
         let conn = setup_test_db();
         let parsed = parse_query("in:starred");
-        let threads =
-            query_threads(&conn, &parsed, &AccountScope::All, None, None)
-                .expect("query");
+        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
         assert!(threads[0].is_starred);
     }
@@ -699,9 +683,7 @@ mod tests {
     fn is_tagged_finds_threads_with_labels() {
         let conn = setup_test_db();
         let parsed = parse_query("is:tagged");
-        let threads =
-            query_threads(&conn, &parsed, &AccountScope::All, None, None)
-                .expect("query");
+        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
         // Both threads have labels (INBOX at minimum).
         assert_eq!(threads.len(), 2);
     }
@@ -712,9 +694,7 @@ mod tests {
     fn has_contact_filters_by_known_sender() {
         let conn = setup_test_db();
         let parsed = parse_query("has:contact");
-        let threads =
-            query_threads(&conn, &parsed, &AccountScope::All, None, None)
-                .expect("query");
+        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
         // Only m1's sender (sender@example.com) is in contacts.
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
@@ -726,9 +706,7 @@ mod tests {
     fn has_pdf_filters_attachments() {
         let conn = setup_test_db();
         let parsed = parse_query("has:pdf");
-        let threads =
-            query_threads(&conn, &parsed, &AccountScope::All, None, None)
-                .expect("query");
+        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
     }
@@ -737,9 +715,7 @@ mod tests {
     fn has_image_filters_attachments() {
         let conn = setup_test_db();
         let parsed = parse_query("has:image");
-        let threads =
-            query_threads(&conn, &parsed, &AccountScope::All, None, None)
-                .expect("query");
+        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
     }
@@ -748,9 +724,7 @@ mod tests {
     fn type_glob_pattern_matches() {
         let conn = setup_test_db();
         let parsed = parse_query("type:image/jpeg");
-        let threads =
-            query_threads(&conn, &parsed, &AccountScope::All, None, None)
-                .expect("query");
+        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
     }
 
@@ -760,9 +734,7 @@ mod tests {
     fn from_matches_contact_display_name() {
         let conn = setup_test_db();
         let parsed = parse_query("from:\"Friendly Sender\"");
-        let threads =
-            query_threads(&conn, &parsed, &AccountScope::All, None, None)
-                .expect("query");
+        let threads = query_threads(&conn, &parsed, &AccountScope::All, None, None).expect("query");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
     }
@@ -773,8 +745,7 @@ mod tests {
     fn count_matching_returns_correct_count() {
         let conn = setup_test_db();
         let parsed = parse_query("in:inbox");
-        let count =
-            count_matching(&conn, &parsed, &AccountScope::All).expect("count");
+        let count = count_matching(&conn, &parsed, &AccountScope::All).expect("count");
         assert_eq!(count, 2);
     }
 }

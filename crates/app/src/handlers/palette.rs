@@ -47,9 +47,7 @@ impl App {
     /// Handle events emitted by the palette component.
     fn handle_palette_event(&mut self, event: PaletteEvent) -> Task<Message> {
         match event {
-            PaletteEvent::ExecuteCommand(id) => {
-                self.update(Message::ExecuteCommand(id))
-            }
+            PaletteEvent::ExecuteCommand(id) => self.update(Message::ExecuteCommand(id)),
             PaletteEvent::ExecuteParameterized(id, args) => {
                 self.update(Message::ExecuteParameterized(id, args))
             }

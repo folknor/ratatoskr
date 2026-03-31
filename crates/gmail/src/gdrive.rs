@@ -259,9 +259,7 @@ pub async fn create_sharing_permission(
         }),
     };
 
-    let url = format!(
-        "https://www.googleapis.com/drive/v3/files/{file_id}/permissions?fields=id"
-    );
+    let url = format!("https://www.googleapis.com/drive/v3/files/{file_id}/permissions?fields=id");
 
     let response = http
         .post(&url)
@@ -299,9 +297,7 @@ pub async fn get_file_web_link(
     access_token: &str,
     file_id: &str,
 ) -> Result<String, String> {
-    let url = format!(
-        "https://www.googleapis.com/drive/v3/files/{file_id}?fields=webViewLink"
-    );
+    let url = format!("https://www.googleapis.com/drive/v3/files/{file_id}?fields=webViewLink");
 
     let response = http
         .get(&url)
@@ -353,11 +349,7 @@ mod tests {
         let range = format!("bytes {offset}-{}/{total}", end - 1);
         assert_eq!(
             range,
-            format!(
-                "bytes {}-{}/{total}",
-                5 * 1024 * 1024,
-                10 * 1024 * 1024 - 1
-            )
+            format!("bytes {}-{}/{total}", 5 * 1024 * 1024, 10 * 1024 * 1024 - 1)
         );
 
         // Third (final) chunk: 10MiB to 12MiB-1

@@ -281,10 +281,7 @@ mod tests {
 
     #[test]
     fn search_options_excludes_non_matching() {
-        let items = vec![
-            make_item("1", "Inbox"),
-            make_item("2", "Sent"),
-        ];
+        let items = vec![make_item("1", "Inbox"), make_item("2", "Sent")];
         let results = search_options(&items, "zzzzz");
         assert!(results.is_empty());
     }

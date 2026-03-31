@@ -23,10 +23,8 @@ impl App {
                 return self.restore_folder_view();
             }
         } else {
-            self.search_debounce_deadline = Some(
-                iced::time::Instant::now()
-                    + std::time::Duration::from_millis(150),
-            );
+            self.search_debounce_deadline =
+                Some(iced::time::Instant::now() + std::time::Duration::from_millis(150));
         }
 
         // Trigger typeahead based on cursor context (assume cursor at end)
@@ -105,9 +103,7 @@ impl App {
                         );
                     }
                     return Task::perform(
-                        async move {
-                            db.create_or_update_pinned_search(query, thread_ids).await
-                        },
+                        async move { db.create_or_update_pinned_search(query, thread_ids).await },
                         Message::PinnedSearchSaved,
                     );
                 }
@@ -124,9 +120,8 @@ impl App {
         if self.search_query.text().trim().is_empty() {
             self.search_debounce_deadline = None;
         } else {
-            self.search_debounce_deadline = Some(
-                iced::time::Instant::now() + std::time::Duration::from_millis(150),
-            );
+            self.search_debounce_deadline =
+                Some(iced::time::Instant::now() + std::time::Duration::from_millis(150));
         }
         Task::none()
     }
@@ -172,61 +167,81 @@ impl App {
     }
 
     /// Dispatch an async typeahead query based on operator type.
-    fn dispatch_typeahead_query(
-        &mut self,
-        operator: &str,
-        partial: &str,
-    ) -> Task<Message> {
-        use crate::ui::thread_list::{TypeaheadItem, ThreadListMessage};
+    fn dispatch_typeahead_query(&mut self, operator: &str, partial: &str) -> Task<Message> {
+        use crate::ui::thread_list::{ThreadListMessage, TypeaheadItem};
 
         let load_gen = self.thread_list.typeahead.generation.next();
 
         // Static operators — resolve immediately
         let static_items: Option<Vec<TypeaheadItem>> = match operator {
             "in" => Some(
-                ["inbox", "sent", "drafts", "trash", "spam", "starred", "snoozed"]
-                    .iter()
-                    .filter(|s| s.starts_with(&partial.to_lowercase()))
-                    .map(|s| TypeaheadItem {
-                        label: s.to_string(),
-                        detail: None,
-                        insert_value: s.to_string(),
-                    })
-                    .collect(),
+                [
+                    "inbox", "sent", "drafts", "trash", "spam", "starred", "snoozed",
+                ]
+                .iter()
+                .filter(|s| s.starts_with(&partial.to_lowercase()))
+                .map(|s| TypeaheadItem {
+                    label: s.to_string(),
+                    detail: None,
+                    insert_value: s.to_string(),
+                })
+                .collect(),
             ),
             "is" => Some(
-                ["unread", "read", "starred", "snoozed", "pinned", "muted", "tagged"]
-                    .iter()
-                    .filter(|s| s.starts_with(&partial.to_lowercase()))
-                    .map(|s| TypeaheadItem {
-                        label: s.to_string(),
-                        detail: None,
-                        insert_value: s.to_string(),
-                    })
-                    .collect(),
+                [
+                    "unread", "read", "starred", "snoozed", "pinned", "muted", "tagged",
+                ]
+                .iter()
+                .filter(|s| s.starts_with(&partial.to_lowercase()))
+                .map(|s| TypeaheadItem {
+                    label: s.to_string(),
+                    detail: None,
+                    insert_value: s.to_string(),
+                })
+                .collect(),
             ),
             "has" => Some(
-                ["attachment", "pdf", "image", "excel", "word", "document", "archive", "video", "audio", "powerpoint", "spreadsheet", "calendar", "contact"]
-                    .iter()
-                    .filter(|s| s.starts_with(&partial.to_lowercase()))
-                    .map(|s| TypeaheadItem {
-                        label: s.to_string(),
-                        detail: None,
-                        insert_value: s.to_string(),
-                    })
-                    .collect(),
+                [
+                    "attachment",
+                    "pdf",
+                    "image",
+                    "excel",
+                    "word",
+                    "document",
+                    "archive",
+                    "video",
+                    "audio",
+                    "powerpoint",
+                    "spreadsheet",
+                    "calendar",
+                    "contact",
+                ]
+                .iter()
+                .filter(|s| s.starts_with(&partial.to_lowercase()))
+                .map(|s| TypeaheadItem {
+                    label: s.to_string(),
+                    detail: None,
+                    insert_value: s.to_string(),
+                })
+                .collect(),
             ),
             "before" | "after" => Some(
-                [("Today", "0"), ("Yesterday", "-1"), ("Last 7 days", "-7"),
-                 ("Last 30 days", "-30"), ("Last 3 months", "-90"), ("Last year", "-365")]
-                    .iter()
-                    .filter(|(label, _)| label.to_lowercase().contains(&partial.to_lowercase()))
-                    .map(|(label, value)| TypeaheadItem {
-                        label: label.to_string(),
-                        detail: Some(format!("{operator}:{value}")),
-                        insert_value: value.to_string(),
-                    })
-                    .collect(),
+                [
+                    ("Today", "0"),
+                    ("Yesterday", "-1"),
+                    ("Last 7 days", "-7"),
+                    ("Last 30 days", "-30"),
+                    ("Last 3 months", "-90"),
+                    ("Last year", "-365"),
+                ]
+                .iter()
+                .filter(|(label, _)| label.to_lowercase().contains(&partial.to_lowercase()))
+                .map(|(label, value)| TypeaheadItem {
+                    label: label.to_string(),
+                    detail: Some(format!("{operator}:{value}")),
+                    insert_value: value.to_string(),
+                })
+                .collect(),
             ),
             _ => None,
         };
@@ -244,15 +259,9 @@ impl App {
         Task::perform(
             async move {
                 match op.as_str() {
-                    "from" | "to" => {
-                        db.search_contacts_for_typeahead(partial).await
-                    }
-                    "label" | "folder" => {
-                        db.search_labels_for_typeahead(partial).await
-                    }
-                    "account" => {
-                        db.search_accounts_for_typeahead(partial).await
-                    }
+                    "from" | "to" => db.search_contacts_for_typeahead(partial).await,
+                    "label" | "folder" => db.search_labels_for_typeahead(partial).await,
+                    "account" => db.search_accounts_for_typeahead(partial).await,
                     _ => Ok(Vec::new()),
                 }
             },
@@ -290,9 +299,8 @@ impl App {
             self.thread_list.typeahead.visible = false;
 
             // Trigger search execution with the new query
-            self.search_debounce_deadline = Some(
-                iced::time::Instant::now() + std::time::Duration::from_millis(50),
-            );
+            self.search_debounce_deadline =
+                Some(iced::time::Instant::now() + std::time::Duration::from_millis(50));
         }
         Task::none()
     }
@@ -308,7 +316,9 @@ impl App {
         match result {
             Ok(searches) => {
                 self.pinned_searches = searches;
-                self.sidebar.pinned_searches.clone_from(&self.pinned_searches);
+                self.sidebar
+                    .pinned_searches
+                    .clone_from(&self.pinned_searches);
 
                 let db = Arc::clone(&self.db);
                 let history_task = Task::perform(
@@ -544,9 +554,7 @@ pub(crate) async fn execute_search(
 ) -> Result<Vec<Thread>, String> {
     db.with_conn(move |conn| {
         if let Some(ref ss) = search_state {
-            let results = rtsk::search_pipeline::search(
-                &query, ss, conn,
-            )?;
+            let results = rtsk::search_pipeline::search(&query, ss, conn)?;
             Ok(results.into_iter().map(unified_result_to_thread).collect())
         } else {
             execute_search_sql_fallback(conn, &query)
@@ -564,10 +572,12 @@ fn execute_search_sql_fallback(
     let scope = rtsk::db::types::AccountScope::All;
 
     if parsed.has_any_operator() || parsed.free_text.is_empty() {
-        let db_threads = rtsk::smart_folder::query_threads(
-            conn, &parsed, &scope, Some(200), Some(0),
-        )?;
-        Ok(db_threads.into_iter().map(crate::db_thread_to_app_thread).collect())
+        let db_threads =
+            rtsk::smart_folder::query_threads(conn, &parsed, &scope, Some(200), Some(0))?;
+        Ok(db_threads
+            .into_iter()
+            .map(crate::db_thread_to_app_thread)
+            .collect())
     } else {
         // Free text only, no Tantivy — do a simple LIKE search
         let pattern = format!("%{}%", parsed.free_text);
@@ -590,7 +600,8 @@ fn execute_search_sql_fallback(
                     account_id: row.get(1)?,
                     subject: row.get(2)?,
                     snippet: row.get(3)?,
-                    last_message_at: row.get::<_, Option<String>>(4)?
+                    last_message_at: row
+                        .get::<_, Option<String>>(4)?
                         .and_then(|s| s.parse().ok()),
                     message_count: row.get(5)?,
                     is_read: row.get(6)?,
@@ -613,9 +624,7 @@ fn execute_search_sql_fallback(
 }
 
 /// Convert a `UnifiedSearchResult` from the search pipeline to an app `Thread`.
-fn unified_result_to_thread(
-    r: rtsk::search_pipeline::UnifiedSearchResult,
-) -> Thread {
+fn unified_result_to_thread(r: rtsk::search_pipeline::UnifiedSearchResult) -> Thread {
     Thread {
         id: r.thread_id,
         account_id: r.account_id,
@@ -637,10 +646,7 @@ fn unified_result_to_thread(
 // ── Search phases 2+4 methods ──────────────────────────
 
 impl App {
-    pub(crate) fn handle_refresh_pinned_search(
-        &mut self,
-        id: i64,
-    ) -> Task<Message> {
+    pub(crate) fn handle_refresh_pinned_search(&mut self, id: i64) -> Task<Message> {
         for ps in &mut self.pinned_searches {
             if ps.id == id {
                 ps.thread_ids = None;
@@ -658,10 +664,7 @@ impl App {
         )
     }
 
-    pub(crate) fn handle_search_here(
-        &mut self,
-        query_prefix: String,
-    ) -> Task<Message> {
+    pub(crate) fn handle_search_here(&mut self, query_prefix: String) -> Task<Message> {
         if self.thread_list.mode == ThreadListMode::Folder {
             self.was_in_folder_view = true;
         }
@@ -671,10 +674,7 @@ impl App {
         iced::widget::operation::focus::<Message>("search-bar".to_string())
     }
 
-    pub(crate) fn handle_save_as_smart_folder(
-        &mut self,
-        name: String,
-    ) -> Task<Message> {
+    pub(crate) fn handle_save_as_smart_folder(&mut self, name: String) -> Task<Message> {
         let query = self.search_query.text().trim().to_string();
         if query.is_empty() {
             return Task::none();

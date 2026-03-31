@@ -56,26 +56,23 @@ impl App {
         if self.thread_list.typeahead.visible {
             match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
-                    return self.update(Message::ThreadList(
-                        ThreadListMessage::TypeaheadNavigate(TypeaheadDirection::Up),
-                    ));
+                    return self.update(Message::ThreadList(ThreadListMessage::TypeaheadNavigate(
+                        TypeaheadDirection::Up,
+                    )));
                 }
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => {
-                    return self.update(Message::ThreadList(
-                        ThreadListMessage::TypeaheadNavigate(TypeaheadDirection::Down),
-                    ));
+                    return self.update(Message::ThreadList(ThreadListMessage::TypeaheadNavigate(
+                        TypeaheadDirection::Down,
+                    )));
                 }
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab) => {
                     // Tab accepts the selected typeahead item.
                     let idx = self.thread_list.typeahead.selected;
-                    return self.update(Message::ThreadList(
-                        ThreadListMessage::TypeaheadSelect(idx),
-                    ));
+                    return self
+                        .update(Message::ThreadList(ThreadListMessage::TypeaheadSelect(idx)));
                 }
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
-                    return self.update(Message::ThreadList(
-                        ThreadListMessage::TypeaheadDismiss,
-                    ));
+                    return self.update(Message::ThreadList(ThreadListMessage::TypeaheadDismiss));
                 }
                 _ => {}
             }
@@ -96,10 +93,12 @@ impl App {
 
         // 4. If we're in pending chord state, resolve the sequence
         if let Some(pending) = self.pending_chord.take() {
-            log::debug!("Resolving chord sequence: {:?} + {:?}", pending.first, chord);
-            if let Some(id) = self.binding_table.resolve_sequence(
-                &pending.first, &chord,
-            ) {
+            log::debug!(
+                "Resolving chord sequence: {:?} + {:?}",
+                pending.first,
+                chord
+            );
+            if let Some(id) = self.binding_table.resolve_sequence(&pending.first, &chord) {
                 if self.is_command_available(id) {
                     return self.update(Message::ExecuteCommand(id));
                 }
@@ -116,7 +115,9 @@ impl App {
     /// Check if a command is currently available given app context.
     pub(crate) fn is_command_available(&self, id: CommandId) -> bool {
         let ctx = command_dispatch::build_context(self);
-        self.registry.get(id).is_some_and(|desc| (desc.is_available)(&ctx))
+        self.registry
+            .get(id)
+            .is_some_and(|desc| (desc.is_available)(&ctx))
     }
 
     /// When the palette is open, intercept Escape/ArrowUp/ArrowDown/Enter.
@@ -151,9 +152,7 @@ impl App {
                 }
             }
             ResolveResult::Pending => {
-                self.pending_chord = Some(PendingChord {
-                    first: chord,
-                });
+                self.pending_chord = Some(PendingChord { first: chord });
                 Task::none()
             }
             ResolveResult::NoMatch => Task::none(),

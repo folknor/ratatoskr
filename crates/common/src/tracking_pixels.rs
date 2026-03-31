@@ -36,9 +36,8 @@ static WIDTH_ATTR_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)\bwidth\s*=\s*["']?\s*([0-9]+)"#).expect("WIDTH_ATTR_RE"));
 
 /// Extracts the `height` HTML attribute (bare, not inside `style`).
-static HEIGHT_ATTR_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)\bheight\s*=\s*["']?\s*([0-9]+)"#).expect("HEIGHT_ATTR_RE")
-});
+static HEIGHT_ATTR_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)\bheight\s*=\s*["']?\s*([0-9]+)"#).expect("HEIGHT_ATTR_RE"));
 
 /// Extracts the `style` attribute value.
 static STYLE_ATTR_RE: LazyLock<Regex> =
@@ -57,9 +56,8 @@ static DISPLAY_NONE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\bdisplay\s*:\s*none\b").expect("DISPLAY_NONE_RE"));
 
 /// Matches `visibility:hidden` in CSS.
-static VISIBILITY_HIDDEN_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\bvisibility\s*:\s*hidden\b").expect("VISIBILITY_HIDDEN_RE")
-});
+static VISIBILITY_HIDDEN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bvisibility\s*:\s*hidden\b").expect("VISIBILITY_HIDDEN_RE"));
 
 // ---------------------------------------------------------------------------
 // Known tracker domain/path patterns
@@ -245,8 +243,7 @@ mod tests {
 
     #[test]
     fn detects_display_none() {
-        let html =
-            r#"<img src="https://example.com/pixel.gif" style="display:none" width="100" height="100">"#;
+        let html = r#"<img src="https://example.com/pixel.gif" style="display:none" width="100" height="100">"#;
         let results = detect_tracking_pixels_in_html(html);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].reason, TrackingPixelReason::HiddenByStyle);
@@ -254,8 +251,7 @@ mod tests {
 
     #[test]
     fn detects_visibility_hidden() {
-        let html =
-            r#"<img src="https://example.com/pixel.gif" style="visibility: hidden">"#;
+        let html = r#"<img src="https://example.com/pixel.gif" style="visibility: hidden">"#;
         let results = detect_tracking_pixels_in_html(html);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].reason, TrackingPixelReason::HiddenByStyle);
@@ -263,8 +259,7 @@ mod tests {
 
     #[test]
     fn detects_known_tracker_mailchimp() {
-        let html =
-            r#"<img src="https://list-manage.com/track/open.php?u=abc&id=123" width="100" height="50">"#;
+        let html = r#"<img src="https://list-manage.com/track/open.php?u=abc&id=123" width="100" height="50">"#;
         let results = detect_tracking_pixels_in_html(html);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].reason, TrackingPixelReason::KnownTracker);

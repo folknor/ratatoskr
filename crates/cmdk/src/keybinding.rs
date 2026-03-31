@@ -467,9 +467,7 @@ impl BindingTable {
     pub fn check_conflict(&self, id: CommandId, binding: &KeyBinding) -> Option<CommandId> {
         match binding {
             KeyBinding::Chord(chord) => self.check_chord_conflict(id, chord),
-            KeyBinding::Sequence(first, second) => {
-                self.check_sequence_conflict(id, first, second)
-            }
+            KeyBinding::Sequence(first, second) => self.check_sequence_conflict(id, first, second),
         }
     }
 
@@ -517,7 +515,8 @@ impl BindingTable {
         if self.overrides.is_empty() {
             // Nothing to persist — remove stale file if present.
             if path.exists() {
-                std::fs::remove_file(path).map_err(|e| format!("remove {}: {e}", path.display()))?;
+                std::fs::remove_file(path)
+                    .map_err(|e| format!("remove {}: {e}", path.display()))?;
             }
             return Ok(());
         }
@@ -538,8 +537,7 @@ impl BindingTable {
                 .map_err(|e| format!("create dir {}: {e}", parent.display()))?;
         }
 
-        std::fs::write(path, json)
-            .map_err(|e| format!("write {}: {e}", path.display()))?;
+        std::fs::write(path, json).map_err(|e| format!("write {}: {e}", path.display()))?;
 
         Ok(())
     }
@@ -557,8 +555,8 @@ impl BindingTable {
             Err(e) => return Err(format!("read {}: {e}", path.display())),
         };
 
-        let wrapper: OverridesFile = serde_json::from_slice(&bytes)
-            .map_err(|e| format!("parse {}: {e}", path.display()))?;
+        let wrapper: OverridesFile =
+            serde_json::from_slice(&bytes).map_err(|e| format!("parse {}: {e}", path.display()))?;
 
         let mut overrides = HashMap::new();
         for (key, value) in wrapper.overrides {
@@ -839,7 +837,10 @@ mod tests {
             .set_override(CommandId::EmailArchive, new_binding)
             .expect("no conflict");
 
-        assert_eq!(table.binding_for(CommandId::EmailArchive), Some(new_binding));
+        assert_eq!(
+            table.binding_for(CommandId::EmailArchive),
+            Some(new_binding)
+        );
 
         let old_chord = Chord::key('e');
         assert_eq!(table.resolve_chord(&old_chord), ResolveResult::NoMatch);
@@ -915,15 +916,17 @@ mod tests {
         let table = make_table();
         // 'g' starts sequences — binding a single chord to 'g' conflicts
         let conflict = table.check_conflict(CommandId::NavNext, &KeyBinding::key('g'));
-        assert!(conflict.is_some(), "should conflict with a 'g then X' sequence");
+        assert!(
+            conflict.is_some(),
+            "should conflict with a 'g then X' sequence"
+        );
     }
 
     #[test]
     fn conflict_sequence_vs_single() {
         let table = make_table();
         // 'e' is EmailArchive — a sequence starting with 'e' conflicts
-        let conflict =
-            table.check_conflict(CommandId::NavNext, &KeyBinding::seq('e', 'x'));
+        let conflict = table.check_conflict(CommandId::NavNext, &KeyBinding::seq('e', 'x'));
         assert_eq!(conflict, Some(CommandId::EmailArchive));
     }
 
@@ -939,8 +942,7 @@ mod tests {
     fn no_conflict_different_sequence_second_chord() {
         let table = make_table();
         // 'g then z' doesn't conflict with existing 'g then i', 'g then s', etc.
-        let conflict =
-            table.check_conflict(CommandId::EmailArchive, &KeyBinding::seq('g', 'z'));
+        let conflict = table.check_conflict(CommandId::EmailArchive, &KeyBinding::seq('g', 'z'));
         assert_eq!(conflict, None);
     }
 

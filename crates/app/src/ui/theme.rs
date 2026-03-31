@@ -1,8 +1,8 @@
 use std::cell::Cell;
 
-use iced::widget::{button, container, pick_list, radio, rule, slider, text, text_input, toggler};
-use iced::{border, Color, Theme};
 use iced::theme::palette::Seed;
+use iced::widget::{button, container, pick_list, radio, rule, slider, text, text_input, toggler};
+use iced::{Color, Theme, border};
 use serde::Deserialize;
 
 use super::layout::*;
@@ -28,27 +28,90 @@ pub struct ThemeEntry {
 }
 
 pub const THEMES: &[ThemeEntry] = &[
-    ThemeEntry { name: "Light", palette: Seed::LIGHT },
-    ThemeEntry { name: "Dark", palette: Seed::DARK },
-    ThemeEntry { name: "Dracula", palette: Seed::DRACULA },
-    ThemeEntry { name: "Nord", palette: Seed::NORD },
-    ThemeEntry { name: "Solarized Light", palette: Seed::SOLARIZED_LIGHT },
-    ThemeEntry { name: "Solarized Dark", palette: Seed::SOLARIZED_DARK },
-    ThemeEntry { name: "Gruvbox Light", palette: Seed::GRUVBOX_LIGHT },
-    ThemeEntry { name: "Gruvbox Dark", palette: Seed::GRUVBOX_DARK },
-    ThemeEntry { name: "Catppuccin Latte", palette: Seed::CATPPUCCIN_LATTE },
-    ThemeEntry { name: "Catppuccin Frappé", palette: Seed::CATPPUCCIN_FRAPPE },
-    ThemeEntry { name: "Catppuccin Macchiato", palette: Seed::CATPPUCCIN_MACCHIATO },
-    ThemeEntry { name: "Catppuccin Mocha", palette: Seed::CATPPUCCIN_MOCHA },
-    ThemeEntry { name: "Tokyo Night", palette: Seed::TOKYO_NIGHT },
-    ThemeEntry { name: "Tokyo Night Storm", palette: Seed::TOKYO_NIGHT_STORM },
-    ThemeEntry { name: "Tokyo Night Light", palette: Seed::TOKYO_NIGHT_LIGHT },
-    ThemeEntry { name: "Kanagawa Wave", palette: Seed::KANAGAWA_WAVE },
-    ThemeEntry { name: "Kanagawa Lotus", palette: Seed::KANAGAWA_LOTUS },
-    ThemeEntry { name: "Moonfly", palette: Seed::MOONFLY },
-    ThemeEntry { name: "Nightfly", palette: Seed::NIGHTFLY },
-    ThemeEntry { name: "Oxocarbon", palette: Seed::OXOCARBON },
-    ThemeEntry { name: "Ferra", palette: Seed::FERRA },
+    ThemeEntry {
+        name: "Light",
+        palette: Seed::LIGHT,
+    },
+    ThemeEntry {
+        name: "Dark",
+        palette: Seed::DARK,
+    },
+    ThemeEntry {
+        name: "Dracula",
+        palette: Seed::DRACULA,
+    },
+    ThemeEntry {
+        name: "Nord",
+        palette: Seed::NORD,
+    },
+    ThemeEntry {
+        name: "Solarized Light",
+        palette: Seed::SOLARIZED_LIGHT,
+    },
+    ThemeEntry {
+        name: "Solarized Dark",
+        palette: Seed::SOLARIZED_DARK,
+    },
+    ThemeEntry {
+        name: "Gruvbox Light",
+        palette: Seed::GRUVBOX_LIGHT,
+    },
+    ThemeEntry {
+        name: "Gruvbox Dark",
+        palette: Seed::GRUVBOX_DARK,
+    },
+    ThemeEntry {
+        name: "Catppuccin Latte",
+        palette: Seed::CATPPUCCIN_LATTE,
+    },
+    ThemeEntry {
+        name: "Catppuccin Frappé",
+        palette: Seed::CATPPUCCIN_FRAPPE,
+    },
+    ThemeEntry {
+        name: "Catppuccin Macchiato",
+        palette: Seed::CATPPUCCIN_MACCHIATO,
+    },
+    ThemeEntry {
+        name: "Catppuccin Mocha",
+        palette: Seed::CATPPUCCIN_MOCHA,
+    },
+    ThemeEntry {
+        name: "Tokyo Night",
+        palette: Seed::TOKYO_NIGHT,
+    },
+    ThemeEntry {
+        name: "Tokyo Night Storm",
+        palette: Seed::TOKYO_NIGHT_STORM,
+    },
+    ThemeEntry {
+        name: "Tokyo Night Light",
+        palette: Seed::TOKYO_NIGHT_LIGHT,
+    },
+    ThemeEntry {
+        name: "Kanagawa Wave",
+        palette: Seed::KANAGAWA_WAVE,
+    },
+    ThemeEntry {
+        name: "Kanagawa Lotus",
+        palette: Seed::KANAGAWA_LOTUS,
+    },
+    ThemeEntry {
+        name: "Moonfly",
+        palette: Seed::MOONFLY,
+    },
+    ThemeEntry {
+        name: "Nightfly",
+        palette: Seed::NIGHTFLY,
+    },
+    ThemeEntry {
+        name: "Oxocarbon",
+        palette: Seed::OXOCARBON,
+    },
+    ThemeEntry {
+        name: "Ferra",
+        palette: Seed::FERRA,
+    },
 ];
 
 pub fn theme_by_index(index: usize) -> Theme {
@@ -90,7 +153,10 @@ pub fn from_toml(content: &str) -> Result<Theme, toml::de::Error> {
         warning: hex_to_color(&file.colors.warning),
         danger: hex_to_color(&file.colors.danger),
     };
-    Ok(Theme::custom(file.name.unwrap_or_else(|| "Custom".into()), palette))
+    Ok(Theme::custom(
+        file.name.unwrap_or_else(|| "Custom".into()),
+        palette,
+    ))
 }
 
 // ══════════════════════════════════════════════════════════
@@ -132,23 +198,33 @@ impl TextClass {
 }
 
 fn style_text_accent(theme: &Theme) -> text::Style {
-    text::Style { color: Some(theme.palette().primary.base.color) }
+    text::Style {
+        color: Some(theme.palette().primary.base.color),
+    }
 }
 
 fn style_text_tertiary(theme: &Theme) -> text::Style {
-    text::Style { color: Some(theme.palette().background.strongest.text.scale_alpha(0.5)) }
+    text::Style {
+        color: Some(theme.palette().background.strongest.text.scale_alpha(0.5)),
+    }
 }
 
 fn style_text_muted(theme: &Theme) -> text::Style {
-    text::Style { color: Some(theme.palette().background.base.text.scale_alpha(0.6)) }
+    text::Style {
+        color: Some(theme.palette().background.base.text.scale_alpha(0.6)),
+    }
 }
 
 fn style_text_on_primary(theme: &Theme) -> text::Style {
-    text::Style { color: Some(theme.palette().primary.base.text) }
+    text::Style {
+        color: Some(theme.palette().primary.base.text),
+    }
 }
 
 fn style_text_warning(theme: &Theme) -> text::Style {
-    text::Style { color: Some(theme.palette().warning.base.color) }
+    text::Style {
+        color: Some(theme.palette().warning.base.color),
+    }
 }
 
 fn style_text_default(_theme: &Theme) -> text::Style {
@@ -220,16 +296,12 @@ impl ButtonClass {
             Self::CollapsedMessage => style_collapsed_message_button(theme, status),
             Self::StarActive => style_star_active_button(theme, status),
             Self::Chip { active } => style_chip_button(theme, status, active),
-            Self::PinnedSearch { active } => {
-                style_pinned_search_button(theme, status, active)
-            }
+            Self::PinnedSearch { active } => style_pinned_search_button(theme, status, active),
             Self::ProtocolCard => style_protocol_card_button(theme, status, false),
             Self::ProtocolCardSelected => style_protocol_card_button(theme, status, true),
             Self::ColorSwatchSelected => style_color_swatch_selected_button(theme, status),
             Self::Experiment { variant } => style_exp_btn(theme, status, variant),
-            Self::ExperimentSemantic { variant } => {
-                style_exp_semantic_btn(theme, status, variant)
-            }
+            Self::ExperimentSemantic { variant } => style_exp_semantic_btn(theme, status, variant),
         }
     }
 }
@@ -484,7 +556,11 @@ fn style_dropdown_button(theme: &Theme, status: button::Status, selected: bool) 
         },
         _ => button::Style {
             background: None,
-            text_color: if selected { p.background.base.text } else { p.secondary.base.color },
+            text_color: if selected {
+                p.background.base.text
+            } else {
+                p.secondary.base.color
+            },
             border: border::rounded(RADIUS_SM),
             ..Default::default()
         },
@@ -497,13 +573,25 @@ fn style_nav_button(theme: &Theme, status: button::Status, active: bool) -> butt
     match status {
         button::Status::Hovered => button::Style {
             background: Some(p.background.weak.color.into()),
-            text_color: if active { p.primary.base.color } else { p.background.base.text },
+            text_color: if active {
+                p.primary.base.color
+            } else {
+                p.background.base.text
+            },
             border: border::rounded(RADIUS_SM),
             ..Default::default()
         },
         _ => button::Style {
-            background: if active { Some(p.background.strong.color.into()) } else { None },
-            text_color: if active { p.primary.base.color } else { inactive_text },
+            background: if active {
+                Some(p.background.strong.color.into())
+            } else {
+                None
+            },
+            text_color: if active {
+                p.primary.base.color
+            } else {
+                inactive_text
+            },
             border: border::rounded(RADIUS_SM),
             ..Default::default()
         },
@@ -518,7 +606,11 @@ fn style_thread_card_button(
 ) -> button::Style {
     let p = theme.palette();
     let base_bg = if starred {
-        mix(p.background.base.color, p.warning.base.color, STARRED_BG_ALPHA)
+        mix(
+            p.background.base.color,
+            p.warning.base.color,
+            STARRED_BG_ALPHA,
+        )
     } else if selected {
         p.background.weakest.color
     } else {
@@ -527,7 +619,12 @@ fn style_thread_card_button(
     match status {
         button::Status::Hovered => button::Style {
             background: Some(if starred {
-                mix(p.background.weakest.color, p.warning.base.color, STARRED_BG_ALPHA).into()
+                mix(
+                    p.background.weakest.color,
+                    p.warning.base.color,
+                    STARRED_BG_ALPHA,
+                )
+                .into()
             } else {
                 p.background.weakest.color.into()
             }),
@@ -649,7 +746,11 @@ fn style_chip_hovered(p: &iced::theme::palette::Palette, active: bool) -> button
         } else {
             p.background.weakest.color.into()
         }),
-        text_color: if active { p.primary.base.color } else { p.background.base.text },
+        text_color: if active {
+            p.primary.base.color
+        } else {
+            p.background.base.text
+        },
         border: iced::Border {
             color: if active {
                 p.primary.base.color.scale_alpha(0.4)
@@ -776,10 +877,7 @@ fn style_protocol_card_button(
     }
 }
 
-fn style_color_swatch_selected_button(
-    theme: &Theme,
-    _status: button::Status,
-) -> button::Style {
+fn style_color_swatch_selected_button(theme: &Theme, _status: button::Status) -> button::Style {
     let p = theme.palette();
     let pri = p.primary.base.color;
 
@@ -804,13 +902,18 @@ fn style_exp_btn(theme: &Theme, status: button::Status, variant: usize) -> butto
     let txt = p.background.base.text;
     let is_hovered = matches!(status, button::Status::Hovered);
 
-    let (background, text_color, border_color) = exp_btn_colors(p, bg_base, pri, txt, is_hovered, variant);
+    let (background, text_color, border_color) =
+        exp_btn_colors(p, bg_base, pri, txt, is_hovered, variant);
 
     button::Style {
         background,
         text_color,
         border: match border_color {
-            Some(c) => iced::Border { color: c, width: 1.0, radius: RADIUS_LG.into() },
+            Some(c) => iced::Border {
+                color: c,
+                width: 1.0,
+                radius: RADIUS_LG.into(),
+            },
             None => border::rounded(RADIUS_LG),
         },
         ..Default::default()
@@ -837,7 +940,11 @@ fn exp_btn_colors(
     }
 }
 
-fn exp_btn_outlined_primary(bg: Color, pri: Color, hovered: bool) -> (Option<iced::Background>, Color, Option<Color>) {
+fn exp_btn_outlined_primary(
+    bg: Color,
+    pri: Color,
+    hovered: bool,
+) -> (Option<iced::Background>, Color, Option<Color>) {
     if hovered {
         (Some(mix(bg, pri, 0.12).into()), pri, Some(pri))
     } else {
@@ -845,31 +952,62 @@ fn exp_btn_outlined_primary(bg: Color, pri: Color, hovered: bool) -> (Option<ice
     }
 }
 
-fn exp_btn_outlined_text(bg: Color, txt: Color, hovered: bool) -> (Option<iced::Background>, Color, Option<Color>) {
+fn exp_btn_outlined_text(
+    bg: Color,
+    txt: Color,
+    hovered: bool,
+) -> (Option<iced::Background>, Color, Option<Color>) {
     if hovered {
-        (Some(mix(bg, txt, 0.08).into()), txt, Some(txt.scale_alpha(0.4)))
+        (
+            Some(mix(bg, txt, 0.08).into()),
+            txt,
+            Some(txt.scale_alpha(0.4)),
+        )
     } else {
         (None, txt, Some(txt.scale_alpha(0.3)))
     }
 }
 
-fn exp_btn_filled_primary(bg: Color, pri: Color, hovered: bool) -> (Option<iced::Background>, Color, Option<Color>) {
+fn exp_btn_filled_primary(
+    bg: Color,
+    pri: Color,
+    hovered: bool,
+) -> (Option<iced::Background>, Color, Option<Color>) {
     if hovered {
-        (Some(mix(bg, pri, 0.18).into()), pri, Some(pri.scale_alpha(0.6)))
+        (
+            Some(mix(bg, pri, 0.18).into()),
+            pri,
+            Some(pri.scale_alpha(0.6)),
+        )
     } else {
-        (Some(mix(bg, pri, 0.08).into()), pri, Some(pri.scale_alpha(0.4)))
+        (
+            Some(mix(bg, pri, 0.08).into()),
+            pri,
+            Some(pri.scale_alpha(0.4)),
+        )
     }
 }
 
-fn exp_btn_muted_border(bg: Color, txt: Color, hovered: bool) -> (Option<iced::Background>, Color, Option<Color>) {
+fn exp_btn_muted_border(
+    bg: Color,
+    txt: Color,
+    hovered: bool,
+) -> (Option<iced::Background>, Color, Option<Color>) {
     if hovered {
-        (Some(mix(bg, txt, 0.08).into()), txt.scale_alpha(0.85), Some(txt.scale_alpha(0.25)))
+        (
+            Some(mix(bg, txt, 0.08).into()),
+            txt.scale_alpha(0.85),
+            Some(txt.scale_alpha(0.25)),
+        )
     } else {
         (None, txt.scale_alpha(0.7), Some(txt.scale_alpha(0.15)))
     }
 }
 
-fn exp_btn_derived(p: &iced::theme::palette::Palette, hovered: bool) -> (Option<iced::Background>, Color, Option<Color>) {
+fn exp_btn_derived(
+    p: &iced::theme::palette::Palette,
+    hovered: bool,
+) -> (Option<iced::Background>, Color, Option<Color>) {
     if hovered {
         (Some(p.primary.base.color.into()), p.primary.base.text, None)
     } else {
@@ -895,11 +1033,7 @@ fn exp_btn_mixed(
     (Some(mix(bg, blend_color, t).into()), txt, None)
 }
 
-fn style_exp_semantic_btn(
-    theme: &Theme,
-    status: button::Status,
-    variant: usize,
-) -> button::Style {
+fn style_exp_semantic_btn(theme: &Theme, status: button::Status, variant: usize) -> button::Style {
     let p = theme.palette();
     let is_hovered = matches!(status, button::Status::Hovered);
 
@@ -1026,7 +1160,10 @@ fn style_email_body_container(theme: &Theme) -> container::Style {
     let (bg, border_color) = if use_white {
         (Color::WHITE, Color::BLACK.scale_alpha(0.08))
     } else {
-        (theme_bg, theme.palette().background.strongest.color.scale_alpha(0.15))
+        (
+            theme_bg,
+            theme.palette().background.strongest.color.scale_alpha(0.15),
+        )
     };
     container::Style {
         background: Some(bg.into()),
@@ -1162,7 +1299,13 @@ fn style_status_bar_container(theme: &Theme) -> container::Style {
 fn style_palette_backdrop_container(theme: &Theme) -> container::Style {
     let p = theme.palette();
     container::Style {
-        background: Some(Color { a: 0.5, ..p.background.base.color }.into()),
+        background: Some(
+            Color {
+                a: 0.5,
+                ..p.background.base.color
+            }
+            .into(),
+        ),
         ..Default::default()
     }
 }
@@ -1177,7 +1320,10 @@ fn style_palette_card_container(theme: &Theme) -> container::Style {
             color: p.background.strong.color,
         },
         shadow: iced::Shadow {
-            color: Color { a: 0.3, ..Color::BLACK },
+            color: Color {
+                a: 0.3,
+                ..Color::BLACK
+            },
             offset: iced::Vector::new(0.0, 4.0),
             blur_radius: 16.0,
         },
@@ -1196,7 +1342,15 @@ fn style_palette_selected_row_container(theme: &Theme) -> container::Style {
 
 fn style_modal_backdrop_container(_theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Color { r: 0.0, g: 0.0, b: 0.0, a: 0.5 }.into()),
+        background: Some(
+            Color {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.5,
+            }
+            .into(),
+        ),
         ..Default::default()
     }
 }
@@ -1311,7 +1465,10 @@ fn style_chord_indicator_container(theme: &Theme) -> container::Style {
             .color(p.background.strongest.color.scale_alpha(0.3))
             .width(1.0),
         shadow: iced::Shadow {
-            color: Color { a: 0.15, ..Color::BLACK },
+            color: Color {
+                a: 0.15,
+                ..Color::BLACK
+            },
             offset: iced::Vector::new(0.0, 2.0),
             blur_radius: 4.0,
         },
@@ -1440,7 +1597,9 @@ fn style_settings_slider(theme: &Theme, status: slider::Status) -> slider::Style
             border: border::rounded(SLIDER_RAIL_WIDTH / 2.0),
         },
         handle: slider::Handle {
-            shape: slider::HandleShape::Circle { radius: SLIDER_HANDLE_RADIUS },
+            shape: slider::HandleShape::Circle {
+                radius: SLIDER_HANDLE_RADIUS,
+            },
             background: color.into(),
             border_width: 0.0,
             border_color: Color::TRANSPARENT,

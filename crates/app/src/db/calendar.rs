@@ -1,7 +1,6 @@
 use rtsk::db::queries_extra::calendars::{
-    create_calendar_event_sync, delete_calendar_event_sync,
-    get_calendar_event_sync, load_calendar_events_for_view_sync,
-    update_calendar_event_sync, LocalCalendarEventParams,
+    LocalCalendarEventParams, create_calendar_event_sync, delete_calendar_event_sync,
+    get_calendar_event_sync, load_calendar_events_for_view_sync, update_calendar_event_sync,
 };
 
 use super::connection::Db;
@@ -42,10 +41,8 @@ impl Db {
         &self,
         params: LocalCalendarEventParams,
     ) -> Result<String, String> {
-        self.with_write_conn(move |conn| {
-            create_calendar_event_sync(conn, &params)
-        })
-        .await
+        self.with_write_conn(move |conn| create_calendar_event_sync(conn, &params))
+            .await
     }
 
     /// Update an existing calendar event.
@@ -54,10 +51,8 @@ impl Db {
         event_id: String,
         params: LocalCalendarEventParams,
     ) -> Result<(), String> {
-        self.with_write_conn(move |conn| {
-            update_calendar_event_sync(conn, &event_id, &params)
-        })
-        .await
+        self.with_write_conn(move |conn| update_calendar_event_sync(conn, &event_id, &params))
+            .await
     }
 
     /// Load all calendar events as TimeGridEvent for view rendering.
@@ -94,14 +89,9 @@ impl Db {
     }
 
     /// Delete a calendar event by id.
-    pub async fn delete_calendar_event(
-        &self,
-        event_id: String,
-    ) -> Result<(), String> {
-        self.with_write_conn(move |conn| {
-            delete_calendar_event_sync(conn, &event_id)
-        })
-        .await
+    pub async fn delete_calendar_event(&self, event_id: String) -> Result<(), String> {
+        self.with_write_conn(move |conn| delete_calendar_event_sync(conn, &event_id))
+            .await
     }
 
     /// Load attendees for a given event.
@@ -111,25 +101,28 @@ impl Db {
         event_id: String,
     ) -> Result<Vec<crate::ui::calendar::AttendeeEntry>, String> {
         self.with_conn(move |conn| {
-            let mut stmt = conn.prepare(
-                "SELECT email, name, rsvp_status, is_organizer \
+            let mut stmt = conn
+                .prepare(
+                    "SELECT email, name, rsvp_status, is_organizer \
                  FROM calendar_attendees \
                  WHERE account_id = ?1 AND event_id = ?2 \
                  ORDER BY is_organizer DESC, email ASC",
-            ).map_err(|e| e.to_string())?;
-            let rows = stmt.query_map(
-                rusqlite::params![account_id, event_id],
-                |row| {
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(rusqlite::params![account_id, event_id], |row| {
                     Ok(crate::ui::calendar::AttendeeEntry {
                         email: row.get("email")?,
                         name: row.get("name")?,
-                        rsvp_status: row.get::<_, Option<String>>("rsvp_status")?
+                        rsvp_status: row
+                            .get::<_, Option<String>>("rsvp_status")?
                             .unwrap_or_else(|| "needs-action".to_string()),
                         is_organizer: row.get::<_, i64>("is_organizer")? != 0,
                     })
-                },
-            ).map_err(|e| e.to_string())?;
-            rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+                })
+                .map_err(|e| e.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())
         })
         .await
     }
@@ -141,23 +134,26 @@ impl Db {
         event_id: String,
     ) -> Result<Vec<crate::ui::calendar::ReminderEntry>, String> {
         self.with_conn(move |conn| {
-            let mut stmt = conn.prepare(
-                "SELECT minutes_before, method \
+            let mut stmt = conn
+                .prepare(
+                    "SELECT minutes_before, method \
                  FROM calendar_reminders \
                  WHERE account_id = ?1 AND event_id = ?2 \
                  ORDER BY minutes_before ASC",
-            ).map_err(|e| e.to_string())?;
-            let rows = stmt.query_map(
-                rusqlite::params![account_id, event_id],
-                |row| {
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(rusqlite::params![account_id, event_id], |row| {
                     Ok(crate::ui::calendar::ReminderEntry {
                         minutes_before: row.get("minutes_before")?,
-                        method: row.get::<_, Option<String>>("method")?
+                        method: row
+                            .get::<_, Option<String>>("method")?
                             .unwrap_or_else(|| "popup".to_string()),
                     })
-                },
-            ).map_err(|e| e.to_string())?;
-            rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+                })
+                .map_err(|e| e.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())
         })
         .await
     }
@@ -167,23 +163,30 @@ impl Db {
         &self,
     ) -> Result<Vec<crate::ui::calendar::CalendarListEntry>, String> {
         self.with_conn(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, account_id, display_name, color, is_visible \
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, account_id, display_name, color, is_visible \
                  FROM calendars \
                  ORDER BY account_id, sort_order ASC, is_primary DESC, display_name ASC",
-            ).map_err(|e| e.to_string())?;
-            let rows = stmt.query_map([], |row| {
-                Ok(crate::ui::calendar::CalendarListEntry {
-                    id: row.get::<_, String>("id")?,
-                    account_id: row.get::<_, String>("account_id")?,
-                    display_name: row.get::<_, Option<String>>("display_name")?
-                        .unwrap_or_else(|| "(Unnamed)".to_string()),
-                    color: row.get::<_, Option<String>>("color")?
-                        .unwrap_or_else(|| "#3498db".to_string()),
-                    is_visible: row.get::<_, i64>("is_visible")? != 0,
+                )
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(crate::ui::calendar::CalendarListEntry {
+                        id: row.get::<_, String>("id")?,
+                        account_id: row.get::<_, String>("account_id")?,
+                        display_name: row
+                            .get::<_, Option<String>>("display_name")?
+                            .unwrap_or_else(|| "(Unnamed)".to_string()),
+                        color: row
+                            .get::<_, Option<String>>("color")?
+                            .unwrap_or_else(|| "#3498db".to_string()),
+                        is_visible: row.get::<_, i64>("is_visible")? != 0,
+                    })
                 })
-            }).map_err(|e| e.to_string())?;
-            rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+                .map_err(|e| e.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())
         })
         .await
     }
@@ -198,7 +201,8 @@ impl Db {
             conn.execute(
                 "UPDATE calendars SET is_visible = ?1, updated_at = unixepoch() WHERE id = ?2",
                 rusqlite::params![visible as i64, calendar_id],
-            ).map_err(|e| e.to_string())?;
+            )
+            .map_err(|e| e.to_string())?;
             Ok(())
         })
         .await

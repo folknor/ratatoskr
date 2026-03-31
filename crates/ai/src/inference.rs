@@ -13,9 +13,7 @@ use crate::types::{AiCompletionRequest, AiConfig, AiError, AiProvider};
 // ---------------------------------------------------------------------------
 
 /// Load the full AI settings map from the `settings` table.
-pub async fn load_ai_settings_map(
-    db: &DbState,
-) -> Result<HashMap<String, String>, AiError> {
+pub async fn load_ai_settings_map(db: &DbState) -> Result<HashMap<String, String>, AiError> {
     db.with_conn(|conn| {
         let mut stmt = conn
             .prepare(
@@ -48,10 +46,7 @@ pub async fn load_ai_settings_map(
 }
 
 /// Load the resolved AI configuration (provider, model, key, URL).
-pub async fn load_ai_config(
-    db: &DbState,
-    encryption_key: &[u8; 32],
-) -> Result<AiConfig, AiError> {
+pub async fn load_ai_config(db: &DbState, encryption_key: &[u8; 32]) -> Result<AiConfig, AiError> {
     let settings = load_ai_settings_map(db).await?;
     build_ai_config(&settings, encryption_key)
 }
@@ -69,46 +64,27 @@ fn build_ai_config(
     let secure = |key: &str| {
         settings.get(key).map(|raw| {
             if is_encrypted(raw) {
-                decrypt_value(encryption_key, raw)
-                    .unwrap_or_else(|_| raw.clone())
+                decrypt_value(encryption_key, raw).unwrap_or_else(|_| raw.clone())
             } else {
                 raw.clone()
             }
         })
     };
 
-    let provider = AiProvider::from_str_name(provider_name)
-        .unwrap_or(AiProvider::Claude);
+    let provider = AiProvider::from_str_name(provider_name).unwrap_or(AiProvider::Claude);
 
     let (model, api_key, server_url) = match provider {
-        AiProvider::OpenAi => (
-            plain("openai_model"),
-            secure("openai_api_key"),
-            None,
-        ),
-        AiProvider::Gemini => (
-            plain("gemini_model"),
-            secure("gemini_api_key"),
-            None,
-        ),
+        AiProvider::OpenAi => (plain("openai_model"), secure("openai_api_key"), None),
+        AiProvider::Gemini => (plain("gemini_model"), secure("gemini_api_key"), None),
         AiProvider::Ollama => (
             plain("ollama_model"),
             None,
             Some(
-                plain("ollama_server_url")
-                    .unwrap_or_else(|| "http://localhost:11434".to_string()),
+                plain("ollama_server_url").unwrap_or_else(|| "http://localhost:11434".to_string()),
             ),
         ),
-        AiProvider::Copilot => (
-            plain("copilot_model"),
-            secure("copilot_api_key"),
-            None,
-        ),
-        AiProvider::Claude => (
-            plain("claude_model"),
-            secure("claude_api_key"),
-            None,
-        ),
+        AiProvider::Copilot => (plain("copilot_model"), secure("copilot_api_key"), None),
+        AiProvider::Claude => (plain("claude_model"), secure("claude_api_key"), None),
     };
 
     Ok(AiConfig {
@@ -124,10 +100,7 @@ fn build_ai_config(
 // ---------------------------------------------------------------------------
 
 /// Read a single plain-text setting value.
-pub async fn read_plain_setting(
-    db: &DbState,
-    key: &str,
-) -> Result<Option<String>, AiError> {
+pub async fn read_plain_setting(db: &DbState, key: &str) -> Result<Option<String>, AiError> {
     let key_name = key.to_string();
     db.with_conn(move |conn| rtsk::db::get_setting(conn, &key_name))
         .await
@@ -135,10 +108,7 @@ pub async fn read_plain_setting(
 }
 
 /// Check whether AI is available (enabled + configured).
-pub async fn ai_is_available(
-    db: &DbState,
-    crypto: &AppCryptoState,
-) -> Result<bool, AiError> {
+pub async fn ai_is_available(db: &DbState, crypto: &AppCryptoState) -> Result<bool, AiError> {
     let enabled = read_plain_setting(db, "ai_enabled").await?;
     if enabled.as_deref() == Some("false") {
         return Ok(false);
@@ -209,18 +179,10 @@ pub async fn complete_with_config(
             .await
         }
         AiProvider::Ollama => {
-            let base = config
-                .server_url
-                .as_deref()
-                .ok_or_else(|| {
-                    AiError::NotConfigured(
-                        "Ollama server URL not configured".to_string(),
-                    )
-                })?;
-            let url = format!(
-                "{}/v1/chat/completions",
-                base.trim_end_matches('/')
-            );
+            let base = config.server_url.as_deref().ok_or_else(|| {
+                AiError::NotConfigured("Ollama server URL not configured".to_string())
+            })?;
+            let url = format!("{}/v1/chat/completions", base.trim_end_matches('/'));
             complete_openai_like(&url, config, request, None, false).await
         }
         AiProvider::Gemini => complete_gemini(config, request).await,
@@ -239,17 +201,9 @@ async fn complete_openai_like(
     require_api_key: bool,
 ) -> Result<String, AiError> {
     let api_key = if require_api_key {
-        Some(
-            config
-                .api_key
-                .as_deref()
-                .ok_or_else(|| {
-                    AiError::NotConfigured(format!(
-                        "{} API key not configured",
-                        config.provider
-                    ))
-                })?,
-        )
+        Some(config.api_key.as_deref().ok_or_else(|| {
+            AiError::NotConfigured(format!("{} API key not configured", config.provider))
+        })?)
     } else {
         config.api_key.as_deref()
     };
@@ -258,20 +212,15 @@ async fn complete_openai_like(
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     if let Some(key) = api_key {
         let value = HeaderValue::from_str(&format!("Bearer {key}"))
-            .map_err(|e| {
-                AiError::NetworkError(format!("invalid auth header: {e}"))
-            })?;
+            .map_err(|e| AiError::NetworkError(format!("invalid auth header: {e}")))?;
         headers.insert(AUTHORIZATION, value);
     }
     if let Some((name, value)) = extra_header {
         headers.insert(
             reqwest::header::HeaderName::from_bytes(name.as_bytes())
-                .map_err(|e| {
-                    AiError::NetworkError(format!("invalid header name: {e}"))
-                })?,
-            HeaderValue::from_str(value).map_err(|e| {
-                AiError::NetworkError(format!("invalid header value: {e}"))
-            })?,
+                .map_err(|e| AiError::NetworkError(format!("invalid header name: {e}")))?,
+            HeaderValue::from_str(value)
+                .map_err(|e| AiError::NetworkError(format!("invalid header value: {e}")))?,
         );
     }
 
@@ -312,24 +261,14 @@ async fn complete_claude(
     let api_key = config
         .api_key
         .as_deref()
-        .ok_or_else(|| {
-            AiError::NotConfigured(
-                "claude API key not configured".to_string(),
-            )
-        })?;
+        .ok_or_else(|| AiError::NotConfigured("claude API key not configured".to_string()))?;
     let mut headers = HeaderMap::new();
     headers.insert(
         "x-api-key",
-        HeaderValue::from_str(api_key).map_err(|e| {
-            AiError::NetworkError(format!(
-                "invalid Anthropic API key header: {e}"
-            ))
-        })?,
+        HeaderValue::from_str(api_key)
+            .map_err(|e| AiError::NetworkError(format!("invalid Anthropic API key header: {e}")))?,
     );
-    headers.insert(
-        "anthropic-version",
-        HeaderValue::from_static("2023-06-01"),
-    );
+    headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
     let body = serde_json::json!({
@@ -373,11 +312,7 @@ async fn complete_gemini(
     let api_key = config
         .api_key
         .as_deref()
-        .ok_or_else(|| {
-            AiError::NotConfigured(
-                "gemini API key not configured".to_string(),
-            )
-        })?;
+        .ok_or_else(|| AiError::NotConfigured("gemini API key not configured".to_string()))?;
     let url = format!(
         "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
         urlencoding::encode(&config.model),
@@ -457,10 +392,7 @@ impl<'a> DbConfigCompleter<'a> {
 
 #[async_trait::async_trait]
 impl crate::AiCompleter for DbConfigCompleter<'_> {
-    async fn complete(
-        &self,
-        request: &AiCompletionRequest,
-    ) -> Result<String, AiError> {
+    async fn complete(&self, request: &AiCompletionRequest) -> Result<String, AiError> {
         self::complete(self.db, self.crypto, request).await
     }
 }

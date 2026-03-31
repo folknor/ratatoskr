@@ -37,11 +37,7 @@ const JPEG_BYTES_PER_PIXEL_Q75: f64 = 0.25;
 /// Reads only headers and metadata — sub-millisecond even on very large files.
 /// The estimate is deliberately conservative (tends to over-estimate output size)
 /// so that `worth_trying: false` is a reliable signal.
-pub fn estimate(
-    input: &[u8],
-    format: Format,
-    config: &Config,
-) -> Result<Estimate, SqueezeError> {
+pub fn estimate(input: &[u8], format: Format, config: &Config) -> Result<Estimate, SqueezeError> {
     match format {
         Format::Jpeg | Format::Png | Format::WebP | Format::Gif | Format::Bmp | Format::Tiff => {
             let original_size = input.len() as u64;
@@ -57,7 +53,10 @@ pub fn estimate(
             }
             #[cfg(not(feature = "heic"))]
             {
-                Ok(unchanged(input.len() as u64, "HEIC support requires the 'heic' feature"))
+                Ok(unchanged(
+                    input.len() as u64,
+                    "HEIC support requires the 'heic' feature",
+                ))
             }
         }
         Format::Pdf => estimate_pdf_mem(input, config),
@@ -95,7 +94,10 @@ pub fn estimate_file(
             }
             #[cfg(not(feature = "heic"))]
             {
-                Ok(unchanged(original_size, "HEIC support requires the 'heic' feature"))
+                Ok(unchanged(
+                    original_size,
+                    "HEIC support requires the 'heic' feature",
+                ))
             }
         }
         Format::Pdf => estimate_pdf_file(path, original_size, config),
@@ -229,11 +231,7 @@ fn read_image_dimensions_file(path: &Path, format: Format) -> Result<(u32, u32),
 // ---------------------------------------------------------------------------
 
 /// Shared logic: walk parsed PDF objects, estimate image compression.
-fn estimate_pdf_doc(
-    doc: &lopdf::Document,
-    original_size: u64,
-    config: &Config,
-) -> Estimate {
+fn estimate_pdf_doc(doc: &lopdf::Document, original_size: u64, config: &Config) -> Estimate {
     let mut total_image_bytes: u64 = 0;
     let mut estimated_compressed_image_bytes: u64 = 0;
 
@@ -319,8 +317,8 @@ fn estimate_pdf_doc(
 }
 
 fn estimate_pdf_mem(input: &[u8], config: &Config) -> Result<Estimate, SqueezeError> {
-    let doc = lopdf::Document::load_mem(input)
-        .map_err(|e| SqueezeError::PdfParse(e.to_string()))?;
+    let doc =
+        lopdf::Document::load_mem(input).map_err(|e| SqueezeError::PdfParse(e.to_string()))?;
     Ok(estimate_pdf_doc(&doc, input.len() as u64, config))
 }
 
@@ -329,8 +327,7 @@ fn estimate_pdf_file(
     original_size: u64,
     config: &Config,
 ) -> Result<Estimate, SqueezeError> {
-    let doc = lopdf::Document::load(path)
-        .map_err(|e| SqueezeError::PdfParse(e.to_string()))?;
+    let doc = lopdf::Document::load(path).map_err(|e| SqueezeError::PdfParse(e.to_string()))?;
     Ok(estimate_pdf_doc(&doc, original_size, config))
 }
 
@@ -350,8 +347,8 @@ fn estimate_archive_reader<R: Read + Seek>(
     original_size: u64,
     _config: &Config,
 ) -> Result<Estimate, SqueezeError> {
-    let mut archive = zip::ZipArchive::new(reader)
-        .map_err(|e| SqueezeError::ArchiveRead(e.to_string()))?;
+    let mut archive =
+        zip::ZipArchive::new(reader).map_err(|e| SqueezeError::ArchiveRead(e.to_string()))?;
 
     let mut image_bytes: u64 = 0;
     let mut estimated_image_output: u64 = 0;
@@ -466,9 +463,7 @@ fn estimate_svg_reader<R: Read + Seek>(
     let mut carry = 0usize; // bytes carried over from previous chunk
 
     loop {
-        let n = reader
-            .read(&mut buf[carry..])
-            .map_err(SqueezeError::Io)?;
+        let n = reader.read(&mut buf[carry..]).map_err(SqueezeError::Io)?;
         if n == 0 {
             break;
         }
@@ -534,7 +529,10 @@ const MAX_QUOTE_SEARCH_BYTES: u64 = 100 * 1024 * 1024;
 ///
 /// When the quote is found via read-ahead, seeks the reader back so bytes
 /// after the quote aren't lost to the caller's subsequent reads.
-fn find_quote_distance<R: Read + Seek>(local_buf: &[u8], reader: &mut R) -> Result<u64, SqueezeError> {
+fn find_quote_distance<R: Read + Seek>(
+    local_buf: &[u8],
+    reader: &mut R,
+) -> Result<u64, SqueezeError> {
     // Check the local buffer first.
     for (i, &b) in local_buf.iter().enumerate() {
         if b == b'"' || b == b'\'' {
@@ -638,8 +636,7 @@ mod tests {
 
         let config = Config::email_default();
         let est_mem = estimate(&data, Format::Jpeg, &config).expect("mem estimate failed");
-        let est_file =
-            estimate_file(&path, Format::Jpeg, &config).expect("file estimate failed");
+        let est_file = estimate_file(&path, Format::Jpeg, &config).expect("file estimate failed");
 
         let _ = fs::remove_file(&path);
 

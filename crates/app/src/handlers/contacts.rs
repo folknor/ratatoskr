@@ -3,8 +3,8 @@ use std::sync::Arc;
 use iced::Task;
 
 use crate::db::{ContactEntry, Db};
-use crate::pop_out::compose::{ComposeMessage, ComposeState};
 use crate::pop_out::PopOutMessage;
+use crate::pop_out::compose::{ComposeMessage, ComposeState};
 use crate::ui::settings::SettingsMessage;
 use crate::{App, Message};
 
@@ -57,8 +57,7 @@ impl App {
 
         Task::perform(
             async move {
-                let outcome =
-                    rtsk::actions::contacts::save_contact(&ctx, input).await;
+                let outcome = rtsk::actions::contacts::save_contact(&ctx, input).await;
                 // Reload contacts regardless of outcome (local save succeeded
                 // for Success and LocalOnly, failed for Failed)
                 let contacts = db.get_contacts_for_settings(filter).await;
@@ -95,8 +94,7 @@ impl App {
 
         Task::perform(
             async move {
-                let outcome =
-                    rtsk::actions::contacts::delete_contact(&ctx, &id).await;
+                let outcome = rtsk::actions::contacts::delete_contact(&ctx, &id).await;
                 match outcome {
                     rtsk::actions::ActionOutcome::Failed { .. } => {
                         // Provider-first delete failed (e.g. JMAP) — contact not
@@ -115,7 +113,9 @@ impl App {
                 match outcome {
                     ActionOutcome::Failed { error } => {
                         log::error!("Contact delete failed: {error}");
-                        Message::Settings(SettingsMessage::ContactDeleted(Err(error.user_message())))
+                        Message::Settings(SettingsMessage::ContactDeleted(
+                            Err(error.user_message()),
+                        ))
                     }
                     ActionOutcome::LocalOnly { reason, .. } => {
                         // Local delete succeeded — reload list so the contact disappears.
@@ -173,7 +173,9 @@ impl App {
         let gid = group_id.clone();
         Task::perform(
             async move { db.get_group_member_emails(group_id).await },
-            move |result| Message::Settings(SettingsMessage::GroupMembersLoaded(gid.clone(), result)),
+            move |result| {
+                Message::Settings(SettingsMessage::GroupMembersLoaded(gid.clone(), result))
+            },
         )
     }
 
@@ -185,9 +187,7 @@ impl App {
     ) -> Task<Message> {
         let db = Arc::clone(&self.db);
         Task::perform(
-            async move {
-                execute_contact_import(&db, contacts, account_id, update_existing).await
-            },
+            async move { execute_contact_import(&db, contacts, account_id, update_existing).await },
             |result| {
                 let mapped = result.map(|r| crate::ui::settings::ImportResult {
                     imported: r.0,
@@ -244,12 +244,7 @@ async fn execute_contact_import(
 
         if let Some(existing_id) = exists {
             if update_existing {
-                let entry = build_contact_entry(
-                    existing_id,
-                    &email,
-                    contact,
-                    &account_id,
-                );
+                let entry = build_contact_entry(existing_id, &email, contact, &account_id);
                 db.save_contact(entry).await?;
                 updated += 1;
             } else {
@@ -307,9 +302,7 @@ async fn execute_contact_import(
                     )
                     .map_err(|e| e.to_string())?;
                 let found = stmt
-                    .query_row(rusqlite::params![name], |row| {
-                        row.get::<_, String>(0)
-                    })
+                    .query_row(rusqlite::params![name], |row| row.get::<_, String>(0))
                     .ok();
                 Ok(found)
             })
@@ -337,7 +330,13 @@ async fn execute_contact_import(
         db.save_group(entry, member_list).await?;
     }
 
-    Ok((imported, skipped_no_email, skipped_duplicate, updated, groups_created))
+    Ok((
+        imported,
+        skipped_no_email,
+        skipped_duplicate,
+        updated,
+        groups_created,
+    ))
 }
 
 fn build_contact_entry(
@@ -393,9 +392,7 @@ pub fn dispatch_autocomplete_search(
         move |results| {
             Message::PopOut(
                 window_id,
-                PopOutMessage::Compose(
-                    ComposeMessage::AutocompleteResults(generation, results),
-                ),
+                PopOutMessage::Compose(ComposeMessage::AutocompleteResults(generation, results)),
             )
         },
     )
@@ -405,12 +402,12 @@ pub fn dispatch_autocomplete_search(
 pub fn should_trigger_autocomplete(msg: &ComposeMessage) -> bool {
     matches!(
         msg,
-        ComposeMessage::ToTokenInput(
-            crate::ui::token_input::TokenInputMessage::TextChanged(_)
-        ) | ComposeMessage::CcTokenInput(
-            crate::ui::token_input::TokenInputMessage::TextChanged(_)
-        ) | ComposeMessage::BccTokenInput(
-            crate::ui::token_input::TokenInputMessage::TextChanged(_)
-        )
+        ComposeMessage::ToTokenInput(crate::ui::token_input::TokenInputMessage::TextChanged(_))
+            | ComposeMessage::CcTokenInput(crate::ui::token_input::TokenInputMessage::TextChanged(
+                _
+            ))
+            | ComposeMessage::BccTokenInput(
+                crate::ui::token_input::TokenInputMessage::TextChanged(_)
+            )
     )
 }

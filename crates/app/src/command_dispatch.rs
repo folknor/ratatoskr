@@ -23,11 +23,22 @@ pub enum NavigationTarget {
     Newsletters,
     Tasks,
     Attachments,
-    SmartFolder { id: String },
-    Label { label_id: String, account_id: String },
-    Search { query: String },
-    PinnedSearch { id: i64 },
-    Chat { email: String },
+    SmartFolder {
+        id: String,
+    },
+    Label {
+        label_id: String,
+        account_id: String,
+    },
+    Search {
+        query: String,
+    },
+    PinnedSearch {
+        id: i64,
+    },
+    Chat {
+        email: String,
+    },
 }
 
 impl NavigationTarget {
@@ -148,25 +159,29 @@ pub fn build_context(app: &App) -> CommandContext {
 /// Returns `(may_remove_items, may_set_seen, may_set_keywords, may_submit)`.
 /// All `None` when the folder has no rights data (provider doesn't report ACL,
 /// or we're in a universal/smart folder view).
-fn current_mailbox_rights(
-    app: &App,
-) -> (Option<bool>, Option<bool>, Option<bool>, Option<bool>) {
-    let rights = app
-        .sidebar
-        .selected_label
-        .as_deref()
-        .and_then(|label_id| {
-            app.sidebar.nav_state.as_ref()?.folders.iter().find_map(|f| {
+fn current_mailbox_rights(app: &App) -> (Option<bool>, Option<bool>, Option<bool>, Option<bool>) {
+    let rights = app.sidebar.selected_label.as_deref().and_then(|label_id| {
+        app.sidebar
+            .nav_state
+            .as_ref()?
+            .folders
+            .iter()
+            .find_map(|f| {
                 if f.id == label_id {
                     f.rights.as_ref()
                 } else {
                     None
                 }
             })
-        });
+    });
 
     match rights {
-        Some(r) => (r.may_remove_items, r.may_set_seen, r.may_set_keywords, r.may_submit),
+        Some(r) => (
+            r.may_remove_items,
+            r.may_set_seen,
+            r.may_set_keywords,
+            r.may_submit,
+        ),
         None => (None, None, None, None),
     }
 }
@@ -224,10 +239,7 @@ fn current_view_and_label(app: &App) -> (ViewType, Option<String>) {
 }
 
 /// Map a `NavigationTarget` to `ViewType` and optional label ID.
-fn view_type_from_target(
-    _app: &App,
-    target: &NavigationTarget,
-) -> (ViewType, Option<String>) {
+fn view_type_from_target(_app: &App, target: &NavigationTarget) -> (ViewType, Option<String>) {
     match target {
         NavigationTarget::Inbox => (ViewType::Inbox, None),
         NavigationTarget::Starred => (ViewType::Starred, None),
@@ -244,12 +256,8 @@ fn view_type_from_target(
         | NavigationTarget::Newsletters => (ViewType::Category, None),
         NavigationTarget::Tasks => (ViewType::Tasks, None),
         NavigationTarget::Attachments => (ViewType::Attachments, None),
-        NavigationTarget::SmartFolder { id } => {
-            (ViewType::SmartFolder, Some(id.clone()))
-        }
-        NavigationTarget::Label { label_id, .. } => {
-            (ViewType::Label, Some(label_id.clone()))
-        }
+        NavigationTarget::SmartFolder { id } => (ViewType::SmartFolder, Some(id.clone())),
+        NavigationTarget::Label { label_id, .. } => (ViewType::Label, Some(label_id.clone())),
         NavigationTarget::Search { .. } => (ViewType::Search, None),
         NavigationTarget::PinnedSearch { .. } => (ViewType::PinnedSearch, None),
         NavigationTarget::Chat { .. } => (ViewType::Chat, None),
@@ -296,9 +304,7 @@ fn view_type_from_label(app: &App, label_id: &str) -> (ViewType, Option<String>)
 ///
 /// When scoped to a single account, also resolves `ProviderKind` from
 /// the account's `provider` field so availability predicates work.
-fn active_account_info(
-    app: &App,
-) -> (Option<String>, Option<cmdk::ProviderKind>) {
+fn active_account_info(app: &App) -> (Option<String>, Option<cmdk::ProviderKind>) {
     // 1. Derive account from the current view scope.
     let scope_account: Option<&str> = match &app.sidebar.selected_scope {
         ViewScope::Account(id) => Some(id.as_str()),
@@ -332,9 +338,7 @@ fn active_account_info(
 }
 
 /// Map a provider string from the DB to a `ProviderKind` enum.
-fn provider_str_to_kind(
-    provider: &str,
-) -> Option<cmdk::ProviderKind> {
+fn provider_str_to_kind(provider: &str) -> Option<cmdk::ProviderKind> {
     match provider {
         "gmail_api" => Some(cmdk::ProviderKind::Gmail),
         "jmap" => Some(cmdk::ProviderKind::Jmap),
@@ -369,21 +373,20 @@ fn selected_thread_state(app: &App) -> ThreadState {
         Some(t) => {
             // Derive trash/spam/draft from navigation target if available,
             // otherwise fall back to sidebar selected_label.
-            let (in_trash, in_spam, is_draft) =
-                if let Some(target) = &app.navigation_target {
-                    (
-                        Some(matches!(target, NavigationTarget::Trash)),
-                        Some(matches!(target, NavigationTarget::Spam)),
-                        Some(matches!(target, NavigationTarget::Drafts)),
-                    )
-                } else {
-                    let current_label = app.sidebar.selected_label.as_deref();
-                    (
-                        Some(current_label == Some("TRASH")),
-                        Some(current_label == Some("SPAM")),
-                        Some(current_label == Some("DRAFT")),
-                    )
-                };
+            let (in_trash, in_spam, is_draft) = if let Some(target) = &app.navigation_target {
+                (
+                    Some(matches!(target, NavigationTarget::Trash)),
+                    Some(matches!(target, NavigationTarget::Spam)),
+                    Some(matches!(target, NavigationTarget::Drafts)),
+                )
+            } else {
+                let current_label = app.sidebar.selected_label.as_deref();
+                (
+                    Some(current_label == Some("TRASH")),
+                    Some(current_label == Some("SPAM")),
+                    Some(current_label == Some("DRAFT")),
+                )
+            };
 
             ThreadState {
                 is_read: Some(t.is_read),
@@ -449,7 +452,9 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
         // Email actions
         CommandId::EmailArchive => Some(Message::EmailAction(MailActionIntent::Archive)),
         CommandId::EmailTrash => Some(Message::EmailAction(MailActionIntent::Trash)),
-        CommandId::EmailPermanentDelete => Some(Message::EmailAction(MailActionIntent::PermanentDelete)),
+        CommandId::EmailPermanentDelete => {
+            Some(Message::EmailAction(MailActionIntent::PermanentDelete))
+        }
         CommandId::EmailSpam => Some(Message::EmailAction(MailActionIntent::ToggleSpam)),
         CommandId::EmailMarkRead => Some(Message::EmailAction(MailActionIntent::ToggleRead)),
         CommandId::EmailStar => Some(Message::EmailAction(MailActionIntent::ToggleStar)),
@@ -489,21 +494,39 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
         CommandId::ViewSetThemeDark => Some(Message::SetTheme("Dark".to_string())),
         CommandId::ViewSetThemeSystem => Some(Message::SetTheme("System".to_string())),
         CommandId::ViewToggleTaskPanel => Some(Message::TaskAction(TaskAction::TogglePanel)),
-        CommandId::ViewReadingPaneRight => Some(Message::SetReadingPanePosition(ReadingPanePosition::Right)),
-        CommandId::ViewReadingPaneBottom => Some(Message::SetReadingPanePosition(ReadingPanePosition::Bottom)),
-        CommandId::ViewReadingPaneHidden => Some(Message::SetReadingPanePosition(ReadingPanePosition::Hidden)),
+        CommandId::ViewReadingPaneRight => {
+            Some(Message::SetReadingPanePosition(ReadingPanePosition::Right))
+        }
+        CommandId::ViewReadingPaneBottom => {
+            Some(Message::SetReadingPanePosition(ReadingPanePosition::Bottom))
+        }
+        CommandId::ViewReadingPaneHidden => {
+            Some(Message::SetReadingPanePosition(ReadingPanePosition::Hidden))
+        }
 
         // Calendar
         CommandId::CalendarToggle => Some(Message::ToggleAppMode),
         CommandId::SwitchToCalendar => Some(Message::SetAppMode(crate::AppMode::Calendar)),
         CommandId::SwitchToMail => Some(Message::SetAppMode(crate::AppMode::Mail)),
-        CommandId::CalendarViewDay => Some(Message::SetCalendarView(crate::ui::calendar::CalendarView::Day)),
-        CommandId::CalendarViewWorkWeek => Some(Message::SetCalendarView(crate::ui::calendar::CalendarView::WorkWeek)),
-        CommandId::CalendarViewWeek => Some(Message::SetCalendarView(crate::ui::calendar::CalendarView::Week)),
-        CommandId::CalendarViewMonth => Some(Message::SetCalendarView(crate::ui::calendar::CalendarView::Month)),
+        CommandId::CalendarViewDay => Some(Message::SetCalendarView(
+            crate::ui::calendar::CalendarView::Day,
+        )),
+        CommandId::CalendarViewWorkWeek => Some(Message::SetCalendarView(
+            crate::ui::calendar::CalendarView::WorkWeek,
+        )),
+        CommandId::CalendarViewWeek => Some(Message::SetCalendarView(
+            crate::ui::calendar::CalendarView::Week,
+        )),
+        CommandId::CalendarViewMonth => Some(Message::SetCalendarView(
+            crate::ui::calendar::CalendarView::Month,
+        )),
         CommandId::CalendarToday => Some(Message::CalendarToday),
-        CommandId::CalendarCreateEvent => Some(Message::Calendar(Box::new(crate::ui::calendar::CalendarMessage::CreateEvent))),
-        CommandId::CalendarPopOut => Some(Message::Calendar(Box::new(crate::ui::calendar::CalendarMessage::PopOutCalendar))),
+        CommandId::CalendarCreateEvent => Some(Message::Calendar(Box::new(
+            crate::ui::calendar::CalendarMessage::CreateEvent,
+        ))),
+        CommandId::CalendarPopOut => Some(Message::Calendar(Box::new(
+            crate::ui::calendar::CalendarMessage::PopOutCalendar,
+        ))),
 
         // App
         CommandId::AppSearch => Some(Message::FocusSearch),
@@ -511,9 +534,7 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
         CommandId::AppHelp => Some(Message::ShowHelp),
         CommandId::AppSyncFolder => Some(Message::SyncCurrentFolder),
         CommandId::AppOpenPalette => Some(Message::Palette(
-            crate::ui::palette::PaletteMessage::Open(
-                cmdk::CommandContext::default(),
-            ),
+            crate::ui::palette::PaletteMessage::Open(cmdk::CommandContext::default()),
         )),
 
         // Undo
@@ -539,9 +560,7 @@ fn dispatch_nav_prev(app: &App) -> Option<Message> {
     let current = app.thread_list.selected_thread?;
     if current > 0 {
         Some(Message::ThreadList(
-            crate::ui::thread_list::ThreadListMessage::SelectThread(
-                current.saturating_sub(1),
-            ),
+            crate::ui::thread_list::ThreadListMessage::SelectThread(current.saturating_sub(1)),
         ))
     } else {
         None
@@ -563,26 +582,19 @@ fn dispatch_nav_open(app: &App) -> Option<Message> {
 }
 
 /// Map a parameterized command + resolved args to an iced Message.
-pub fn dispatch_parameterized(
-    id: CommandId,
-    args: CommandArgs,
-) -> Option<Message> {
+pub fn dispatch_parameterized(id: CommandId, args: CommandArgs) -> Option<Message> {
     match (id, args) {
-        (
-            CommandId::EmailMoveToFolder,
-            CommandArgs::MoveToFolder { folder_id },
-        ) => Some(Message::EmailAction(MailActionIntent::MoveToFolder {
-            folder_id: rtsk::actions::FolderId::from(folder_id),
-        })),
+        (CommandId::EmailMoveToFolder, CommandArgs::MoveToFolder { folder_id }) => {
+            Some(Message::EmailAction(MailActionIntent::MoveToFolder {
+                folder_id: rtsk::actions::FolderId::from(folder_id),
+            }))
+        }
         (CommandId::EmailAddLabel, CommandArgs::AddLabel { label_id }) => {
             Some(Message::EmailAction(MailActionIntent::AddLabel {
                 label_id: rtsk::actions::TagId::from(label_id),
             }))
         }
-        (
-            CommandId::EmailRemoveLabel,
-            CommandArgs::RemoveLabel { label_id },
-        ) => {
+        (CommandId::EmailRemoveLabel, CommandArgs::RemoveLabel { label_id }) => {
             Some(Message::EmailAction(MailActionIntent::RemoveLabel {
                 label_id: rtsk::actions::TagId::from(label_id),
             }))
@@ -600,10 +612,9 @@ pub fn dispatch_parameterized(
             label_id,
             account_id,
         })),
-        (
-            CommandId::SmartFolderSave,
-            CommandArgs::SmartFolderSave { name },
-        ) => Some(Message::SaveAsSmartFolder(name)),
+        (CommandId::SmartFolderSave, CommandArgs::SmartFolderSave { name }) => {
+            Some(Message::SaveAsSmartFolder(name))
+        }
         (other_id, other_args) => {
             log::warn!("unhandled parameterized dispatch: {other_id:?} with {other_args:?}");
             None

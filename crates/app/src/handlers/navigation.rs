@@ -10,10 +10,7 @@ impl App {
     /// Updates sidebar selection, clears search/pinned search context,
     /// sets the navigation target for view type derivation, and loads
     /// threads for the new view.
-    pub(crate) fn handle_navigate_to(
-        &mut self,
-        target: NavigationTarget,
-    ) -> Task<Message> {
+    pub(crate) fn handle_navigate_to(&mut self, target: NavigationTarget) -> Task<Message> {
         // Chat targets have their own entry path
         if let NavigationTarget::Chat { ref email } = target {
             return self.enter_chat_view(email.clone());

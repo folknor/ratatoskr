@@ -80,9 +80,7 @@ pub async fn create_upload_session(
 ) -> Result<UploadSession, String> {
     log::debug!("[OneDrive] Creating upload session for '{filename}'");
     let encoded_path = encode_onedrive_path(filename);
-    let path = format!(
-        "/me/drive/root:/Ratatoskr Attachments/{encoded_path}:/createUploadSession"
-    );
+    let path = format!("/me/drive/root:/Ratatoskr Attachments/{encoded_path}:/createUploadSession");
 
     let body = CreateUploadSessionRequest {
         item: DriveItemUploadable {
@@ -254,9 +252,6 @@ mod tests {
     fn encode_special_chars() {
         assert_eq!(encode_onedrive_path("file.txt"), "file.txt");
         assert_eq!(encode_onedrive_path("file #1.txt"), "file %231.txt");
-        assert_eq!(
-            encode_onedrive_path("100% done?.txt"),
-            "100%25 done%3F.txt"
-        );
+        assert_eq!(encode_onedrive_path("100% done?.txt"), "100%25 done%3F.txt");
     }
 }

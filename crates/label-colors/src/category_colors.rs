@@ -182,7 +182,10 @@ mod tests {
     #[test]
     fn nearest_pure_black_maps_to_black_preset() {
         let result = nearest_exchange_preset("#000000").expect("valid hex");
-        assert_eq!(result, "preset14", "black should be nearest to Black preset");
+        assert_eq!(
+            result, "preset14",
+            "black should be nearest to Black preset"
+        );
     }
 
     #[test]

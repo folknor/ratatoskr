@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
+use cmdk::{
+    CommandArgs, CommandContext, CommandId, CommandInputResolver, CommandMatch, CommandRegistry,
+    InputMode, OptionItem, OptionMatch,
+};
 use iced::widget::{column, container, mouse_area, row, scrollable, text, text_input};
 use iced::{Element, Length, Task};
-use cmdk::{
-    CommandArgs, CommandContext, CommandId, CommandInputResolver, CommandMatch,
-    CommandRegistry, InputMode, OptionItem, OptionMatch,
-};
 
 use super::layout::*;
 use super::theme::{ContainerClass, TextClass};
@@ -38,7 +38,11 @@ pub enum PaletteMessage {
     ClickOption(usize),
     /// Stage 2: option list loaded from resolver.
     /// The token is a generation guard to discard stale results.
-    OptionsLoaded(rtsk::generation::GenerationToken<rtsk::generation::PaletteOptions>, CommandId, Result<Vec<OptionItem>, String>),
+    OptionsLoaded(
+        rtsk::generation::GenerationToken<rtsk::generation::PaletteOptions>,
+        CommandId,
+        Result<Vec<OptionItem>, String>,
+    ),
 }
 
 /// Events the palette emits upward to the App.
@@ -148,10 +152,7 @@ impl Palette {
         matches!(self.stage, PaletteStage::OptionPick)
     }
 
-    fn confirm(
-        &mut self,
-        ctx: &CommandContext,
-    ) -> (Task<PaletteMessage>, Option<PaletteEvent>) {
+    fn confirm(&mut self, ctx: &CommandContext) -> (Task<PaletteMessage>, Option<PaletteEvent>) {
         let Some(result) = self.results.get(self.selected_index) else {
             return (Task::none(), None);
         };
@@ -178,10 +179,7 @@ impl Palette {
                     .unwrap_or("option");
 
                 // DateTime commands use preset options instead of a full picker
-                if matches!(
-                    schema.param_at(0),
-                    Some(cmdk::ParamDef::DateTime { .. })
-                ) {
+                if matches!(schema.param_at(0), Some(cmdk::ParamDef::DateTime { .. })) {
                     let task = self.enter_snooze_stage2(id, param_label);
                     return (task, None);
                 }
@@ -209,27 +207,20 @@ impl Palette {
 
         let resolver = Arc::clone(&self.resolver);
         let ctx = ctx.clone();
-        let focus_task = iced::widget::operation::focus::<PaletteMessage>(
-            "palette-input".to_string(),
-        );
+        let focus_task =
+            iced::widget::operation::focus::<PaletteMessage>("palette-input".to_string());
         let load_task = Task::perform(
             async move {
-                tokio::task::spawn_blocking(move || {
-                    resolver.get_options(id, 0, &[], &ctx)
-                })
-                .await
-                .unwrap_or_else(|e| Err(format!("spawn_blocking: {e}")))
+                tokio::task::spawn_blocking(move || resolver.get_options(id, 0, &[], &ctx))
+                    .await
+                    .unwrap_or_else(|e| Err(format!("spawn_blocking: {e}")))
             },
             move |result| PaletteMessage::OptionsLoaded(generation, id, result),
         );
         (Task::batch([focus_task, load_task]), None)
     }
 
-    fn enter_snooze_stage2(
-        &mut self,
-        id: CommandId,
-        param_label: &str,
-    ) -> Task<PaletteMessage> {
+    fn enter_snooze_stage2(&mut self, id: CommandId, param_label: &str) -> Task<PaletteMessage> {
         self.stage = PaletteStage::OptionPick;
         self.query.clear();
         self.selected_index = 0;
@@ -241,9 +232,7 @@ impl Palette {
         self.option_matches = cmdk::search_options(&items, "");
         self.option_items = items;
 
-        iced::widget::operation::focus::<PaletteMessage>(
-            "palette-input".to_string(),
-        )
+        iced::widget::operation::focus::<PaletteMessage>("palette-input".to_string())
     }
 
     fn confirm_option(&mut self) -> (Task<PaletteMessage>, Option<PaletteEvent>) {
@@ -288,8 +277,7 @@ impl Palette {
 
         match result {
             Ok(items) => {
-                self.option_matches =
-                    cmdk::search_options(&items, &self.query);
+                self.option_matches = cmdk::search_options(&items, &self.query);
                 self.option_items = items;
                 self.selected_index = 0;
                 (Task::none(), None)
@@ -307,10 +295,7 @@ impl Component for Palette {
     type Message = PaletteMessage;
     type Event = PaletteEvent;
 
-    fn update(
-        &mut self,
-        message: PaletteMessage,
-    ) -> (Task<PaletteMessage>, Option<PaletteEvent>) {
+    fn update(&mut self, message: PaletteMessage) -> (Task<PaletteMessage>, Option<PaletteEvent>) {
         match message {
             PaletteMessage::Open(ctx) => {
                 let results = self.registry.query(&ctx, "");
@@ -319,9 +304,8 @@ impl Component for Palette {
                 self.results = results;
                 self.selected_index = 0;
                 self.stage = PaletteStage::CommandSearch;
-                let task = iced::widget::operation::focus::<PaletteMessage>(
-                    "palette-input".to_string(),
-                );
+                let task =
+                    iced::widget::operation::focus::<PaletteMessage>("palette-input".to_string());
                 (task, None)
             }
             PaletteMessage::Close(ctx) => {
@@ -340,10 +324,7 @@ impl Component for Palette {
             PaletteMessage::QueryChanged(query, ctx) => {
                 if self.is_option_pick() {
                     // Stage 2: filter options with fuzzy search
-                    self.option_matches = cmdk::search_options(
-                        &self.option_items,
-                        &query,
-                    );
+                    self.option_matches = cmdk::search_options(&self.option_items, &query);
                     self.query = query;
                     self.selected_index = 0;
                 } else {
@@ -427,17 +408,13 @@ fn build_command_search_card(state: &Palette) -> Element<'_, PaletteMessage> {
         .padding(PAD_INPUT)
         .size(TEXT_LG);
 
-    let results_column = build_results_column(
-        &state.results,
-        state.selected_index,
-    );
+    let results_column = build_results_column(&state.results, state.selected_index);
 
     let results_scrollable = scrollable(results_column)
         .id("palette-results")
         .height(Length::Fill);
 
-    let card_content = column![input, results_scrollable]
-        .spacing(SPACE_XXS);
+    let card_content = column![input, results_scrollable].spacing(SPACE_XXS);
 
     container(card_content)
         .width(PALETTE_WIDTH)
@@ -461,17 +438,13 @@ fn build_option_pick_card(state: &Palette) -> Element<'_, PaletteMessage> {
         .padding(PAD_INPUT)
         .size(TEXT_LG);
 
-    let options_column = build_options_column(
-        &state.option_matches,
-        state.selected_index,
-    );
+    let options_column = build_options_column(&state.option_matches, state.selected_index);
 
     let options_scrollable = scrollable(options_column)
         .id("palette-results")
         .height(Length::Fill);
 
-    let card_content = column![input, options_scrollable]
-        .spacing(SPACE_XXS);
+    let card_content = column![input, options_scrollable].spacing(SPACE_XXS);
 
     container(card_content)
         .width(PALETTE_WIDTH)
@@ -531,13 +504,9 @@ fn option_result_row<'a>(
     };
 
     // Option label (fills remaining space)
-    let label = container(
-        text(&option.item.label)
-            .size(TEXT_MD)
-            .style(label_style),
-    )
-    .width(Length::Fill)
-    .align_y(iced::Alignment::Center);
+    let label = container(text(&option.item.label).size(TEXT_MD).style(label_style))
+        .width(Length::Fill)
+        .align_y(iced::Alignment::Center);
 
     // Path breadcrumb (right-aligned, dimmed)
     let path_display = format_option_path(&option.item.path);
@@ -553,8 +522,7 @@ fn option_result_row<'a>(
         .into()
     };
 
-    let row_content = row![label, path_element]
-        .align_y(iced::Alignment::Center);
+    let row_content = row![label, path_element].align_y(iced::Alignment::Center);
 
     let row_container = if is_selected {
         container(row_content)
@@ -567,9 +535,7 @@ fn option_result_row<'a>(
             .padding([0.0, SPACE_XS])
     };
 
-    mouse_area(row_container)
-        .on_press(on_click)
-        .into()
+    mouse_area(row_container).on_press(on_click).into()
 }
 
 /// Format an option's path segments as a breadcrumb string.
@@ -602,13 +568,9 @@ fn palette_result_row<'a>(
     };
 
     // Category badge (left, fixed width)
-    let category = container(
-        text(category_str)
-            .size(TEXT_SM)
-            .style(text_style),
-    )
-    .width(PALETTE_CATEGORY_WIDTH)
-    .align_y(iced::Alignment::Center);
+    let category = container(text(category_str).size(TEXT_SM).style(text_style))
+        .width(PALETTE_CATEGORY_WIDTH)
+        .align_y(iced::Alignment::Center);
 
     // Command label (center, fills)
     let label_text = if matches!(input_mode, InputMode::Parameterized { .. }) {
@@ -616,36 +578,25 @@ fn palette_result_row<'a>(
     } else {
         label_str.to_string()
     };
-    let label = container(
-        text(label_text)
-            .size(TEXT_MD)
-            .style(label_style),
-    )
-    .width(Length::Fill)
-    .align_y(iced::Alignment::Center);
+    let label = container(text(label_text).size(TEXT_MD).style(label_style))
+        .width(Length::Fill)
+        .align_y(iced::Alignment::Center);
 
     // Keybinding hint (right, fixed width, pill style)
     let keybinding: Element<'_, PaletteMessage> = match keybinding_str {
         Some(kb) => container(
-            container(
-                text(kb)
-                    .size(TEXT_XS)
-                    .style(TextClass::Tertiary.style()),
-            )
-            .padding(PAD_BADGE)
-            .style(ContainerClass::KeyBadge.style()),
+            container(text(kb).size(TEXT_XS).style(TextClass::Tertiary.style()))
+                .padding(PAD_BADGE)
+                .style(ContainerClass::KeyBadge.style()),
         )
         .width(PALETTE_KEYBINDING_WIDTH)
         .align_x(iced::Alignment::End)
         .align_y(iced::Alignment::Center)
         .into(),
-        None => container("")
-            .width(PALETTE_KEYBINDING_WIDTH)
-            .into(),
+        None => container("").width(PALETTE_KEYBINDING_WIDTH).into(),
     };
 
-    let row_content = row![category, label, keybinding]
-        .align_y(iced::Alignment::Center);
+    let row_content = row![category, label, keybinding].align_y(iced::Alignment::Center);
 
     let row_container = if is_selected {
         container(row_content)
@@ -658,9 +609,7 @@ fn palette_result_row<'a>(
             .padding([0.0, SPACE_XS])
     };
 
-    mouse_area(row_container)
-        .on_press(on_click)
-        .into()
+    mouse_area(row_container).on_press(on_click).into()
 }
 
 /// Keep the selected item visible in the palette results scrollable.
@@ -676,9 +625,7 @@ fn scroll_to_selected(_selected_index: usize, _total_items: usize) -> Task<()> {
 ///
 /// Shows the first key of a two-key sequence (e.g., "g...") as a small
 /// floating badge. Returns `None` if there is no pending chord.
-pub fn chord_indicator<'a, M: 'a>(
-    chord_display: &str,
-) -> Element<'a, M> {
+pub fn chord_indicator<'a, M: 'a>(chord_display: &str) -> Element<'a, M> {
     let badge = container(
         text(format!("{chord_display}..."))
             .size(TEXT_SM)

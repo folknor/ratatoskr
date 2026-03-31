@@ -39,7 +39,8 @@ impl CompressResult {
             return 0.0;
         }
         #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-        let pct = ((1.0 - (self.compressed_size as f64 / self.original_size as f64)) * 100.0) as f32;
+        let pct =
+            ((1.0 - (self.compressed_size as f64 / self.original_size as f64)) * 100.0) as f32;
         pct
     }
 

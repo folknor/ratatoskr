@@ -4,8 +4,7 @@ use crate::parsing;
 use crate::prompts;
 use crate::types::{
     AiCompleter, AiCompletionRequest, AiError, AiMessageInput, AiSearchResult, AutoDraftMode,
-    ExtractedTask, TextTransformType, ThreadCategory, ThreadForCategorization,
-    WritingStyleProfile,
+    ExtractedTask, TextTransformType, ThreadCategory, ThreadForCategorization, WritingStyleProfile,
 };
 use rtsk::db::DbState;
 
@@ -127,8 +126,7 @@ pub async fn generate_smart_replies(
 
     let replies = parsing::parse_smart_replies(&response);
 
-    let json =
-        serde_json::to_string(&replies).map_err(|e| AiError::ParseError(e.to_string()))?;
+    let json = serde_json::to_string(&replies).map_err(|e| AiError::ParseError(e.to_string()))?;
     db_set_cache(db, account_id, thread_id, "smart_replies", &json).await?;
     Ok(replies)
 }
@@ -512,7 +510,9 @@ pub async fn generate_auto_draft(
     };
 
     let user_content = truncate(
-        &format!("<email_content>Subject: {subject}\n\n{thread_content}</email_content>{style_section}"),
+        &format!(
+            "<email_content>Subject: {subject}\n\n{thread_content}</email_content>{style_section}"
+        ),
         6000,
     );
 

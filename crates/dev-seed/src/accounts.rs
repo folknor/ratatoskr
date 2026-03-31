@@ -10,10 +10,34 @@ pub struct AccountPreset {
 }
 
 pub static ACCOUNT_PRESETS: &[AccountPreset] = &[
-    AccountPreset { email: "alex.morgan@gmail.com", name: "Alex Morgan", provider: "gmail_api", host: "imap.gmail.com", color: "#4285f4" },
-    AccountPreset { email: "alex.morgan@company.io", name: "Alex Morgan", provider: "imap", host: "mail.company.io", color: "#ea4335" },
-    AccountPreset { email: "a.morgan@outlook.com", name: "Alex Morgan", provider: "graph", host: "outlook.office365.com", color: "#fbbc04" },
-    AccountPreset { email: "alex@fastmail.com", name: "Alex Morgan", provider: "jmap", host: "jmap.fastmail.com", color: "#34a853" },
+    AccountPreset {
+        email: "alex.morgan@gmail.com",
+        name: "Alex Morgan",
+        provider: "gmail_api",
+        host: "imap.gmail.com",
+        color: "#4285f4",
+    },
+    AccountPreset {
+        email: "alex.morgan@company.io",
+        name: "Alex Morgan",
+        provider: "imap",
+        host: "mail.company.io",
+        color: "#ea4335",
+    },
+    AccountPreset {
+        email: "a.morgan@outlook.com",
+        name: "Alex Morgan",
+        provider: "graph",
+        host: "outlook.office365.com",
+        color: "#fbbc04",
+    },
+    AccountPreset {
+        email: "alex@fastmail.com",
+        name: "Alex Morgan",
+        provider: "jmap",
+        host: "jmap.fastmail.com",
+        color: "#34a853",
+    },
 ];
 
 struct SystemLabel {
@@ -23,12 +47,36 @@ struct SystemLabel {
 }
 
 static SYSTEM_LABELS: &[SystemLabel] = &[
-    SystemLabel { name: "INBOX", special: "inbox", sort: 0 },
-    SystemLabel { name: "Sent", special: "sent", sort: 1 },
-    SystemLabel { name: "Drafts", special: "drafts", sort: 2 },
-    SystemLabel { name: "Trash", special: "trash", sort: 3 },
-    SystemLabel { name: "Archive", special: "archive", sort: 4 },
-    SystemLabel { name: "Spam", special: "junk", sort: 5 },
+    SystemLabel {
+        name: "INBOX",
+        special: "inbox",
+        sort: 0,
+    },
+    SystemLabel {
+        name: "Sent",
+        special: "sent",
+        sort: 1,
+    },
+    SystemLabel {
+        name: "Drafts",
+        special: "drafts",
+        sort: 2,
+    },
+    SystemLabel {
+        name: "Trash",
+        special: "trash",
+        sort: 3,
+    },
+    SystemLabel {
+        name: "Archive",
+        special: "archive",
+        sort: 4,
+    },
+    SystemLabel {
+        name: "Spam",
+        special: "junk",
+        sort: 5,
+    },
 ];
 
 struct UserLabel {
@@ -38,14 +86,46 @@ struct UserLabel {
 }
 
 static USER_LABELS: &[UserLabel] = &[
-    UserLabel { name: "Work", color_bg: "#4285f4", color_fg: "#ffffff" },
-    UserLabel { name: "Personal", color_bg: "#0b8043", color_fg: "#ffffff" },
-    UserLabel { name: "Finance", color_bg: "#f4b400", color_fg: "#000000" },
-    UserLabel { name: "Travel", color_bg: "#db4437", color_fg: "#ffffff" },
-    UserLabel { name: "Newsletters", color_bg: "#ab47bc", color_fg: "#ffffff" },
-    UserLabel { name: "Receipts", color_bg: "#00acc1", color_fg: "#ffffff" },
-    UserLabel { name: "Projects", color_bg: "#ff7043", color_fg: "#ffffff" },
-    UserLabel { name: "Waiting", color_bg: "#8d6e63", color_fg: "#ffffff" },
+    UserLabel {
+        name: "Work",
+        color_bg: "#4285f4",
+        color_fg: "#ffffff",
+    },
+    UserLabel {
+        name: "Personal",
+        color_bg: "#0b8043",
+        color_fg: "#ffffff",
+    },
+    UserLabel {
+        name: "Finance",
+        color_bg: "#f4b400",
+        color_fg: "#000000",
+    },
+    UserLabel {
+        name: "Travel",
+        color_bg: "#db4437",
+        color_fg: "#ffffff",
+    },
+    UserLabel {
+        name: "Newsletters",
+        color_bg: "#ab47bc",
+        color_fg: "#ffffff",
+    },
+    UserLabel {
+        name: "Receipts",
+        color_bg: "#00acc1",
+        color_fg: "#ffffff",
+    },
+    UserLabel {
+        name: "Projects",
+        color_bg: "#ff7043",
+        color_fg: "#ffffff",
+    },
+    UserLabel {
+        name: "Waiting",
+        color_bg: "#8d6e63",
+        color_fg: "#ffffff",
+    },
 ];
 
 /// Inserted account info needed by later stages.

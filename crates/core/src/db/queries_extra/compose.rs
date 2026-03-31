@@ -103,9 +103,7 @@ pub async fn db_get_signatures_for_account(
 }
 
 /// Get all signatures across all accounts (for the settings UI).
-pub async fn db_get_all_signatures(
-    db: &DbState,
-) -> Result<Vec<DbSignature>, String> {
+pub async fn db_get_all_signatures(db: &DbState) -> Result<Vec<DbSignature>, String> {
     db.with_conn(move |conn| {
         let sql = format!(
             "SELECT {SIG_COLS} FROM signatures \
@@ -158,11 +156,12 @@ pub struct InsertSignatureParams {
     pub is_reply_default: bool,
 }
 
-pub async fn db_insert_signature(
-    db: &DbState,
-    p: InsertSignatureParams,
-) -> Result<String, String> {
-    log::info!("Inserting signature: account_id={}, name={}", p.account_id, p.name);
+pub async fn db_insert_signature(db: &DbState, p: InsertSignatureParams) -> Result<String, String> {
+    log::info!(
+        "Inserting signature: account_id={}, name={}",
+        p.account_id,
+        p.name
+    );
     let id = uuid::Uuid::new_v4().to_string();
     let ret_id = id.clone();
     db.with_conn(move |conn| {
@@ -212,10 +211,7 @@ pub struct UpdateSignatureParams {
     pub is_reply_default: Option<bool>,
 }
 
-pub async fn db_update_signature(
-    db: &DbState,
-    p: UpdateSignatureParams,
-) -> Result<(), String> {
+pub async fn db_update_signature(db: &DbState, p: UpdateSignatureParams) -> Result<(), String> {
     log::info!("Updating signature: id={}", p.id);
     db.with_conn(move |conn| {
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
@@ -276,10 +272,7 @@ pub async fn db_delete_signature(db: &DbState, id: String) -> Result<(), String>
 
 /// Reorder signatures for an account. `ordered_ids` lists signature IDs in
 /// the desired display order; each one receives `sort_order = index`.
-pub async fn db_reorder_signatures(
-    db: &DbState,
-    ordered_ids: Vec<String>,
-) -> Result<(), String> {
+pub async fn db_reorder_signatures(db: &DbState, ordered_ids: Vec<String>) -> Result<(), String> {
     db.with_conn(move |conn| {
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         for (i, sig_id) in ordered_ids.iter().enumerate() {
@@ -351,9 +344,7 @@ pub async fn db_resolve_signature_for_compose(
                 )
                 .ok();
             if let Some(sig_id) = alias_sig_id {
-                let sql = format!(
-                    "SELECT {SIG_COLS} FROM signatures WHERE id = ?1 LIMIT 1"
-                );
+                let sql = format!("SELECT {SIG_COLS} FROM signatures WHERE id = ?1 LIMIT 1");
                 if let Some(sig) = query_one::<DbSignature>(conn, &sql, &[&sig_id])? {
                     return Ok(Some(sig));
                 }
@@ -566,11 +557,7 @@ pub async fn db_save_local_draft(
 
 pub async fn db_get_local_draft(db: &DbState, id: String) -> Result<Option<DbLocalDraft>, String> {
     db.with_conn(move |conn| {
-        query_one::<DbLocalDraft>(
-            conn,
-            "SELECT * FROM local_drafts WHERE id = ?1",
-            &[&id],
-        )
+        query_one::<DbLocalDraft>(conn, "SELECT * FROM local_drafts WHERE id = ?1", &[&id])
     })
     .await
 }
@@ -728,7 +715,7 @@ pub async fn db_delete_scheduled_email(db: &DbState, id: String) -> Result<(), S
 /// Block elements (`<p>`, `<br>`, `<div>`, `<li>`, `<h1>`..`<h6>`) insert
 /// newlines. Inline elements are dropped. Common HTML entities are decoded.
 pub fn html_to_plain_text(html: &str) -> String {
-    use lol_html::{element, rewrite_str, RewriteStrSettings};
+    use lol_html::{RewriteStrSettings, element, rewrite_str};
 
     let trimmed = html.trim();
     if trimmed.is_empty() {
@@ -737,8 +724,19 @@ pub fn html_to_plain_text(html: &str) -> String {
 
     // Block-level tags that should insert a newline *before* their content.
     let block_tags: &[&str] = &[
-        "p", "div", "br", "h1", "h2", "h3", "h4", "h5", "h6",
-        "li", "blockquote", "hr", "tr",
+        "p",
+        "div",
+        "br",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "li",
+        "blockquote",
+        "hr",
+        "tr",
     ];
 
     let element_handlers: Vec<_> = block_tags
@@ -752,10 +750,13 @@ pub fn html_to_plain_text(html: &str) -> String {
         .collect();
 
     // Remove all tags but keep text content + the newlines we inserted.
-    let result = rewrite_str(trimmed, RewriteStrSettings {
-        element_content_handlers: element_handlers,
-        ..RewriteStrSettings::new()
-    });
+    let result = rewrite_str(
+        trimmed,
+        RewriteStrSettings {
+            element_content_handlers: element_handlers,
+            ..RewriteStrSettings::new()
+        },
+    );
 
     match result {
         Ok(text) => {
@@ -833,8 +834,7 @@ pub fn finalize_compose_html(html: &str) -> String {
         .and_then(|bq_pos| {
             // Find the attribution paragraph before the blockquote.
             let before_bq = &after_hr[..bq_pos];
-            before_bq.rfind("<p")
-                .map(|p_pos| hr_end + p_pos)
+            before_bq.rfind("<p").map(|p_pos| hr_end + p_pos)
         })
         .unwrap_or(html.len());
 
@@ -853,10 +853,7 @@ pub fn finalize_compose_html(html: &str) -> String {
 /// substring that marks where the signature begins (typically the text
 /// equivalent of the `<hr>` separator). Everything from `separator_marker`
 /// onward is treated as the signature.
-pub fn finalize_compose_plain_text(
-    body_text: &str,
-    signature_text: Option<&str>,
-) -> String {
+pub fn finalize_compose_plain_text(body_text: &str, signature_text: Option<&str>) -> String {
     let Some(sig) = signature_text else {
         return body_text.to_string();
     };

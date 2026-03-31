@@ -133,10 +133,11 @@ fn normalize_runs(runs: Vec<StyledRun>) -> Vec<StyledRun> {
 
     for run in non_empty {
         if let Some(last) = merged.last_mut()
-            && last.same_formatting(&run) {
-                last.text.push_str(&run.text);
-                continue;
-            }
+            && last.same_formatting(&run)
+        {
+            last.text.push_str(&run.text);
+            continue;
+        }
         merged.push(run);
     }
 
@@ -261,10 +262,7 @@ mod tests {
         let runs = doc.blocks[0].runs().expect("should have runs");
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].text, "click here");
-        assert_eq!(
-            runs[0].link.as_deref(),
-            Some("https://example.com")
-        );
+        assert_eq!(runs[0].link.as_deref(), Some("https://example.com"));
     }
 
     // ── Remove empty runs ───────────────────────────────
@@ -431,10 +429,7 @@ mod tests {
         let mut doc = Document {
             blocks: vec![
                 Arc::new(Block::Paragraph {
-                    runs: vec![
-                        StyledRun::plain("a"),
-                        StyledRun::plain("b"),
-                    ],
+                    runs: vec![StyledRun::plain("a"), StyledRun::plain("b")],
                 }),
                 Arc::new(Block::Paragraph {
                     runs: vec![StyledRun::plain("clean")],
@@ -537,7 +532,13 @@ mod tests {
         };
         normalize(&mut doc);
 
-        if let Block::Image { src, alt, width, height } = &*doc.blocks[0] {
+        if let Block::Image {
+            src,
+            alt,
+            width,
+            height,
+        } = &*doc.blocks[0]
+        {
             assert_eq!(src, "https://example.com/img.png");
             assert_eq!(alt, "photo");
             assert_eq!(*width, Some(100));
@@ -567,10 +568,7 @@ mod tests {
             blocks: vec![
                 // Paragraph with mergeable runs.
                 Arc::new(Block::Paragraph {
-                    runs: vec![
-                        StyledRun::plain("hello"),
-                        StyledRun::plain(" world"),
-                    ],
+                    runs: vec![StyledRun::plain("hello"), StyledRun::plain(" world")],
                 }),
                 // Heading with empty runs interspersed.
                 Arc::new(Block::Heading {
@@ -590,10 +588,7 @@ mod tests {
                 Arc::new(Block::ListItem {
                     ordered: false,
                     indent_level: 0,
-                    runs: vec![
-                        StyledRun::plain("item"),
-                        StyledRun::plain(" text"),
-                    ],
+                    runs: vec![StyledRun::plain("item"), StyledRun::plain(" text")],
                 }),
                 // Empty blockquote.
                 Arc::new(Block::BlockQuote { blocks: vec![] }),

@@ -25,7 +25,9 @@ pub(crate) async fn add_label_local(
     let lid = label_id.as_str().to_string();
     tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+        let conn = conn
+            .lock()
+            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
         let label_kind: String = conn
             .query_row(
@@ -47,8 +49,7 @@ pub(crate) async fn add_label_local(
             ));
         }
 
-        crate::email_actions::insert_label(&conn, &aid, &tid, &lid)
-            .map_err(ActionError::db)?;
+        crate::email_actions::insert_label(&conn, &aid, &tid, &lid).map_err(ActionError::db)?;
 
         Ok(())
     })
@@ -83,10 +84,21 @@ async fn add_label_dispatch(
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             let msg = e.to_string();
-            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
+            ActionOutcome::LocalOnly {
+                reason: ActionError::remote(msg),
+                retryable: true,
+            }
         }
     };
-    enqueue_if_retryable(ctx, &outcome, account_id, "addLabel", thread_id, &params_json).await;
+    enqueue_if_retryable(
+        ctx,
+        &outcome,
+        account_id,
+        "addLabel",
+        thread_id,
+        &params_json,
+    )
+    .await;
     mlog.emit(&outcome);
     outcome
 }
@@ -108,12 +120,21 @@ pub async fn add_label(
     }
 
     match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(provider) => {
-            add_label_dispatch(ctx, &*provider, account_id, thread_id, label_id).await
-        }
+        Ok(provider) => add_label_dispatch(ctx, &*provider, account_id, thread_id, label_id).await,
         Err(e) => {
-            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
-            enqueue_if_retryable(ctx, &outcome, account_id, "addLabel", thread_id, &params_json).await;
+            let outcome = ActionOutcome::LocalOnly {
+                reason: ActionError::remote(e),
+                retryable: true,
+            };
+            enqueue_if_retryable(
+                ctx,
+                &outcome,
+                account_id,
+                "addLabel",
+                thread_id,
+                &params_json,
+            )
+            .await;
             mlog.emit(&outcome);
             outcome
         }
@@ -155,7 +176,9 @@ pub(crate) async fn remove_label_local(
     let lid = label_id.as_str().to_string();
     tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+        let conn = conn
+            .lock()
+            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
         let label_kind: String = conn
             .query_row(
@@ -177,8 +200,7 @@ pub(crate) async fn remove_label_local(
             ));
         }
 
-        crate::email_actions::remove_label(&conn, &aid, &tid, &lid)
-            .map_err(ActionError::db)?;
+        crate::email_actions::remove_label(&conn, &aid, &tid, &lid).map_err(ActionError::db)?;
 
         Ok(())
     })
@@ -207,16 +229,29 @@ async fn remove_label_dispatch(
         progress: &NoopProgressReporter,
     };
 
-    let result = provider.remove_tag(&provider_ctx, thread_id, label_id).await;
+    let result = provider
+        .remove_tag(&provider_ctx, thread_id, label_id)
+        .await;
 
     let outcome = match result {
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             let msg = e.to_string();
-            ActionOutcome::LocalOnly { reason: ActionError::remote(msg), retryable: true }
+            ActionOutcome::LocalOnly {
+                reason: ActionError::remote(msg),
+                retryable: true,
+            }
         }
     };
-    enqueue_if_retryable(ctx, &outcome, account_id, "removeLabel", thread_id, &params_json).await;
+    enqueue_if_retryable(
+        ctx,
+        &outcome,
+        account_id,
+        "removeLabel",
+        thread_id,
+        &params_json,
+    )
+    .await;
     mlog.emit(&outcome);
     outcome
 }
@@ -242,8 +277,19 @@ pub async fn remove_label(
             remove_label_dispatch(ctx, &*provider, account_id, thread_id, label_id).await
         }
         Err(e) => {
-            let outcome = ActionOutcome::LocalOnly { reason: ActionError::remote(e), retryable: true };
-            enqueue_if_retryable(ctx, &outcome, account_id, "removeLabel", thread_id, &params_json).await;
+            let outcome = ActionOutcome::LocalOnly {
+                reason: ActionError::remote(e),
+                retryable: true,
+            };
+            enqueue_if_retryable(
+                ctx,
+                &outcome,
+                account_id,
+                "removeLabel",
+                thread_id,
+                &params_json,
+            )
+            .await;
             mlog.emit(&outcome);
             outcome
         }

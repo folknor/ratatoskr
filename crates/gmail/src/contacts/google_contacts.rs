@@ -7,7 +7,7 @@ use sync::state as sync_state;
 
 use super::super::client::GmailClient;
 use super::{
-    PEOPLE_API_BASE, PAGE_SIZE, PeopleConnectionsResponse, Person, SyncContactsResult,
+    PAGE_SIZE, PEOPLE_API_BASE, PeopleConnectionsResponse, Person, SyncContactsResult,
     extract_avatar_url, extract_display_name, extract_primary_email,
 };
 
@@ -111,9 +111,7 @@ async fn full_sync(
         sync_state::save_google_contacts_sync_token(db, account_id, token).await?;
     }
 
-    log::info!(
-        "Google contacts full sync for {account_id}: {synced} contacts with emails"
-    );
+    log::info!("Google contacts full sync for {account_id}: {synced} contacts with emails");
 
     Ok(SyncContactsResult { synced, deleted: 0 })
 }
@@ -274,8 +272,16 @@ fn persist_google_contacts(
                account_id = COALESCE(excluded.account_id, contacts.account_id), \
                server_id = COALESCE(excluded.server_id, contacts.server_id), \
                updated_at = unixepoch()",
-            params![local_id, email, display_name, avatar_url, phone, company,
-                    account_id, resource_name],
+            params![
+                local_id,
+                email,
+                display_name,
+                avatar_url,
+                phone,
+                company,
+                account_id,
+                resource_name
+            ],
         )
         .map_err(|e| format!("upsert google contact: {e}"))?;
 
@@ -360,7 +366,9 @@ fn prune_stale_google_contacts(
         .map_err(|e| format!("prepare stale google contacts: {e}"))?;
 
     let all_mapped: Vec<String> = stmt
-        .query_map(params![account_id], |row| row.get::<_, String>("resource_name"))
+        .query_map(params![account_id], |row| {
+            row.get::<_, String>("resource_name")
+        })
         .map_err(|e| format!("query stale google contacts: {e}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("collect stale google contacts: {e}"))?;

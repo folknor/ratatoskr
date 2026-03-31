@@ -164,11 +164,7 @@ fn organizational_domain(domain: &str) -> Option<&str> {
     let dot = domain.find('.')?;
     let rest = &domain[dot + 1..];
     // Must still contain at least one dot to be a valid domain
-    if rest.contains('.') {
-        Some(rest)
-    } else {
-        None
-    }
+    if rest.contains('.') { Some(rest) } else { None }
 }
 
 /// Look up the BIMI TXT record for a domain via DNS, falling back to the
@@ -264,7 +260,12 @@ fn validate_svg(data: &[u8]) -> Result<(), String> {
 
     // Reject external URI references (xlink:href to external resources)
     // Allow data: URIs and fragment-only references
-    for attr in ["xlink:href=\"http", "xlink:href='http", "href=\"http", "href='http"] {
+    for attr in [
+        "xlink:href=\"http",
+        "xlink:href='http",
+        "href=\"http",
+        "href='http",
+    ] {
         if text.contains(attr) {
             // Allow the SVG namespace declaration itself
             let is_namespace_only = text.match_indices(attr).all(|(i, _)| {
@@ -287,8 +288,8 @@ fn validate_svg(data: &[u8]) -> Result<(), String> {
 /// Rasterize SVG data to a PNG file at the given path.
 fn rasterize_svg_to_png(svg_data: &[u8], output_path: &Path) -> Result<(), String> {
     let options = resvg::usvg::Options::default();
-    let tree = resvg::usvg::Tree::from_data(svg_data, &options)
-        .map_err(|e| format!("parse SVG: {e}"))?;
+    let tree =
+        resvg::usvg::Tree::from_data(svg_data, &options).map_err(|e| format!("parse SVG: {e}"))?;
 
     let size = tree.size();
     let icon_f = ICON_SIZE as f32;
@@ -305,8 +306,7 @@ fn rasterize_svg_to_png(svg_data: &[u8], output_path: &Path) -> Result<(), Strin
     let tx = (icon_f - scaled_w) / 2.0;
     let ty = (icon_f - scaled_h) / 2.0;
 
-    let transform =
-        resvg::tiny_skia::Transform::from_scale(scale, scale).post_translate(tx, ty);
+    let transform = resvg::tiny_skia::Transform::from_scale(scale, scale).post_translate(tx, ty);
 
     resvg::render(&tree, transform, &mut pixmap.as_mut());
 
@@ -316,12 +316,10 @@ fn rasterize_svg_to_png(svg_data: &[u8], output_path: &Path) -> Result<(), Strin
         .map_err(|e| format!("encode PNG: {e}"))?;
 
     if let Some(parent) = output_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("create BIMI cache dir: {e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("create BIMI cache dir: {e}"))?;
     }
 
-    std::fs::write(output_path, png_data)
-        .map_err(|e| format!("write BIMI PNG: {e}"))?;
+    std::fs::write(output_path, png_data).map_err(|e| format!("write BIMI PNG: {e}"))?;
 
     Ok(())
 }
@@ -337,13 +335,10 @@ fn cache_path(cache_dir: &Path, logo_uri: &str) -> PathBuf {
 /// Minimal hex encoding to avoid adding a dependency.
 fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
     use std::fmt::Write;
-    bytes
-        .as_ref()
-        .iter()
-        .fold(String::new(), |mut s, b| {
-            let _ = write!(s, "{b:02x}");
-            s
-        })
+    bytes.as_ref().iter().fold(String::new(), |mut s, b| {
+        let _ = write!(s, "{b:02x}");
+        s
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -643,10 +638,9 @@ fn domains_to_warm(conn: &Connection) -> Result<Vec<String>, String> {
         .map_err(|e| format!("prepare domain query: {e}"))?;
 
     let rows = stmt
-        .query_map(
-            rusqlite::params![cutoff, WARM_MAX_MESSAGES],
-            |row| row.get::<_, String>("domain"),
-        )
+        .query_map(rusqlite::params![cutoff, WARM_MAX_MESSAGES], |row| {
+            row.get::<_, String>("domain")
+        })
         .map_err(|e| format!("query sender domains: {e}"))?;
 
     let mut domains = Vec::new();
@@ -691,18 +685,17 @@ pub async fn warm_bimi_cache(
     // We need to collect results synchronously back to update the DB, so we
     // run the async lookups and collect (domain, result) pairs.
     type BimiResult = (String, Option<(PathBuf, String, Option<String>)>);
-    let results: Vec<BimiResult> =
-        stream::iter(domains)
-            .map(|domain| {
-                let cache_dir = cache_dir.to_path_buf();
-                async move {
-                    let result = lookup_bimi_dns_and_fetch(&domain, &cache_dir).await;
-                    (domain, result)
-                }
-            })
-            .buffer_unordered(max_concurrent)
-            .collect()
-            .await;
+    let results: Vec<BimiResult> = stream::iter(domains)
+        .map(|domain| {
+            let cache_dir = cache_dir.to_path_buf();
+            async move {
+                let result = lookup_bimi_dns_and_fetch(&domain, &cache_dir).await;
+                (domain, result)
+            }
+        })
+        .buffer_unordered(max_concurrent)
+        .collect()
+        .await;
 
     let mut warmed = 0usize;
     for (domain, result) in &results {
@@ -792,7 +785,10 @@ mod tests {
     fn test_parse_bimi_record_full() {
         let txt = "v=BIMI1; l=https://example.com/logo.svg; a=https://example.com/cert.pem";
         let rec = parse_bimi_record(txt).expect("should parse");
-        assert_eq!(rec.logo_uri.as_deref(), Some("https://example.com/logo.svg"));
+        assert_eq!(
+            rec.logo_uri.as_deref(),
+            Some("https://example.com/logo.svg")
+        );
         assert_eq!(
             rec.authority_uri.as_deref(),
             Some("https://example.com/cert.pem")
@@ -803,7 +799,10 @@ mod tests {
     fn test_parse_bimi_record_logo_only() {
         let txt = "v=BIMI1; l=https://example.com/logo.svg;";
         let rec = parse_bimi_record(txt).expect("should parse");
-        assert_eq!(rec.logo_uri.as_deref(), Some("https://example.com/logo.svg"));
+        assert_eq!(
+            rec.logo_uri.as_deref(),
+            Some("https://example.com/logo.svg")
+        );
         assert!(rec.authority_uri.is_none());
     }
 

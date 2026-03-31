@@ -4,8 +4,8 @@ use rusqlite::params;
 
 use crate::db::DbState;
 use crate::db::queries_extra::calendars::{
-    db_delete_events_for_calendar, db_update_calendar_sync_token, db_upsert_calendar,
-    db_upsert_calendar_event, UpsertCalendarEventParams,
+    UpsertCalendarEventParams, db_delete_events_for_calendar, db_update_calendar_sync_token,
+    db_upsert_calendar, db_upsert_calendar_event,
 };
 
 use super::client::CalDavClient;
@@ -86,13 +86,7 @@ pub async fn sync_caldav_calendars(
         total_deleted += deleted;
 
         // Update stored ctag
-        db_update_calendar_sync_token(
-            db,
-            calendar_id.clone(),
-            None,
-            cal.ctag.clone(),
-        )
-        .await?;
+        db_update_calendar_sync_token(db, calendar_id.clone(), None, cal.ctag.clone()).await?;
     }
 
     log::info!(
@@ -175,16 +169,8 @@ async fn sync_calendar_events(
         match parse::parse_icalendar(ical_data) {
             Ok(events) => {
                 for event in &events {
-                    upsert_parsed_event(
-                        db,
-                        account_id,
-                        calendar_id,
-                        uri,
-                        &etag,
-                        ical_data,
-                        event,
-                    )
-                    .await?;
+                    upsert_parsed_event(db, account_id, calendar_id, uri, &etag, ical_data, event)
+                        .await?;
                     upserted += 1;
                 }
             }

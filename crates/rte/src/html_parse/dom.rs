@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use html5ever::tendril::{StrTendril, TendrilSink};
 use html5ever::tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink};
-use html5ever::{parse_fragment, Attribute, QualName};
+use html5ever::{Attribute, QualName, parse_fragment};
 use markup5ever::{local_name, ns};
 
 // ── DOM types ───────────────────────────────────────────
@@ -82,16 +82,17 @@ impl Sink {
     fn append_text(parent: &Handle, text: &str) {
         let last_is_text = {
             let p = parent.borrow();
-            p.children.last().is_some_and(|c| {
-                matches!(c.borrow().data, NodeData::Text(_))
-            })
+            p.children
+                .last()
+                .is_some_and(|c| matches!(c.borrow().data, NodeData::Text(_)))
         };
         if last_is_text {
             let p = parent.borrow();
             if let Some(last) = p.children.last()
-                && let NodeData::Text(ref mut s) = last.borrow_mut().data {
-                    s.push_str(text);
-                }
+                && let NodeData::Text(ref mut s) = last.borrow_mut().data
+            {
+                s.push_str(text);
+            }
         } else {
             let node = Node::new(NodeData::Text(text.to_owned()));
             Self::append_child(parent, &node);
@@ -137,20 +138,14 @@ impl TreeSink for Sink {
         }
     }
 
-    fn create_element(
-        &self,
-        name: QualName,
-        attrs: Vec<Attribute>,
-        flags: ElementFlags,
-    ) -> Handle {
+    fn create_element(&self, name: QualName, attrs: Vec<Attribute>, flags: ElementFlags) -> Handle {
         Node::new(NodeData::Element {
             template_contents: if flags.template {
                 Some(Node::new(NodeData::Document))
             } else {
                 None
             },
-            mathml_annotation_xml_integration_point: flags
-                .mathml_annotation_xml_integration_point,
+            mathml_annotation_xml_integration_point: flags.mathml_annotation_xml_integration_point,
             name,
             attrs,
         })
@@ -225,9 +220,7 @@ impl TreeSink for Sink {
 
         let idx = {
             let p = parent.borrow();
-            p.children
-                .iter()
-                .position(|c| Rc::ptr_eq(c, sibling))
+            p.children.iter().position(|c| Rc::ptr_eq(c, sibling))
         };
         let Some(idx) = idx else { return };
 

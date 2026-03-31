@@ -1,5 +1,5 @@
-use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 use quick_xml::writer::Writer;
@@ -147,7 +147,9 @@ fn should_skip_element(name: &[u8]) -> bool {
 }
 
 fn should_strip_attr(key: &[u8]) -> bool {
-    EDITOR_ATTR_PREFIXES.iter().any(|&prefix| key.starts_with(prefix))
+    EDITOR_ATTR_PREFIXES
+        .iter()
+        .any(|&prefix| key.starts_with(prefix))
 }
 
 /// Check if an element has any attributes that need processing (editor attrs or embedded images).
@@ -165,13 +167,10 @@ fn needs_attr_processing(e: &quick_xml::events::BytesStart<'_>) -> bool {
 }
 
 /// Process attributes: strip editor attrs, optimize embedded base64 images.
-fn process_attrs(
-    e: &quick_xml::events::BytesStart<'_>,
-) -> quick_xml::events::BytesStart<'static> {
+fn process_attrs(e: &quick_xml::events::BytesStart<'_>) -> quick_xml::events::BytesStart<'static> {
     let local_name = e.name().as_ref().to_vec();
-    let mut elem = quick_xml::events::BytesStart::new(
-        String::from_utf8_lossy(&local_name).into_owned(),
-    );
+    let mut elem =
+        quick_xml::events::BytesStart::new(String::from_utf8_lossy(&local_name).into_owned());
 
     for attr in e.attributes().flatten() {
         if should_strip_attr(attr.key.as_ref()) {
@@ -266,8 +265,7 @@ fn optimize_embedded_jpeg(value: &str) -> Option<String> {
         return None;
     }
 
-    let mut result =
-        String::with_capacity(BASE64_JPEG_PREFIX.len() + compressed.len() * 4 / 3 + 4);
+    let mut result = String::with_capacity(BASE64_JPEG_PREFIX.len() + compressed.len() * 4 / 3 + 4);
     result.push_str(BASE64_JPEG_PREFIX);
     BASE64.encode_string(&compressed, &mut result);
     Some(result)

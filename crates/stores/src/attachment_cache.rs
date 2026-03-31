@@ -68,8 +68,9 @@ pub fn remove_cached_relative(app_data_dir: &Path, relative_path: &str) -> Resul
     }
 
     let full_path = app_data_dir.join(relative_path);
-    let canonical =
-        full_path.canonicalize().map_err(|e| format!("canonicalize cache path: {e}"))?;
+    let canonical = full_path
+        .canonicalize()
+        .map_err(|e| format!("canonicalize cache path: {e}"))?;
     let cache_dir = app_data_dir
         .join(CACHE_DIR)
         .canonicalize()
@@ -167,8 +168,7 @@ pub struct CacheInfo {
 
 async fn attachment_cache_max_bytes(db: &DbState) -> Result<i64, String> {
     db.with_conn(|conn| {
-        let raw = db::db::queries::get_setting(conn, "attachment_cache_max_mb")
-            .unwrap_or(None);
+        let raw = db::db::queries::get_setting(conn, "attachment_cache_max_mb").unwrap_or(None);
         let max_mb = raw
             .as_deref()
             .unwrap_or("500")

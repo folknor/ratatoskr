@@ -33,10 +33,7 @@ where
     where
         F: Fn(&Rectangle) -> bool + Send + 'static,
     {
-        fn traverse(
-            &mut self,
-            operate: &mut dyn FnMut(&mut dyn Operation<Vec<(Id, Rectangle)>>),
-        ) {
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<Vec<(Id, Rectangle)>>)) {
             if self.goto_next {
                 operate(self);
             }

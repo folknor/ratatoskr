@@ -170,7 +170,9 @@ impl std::fmt::Debug for ImapStream {
 
 /// Build a TLS connector, optionally accepting invalid certificates
 /// (for local mail bridges like ProtonMail Bridge with self-signed certs).
-pub(crate) fn build_tls_connector(accept_invalid_certs: bool) -> Result<native_tls::TlsConnector, String> {
+pub(crate) fn build_tls_connector(
+    accept_invalid_certs: bool,
+) -> Result<native_tls::TlsConnector, String> {
     let mut builder = native_tls::TlsConnector::builder();
     if accept_invalid_certs {
         builder.danger_accept_invalid_certs(true);
@@ -191,7 +193,13 @@ pub type ImapSession = Session<ImapStream>;
 ///
 /// Wraps the entire connection + auth sequence in a 60s overall timeout.
 pub async fn connect(config: &ImapConfig) -> Result<ImapSession, String> {
-    log::info!("[IMAP] Connecting to {}:{} (security={}, auth={})", config.host, config.port, config.security, config.auth_method);
+    log::info!(
+        "[IMAP] Connecting to {}:{} (security={}, auth={})",
+        config.host,
+        config.port,
+        config.security,
+        config.auth_method
+    );
     tokio::time::timeout(OVERALL_CONNECT_TIMEOUT, connect_inner(config))
         .await
         .map_err(|_| format!(
@@ -339,13 +347,19 @@ async fn authenticate(
 ) -> Result<ImapSession, String> {
     match config.auth_method.as_str() {
         "oauthbearer" => {
-            log::debug!("[IMAP] Authenticating with OAUTHBEARER as {}", config.username);
+            log::debug!(
+                "[IMAP] Authenticating with OAUTHBEARER as {}",
+                config.username
+            );
             let auth = OAuthBearer::new(&config.username, &config.password);
             client
                 .authenticate("OAUTHBEARER", auth)
                 .await
                 .map_err(|(e, _)| {
-                    log::error!("[IMAP] OAUTHBEARER authentication failed for {}: {e}", config.username);
+                    log::error!(
+                        "[IMAP] OAUTHBEARER authentication failed for {}: {e}",
+                        config.username
+                    );
                     format!("OAUTHBEARER authentication failed: {e}")
                 })
         }
@@ -356,7 +370,10 @@ async fn authenticate(
                 .authenticate("XOAUTH2", auth)
                 .await
                 .map_err(|(e, _)| {
-                    log::error!("[IMAP] XOAUTH2 authentication failed for {}: {e}", config.username);
+                    log::error!(
+                        "[IMAP] XOAUTH2 authentication failed for {}: {e}",
+                        config.username
+                    );
                     format!("XOAUTH2 authentication failed: {e}")
                 })
         }
@@ -396,10 +413,7 @@ pub async fn negotiate_condstore_qresync(
 ) -> Result<ImapCapabilities, String> {
     let caps = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.capabilities())
         .await
-        .map_err(|_| format!(
-            "CAPABILITY timed out after {}s",
-            IMAP_CMD_TIMEOUT.as_secs()
-        ))?
+        .map_err(|_| format!("CAPABILITY timed out after {}s", IMAP_CMD_TIMEOUT.as_secs()))?
         .map_err(|e| format!("CAPABILITY failed: {e}"))?;
 
     let has_condstore = caps.has_str("CONDSTORE");
@@ -450,7 +464,9 @@ pub async fn negotiate_condstore_qresync(
                         }
                     }
                 }
-                async_imap::imap_proto::Response::Done { tag: resp_tag, .. } if *resp_tag == tag => {
+                async_imap::imap_proto::Response::Done { tag: resp_tag, .. }
+                    if *resp_tag == tag =>
+                {
                     break;
                 }
                 _ => {}
@@ -460,10 +476,12 @@ pub async fn negotiate_condstore_qresync(
         Ok::<bool, String>(saw_enabled)
     })
     .await
-    .map_err(|_| format!(
-        "ENABLE QRESYNC timed out after {}s",
-        IMAP_CMD_TIMEOUT.as_secs()
-    ))??;
+    .map_err(|_| {
+        format!(
+            "ENABLE QRESYNC timed out after {}s",
+            IMAP_CMD_TIMEOUT.as_secs()
+        )
+    })??;
 
     if qresync_enabled {
         log::info!("IMAP: QRESYNC successfully enabled (implies CONDSTORE)");
@@ -629,9 +647,7 @@ fn parse_ns_string(bytes: &[u8], pos: &mut usize) -> Result<String, String> {
 /// Returns the personal, other-users, and shared namespace prefixes and
 /// delimiters. This is used to identify shared/delegated mailbox prefixes
 /// for Dovecot/Cyrus servers.
-pub async fn discover_namespaces(
-    session: &mut ImapSession,
-) -> Result<NamespaceInfo, String> {
+pub async fn discover_namespaces(session: &mut ImapSession) -> Result<NamespaceInfo, String> {
     tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
         let tag = session
             .run_command("NAMESPACE")
@@ -683,10 +699,7 @@ pub async fn discover_namespaces(
         Ok(result)
     })
     .await
-    .map_err(|_| format!(
-        "NAMESPACE timed out after {}s",
-        IMAP_CMD_TIMEOUT.as_secs()
-    ))?
+    .map_err(|_| format!("NAMESPACE timed out after {}s", IMAP_CMD_TIMEOUT.as_secs()))?
 }
 
 // ---------- ACL discovery: MYRIGHTS (RFC 4314) ----------
@@ -696,10 +709,7 @@ pub async fn discover_namespaces(
 /// Returns the rights string (e.g. `"lrswipcda"`). Common right characters:
 /// - `l` lookup, `r` read, `s` seen, `w` write flags, `i` insert
 /// - `p` post, `c`/`k` create subfolder, `d`/`t` delete, `e` expunge, `a` admin
-pub async fn discover_myrights(
-    session: &mut ImapSession,
-    folder: &str,
-) -> Result<String, String> {
+pub async fn discover_myrights(session: &mut ImapSession, folder: &str) -> Result<String, String> {
     tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
         let cmd = format!("MYRIGHTS \"{}\"", folder.replace('"', "\\\""));
         let tag = session
@@ -723,9 +733,7 @@ pub async fn discover_myrights(
                     ..
                 } if *resp_tag == tag => {
                     if !matches!(status, async_imap::imap_proto::Status::Ok) {
-                        let info = information
-                            .as_deref()
-                            .unwrap_or("unknown error");
+                        let info = information.as_deref().unwrap_or("unknown error");
                         return Err(format!("MYRIGHTS failed: {info}"));
                     }
                     break;
@@ -733,11 +741,7 @@ pub async fn discover_myrights(
                 async_imap::imap_proto::Response::MyRights(my_rights) => {
                     // imap_proto parses MYRIGHTS into AclRight variants;
                     // convert back to the compact character string.
-                    rights = my_rights
-                        .rights
-                        .iter()
-                        .map(|r| char::from(*r))
-                        .collect();
+                    rights = my_rights.rights.iter().map(|r| char::from(*r)).collect();
                 }
                 _ => {}
             }
@@ -747,10 +751,7 @@ pub async fn discover_myrights(
         Ok(rights)
     })
     .await
-    .map_err(|_| format!(
-        "MYRIGHTS timed out after {}s",
-        IMAP_CMD_TIMEOUT.as_secs()
-    ))?
+    .map_err(|_| format!("MYRIGHTS timed out after {}s", IMAP_CMD_TIMEOUT.as_secs()))?
 }
 
 #[cfg(test)]
@@ -785,8 +786,7 @@ mod tests {
 
     #[test]
     fn parse_namespace_multiple_entries() {
-        let input =
-            r##"(("" "/")("#mbox" "/")) NIL (("Public Folders/" "/"))"##;
+        let input = r##"(("" "/")("#mbox" "/")) NIL (("Public Folders/" "/"))"##;
         let info = parse_namespace_response(input).unwrap();
         assert_eq!(info.personal.len(), 2);
         assert_eq!(info.personal[0].prefix, "");
@@ -852,10 +852,9 @@ mod tests {
 
     #[test]
     fn namespace_type_classification() {
-        let info = parse_namespace_response(
-            r#"(("" "/")) (("Other Users/" "/")) (("Shared/" "/"))"#,
-        )
-        .unwrap();
+        let info =
+            parse_namespace_response(r#"(("" "/")) (("Other Users/" "/")) (("Shared/" "/"))"#)
+                .unwrap();
 
         // A folder path can be classified by checking which namespace prefix it matches
         let folder = "Shared/team-inbox";
@@ -873,7 +872,10 @@ mod tests {
 }
 
 /// Classify which namespace a folder path belongs to based on prefix matching.
-pub(crate) fn classify_folder_namespace(info: &NamespaceInfo, folder_path: &str) -> Option<NamespaceType> {
+pub(crate) fn classify_folder_namespace(
+    info: &NamespaceInfo,
+    folder_path: &str,
+) -> Option<NamespaceType> {
     // Check other_users and shared first (they have non-empty prefixes),
     // then fall back to personal.
     for entry in &info.other_users {

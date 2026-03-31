@@ -194,10 +194,7 @@ impl EditorState {
                     let start = self.selection.start();
                     let end = self.selection.end();
                     if let Some(slice) = self.document.slice(start, end) {
-                        self.internal_clipboard = Some(InternalClipboard {
-                            slice,
-                            plain_text,
-                        });
+                        self.internal_clipboard = Some(InternalClipboard { slice, plain_text });
                     }
                 }
                 // The widget's update() method writes to the system clipboard.
@@ -211,16 +208,13 @@ impl EditorState {
                 // plain text matches what came from the system clipboard.
                 // If so, paste with structure preservation; otherwise fall
                 // back to plain-text insertion.
-                let structured_slice = self
-                    .internal_clipboard
-                    .as_ref()
-                    .and_then(|ic| {
-                        if ic.plain_text == text {
-                            Some(ic.slice.clone())
-                        } else {
-                            None
-                        }
-                    });
+                let structured_slice = self.internal_clipboard.as_ref().and_then(|ic| {
+                    if ic.plain_text == text {
+                        Some(ic.slice.clone())
+                    } else {
+                        None
+                    }
+                });
                 if let Some(slice) = structured_slice {
                     self.paste_slice(&slice);
                 } else {
@@ -265,12 +259,7 @@ impl EditorState {
             return;
         }
 
-        let ops = rules::resolve(
-            &self.document,
-            self.selection,
-            action,
-            self.pending_style,
-        );
+        let ops = rules::resolve(&self.document, self.selection, action, self.pending_style);
 
         if ops.is_empty() {
             return;
@@ -396,12 +385,7 @@ impl EditorState {
     /// Inserts each run's text individually, applying style toggles where
     /// the run's style differs from the inherited style at the insertion
     /// point.
-    fn paste_inline_runs(
-        &mut self,
-        pos: DocPosition,
-        source_block: &Block,
-        ops: &mut Vec<EditOp>,
-    ) {
+    fn paste_inline_runs(&mut self, pos: DocPosition, source_block: &Block, ops: &mut Vec<EditOp>) {
         let Some(paste_runs) = source_block.runs() else {
             return;
         };
@@ -431,12 +415,7 @@ impl EditorState {
     }
 
     /// Insert atomic blocks like images and horizontal rules as complete blocks.
-    fn paste_complete_blocks(
-        &mut self,
-        pos: DocPosition,
-        blocks: &[Block],
-        ops: &mut Vec<EditOp>,
-    ) {
+    fn paste_complete_blocks(&mut self, pos: DocPosition, blocks: &[Block], ops: &mut Vec<EditOp>) {
         // If the cursor is mid-block, split first so blocks insert cleanly.
         let mut insert_idx = if pos.offset > 0 {
             let split_op = EditOp::SplitBlock { position: pos };
@@ -463,12 +442,7 @@ impl EditorState {
     }
 
     /// Paste a multi-block slice at `pos`, merging edges and inserting middles.
-    fn paste_multi_block(
-        &mut self,
-        pos: DocPosition,
-        slice: &DocSlice,
-        ops: &mut Vec<EditOp>,
-    ) {
+    fn paste_multi_block(&mut self, pos: DocPosition, slice: &DocSlice, ops: &mut Vec<EditOp>) {
         let block_count = slice.blocks.len();
 
         // Split at cursor to create left and right halves.
@@ -535,10 +509,7 @@ impl EditorState {
             }
         } else {
             cursor_block = left_idx;
-            cursor_offset = self
-                .document
-                .block(left_idx)
-                .map_or(0, Block::char_len);
+            cursor_offset = self.document.block(left_idx).map_or(0, Block::char_len);
         }
 
         self.selection = DocSelection::caret(DocPosition::new(cursor_block, cursor_offset));
@@ -586,8 +557,7 @@ impl EditorState {
         match last_op {
             EditOp::InsertText { position, text } => {
                 let char_count = text.chars().count();
-                let new_pos =
-                    DocPosition::new(position.block_index, position.offset + char_count);
+                let new_pos = DocPosition::new(position.block_index, position.offset + char_count);
                 self.selection = DocSelection::caret(new_pos);
             }
             EditOp::DeleteRange { start, .. } => {
@@ -595,14 +565,16 @@ impl EditorState {
             }
             EditOp::SplitBlock { position } => {
                 // Cursor at start of the new (second) block.
-                self.selection =
-                    DocSelection::caret(DocPosition::new(position.block_index + 1, 0));
+                self.selection = DocSelection::caret(DocPosition::new(position.block_index + 1, 0));
             }
-            EditOp::MergeBlocks { merge_offset, block_index, .. } => {
+            EditOp::MergeBlocks {
+                merge_offset,
+                block_index,
+                ..
+            } => {
                 // Cursor at the merge point in the previous block.
                 let target_block = block_index.saturating_sub(1);
-                self.selection =
-                    DocSelection::caret(DocPosition::new(target_block, *merge_offset));
+                self.selection = DocSelection::caret(DocPosition::new(target_block, *merge_offset));
             }
             EditOp::ToggleInlineStyle { .. }
             | EditOp::SetBlockType { .. }
@@ -687,10 +659,7 @@ impl EditorState {
                 // offset is remembered; subsequent vertical moves use that
                 // remembered offset so that traversing a short block and then
                 // a long block returns to the original column.
-                let desired_offset = self
-                    .cursor
-                    .target_column()
-                    .unwrap_or(focus.offset);
+                let desired_offset = self.cursor.target_column().unwrap_or(focus.offset);
 
                 // Save target_column on first vertical move.
                 if self.cursor.target_column().is_none() {
@@ -700,26 +669,18 @@ impl EditorState {
                 match move_action {
                     MoveAction::Up => {
                         if focus.block_index > 0 {
-                            let prev_len = doc
-                                .block(focus.block_index - 1)
-                                .map_or(0, Block::char_len);
-                            DocPosition::new(
-                                focus.block_index - 1,
-                                prev_len.min(desired_offset),
-                            )
+                            let prev_len =
+                                doc.block(focus.block_index - 1).map_or(0, Block::char_len);
+                            DocPosition::new(focus.block_index - 1, prev_len.min(desired_offset))
                         } else {
                             DocPosition::new(0, 0)
                         }
                     }
                     MoveAction::Down => {
                         if focus.block_index + 1 < doc.block_count() {
-                            let next_len = doc
-                                .block(focus.block_index + 1)
-                                .map_or(0, Block::char_len);
-                            DocPosition::new(
-                                focus.block_index + 1,
-                                next_len.min(desired_offset),
-                            )
+                            let next_len =
+                                doc.block(focus.block_index + 1).map_or(0, Block::char_len);
+                            DocPosition::new(focus.block_index + 1, next_len.min(desired_offset))
                         } else {
                             doc.end_position()
                         }
@@ -843,7 +804,10 @@ fn splice_runs_into_block(
         if doc.block_count() > 1 {
             let remove_old = EditOp::RemoveBlock {
                 index: block_idx + 1,
-                saved: doc.block(block_idx + 1).cloned().unwrap_or_else(Block::empty_paragraph),
+                saved: doc
+                    .block(block_idx + 1)
+                    .cloned()
+                    .unwrap_or_else(Block::empty_paragraph),
             };
             remove_old.apply(doc);
             ops.push(remove_old);
@@ -881,20 +845,38 @@ mod tests {
 
     #[test]
     fn from_document_preserves_blocks() {
-        let doc = Document::from_blocks(vec![
-            Block::paragraph("hello"),
-            Block::paragraph("world"),
-        ]);
+        let doc = Document::from_blocks(vec![Block::paragraph("hello"), Block::paragraph("world")]);
         let state = EditorState::from_document(doc);
         assert_eq!(state.document.block_count(), 2);
-        assert_eq!(state.document.block(0).map(Block::flattened_text).as_deref(), Some("hello"));
-        assert_eq!(state.document.block(1).map(Block::flattened_text).as_deref(), Some("world"));
+        assert_eq!(
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
+            Some("hello")
+        );
+        assert_eq!(
+            state
+                .document
+                .block(1)
+                .map(Block::flattened_text)
+                .as_deref(),
+            Some("world")
+        );
     }
 
     #[test]
     fn from_html_parses() {
         let state = EditorState::from_html("<p>hello</p>");
-        assert_eq!(state.document.block(0).map(Block::flattened_text).as_deref(), Some("hello"));
+        assert_eq!(
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
+            Some("hello")
+        );
     }
 
     // ── EditorState::to_html ─────────────────────────────
@@ -916,13 +898,10 @@ mod tests {
 
     #[test]
     fn selection_text_single_block() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello world"),
-        ]));
-        state.selection = DocSelection::range(
-            DocPosition::new(0, 0),
-            DocPosition::new(0, 5),
-        );
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::paragraph(
+            "hello world",
+        )]));
+        state.selection = DocSelection::range(DocPosition::new(0, 0), DocPosition::new(0, 5));
         assert_eq!(state.selection_text(), "hello");
     }
 
@@ -932,10 +911,7 @@ mod tests {
             Block::paragraph("hello"),
             Block::paragraph("world"),
         ]));
-        state.selection = DocSelection::range(
-            DocPosition::new(0, 3),
-            DocPosition::new(1, 2),
-        );
+        state.selection = DocSelection::range(DocPosition::new(0, 3), DocPosition::new(1, 2));
         let text = state.selection_text();
         assert!(text.contains("lo"));
         assert!(text.contains("wo"));
@@ -948,7 +924,11 @@ mod tests {
         let mut state = EditorState::new();
         state.apply_action(EditAction::InsertText("hello".into()));
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("hello"),
         );
         assert_eq!(state.selection.focus, DocPosition::new(0, 5));
@@ -961,7 +941,11 @@ mod tests {
         state.apply_action(EditAction::InsertText("e".into()));
         state.apply_action(EditAction::InsertText("l".into()));
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("hel"),
         );
         assert_eq!(state.selection.focus, DocPosition::new(0, 3));
@@ -971,13 +955,16 @@ mod tests {
 
     #[test]
     fn apply_action_delete_backward() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello"),
-        ]));
+        let mut state =
+            EditorState::from_document(Document::from_blocks(vec![Block::paragraph("hello")]));
         state.selection = DocSelection::caret(DocPosition::new(0, 5));
         state.apply_action(EditAction::DeleteBackward);
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("hell"),
         );
         assert_eq!(state.selection.focus, DocPosition::new(0, 4));
@@ -985,29 +972,33 @@ mod tests {
 
     #[test]
     fn apply_action_delete_forward() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello"),
-        ]));
+        let mut state =
+            EditorState::from_document(Document::from_blocks(vec![Block::paragraph("hello")]));
         state.selection = DocSelection::caret(DocPosition::new(0, 0));
         state.apply_action(EditAction::DeleteForward);
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("ello"),
         );
     }
 
     #[test]
     fn apply_action_delete_selection() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello world"),
-        ]));
-        state.selection = DocSelection::range(
-            DocPosition::new(0, 5),
-            DocPosition::new(0, 11),
-        );
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::paragraph(
+            "hello world",
+        )]));
+        state.selection = DocSelection::range(DocPosition::new(0, 5), DocPosition::new(0, 11));
         state.apply_action(EditAction::DeleteSelection);
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("hello"),
         );
     }
@@ -1016,18 +1007,26 @@ mod tests {
 
     #[test]
     fn apply_action_split_block() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello world"),
-        ]));
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::paragraph(
+            "hello world",
+        )]));
         state.selection = DocSelection::caret(DocPosition::new(0, 5));
         state.apply_action(EditAction::SplitBlock);
         assert_eq!(state.document.block_count(), 2);
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("hello"),
         );
         assert_eq!(
-            state.document.block(1).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(1)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some(" world"),
         );
         // Cursor should be at start of new block.
@@ -1054,13 +1053,10 @@ mod tests {
 
     #[test]
     fn toggle_style_with_selection_applies() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello world"),
-        ]));
-        state.selection = DocSelection::range(
-            DocPosition::new(0, 0),
-            DocPosition::new(0, 5),
-        );
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::paragraph(
+            "hello world",
+        )]));
+        state.selection = DocSelection::range(DocPosition::new(0, 0), DocPosition::new(0, 5));
         state.apply_action(EditAction::ToggleInlineStyle(InlineStyle::BOLD));
 
         let runs = state.document.block(0).and_then(Block::runs).expect("runs");
@@ -1075,13 +1071,21 @@ mod tests {
         let mut state = EditorState::new();
         state.apply_action(EditAction::InsertText("hello".into()));
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("hello"),
         );
 
         state.undo();
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some(""),
         );
     }
@@ -1093,7 +1097,11 @@ mod tests {
         state.undo();
         state.redo();
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("hello"),
         );
     }
@@ -1122,25 +1130,41 @@ mod tests {
         state.apply_action(EditAction::InsertText("c".into()));
 
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("abc"),
         );
 
         state.undo(); // remove "c"
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("ab"),
         );
 
         state.undo(); // remove "b"
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("a"),
         );
 
         state.redo(); // re-add "b"
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("ab"),
         );
     }
@@ -1149,9 +1173,8 @@ mod tests {
 
     #[test]
     fn move_left() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello"),
-        ]));
+        let mut state =
+            EditorState::from_document(Document::from_blocks(vec![Block::paragraph("hello")]));
         state.selection = DocSelection::caret(DocPosition::new(0, 3));
         state.perform(Action::Move(MoveAction::Left));
         assert_eq!(state.selection.focus, DocPosition::new(0, 2));
@@ -1160,9 +1183,8 @@ mod tests {
 
     #[test]
     fn move_right() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello"),
-        ]));
+        let mut state =
+            EditorState::from_document(Document::from_blocks(vec![Block::paragraph("hello")]));
         state.selection = DocSelection::caret(DocPosition::new(0, 2));
         state.perform(Action::Move(MoveAction::Right));
         assert_eq!(state.selection.focus, DocPosition::new(0, 3));
@@ -1170,13 +1192,10 @@ mod tests {
 
     #[test]
     fn move_left_collapses_selection_to_start() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello world"),
-        ]));
-        state.selection = DocSelection::range(
-            DocPosition::new(0, 2),
-            DocPosition::new(0, 7),
-        );
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::paragraph(
+            "hello world",
+        )]));
+        state.selection = DocSelection::range(DocPosition::new(0, 2), DocPosition::new(0, 7));
         state.perform(Action::Move(MoveAction::Left));
         assert!(state.selection.is_collapsed());
         assert_eq!(state.selection.focus, DocPosition::new(0, 2));
@@ -1184,13 +1203,10 @@ mod tests {
 
     #[test]
     fn move_right_collapses_selection_to_end() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello world"),
-        ]));
-        state.selection = DocSelection::range(
-            DocPosition::new(0, 2),
-            DocPosition::new(0, 7),
-        );
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::paragraph(
+            "hello world",
+        )]));
+        state.selection = DocSelection::range(DocPosition::new(0, 2), DocPosition::new(0, 7));
         state.perform(Action::Move(MoveAction::Right));
         assert!(state.selection.is_collapsed());
         assert_eq!(state.selection.focus, DocPosition::new(0, 7));
@@ -1198,9 +1214,8 @@ mod tests {
 
     #[test]
     fn select_extends_selection() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello"),
-        ]));
+        let mut state =
+            EditorState::from_document(Document::from_blocks(vec![Block::paragraph("hello")]));
         state.selection = DocSelection::caret(DocPosition::new(0, 2));
         state.perform(Action::Select(MoveAction::Right));
         assert!(!state.selection.is_collapsed());
@@ -1221,9 +1236,9 @@ mod tests {
 
     #[test]
     fn move_home_end() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello world"),
-        ]));
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::paragraph(
+            "hello world",
+        )]));
         state.selection = DocSelection::caret(DocPosition::new(0, 5));
 
         state.perform(Action::Move(MoveAction::Home));
@@ -1272,8 +1287,8 @@ mod tests {
         // to block 2. The offset should recover to 10 in block 2.
         let mut state = EditorState::from_document(Document::from_blocks(vec![
             Block::paragraph("abcdefghijklmno"),      // len 15
-            Block::paragraph("xy"),                    // len 2
-            Block::paragraph("12345678901234567890"),  // len 20
+            Block::paragraph("xy"),                   // len 2
+            Block::paragraph("12345678901234567890"), // len 20
         ]));
         state.selection = DocSelection::caret(DocPosition::new(0, 10));
 
@@ -1308,7 +1323,7 @@ mod tests {
     fn horizontal_move_clears_target_column() {
         let mut state = EditorState::from_document(Document::from_blocks(vec![
             Block::paragraph("abcdefghij"), // len 10
-            Block::paragraph("xy"),          // len 2
+            Block::paragraph("xy"),         // len 2
             Block::paragraph("abcdefghij"), // len 10
         ]));
         state.selection = DocSelection::caret(DocPosition::new(0, 8));
@@ -1328,9 +1343,8 @@ mod tests {
 
     #[test]
     fn vertical_move_at_boundary_clamps_correctly() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("abc"),
-        ]));
+        let mut state =
+            EditorState::from_document(Document::from_blocks(vec![Block::paragraph("abc")]));
         state.selection = DocSelection::caret(DocPosition::new(0, 2));
 
         // Move up at top boundary — goes to (0, 0)
@@ -1347,13 +1361,9 @@ mod tests {
 
     #[test]
     fn set_selection() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello"),
-        ]));
-        let sel = DocSelection::range(
-            DocPosition::new(0, 1),
-            DocPosition::new(0, 4),
-        );
+        let mut state =
+            EditorState::from_document(Document::from_blocks(vec![Block::paragraph("hello")]));
+        let sel = DocSelection::range(DocPosition::new(0, 1), DocPosition::new(0, 4));
         state.set_selection(sel);
         assert_eq!(state.selection, sel);
     }
@@ -1388,16 +1398,17 @@ mod tests {
 
     #[test]
     fn insert_replaces_selection() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello world"),
-        ]));
-        state.selection = DocSelection::range(
-            DocPosition::new(0, 5),
-            DocPosition::new(0, 11),
-        );
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::paragraph(
+            "hello world",
+        )]));
+        state.selection = DocSelection::range(DocPosition::new(0, 5), DocPosition::new(0, 11));
         state.apply_action(EditAction::InsertText("!".into()));
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("hello!"),
         );
     }
@@ -1414,7 +1425,11 @@ mod tests {
         state.apply_action(EditAction::DeleteBackward);
         assert_eq!(state.document.block_count(), 1);
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("helloworld"),
         );
         assert_eq!(state.selection.focus, DocPosition::new(0, 5));
@@ -1434,7 +1449,11 @@ mod tests {
 
         state.undo();
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some(""),
         );
     }
@@ -1459,13 +1478,18 @@ mod tests {
 
         // Type 'x' — should be bold.
         state.apply_action(EditAction::InsertText("x".into()));
-        assert!(state.pending_style.is_empty(), "pending style should be cleared after insert");
+        assert!(
+            state.pending_style.is_empty(),
+            "pending style should be cleared after insert"
+        );
 
         let runs = state.document.block(0).and_then(Block::runs).expect("runs");
         // The 'x' run should be bold.
         let bold_runs: Vec<_> = runs.iter().filter(|r| !r.is_empty()).collect();
         assert!(
-            bold_runs.iter().all(|r| r.style.contains(InlineStyle::BOLD)),
+            bold_runs
+                .iter()
+                .all(|r| r.style.contains(InlineStyle::BOLD)),
             "all non-empty runs should be bold, got: {bold_runs:?}",
         );
     }
@@ -1474,13 +1498,10 @@ mod tests {
 
     #[test]
     fn copy_captures_internal_clipboard() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello world"),
-        ]));
-        state.selection = DocSelection::range(
-            DocPosition::new(0, 0),
-            DocPosition::new(0, 5),
-        );
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::paragraph(
+            "hello world",
+        )]));
+        state.selection = DocSelection::range(DocPosition::new(0, 0), DocPosition::new(0, 5));
         state.perform(Action::Copy);
         assert!(state.internal_clipboard.is_some());
         let ic = state.internal_clipboard.as_ref().expect("clipboard");
@@ -1491,14 +1512,11 @@ mod tests {
 
     #[test]
     fn copy_paste_plain_text_within_single_block() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello world"),
-        ]));
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::paragraph(
+            "hello world",
+        )]));
         // Copy "world"
-        state.selection = DocSelection::range(
-            DocPosition::new(0, 6),
-            DocPosition::new(0, 11),
-        );
+        state.selection = DocSelection::range(DocPosition::new(0, 6), DocPosition::new(0, 11));
         state.perform(Action::Copy);
 
         // Move cursor to start and paste
@@ -1506,27 +1524,26 @@ mod tests {
         state.perform(Action::Paste("world".into()));
 
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("worldhello world"),
         );
     }
 
     #[test]
     fn copy_paste_preserves_bold_formatting() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::Paragraph {
-                runs: vec![
-                    StyledRun::plain("hello "),
-                    StyledRun::styled("bold", InlineStyle::BOLD),
-                    StyledRun::plain(" text"),
-                ],
-            },
-        ]));
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::Paragraph {
+            runs: vec![
+                StyledRun::plain("hello "),
+                StyledRun::styled("bold", InlineStyle::BOLD),
+                StyledRun::plain(" text"),
+            ],
+        }]));
         // Copy "bold" (offsets 6..10)
-        state.selection = DocSelection::range(
-            DocPosition::new(0, 6),
-            DocPosition::new(0, 10),
-        );
+        state.selection = DocSelection::range(DocPosition::new(0, 6), DocPosition::new(0, 10));
         state.perform(Action::Copy);
 
         // Move cursor to end and paste
@@ -1567,10 +1584,7 @@ mod tests {
         ]));
 
         // Copy "first\nsecond" (blocks 0 and 1 entirely)
-        state.selection = DocSelection::range(
-            DocPosition::new(0, 0),
-            DocPosition::new(1, 6),
-        );
+        state.selection = DocSelection::range(DocPosition::new(0, 0), DocPosition::new(1, 6));
         state.perform(Action::Copy);
 
         // Paste at end of "third"
@@ -1580,29 +1594,38 @@ mod tests {
         // Should now have: "first", "second", "thirdfirst", "second"
         assert_eq!(state.document.block_count(), 4);
         assert_eq!(
-            state.document.block(2).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(2)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("thirdfirst"),
         );
         assert_eq!(
-            state.document.block(3).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(3)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("second"),
         );
     }
 
     #[test]
     fn cut_captures_and_deletes() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello world"),
-        ]));
-        state.selection = DocSelection::range(
-            DocPosition::new(0, 5),
-            DocPosition::new(0, 11),
-        );
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::paragraph(
+            "hello world",
+        )]));
+        state.selection = DocSelection::range(DocPosition::new(0, 5), DocPosition::new(0, 11));
         state.perform(Action::Cut);
 
         // Text should be deleted.
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("hello"),
         );
 
@@ -1614,14 +1637,10 @@ mod tests {
 
     #[test]
     fn paste_external_text_when_clipboard_differs() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello"),
-        ]));
+        let mut state =
+            EditorState::from_document(Document::from_blocks(vec![Block::paragraph("hello")]));
         // Copy "hello"
-        state.selection = DocSelection::range(
-            DocPosition::new(0, 0),
-            DocPosition::new(0, 5),
-        );
+        state.selection = DocSelection::range(DocPosition::new(0, 0), DocPosition::new(0, 5));
         state.perform(Action::Copy);
 
         // Now paste something different from the system clipboard
@@ -1630,32 +1649,34 @@ mod tests {
         state.perform(Action::Paste("external".into()));
 
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("helloexternal"),
         );
     }
 
     #[test]
     fn paste_replaces_selection() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello world"),
-        ]));
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::paragraph(
+            "hello world",
+        )]));
         // Copy "hello"
-        state.selection = DocSelection::range(
-            DocPosition::new(0, 0),
-            DocPosition::new(0, 5),
-        );
+        state.selection = DocSelection::range(DocPosition::new(0, 0), DocPosition::new(0, 5));
         state.perform(Action::Copy);
 
         // Select " world" and paste "hello" over it.
-        state.selection = DocSelection::range(
-            DocPosition::new(0, 5),
-            DocPosition::new(0, 11),
-        );
+        state.selection = DocSelection::range(DocPosition::new(0, 5), DocPosition::new(0, 11));
         state.perform(Action::Paste("hello".into()));
 
         assert_eq!(
-            state.document.block(0).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("hellohello"),
         );
     }
@@ -1669,10 +1690,7 @@ mod tests {
         ]));
 
         // Copy "aaa\nbbb" (two complete blocks)
-        state.selection = DocSelection::range(
-            DocPosition::new(0, 0),
-            DocPosition::new(1, 3),
-        );
+        state.selection = DocSelection::range(DocPosition::new(0, 0), DocPosition::new(1, 3));
         state.perform(Action::Copy);
 
         // Paste in the middle of "target text" at offset 6
@@ -1683,20 +1701,27 @@ mod tests {
         // Block 0: "aaa", Block 1: "bbb", Block 2: "targetaaa", Block 3: "bbb text"
         assert!(state.document.block_count() >= 4);
         assert_eq!(
-            state.document.block(2).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(2)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("targetaaa"),
         );
         assert_eq!(
-            state.document.block(3).map(Block::flattened_text).as_deref(),
+            state
+                .document
+                .block(3)
+                .map(Block::flattened_text)
+                .as_deref(),
             Some("bbb text"),
         );
     }
 
     #[test]
     fn collapsed_copy_does_not_capture() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello"),
-        ]));
+        let mut state =
+            EditorState::from_document(Document::from_blocks(vec![Block::paragraph("hello")]));
         state.selection = DocSelection::caret(DocPosition::new(0, 3));
         state.perform(Action::Copy);
         assert!(state.internal_clipboard.is_none());
@@ -1757,9 +1782,9 @@ mod tests {
 
     #[test]
     fn double_click_selects_word() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello world"),
-        ]));
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::paragraph(
+            "hello world",
+        )]));
         state.perform(Action::DoubleClick(DocPosition::new(0, 3)));
         assert_eq!(state.selection.start(), DocPosition::new(0, 0));
         assert_eq!(state.selection.end(), DocPosition::new(0, 5));
@@ -1767,9 +1792,9 @@ mod tests {
 
     #[test]
     fn double_click_selects_second_word() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello world"),
-        ]));
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::paragraph(
+            "hello world",
+        )]));
         state.perform(Action::DoubleClick(DocPosition::new(0, 8)));
         assert_eq!(state.selection.start(), DocPosition::new(0, 6));
         assert_eq!(state.selection.end(), DocPosition::new(0, 11));
@@ -1777,9 +1802,9 @@ mod tests {
 
     #[test]
     fn triple_click_selects_block() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello world"),
-        ]));
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::paragraph(
+            "hello world",
+        )]));
         state.perform(Action::TripleClick(DocPosition::new(0, 3)));
         assert_eq!(state.selection.start(), DocPosition::new(0, 0));
         assert_eq!(state.selection.end(), DocPosition::new(0, 11));
@@ -1798,9 +1823,9 @@ mod tests {
 
     #[test]
     fn double_click_clears_drag() {
-        let mut state = EditorState::from_document(Document::from_blocks(vec![
-            Block::paragraph("hello world"),
-        ]));
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::paragraph(
+            "hello world",
+        )]));
         state.perform(Action::DoubleClick(DocPosition::new(0, 3)));
         assert!(state.drag.is_none());
     }

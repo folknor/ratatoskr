@@ -8,8 +8,7 @@ use super::context::ActionContext;
 use super::outcome::{ActionError, ActionOutcome};
 use crate::db::pending_ops::{
     db_pending_ops_delete, db_pending_ops_enqueue, db_pending_ops_get,
-    db_pending_ops_increment_retry, db_pending_ops_recover_executing,
-    db_pending_ops_update_status,
+    db_pending_ops_increment_retry, db_pending_ops_recover_executing, db_pending_ops_update_status,
 };
 
 /// Per-action-type retry policy.
@@ -144,20 +143,18 @@ async fn process_account_group(
             None => {
                 log::debug!(
                     "[pending_ops] Skipping {} for {}/{} — in flight",
-                    op.operation_type, op.account_id, op.resource_id
+                    op.operation_type,
+                    op.account_id,
+                    op.resource_id
                 );
                 continue; // Leave pending, don't increment retry
             }
         };
 
         // Mark as executing
-        if let Err(e) = db_pending_ops_update_status(
-            &ctx.db,
-            op.id.clone(),
-            "executing".to_string(),
-            None,
-        )
-        .await
+        if let Err(e) =
+            db_pending_ops_update_status(&ctx.db, op.id.clone(), "executing".to_string(), None)
+                .await
         {
             log::warn!("[pending_ops] Failed to mark op {} executing: {e}", op.id);
             continue;
@@ -165,13 +162,22 @@ async fn process_account_group(
 
         let outcome = if let Some(ref provider) = provider {
             dispatch_pending_op_with_provider(
-                retry_ctx, &**provider, account_id, &op.operation_type, &op.resource_id, &op.params,
+                retry_ctx,
+                &**provider,
+                account_id,
+                &op.operation_type,
+                &op.resource_id,
+                &op.params,
             )
             .await
         } else {
             // No provider — use public wrappers (which will also fail to create provider)
             dispatch_pending_op(
-                retry_ctx, &op.account_id, &op.operation_type, &op.resource_id, &op.params,
+                retry_ctx,
+                &op.account_id,
+                &op.operation_type,
+                &op.resource_id,
+                &op.params,
             )
             .await
         };
@@ -181,13 +187,17 @@ async fn process_account_group(
                 let _ = db_pending_ops_delete(&ctx.db, op.id.clone()).await;
                 log::info!(
                     "[pending_ops] Completed {} for {}/{}",
-                    op.operation_type, op.account_id, op.resource_id
+                    op.operation_type,
+                    op.account_id,
+                    op.resource_id
                 );
             }
             ActionOutcome::LocalOnly { reason, .. } | ActionOutcome::Failed { error: reason } => {
                 log::warn!(
                     "[pending_ops] Retry failed for {} {}/{}: {reason}",
-                    op.operation_type, op.account_id, op.resource_id
+                    op.operation_type,
+                    op.account_id,
+                    op.resource_id
                 );
                 let _ = db_pending_ops_increment_retry(&ctx.db, op.id.clone()).await;
             }
@@ -206,8 +216,7 @@ async fn dispatch_pending_op(
     resource_id: &str,
     params_json: &str,
 ) -> ActionOutcome {
-    let params: serde_json::Value =
-        serde_json::from_str(params_json).unwrap_or_default();
+    let params: serde_json::Value = serde_json::from_str(params_json).unwrap_or_default();
 
     match operation_type {
         "archive" => super::archive::archive(ctx, account_id, resource_id).await,
@@ -221,13 +230,23 @@ async fn dispatch_pending_op(
         }
         "moveToFolder" => {
             let folder_id = crate::provider::typed_ids::FolderId::from(
-                params.get("folderId").and_then(serde_json::Value::as_str).unwrap_or(""),
+                params
+                    .get("folderId")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(""),
             );
-            let source = params.get("sourceLabelId")
+            let source = params
+                .get("sourceLabelId")
                 .and_then(serde_json::Value::as_str)
                 .map(crate::provider::typed_ids::FolderId::from);
-            super::move_to_folder::move_to_folder(ctx, account_id, resource_id, &folder_id, source.as_ref())
-                .await
+            super::move_to_folder::move_to_folder(
+                ctx,
+                account_id,
+                resource_id,
+                &folder_id,
+                source.as_ref(),
+            )
+            .await
         }
         "star" => {
             let starred = params
@@ -248,13 +267,19 @@ async fn dispatch_pending_op(
         }
         "addLabel" => {
             let label_id = crate::provider::typed_ids::TagId::from(
-                params.get("labelId").and_then(serde_json::Value::as_str).unwrap_or(""),
+                params
+                    .get("labelId")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(""),
             );
             super::label::add_label(ctx, account_id, resource_id, &label_id).await
         }
         "removeLabel" => {
             let label_id = crate::provider::typed_ids::TagId::from(
-                params.get("labelId").and_then(serde_json::Value::as_str).unwrap_or(""),
+                params
+                    .get("labelId")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(""),
             );
             super::label::remove_label(ctx, account_id, resource_id, &label_id).await
         }
@@ -276,47 +301,90 @@ async fn dispatch_pending_op_with_provider(
     resource_id: &str,
     params_json: &str,
 ) -> ActionOutcome {
-    let params: serde_json::Value =
-        serde_json::from_str(params_json).unwrap_or_default();
+    let params: serde_json::Value = serde_json::from_str(params_json).unwrap_or_default();
 
     match operation_type {
-        "archive" => super::archive::archive_with_provider(ctx, provider, account_id, resource_id).await,
+        "archive" => {
+            super::archive::archive_with_provider(ctx, provider, account_id, resource_id).await
+        }
         "trash" => super::trash::trash_with_provider(ctx, provider, account_id, resource_id).await,
         "spam" => {
-            let is_spam = params.get("isSpam").and_then(serde_json::Value::as_bool).unwrap_or(true);
+            let is_spam = params
+                .get("isSpam")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true);
             super::spam::spam_with_provider(ctx, provider, account_id, resource_id, is_spam).await
         }
         "moveToFolder" => {
             let folder_id = crate::provider::typed_ids::FolderId::from(
-                params.get("folderId").and_then(serde_json::Value::as_str).unwrap_or(""),
+                params
+                    .get("folderId")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(""),
             );
-            let source = params.get("sourceLabelId")
+            let source = params
+                .get("sourceLabelId")
                 .and_then(serde_json::Value::as_str)
                 .map(crate::provider::typed_ids::FolderId::from);
-            super::move_to_folder::move_to_folder_with_provider(ctx, provider, account_id, resource_id, &folder_id, source.as_ref()).await
+            super::move_to_folder::move_to_folder_with_provider(
+                ctx,
+                provider,
+                account_id,
+                resource_id,
+                &folder_id,
+                source.as_ref(),
+            )
+            .await
         }
         "star" => {
-            let starred = params.get("starred").and_then(serde_json::Value::as_bool).unwrap_or(true);
+            let starred = params
+                .get("starred")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true);
             super::star::star_with_provider(ctx, provider, account_id, resource_id, starred).await
         }
         "markRead" => {
-            let read = params.get("read").and_then(serde_json::Value::as_bool).unwrap_or(true);
-            super::mark_read::mark_read_with_provider(ctx, provider, account_id, resource_id, read).await
+            let read = params
+                .get("read")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true);
+            super::mark_read::mark_read_with_provider(ctx, provider, account_id, resource_id, read)
+                .await
         }
         "permanentDelete" => {
-            super::permanent_delete::permanent_delete_with_provider(ctx, provider, account_id, resource_id).await
+            super::permanent_delete::permanent_delete_with_provider(
+                ctx,
+                provider,
+                account_id,
+                resource_id,
+            )
+            .await
         }
         "addLabel" => {
             let label_id = crate::provider::typed_ids::TagId::from(
-                params.get("labelId").and_then(serde_json::Value::as_str).unwrap_or(""),
+                params
+                    .get("labelId")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(""),
             );
-            super::label::add_label_with_provider(ctx, provider, account_id, resource_id, &label_id).await
+            super::label::add_label_with_provider(ctx, provider, account_id, resource_id, &label_id)
+                .await
         }
         "removeLabel" => {
             let label_id = crate::provider::typed_ids::TagId::from(
-                params.get("labelId").and_then(serde_json::Value::as_str).unwrap_or(""),
+                params
+                    .get("labelId")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(""),
             );
-            super::label::remove_label_with_provider(ctx, provider, account_id, resource_id, &label_id).await
+            super::label::remove_label_with_provider(
+                ctx,
+                provider,
+                account_id,
+                resource_id,
+                &label_id,
+            )
+            .await
         }
         other => {
             log::warn!("[pending_ops] Unknown operation type: {other}");

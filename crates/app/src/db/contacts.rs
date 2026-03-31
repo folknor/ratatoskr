@@ -37,8 +37,7 @@ pub fn search_contacts_for_autocomplete(
     }
     let like_pattern = make_like_pattern(trimmed);
     let mut results = Vec::new();
-    let mut seen_emails: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
+    let mut seen_emails: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     // Search contacts table first (higher priority) — FTS5 with LIKE fallback.
     search_contacts_fts_or_like(
@@ -241,8 +240,7 @@ fn search_seen_addresses_fts_or_like(
                     WHERE email LIKE ?1 ESCAPE '\\' OR display_name LIKE ?1 ESCAPE '\\'
                     ORDER BY last_seen_at DESC
                     LIMIT ?2";
-    let mut seen_stmt =
-        conn.prepare(seen_sql).map_err(|e| e.to_string())?;
+    let mut seen_stmt = conn.prepare(seen_sql).map_err(|e| e.to_string())?;
     let seen_rows = seen_stmt
         .query_map(params![like_pattern, limit], |row| {
             Ok(ContactMatch {
@@ -271,16 +269,14 @@ fn search_groups(
     limit: i64,
     results: &mut Vec<ContactMatch>,
 ) -> Result<(), String> {
-    let groups_sql =
-        "SELECT g.id, g.name,
+    let groups_sql = "SELECT g.id, g.name,
                 (SELECT COUNT(*) FROM contact_group_members m
                  WHERE m.group_id = g.id) AS member_count
          FROM contact_groups g
          WHERE g.name LIKE ?1 ESCAPE '\\'
          ORDER BY g.name ASC
          LIMIT ?2";
-    let mut stmt =
-        conn.prepare(groups_sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(groups_sql).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![pattern, limit], |row| {
             let id: String = row.get("id")?;
@@ -311,10 +307,8 @@ impl Db {
         query: String,
         limit: i64,
     ) -> Result<Vec<ContactMatch>, String> {
-        self.with_conn(move |conn| {
-            search_contacts_for_autocomplete(conn, &query, limit)
-        })
-        .await
+        self.with_conn(move |conn| search_contacts_for_autocomplete(conn, &query, limit))
+            .await
     }
 }
 
@@ -361,30 +355,20 @@ impl Db {
         &self,
         filter: String,
     ) -> Result<Vec<ContactEntry>, String> {
-        self.with_conn(move |conn| {
-            load_contacts_filtered(conn, &filter)
-        })
-        .await
+        self.with_conn(move |conn| load_contacts_filtered(conn, &filter))
+            .await
     }
 
     /// Load contact groups for the settings management list.
-    pub async fn get_groups_for_settings(
-        &self,
-        filter: String,
-    ) -> Result<Vec<GroupEntry>, String> {
+    pub async fn get_groups_for_settings(&self, filter: String) -> Result<Vec<GroupEntry>, String> {
         self.with_conn(move |conn| load_groups_filtered(conn, &filter))
             .await
     }
 
     /// Get member emails for a group.
-    pub async fn get_group_member_emails(
-        &self,
-        group_id: String,
-    ) -> Result<Vec<String>, String> {
-        self.with_conn(move |conn| {
-            load_group_member_emails(conn, &group_id)
-        })
-        .await
+    pub async fn get_group_member_emails(&self, group_id: String) -> Result<Vec<String>, String> {
+        self.with_conn(move |conn| load_group_member_emails(conn, &group_id))
+            .await
     }
 
     /// Expand a contact group into individual (email, display_name) pairs.
@@ -393,34 +377,21 @@ impl Db {
         &self,
         group_id: String,
     ) -> Result<Vec<(String, Option<String>)>, String> {
-        self.with_conn(move |conn| {
-            expand_group_with_names(conn, &group_id)
-        })
-        .await
+        self.with_conn(move |conn| expand_group_with_names(conn, &group_id))
+            .await
     }
 
     /// Insert or update a contact.
-    pub async fn save_contact(
-        &self,
-        entry: ContactEntry,
-    ) -> Result<(), String> {
-        self.with_write_conn(move |conn| {
-            save_contact_inner(conn, &entry)
-        })
-        .await
+    pub async fn save_contact(&self, entry: ContactEntry) -> Result<(), String> {
+        self.with_write_conn(move |conn| save_contact_inner(conn, &entry))
+            .await
     }
 
     /// Delete a contact by ID.
-    pub async fn delete_contact(
-        &self,
-        contact_id: String,
-    ) -> Result<(), String> {
+    pub async fn delete_contact(&self, contact_id: String) -> Result<(), String> {
         self.with_write_conn(move |conn| {
-            conn.execute(
-                "DELETE FROM contacts WHERE id = ?1",
-                params![contact_id],
-            )
-            .map_err(|e| e.to_string())?;
+            conn.execute("DELETE FROM contacts WHERE id = ?1", params![contact_id])
+                .map_err(|e| e.to_string())?;
             Ok(())
         })
         .await
@@ -432,17 +403,12 @@ impl Db {
         group: GroupEntry,
         member_emails: Vec<String>,
     ) -> Result<(), String> {
-        self.with_write_conn(move |conn| {
-            save_group_inner(conn, &group, &member_emails)
-        })
-        .await
+        self.with_write_conn(move |conn| save_group_inner(conn, &group, &member_emails))
+            .await
     }
 
     /// Delete a contact group by ID.
-    pub async fn delete_group(
-        &self,
-        group_id: String,
-    ) -> Result<(), String> {
+    pub async fn delete_group(&self, group_id: String) -> Result<(), String> {
         self.with_write_conn(move |conn| {
             conn.execute(
                 "DELETE FROM contact_groups WHERE id = ?1",
@@ -458,10 +424,7 @@ impl Db {
 /// Load contacts with group memberships via a single JOIN query
 /// (replaces the N+1 pattern of calling load_contact_groups per
 /// contact).
-fn load_contacts_filtered(
-    conn: &Connection,
-    filter: &str,
-) -> Result<Vec<ContactEntry>, String> {
+fn load_contacts_filtered(conn: &Connection, filter: &str) -> Result<Vec<ContactEntry>, String> {
     let trimmed = filter.trim();
     let escaped = trimmed.replace('%', r"\%").replace('_', r"\_");
     let pattern = format!("%{escaped}%");
@@ -502,22 +465,15 @@ fn load_contacts_filtered(
          LIMIT 200"
     };
 
-    let db_params: &[&dyn rusqlite::types::ToSql] = if trimmed.is_empty() {
-        &[]
-    } else {
-        &[&pattern]
-    };
+    let db_params: &[&dyn rusqlite::types::ToSql] =
+        if trimmed.is_empty() { &[] } else { &[&pattern] };
 
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(db_params, |row| {
             let group_names: Option<String> = row.get("group_names")?;
             let groups = group_names
-                .map(|s| {
-                    s.split("||")
-                        .map(String::from)
-                        .collect::<Vec<_>>()
-                })
+                .map(|s| s.split("||").map(String::from).collect::<Vec<_>>())
                 .unwrap_or_default();
             Ok(ContactEntry {
                 id: row.get("id")?,
@@ -540,10 +496,7 @@ fn load_contacts_filtered(
         .map_err(|e| e.to_string())
 }
 
-fn load_groups_filtered(
-    conn: &Connection,
-    filter: &str,
-) -> Result<Vec<GroupEntry>, String> {
+fn load_groups_filtered(conn: &Connection, filter: &str) -> Result<Vec<GroupEntry>, String> {
     let trimmed = filter.trim();
     let escaped = trimmed.replace('%', r"\%").replace('_', r"\_");
     let pattern = format!("%{escaped}%");
@@ -565,11 +518,8 @@ fn load_groups_filtered(
          LIMIT 100"
     };
 
-    let db_params: &[&dyn rusqlite::types::ToSql] = if trimmed.is_empty() {
-        &[]
-    } else {
-        &[&pattern]
-    };
+    let db_params: &[&dyn rusqlite::types::ToSql] =
+        if trimmed.is_empty() { &[] } else { &[&pattern] };
 
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let rows = stmt
@@ -588,10 +538,7 @@ fn load_groups_filtered(
         .map_err(|e| e.to_string())
 }
 
-fn load_group_member_emails(
-    conn: &Connection,
-    group_id: &str,
-) -> Result<Vec<String>, String> {
+fn load_group_member_emails(conn: &Connection, group_id: &str) -> Result<Vec<String>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT member_value FROM contact_group_members
@@ -671,10 +618,7 @@ fn expand_group_with_names(
     Ok(result)
 }
 
-fn save_contact_inner(
-    conn: &Connection,
-    entry: &ContactEntry,
-) -> Result<(), String> {
+fn save_contact_inner(conn: &Connection, entry: &ContactEntry) -> Result<(), String> {
     let now = chrono::Utc::now().timestamp();
     let source = entry.source.as_deref().unwrap_or("user");
     conn.execute(

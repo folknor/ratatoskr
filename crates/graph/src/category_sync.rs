@@ -1,8 +1,8 @@
 use serde::Deserialize;
 
 use super::client::GraphClient;
-use label_colors::category_colors;
 use db::db::DbState;
+use label_colors::category_colors;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,9 +27,8 @@ pub async fn graph_label_sync(
     account_id: &str,
     db: &DbState,
 ) -> Result<usize, String> {
-    let response: CategoryListResponse = client
-        .get_json("/me/outlook/masterCategories", db)
-        .await?;
+    let response: CategoryListResponse =
+        client.get_json("/me/outlook/masterCategories", db).await?;
 
     let aid = account_id.to_string();
     let categories = response.value;

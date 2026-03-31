@@ -28,11 +28,10 @@ pub async fn prepare_account_resync(
                     .map_err(|e| format!("query resync message ids: {e}"))?
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|e| format!("collect resync message ids: {e}"))?;
-                let hashes =
-                    crate::inline_image_store::collect_inline_hashes_for_account(
-                        conn,
-                        &account_id,
-                    )?;
+                let hashes = crate::inline_image_store::collect_inline_hashes_for_account(
+                    conn,
+                    &account_id,
+                )?;
                 Ok((msg_ids, hashes))
             }
         })
@@ -62,9 +61,7 @@ pub async fn prepare_account_resync(
         let orphaned = db
             .with_conn({
                 let hashes = inline_hashes;
-                move |conn| {
-                    crate::inline_image_store::find_unreferenced_hashes(conn, &hashes)
-                }
+                move |conn| crate::inline_image_store::find_unreferenced_hashes(conn, &hashes)
             })
             .await?;
         let _ = inline_images.delete_unreferenced(orphaned).await;

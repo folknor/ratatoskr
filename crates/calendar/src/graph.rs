@@ -1,9 +1,9 @@
-use rtsk::db::DbState;
 use graph::calendar_sync::{
-    graph_create_event, graph_delete_event, graph_list_calendars, graph_sync_calendar_events,
-    graph_update_event, GraphDateTimeTimeZone, GraphEventCreate,
+    GraphDateTimeTimeZone, GraphEventCreate, graph_create_event, graph_delete_event,
+    graph_list_calendars, graph_sync_calendar_events, graph_update_event,
 };
 use graph::client::GraphClient;
+use rtsk::db::DbState;
 
 use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
 
@@ -111,29 +111,32 @@ fn graph_event_to_dto(
 
 /// Convert a generic JSON event payload to a `GraphEventCreate` request.
 fn json_to_graph_event_create(value: &serde_json::Value) -> Result<GraphEventCreate, String> {
-    let subject = value.get("subject").or_else(|| value.get("summary"))
+    let subject = value
+        .get("subject")
+        .or_else(|| value.get("summary"))
         .and_then(|v| v.as_str())
         .map(String::from);
 
-    let description = value.get("description")
+    let description = value
+        .get("description")
         .and_then(|v| v.as_str())
         .map(String::from);
 
-    let body = description.map(|desc| {
-        graph::calendar_sync::GraphEventBodyInput {
-            content_type: "text".to_string(),
-            content: desc,
-        }
+    let body = description.map(|desc| graph::calendar_sync::GraphEventBodyInput {
+        content_type: "text".to_string(),
+        content: desc,
     });
 
-    let is_all_day = value.get("isAllDay")
+    let is_all_day = value
+        .get("isAllDay")
         .or_else(|| value.get("is_all_day"))
         .and_then(serde_json::Value::as_bool);
 
     let start = parse_event_datetime(value, "start", "startDateTime", is_all_day.unwrap_or(false))?;
     let end = parse_event_datetime(value, "end", "endDateTime", is_all_day.unwrap_or(false))?;
 
-    let location = value.get("location")
+    let location = value
+        .get("location")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| graph::calendar_sync::GraphLocationInput {
@@ -176,7 +179,9 @@ fn parse_event_datetime(
     }
 
     // Try flat ISO string
-    let dt_str = value.get(key).or_else(|| value.get(alt_key))
+    let dt_str = value
+        .get(key)
+        .or_else(|| value.get(alt_key))
         .and_then(|v| v.as_str())
         .ok_or_else(|| format!("Missing '{key}' in event payload"))?;
 

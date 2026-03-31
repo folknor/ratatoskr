@@ -40,8 +40,8 @@ const DEFAULT_REPLY: &str = "Thanks for the update.";
 /// stripping numbered prefixes. Always returns exactly 3 replies, padding
 /// with a default if the AI returned fewer.
 pub fn parse_smart_replies(response: &str) -> Vec<String> {
-    let mut replies = try_parse_json_array(response)
-        .unwrap_or_else(|| parse_newline_replies(response));
+    let mut replies =
+        try_parse_json_array(response).unwrap_or_else(|| parse_newline_replies(response));
 
     // Sanitize: strip HTML, limit length
     replies = replies
@@ -189,8 +189,7 @@ pub fn parse_category_response(response: &str) -> Vec<(String, ThreadCategory)> 
             if thread_id.is_empty() {
                 return None;
             }
-            ThreadCategory::parse(category_str)
-                .map(|cat| (thread_id.to_string(), cat))
+            ThreadCategory::parse(category_str).map(|cat| (thread_id.to_string(), cat))
         })
         .collect()
 }
@@ -280,8 +279,7 @@ mod tests {
 
     #[test]
     fn parse_smart_replies_truncates_to_three() {
-        let input =
-            r#"["One", "Two", "Three", "Four", "Five"]"#;
+        let input = r#"["One", "Two", "Three", "Four", "Five"]"#;
         let replies = parse_smart_replies(input);
         assert_eq!(replies.len(), 3);
     }
@@ -331,7 +329,8 @@ mod tests {
 
     #[test]
     fn parse_extracted_task_markdown_wrapped() {
-        let input = "Here is the task:\n```json\n{\"title\": \"Do thing\", \"priority\": \"low\"}\n```";
+        let input =
+            "Here is the task:\n```json\n{\"title\": \"Do thing\", \"priority\": \"low\"}\n```";
         let task = parse_extracted_task(input, "Fallback");
         assert_eq!(task.title, "Do thing");
         assert_eq!(task.priority, TaskPriority::Low);
@@ -384,7 +383,10 @@ mod tests {
         assert_eq!(result.len(), 3);
         assert_eq!(result[0], ("thread-1".to_string(), ThreadCategory::Primary));
         assert_eq!(result[1], ("thread-2".to_string(), ThreadCategory::Updates));
-        assert_eq!(result[2], ("thread-3".to_string(), ThreadCategory::Newsletters));
+        assert_eq!(
+            result[2],
+            ("thread-3".to_string(), ThreadCategory::Newsletters)
+        );
     }
 
     #[test]

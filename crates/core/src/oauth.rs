@@ -176,8 +176,8 @@ pub struct GenericOAuthProvider {
 
 impl GenericOAuthProvider {
     pub fn from_request(request: OAuthProviderAuthorizationRequest) -> Self {
-        let is_microsoft = request.provider_id == "microsoft"
-            || request.provider_id == "microsoft_graph";
+        let is_microsoft =
+            request.provider_id == "microsoft" || request.provider_id == "microsoft_graph";
         Self {
             provider_id: request.provider_id,
             auth_url: request.auth_url,
@@ -319,10 +319,7 @@ pub fn build_authorization_url(
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
 
-    let all_params: Vec<(&str, &str)> = params
-        .into_iter()
-        .chain(extra_refs)
-        .collect();
+    let all_params: Vec<(&str, &str)> = params.into_iter().chain(extra_refs).collect();
 
     let auth_url = format!(
         "{}?{}",
@@ -350,8 +347,7 @@ pub async fn run_oauth_authorization_flow(
     let (listener, actual_port) = bind_oauth_listener(OAUTH_CALLBACK_PORT).await?;
     let redirect_uri = format!("http://127.0.0.1:{actual_port}");
 
-    let (auth_url, code_verifier, state) =
-        build_authorization_url(&request, &redirect_uri)?;
+    let (auth_url, code_verifier, state) = build_authorization_url(&request, &redirect_uri)?;
 
     open_url(&auth_url)?;
     let result = await_oauth_callback(listener, &state).await?;
@@ -429,13 +425,10 @@ pub async fn await_oauth_callback(
     let mut buf = Vec::with_capacity(4096);
     let mut tmp = [0u8; 4096];
     loop {
-        let n = tokio::time::timeout(
-            Duration::from_secs(10),
-            stream.read(&mut tmp),
-        )
-        .await
-        .map_err(|_| "Timed out reading OAuth callback request".to_string())?
-        .map_err(|e| format!("Failed to read OAuth request: {e}"))?;
+        let n = tokio::time::timeout(Duration::from_secs(10), stream.read(&mut tmp))
+            .await
+            .map_err(|_| "Timed out reading OAuth callback request".to_string())?
+            .map_err(|e| format!("Failed to read OAuth request: {e}"))?;
         if n == 0 {
             break;
         }
@@ -666,7 +659,9 @@ async fn fetch_provider_userinfo(
 
     if !response.status().is_success() {
         let status = response.status();
-        return Err(format!("Failed to fetch provider user info (HTTP {status})"));
+        return Err(format!(
+            "Failed to fetch provider user info (HTTP {status})"
+        ));
     }
 
     let data = response

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use jmap_client::mailbox::{MailboxGet, MailboxRights, Role};
 use jmap_client::email::EmailGet;
+use jmap_client::mailbox::{MailboxGet, MailboxRights, Role};
 
 use super::super::client::JmapClient;
 use super::super::mailbox_mapper::{MailboxInfo, map_mailbox_to_label};
@@ -135,9 +135,20 @@ pub(crate) async fn sync_mailboxes(
                        right_submit = excluded.right_submit, \
                        is_subscribed = excluded.is_subscribed",
                     rusqlite::params![
-                        row.label_id, row.account_id, row.label_name, row.label_type,
+                        row.label_id,
+                        row.account_id,
+                        row.label_name,
+                        row.label_type,
                         row.parent_label_id,
-                        r_read, r_add, r_remove, r_seen, r_kw, r_child, r_rename, r_del, r_submit,
+                        r_read,
+                        r_add,
+                        r_remove,
+                        r_seen,
+                        r_kw,
+                        r_child,
+                        r_rename,
+                        r_del,
+                        r_submit,
                         row.is_subscribed,
                     ],
                 )
@@ -231,9 +242,7 @@ pub(crate) async fn get_email_state_for(
         .unwrap_or_else(|| request.default_account_id().to_string());
     let mut get = EmailGet::new(&account_id);
     get.ids(std::iter::empty::<&str>());
-    let handle = request
-        .call(get)
-        .map_err(|e| format!("Email state: {e}"))?;
+    let handle = request.call(get).map_err(|e| format!("Email state: {e}"))?;
 
     let mut response = request
         .send()
@@ -268,9 +277,7 @@ pub async fn fetch_all_mailboxes_for(
         .map(String::from)
         .unwrap_or_else(|| request.default_account_id().to_string());
     let get = MailboxGet::new(&account_id);
-    let handle = request
-        .call(get)
-        .map_err(|e| format!("Mailbox/get: {e}"))?;
+    let handle = request.call(get).map_err(|e| format!("Mailbox/get: {e}"))?;
     let mut response = request
         .send()
         .await
@@ -301,9 +308,15 @@ pub(crate) fn role_to_str(role: &jmap_client::mailbox::Role) -> &'static str {
 fn rights_to_ints(
     rights: Option<&MailboxRights>,
 ) -> (
-    Option<i64>, Option<i64>, Option<i64>,
-    Option<i64>, Option<i64>, Option<i64>,
-    Option<i64>, Option<i64>, Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
 ) {
     match rights {
         Some(r) => (

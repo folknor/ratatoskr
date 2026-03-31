@@ -54,7 +54,12 @@ pub fn build_month_grid(
 ) -> MonthGridData {
     // Find the first day of the month.
     let Some(first_of_month) = NaiveDate::from_ymd_opt(year, month, 1) else {
-        return MonthGridData { year, month, weeks: Vec::new(), week_start };
+        return MonthGridData {
+            year,
+            month,
+            weeks: Vec::new(),
+            week_start,
+        };
     };
 
     // Walk backward to find the grid start (the week_start day on or before first_of_month).
@@ -110,14 +115,21 @@ pub fn build_month_grid(
         // Sort events: all-day first, then by start_time.
         for day in &mut week {
             day.events.sort_by(|a, b| {
-                b.all_day.cmp(&a.all_day).then(a.start_time.cmp(&b.start_time))
+                b.all_day
+                    .cmp(&a.all_day)
+                    .then(a.start_time.cmp(&b.start_time))
             });
         }
 
         weeks.push(week);
     }
 
-    MonthGridData { year, month, weeks, week_start }
+    MonthGridData {
+        year,
+        month,
+        weeks,
+        week_start,
+    }
 }
 
 // ── Month view widget ───────────────────────────────────
@@ -142,9 +154,7 @@ pub fn month_view<'a, M: 'a + Clone>(
 
     for week in &data.weeks {
         // ISO week number from the first day of the row.
-        let week_num = week.first()
-            .map(|d| d.date.iso_week().week())
-            .unwrap_or(0);
+        let week_num = week.first().map(|d| d.date.iso_week().week()).unwrap_or(0);
 
         let week_label = button(
             container(
@@ -164,12 +174,7 @@ pub fn month_view<'a, M: 'a + Clone>(
 
         let mut week_row = row![week_label].spacing(SPACE_0);
         for day in week {
-            let cell = day_cell(
-                day,
-                max_events_per_cell,
-                &on_date_click,
-                &on_event_click,
-            );
+            let cell = day_cell(day, max_events_per_cell, &on_date_click, &on_event_click);
             week_row = week_row.push(cell);
         }
         grid = grid.push(week_row.height(Length::Fill));
@@ -293,10 +298,7 @@ fn day_cell<'a, M: 'a + Clone>(
 ///
 /// Small container with colored background and event title text.
 /// Text color is chosen based on background luminance for readability.
-fn event_entry<'a, M: 'a + Clone>(
-    event: &'a MonthEvent,
-    on_click: M,
-) -> Element<'a, M> {
+fn event_entry<'a, M: 'a + Clone>(event: &'a MonthEvent, on_click: M) -> Element<'a, M> {
     let bg_color = theme::hex_to_color(&event.color);
     let text_color = contrasting_text_color(bg_color);
 
@@ -311,15 +313,13 @@ fn event_entry<'a, M: 'a + Clone>(
             .width(Length::Fill)
             .height(CALENDAR_EVENT_HEIGHT)
             .align_y(Alignment::Center)
-            .style(move |_theme: &Theme| {
-                container::Style {
-                    background: Some(bg_color.into()),
-                    border: iced::Border {
-                        radius: RADIUS_SM.into(),
-                        ..Default::default()
-                    },
+            .style(move |_theme: &Theme| container::Style {
+                background: Some(bg_color.into()),
+                border: iced::Border {
+                    radius: RADIUS_SM.into(),
                     ..Default::default()
-                }
+                },
+                ..Default::default()
             }),
     )
     .on_press(on_click)
@@ -430,16 +430,16 @@ pub fn mini_month<'a, M: 'a + Clone>(
             };
 
             let has_events = dates_with_events.contains(&date);
-            let label = text(num_str)
-                .size(TEXT_XS)
-                .style(text_style)
-                .font(font);
+            let label = text(num_str).size(TEXT_XS).style(text_style).font(font);
 
             // Stack date number + optional event dot.
             let cell_content: Element<'_, M> = if has_events && in_month {
                 let dot = container(text("\u{2022}").size(4.0).style(text::primary))
                     .align_x(Alignment::Center);
-                column![label, dot].spacing(0).align_x(Alignment::Center).into()
+                column![label, dot]
+                    .spacing(0)
+                    .align_x(Alignment::Center)
+                    .into()
             } else {
                 label.into()
             };
@@ -469,9 +469,7 @@ pub fn mini_month<'a, M: 'a + Clone>(
         grid = grid.push(week_row);
     }
 
-    column![header, dow_row, grid]
-        .spacing(SPACE_XXS)
-        .into()
+    column![header, dow_row, grid].spacing(SPACE_XXS).into()
 }
 
 // ── Helpers ─────────────────────────────────────────────
@@ -490,8 +488,8 @@ fn max_visible_events() -> usize {
 /// Rewind a date to the previous (or same) occurrence of `target` weekday.
 fn rewind_to_weekday(date: NaiveDate, target: Weekday) -> NaiveDate {
     let current = date.weekday();
-    let diff = (current.num_days_from_monday() as i64 - target.num_days_from_monday() as i64 + 7)
-        % 7;
+    let diff =
+        (current.num_days_from_monday() as i64 - target.num_days_from_monday() as i64 + 7) % 7;
     date - chrono::Duration::days(diff)
 }
 

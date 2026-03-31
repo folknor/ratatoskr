@@ -13,7 +13,10 @@ use super::operation::MailOperation;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
-use super::{archive, label, mark_read, move_to_folder, mute, permanent_delete, pin, snooze, spam, star, trash};
+use super::{
+    archive, label, mark_read, move_to_folder, mute, permanent_delete, pin, snooze, spam, star,
+    trash,
+};
 
 /// Maximum consecutive remote failures before short-circuiting to degraded mode.
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
@@ -51,19 +54,15 @@ pub async fn batch_execute(
         .into_iter()
         .map(|(account_id, thread_ops)| {
             let ctx = ctx.clone();
-            async move {
-                execute_account_group(&ctx, &account_id, thread_ops).await
-            }
+            async move { execute_account_group(&ctx, &account_id, thread_ops).await }
         })
         .collect();
     let group_results = futures::future::join_all(account_futures).await;
 
     // Reassemble in original order
     let mut outcomes = Vec::with_capacity(total);
-    outcomes.resize_with(total, || {
-        ActionOutcome::Failed {
-            error: ActionError::invalid_state("batch reassembly bug"),
-        }
+    outcomes.resize_with(total, || ActionOutcome::Failed {
+        error: ActionError::invalid_state("batch reassembly bug"),
     });
     for group in group_results {
         for (idx, outcome) in group {
@@ -100,9 +99,14 @@ async fn execute_account_group(
             let _guard = match ctx.try_acquire_flight(account_id, &thread_id) {
                 Some(g) => g,
                 None => {
-                    results.push((idx, ActionOutcome::Failed {
-                        error: ActionError::invalid_state("action already in flight for this thread"),
-                    }));
+                    results.push((
+                        idx,
+                        ActionOutcome::Failed {
+                            error: ActionError::invalid_state(
+                                "action already in flight for this thread",
+                            ),
+                        },
+                    ));
                     continue;
                 }
             };
@@ -128,19 +132,28 @@ async fn execute_account_group(
         let _guard = match ctx.try_acquire_flight(account_id, thread_id) {
             Some(g) => g,
             None => {
-                results.push((*idx, ActionOutcome::Failed {
-                    error: ActionError::invalid_state("action already in flight for this thread"),
-                }));
+                results.push((
+                    *idx,
+                    ActionOutcome::Failed {
+                        error: ActionError::invalid_state(
+                            "action already in flight for this thread",
+                        ),
+                    },
+                ));
                 continue;
             }
         };
 
         let outcome = if consecutive_remote_failures >= MAX_CONSECUTIVE_FAILURES {
             handle_thread_degraded(
-                ctx, op, account_id, thread_id,
+                ctx,
+                op,
+                account_id,
+                thread_id,
                 "provider presumed unavailable after consecutive failures",
                 RemoteFailureKind::Unknown,
-            ).await
+            )
+            .await
         } else {
             let o = dispatch_with_provider(ctx, &*provider, op, account_id, thread_id).await;
             if let ActionOutcome::LocalOnly { reason, .. } = &o {
@@ -174,14 +187,20 @@ async fn degraded_fallback(
         let _guard = match ctx.try_acquire_flight(account_id, &thread_id) {
             Some(g) => g,
             None => {
-                results.push((idx, ActionOutcome::Failed {
-                    error: ActionError::invalid_state("action already in flight for this thread"),
-                }));
+                results.push((
+                    idx,
+                    ActionOutcome::Failed {
+                        error: ActionError::invalid_state(
+                            "action already in flight for this thread",
+                        ),
+                    },
+                ));
                 continue;
             }
         };
         let outcome =
-            handle_thread_degraded(ctx, &op, account_id, &thread_id, provider_error, error_kind).await;
+            handle_thread_degraded(ctx, &op, account_id, &thread_id, provider_error, error_kind)
+                .await;
         results.push((idx, outcome));
     }
     results
@@ -230,7 +249,12 @@ async fn handle_thread_degraded(
 // ── Operation-specific routing ────────────────────────────────────
 
 fn is_local_only(op: &MailOperation) -> bool {
-    matches!(op, MailOperation::SetPinned { .. } | MailOperation::SetMuted { .. } | MailOperation::Snooze { .. })
+    matches!(
+        op,
+        MailOperation::SetPinned { .. }
+            | MailOperation::SetMuted { .. }
+            | MailOperation::Snooze { .. }
+    )
 }
 
 /// Route to the correct `_with_provider` function.
@@ -253,8 +277,14 @@ async fn dispatch_with_provider(
         }
         MailOperation::MoveToFolder { dest, source } => {
             move_to_folder::move_to_folder_with_provider(
-                ctx, provider, account_id, thread_id, dest, source.as_ref(),
-            ).await
+                ctx,
+                provider,
+                account_id,
+                thread_id,
+                dest,
+                source.as_ref(),
+            )
+            .await
         }
         MailOperation::SetStarred { to } => {
             star::star_with_provider(ctx, provider, account_id, thread_id, *to).await
@@ -263,7 +293,8 @@ async fn dispatch_with_provider(
             mark_read::mark_read_with_provider(ctx, provider, account_id, thread_id, *to).await
         }
         MailOperation::PermanentDelete => {
-            permanent_delete::permanent_delete_with_provider(ctx, provider, account_id, thread_id).await
+            permanent_delete::permanent_delete_with_provider(ctx, provider, account_id, thread_id)
+                .await
         }
         MailOperation::AddLabel { label_id } => {
             label::add_label_with_provider(ctx, provider, account_id, thread_id, label_id).await
@@ -272,7 +303,9 @@ async fn dispatch_with_provider(
             label::remove_label_with_provider(ctx, provider, account_id, thread_id, label_id).await
         }
         // Local-only ops routed through provider path in mixed batches
-        op @ (MailOperation::SetPinned { .. } | MailOperation::SetMuted { .. } | MailOperation::Snooze { .. }) => {
+        op @ (MailOperation::SetPinned { .. }
+        | MailOperation::SetMuted { .. }
+        | MailOperation::Snooze { .. }) => {
             dispatch_local_only(ctx, op, account_id, thread_id).await
         }
     }
@@ -287,19 +320,37 @@ async fn op_local(
 ) -> Result<bool, ActionError> {
     match op {
         MailOperation::Archive => archive::archive_local(ctx, account_id, thread_id).await,
-        MailOperation::Trash => trash::trash_local(ctx, account_id, thread_id).await.map(|()| true),
-        MailOperation::SetSpam { to } => spam::spam_local(ctx, account_id, thread_id, *to).await.map(|()| true),
+        MailOperation::Trash => trash::trash_local(ctx, account_id, thread_id)
+            .await
+            .map(|()| true),
+        MailOperation::SetSpam { to } => spam::spam_local(ctx, account_id, thread_id, *to)
+            .await
+            .map(|()| true),
         MailOperation::MoveToFolder { dest, source } => {
-            move_to_folder::move_local(ctx, account_id, thread_id, dest, source.as_ref()).await.map(|()| true)
+            move_to_folder::move_local(ctx, account_id, thread_id, dest, source.as_ref())
+                .await
+                .map(|()| true)
         }
         MailOperation::SetStarred { to } => star::star_local(ctx, account_id, thread_id, *to).await,
-        MailOperation::SetRead { to } => mark_read::mark_read_local(ctx, account_id, thread_id, *to).await.map(|()| true),
-        MailOperation::PermanentDelete => permanent_delete::permanent_delete_local(ctx, account_id, thread_id).await.map(|()| true),
+        MailOperation::SetRead { to } => {
+            mark_read::mark_read_local(ctx, account_id, thread_id, *to)
+                .await
+                .map(|()| true)
+        }
+        MailOperation::PermanentDelete => {
+            permanent_delete::permanent_delete_local(ctx, account_id, thread_id)
+                .await
+                .map(|()| true)
+        }
         MailOperation::AddLabel { label_id } => {
-            label::add_label_local(ctx, account_id, thread_id, label_id).await.map(|()| true)
+            label::add_label_local(ctx, account_id, thread_id, label_id)
+                .await
+                .map(|()| true)
         }
         MailOperation::RemoveLabel { label_id } => {
-            label::remove_label_local(ctx, account_id, thread_id, label_id).await.map(|()| true)
+            label::remove_label_local(ctx, account_id, thread_id, label_id)
+                .await
+                .map(|()| true)
         }
         MailOperation::SetPinned { to } => {
             // Local-only action in degraded path — call the action directly
@@ -345,13 +396,17 @@ fn enqueue_params(op: &MailOperation) -> (&'static str, String) {
         MailOperation::SetStarred { to } => ("star", format!(r#"{{"starred":{to}}}"#)),
         MailOperation::SetRead { to } => ("markRead", format!(r#"{{"read":{to}}}"#)),
         MailOperation::PermanentDelete => ("permanentDelete", "{}".to_string()),
-        MailOperation::AddLabel { label_id } => {
-            ("addLabel", serde_json::json!({"labelId": label_id}).to_string())
-        }
-        MailOperation::RemoveLabel { label_id } => {
-            ("removeLabel", serde_json::json!({"labelId": label_id}).to_string())
-        }
-        MailOperation::SetPinned { .. } | MailOperation::SetMuted { .. } | MailOperation::Snooze { .. } => {
+        MailOperation::AddLabel { label_id } => (
+            "addLabel",
+            serde_json::json!({"labelId": label_id}).to_string(),
+        ),
+        MailOperation::RemoveLabel { label_id } => (
+            "removeLabel",
+            serde_json::json!({"labelId": label_id}).to_string(),
+        ),
+        MailOperation::SetPinned { .. }
+        | MailOperation::SetMuted { .. }
+        | MailOperation::Snooze { .. } => {
             unreachable!("local-only actions don't enqueue")
         }
     }

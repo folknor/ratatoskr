@@ -1,4 +1,6 @@
-use iced::widget::{button, column, container, mouse_area, radio, row, slider, text, text_input, Space};
+use iced::widget::{
+    Space, button, column, container, mouse_area, radio, row, slider, text, text_input,
+};
 use iced::{Alignment, Element, Length};
 
 use crate::icon;
@@ -57,7 +59,8 @@ fn section_inner<'a>(
     let mut col = column![].width(Length::Fill).padding(1);
     for (i, item) in items.into_iter().enumerate() {
         if i > 0 {
-            col = col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
+            col =
+                col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
         }
         col = col.push(item);
     }
@@ -69,7 +72,10 @@ fn section_inner<'a>(
         let title_text: Element<'a, SettingsMessage> = text(title)
             .size(TEXT_XL)
             .style(text::base)
-            .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::text() })
+            .font(iced::Font {
+                weight: iced::font::Weight::Bold,
+                ..crate::font::text()
+            })
             .into();
 
         let header_row: Element<'a, SettingsMessage> = if let Some(help_cfg) = help {
@@ -110,13 +116,9 @@ fn section_inner<'a>(
                     .on_dismiss(SettingsMessage::DismissHelp);
             }
 
-            row![
-                title_text,
-                Space::new().width(Length::Fill),
-                pop,
-            ]
-            .align_y(Alignment::Center)
-            .into()
+            row![title_text, Space::new().width(Length::Fill), pop,]
+                .align_y(Alignment::Center)
+                .into()
         } else {
             title_text
         };
@@ -158,8 +160,7 @@ pub(super) fn setting_row<'a>(
     button(
         container(
             row![
-                container(text(label).size(TEXT_LG).style(text::base))
-                    .align_y(Alignment::Center),
+                container(text(label).size(TEXT_LG).style(text::base)).align_y(Alignment::Center),
                 Space::new().width(Length::Fill),
                 control,
             ]
@@ -192,11 +193,16 @@ pub(super) fn toggle_row<'a>(
             row![
                 column![
                     text(label).size(TEXT_LG).style(text::base),
-                    text(description).size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
+                    text(description)
+                        .size(TEXT_SM)
+                        .style(theme::TextClass::Tertiary.style()),
                 ]
                 .spacing(SPACE_XXXS),
                 Space::new().width(Length::Fill),
-                animated_toggler(value).size(TEXT_HEADING).on_toggle(on_toggle).style(theme::TogglerClass::Settings.style()),
+                animated_toggler(value)
+                    .size(TEXT_HEADING)
+                    .on_toggle(on_toggle)
+                    .style(theme::TogglerClass::Settings.style()),
             ]
             .align_y(Alignment::Center),
         )
@@ -212,17 +218,16 @@ pub(super) fn toggle_row<'a>(
     .into()
 }
 
-pub(super) fn info_row(
-    label: &str,
-    value: &str,
-) -> Element<'static, SettingsMessage> {
+pub(super) fn info_row(label: &str, value: &str) -> Element<'static, SettingsMessage> {
     let label_owned = label.to_string();
     let value_owned = value.to_string();
     let value_for_clipboard = value_owned.clone();
     container(
         row![
             column![
-                text(label_owned).size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
+                text(label_owned)
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Tertiary.style()),
                 text_input("", &value_owned)
                     .on_input(|_| SettingsMessage::Noop)
                     .size(TEXT_LG)
@@ -265,7 +270,9 @@ pub(super) fn input_row(
             container(
                 row![
                     column![
-                        text(label_owned).size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
+                        text(label_owned)
+                            .size(TEXT_SM)
+                            .style(theme::TextClass::Tertiary.style()),
                         undoable_text_input(&placeholder_owned, &value_owned)
                             .id(id_owned.clone())
                             .on_input(on_input)
@@ -328,8 +335,7 @@ pub(super) fn slider_row<'a>(
 
     let right_content: Element<'a, SettingsMessage> = if let Some(ic) = icon {
         row![
-            container(ic.size(ICON_XL).style(text::secondary))
-                .align_y(Alignment::Center),
+            container(ic.size(ICON_XL).style(text::secondary)).align_y(Alignment::Center),
             slider_widget,
         ]
         .spacing(SPACE_SM)
@@ -416,7 +422,8 @@ pub(super) fn editable_list<'a>(
 
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
-            col = col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
+            col =
+                col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
         }
 
         let is_drag_item = drag_state
@@ -427,7 +434,9 @@ pub(super) fn editable_list<'a>(
         let lid_grip = id.clone();
         let grip_slot = mouse_area(
             container(
-                icon::grip_vertical().size(ICON_MD).style(theme::TextClass::Tertiary.style()),
+                icon::grip_vertical()
+                    .size(ICON_MD)
+                    .style(theme::TextClass::Tertiary.style()),
             )
             .width(GRIP_SLOT_WIDTH)
             .align_x(Alignment::Center)
@@ -436,11 +445,9 @@ pub(super) fn editable_list<'a>(
         .on_press(SettingsMessage::ListGripPress(lid_grip, i))
         .interaction(iced::mouse::Interaction::Grab);
 
-        let label_slot = container(
-            text(&item.label).size(TEXT_LG).style(text::base),
-        )
-        .align_y(Alignment::Center)
-        .width(Length::Fill);
+        let label_slot = container(text(&item.label).size(TEXT_LG).style(text::base))
+            .align_y(Alignment::Center)
+            .width(Length::Fill);
 
         let left_half = row![grip_slot, label_slot]
             .spacing(SPACE_XS)
@@ -494,8 +501,7 @@ pub(super) fn editable_list<'a>(
             .align_y(Alignment::Center)
             .width(Length::FillPortion(1));
 
-        let item_row = row![left_half, right_half]
-            .align_y(Alignment::Center);
+        let item_row = row![left_half, right_half].align_y(Alignment::Center);
 
         // Button for hover effect + row click (toggle).
         let lid_click = id.clone();
@@ -530,8 +536,13 @@ pub(super) fn editable_list<'a>(
         container(
             row![
                 icon::plus().size(ICON_MD).style(text::base),
-                text(add_label).size(TEXT_LG).style(text::base)
-                    .font(iced::Font { weight: iced::font::Weight::Bold, ..crate::font::text() }),
+                text(add_label)
+                    .size(TEXT_LG)
+                    .style(text::base)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..crate::font::text()
+                    }),
             ]
             .spacing(SPACE_XS)
             .align_y(Alignment::Center),
@@ -583,16 +594,16 @@ pub(super) fn action_row<'a>(
     let mut content = row![].spacing(SPACE_SM).align_y(Alignment::Center);
 
     if let Some(ico) = icon {
-        content = content.push(
-            container(ico.size(ICON_XL).style(text::secondary))
-                .align_y(Alignment::Center),
-        );
+        content = content
+            .push(container(ico.size(ICON_XL).style(text::secondary)).align_y(Alignment::Center));
     }
 
     let label_col: Element<'a, SettingsMessage> = if let Some(desc) = description {
         column![
             text(label).size(TEXT_LG).style(text::base),
-            text(desc).size(TEXT_SM).style(theme::TextClass::Tertiary.style()),
+            text(desc)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
         ]
         .spacing(SPACE_XXXS)
         .into()
@@ -607,10 +618,8 @@ pub(super) fn action_row<'a>(
         ActionKind::Url => icon::external_link(),
         ActionKind::InApp => icon::arrow_right(),
     };
-    content = content.push(
-        container(trailing.size(ICON_XL).style(text::base))
-            .align_y(Alignment::Center),
-    );
+    content = content
+        .push(container(trailing.size(ICON_XL).style(text::base)).align_y(Alignment::Center));
 
     button(content)
         .on_press(on_press)

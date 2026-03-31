@@ -1,9 +1,9 @@
 use std::io::{Cursor, Read, Write};
 
 use image::ImageReader;
+use zip::ZipWriter;
 use zip::read::ZipArchive;
 use zip::write::FileOptions;
-use zip::ZipWriter;
 
 use crate::config::Config;
 use crate::error::SqueezeError;
@@ -95,8 +95,7 @@ pub fn compress_archive(
             return Ok(unchanged_result(input));
         }
 
-        let options = FileOptions::<()>::default()
-            .compression_method(entry.compression());
+        let options = FileOptions::<()>::default().compression_method(entry.compression());
 
         if is_image_entry {
             match try_compress_archive_image(&content, config) {
@@ -212,8 +211,14 @@ mod tests {
     #[test]
     fn test_is_compressible_image() {
         let docx_prefixes = ArchiveKind::Docx.image_prefixes();
-        assert!(is_compressible_image("word/media/image1.jpg", docx_prefixes));
-        assert!(is_compressible_image("word/media/image2.png", docx_prefixes));
+        assert!(is_compressible_image(
+            "word/media/image1.jpg",
+            docx_prefixes
+        ));
+        assert!(is_compressible_image(
+            "word/media/image2.png",
+            docx_prefixes
+        ));
         assert!(!is_compressible_image(
             "word/media/image3.emf",
             docx_prefixes

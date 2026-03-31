@@ -37,12 +37,7 @@ impl CardDavClient {
     ///
     /// Call [`discover`] after construction to auto-detect the principal and
     /// addressbook URLs, or set them manually with [`set_addressbook_url`].
-    pub fn new(
-        base_url: &str,
-        username: &str,
-        password: &str,
-        auth_method: AuthMethod,
-    ) -> Self {
+    pub fn new(base_url: &str, username: &str, password: &str, auth_method: AuthMethod) -> Self {
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::limited(5))
             .timeout(crate::constants::DAV_CLIENT_TIMEOUT)
@@ -83,7 +78,10 @@ impl CardDavClient {
     pub async fn discover(&mut self) -> Result<(), String> {
         // Step 1: Try .well-known/carddav to find the DAV root
         let well_known_url = format!("{}/.well-known/carddav", self.base_url);
-        let dav_root = match self.propfind_raw(&well_known_url, "0", PROPFIND_PRINCIPAL).await {
+        let dav_root = match self
+            .propfind_raw(&well_known_url, "0", PROPFIND_PRINCIPAL)
+            .await
+        {
             Ok((_, body)) => {
                 // If we got a response, try to extract principal from it
                 if let Some(principal) = extract_href_property(&body, "current-user-principal") {
@@ -227,7 +225,10 @@ impl CardDavClient {
     ) -> Result<(StatusCode, String), String> {
         let resp = self
             .http
-            .request(Method::from_bytes(b"PROPFIND").map_err(|e| format!("method: {e}"))?, url)
+            .request(
+                Method::from_bytes(b"PROPFIND").map_err(|e| format!("method: {e}"))?,
+                url,
+            )
             .header(CONTENT_TYPE, "application/xml; charset=utf-8")
             .header("Depth", depth)
             .headers(self.auth_headers())
@@ -237,10 +238,7 @@ impl CardDavClient {
             .map_err(|e| format!("PROPFIND {url}: {e}"))?;
 
         let status = resp.status();
-        let text = resp
-            .text()
-            .await
-            .map_err(|e| format!("read body: {e}"))?;
+        let text = resp.text().await.map_err(|e| format!("read body: {e}"))?;
 
         if status.is_success() || status == StatusCode::MULTI_STATUS {
             Ok((status, text))
@@ -253,7 +251,10 @@ impl CardDavClient {
     async fn report_raw(&self, url: &str, body: &str) -> Result<(StatusCode, String), String> {
         let resp = self
             .http
-            .request(Method::from_bytes(b"REPORT").map_err(|e| format!("method: {e}"))?, url)
+            .request(
+                Method::from_bytes(b"REPORT").map_err(|e| format!("method: {e}"))?,
+                url,
+            )
             .header(CONTENT_TYPE, "application/xml; charset=utf-8")
             .header("Depth", "1")
             .headers(self.auth_headers())
@@ -263,10 +264,7 @@ impl CardDavClient {
             .map_err(|e| format!("REPORT {url}: {e}"))?;
 
         let status = resp.status();
-        let text = resp
-            .text()
-            .await
-            .map_err(|e| format!("read body: {e}"))?;
+        let text = resp.text().await.map_err(|e| format!("read body: {e}"))?;
 
         if status.is_success() || status == StatusCode::MULTI_STATUS {
             Ok((status, text))
@@ -280,11 +278,10 @@ impl CardDavClient {
         let mut headers = reqwest::header::HeaderMap::new();
         match self.auth_method {
             AuthMethod::Basic => {
-                let credentials =
-                    base64::Engine::encode(
-                        &base64::engine::general_purpose::STANDARD,
-                        format!("{}:{}", self.username, self.password),
-                    );
+                let credentials = base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    format!("{}:{}", self.username, self.password),
+                );
                 if let Ok(val) = format!("Basic {credentials}").parse() {
                     headers.insert(AUTHORIZATION, val);
                 }
@@ -315,9 +312,9 @@ impl CardDavClient {
 
     /// Get the addressbook URL or return an error.
     fn require_addressbook_url(&self) -> Result<String, String> {
-        self.addressbook_url
-            .clone()
-            .ok_or_else(|| "No addressbook URL — call discover() or set_addressbook_url() first".to_string())
+        self.addressbook_url.clone().ok_or_else(|| {
+            "No addressbook URL — call discover() or set_addressbook_url() first".to_string()
+        })
     }
 }
 

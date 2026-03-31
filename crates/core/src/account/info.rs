@@ -172,16 +172,15 @@ pub fn get_oauth_credentials(
                 return None;
             }
 
-            let client_id =
-                client_id
-                    .filter(|value| !value.trim().is_empty())
-                    .map(|value| {
-                        if is_encrypted(&value) {
-                            decrypt_value(encryption_key, &value).unwrap_or(value)
-                        } else {
-                            value
-                        }
-                    })?;
+            let client_id = client_id
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| {
+                    if is_encrypted(&value) {
+                        decrypt_value(encryption_key, &value).unwrap_or(value)
+                    } else {
+                        value
+                    }
+                })?;
             let client_secret =
                 client_secret
                     .filter(|value| !value.trim().is_empty())

@@ -68,10 +68,14 @@ pub fn detect_delimiter(text: &str) -> u8 {
             continue;
         }
 
-        let variance = counts.iter().map(|&c| {
-            let diff = c as f64 - avg;
-            diff * diff
-        }).sum::<f64>() / counts.len() as f64;
+        let variance = counts
+            .iter()
+            .map(|&c| {
+                let diff = c as f64 - avg;
+                diff * diff
+            })
+            .sum::<f64>()
+            / counts.len() as f64;
 
         // Lower variance is better; higher average count is better
         let score = avg / (1.0 + variance);
@@ -144,11 +148,8 @@ fn looks_like_data(value: &str) -> bool {
     }
 
     // All digits (or digits with common phone separators): likely data
-    let digit_ratio = trimmed
-        .chars()
-        .filter(char::is_ascii_digit)
-        .count() as f64
-        / trimmed.len() as f64;
+    let digit_ratio =
+        trimmed.chars().filter(char::is_ascii_digit).count() as f64 / trimmed.len() as f64;
     if digit_ratio > 0.7 && trimmed.len() > 3 {
         return true;
     }
@@ -190,7 +191,11 @@ mod tests {
     #[test]
     fn detect_no_header_row() {
         let rows = vec![
-            vec!["Alice".into(), "alice@test.com".into(), "+1-555-1234".into()],
+            vec![
+                "Alice".into(),
+                "alice@test.com".into(),
+                "+1-555-1234".into(),
+            ],
             vec!["Bob".into(), "bob@test.com".into(), "+1-555-5678".into()],
         ];
         assert!(!detect_has_header(&rows));

@@ -4,7 +4,9 @@ use rusqlite::{Connection, Row, params};
 
 use super::DbState;
 use super::from_row::{query_as, query_one};
-use super::sql_fragments::{LATEST_MESSAGE_SUBQUERY, SEEN_ADDRESS_SCORE_EXPR, validate_thread_bool_column};
+use super::sql_fragments::{
+    LATEST_MESSAGE_SUBQUERY, SEEN_ADDRESS_SCORE_EXPR, validate_thread_bool_column,
+};
 use super::types::{
     CategoryCount, DbAttachment, DbContact, DbLabel, DbMessage, DbThread, ThreadCategoryRow,
 };
@@ -812,9 +814,7 @@ pub fn build_fts_query(raw: &str) -> String {
             // Strip everything except alphanumeric and email-significant chars.
             let clean: String = token
                 .chars()
-                .filter(|c| {
-                    c.is_alphanumeric() || *c == '@' || *c == '.' || *c == '-' || *c == '_'
-                })
+                .filter(|c| c.is_alphanumeric() || *c == '@' || *c == '.' || *c == '-' || *c == '_')
                 .collect();
             // Quote the token to prevent FTS5 operator interpretation
             // (`.`, `-` etc. can be parsed as syntax otherwise).

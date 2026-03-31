@@ -81,8 +81,7 @@ static CLOUD_URL_PATTERNS: LazyLock<RegexSet> = LazyLock::new(|| {
 
 /// Regex to extract URLs from href attributes in HTML.
 static HREF_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"href\s*=\s*["']([^"']+)["']"#)
-        .expect("href regex should be valid")
+    Regex::new(r#"href\s*=\s*["']([^"']+)["']"#).expect("href regex should be valid")
 });
 
 fn provider_for_match_index(index: usize) -> Option<CloudProvider> {
@@ -252,11 +251,7 @@ pub fn update_upload_status(
 /// Mark an upload as failed, incrementing retry_count. If `retry` is true the
 /// status is reset to `pending` so it will be picked up again; otherwise it
 /// stays `failed`.
-pub fn mark_upload_failed(
-    conn: &Connection,
-    id: i64,
-    retry: bool,
-) -> Result<(), rusqlite::Error> {
+pub fn mark_upload_failed(conn: &Connection, id: i64, retry: bool) -> Result<(), rusqlite::Error> {
     let new_status = if retry {
         UploadStatus::Pending.as_str()
     } else {
@@ -488,7 +483,12 @@ pub fn update_cloud_attachment_metadata(
              file_size = COALESCE(?2, file_size),
              mime_type = COALESCE(?3, mime_type)
          WHERE id = ?4",
-        rusqlite::params![metadata.file_name, metadata.file_size, metadata.mime_type, id],
+        rusqlite::params![
+            metadata.file_name,
+            metadata.file_size,
+            metadata.mime_type,
+            id
+        ],
     )?;
     Ok(())
 }
@@ -612,28 +612,19 @@ mod tests {
     #[test]
     fn extract_gdrive_file_id_from_docs_url() {
         let url = "https://docs.google.com/document/d/1aBcDeFgHiJk/edit";
-        assert_eq!(
-            extract_gdrive_file_id(url),
-            Some("1aBcDeFgHiJk".to_owned())
-        );
+        assert_eq!(extract_gdrive_file_id(url), Some("1aBcDeFgHiJk".to_owned()));
     }
 
     #[test]
     fn extract_gdrive_file_id_from_spreadsheets_url() {
         let url = "https://docs.google.com/spreadsheets/d/1aBcDeFgHiJk/edit#gid=0";
-        assert_eq!(
-            extract_gdrive_file_id(url),
-            Some("1aBcDeFgHiJk".to_owned())
-        );
+        assert_eq!(extract_gdrive_file_id(url), Some("1aBcDeFgHiJk".to_owned()));
     }
 
     #[test]
     fn extract_gdrive_file_id_from_open_url() {
         let url = "https://drive.google.com/open?id=1aBcDeFgHiJk";
-        assert_eq!(
-            extract_gdrive_file_id(url),
-            Some("1aBcDeFgHiJk".to_owned())
-        );
+        assert_eq!(extract_gdrive_file_id(url), Some("1aBcDeFgHiJk".to_owned()));
     }
 
     #[test]
@@ -644,9 +635,6 @@ mod tests {
     #[test]
     fn extract_gdrive_file_id_from_presentation_url() {
         let url = "https://docs.google.com/presentation/d/1aBcDeFgHiJk/edit";
-        assert_eq!(
-            extract_gdrive_file_id(url),
-            Some("1aBcDeFgHiJk".to_owned())
-        );
+        assert_eq!(extract_gdrive_file_id(url), Some("1aBcDeFgHiJk".to_owned()));
     }
 }

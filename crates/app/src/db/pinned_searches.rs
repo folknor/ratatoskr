@@ -112,11 +112,8 @@ impl Db {
                 )
                 .ok();
             if let Some(cid) = conflict_id {
-                tx.execute(
-                    "DELETE FROM pinned_searches WHERE id = ?1",
-                    params![cid],
-                )
-                .map_err(|e| e.to_string())?;
+                tx.execute("DELETE FROM pinned_searches WHERE id = ?1", params![cid])
+                    .map_err(|e| e.to_string())?;
             }
 
             tx.execute(
@@ -157,11 +154,8 @@ impl Db {
     /// Deletes a pinned search. CASCADE handles thread cleanup.
     pub async fn delete_pinned_search(&self, id: i64) -> Result<(), String> {
         self.with_write_conn(move |conn| {
-            conn.execute(
-                "DELETE FROM pinned_searches WHERE id = ?1",
-                params![id],
-            )
-            .map_err(|e| e.to_string())?;
+            conn.execute("DELETE FROM pinned_searches WHERE id = ?1", params![id])
+                .map_err(|e| e.to_string())?;
             Ok(())
         })
         .await
@@ -261,8 +255,7 @@ impl Db {
                      ORDER BY t.last_message_at DESC"
                 );
 
-                let mut stmt =
-                    conn.prepare(&sql).map_err(|e| e.to_string())?;
+                let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
                 let param_values: Vec<Box<dyn rusqlite::types::ToSql>> = chunk
                     .iter()
@@ -274,8 +267,10 @@ impl Db {
                     })
                     .collect();
 
-                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                    param_values.iter().map(std::convert::AsRef::as_ref).collect();
+                let param_refs: Vec<&dyn rusqlite::types::ToSql> = param_values
+                    .iter()
+                    .map(std::convert::AsRef::as_ref)
+                    .collect();
 
                 let rows = stmt
                     .query_map(param_refs.as_slice(), row_to_thread)
@@ -293,10 +288,7 @@ impl Db {
 
     /// Returns the most recent search queries (up to `limit`) for search history.
     /// Uses the pinned_searches table which already tracks all executed searches.
-    pub async fn get_recent_search_queries(
-        &self,
-        limit: usize,
-    ) -> Result<Vec<String>, String> {
+    pub async fn get_recent_search_queries(&self, limit: usize) -> Result<Vec<String>, String> {
         self.with_conn(move |conn| {
             let mut stmt = conn
                 .prepare(
@@ -329,11 +321,7 @@ impl Db {
 
     /// Creates a smart folder with the given name and query.
     /// Returns the generated smart folder ID.
-    pub async fn create_smart_folder(
-        &self,
-        name: String,
-        query: String,
-    ) -> Result<i64, String> {
+    pub async fn create_smart_folder(&self, name: String, query: String) -> Result<i64, String> {
         self.with_write_conn(move |conn| {
             let id = uuid::Uuid::new_v4().to_string();
             conn.execute(
@@ -349,10 +337,7 @@ impl Db {
 
     /// Removes pinned searches older than `max_age_secs` that haven't
     /// been accessed (updated_at == created_at).
-    pub async fn expire_stale_pinned_searches(
-        &self,
-        max_age_secs: i64,
-    ) -> Result<u64, String> {
+    pub async fn expire_stale_pinned_searches(&self, max_age_secs: i64) -> Result<u64, String> {
         self.with_write_conn(move |conn| {
             let cutoff = chrono::Utc::now().timestamp() - max_age_secs;
             let deleted = conn

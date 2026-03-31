@@ -87,7 +87,12 @@ impl InlineImageStoreState {
         data: Vec<u8>,
         mime_type: String,
     ) -> Result<(), String> {
-        log::debug!("Storing inline image hash={} mime={} size={}", content_hash, mime_type, data.len());
+        log::debug!(
+            "Storing inline image hash={} mime={} size={}",
+            content_hash,
+            mime_type,
+            data.len()
+        );
         self.with_conn(move |conn| {
             #[allow(clippy::cast_possible_wrap)]
             let size = data.len() as i64;
@@ -167,9 +172,9 @@ impl InlineImageStoreState {
             .map_err(|e| format!("prepare inline image batch get: {e}"))?;
 
         for (cid, content_hash) in content_hashes {
-            if let Ok(data) = stmt.query_row(params![content_hash], |row| {
-                row.get::<_, Vec<u8>>("data")
-            }) {
+            if let Ok(data) =
+                stmt.query_row(params![content_hash], |row| row.get::<_, Vec<u8>>("data"))
+            {
                 result.insert(cid.clone(), data);
             }
         }
@@ -201,7 +206,9 @@ impl InlineImageStoreState {
     pub async fn stats(&self) -> Result<InlineImageStats, String> {
         self.with_conn(|conn| {
             let count: i64 = conn
-                .query_row("SELECT COUNT(*) AS cnt FROM inline_images", [], |row| row.get("cnt"))
+                .query_row("SELECT COUNT(*) AS cnt FROM inline_images", [], |row| {
+                    row.get("cnt")
+                })
                 .map_err(|e| format!("count: {e}"))?;
             let total_bytes: i64 = conn
                 .query_row(
@@ -338,10 +345,7 @@ impl InlineImageStoreState {
     /// First call [`find_unreferenced_hashes`] with the main DB connection
     /// (inside a `with_conn` block) to get the orphaned hashes, then pass
     /// them here.
-    pub async fn delete_unreferenced(
-        &self,
-        orphaned_hashes: Vec<String>,
-    ) -> Result<u64, String> {
+    pub async fn delete_unreferenced(&self, orphaned_hashes: Vec<String>) -> Result<u64, String> {
         self.delete_hashes(orphaned_hashes).await
     }
 }
@@ -387,7 +391,9 @@ pub fn collect_inline_hashes_for_account(
         )
         .map_err(|e| format!("prepare inline hash query: {e}"))?;
     let hashes = stmt
-        .query_map(params![account_id], |row| row.get::<_, String>("content_hash"))
+        .query_map(params![account_id], |row| {
+            row.get::<_, String>("content_hash")
+        })
         .map_err(|e| format!("query inline hashes: {e}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("collect inline hashes: {e}"))?;

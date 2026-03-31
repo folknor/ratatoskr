@@ -1,9 +1,9 @@
 use rusqlite::{OptionalExtension, Row, params};
 
-use rtsk::db::DbState;
-use rtsk::db::types::DbCalendar;
 use gmail::client::GmailState;
 use graph::client::GraphState;
+use rtsk::db::DbState;
+use rtsk::db::types::DbCalendar;
 
 use super::caldav::{caldav_list_calendars_impl, caldav_sync_events_impl};
 use super::google::{google_calendar_list_calendars_impl, google_calendar_sync_events_impl};
@@ -41,9 +41,7 @@ pub async fn calendar_sync_account_impl(
                     if calendar_provider.as_deref() == Some("google_api") || provider == "gmail_api"
                     {
                         Ok(Some("google_api"))
-                    } else if calendar_provider.as_deref() == Some("graph")
-                        || provider == "graph"
-                    {
+                    } else if calendar_provider.as_deref() == Some("graph") || provider == "graph" {
                         Ok(Some("graph"))
                     } else if calendar_provider.as_deref() == Some("caldav")
                         || (provider == "caldav"

@@ -139,11 +139,7 @@ pub(crate) fn extract_display_name(person: &Person, fallback_email: &str) -> Str
 
 /// Extract avatar URL from the first photo.
 pub(crate) fn extract_avatar_url(person: &Person) -> Option<String> {
-    person
-        .photos
-        .as_ref()?
-        .first()
-        .and_then(|p| p.url.clone())
+    person.photos.as_ref()?.first().and_then(|p| p.url.clone())
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +183,11 @@ mod tests {
             }),
             phone_numbers: None,
             organizations: None,
-            photos: photo_url.map(|u| vec![Photo { url: Some(u.to_string()) }]),
+            photos: photo_url.map(|u| {
+                vec![Photo {
+                    url: Some(u.to_string()),
+                }]
+            }),
         }
     }
 
@@ -343,7 +343,13 @@ mod tests {
     #[test]
     fn test_contacts_with_no_email_skipped() {
         let persons = vec![
-            make_person("people/1", Some("valid@test.com"), Some("Valid"), None, false),
+            make_person(
+                "people/1",
+                Some("valid@test.com"),
+                Some("Valid"),
+                None,
+                false,
+            ),
             make_person("people/2", None, Some("No Email"), None, false),
             make_person("people/3", Some("also@valid.com"), None, None, false),
         ];
@@ -399,7 +405,10 @@ mod tests {
             extract_primary_email(&person),
             Some("other@example.com".to_string())
         );
-        assert_eq!(extract_display_name(&person, "other@example.com"), "Other User");
+        assert_eq!(
+            extract_display_name(&person, "other@example.com"),
+            "Other User"
+        );
     }
 
     #[test]

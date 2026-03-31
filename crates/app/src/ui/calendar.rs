@@ -9,17 +9,17 @@ use std::collections::HashSet;
 
 use chrono::{Datelike, Local, NaiveDate, Weekday};
 use iced::widget::{
-    button, checkbox, column, container, mouse_area, row, scrollable, text, text_input, Space,
+    Space, button, checkbox, column, container, mouse_area, row, scrollable, text, text_input,
 };
 use iced::{Alignment, Element, Length, Theme};
 
-use crate::icon;
 use super::calendar_month;
 use super::calendar_time_grid;
 use super::layout::*;
 use super::theme;
 use super::undoable::UndoableText;
 use super::undoable_text_input::undoable_text_input;
+use crate::icon;
 
 // ── Calendar view enum ─────────────────────────────────
 
@@ -64,10 +64,7 @@ pub enum CalendarOverlay {
         original_title: String,
     },
     /// Delete confirmation dialog.
-    ConfirmDelete {
-        event_id: String,
-        title: String,
-    },
+    ConfirmDelete { event_id: String, title: String },
 }
 
 /// Data for a calendar event in the UI layer.
@@ -236,15 +233,9 @@ impl CalendarState {
     /// Create calendar state with a specific default view (read from settings).
     pub fn with_default_view(default_view: CalendarView) -> Self {
         let today = Local::now().date_naive();
-        let month_grid = calendar_month::build_month_grid(
-            today.year(),
-            today.month(),
-            &[],
-            Weekday::Mon,
-            today,
-        );
-        let time_grid_config =
-            calendar_time_grid::build_day_view(today, &[], today);
+        let month_grid =
+            calendar_month::build_month_grid(today.year(), today.month(), &[], Weekday::Mon, today);
+        let time_grid_config = calendar_time_grid::build_day_view(today, &[], today);
         Self {
             selected_date: today,
             selected_hour: None,
@@ -361,11 +352,7 @@ impl CalendarState {
                 calendar_time_grid::build_day_view(self.selected_date, events, today)
             }
             CalendarView::WorkWeek => {
-                calendar_time_grid::build_work_week_view(
-                    self.selected_date,
-                    events,
-                    today,
-                )
+                calendar_time_grid::build_work_week_view(self.selected_date, events, today)
             }
             CalendarView::Week => calendar_time_grid::build_week_view(
                 self.selected_date,
@@ -455,7 +442,10 @@ pub enum CalendarMessage {
     EventLoaded(Result<CalendarEventData, String>),
     /// Calendar events loaded from DB for view rendering.
     /// The token is a generation guard — stale results are discarded.
-    EventsLoaded(rtsk::generation::GenerationToken<rtsk::generation::Calendar>, Result<Vec<calendar_time_grid::TimeGridEvent>, String>),
+    EventsLoaded(
+        rtsk::generation::GenerationToken<rtsk::generation::Calendar>,
+        Result<Vec<calendar_time_grid::TimeGridEvent>, String>,
+    ),
     /// Switch back to mail mode.
     SwitchToMail,
     /// Pop out the calendar into a separate window.
@@ -464,7 +454,10 @@ pub enum CalendarMessage {
     ToggleCalendarVisibility(String, bool),
     /// Calendars loaded from DB for sidebar list.
     /// The token is a generation guard — stale results are discarded.
-    CalendarsLoaded(rtsk::generation::GenerationToken<rtsk::generation::Calendar>, Result<Vec<CalendarListEntry>, String>),
+    CalendarsLoaded(
+        rtsk::generation::GenerationToken<rtsk::generation::Calendar>,
+        Result<Vec<CalendarListEntry>, String>,
+    ),
 }
 
 // ── View ───────────────────────────────────────────────
@@ -477,8 +470,7 @@ pub fn calendar_layout(state: &CalendarState) -> Element<'_, CalendarMessage> {
     let sidebar = calendar_sidebar(state);
     let main_view = calendar_main_view(state);
 
-    let base = row![sidebar, main_view]
-        .height(Length::Fill);
+    let base = row![sidebar, main_view].height(Length::Fill);
 
     // If an overlay is active, stack it on top with a backdrop.
     match &state.overlay {
@@ -493,10 +485,7 @@ pub fn calendar_layout(state: &CalendarState) -> Element<'_, CalendarMessage> {
             overlay_stack(base.into(), event_editor_card(event, *is_new))
         }
         CalendarOverlay::ConfirmDelete { event_id, title } => {
-            overlay_stack(
-                base.into(),
-                delete_confirm_card(event_id, title),
-            )
+            overlay_stack(base.into(), delete_confirm_card(event_id, title))
         }
     }
 }
@@ -506,24 +495,16 @@ fn popover_stack<'a>(
     base: Element<'a, CalendarMessage>,
     card: Element<'a, CalendarMessage>,
 ) -> Element<'a, CalendarMessage> {
-    let backdrop = mouse_area(
-        container("")
-            .width(Length::Fill)
-            .height(Length::Fill),
-    )
-    .on_press(CalendarMessage::CloseOverlay);
+    let backdrop = mouse_area(container("").width(Length::Fill).height(Length::Fill))
+        .on_press(CalendarMessage::CloseOverlay);
 
     // Position the popover toward the right side of the view.
-    let positioned = container(
-        container(card)
-            .align_y(Alignment::Center)
-            .max_width(320.0),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(Alignment::End)
-    .align_y(Alignment::Center)
-    .padding(iced::Padding::from([SPACE_LG, SPACE_LG]));
+    let positioned = container(container(card).align_y(Alignment::Center).max_width(320.0))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(Alignment::End)
+        .align_y(Alignment::Center)
+        .padding(iced::Padding::from([SPACE_LG, SPACE_LG]));
 
     iced::widget::stack![base, backdrop, positioned].into()
 }
@@ -562,19 +543,15 @@ fn event_detail_popover(event: &CalendarEventData) -> Element<'_, CalendarMessag
     } else {
         &event.title
     };
-    let expand_btn = button(
-        text("\u{2197}").size(TEXT_MD),
-    )
-    .on_press(CalendarMessage::ExpandToFullModal)
-    .padding(PAD_ICON_BTN)
-    .style(theme::ButtonClass::Ghost.style());
+    let expand_btn = button(text("\u{2197}").size(TEXT_MD))
+        .on_press(CalendarMessage::ExpandToFullModal)
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Ghost.style());
 
-    let close_btn = button(
-        text("\u{2715}").size(TEXT_SM),
-    )
-    .on_press(CalendarMessage::CloseOverlay)
-    .padding(PAD_ICON_BTN)
-    .style(theme::ButtonClass::Ghost.style());
+    let close_btn = button(text("\u{2715}").size(TEXT_SM))
+        .on_press(CalendarMessage::CloseOverlay)
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Ghost.style());
 
     let title_row = row![
         container(
@@ -591,19 +568,11 @@ fn event_detail_popover(event: &CalendarEventData) -> Element<'_, CalendarMessag
 
     // Time
     let time_label = format_event_time_range(event);
-    content = content.push(
-        text(time_label)
-            .size(TEXT_MD)
-            .style(text::secondary),
-    );
+    content = content.push(text(time_label).size(TEXT_MD).style(text::secondary));
 
     // Location (hidden if empty)
     if !event.location.is_empty() {
-        content = content.push(
-            text(&event.location)
-                .size(TEXT_MD)
-                .style(text::secondary),
-        );
+        content = content.push(text(&event.location).size(TEXT_MD).style(text::secondary));
     }
 
     // Recurrence (hidden if none)
@@ -671,7 +640,9 @@ fn event_detail_popover(event: &CalendarEventData) -> Element<'_, CalendarMessag
 
     // Reminders (hidden if empty)
     if !event.reminders.is_empty() {
-        let reminder_text = event.reminders.iter()
+        let reminder_text = event
+            .reminders
+            .iter()
             .map(|r| format_reminder(r.minutes_before))
             .collect::<Vec<_>>()
             .join(", ");
@@ -720,12 +691,9 @@ fn event_detail_popover(event: &CalendarEventData) -> Element<'_, CalendarMessag
     };
 
     content = content.push(Space::new().height(SPACE_XS));
-    content = content.push(
-        row![edit_btn, delete_btn].spacing(SPACE_XS),
-    );
+    content = content.push(row![edit_btn, delete_btn].spacing(SPACE_XS));
 
-    let scrollable_content = scrollable(content)
-        .height(Length::Shrink);
+    let scrollable_content = scrollable(content).height(Length::Shrink);
 
     container(scrollable_content)
         .width(Length::Fixed(300.0))
@@ -759,16 +727,25 @@ fn event_full_modal<'a>(
             text("\u{25CF}").size(TEXT_MD)
         };
         detail = detail.push(
-            row![color_dot, text(cal_name).size(TEXT_SM).style(text::secondary)]
-                .spacing(SPACE_XXS)
-                .align_y(Alignment::Center),
+            row![
+                color_dot,
+                text(cal_name).size(TEXT_SM).style(text::secondary)
+            ]
+            .spacing(SPACE_XXS)
+            .align_y(Alignment::Center),
         );
     }
 
     // Title
-    let title_text = if event.title.is_empty() { "(Untitled event)" } else { &event.title };
+    let title_text = if event.title.is_empty() {
+        "(Untitled event)"
+    } else {
+        &event.title
+    };
     detail = detail.push(
-        text(title_text).size(TEXT_HEADING).font(crate::font::text_semibold()),
+        text(title_text)
+            .size(TEXT_HEADING)
+            .font(crate::font::text_semibold()),
     );
 
     // Date and time
@@ -785,15 +762,17 @@ fn event_full_modal<'a>(
     } else {
         format!("{date_str}  {time_str}")
     };
-    let mut datetime_row = row![
-        text(datetime_label).size(TEXT_MD).style(text::secondary),
-    ].spacing(SPACE_SM).align_y(Alignment::Center);
+    let mut datetime_row = row![text(datetime_label).size(TEXT_MD).style(text::secondary),]
+        .spacing(SPACE_SM)
+        .align_y(Alignment::Center);
 
     // Timezone
     if let Some(ref tz) = event.timezone {
         if !tz.is_empty() {
             datetime_row = datetime_row.push(
-                text(tz).size(TEXT_SM).style(theme::TextClass::Muted.style()),
+                text(tz)
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Muted.style()),
             );
         }
     }
@@ -804,18 +783,23 @@ fn event_full_modal<'a>(
         detail = detail.push(
             row![
                 text("\u{1F501}").size(TEXT_SM),
-                text(format_recurrence_rule(rrule)).size(TEXT_SM).style(text::secondary),
-            ].spacing(SPACE_XXS).align_y(Alignment::Center),
+                text(format_recurrence_rule(rrule))
+                    .size(TEXT_SM)
+                    .style(text::secondary),
+            ]
+            .spacing(SPACE_XXS)
+            .align_y(Alignment::Center),
         );
     }
 
     // Location (clickable if URL)
     if !event.location.is_empty() {
-        let loc_text = if event.location.starts_with("http://") || event.location.starts_with("https://") {
-            text(&event.location).size(TEXT_MD).style(text::primary)
-        } else {
-            text(&event.location).size(TEXT_MD).style(text::secondary)
-        };
+        let loc_text =
+            if event.location.starts_with("http://") || event.location.starts_with("https://") {
+                text(&event.location).size(TEXT_MD).style(text::primary)
+            } else {
+                text(&event.location).size(TEXT_MD).style(text::secondary)
+            };
         detail = detail.push(loc_text);
     }
 
@@ -823,13 +807,17 @@ fn event_full_modal<'a>(
     if let Some(ref name) = event.organizer_name {
         if !name.is_empty() {
             detail = detail.push(
-                text(format!("Organizer: {name}")).size(TEXT_SM).style(text::secondary),
+                text(format!("Organizer: {name}"))
+                    .size(TEXT_SM)
+                    .style(text::secondary),
             );
         }
     } else if let Some(ref email) = event.organizer_email {
         if !email.is_empty() {
             detail = detail.push(
-                text(format!("Organizer: {email}")).size(TEXT_SM).style(text::secondary),
+                text(format!("Organizer: {email}"))
+                    .size(TEXT_SM)
+                    .style(text::secondary),
             );
         }
     }
@@ -837,7 +825,9 @@ fn event_full_modal<'a>(
     // Attendees
     if !event.attendees.is_empty() {
         detail = detail.push(
-            text("Attendees:").size(TEXT_SM).font(crate::font::text_semibold()),
+            text("Attendees:")
+                .size(TEXT_SM)
+                .font(crate::font::text_semibold()),
         );
         for att in &event.attendees {
             let icon = match att.rsvp_status.as_str() {
@@ -849,7 +839,9 @@ fn event_full_modal<'a>(
             let display = att.name.as_deref().unwrap_or(&att.email);
             let suffix = if att.is_organizer { " (organizer)" } else { "" };
             detail = detail.push(
-                text(format!("  {icon} {display}{suffix}")).size(TEXT_SM).style(text::secondary),
+                text(format!("  {icon} {display}{suffix}"))
+                    .size(TEXT_SM)
+                    .style(text::secondary),
             );
         }
     }
@@ -858,18 +850,24 @@ fn event_full_modal<'a>(
     if !event.description.is_empty() {
         detail = detail.push(Space::new().height(SPACE_XXS));
         detail = detail.push(
-            text(&event.description).size(TEXT_SM).style(text::secondary),
+            text(&event.description)
+                .size(TEXT_SM)
+                .style(text::secondary),
         );
     }
 
     // Reminders
     if !event.reminders.is_empty() {
-        let reminder_text = event.reminders.iter()
+        let reminder_text = event
+            .reminders
+            .iter()
             .map(|r| format_reminder(r.minutes_before))
             .collect::<Vec<_>>()
             .join(", ");
         detail = detail.push(
-            text(format!("Reminders: {reminder_text}")).size(TEXT_SM).style(text::secondary),
+            text(format!("Reminders: {reminder_text}"))
+                .size(TEXT_SM)
+                .style(text::secondary),
         );
     }
 
@@ -901,7 +899,10 @@ fn event_full_modal<'a>(
     if let Some(ref id) = event.id {
         action_row = action_row.push(
             button(text("Delete").size(TEXT_SM))
-                .on_press(CalendarMessage::ConfirmDeleteEvent(id.clone(), event.title.clone()))
+                .on_press(CalendarMessage::ConfirmDeleteEvent(
+                    id.clone(),
+                    event.title.clone(),
+                ))
                 .padding(PAD_BUTTON)
                 .style(theme::ButtonClass::Ghost.style()),
         );
@@ -911,10 +912,7 @@ fn event_full_modal<'a>(
     let detail_scroll = scrollable(detail).height(Length::Fill);
 
     // ── Right panel: mini day view showing conflicts ──
-    let day_events = calendar_time_grid::events_for_date(
-        &state.events,
-        event.start_date,
-    );
+    let day_events = calendar_time_grid::events_for_date(&state.events, event.start_date);
 
     let day_label = format!(
         "{}, {} {}",
@@ -924,13 +922,18 @@ fn event_full_modal<'a>(
     );
 
     let mut day_col = column![
-        text(day_label).size(TEXT_SM).font(crate::font::text_semibold()),
+        text(day_label)
+            .size(TEXT_SM)
+            .font(crate::font::text_semibold()),
         Space::new().height(SPACE_XS),
-    ].spacing(SPACE_XXXS);
+    ]
+    .spacing(SPACE_XXXS);
 
     if day_events.is_empty() {
         day_col = day_col.push(
-            text("No other events").size(TEXT_XS).style(theme::TextClass::Muted.style()),
+            text("No other events")
+                .size(TEXT_XS)
+                .style(theme::TextClass::Muted.style()),
         );
     } else {
         for ev in day_events {
@@ -942,7 +945,9 @@ fn event_full_modal<'a>(
                 let end = chrono::DateTime::from_timestamp(ev.end_time, 0)
                     .map(|dt| dt.with_timezone(&chrono::Local));
                 match (start, end) {
-                    (Some(s), Some(e)) => format!("{} \u{2013} {}", s.format("%H:%M"), e.format("%H:%M")),
+                    (Some(s), Some(e)) => {
+                        format!("{} \u{2013} {}", s.format("%H:%M"), e.format("%H:%M"))
+                    }
                     _ => String::new(),
                 }
             };
@@ -956,36 +961,32 @@ fn event_full_modal<'a>(
             };
             let ev_row = column![
                 row![dot, text(ev.title).size(TEXT_XS).style(title_style)]
-                    .spacing(SPACE_XXS).align_y(Alignment::Center),
-                text(time_str).size(8.0).style(theme::TextClass::Muted.style()),
-            ].spacing(0);
+                    .spacing(SPACE_XXS)
+                    .align_y(Alignment::Center),
+                text(time_str)
+                    .size(8.0)
+                    .style(theme::TextClass::Muted.style()),
+            ]
+            .spacing(0);
             day_col = day_col.push(ev_row);
         }
     }
 
-    let right_panel = container(
-        scrollable(day_col),
-    )
-    .width(Length::FillPortion(3))
-    .height(Length::Fill)
-    .padding(PAD_CARD)
-    .style(theme::ContainerClass::Sidebar.style());
+    let right_panel = container(scrollable(day_col))
+        .width(Length::FillPortion(3))
+        .height(Length::Fill)
+        .padding(PAD_CARD)
+        .style(theme::ContainerClass::Sidebar.style());
 
     // ── Assemble two-panel layout ──
-    let header = row![
-        Space::new().width(Length::Fill),
-        close_btn,
-    ].width(Length::Fill);
+    let header = row![Space::new().width(Length::Fill), close_btn,].width(Length::Fill);
 
-    let left_panel = container(
-        column![header, detail_scroll].spacing(SPACE_XXS),
-    )
-    .width(Length::FillPortion(7))
-    .height(Length::Fill)
-    .padding(PAD_CARD);
+    let left_panel = container(column![header, detail_scroll].spacing(SPACE_XXS))
+        .width(Length::FillPortion(7))
+        .height(Length::Fill)
+        .padding(PAD_CARD);
 
-    let two_panel = row![left_panel, right_panel]
-        .height(Length::Fill);
+    let two_panel = row![left_panel, right_panel].height(Length::Fill);
 
     container(two_panel)
         .width(Length::FillPortion(4))
@@ -999,10 +1000,7 @@ fn event_full_modal<'a>(
 // ── Event editor card ──────────────────────────────────
 
 /// Event creation/editing form (rendered as a centered modal).
-fn event_editor_card(
-    event: &CalendarEventData,
-    is_new: bool,
-) -> Element<'_, CalendarMessage> {
+fn event_editor_card(event: &CalendarEventData, is_new: bool) -> Element<'_, CalendarMessage> {
     let heading = if is_new { "New Event" } else { "Edit Event" };
 
     let mut content = column![].spacing(SPACE_SM);
@@ -1014,10 +1012,13 @@ fn event_editor_card(
         .style(theme::ButtonClass::Ghost.style());
     content = content.push(
         row![
-            text(heading).size(TEXT_HEADING).font(crate::font::text_semibold()),
+            text(heading)
+                .size(TEXT_HEADING)
+                .font(crate::font::text_semibold()),
             Space::new().width(Length::Fill),
             close_btn,
-        ].align_y(Alignment::Center),
+        ]
+        .align_y(Alignment::Center),
     );
 
     // Calendar selector (spec: first field)
@@ -1033,7 +1034,10 @@ fn event_editor_card(
                     text("\u{25CF}").size(TEXT_MD)
                 },
                 text(cal_name).size(TEXT_MD),
-            ].spacing(SPACE_XXS).align_y(Alignment::Center).into(),
+            ]
+            .spacing(SPACE_XXS)
+            .align_y(Alignment::Center)
+            .into(),
         ));
     }
 
@@ -1057,10 +1061,7 @@ fn event_editor_card(
         event.start_date.day(),
         event.start_date.year(),
     );
-    content = content.push(form_field(
-        "Date",
-        text(date_str).size(TEXT_MD).into(),
-    ));
+    content = content.push(form_field("Date", text(date_str).size(TEXT_MD).into()));
 
     // Time row (start hour:minute - end hour:minute)
     if !event.all_day {
@@ -1069,11 +1070,15 @@ fn event_editor_card(
     }
 
     // All-day toggle
-    let all_day_label = if event.all_day { "All day: Yes" } else { "All day: No" };
+    let all_day_label = if event.all_day {
+        "All day: Yes"
+    } else {
+        "All day: No"
+    };
     let all_day_btn = button(text(all_day_label).size(TEXT_SM))
-        .on_press(CalendarMessage::EventFieldChanged(
-            EventField::AllDay(!event.all_day),
-        ))
+        .on_press(CalendarMessage::EventFieldChanged(EventField::AllDay(
+            !event.all_day,
+        )))
         .padding(PAD_ICON_BTN)
         .style(theme::ButtonClass::Ghost.style());
     content = content.push(all_day_btn);
@@ -1127,9 +1132,11 @@ fn event_editor_card(
             _ => opt,
         };
         avail_row = avail_row.push(
-            button(text(label).size(TEXT_XS).style(
-                if is_active { text::primary } else { text::secondary },
-            ))
+            button(text(label).size(TEXT_XS).style(if is_active {
+                text::primary
+            } else {
+                text::secondary
+            }))
             .on_press(CalendarMessage::EventFieldChanged(
                 EventField::Availability(Some((*opt).to_string())),
             ))
@@ -1156,12 +1163,14 @@ fn event_editor_card(
             _ => opt,
         };
         vis_row = vis_row.push(
-            button(text(label).size(TEXT_XS).style(
-                if is_active { text::primary } else { text::secondary },
-            ))
-            .on_press(CalendarMessage::EventFieldChanged(
-                EventField::Visibility(Some((*opt).to_string())),
-            ))
+            button(text(label).size(TEXT_XS).style(if is_active {
+                text::primary
+            } else {
+                text::secondary
+            }))
+            .on_press(CalendarMessage::EventFieldChanged(EventField::Visibility(
+                Some((*opt).to_string()),
+            )))
             .padding(PAD_ICON_BTN)
             .style(if is_active {
                 theme::ButtonClass::Nav { active: true }.style()
@@ -1175,16 +1184,21 @@ fn event_editor_card(
     // Recurrence (basic toggle + text display)
     let has_recurrence = event.recurrence_rule.is_some();
     let recurrence_label = if has_recurrence {
-        format!("Recurring: {}", format_recurrence_rule(
-            event.recurrence_rule.as_deref().unwrap_or(""),
-        ))
+        format!(
+            "Recurring: {}",
+            format_recurrence_rule(event.recurrence_rule.as_deref().unwrap_or(""),)
+        )
     } else {
         "Not recurring".to_string()
     };
     let recurrence_toggle = button(text(recurrence_label).size(TEXT_SM))
-        .on_press(CalendarMessage::EventFieldChanged(EventField::RecurrenceRule(
-            if has_recurrence { None } else { Some("RRULE:FREQ=WEEKLY".to_string()) },
-        )))
+        .on_press(CalendarMessage::EventFieldChanged(
+            EventField::RecurrenceRule(if has_recurrence {
+                None
+            } else {
+                Some("RRULE:FREQ=WEEKLY".to_string())
+            }),
+        ))
         .padding(PAD_ICON_BTN)
         .style(theme::ButtonClass::Ghost.style());
     content = content.push(form_field("Recurrence", recurrence_toggle.into()));
@@ -1201,12 +1215,9 @@ fn event_editor_card(
         .style(theme::ButtonClass::Ghost.style());
 
     content = content.push(Space::new().height(SPACE_XS));
-    content = content.push(
-        row![save_btn, cancel_btn].spacing(SPACE_XS),
-    );
+    content = content.push(row![save_btn, cancel_btn].spacing(SPACE_XS));
 
-    let scrollable_content = scrollable(content)
-        .height(Length::Shrink);
+    let scrollable_content = scrollable(content).height(Length::Shrink);
 
     container(scrollable_content)
         .width(Length::Fixed(CALENDAR_OVERLAY_WIDTH))
@@ -1282,11 +1293,12 @@ fn time_input_row(event: &CalendarEventData) -> Element<'_, CalendarMessage> {
 // ── Delete confirmation card ───────────────────────────
 
 /// Confirmation dialog before deleting an event.
-fn delete_confirm_card<'a>(
-    event_id: &str,
-    title: &str,
-) -> Element<'a, CalendarMessage> {
-    let display_title = if title.is_empty() { "(Untitled)" } else { title };
+fn delete_confirm_card<'a>(event_id: &str, title: &str) -> Element<'a, CalendarMessage> {
+    let display_title = if title.is_empty() {
+        "(Untitled)"
+    } else {
+        title
+    };
     let id = event_id.to_string();
 
     let content = column![
@@ -1294,8 +1306,10 @@ fn delete_confirm_card<'a>(
             .size(TEXT_HEADING)
             .font(crate::font::text_semibold()),
         Space::new().height(SPACE_XS),
-        text(format!("Delete \"{display_title}\"? This cannot be undone."))
-            .size(TEXT_MD),
+        text(format!(
+            "Delete \"{display_title}\"? This cannot be undone."
+        ))
+        .size(TEXT_MD),
         Space::new().height(SPACE_MD),
         row![
             button(text("Delete").size(TEXT_SM))
@@ -1338,24 +1352,16 @@ fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMessage> {
     );
 
     // Today button
-    let today_btn = button(
-        text("Today")
-            .size(TEXT_SM)
-            .style(text::secondary),
-    )
-    .on_press(CalendarMessage::Today)
-    .padding(PAD_ICON_BTN)
-    .style(theme::ButtonClass::Ghost.style());
+    let today_btn = button(text("Today").size(TEXT_SM).style(text::secondary))
+        .on_press(CalendarMessage::Today)
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Ghost.style());
 
     // New event button
-    let new_event_btn = button(
-        text("+ New Event")
-            .size(TEXT_SM)
-            .style(text::primary),
-    )
-    .on_press(CalendarMessage::CreateEvent)
-    .padding(PAD_ICON_BTN)
-    .style(theme::ButtonClass::Ghost.style());
+    let new_event_btn = button(text("+ New Event").size(TEXT_SM).style(text::primary))
+        .on_press(CalendarMessage::CreateEvent)
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Ghost.style());
 
     // Calendar list with visibility toggles
     let mut calendar_list_col = column![
@@ -1382,9 +1388,7 @@ fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMessage> {
                 .size(TEXT_SM)
                 .color(parse_hex_color(&cal.color));
 
-            let name = text(&cal.display_name)
-                .size(TEXT_XS)
-                .style(text::base);
+            let name = text(&cal.display_name).size(TEXT_XS).style(text::base);
 
             let toggle = checkbox(is_visible)
                 .on_toggle(move |checked| {
@@ -1429,19 +1433,20 @@ fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMessage> {
     for v in views {
         let is_active = v == state.active_view;
         let (btn_style, txt_style): (_, fn(&Theme) -> text::Style) = if is_active {
-            (theme::ButtonClass::Primary.style(), |_| text::Style { color: Some(theme::ON_AVATAR) })
+            (theme::ButtonClass::Primary.style(), |_| text::Style {
+                color: Some(theme::ON_AVATAR),
+            })
         } else {
-            (theme::ButtonClass::Experiment { variant: 8 }.style(), text::primary)
+            (
+                theme::ButtonClass::Experiment { variant: 8 }.style(),
+                text::primary,
+            )
         };
         view_row = view_row.push(
             button(
-                container(
-                    text(v.label())
-                        .size(TEXT_SM)
-                        .style(txt_style),
-                )
-                .center_x(Length::Fill)
-                .center_y(Length::Fill),
+                container(text(v.label()).size(TEXT_SM).style(txt_style))
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill),
             )
             .on_press(CalendarMessage::SetView(v))
             .width(Length::Fill)
@@ -1449,11 +1454,9 @@ fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMessage> {
             .style(btn_style),
         );
     }
-    let right_stack = container(
-        view_row.height(Length::Fill),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill);
+    let right_stack = container(view_row.height(Length::Fill))
+        .width(Length::Fill)
+        .height(Length::Fill);
 
     // Fixed-height header so Fill children resolve correctly
     let header = container(
@@ -1484,7 +1487,9 @@ fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMessage> {
         .style(theme::ButtonClass::Experiment { variant: 10 }.style())
         .padding(PAD_BUTTON)
         .width(Length::Fill),
-        text("Open calendar in a separate window").size(TEXT_XS).style(theme::TextClass::OnPrimary.style()),
+        text("Open calendar in a separate window")
+            .size(TEXT_XS)
+            .style(theme::TextClass::OnPrimary.style()),
         iced::widget::tooltip::Position::Top,
     )
     .gap(SPACE_XXS)
@@ -1521,16 +1526,12 @@ fn calendar_main_view(state: &CalendarState) -> Element<'_, CalendarMessage> {
 }
 
 /// Month view main content area.
-fn calendar_main_month(
-    state: &CalendarState,
-) -> Element<'_, CalendarMessage> {
-    container(
-        calendar_month::month_view(
-            &state.month_grid,
-            |d| CalendarMessage::SelectDate(d),
-            |id| CalendarMessage::EventClicked(id.to_string()),
-        ),
-    )
+fn calendar_main_month(state: &CalendarState) -> Element<'_, CalendarMessage> {
+    container(calendar_month::month_view(
+        &state.month_grid,
+        |d| CalendarMessage::SelectDate(d),
+        |id| CalendarMessage::EventClicked(id.to_string()),
+    ))
     .width(Length::Fill)
     .height(Length::Fill)
     .style(theme::ContainerClass::Content.style())
@@ -1538,9 +1539,7 @@ fn calendar_main_month(
 }
 
 /// Day / Work Week / Week time grid main content area.
-fn calendar_main_time_grid(
-    state: &CalendarState,
-) -> Element<'_, CalendarMessage> {
+fn calendar_main_time_grid(state: &CalendarState) -> Element<'_, CalendarMessage> {
     container(calendar_time_grid::time_grid_view(
         &state.time_grid_config,
         |id| CalendarMessage::EventClicked(id.to_string()),
@@ -1635,12 +1634,18 @@ fn format_reminder(minutes_before: i64) -> String {
         format!("{minutes_before} min before")
     } else if minutes_before < 1440 {
         let hours = minutes_before / 60;
-        if hours == 1 { "1 hour before".to_string() }
-        else { format!("{hours} hours before") }
+        if hours == 1 {
+            "1 hour before".to_string()
+        } else {
+            format!("{hours} hours before")
+        }
     } else {
         let days = minutes_before / 1440;
-        if days == 1 { "1 day before".to_string() }
-        else { format!("{days} days before") }
+        if days == 1 {
+            "1 day before".to_string()
+        } else {
+            format!("{days} days before")
+        }
     }
 }
 

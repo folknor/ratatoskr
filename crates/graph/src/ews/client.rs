@@ -1,8 +1,8 @@
 use super::{
-    EWS_URL, EwsClient, EwsFolder, EwsHeaders, EwsItem, FindItemsResult,
-    build_soap_envelope, check_soap_fault, is_distinguished_folder_id,
-    parse_create_item_response, parse_find_folder_response, parse_find_items_response,
-    parse_get_folder_response, parse_get_item_response, xml_escape,
+    EWS_URL, EwsClient, EwsFolder, EwsHeaders, EwsItem, FindItemsResult, build_soap_envelope,
+    check_soap_fault, is_distinguished_folder_id, parse_create_item_response,
+    parse_find_folder_response, parse_find_items_response, parse_get_folder_response,
+    parse_get_item_response, xml_escape,
 };
 
 impl Default for EwsClient {

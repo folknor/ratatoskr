@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use iced::widget::{button, column, container, image, row, text, Space};
+use iced::widget::{Space, button, column, container, image, row, text};
 use iced::{Element, Length, Padding};
 
 use crate::ui::layout::*;
@@ -101,8 +101,7 @@ pub fn render_cached_html<'a, M: Clone + 'a>(
 ) -> Element<'a, M> {
     match cached {
         CachedHtmlBody::Complex => {
-            let display = fallback_text
-                .unwrap_or("(complex HTML email — plain text unavailable)");
+            let display = fallback_text.unwrap_or("(complex HTML email — plain text unavailable)");
             text(display.to_string())
                 .size(TEXT_LG)
                 .style(text::secondary)
@@ -137,8 +136,7 @@ pub fn render_html<'a, M: Clone + 'a>(
     inline_images: &'a HashMap<String, Vec<u8>>,
 ) -> Element<'a, M> {
     if assess_complexity(html) == HtmlComplexity::Complex {
-        let display = fallback_text
-            .unwrap_or("(complex HTML email — plain text unavailable)");
+        let display = fallback_text.unwrap_or("(complex HTML email — plain text unavailable)");
         return text(display.to_string())
             .size(TEXT_LG)
             .style(text::secondary)
@@ -179,10 +177,16 @@ pub(super) enum Block {
     Heading(String, u8),
     Preformatted(String),
     Blockquote(String),
-    ListItem { prefix: String, content: Vec<InlineSpan> },
+    ListItem {
+        prefix: String,
+        content: Vec<InlineSpan>,
+    },
     HorizontalRule,
     /// An inline image referenced by Content-ID (from `<img src="cid:...">`).
-    InlineImage { cid: String, alt: String },
+    InlineImage {
+        cid: String,
+        alt: String,
+    },
 }
 
 /// Render inline spans as a row of text and link widgets.
@@ -232,10 +236,7 @@ fn render_spans<'a, M: Clone + 'a>(
         }
     }
 
-    iced::widget::row(elements)
-        .spacing(0)
-        .wrap()
-        .into()
+    iced::widget::row(elements).spacing(0).wrap().into()
 }
 
 /// Render a block by reference (for cached rendering). Clones the owned
@@ -246,9 +247,7 @@ fn render_block_ref<'a, M: Clone + 'a>(
     inline_images: &'a HashMap<String, Vec<u8>>,
 ) -> Element<'a, M> {
     match block {
-        Block::Paragraph(spans) => {
-            render_spans(spans, &on_link_click)
-        }
+        Block::Paragraph(spans) => render_spans(spans, &on_link_click),
         Block::Heading(txt, level) => {
             let size = match level {
                 1 => TEXT_HEADING,
@@ -261,48 +260,43 @@ fn render_block_ref<'a, M: Clone + 'a>(
                 .style(text::base)
                 .into()
         }
-        Block::Preformatted(txt) => {
+        Block::Preformatted(txt) => container(
+            text(txt.clone())
+                .size(TEXT_MD)
+                .font(iced::Font::MONOSPACE)
+                .style(text::secondary),
+        )
+        .padding(PAD_CARD)
+        .style(theme::ContainerClass::Elevated.style())
+        .width(Length::Fill)
+        .into(),
+        Block::Blockquote(txt) => container(
+            text(txt.clone())
+                .size(TEXT_LG)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .padding(Padding {
+            top: SPACE_XXS,
+            right: SPACE_SM,
+            bottom: SPACE_XXS,
+            left: SPACE_MD,
+        })
+        .style(theme::ContainerClass::Elevated.style())
+        .width(Length::Fill)
+        .into(),
+        Block::ListItem { prefix, content } => row![
             container(
-                text(txt.clone())
-                    .size(TEXT_MD)
-                    .font(iced::Font::MONOSPACE)
-                    .style(text::secondary),
-            )
-            .padding(PAD_CARD)
-            .style(theme::ContainerClass::Elevated.style())
-            .width(Length::Fill)
-            .into()
-        }
-        Block::Blockquote(txt) => {
-            container(
-                text(txt.clone())
+                text(prefix.clone())
                     .size(TEXT_LG)
                     .style(theme::TextClass::Tertiary.style()),
             )
-            .padding(Padding { top: SPACE_XXS, right: SPACE_SM, bottom: SPACE_XXS, left: SPACE_MD })
-            .style(theme::ContainerClass::Elevated.style())
-            .width(Length::Fill)
-            .into()
-        }
-        Block::ListItem { prefix, content } => {
-            row![
-                container(
-                    text(prefix.clone())
-                        .size(TEXT_LG)
-                        .style(theme::TextClass::Tertiary.style()),
-                )
-                .width(Length::Fixed(SPACE_LG)),
-            ]
-            .push(render_spans(content, &on_link_click))
-            .spacing(SPACE_XXS)
-            .into()
-        }
-        Block::HorizontalRule => {
-            iced::widget::rule::horizontal(1).into()
-        }
-        Block::InlineImage { cid, alt } => {
-            render_cid_image(cid, alt, inline_images)
-        }
+            .width(Length::Fixed(SPACE_LG)),
+        ]
+        .push(render_spans(content, &on_link_click))
+        .spacing(SPACE_XXS)
+        .into(),
+        Block::HorizontalRule => iced::widget::rule::horizontal(1).into(),
+        Block::InlineImage { cid, alt } => render_cid_image(cid, alt, inline_images),
     }
 }
 
@@ -717,7 +711,10 @@ fn decode_entities(s: &str) -> String {
         if let Some(decoded) = decode_named_entity(&entity) {
             result.push_str(decoded);
         } else if let Some(stripped) = entity.strip_prefix('#') {
-            let codepoint = if let Some(hex) = stripped.strip_prefix('x').or_else(|| stripped.strip_prefix('X')) {
+            let codepoint = if let Some(hex) = stripped
+                .strip_prefix('x')
+                .or_else(|| stripped.strip_prefix('X'))
+            {
                 u32::from_str_radix(hex, 16).ok()
             } else {
                 stripped.parse::<u32>().ok()
@@ -893,9 +890,7 @@ mod tests {
 
     #[test]
     fn style_stripped() {
-        let blocks = parse_html_to_blocks(
-            "<style>.foo{color:red}</style><p>visible</p>"
-        );
+        let blocks = parse_html_to_blocks("<style>.foo{color:red}</style><p>visible</p>");
         assert_eq!(blocks.len(), 1);
         match &blocks[0] {
             Block::Paragraph(spans) => assert_eq!(spans_text(spans), "visible"),
@@ -905,9 +900,8 @@ mod tests {
 
     #[test]
     fn link_extraction() {
-        let blocks = parse_html_to_blocks(
-            "<p>Click <a href=\"https://example.com\">here</a> for more.</p>"
-        );
+        let blocks =
+            parse_html_to_blocks("<p>Click <a href=\"https://example.com\">here</a> for more.</p>");
         assert_eq!(blocks.len(), 1);
         match &blocks[0] {
             Block::Paragraph(spans) => {
@@ -934,9 +928,7 @@ mod tests {
 
     #[test]
     fn link_only_paragraph() {
-        let blocks = parse_html_to_blocks(
-            "<p><a href=\"https://example.com\">Example</a></p>"
-        );
+        let blocks = parse_html_to_blocks("<p><a href=\"https://example.com\">Example</a></p>");
         assert_eq!(blocks.len(), 1);
         match &blocks[0] {
             Block::Paragraph(spans) => {
@@ -955,9 +947,8 @@ mod tests {
 
     #[test]
     fn list_item_with_link() {
-        let blocks = parse_html_to_blocks(
-            "<ul><li>See <a href=\"https://example.com\">this</a></li></ul>"
-        );
+        let blocks =
+            parse_html_to_blocks("<ul><li>See <a href=\"https://example.com\">this</a></li></ul>");
         assert_eq!(blocks.len(), 1);
         match &blocks[0] {
             Block::ListItem { content, .. } => {

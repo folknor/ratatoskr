@@ -45,7 +45,14 @@ pub(super) async fn persist_messages(
                 .map_err(|e| format!("begin tx: {e}"))?;
             let user_emails = sync_persistence::query_user_emails(&tx)?;
             for (thread_id, msgs) in &thread_groups {
-                store_thread_to_db(&tx, &aid, thread_id, msgs, shared_mb_id.as_deref(), &user_emails)?;
+                store_thread_to_db(
+                    &tx,
+                    &aid,
+                    thread_id,
+                    msgs,
+                    shared_mb_id.as_deref(),
+                    &user_emails,
+                )?;
             }
             tx.commit().map_err(|e| format!("commit: {e}"))?;
             Ok(())
@@ -380,7 +387,9 @@ pub(super) async fn refresh_reactions_for_recent_messages(
                 )
                 .map_err(|e| format!("prepare reaction refresh query: {e}"))?;
             let rows = stmt
-                .query_map(rusqlite::params![aid], |row| row.get::<_, String>("message_id"))
+                .query_map(rusqlite::params![aid], |row| {
+                    row.get::<_, String>("message_id")
+                })
                 .map_err(|e| format!("query reaction messages: {e}"))?;
             let mut ids = Vec::new();
             for row in rows {
@@ -396,9 +405,8 @@ pub(super) async fn refresh_reactions_for_recent_messages(
 
     let owner_reaction_id = format!("String {REACTIONS_GUID} Name OwnerReactionType");
     let reactions_count_id = format!("Integer {REACTIONS_GUID} Name ReactionsCount");
-    let expand_filter = format!(
-        "$filter=id eq '{owner_reaction_id}' or id eq '{reactions_count_id}'"
-    );
+    let expand_filter =
+        format!("$filter=id eq '{owner_reaction_id}' or id eq '{reactions_count_id}'");
 
     // Look up the authenticated user's email for reaction rows
     let aid2 = account_id.to_string();

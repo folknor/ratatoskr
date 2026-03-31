@@ -3,15 +3,13 @@
 //! Shares the same OAuth token as the Gmail provider. Calendar sync runs
 //! alongside email sync (called from `sync/mod.rs`).
 
-pub mod types;
 mod storage;
+pub mod types;
 
 use db::db::DbState;
 
 use super::client::GmailClient;
-use types::{
-    CalendarListEntry, CalendarListResponse, EventListResponse, GoogleCalendarEvent,
-};
+use types::{CalendarListEntry, CalendarListResponse, EventListResponse, GoogleCalendarEvent};
 
 const CALENDAR_API_BASE: &str = "https://www.googleapis.com/calendar/v3";
 
@@ -96,21 +94,19 @@ pub async fn sync_calendar_events(
     let sync_token = storage::load_sync_token(db, &cal.local_id).await?;
 
     match sync_token {
-        Some(token) => {
-            match incremental_event_sync(client, account_id, cal, &token, db).await {
-                Ok(()) => Ok(()),
-                Err(e) if e.contains("410") || e.contains("fullSyncRequired") => {
-                    log::warn!(
-                        "Calendar sync token expired for {} ({}), falling back to full sync",
-                        cal.remote_id,
-                        cal.local_id,
-                    );
-                    storage::save_sync_token(db, &cal.local_id, None).await?;
-                    full_event_sync(client, account_id, cal, db).await
-                }
-                Err(e) => Err(e),
+        Some(token) => match incremental_event_sync(client, account_id, cal, &token, db).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.contains("410") || e.contains("fullSyncRequired") => {
+                log::warn!(
+                    "Calendar sync token expired for {} ({}), falling back to full sync",
+                    cal.remote_id,
+                    cal.local_id,
+                );
+                storage::save_sync_token(db, &cal.local_id, None).await?;
+                full_event_sync(client, account_id, cal, db).await
             }
-        }
+            Err(e) => Err(e),
+        },
         None => full_event_sync(client, account_id, cal, db).await,
     }
 }
@@ -255,9 +251,7 @@ pub async fn update_event(
 ) -> Result<GoogleCalendarEvent, String> {
     let encoded_cal = urlencoding::encode(calendar_remote_id);
     let encoded_event = urlencoding::encode(event_id);
-    let url = format!(
-        "{CALENDAR_API_BASE}/calendars/{encoded_cal}/events/{encoded_event}"
-    );
+    let url = format!("{CALENDAR_API_BASE}/calendars/{encoded_cal}/events/{encoded_event}");
     client.put_absolute(&url, event, db).await
 }
 
@@ -270,9 +264,7 @@ pub async fn delete_event(
 ) -> Result<(), String> {
     let encoded_cal = urlencoding::encode(calendar_remote_id);
     let encoded_event = urlencoding::encode(event_id);
-    let url = format!(
-        "{CALENDAR_API_BASE}/calendars/{encoded_cal}/events/{encoded_event}"
-    );
+    let url = format!("{CALENDAR_API_BASE}/calendars/{encoded_cal}/events/{encoded_event}");
     client.delete_absolute(&url, db).await
 }
 

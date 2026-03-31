@@ -3,9 +3,9 @@ use std::sync::{Arc, Mutex};
 
 use iced::advanced::graphics::futures::subscription;
 use iced::advanced::subscription::Hasher;
-use iced::futures::stream::BoxStream;
 use iced::futures::StreamExt;
-use iced::widget::{container, mouse_area, row, text, Space};
+use iced::futures::stream::BoxStream;
+use iced::widget::{Space, container, mouse_area, row, text};
 use iced::{Alignment, Element, Length, Subscription};
 
 use crate::component::Component;
@@ -141,7 +141,12 @@ impl SyncEvent {
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
 
-        Self::Progress { account_id, phase, current, total }
+        Self::Progress {
+            account_id,
+            phase,
+            current,
+            total,
+        }
     }
 }
 
@@ -200,24 +205,15 @@ impl subscription::Recipe for SyncProgressRecipe {
         std::any::TypeId::of::<Marker>().hash(state);
     }
 
-    fn stream(
-        self: Box<Self>,
-        _input: subscription::EventStream,
-    ) -> BoxStream<'static, SyncEvent> {
-        let taken = self
-            .receiver
-            .lock()
-            .ok()
-            .and_then(|mut guard| guard.take());
+    fn stream(self: Box<Self>, _input: subscription::EventStream) -> BoxStream<'static, SyncEvent> {
+        let taken = self.receiver.lock().ok().and_then(|mut guard| guard.take());
 
         match taken {
-            Some(rx) => {
-                iced::futures::stream::unfold(rx, |mut rx| async {
-                    let event = rx.recv().await?;
-                    Some((event, rx))
-                })
-                .boxed()
-            }
+            Some(rx) => iced::futures::stream::unfold(rx, |mut rx| async {
+                let event = rx.recv().await?;
+                Some((event, rx))
+            })
+            .boxed(),
             None => iced::futures::stream::empty().boxed(),
         }
     }
@@ -225,9 +221,7 @@ impl subscription::Recipe for SyncProgressRecipe {
 
 /// Build an iced `Subscription` that yields `SyncEvent` from the
 /// shared receiver.
-pub fn sync_progress_subscription(
-    receiver: &SyncProgressReceiver,
-) -> Subscription<SyncEvent> {
+pub fn sync_progress_subscription(receiver: &SyncProgressReceiver) -> Subscription<SyncEvent> {
     subscription::from_recipe(SyncProgressRecipe {
         receiver: Arc::clone(receiver),
     })
@@ -293,7 +287,13 @@ impl StatusBar {
         let generation = self.current_generation(&account_id);
         self.sync_progress.insert(
             account_id,
-            SyncAccountProgress { email, current, total, phase, generation },
+            SyncAccountProgress {
+                email,
+                current,
+                total,
+                phase,
+                generation,
+            },
         );
     }
 
@@ -306,7 +306,8 @@ impl StatusBar {
     /// generation number. Call this at the start of each sync cycle
     /// so that old progress entries can be detected as stale.
     pub fn begin_sync_generation(&mut self, account_id: &str) -> u64 {
-        let generation = self.sync_generations
+        let generation = self
+            .sync_generations
             .entry(account_id.to_string())
             .or_insert(0);
         *generation = generation.wrapping_add(1);
@@ -325,7 +326,9 @@ impl StatusBar {
 
     /// Remove stale sync progress entries (where generation is behind).
     pub fn prune_stale_sync(&mut self) {
-        let stale_ids: Vec<String> = self.sync_progress.keys()
+        let stale_ids: Vec<String> = self
+            .sync_progress
+            .keys()
             .filter(|id| self.is_sync_stale(id))
             .cloned()
             .collect();
@@ -415,10 +418,7 @@ impl StatusBar {
                     )
                 }
                 WarningKind::ConnectionFailure { message } => {
-                    format!(
-                        "{} \u{2014} connection failed ({})",
-                        warning.email, message,
-                    )
+                    format!("{} \u{2014} connection failed ({})", warning.email, message,)
                 }
             }
         } else {
@@ -445,8 +445,7 @@ impl StatusBar {
     }
 
     fn resolve_sync_progress(&self) -> ResolvedContent {
-        let accounts: Vec<&SyncAccountProgress> =
-            self.sync_progress.values().collect();
+        let accounts: Vec<&SyncAccountProgress> = self.sync_progress.values().collect();
 
         let text = if accounts.len() == 1 {
             let p = accounts[0];
@@ -509,9 +508,7 @@ impl Component for StatusBar {
                         };
                         (iced::Task::none(), Some(event))
                     }
-                    WarningKind::ConnectionFailure { .. } => {
-                        (iced::Task::none(), None)
-                    }
+                    WarningKind::ConnectionFailure { .. } => (iced::Task::none(), None),
                 }
             }
         }
@@ -535,11 +532,8 @@ impl Component for StatusBar {
                 clickable,
                 ..
             } => {
-                let bar = build_status_row(
-                    icon::alert_triangle(),
-                    &warning_text,
-                    TextClass::Warning,
-                );
+                let bar =
+                    build_status_row(icon::alert_triangle(), &warning_text, TextClass::Warning);
 
                 if clickable {
                     mouse_area(bar)
@@ -551,36 +545,23 @@ impl Component for StatusBar {
                 }
             }
             ResolvedContent::SyncProgress { text: sync_text } => {
-                build_status_row(
-                    icon::refresh(),
-                    &sync_text,
-                    TextClass::Muted,
-                )
-                .into()
+                build_status_row(icon::refresh(), &sync_text, TextClass::Muted).into()
             }
             ResolvedContent::Confirmation { text: conf_text } => {
-                build_status_row(
-                    icon::check(),
-                    &conf_text,
-                    TextClass::Muted,
-                )
-                .into()
+                build_status_row(icon::check(), &conf_text, TextClass::Muted).into()
             }
-            ResolvedContent::AutoReplyActive => {
-                build_status_row(
-                    icon::mail(),
-                    "Out of Office auto-reply is active",
-                    TextClass::Accent,
-                )
-                .into()
-            }
+            ResolvedContent::AutoReplyActive => build_status_row(
+                icon::mail(),
+                "Out of Office auto-reply is active",
+                TextClass::Accent,
+            )
+            .into(),
         }
     }
 
     fn subscription(&self) -> iced::Subscription<StatusBarMessage> {
-        let needs_tick = self.warnings.len() > 1
-            || self.sync_progress.len() > 1
-            || self.confirmation.is_some();
+        let needs_tick =
+            self.warnings.len() > 1 || self.sync_progress.len() > 1 || self.confirmation.is_some();
 
         if needs_tick {
             iced::time::every(CYCLE_INTERVAL).map(StatusBarMessage::CycleTick)

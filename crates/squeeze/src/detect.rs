@@ -54,9 +54,15 @@ impl Format {
             Self::Tiff => "image/tiff",
             Self::Heic => "image/heic",
             Self::Pdf => "application/pdf",
-            Self::Ooxml(OoxmlKind::Docx) => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            Self::Ooxml(OoxmlKind::Xlsx) => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            Self::Ooxml(OoxmlKind::Pptx) => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            Self::Ooxml(OoxmlKind::Docx) => {
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            }
+            Self::Ooxml(OoxmlKind::Xlsx) => {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            }
+            Self::Ooxml(OoxmlKind::Pptx) => {
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            }
             Self::Odf(OdfKind::Odt) => "application/vnd.oasis.opendocument.text",
             Self::Odf(OdfKind::Ods) => "application/vnd.oasis.opendocument.spreadsheet",
             Self::Odf(OdfKind::Odp) => "application/vnd.oasis.opendocument.presentation",

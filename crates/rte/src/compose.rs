@@ -138,9 +138,7 @@ pub fn build_reply_attribution_block(date: &str, sender_name: &str) -> Block {
 /// Returns a `Block::Paragraph` with "---------- Forwarded message ----------"
 pub fn build_forward_header() -> Block {
     Block::Paragraph {
-        runs: vec![StyledRun::plain(
-            "---------- Forwarded message ----------",
-        )],
+        runs: vec![StyledRun::plain("---------- Forwarded message ----------")],
     }
 }
 
@@ -183,11 +181,7 @@ pub fn insert_signature(
 /// (but keeps at least one block).
 ///
 /// Out-of-range indices are clamped to the document's block count.
-pub fn remove_signature(
-    document: &mut Document,
-    separator_index: usize,
-    end_index: Option<usize>,
-) {
+pub fn remove_signature(document: &mut Document, separator_index: usize, end_index: Option<usize>) {
     let count = document.block_count();
     let start = separator_index.min(count);
     let end = end_index.unwrap_or(count).min(count);
@@ -212,7 +206,8 @@ pub fn replace_signature(
 ) -> Option<usize> {
     remove_signature(document, old_separator_index, old_end_index);
 
-    new_signature_html.and_then(|sig_html| insert_signature(document, old_separator_index, sig_html))
+    new_signature_html
+        .and_then(|sig_html| insert_signature(document, old_separator_index, sig_html))
 }
 
 // ── Tests ───────────────────────────────────────────────
@@ -226,33 +221,21 @@ mod tests {
     fn assemble_no_signature_no_quoted() {
         let result = assemble_compose_document(None, None, None);
         assert_eq!(result.document.block_count(), 1);
-        assert_eq!(
-            result.document.block(0),
-            Some(&Block::empty_paragraph())
-        );
+        assert_eq!(result.document.block(0), Some(&Block::empty_paragraph()));
         assert_eq!(result.signature_separator_index, None);
     }
 
     #[test]
     fn assemble_with_signature_only() {
-        let result = assemble_compose_document(
-            Some("<p>Best regards,</p><p>Alice</p>"),
-            None,
-            None,
-        );
+        let result =
+            assemble_compose_document(Some("<p>Best regards,</p><p>Alice</p>"), None, None);
         // Block 0: empty paragraph
         // Block 1: HorizontalRule
         // Block 2: "Best regards,"
         // Block 3: "Alice"
         assert_eq!(result.document.block_count(), 4);
-        assert_eq!(
-            result.document.block(0),
-            Some(&Block::empty_paragraph())
-        );
-        assert_eq!(
-            result.document.block(1),
-            Some(&Block::HorizontalRule)
-        );
+        assert_eq!(result.document.block(0), Some(&Block::empty_paragraph()));
+        assert_eq!(result.document.block(1), Some(&Block::HorizontalRule));
         assert_eq!(result.signature_separator_index, Some(1));
 
         let text2 = result.document.block(2).map(Block::flattened_text);
@@ -340,10 +323,7 @@ mod tests {
         let block = build_forward_header();
         if let Block::Paragraph { runs } = &block {
             assert_eq!(runs.len(), 1);
-            assert_eq!(
-                runs[0].text,
-                "---------- Forwarded message ----------"
-            );
+            assert_eq!(runs[0].text, "---------- Forwarded message ----------");
             assert_eq!(runs[0].style, InlineStyle::empty());
         } else {
             panic!("expected paragraph, got {block:?}");
@@ -432,10 +412,7 @@ mod tests {
 
     #[test]
     fn remove_signature_preserves_at_least_one_block() {
-        let mut doc = Document::from_blocks(vec![
-            Block::HorizontalRule,
-            Block::paragraph("Sig"),
-        ]);
+        let mut doc = Document::from_blocks(vec![Block::HorizontalRule, Block::paragraph("Sig")]);
         remove_signature(&mut doc, 0, None);
         // Document must retain at least one block.
         assert!(doc.block_count() >= 1);
@@ -515,11 +492,8 @@ mod tests {
         assert_eq!(result.document.block_count(), 3); // empty + HR + sig
 
         // Multi-block signature.
-        let result = assemble_compose_document(
-            Some("<p>Line 1</p><p>Line 2</p><p>Line 3</p>"),
-            None,
-            None,
-        );
+        let result =
+            assemble_compose_document(Some("<p>Line 1</p><p>Line 2</p><p>Line 3</p>"), None, None);
         assert_eq!(result.signature_separator_index, Some(1));
         assert_eq!(result.document.block_count(), 5); // empty + HR + 3 sig blocks
     }

@@ -96,7 +96,9 @@ pub async fn db_get_active_follow_up_thread_ids(
             let param_refs: Vec<&dyn rusqlite::types::ToSql> =
                 param_values.iter().map(AsRef::as_ref).collect();
             let rows = stmt
-                .query_map(param_refs.as_slice(), |row| row.get::<_, String>("thread_id"))
+                .query_map(param_refs.as_slice(), |row| {
+                    row.get::<_, String>("thread_id")
+                })
                 .map_err(|e| e.to_string())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())?;

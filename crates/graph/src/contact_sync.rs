@@ -6,9 +6,7 @@ use db::db::DbState;
 use sync::state as sync_state;
 
 use super::client::GraphClient;
-use super::types::{
-    CONTACT_SELECT, GraphContact, GraphContactFolder, ODataCollection,
-};
+use super::types::{CONTACT_SELECT, GraphContact, GraphContactFolder, ODataCollection};
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -27,15 +25,17 @@ pub(crate) async fn graph_contacts_initial_sync(
         log::debug!("[Graph] No contact folders found for account {account_id}");
         return Ok(());
     }
-    log::debug!("[Graph] Found {} contact folders for account {account_id}", folders.len());
+    log::debug!(
+        "[Graph] Found {} contact folders for account {account_id}",
+        folders.len()
+    );
 
     for folder in &folders {
         full_sync_contact_folder(client, account_id, db, &folder.id).await?;
 
         // Bootstrap delta token for future delta syncs
         let delta_link = bootstrap_contact_delta_token(client, db, &folder.id).await?;
-        sync_state::save_graph_contact_delta_token(db, account_id, &folder.id, &delta_link)
-            .await?;
+        sync_state::save_graph_contact_delta_token(db, account_id, &folder.id, &delta_link).await?;
     }
 
     Ok(())
@@ -91,9 +91,7 @@ async fn fetch_contact_folders(
         let page: ODataCollection<GraphContactFolder> = if let Some(ref link) = next_link {
             client.get_absolute(link, db).await?
         } else {
-            client
-                .get_json("/me/contactFolders?$top=250", db)
-                .await?
+            client.get_json("/me/contactFolders?$top=250", db).await?
         };
 
         folders.extend(page.value);
@@ -127,7 +125,9 @@ async fn full_sync_contact_folder(
     let seen_ids_owned = seen_ids;
 
     db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| format!("begin tx: {e}"))?;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| format!("begin tx: {e}"))?;
         persist_synced_contacts(&tx, &aid, &contacts_owned)?;
         prune_stale_contacts(&tx, &aid, &seen_ids_owned)?;
         tx.commit().map_err(|e| format!("commit tx: {e}"))?;
@@ -213,7 +213,9 @@ async fn sync_contact_folder_delta(
             let deleted_owned = deleted_ids;
 
             db.with_conn(move |conn| {
-                let tx = conn.unchecked_transaction().map_err(|e| format!("begin tx: {e}"))?;
+                let tx = conn
+                    .unchecked_transaction()
+                    .map_err(|e| format!("begin tx: {e}"))?;
                 persist_synced_contacts(&tx, &aid, &upserts_owned)?;
                 for graph_contact_id in &deleted_owned {
                     delete_synced_contact(&tx, &aid, graph_contact_id)?;
@@ -232,9 +234,7 @@ async fn sync_contact_folder_delta(
                 .await?;
             break;
         } else {
-            log::warn!(
-                "Graph contact delta for folder {folder_id} has no nextLink or deltaLink"
-            );
+            log::warn!("Graph contact delta for folder {folder_id} has no nextLink or deltaLink");
             break;
         }
     }
@@ -252,9 +252,7 @@ async fn bootstrap_contact_delta_token(
     folder_id: &str,
 ) -> Result<String, String> {
     let enc_folder_id = urlencoding::encode(folder_id);
-    let initial_url = format!(
-        "/me/contactFolders/{enc_folder_id}/contacts/delta?$select=id"
-    );
+    let initial_url = format!("/me/contactFolders/{enc_folder_id}/contacts/delta?$select=id");
     let mut next_link: Option<String> = None;
 
     loop {
@@ -313,7 +311,13 @@ fn persist_synced_contacts(
                    account_id = COALESCE(excluded.account_id, contacts.account_id), \
                    server_id = COALESCE(excluded.server_id, contacts.server_id), \
                    updated_at = unixepoch()",
-                params![local_id, email, contact.display_name, account_id, contact.id],
+                params![
+                    local_id,
+                    email,
+                    contact.display_name,
+                    account_id,
+                    contact.id
+                ],
             )
             .map_err(|e| format!("upsert synced contact: {e}"))?;
 
@@ -399,7 +403,9 @@ fn prune_stale_contacts(
         .map_err(|e| format!("prepare stale lookup: {e}"))?;
 
     let all_mapped: Vec<String> = stmt
-        .query_map(params![account_id], |row| row.get::<_, String>("graph_contact_id"))
+        .query_map(params![account_id], |row| {
+            row.get::<_, String>("graph_contact_id")
+        })
         .map_err(|e| format!("query stale: {e}"))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("collect stale: {e}"))?;

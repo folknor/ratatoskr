@@ -21,10 +21,7 @@ pub enum ContactSearchKind {
     /// An address observed in message headers (lower priority).
     SeenAddress,
     /// A contact group (can be expanded into individual addresses).
-    Group {
-        group_id: String,
-        member_count: i64,
-    },
+    Group { group_id: String, member_count: i64 },
 }
 
 /// A single result from a contact/autocomplete search.
@@ -67,12 +64,26 @@ pub fn search_contacts_unified(
     let mut seen_emails: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     // 1. Search contacts table (highest priority) — FTS5 with LIKE fallback.
-    search_contacts_fts_or_like(conn, trimmed, &like_pattern, limit, &mut seen_emails, &mut results)?;
+    search_contacts_fts_or_like(
+        conn,
+        trimmed,
+        &like_pattern,
+        limit,
+        &mut seen_emails,
+        &mut results,
+    )?;
 
     // 2. Search seen_addresses table (lower priority, fills remaining) — FTS5 with LIKE fallback.
     let remaining = limit - i64::try_from(results.len()).unwrap_or(i64::MAX);
     if remaining > 0 {
-        search_seen_addresses_fts_or_like(conn, trimmed, &like_pattern, remaining, &mut seen_emails, &mut results)?;
+        search_seen_addresses_fts_or_like(
+            conn,
+            trimmed,
+            &like_pattern,
+            remaining,
+            &mut seen_emails,
+            &mut results,
+        )?;
     }
 
     // 3. Search contact groups by name.

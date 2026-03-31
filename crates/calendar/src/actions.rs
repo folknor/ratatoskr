@@ -7,12 +7,13 @@
 //! `ActionOutcome`, `DbState`) and has access to all provider write functions.
 //! Adding `calendar` as a dependency of `core` would create a circular dep.
 
-use rtsk::actions::{ActionContext, ActionError, ActionOutcome, MutationLog};
-use rtsk::db::DbState;
 use gmail::client::GmailClient;
 use graph::client::GraphClient;
 use jmap::client::JmapClient;
+use rtsk::actions::{ActionContext, ActionError, ActionOutcome, MutationLog};
+use rtsk::db::DbState;
 
+use super::caldav::{caldav_create_event_impl, caldav_delete_event_impl, caldav_update_event_impl};
 use super::google::{
     google_calendar_create_event_impl, google_calendar_delete_event_impl,
     google_calendar_update_event_impl,
@@ -20,9 +21,6 @@ use super::google::{
 use super::graph::{
     graph_calendar_create_event_impl, graph_calendar_delete_event_impl,
     graph_calendar_update_event_impl,
-};
-use super::caldav::{
-    caldav_create_event_impl, caldav_delete_event_impl, caldav_update_event_impl,
 };
 use super::types::CalendarEventDto;
 
@@ -65,7 +63,9 @@ async fn create_calendar_provider(
     let db_clone = db.clone();
     let (provider, calendar_provider) = tokio::task::spawn_blocking(move || {
         let conn = db_clone.conn();
-        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+        let conn = conn
+            .lock()
+            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         conn.query_row(
             "SELECT provider, calendar_provider FROM accounts WHERE id = ?1",
             rusqlite::params![aid],
@@ -79,8 +79,7 @@ async fn create_calendar_provider(
         })
     })
     .await
-    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))?
-    ?;
+    .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))??;
 
     let effective = calendar_provider.as_deref().unwrap_or(provider.as_str());
 
@@ -179,13 +178,15 @@ async fn dispatch_create(
                 ..CalendarEventDto::default()
             })
         }
-        CalendarProvider::CalDav { account_id } => {
-            caldav_create_event_impl(
-                &ctx.db, &ctx.encryption_key, account_id, calendar_remote_id, json,
-            )
-            .await
-            .map_err(|e| ActionError::remote(e))
-        }
+        CalendarProvider::CalDav { account_id } => caldav_create_event_impl(
+            &ctx.db,
+            &ctx.encryption_key,
+            account_id,
+            calendar_remote_id,
+            json,
+        )
+        .await
+        .map_err(|e| ActionError::remote(e)),
     }
 }
 
@@ -199,13 +200,15 @@ async fn dispatch_update(
 ) -> Result<CalendarEventDto, ActionError> {
     let json = input_to_json(input);
     match provider {
-        CalendarProvider::Google(client) => {
-            google_calendar_update_event_impl(
-                client, &ctx.db, calendar_remote_id, remote_event_id, json,
-            )
-            .await
-            .map_err(|e| ActionError::remote(e))
-        }
+        CalendarProvider::Google(client) => google_calendar_update_event_impl(
+            client,
+            &ctx.db,
+            calendar_remote_id,
+            remote_event_id,
+            json,
+        )
+        .await
+        .map_err(|e| ActionError::remote(e)),
         CalendarProvider::Graph(client) => {
             graph_calendar_update_event_impl(client, &ctx.db, remote_event_id, json)
                 .await
@@ -237,18 +240,16 @@ async fn dispatch_update(
                 ..CalendarEventDto::default()
             })
         }
-        CalendarProvider::CalDav { account_id } => {
-            caldav_update_event_impl(
-                &ctx.db,
-                &ctx.encryption_key,
-                account_id,
-                remote_event_id,
-                json,
-                etag.map(String::from),
-            )
-            .await
-            .map_err(|e| ActionError::remote(e))
-        }
+        CalendarProvider::CalDav { account_id } => caldav_update_event_impl(
+            &ctx.db,
+            &ctx.encryption_key,
+            account_id,
+            remote_event_id,
+            json,
+            etag.map(String::from),
+        )
+        .await
+        .map_err(|e| ActionError::remote(e)),
     }
 }
 
@@ -261,11 +262,9 @@ async fn dispatch_delete(
 ) -> Result<(), ActionError> {
     match provider {
         CalendarProvider::Google(client) => {
-            google_calendar_delete_event_impl(
-                client, &ctx.db, calendar_remote_id, remote_event_id,
-            )
-            .await
-            .map_err(|e| ActionError::remote(e))
+            google_calendar_delete_event_impl(client, &ctx.db, calendar_remote_id, remote_event_id)
+                .await
+                .map_err(|e| ActionError::remote(e))
         }
         CalendarProvider::Graph(client) => {
             graph_calendar_delete_event_impl(client, &ctx.db, remote_event_id)
@@ -277,17 +276,15 @@ async fn dispatch_delete(
                 .await
                 .map_err(|e| ActionError::remote(e))
         }
-        CalendarProvider::CalDav { account_id } => {
-            caldav_delete_event_impl(
-                &ctx.db,
-                &ctx.encryption_key,
-                account_id,
-                remote_event_id,
-                etag.map(String::from),
-            )
-            .await
-            .map_err(|e| ActionError::remote(e))
-        }
+        CalendarProvider::CalDav { account_id } => caldav_delete_event_impl(
+            &ctx.db,
+            &ctx.encryption_key,
+            account_id,
+            remote_event_id,
+            etag.map(String::from),
+        )
+        .await
+        .map_err(|e| ActionError::remote(e)),
     }
 }
 
@@ -367,7 +364,9 @@ pub async fn create_calendar_event(
     let input_clone = input.clone();
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+        let conn = conn
+            .lock()
+            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
         let calendar_remote_id = lookup_calendar_remote_id(&conn, &aid, &cid)?;
 
@@ -385,10 +384,9 @@ pub async fn create_calendar_event(
             availability: input_clone.availability,
             visibility: input_clone.visibility,
         };
-        let event_id = rtsk::db::queries_extra::calendars::create_calendar_event_sync(
-            &conn, &params,
-        )
-        .map_err(|e| ActionError::db(e))?;
+        let event_id =
+            rtsk::db::queries_extra::calendars::create_calendar_event_sync(&conn, &params)
+                .map_err(|e| ActionError::db(e))?;
 
         Ok((event_id, calendar_remote_id))
     })
@@ -412,7 +410,10 @@ pub async fn create_calendar_event(
     let provider = match create_calendar_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
-            let outcome = ActionOutcome::LocalOnly { reason: e, retryable: false };
+            let outcome = ActionOutcome::LocalOnly {
+                reason: e,
+                retryable: false,
+            };
             mlog.emit(&outcome);
             return outcome;
         }
@@ -436,7 +437,10 @@ pub async fn create_calendar_event(
             .await;
             ActionOutcome::Success
         }
-        Err(e) => ActionOutcome::LocalOnly { reason: e, retryable: false },
+        Err(e) => ActionOutcome::LocalOnly {
+            reason: e,
+            retryable: false,
+        },
     };
     mlog.emit(&outcome);
     outcome
@@ -460,7 +464,9 @@ pub async fn update_calendar_event(
     let eid = event_id.to_string();
     let meta_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+        let conn = conn
+            .lock()
+            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         let meta = lookup_event_meta(&conn, &eid)?;
 
         // Use the event's own account_id for calendar lookup
@@ -494,7 +500,9 @@ pub async fn update_calendar_event(
         let eid = event_id.to_string();
         let local_result = tokio::task::spawn_blocking(move || {
             let conn = db.conn();
-            let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
             let params = rtsk::db::queries_extra::calendars::LocalCalendarEventParams {
                 account_id: meta.account_id.clone(),
                 summary: input.title,
@@ -509,10 +517,8 @@ pub async fn update_calendar_event(
                 availability: input.availability,
                 visibility: input.visibility,
             };
-            rtsk::db::queries_extra::calendars::update_calendar_event_sync(
-                &conn, &eid, &params,
-            )
-            .map_err(|e| ActionError::db(e))
+            rtsk::db::queries_extra::calendars::update_calendar_event_sync(&conn, &eid, &params)
+                .map_err(|e| ActionError::db(e))
         })
         .await
         .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
@@ -539,9 +545,7 @@ pub async fn update_calendar_event(
 
     let Some(cal_remote) = calendar_remote_id else {
         let outcome = ActionOutcome::Failed {
-            error: ActionError::not_found(
-                "Synced event has no resolvable calendar remote ID",
-            ),
+            error: ActionError::not_found("Synced event has no resolvable calendar remote ID"),
         };
         mlog.emit(&outcome);
         return outcome;
@@ -567,21 +571,20 @@ pub async fn update_calendar_event(
             let _ = tokio::task::spawn_blocking(move || {
                 let conn = db.conn();
                 if let Ok(conn) = conn.lock() {
-                    let params =
-                        rtsk::db::queries_extra::calendars::LocalCalendarEventParams {
-                            account_id: event_account_id,
-                            summary: input.title,
-                            description: input.description,
-                            location: input.location,
-                            start_time: input.start_time,
-                            end_time: input.end_time,
-                            is_all_day: input.is_all_day,
-                            calendar_id: cal_id,
-                            timezone: input.timezone,
-                            recurrence_rule: input.recurrence_rule,
-                            availability: input.availability,
-                            visibility: input.visibility,
-                        };
+                    let params = rtsk::db::queries_extra::calendars::LocalCalendarEventParams {
+                        account_id: event_account_id,
+                        summary: input.title,
+                        description: input.description,
+                        location: input.location,
+                        start_time: input.start_time,
+                        end_time: input.end_time,
+                        is_all_day: input.is_all_day,
+                        calendar_id: cal_id,
+                        timezone: input.timezone,
+                        recurrence_rule: input.recurrence_rule,
+                        availability: input.availability,
+                        visibility: input.visibility,
+                    };
                     let _ = rtsk::db::queries_extra::calendars::update_calendar_event_sync(
                         &conn, &eid, &params,
                     );
@@ -614,7 +617,9 @@ pub async fn delete_calendar_event(
     let eid = event_id.to_string();
     let meta_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+        let conn = conn
+            .lock()
+            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         let meta = lookup_event_meta(&conn, &eid)?;
         let calendar_remote_id = meta
             .calendar_id
@@ -645,7 +650,9 @@ pub async fn delete_calendar_event(
         let eid = event_id.to_string();
         let local_result = tokio::task::spawn_blocking(move || {
             let conn = db.conn();
-            let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+            let conn = conn
+                .lock()
+                .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
             rtsk::db::queries_extra::calendars::delete_calendar_event_sync(&conn, &eid)
                 .map_err(|e| ActionError::db(e))
         })
@@ -674,9 +681,7 @@ pub async fn delete_calendar_event(
 
     let Some(cal_remote) = calendar_remote_id else {
         let outcome = ActionOutcome::Failed {
-            error: ActionError::not_found(
-                "Synced event has no resolvable calendar remote ID",
-            ),
+            error: ActionError::not_found("Synced event has no resolvable calendar remote ID"),
         };
         mlog.emit(&outcome);
         return outcome;
@@ -700,7 +705,9 @@ pub async fn delete_calendar_event(
     let eid = event_id.to_string();
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
-        let conn = conn.lock().map_err(|e| ActionError::db(format!("db lock: {e}")))?;
+        let conn = conn
+            .lock()
+            .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         rtsk::db::queries_extra::calendars::delete_calendar_event_sync(&conn, &eid)
             .map_err(|e| ActionError::db(e))
     })

@@ -212,9 +212,11 @@ pub fn find_block_at_point(
     }
 
     // Binary search: find the last block whose y_offset <= point.y
-    let layout_index = match block_layouts
-        .binary_search_by(|bl| bl.y_offset.partial_cmp(&point.y).unwrap_or(std::cmp::Ordering::Equal))
-    {
+    let layout_index = match block_layouts.binary_search_by(|bl| {
+        bl.y_offset
+            .partial_cmp(&point.y)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    }) {
         Ok(exact) => exact,
         Err(0) => 0,
         Err(insert) => insert - 1,
@@ -241,10 +243,7 @@ pub fn find_block_at_point(
 ///
 /// Returns `(block_index, local_point)` where `block_index` is the document
 /// block index and `local_point` is relative to the paragraph content origin.
-pub fn hit_test(
-    point: iced::Point,
-    block_layouts: &[BlockLayout],
-) -> Option<(usize, iced::Point)> {
+pub fn hit_test(point: iced::Point, block_layouts: &[BlockLayout]) -> Option<(usize, iced::Point)> {
     let (layout_idx, local_point) = find_block_at_point(point, block_layouts)?;
     let layout = block_layouts.get(layout_idx)?;
     Some((layout.block_index, local_point))
@@ -564,10 +563,7 @@ mod tests {
         assert_eq!(ranges.len(), 4); // block 1 (first), 2 (full), 3 (full), 4 (last)
 
         assert_eq!(ranges[0].0, 1);
-        assert_eq!(
-            ranges[0].1,
-            BlockSelectionKind::First { start_offset: 5 }
-        );
+        assert_eq!(ranges[0].1, BlockSelectionKind::First { start_offset: 5 });
 
         assert_eq!(ranges[1].0, 2);
         assert_eq!(ranges[1].1, BlockSelectionKind::Full);
@@ -576,10 +572,7 @@ mod tests {
         assert_eq!(ranges[2].1, BlockSelectionKind::Full);
 
         assert_eq!(ranges[3].0, 4);
-        assert_eq!(
-            ranges[3].1,
-            BlockSelectionKind::Last { end_offset: 2 }
-        );
+        assert_eq!(ranges[3].1, BlockSelectionKind::Last { end_offset: 2 });
     }
 
     #[test]
@@ -590,15 +583,9 @@ mod tests {
         let ranges = selection_block_ranges(sel);
         assert_eq!(ranges.len(), 3);
         assert_eq!(ranges[0].0, 1);
-        assert_eq!(
-            ranges[0].1,
-            BlockSelectionKind::First { start_offset: 5 }
-        );
+        assert_eq!(ranges[0].1, BlockSelectionKind::First { start_offset: 5 });
         assert_eq!(ranges[2].0, 3);
-        assert_eq!(
-            ranges[2].1,
-            BlockSelectionKind::Last { end_offset: 0 }
-        );
+        assert_eq!(ranges[2].1, BlockSelectionKind::Last { end_offset: 0 });
     }
 
     // ── Full block selection rect ──────────────────────
@@ -617,5 +604,4 @@ mod tests {
         assert!((rect.width - 500.0).abs() < f32::EPSILON);
         assert!((rect.height - 20.0).abs() < f32::EPSILON);
     }
-
 }

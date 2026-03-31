@@ -80,7 +80,8 @@ impl UndoableText {
             return;
         }
         self.redo_stack.clear();
-        self.undo_stack.push_back(std::mem::replace(&mut self.current, new_text));
+        self.undo_stack
+            .push_back(std::mem::replace(&mut self.current, new_text));
         if self.undo_stack.len() > self.max_entries {
             self.undo_stack.pop_front();
         }
@@ -90,7 +91,8 @@ impl UndoableText {
     /// there is nothing to undo.
     pub fn undo(&mut self) -> Option<&str> {
         let previous = self.undo_stack.pop_back()?;
-        self.redo_stack.push(std::mem::replace(&mut self.current, previous));
+        self.redo_stack
+            .push(std::mem::replace(&mut self.current, previous));
         Some(&self.current)
     }
 
@@ -98,7 +100,8 @@ impl UndoableText {
     /// `None` if there is nothing to redo.
     pub fn redo(&mut self) -> Option<&str> {
         let next = self.redo_stack.pop()?;
-        self.undo_stack.push_back(std::mem::replace(&mut self.current, next));
+        self.undo_stack
+            .push_back(std::mem::replace(&mut self.current, next));
         Some(&self.current)
     }
 
@@ -195,7 +198,8 @@ impl<T: Clone> UndoableList<T> {
     /// there is nothing to undo.
     pub fn undo(&mut self) -> Option<&[T]> {
         let previous = self.undo_stack.pop_back()?;
-        self.redo_stack.push(std::mem::replace(&mut self.items, previous));
+        self.redo_stack
+            .push(std::mem::replace(&mut self.items, previous));
         Some(&self.items)
     }
 
@@ -203,7 +207,8 @@ impl<T: Clone> UndoableList<T> {
     /// `None` if there is nothing to redo.
     pub fn redo(&mut self) -> Option<&[T]> {
         let next = self.redo_stack.pop()?;
-        self.undo_stack.push_back(std::mem::replace(&mut self.items, next));
+        self.undo_stack
+            .push_back(std::mem::replace(&mut self.items, next));
         Some(&self.items)
     }
 

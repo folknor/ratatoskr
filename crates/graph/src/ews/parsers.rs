@@ -2,8 +2,8 @@ use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
-use super::{EwsEffectiveRights, EwsFolder, EwsItem, EwsRecipient, FindItemsResult};
 use super::xml_helpers::{extract_attribute, strip_ns};
+use super::{EwsEffectiveRights, EwsFolder, EwsItem, EwsRecipient, FindItemsResult};
 
 // ── Response parsers ────────────────────────────────────────
 
@@ -31,7 +31,11 @@ pub(super) fn parse_find_folder_response(xml: &str) -> Result<Vec<EwsFolder>, St
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 let local = strip_ns(&name);
 
-                if local == "Folder" || local == "ContactsFolder" || local == "CalendarFolder" || local == "TasksFolder" {
+                if local == "Folder"
+                    || local == "ContactsFolder"
+                    || local == "CalendarFolder"
+                    || local == "TasksFolder"
+                {
                     in_folder = true;
                     folder_id.clear();
                     display_name.clear();
@@ -93,7 +97,12 @@ pub(super) fn parse_find_folder_response(xml: &str) -> Result<Vec<EwsFolder>, St
                     }
                 }
 
-                if (local == "Folder" || local == "ContactsFolder" || local == "CalendarFolder" || local == "TasksFolder") && in_folder {
+                if (local == "Folder"
+                    || local == "ContactsFolder"
+                    || local == "CalendarFolder"
+                    || local == "TasksFolder")
+                    && in_folder
+                {
                     if !folder_id.is_empty() {
                         folders.push(EwsFolder {
                             folder_id: folder_id.clone(),
@@ -144,7 +153,11 @@ pub(super) fn parse_get_folder_response(xml: &str) -> Result<EwsFolder, String> 
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 let local = strip_ns(&name);
 
-                if local == "Folder" || local == "ContactsFolder" || local == "CalendarFolder" || local == "TasksFolder" {
+                if local == "Folder"
+                    || local == "ContactsFolder"
+                    || local == "CalendarFolder"
+                    || local == "TasksFolder"
+                {
                     in_folder = true;
                 }
                 if in_folder && local == "EffectiveRights" {
@@ -295,8 +308,7 @@ pub(super) fn parse_find_items_response(xml: &str) -> Result<FindItemsResult, St
 
                 if in_message && local == "ItemId" {
                     item_id = extract_attribute(e, "Id");
-                    change_key = Some(extract_attribute(e, "ChangeKey"))
-                        .filter(|s| !s.is_empty());
+                    change_key = Some(extract_attribute(e, "ChangeKey")).filter(|s| !s.is_empty());
                 }
             }
             Ok(Event::Empty(ref e)) => {
@@ -304,8 +316,7 @@ pub(super) fn parse_find_items_response(xml: &str) -> Result<FindItemsResult, St
                 let local = strip_ns(&name);
                 if in_message && local == "ItemId" {
                     item_id = extract_attribute(e, "Id");
-                    change_key = Some(extract_attribute(e, "ChangeKey"))
-                        .filter(|s| !s.is_empty());
+                    change_key = Some(extract_attribute(e, "ChangeKey")).filter(|s| !s.is_empty());
                 }
                 if local == "RootFolder" {
                     total_count = extract_attribute(e, "TotalItemsInView")
@@ -441,8 +452,7 @@ pub(super) fn parse_get_item_response(xml: &str) -> Result<EwsItem, String> {
 
                 if in_message && local == "ItemId" {
                     item_id = extract_attribute(e, "Id");
-                    change_key = Some(extract_attribute(e, "ChangeKey"))
-                        .filter(|s| !s.is_empty());
+                    change_key = Some(extract_attribute(e, "ChangeKey")).filter(|s| !s.is_empty());
                 }
                 if in_message && local == "Body" {
                     // Body element — content will come in Text event
@@ -453,8 +463,7 @@ pub(super) fn parse_get_item_response(xml: &str) -> Result<EwsItem, String> {
                 let local = strip_ns(&name);
                 if in_message && local == "ItemId" {
                     item_id = extract_attribute(e, "Id");
-                    change_key = Some(extract_attribute(e, "ChangeKey"))
-                        .filter(|s| !s.is_empty());
+                    change_key = Some(extract_attribute(e, "ChangeKey")).filter(|s| !s.is_empty());
                 }
             }
             Ok(Event::Text(ref e)) => {

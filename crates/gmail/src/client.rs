@@ -5,10 +5,10 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::sync::{Mutex, RwLock};
 
-use db::db::DbState;
 use common::crypto;
 use common::http::{self, RetryConfig};
 use common::token::{self, TokenState};
+use db::db::DbState;
 
 const GMAIL_API_BASE: &str = "https://www.googleapis.com/gmail/v1/users/me";
 const RETRY_CONFIG: RetryConfig = RetryConfig {
@@ -311,13 +311,10 @@ impl GmailClient {
             builder = builder.json(b);
         }
 
-        builder
-            .send()
-            .await
-            .map_err(|e| {
-                log::error!("[Gmail] HTTP request failed: {method} {url}: {e}");
-                format!("Gmail API request failed: {e}")
-            })
+        builder.send().await.map_err(|e| {
+            log::error!("[Gmail] HTTP request failed: {method} {url}: {e}");
+            format!("Gmail API request failed: {e}")
+        })
     }
 
     /// Get a valid access token, refreshing if needed.
@@ -361,7 +358,10 @@ impl GmailClient {
         // Read current refresh token
         let refresh_token = self.inner.token.read().await.refresh_token.clone();
 
-        log::info!("[Gmail] Refreshing OAuth token for account {}", self.inner.account_id);
+        log::info!(
+            "[Gmail] Refreshing OAuth token for account {}",
+            self.inner.account_id
+        );
         // Call Google's token endpoint
         let result = token::refresh_google_token(
             &self.inner.http,
@@ -462,4 +462,3 @@ async fn persist_refreshed_token(
     })
     .await
 }
-

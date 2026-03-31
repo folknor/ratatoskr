@@ -249,9 +249,15 @@ mod tests {
 
     #[test]
     fn ai_provider_default_models() {
-        assert_eq!(AiProvider::Claude.default_model(), "claude-haiku-4-5-20251001");
+        assert_eq!(
+            AiProvider::Claude.default_model(),
+            "claude-haiku-4-5-20251001"
+        );
         assert_eq!(AiProvider::OpenAi.default_model(), "gpt-4o-mini");
-        assert_eq!(AiProvider::Gemini.default_model(), "gemini-2.5-flash-preview-05-20");
+        assert_eq!(
+            AiProvider::Gemini.default_model(),
+            "gemini-2.5-flash-preview-05-20"
+        );
         assert_eq!(AiProvider::Ollama.default_model(), "llama3.2");
         assert_eq!(AiProvider::Copilot.default_model(), "openai/gpt-4o-mini");
     }
@@ -282,8 +288,14 @@ mod tests {
 
     #[test]
     fn task_priority_serializes_lowercase() {
-        assert_eq!(serde_json::to_string(&TaskPriority::High).expect("ok"), "\"high\"");
-        assert_eq!(serde_json::to_string(&TaskPriority::None).expect("ok"), "\"none\"");
+        assert_eq!(
+            serde_json::to_string(&TaskPriority::High).expect("ok"),
+            "\"high\""
+        );
+        assert_eq!(
+            serde_json::to_string(&TaskPriority::None).expect("ok"),
+            "\"none\""
+        );
     }
 
     // -- ExtractedTask --

@@ -7,9 +7,9 @@
 use std::collections::{HashMap, HashSet};
 
 use db::db::types::{AccountScope, DbThread};
+use rusqlite::Connection;
 use search::{SearchParams, SearchResult as TantivyResult, SearchState};
 use smart_folder::{ParsedQuery, parse_query, query_threads};
-use rusqlite::Connection;
 
 // ── Result type ─────────────────────────────────────────────
 
@@ -65,7 +65,10 @@ pub fn search(
 
     match &result {
         Ok(results) => {
-            log::info!("Search executed via {path_name} path, returned {} results", results.len());
+            log::info!(
+                "Search executed via {path_name} path, returned {} results",
+                results.len()
+            );
         }
         Err(e) => {
             log::error!("Search failed via {path_name} path: {e}");
@@ -97,7 +100,11 @@ fn search_tantivy_only(
     let params = build_tantivy_params(parsed);
     let results = search_state.search_with_filters(&params)?;
     let mut grouped = group_by_thread_unified(results);
-    grouped.sort_by(|a, b| b.rank.partial_cmp(&a.rank).unwrap_or(std::cmp::Ordering::Equal));
+    grouped.sort_by(|a, b| {
+        b.rank
+            .partial_cmp(&a.rank)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     Ok(grouped)
 }
 
@@ -111,7 +118,13 @@ fn search_combined(
 ) -> Result<Vec<UnifiedSearchResult>, String> {
     // Step 1: SQL generates candidate thread IDs.
     let scope = build_scope(parsed);
-    let sql_threads = query_threads(conn, parsed, &scope, Some(crate::constants::DEFAULT_QUERY_LIMIT), Some(0))?;
+    let sql_threads = query_threads(
+        conn,
+        parsed,
+        &scope,
+        Some(crate::constants::DEFAULT_QUERY_LIMIT),
+        Some(0),
+    )?;
     let candidate_ids: HashSet<String> = sql_threads.iter().map(|t| t.id.clone()).collect();
 
     // Build a lookup map for enrichment from SQL results.
@@ -140,7 +153,11 @@ fn search_combined(
         .collect();
 
     // Step 6: Sort by rank descending.
-    enriched.sort_by(|a, b| b.rank.partial_cmp(&a.rank).unwrap_or(std::cmp::Ordering::Equal));
+    enriched.sort_by(|a, b| {
+        b.rank
+            .partial_cmp(&a.rank)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     Ok(enriched)
 }
 
@@ -168,7 +185,11 @@ fn build_tantivy_params(parsed: &ParsedQuery) -> SearchParams {
         from: parsed.from.clone(),
         to: parsed.to.clone(),
         subject: None,
-        has_attachment: if parsed.has_attachment { Some(true) } else { None },
+        has_attachment: if parsed.has_attachment {
+            Some(true)
+        } else {
+            None
+        },
         is_unread: parsed.is_unread,
         is_starred: parsed.is_starred,
         before: parsed.before,
@@ -199,7 +220,10 @@ fn db_thread_to_unified(t: DbThread) -> UnifiedSearchResult {
 /// for the grouping logic, then converts to `UnifiedSearchResult`.
 fn group_by_thread_unified(results: Vec<TantivyResult>) -> Vec<UnifiedSearchResult> {
     let grouped = search::group_by_thread(results);
-    grouped.into_iter().map(|r| tantivy_result_to_unified(&r)).collect()
+    grouped
+        .into_iter()
+        .map(|r| tantivy_result_to_unified(&r))
+        .collect()
 }
 
 /// Convert a single Tantivy result into a `UnifiedSearchResult`.

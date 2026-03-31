@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
-use iced::widget::{button, column, container, mouse_area, pick_list, row, scrollable, text, text_input, Space};
-use iced::{Alignment, Element, Length, Point};
-use rte::{
-    rich_text_editor, Action as RteAction, EditAction, EditorState, InlineStyle,
+use iced::widget::{
+    Space, button, column, container, mouse_area, pick_list, row, scrollable, text, text_input,
 };
+use iced::{Alignment, Element, Length, Point};
+use rte::{Action as RteAction, EditAction, EditorState, InlineStyle, rich_text_editor};
 
+use crate::Message;
 use crate::db::{self, ContactMatch};
 use crate::font;
 use crate::icon;
@@ -13,7 +14,6 @@ use crate::ui::layout::*;
 use crate::ui::theme;
 use crate::ui::token_input::{self, TokenId, TokenInputMessage, TokenInputValue};
 use crate::ui::widgets;
-use crate::Message;
 
 use super::PopOutMessage;
 
@@ -33,8 +33,7 @@ impl ComposeMode {
     pub fn prefixed_subject(&self) -> String {
         match self {
             Self::New => String::new(),
-            Self::Reply { original_subject }
-            | Self::ReplyAll { original_subject } => {
+            Self::Reply { original_subject } | Self::ReplyAll { original_subject } => {
                 if original_subject.starts_with("Re: ") {
                     original_subject.clone()
                 } else {
@@ -123,7 +122,10 @@ pub enum ComposeMessage {
     /// Toggle discard confirmation dialog.
     ToggleDiscardConfirm,
     /// Autocomplete results arrived from the database.
-    AutocompleteResults(rtsk::generation::GenerationToken<rtsk::generation::Autocomplete>, Result<Vec<ContactMatch>, String>),
+    AutocompleteResults(
+        rtsk::generation::GenerationToken<rtsk::generation::Autocomplete>,
+        Result<Vec<ContactMatch>, String>,
+    ),
     /// User selected an autocomplete suggestion.
     AutocompleteSelect(usize),
     /// User navigated the autocomplete list (up/down).
@@ -414,9 +416,7 @@ impl ComposeState {
         let from_account = draft
             .from_email
             .as_ref()
-            .and_then(|email| {
-                from_accounts.iter().find(|a| &a.email == email).cloned()
-            })
+            .and_then(|email| from_accounts.iter().find(|a| &a.email == email).cloned())
             .or_else(|| from_accounts.first().cloned());
 
         // Parse recipient CSVs into tokens.
@@ -496,9 +496,7 @@ impl ComposeState {
         // Add To recipient (not for Forward — forward starts with empty To)
         if !matches!(state.mode, ComposeMode::Forward { .. }) {
             if let Some(email) = to_email {
-                let label = to_name
-                    .filter(|n| !n.is_empty())
-                    .unwrap_or(email);
+                let label = to_name.filter(|n| !n.is_empty()).unwrap_or(email);
                 let id = state.to.next_token_id();
                 state.to.tokens.push(token_input::Token {
                     id,
@@ -514,9 +512,7 @@ impl ComposeState {
         // Add Cc recipients for ReplyAll
         if let ComposeMode::ReplyAll { .. } = &state.mode {
             if let Some(cc_str) = cc_emails {
-                for addr in
-                    cc_str.split(',').map(str::trim).filter(|s| !s.is_empty())
-                {
+                for addr in cc_str.split(',').map(str::trim).filter(|s| !s.is_empty()) {
                     let id = state.cc.next_token_id();
                     state.cc.tokens.push(token_input::Token {
                         id,
@@ -577,11 +573,7 @@ impl ComposeState {
     /// Inserts a synthetic `AccountInfo` for the shared mailbox email at the
     /// front of the From dropdown and selects it. The `parent_account_id` is
     /// the authenticated account that will actually perform the send.
-    pub fn set_shared_mailbox_from(
-        &mut self,
-        parent_account_id: &str,
-        shared_email: &str,
-    ) {
+    pub fn set_shared_mailbox_from(&mut self, parent_account_id: &str, shared_email: &str) {
         let shared_info = AccountInfo {
             id: parent_account_id.to_string(),
             email: shared_email.to_string(),
@@ -641,8 +633,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                 || !state.cc.tokens.is_empty()
                 || !state.bcc.tokens.is_empty();
             if !has_recipients {
-                state.status =
-                    Some("Add at least one recipient".to_string());
+                state.status = Some("Add at least one recipient".to_string());
                 return;
             }
             // TODO: When send is implemented, call
@@ -673,7 +664,9 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         }
         ComposeMessage::AutocompleteSelect(idx) => {
             if let Some(match_entry) = state.autocomplete.results.get(idx).cloned() {
-                let label = match_entry.display_name.as_deref()
+                let label = match_entry
+                    .display_name
+                    .as_deref()
                     .filter(|n| !n.is_empty())
                     .unwrap_or(&match_entry.email)
                     .to_string();
@@ -717,7 +710,11 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             state.autocomplete.highlighted = None;
         }
         // Context menu actions
-        ComposeMessage::ShowTokenContextMenu { field, token_id, position } => {
+        ComposeMessage::ShowTokenContextMenu {
+            field,
+            token_id,
+            position,
+        } => {
             let is_group = match field {
                 RecipientField::To => &state.to,
                 RecipientField::Cc => &state.cc,
@@ -746,7 +743,11 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             state.context_menu = None;
             state.draft_dirty = true;
         }
-        ComposeMessage::ContextMenuMoveTo { token_id, from, to_field } => {
+        ComposeMessage::ContextMenuMoveTo {
+            token_id,
+            from,
+            to_field,
+        } => {
             let source_tokens = match from {
                 RecipientField::To => &mut state.to.tokens,
                 RecipientField::Cc => &mut state.cc.tokens,
@@ -775,7 +776,11 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             // Group expansion requires DB access — handled by pop_out.rs
             state.context_menu = None;
         }
-        ComposeMessage::GroupExpanded { field, token_id, members } => {
+        ComposeMessage::GroupExpanded {
+            field,
+            token_id,
+            members,
+        } => {
             if let Ok(member_list) = members {
                 let tokens = match field {
                     RecipientField::To => &mut state.to,
@@ -872,43 +877,47 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         }
         // Formatting toolbar — emit ToggleInlineStyle to the rich text editor
         ComposeMessage::FormatBold => {
-            state.body.perform(RteAction::Edit(
-                EditAction::ToggleInlineStyle(InlineStyle::BOLD),
-            ));
+            state
+                .body
+                .perform(RteAction::Edit(EditAction::ToggleInlineStyle(
+                    InlineStyle::BOLD,
+                )));
             state.draft_dirty = true;
         }
         ComposeMessage::FormatItalic => {
-            state.body.perform(RteAction::Edit(
-                EditAction::ToggleInlineStyle(InlineStyle::ITALIC),
-            ));
+            state
+                .body
+                .perform(RteAction::Edit(EditAction::ToggleInlineStyle(
+                    InlineStyle::ITALIC,
+                )));
             state.draft_dirty = true;
         }
         ComposeMessage::FormatUnderline => {
-            state.body.perform(RteAction::Edit(
-                EditAction::ToggleInlineStyle(InlineStyle::UNDERLINE),
-            ));
+            state
+                .body
+                .perform(RteAction::Edit(EditAction::ToggleInlineStyle(
+                    InlineStyle::UNDERLINE,
+                )));
             state.draft_dirty = true;
         }
         ComposeMessage::FormatStrikethrough => {
-            state.body.perform(RteAction::Edit(
-                EditAction::ToggleInlineStyle(InlineStyle::STRIKETHROUGH),
-            ));
+            state
+                .body
+                .perform(RteAction::Edit(EditAction::ToggleInlineStyle(
+                    InlineStyle::STRIKETHROUGH,
+                )));
             state.draft_dirty = true;
         }
         ComposeMessage::FormatList => {
-            state.body.perform(RteAction::Edit(
-                EditAction::SetBlockType(
-                    rte::BlockKind::ListItem {
-                        ordered: false,
-                    },
-                ),
-            ));
+            state.body.perform(RteAction::Edit(EditAction::SetBlockType(
+                rte::BlockKind::ListItem { ordered: false },
+            )));
             state.draft_dirty = true;
         }
         ComposeMessage::FormatBlockquote => {
-            state.body.perform(RteAction::Edit(
-                EditAction::SetBlockType(rte::BlockKind::BlockQuote),
-            ));
+            state.body.perform(RteAction::Edit(EditAction::SetBlockType(
+                rte::BlockKind::BlockQuote,
+            )));
             state.draft_dirty = true;
         }
         // Link dialog
@@ -936,14 +945,14 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                 // we rely on the editor's paste mechanism.
                 // Delete selection first if any.
                 if !state.body.selection.is_collapsed() {
-                    state.body.perform(RteAction::Edit(
-                        EditAction::DeleteSelection,
-                    ));
+                    state
+                        .body
+                        .perform(RteAction::Edit(EditAction::DeleteSelection));
                 }
                 // Insert the display text
-                state.body.perform(RteAction::Edit(
-                    EditAction::InsertText(link_label),
-                ));
+                state
+                    .body
+                    .perform(RteAction::Edit(EditAction::InsertText(link_label)));
                 // Note: The rich text editor does not currently expose
                 // a link-insertion API via EditAction. The text is
                 // inserted without a hyperlink. A future editor update
@@ -971,9 +980,9 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         } => {
             use rte::compose::replace_signature;
 
-            let old_sep = state.signature_separator_index.unwrap_or(
-                state.body.document.block_count(),
-            );
+            let old_sep = state
+                .signature_separator_index
+                .unwrap_or(state.body.document.block_count());
             let new_sep = replace_signature(
                 &mut state.body.document,
                 old_sep,
@@ -1016,9 +1025,7 @@ fn handle_recipient_token_input(
         }
         TokenInputMessage::AutocompleteAccept => {
             let idx = state.autocomplete.highlighted.unwrap_or(0);
-            if let Some(match_entry) =
-                state.autocomplete.results.get(idx).cloned()
-            {
+            if let Some(match_entry) = state.autocomplete.results.get(idx).cloned() {
                 let label = match_entry
                     .display_name
                     .as_deref()
@@ -1049,10 +1056,7 @@ fn handle_recipient_token_input(
 
                 // Bcc nudge: suggest moving group to Bcc if added to To/Cc
                 let active = state.autocomplete.active_field;
-                if is_group
-                    && (active == RecipientField::To
-                        || active == RecipientField::Cc)
-                {
+                if is_group && (active == RecipientField::To || active == RecipientField::Cc) {
                     state.bcc_nudges.push(BccNudgeBanner {
                         group_name: token_label,
                         token_id: id,
@@ -1131,9 +1135,7 @@ fn handle_recipient_token_input(
     let (value, selected) = match field {
         RecipientField::To => (&mut state.to, &mut state.selected_to_token),
         RecipientField::Cc => (&mut state.cc, &mut state.selected_cc_token),
-        RecipientField::Bcc => {
-            (&mut state.bcc, &mut state.selected_bcc_token)
-        }
+        RecipientField::Bcc => (&mut state.bcc, &mut state.selected_bcc_token),
     };
     handle_token_input_message(value, inner, selected);
     state.draft_dirty = true;
@@ -1203,7 +1205,9 @@ fn handle_token_input_message(
             // Use RFC 5322 parser for proper name + email extraction
             let parsed = crate::ui::token_input_parse::parse_pasted_addresses(&content);
             for addr in parsed {
-                let label = addr.display_name.as_deref()
+                let label = addr
+                    .display_name
+                    .as_deref()
                     .filter(|n| !n.is_empty())
                     .unwrap_or(&addr.email)
                     .to_string();
@@ -1233,10 +1237,7 @@ pub fn view_compose_window<'a>(
     let body = compose_body(window_id, state);
     let footer = compose_footer(window_id, state);
 
-    let mut content = column![
-        header,
-    ]
-    .spacing(SPACE_0);
+    let mut content = column![header,].spacing(SPACE_0);
 
     // Bcc nudge banners
     for nudge in &state.bcc_nudges {
@@ -1309,9 +1310,7 @@ fn compose_header<'a>(
     }
 
     // Autocomplete dropdown (rendered below the active recipient field)
-    if !state.autocomplete.query.is_empty()
-        && !state.autocomplete.results.is_empty()
-    {
+    if !state.autocomplete.query.is_empty() && !state.autocomplete.results.is_empty() {
         fields = fields.push(autocomplete_dropdown(window_id, state));
     }
 
@@ -1415,10 +1414,7 @@ fn build_from_row<'a>(
     from_row.into()
 }
 
-fn build_to_row<'a>(
-    window_id: iced::window::Id,
-    state: &'a ComposeState,
-) -> Element<'a, Message> {
+fn build_to_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Element<'a, Message> {
     let ac_open = state.autocomplete.active_field == RecipientField::To
         && !state.autocomplete.results.is_empty();
     build_recipient_row_inner(
@@ -1432,10 +1428,7 @@ fn build_to_row<'a>(
     )
 }
 
-fn build_cc_row<'a>(
-    window_id: iced::window::Id,
-    state: &'a ComposeState,
-) -> Element<'a, Message> {
+fn build_cc_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Element<'a, Message> {
     let ac_open = state.autocomplete.active_field == RecipientField::Cc
         && !state.autocomplete.results.is_empty();
     build_recipient_row_inner(
@@ -1449,10 +1442,7 @@ fn build_cc_row<'a>(
     )
 }
 
-fn build_bcc_row<'a>(
-    window_id: iced::window::Id,
-    state: &'a ComposeState,
-) -> Element<'a, Message> {
+fn build_bcc_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Element<'a, Message> {
     let ac_open = state.autocomplete.active_field == RecipientField::Bcc
         && !state.autocomplete.results.is_empty();
     build_recipient_row_inner(
@@ -1501,15 +1491,10 @@ fn build_recipient_row_inner<'a>(
 
 // ── Formatting toolbar ─────────────────────────────────
 
-fn formatting_toolbar<'a>(
-    window_id: iced::window::Id,
-) -> Element<'a, Message> {
+fn formatting_toolbar<'a>(window_id: iced::window::Id) -> Element<'a, Message> {
     let fmt_btn = |ico: iced::widget::Text<'a>, msg: ComposeMessage| {
         button(ico.size(ICON_SM).style(text::secondary))
-            .on_press(Message::PopOut(
-                window_id,
-                PopOutMessage::Compose(msg),
-            ))
+            .on_press(Message::PopOut(window_id, PopOutMessage::Compose(msg)))
             .padding(PAD_ICON_BTN)
             .style(theme::ButtonClass::BareIcon.style())
     };
@@ -1533,10 +1518,7 @@ fn formatting_toolbar<'a>(
 
 // ── Body ────────────────────────────────────────────────
 
-fn compose_body<'a>(
-    window_id: iced::window::Id,
-    state: &'a ComposeState,
-) -> Element<'a, Message> {
+fn compose_body<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Element<'a, Message> {
     let editor = rich_text_editor(&state.body)
         .on_action(move |action| {
             Message::PopOut(
@@ -1567,12 +1549,9 @@ fn compose_footer<'a>(
     };
 
     let discard_btn = button(
-        row![
-            icon::trash().size(ICON_SM),
-            text("Discard").size(TEXT_MD),
-        ]
-        .spacing(SPACE_XXS)
-        .align_y(Alignment::Center),
+        row![icon::trash().size(ICON_SM), text("Discard").size(TEXT_MD),]
+            .spacing(SPACE_XXS)
+            .align_y(Alignment::Center),
     )
     .style(theme::ButtonClass::Ghost.style())
     .on_press(Message::PopOut(
@@ -1688,12 +1667,9 @@ fn bulk_paste_banner_view<'a>(
         .style(theme::ButtonClass::Ghost.style());
 
     container(
-        row![
-            text(label).size(TEXT_SM).width(Length::Fill),
-            dismiss_btn,
-        ]
-        .spacing(SPACE_XS)
-        .align_y(Alignment::Center),
+        row![text(label).size(TEXT_SM).width(Length::Fill), dismiss_btn,]
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center),
     )
     .padding(PAD_CONTENT)
     .width(Length::Fill)
@@ -1709,10 +1685,7 @@ fn token_context_menu<'a>(
 ) -> Element<'a, Message> {
     let mk = |label: &'a str, msg: ComposeMessage| {
         button(text(label).size(TEXT_SM))
-            .on_press(Message::PopOut(
-                window_id,
-                PopOutMessage::Compose(msg),
-            ))
+            .on_press(Message::PopOut(window_id, PopOutMessage::Compose(msg)))
             .width(Length::Fill)
             .padding(PAD_INPUT)
             .style(theme::ButtonClass::Ghost.style())
@@ -1784,30 +1757,22 @@ fn token_context_menu<'a>(
 
 // ── Discard confirmation ────────────────────────────────
 
-fn discard_confirmation<'a>(
-    window_id: iced::window::Id,
-) -> Element<'a, Message> {
-    let confirm_btn = button(
-        text("Discard")
-            .size(TEXT_MD)
-            .font(font::text_semibold()),
-    )
-    .style(theme::ButtonClass::Ghost.style())
-    .on_press(Message::PopOut(
-        window_id,
-        PopOutMessage::Compose(ComposeMessage::Discard),
-    ))
-    .padding(PAD_BUTTON);
+fn discard_confirmation<'a>(window_id: iced::window::Id) -> Element<'a, Message> {
+    let confirm_btn = button(text("Discard").size(TEXT_MD).font(font::text_semibold()))
+        .style(theme::ButtonClass::Ghost.style())
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::Discard),
+        ))
+        .padding(PAD_BUTTON);
 
-    let cancel_btn = button(
-        text("Keep editing").size(TEXT_MD),
-    )
-    .style(theme::ButtonClass::Primary.style())
-    .on_press(Message::PopOut(
-        window_id,
-        PopOutMessage::Compose(ComposeMessage::ToggleDiscardConfirm),
-    ))
-    .padding(PAD_BUTTON);
+    let cancel_btn = button(text("Keep editing").size(TEXT_MD))
+        .style(theme::ButtonClass::Primary.style())
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::ToggleDiscardConfirm),
+        ))
+        .padding(PAD_BUTTON);
 
     container(
         column![
@@ -1841,20 +1806,16 @@ fn attachment_list<'a>(
 
     for (idx, att) in state.attachments.iter().enumerate() {
         let size_label = att.display_size();
-        let remove_btn = button(
-            icon::x().size(ICON_XS).style(text::secondary),
-        )
-        .on_press(Message::PopOut(
-            window_id,
-            PopOutMessage::Compose(ComposeMessage::RemoveAttachment(idx)),
-        ))
-        .padding(PAD_ICON_BTN)
-        .style(theme::ButtonClass::BareIcon.style());
+        let remove_btn = button(icon::x().size(ICON_XS).style(text::secondary))
+            .on_press(Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::RemoveAttachment(idx)),
+            ))
+            .padding(PAD_ICON_BTN)
+            .style(theme::ButtonClass::BareIcon.style());
 
         let att_row = row![
-            icon::paperclip()
-                .size(ICON_SM)
-                .style(text::secondary),
+            icon::paperclip().size(ICON_SM).style(text::secondary),
             text(&att.name).size(TEXT_SM),
             text(size_label)
                 .size(TEXT_XS)
@@ -1896,17 +1857,14 @@ fn autocomplete_dropdown<'a>(
             theme::ButtonClass::Ghost.style()
         };
 
-        let row_btn = button(
-            text(display)
-                .size(TEXT_SM),
-        )
-        .on_press(Message::PopOut(
-            window_id,
-            PopOutMessage::Compose(ComposeMessage::AutocompleteSelect(idx)),
-        ))
-        .width(Length::Fill)
-        .padding(PAD_INPUT)
-        .style(row_style);
+        let row_btn = button(text(display).size(TEXT_SM))
+            .on_press(Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::AutocompleteSelect(idx)),
+            ))
+            .width(Length::Fill)
+            .padding(PAD_INPUT)
+            .style(row_style);
 
         items = items.push(
             container(row_btn)
@@ -1915,8 +1873,7 @@ fn autocomplete_dropdown<'a>(
         );
     }
 
-    let dropdown = scrollable(items)
-        .height(Length::Shrink);
+    let dropdown = scrollable(items).height(Length::Shrink);
 
     // Offset by label width to align with the token input fields
     let offset_row = row![
@@ -1938,10 +1895,7 @@ fn autocomplete_dropdown<'a>(
 
 // ── Link insertion dialog ───────────────────────────────
 
-fn link_dialog<'a>(
-    window_id: iced::window::Id,
-    state: &'a ComposeState,
-) -> Element<'a, Message> {
+fn link_dialog<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Element<'a, Message> {
     let url_input = text_input("https://...", &state.link_url)
         .on_input(move |s| {
             Message::PopOut(
@@ -1952,18 +1906,15 @@ fn link_dialog<'a>(
         .size(TEXT_MD)
         .padding(PAD_INPUT);
 
-    let text_input_field =
-        text_input("Display text (optional)", &state.link_text)
-            .on_input(move |s| {
-                Message::PopOut(
-                    window_id,
-                    PopOutMessage::Compose(
-                        ComposeMessage::LinkTextChanged(s),
-                    ),
-                )
-            })
-            .size(TEXT_MD)
-            .padding(PAD_INPUT);
+    let text_input_field = text_input("Display text (optional)", &state.link_text)
+        .on_input(move |s| {
+            Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::LinkTextChanged(s)),
+            )
+        })
+        .size(TEXT_MD)
+        .padding(PAD_INPUT);
 
     let cancel_btn = button(text("Cancel").size(TEXT_MD))
         .style(theme::ButtonClass::Ghost.style())
@@ -1973,17 +1924,13 @@ fn link_dialog<'a>(
         ))
         .padding(PAD_BUTTON);
 
-    let insert_btn = button(
-        text("Insert")
-            .size(TEXT_MD)
-            .font(font::text_semibold()),
-    )
-    .style(theme::ButtonClass::Primary.style())
-    .on_press(Message::PopOut(
-        window_id,
-        PopOutMessage::Compose(ComposeMessage::LinkInsert),
-    ))
-    .padding(PAD_BUTTON);
+    let insert_btn = button(text("Insert").size(TEXT_MD).font(font::text_semibold()))
+        .style(theme::ButtonClass::Primary.style())
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::LinkInsert),
+        ))
+        .padding(PAD_BUTTON);
 
     container(
         column![
@@ -1991,15 +1938,10 @@ fn link_dialog<'a>(
                 .size(TEXT_TITLE)
                 .font(font::text_semibold())
                 .style(text::base),
+            column![text("URL").size(TEXT_SM).style(text::secondary), url_input,]
+                .spacing(SPACE_XXS),
             column![
-                text("URL").size(TEXT_SM).style(text::secondary),
-                url_input,
-            ]
-            .spacing(SPACE_XXS),
-            column![
-                text("Display text")
-                    .size(TEXT_SM)
-                    .style(text::secondary),
+                text("Display text").size(TEXT_SM).style(text::secondary),
                 text_input_field,
             ]
             .spacing(SPACE_XXS),
