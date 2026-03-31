@@ -1499,7 +1499,7 @@ impl App {
                 self.reset_view_state(None);
                 self.load_navigation_and_threads()
             }
-            SidebarEvent::LabelSelected(_label_id) => {
+            SidebarEvent::SelectionChanged(_sel) => {
                 self.reset_view_state(None);
                 let token = self.nav_generation.next();
                 self.load_threads_for_current_view(token)
@@ -2254,7 +2254,7 @@ impl App {
     ) -> Task<Message> {
         let db = Arc::clone(&self.db);
         let view_scope = self.sidebar.selected_scope.clone();
-        let label_id = self.sidebar.selected_label.clone();
+        let label_id = self.sidebar.selection.folder_id_for_thread_query();
         Task::perform(
             async move {
                 let r = match &view_scope {
@@ -2647,13 +2647,13 @@ impl App {
     fn update_thread_list_context_from_sidebar(&mut self) {
         let folder_name = self
             .sidebar
-            .selected_label
-            .as_ref()
-            .and_then(|lid| {
+            .selection
+            .navigation_folder_id()
+            .and_then(|nav_id| {
                 self.sidebar.nav_state.as_ref().and_then(|ns| {
                     ns.folders
                         .iter()
-                        .find(|f| f.id == *lid)
+                        .find(|f| f.id == nav_id)
                         .map(|f| f.name.clone())
                 })
             })

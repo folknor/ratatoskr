@@ -27,6 +27,7 @@ dissimilar.workspace = true
 system-fonts = { path = "../system-fonts" }
 cmdk = { path = "../cmdk" }
 rtsk = { path = "../core" }
+types = { path = "../types" }
 smart-folder = { path = "../smart-folder" }
 label-colors = { path = "../label-colors" }
 iced-drop = { path = "../iced-drop" }

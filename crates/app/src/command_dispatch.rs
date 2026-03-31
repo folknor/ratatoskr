@@ -1,34 +1,21 @@
 use cmdk::{CommandArgs, CommandContext, CommandId, ViewType};
 use rtsk::scope::ViewScope;
+use types::SidebarSelection;
 
 use crate::App;
 use crate::Message;
 
 // ── Supporting enums ────────────────────────────────────
 
+/// Navigation targets — sidebar-backed destinations wrap `SidebarSelection`,
+/// non-sidebar destinations (search, chat) have their own variants.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NavigationTarget {
-    Inbox,
-    Starred,
-    Sent,
-    Drafts,
-    Snoozed,
-    Trash,
-    Spam,
-    AllMail,
-    Primary,
-    Updates,
-    Promotions,
-    Social,
-    Newsletters,
-    Tasks,
-    Attachments,
-    SmartFolder {
-        id: String,
-    },
-    Label {
-        label_id: String,
-        account_id: String,
+    /// Navigate to a sidebar-backed destination.
+    Sidebar {
+        selection: SidebarSelection,
+        /// Account to scope to (for cross-account navigation from the palette).
+        account_id: Option<String>,
     },
     Search {
         query: String,
@@ -41,34 +28,33 @@ pub enum NavigationTarget {
     },
 }
 
-impl NavigationTarget {
-    /// Map a `NavigationTarget` to the sidebar `selected_label` string.
-    ///
-    /// Universal folders map to well-known IDs (INBOX, STARRED, etc.).
-    /// Smart folders use their ID directly.
-    /// Labels use `label_id`.
-    /// Search and PinnedSearch return `None` (they don't select a sidebar label).
-    pub fn to_label_id(&self) -> Option<String> {
-        match self {
-            Self::Inbox => Some("INBOX".to_string()),
-            Self::Starred => Some("STARRED".to_string()),
-            Self::Sent => Some("SENT".to_string()),
-            Self::Drafts => Some("DRAFT".to_string()),
-            Self::Snoozed => Some("SNOOZED".to_string()),
-            Self::Trash => Some("TRASH".to_string()),
-            Self::Spam => Some("SPAM".to_string()),
-            Self::AllMail => Some("ALL_MAIL".to_string()),
-            Self::Primary => Some("CATEGORY_PRIMARY".to_string()),
-            Self::Updates => Some("CATEGORY_UPDATES".to_string()),
-            Self::Promotions => Some("CATEGORY_PROMOTIONS".to_string()),
-            Self::Social => Some("CATEGORY_SOCIAL".to_string()),
-            Self::Newsletters => Some("CATEGORY_NEWSLETTERS".to_string()),
-            Self::Tasks => Some("TASKS".to_string()),
-            Self::Attachments => Some("ATTACHMENTS".to_string()),
-            Self::SmartFolder { id } => Some(id.clone()),
-            Self::Label { label_id, .. } => Some(label_id.clone()),
-            Self::Search { .. } | Self::PinnedSearch { .. } | Self::Chat { .. } => None,
+/// Derive `ViewType` and optional label ID from a `SidebarSelection`.
+pub fn selection_to_view_type(sel: &SidebarSelection) -> (ViewType, Option<String>) {
+    match sel {
+        SidebarSelection::Inbox => (ViewType::Inbox, None),
+        SidebarSelection::Folder(f) => {
+            use types::SystemFolder;
+            match f {
+                SystemFolder::Starred => (ViewType::Starred, None),
+                SystemFolder::Sent => (ViewType::Sent, None),
+                SystemFolder::Draft => (ViewType::Drafts, None),
+                SystemFolder::Snoozed => (ViewType::Snoozed, None),
+                SystemFolder::Trash => (ViewType::Trash, None),
+                SystemFolder::Spam => (ViewType::Spam, None),
+                SystemFolder::AllMail => (ViewType::AllMail, None),
+            }
         }
+        SidebarSelection::Bundle(_) => (ViewType::Category, None),
+        SidebarSelection::FeatureView(fv) => {
+            use types::FeatureView;
+            match fv {
+                FeatureView::Tasks => (ViewType::Tasks, None),
+                FeatureView::Attachments => (ViewType::Attachments, None),
+            }
+        }
+        SidebarSelection::SmartFolder { id } => (ViewType::SmartFolder, Some(id.clone())),
+        SidebarSelection::ProviderFolder(fid) => (ViewType::Label, Some(fid.0.clone())),
+        SidebarSelection::Tag(tid) => (ViewType::Label, Some(tid.0.clone())),
     }
 }
 
@@ -160,20 +146,18 @@ pub fn build_context(app: &App) -> CommandContext {
 /// All `None` when the folder has no rights data (provider doesn't report ACL,
 /// or we're in a universal/smart folder view).
 fn current_mailbox_rights(app: &App) -> (Option<bool>, Option<bool>, Option<bool>, Option<bool>) {
-    let rights = app.sidebar.selected_label.as_deref().and_then(|label_id| {
-        app.sidebar
-            .nav_state
-            .as_ref()?
-            .folders
-            .iter()
-            .find_map(|f| {
-                if f.id == label_id {
-                    f.rights.as_ref()
-                } else {
-                    None
-                }
-            })
-    });
+    let rights = app
+        .sidebar
+        .selection
+        .navigation_folder_id()
+        .and_then(|nav_id| {
+            app.sidebar
+                .nav_state
+                .as_ref()?
+                .folders
+                .iter()
+                .find_map(|f| if f.id == nav_id { f.rights.as_ref() } else { None })
+        });
 
     match rights {
         Some(r) => (
@@ -196,9 +180,8 @@ fn selected_thread_ids(app: &App) -> Vec<String> {
 
 /// Derive `ViewType` and optional label ID from app state.
 ///
-/// Uses explicit matching on sidebar `selected_label` IDs (which correspond
-/// to `NavigationFolder.id` values like "INBOX", "STARRED", etc.) and checks
-/// search/pinned search state for `Search`/`PinnedSearch` views.
+/// Checks non-sidebar state first (settings, calendar, search, chat),
+/// then derives from `sidebar.selection`.
 fn current_view_and_label(app: &App) -> (ViewType, Option<String>) {
     if app.show_settings {
         return (ViewType::Settings, None);
@@ -219,85 +202,24 @@ fn current_view_and_label(app: &App) -> (ViewType, Option<String>) {
         return (ViewType::Search, None);
     }
 
-    // Shared mailbox / public folder scope — check before navigation target
-    // because the sidebar sets selected_scope before the event reaches App.
+    // Shared mailbox / public folder scope
     match &app.sidebar.selected_scope {
         ViewScope::SharedMailbox { .. } => return (ViewType::SharedMailbox, None),
         ViewScope::PublicFolder { .. } => return (ViewType::PublicFolder, None),
         _ => {}
     }
 
-    // Derive from navigation target if set
+    // Non-sidebar navigation targets (chat)
     if let Some(target) = &app.navigation_target {
-        return view_type_from_target(app, target);
-    }
-
-    match &app.sidebar.selected_label {
-        Some(label_id) => view_type_from_label(app, label_id),
-        None => (ViewType::Inbox, None),
-    }
-}
-
-/// Map a `NavigationTarget` to `ViewType` and optional label ID.
-fn view_type_from_target(_app: &App, target: &NavigationTarget) -> (ViewType, Option<String>) {
-    match target {
-        NavigationTarget::Inbox => (ViewType::Inbox, None),
-        NavigationTarget::Starred => (ViewType::Starred, None),
-        NavigationTarget::Sent => (ViewType::Sent, None),
-        NavigationTarget::Drafts => (ViewType::Drafts, None),
-        NavigationTarget::Snoozed => (ViewType::Snoozed, None),
-        NavigationTarget::Trash => (ViewType::Trash, None),
-        NavigationTarget::Spam => (ViewType::Spam, None),
-        NavigationTarget::AllMail => (ViewType::AllMail, None),
-        NavigationTarget::Primary
-        | NavigationTarget::Updates
-        | NavigationTarget::Promotions
-        | NavigationTarget::Social
-        | NavigationTarget::Newsletters => (ViewType::Category, None),
-        NavigationTarget::Tasks => (ViewType::Tasks, None),
-        NavigationTarget::Attachments => (ViewType::Attachments, None),
-        NavigationTarget::SmartFolder { id } => (ViewType::SmartFolder, Some(id.clone())),
-        NavigationTarget::Label { label_id, .. } => (ViewType::Label, Some(label_id.clone())),
-        NavigationTarget::Search { .. } => (ViewType::Search, None),
-        NavigationTarget::PinnedSearch { .. } => (ViewType::PinnedSearch, None),
-        NavigationTarget::Chat { .. } => (ViewType::Chat, None),
-    }
-}
-
-/// Map a sidebar label ID to the appropriate `ViewType`.
-///
-/// Checks well-known universal folder IDs first, then consults the
-/// navigation state to distinguish SmartFolders from account labels.
-fn view_type_from_label(app: &App, label_id: &str) -> (ViewType, Option<String>) {
-    match label_id {
-        "INBOX" => (ViewType::Inbox, None),
-        "STARRED" => (ViewType::Starred, None),
-        "SENT" => (ViewType::Sent, None),
-        "DRAFT" => (ViewType::Drafts, None),
-        "SNOOZED" => (ViewType::Snoozed, None),
-        "TRASH" => (ViewType::Trash, None),
-        "SPAM" => (ViewType::Spam, None),
-        "ALL_MAIL" => (ViewType::AllMail, None),
-        other => {
-            // Check nav_state to see if this is a SmartFolder
-            let is_smart = app
-                .sidebar
-                .nav_state
-                .as_ref()
-                .and_then(|ns| ns.folders.iter().find(|f| f.id == other))
-                .is_some_and(|f| {
-                    matches!(
-                        f.folder_kind,
-                        rtsk::db::queries_extra::navigation::FolderKind::SmartFolder
-                    )
-                });
-            if is_smart {
-                (ViewType::SmartFolder, Some(other.to_string()))
-            } else {
-                (ViewType::Label, Some(other.to_string()))
-            }
+        match target {
+            NavigationTarget::Chat { .. } => return (ViewType::Chat, None),
+            // Search/PinnedSearch handled above via thread list mode / active_pinned_search
+            _ => {}
         }
     }
+
+    // Derive from sidebar selection
+    selection_to_view_type(&app.sidebar.selection)
 }
 
 /// Resolve the active account ID and provider kind from sidebar state.
@@ -371,22 +293,11 @@ fn selected_thread_state(app: &App) -> ThreadState {
 
     match thread {
         Some(t) => {
-            // Derive trash/spam/draft from navigation target if available,
-            // otherwise fall back to sidebar selected_label.
-            let (in_trash, in_spam, is_draft) = if let Some(target) = &app.navigation_target {
-                (
-                    Some(matches!(target, NavigationTarget::Trash)),
-                    Some(matches!(target, NavigationTarget::Spam)),
-                    Some(matches!(target, NavigationTarget::Drafts)),
-                )
-            } else {
-                let current_label = app.sidebar.selected_label.as_deref();
-                (
-                    Some(current_label == Some("TRASH")),
-                    Some(current_label == Some("SPAM")),
-                    Some(current_label == Some("DRAFT")),
-                )
-            };
+            let (in_trash, in_spam, is_draft) = (
+                Some(app.sidebar.selection.is_trash()),
+                Some(app.sidebar.selection.is_spam()),
+                Some(app.sidebar.selection.is_draft()),
+            );
 
             ThreadState {
                 is_read: Some(t.is_read),
@@ -419,6 +330,14 @@ fn selected_thread_state(app: &App) -> ThreadState {
 ///
 /// **No wildcard catch-all.** Every `CommandId` variant has an explicit arm
 /// so that adding a new variant without wiring dispatch is a compiler error.
+/// Shorthand for sidebar-backed navigation messages.
+fn nav_msg(selection: SidebarSelection) -> Message {
+    Message::NavigateTo(NavigationTarget::Sidebar {
+        selection,
+        account_id: None,
+    })
+}
+
 pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
     match id {
         // Navigation — direct
@@ -433,20 +352,46 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
         )),
 
         // Navigation — folder/view targets
-        CommandId::NavGoInbox => Some(Message::NavigateTo(NavigationTarget::Inbox)),
-        CommandId::NavGoStarred => Some(Message::NavigateTo(NavigationTarget::Starred)),
-        CommandId::NavGoSent => Some(Message::NavigateTo(NavigationTarget::Sent)),
-        CommandId::NavGoDrafts => Some(Message::NavigateTo(NavigationTarget::Drafts)),
-        CommandId::NavGoSnoozed => Some(Message::NavigateTo(NavigationTarget::Snoozed)),
-        CommandId::NavGoTrash => Some(Message::NavigateTo(NavigationTarget::Trash)),
-        CommandId::NavGoAllMail => Some(Message::NavigateTo(NavigationTarget::AllMail)),
-        CommandId::NavGoPrimary => Some(Message::NavigateTo(NavigationTarget::Primary)),
-        CommandId::NavGoUpdates => Some(Message::NavigateTo(NavigationTarget::Updates)),
-        CommandId::NavGoPromotions => Some(Message::NavigateTo(NavigationTarget::Promotions)),
-        CommandId::NavGoSocial => Some(Message::NavigateTo(NavigationTarget::Social)),
-        CommandId::NavGoNewsletters => Some(Message::NavigateTo(NavigationTarget::Newsletters)),
-        CommandId::NavGoTasks => Some(Message::NavigateTo(NavigationTarget::Tasks)),
-        CommandId::NavGoAttachments => Some(Message::NavigateTo(NavigationTarget::Attachments)),
+        CommandId::NavGoInbox => Some(nav_msg(SidebarSelection::Inbox)),
+        CommandId::NavGoStarred => {
+            Some(nav_msg(SidebarSelection::Folder(types::SystemFolder::Starred)))
+        }
+        CommandId::NavGoSent => {
+            Some(nav_msg(SidebarSelection::Folder(types::SystemFolder::Sent)))
+        }
+        CommandId::NavGoDrafts => {
+            Some(nav_msg(SidebarSelection::Folder(types::SystemFolder::Draft)))
+        }
+        CommandId::NavGoSnoozed => {
+            Some(nav_msg(SidebarSelection::Folder(types::SystemFolder::Snoozed)))
+        }
+        CommandId::NavGoTrash => {
+            Some(nav_msg(SidebarSelection::Folder(types::SystemFolder::Trash)))
+        }
+        CommandId::NavGoAllMail => {
+            Some(nav_msg(SidebarSelection::Folder(types::SystemFolder::AllMail)))
+        }
+        CommandId::NavGoPrimary => {
+            Some(nav_msg(SidebarSelection::Bundle(types::Bundle::Primary)))
+        }
+        CommandId::NavGoUpdates => {
+            Some(nav_msg(SidebarSelection::Bundle(types::Bundle::Updates)))
+        }
+        CommandId::NavGoPromotions => {
+            Some(nav_msg(SidebarSelection::Bundle(types::Bundle::Promotions)))
+        }
+        CommandId::NavGoSocial => {
+            Some(nav_msg(SidebarSelection::Bundle(types::Bundle::Social)))
+        }
+        CommandId::NavGoNewsletters => {
+            Some(nav_msg(SidebarSelection::Bundle(types::Bundle::Newsletters)))
+        }
+        CommandId::NavGoTasks => {
+            Some(nav_msg(SidebarSelection::FeatureView(types::FeatureView::Tasks)))
+        }
+        CommandId::NavGoAttachments => {
+            Some(nav_msg(SidebarSelection::FeatureView(types::FeatureView::Attachments)))
+        }
         CommandId::NavEscape => Some(Message::Escape),
 
         // Email actions
@@ -486,7 +431,9 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
         CommandId::TaskCreate => Some(Message::TaskAction(TaskAction::Create)),
         CommandId::TaskCreateFromEmail => Some(Message::TaskAction(TaskAction::CreateFromEmail)),
         CommandId::TaskTogglePanel => Some(Message::TaskAction(TaskAction::TogglePanel)),
-        CommandId::TaskViewAll => Some(Message::NavigateTo(NavigationTarget::Tasks)),
+        CommandId::TaskViewAll => {
+            Some(nav_msg(SidebarSelection::FeatureView(types::FeatureView::Tasks)))
+        }
 
         // View
         CommandId::ViewToggleSidebar => Some(Message::ToggleSidebar),
@@ -608,9 +555,9 @@ pub fn dispatch_parameterized(id: CommandId, args: CommandArgs) -> Option<Messag
                 label_id,
                 account_id,
             },
-        ) => Some(Message::NavigateTo(NavigationTarget::Label {
-            label_id,
-            account_id,
+        ) => Some(Message::NavigateTo(NavigationTarget::Sidebar {
+            selection: SidebarSelection::ProviderFolder(types::FolderId::from(label_id)),
+            account_id: Some(account_id),
         })),
         (CommandId::SmartFolderSave, CommandArgs::SmartFolderSave { name }) => {
             Some(Message::SaveAsSmartFolder(name))

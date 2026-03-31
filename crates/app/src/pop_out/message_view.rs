@@ -97,10 +97,11 @@ pub struct MessageViewState {
     pub error_banner: Option<String>,
 
     // ── Action context ──
-    /// The folder label the thread was viewed in when the pop-out was opened.
-    /// Used as `source_label_id` for trash undo so the thread restores to
-    /// the correct folder, not whatever the main window happens to show later.
-    pub source_label_id: Option<String>,
+    /// The source folder when the pop-out was opened, for trash/move undo.
+    /// Captured via `SidebarSelection::source_folder_for_undo()` so the
+    /// thread restores to the correct folder, not whatever the main window
+    /// happens to show later.
+    pub source_folder: Option<types::FolderId>,
 
     // ── Window geometry ──
     pub width: f32,
@@ -117,7 +118,7 @@ impl MessageViewState {
     pub fn from_thread_message(
         msg: &ThreadMessage,
         generation: rtsk::generation::GenerationToken<rtsk::generation::PopOut>,
-        source_label_id: Option<String>,
+        source_folder: Option<types::FolderId>,
         default_rendering_mode: RenderingMode,
     ) -> Self {
         Self {
@@ -140,7 +141,7 @@ impl MessageViewState {
             overflow_menu_open: false,
             remote_content_loaded: false,
             error_banner: None,
-            source_label_id,
+            source_folder,
             width: MESSAGE_VIEW_DEFAULT_WIDTH,
             height: MESSAGE_VIEW_DEFAULT_HEIGHT,
             x: None,
@@ -175,7 +176,7 @@ impl MessageViewState {
             overflow_menu_open: false,
             remote_content_loaded: false,
             error_banner: None,
-            source_label_id: None, // not available on session restore
+            source_folder: None, // not available on session restore
             width: entry.width,
             height: entry.height,
             x: entry.x,

@@ -37,8 +37,8 @@ pub enum MailActionIntent {
 /// to collapse ambiguity.
 #[derive(Debug, Clone)]
 pub struct UiContext {
-    /// The sidebar's active label/folder (e.g., "INBOX", "SPAM", a folder ID).
-    pub selected_label: Option<String>,
+    /// The sidebar's current selection.
+    pub selection: types::SidebarSelection,
 }
 
 // ── Compensation ────────────────────────────────────────
@@ -593,7 +593,7 @@ pub fn resolve_intent(intent: MailActionIntent, ctx: &UiContext) -> ResolveOutco
             compensation: CompensationContext::None,
         }),
         MailActionIntent::Trash => {
-            let source = ctx.selected_label.clone().map(FolderId::from);
+            let source = ctx.selection.source_folder_for_undo();
             ResolveOutcome::Resolved(ResolvedIntent {
                 operation: MailOperation::Trash,
                 compensation: CompensationContext::SourceFolder(source),
@@ -604,7 +604,7 @@ pub fn resolve_intent(intent: MailActionIntent, ctx: &UiContext) -> ResolveOutco
             compensation: CompensationContext::None,
         }),
         MailActionIntent::ToggleSpam => {
-            let is_in_spam = ctx.selected_label.as_deref() == Some("SPAM");
+            let is_in_spam = ctx.selection.is_spam();
             ResolveOutcome::Resolved(ResolvedIntent {
                 operation: MailOperation::SetSpam { to: !is_in_spam },
                 compensation: CompensationContext::None,
@@ -627,7 +627,7 @@ pub fn resolve_intent(intent: MailActionIntent, ctx: &UiContext) -> ResolveOutco
             compensation: CompensationContext::None,
         },
         MailActionIntent::MoveToFolder { folder_id } => {
-            let source = ctx.selected_label.clone().map(FolderId::from);
+            let source = ctx.selection.source_folder_for_undo();
             ResolveOutcome::Resolved(ResolvedIntent {
                 operation: MailOperation::MoveToFolder {
                     dest: folder_id,

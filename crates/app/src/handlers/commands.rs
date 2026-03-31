@@ -121,7 +121,7 @@ impl App {
         // ── Resolve → Plan → Dispatch ───────────────────────────
         use crate::action_resolve::{self as ar, OptimisticMutation, UiContext};
         let ui_ctx = UiContext {
-            selected_label: self.sidebar.selected_label.clone(),
+            selection: self.sidebar.selection.clone(),
         };
         let outcome = ar::resolve_intent(intent, &ui_ctx);
 

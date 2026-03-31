@@ -274,20 +274,14 @@ pub struct NavItem<'a> {
 
 pub fn nav_group<'a, M: Clone + 'a>(
     items: &[NavItem<'a>],
-    selected_label: &'a Option<String>,
-    on_select: impl Fn(Option<String>) -> M,
+    selection: &'a types::SidebarSelection,
+    on_select: impl Fn(types::SidebarSelection) -> M,
 ) -> Element<'a, M> {
     let mut col = column![].spacing(SPACE_XXS);
     for item in items {
-        let is_active = match selected_label {
-            Some(lid) => lid == item.id,
-            None => item.id == "INBOX",
-        };
-        let on_press = if item.id == "INBOX" {
-            on_select(None)
-        } else {
-            on_select(Some(item.id.to_string()))
-        };
+        let item_sel = crate::ui::sidebar::universal_folder_selection(item.id);
+        let is_active = *selection == item_sel;
+        let on_press = on_select(item_sel);
         col = col.push(nav_button(
             None,
             item.label,

@@ -356,7 +356,7 @@ impl App {
 
         self.sidebar.active_pinned_search = Some(id);
         self.editing_pinned_search = Some(id);
-        self.sidebar.selected_label = None;
+        self.sidebar.selection = types::SidebarSelection::Inbox;
 
         let _ = self.nav_generation.next();
         let _ = self.thread_generation.next();

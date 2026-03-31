@@ -11,6 +11,7 @@ use crate::ui::theme;
 use crate::ui::widgets::{self, DropdownEntry, DropdownIcon};
 use rtsk::db::queries_extra::navigation::{FolderKind, NavigationFolder, NavigationState};
 use rtsk::scope::ViewScope;
+use types::{FolderId, SidebarSelection, TagId};
 
 // ── Messages & Events ──────────────────────────────────
 
@@ -19,9 +20,10 @@ pub enum SidebarMessage {
     SelectAccount(usize),
     SelectAllAccounts,
     CycleAccount,
-    SelectLabel(Option<String>),
+    Select(SidebarSelection),
     ToggleScopeDropdown,
-    ToggleLabelsSection,
+    ToggleProviderFoldersSection,
+    ToggleTagsSection,
     ToggleSmartFoldersSection,
     ToggleFolderExpand(String),
     Compose,
@@ -50,7 +52,7 @@ pub enum SidebarMessage {
 pub enum SidebarEvent {
     AccountSelected(usize),
     AllAccountsSelected,
-    LabelSelected(Option<String>),
+    SelectionChanged(SidebarSelection),
     Compose,
     ToggleSettings,
     PinnedSearchSelected(i64),
@@ -91,9 +93,10 @@ pub struct Sidebar {
     pub accounts: Vec<Account>,
     pub nav_state: Option<NavigationState>,
     pub selected_scope: ViewScope,
-    pub selected_label: Option<String>,
+    pub selection: SidebarSelection,
     pub scope_dropdown_open: bool,
-    pub labels_expanded: bool,
+    pub provider_folders_expanded: bool,
+    pub tags_expanded: bool,
     pub smart_folders_expanded: bool,
     /// Set of folder IDs whose children are collapsed (hidden).
     pub collapsed_folders: HashSet<String>,
@@ -113,9 +116,10 @@ impl Sidebar {
             accounts: Vec::new(),
             nav_state: None,
             selected_scope: ViewScope::AllAccounts,
-            selected_label: None,
+            selection: SidebarSelection::Inbox,
             scope_dropdown_open: false,
-            labels_expanded: true,
+            provider_folders_expanded: true,
+            tags_expanded: true,
             smart_folders_expanded: true,
             collapsed_folders: HashSet::new(),
             pinned_searches: Vec::new(),
@@ -154,13 +158,13 @@ impl Component for Sidebar {
                     .map(|a| a.id.clone())
                     .unwrap_or_default();
                 self.selected_scope = ViewScope::Account(account_id);
-                self.selected_label = None;
+                self.selection = SidebarSelection::Inbox;
                 self.scope_dropdown_open = false;
                 (Task::none(), Some(SidebarEvent::AccountSelected(idx)))
             }
             SidebarMessage::SelectAllAccounts => {
                 self.selected_scope = ViewScope::AllAccounts;
-                self.selected_label = None;
+                self.selection = SidebarSelection::Inbox;
                 self.scope_dropdown_open = false;
                 (Task::none(), Some(SidebarEvent::AllAccountsSelected))
             }
@@ -173,23 +177,27 @@ impl Component for Sidebar {
                     };
                     let account_id = self.accounts[next].id.clone();
                     self.selected_scope = ViewScope::Account(account_id);
-                    self.selected_label = None;
+                    self.selection = SidebarSelection::Inbox;
                     self.scope_dropdown_open = false;
                     (Task::none(), Some(SidebarEvent::AccountSelected(next)))
                 } else {
                     (Task::none(), None)
                 }
             }
-            SidebarMessage::SelectLabel(label_id) => {
-                self.selected_label = label_id.clone();
-                (Task::none(), Some(SidebarEvent::LabelSelected(label_id)))
+            SidebarMessage::Select(sel) => {
+                self.selection = sel.clone();
+                (Task::none(), Some(SidebarEvent::SelectionChanged(sel)))
             }
             SidebarMessage::ToggleScopeDropdown => {
                 self.scope_dropdown_open = !self.scope_dropdown_open;
                 (Task::none(), None)
             }
-            SidebarMessage::ToggleLabelsSection => {
-                self.labels_expanded = !self.labels_expanded;
+            SidebarMessage::ToggleProviderFoldersSection => {
+                self.provider_folders_expanded = !self.provider_folders_expanded;
+                (Task::none(), None)
+            }
+            SidebarMessage::ToggleTagsSection => {
+                self.tags_expanded = !self.tags_expanded;
                 (Task::none(), None)
             }
             SidebarMessage::ToggleSmartFoldersSection => {
@@ -219,7 +227,7 @@ impl Component for Sidebar {
                 Some(SidebarEvent::SearchHere { query_prefix }),
             ),
             SidebarMessage::SelectSmartFolder { id, query } => {
-                self.selected_label = Some(id.clone());
+                self.selection = SidebarSelection::SmartFolder { id: id.clone() };
                 (
                     Task::none(),
                     Some(SidebarEvent::SmartFolderSelected { id, query }),
@@ -230,7 +238,7 @@ impl Component for Sidebar {
                     account_id: account_id.clone(),
                     mailbox_id: mailbox_id.clone(),
                 };
-                self.selected_label = None;
+                self.selection = SidebarSelection::Inbox;
                 self.scope_dropdown_open = false;
                 (
                     Task::none(),
@@ -245,7 +253,7 @@ impl Component for Sidebar {
                     account_id: account_id.clone(),
                     folder_id: folder_id.clone(),
                 };
-                self.selected_label = None;
+                self.selection = SidebarSelection::Inbox;
                 self.scope_dropdown_open = false;
                 (
                     Task::none(),
@@ -319,10 +327,10 @@ impl Component for Sidebar {
 
         if show_labels {
             col = col.push(widgets::section_break::<SidebarMessage>());
-            col = col.push(labels(self));
+            col = col.push(provider_folders(self));
         }
 
-        // Tags section (section 4) — always visible, all accounts
+        // Labels section (section 4) — tag-type labels, always visible
         let has_tags = self.nav_state.as_ref().is_some_and(|ns| {
             ns.folders
                 .iter()
@@ -477,22 +485,15 @@ fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
 
     let mut col = column![].spacing(SPACE_XXS);
     for f in &universal {
-        let is_active = match &sidebar.selected_label {
-            Some(lid) => lid == &f.id,
-            None => f.id == "INBOX",
-        };
-        let on_press = if f.id == "INBOX" {
-            SidebarMessage::SelectLabel(None)
-        } else {
-            SidebarMessage::SelectLabel(Some(f.id.clone()))
-        };
+        let sel = universal_folder_selection(&f.id);
+        let is_active = sidebar.selection == sel;
         let nav_btn = widgets::nav_button(
             None,
             &f.name,
             is_active,
             widgets::NavSize::Compact,
             Some(f.unread_count),
-            on_press,
+            SidebarMessage::Select(sel),
         );
         let query_prefix = build_search_here_folder_prefix(&f.name, sidebar);
         col =
@@ -518,12 +519,18 @@ fn smart_folders(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
                     query: query.clone(),
                 }
             } else {
-                SidebarMessage::SelectLabel(Some(f.id.clone()))
+                SidebarMessage::Select(SidebarSelection::SmartFolder {
+                    id: f.id.clone(),
+                })
             };
+            let is_active = matches!(
+                &sidebar.selection,
+                SidebarSelection::SmartFolder { id } if id == &f.id
+            );
             widgets::nav_button(
                 None,
                 &f.name,
-                sidebar.selected_label.as_deref() == Some(&f.id),
+                is_active,
                 widgets::NavSize::Compact,
                 Some(f.unread_count),
                 on_press,
@@ -539,7 +546,7 @@ fn smart_folders(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
     )
 }
 
-fn labels(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
+fn provider_folders(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
     let folders = sidebar
         .nav_state
         .as_ref()
@@ -560,9 +567,9 @@ fn labels(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
     };
 
     widgets::collapsible_section(
-        "LABELS",
-        sidebar.labels_expanded,
-        SidebarMessage::ToggleLabelsSection,
+        "FOLDERS",
+        sidebar.provider_folders_expanded,
+        SidebarMessage::ToggleProviderFoldersSection,
         children,
     )
 }
@@ -884,7 +891,10 @@ fn render_label_tree<'a>(
             .iter()
             .any(|f| f.parent_id.as_deref() == Some(&node.folder.id));
         let is_collapsed = sidebar.collapsed_folders.contains(&node.folder.id);
-        let active = sidebar.selected_label.as_deref() == Some(&node.folder.id);
+        let active = matches!(
+            &sidebar.selection,
+            SidebarSelection::ProviderFolder(fid) if fid.as_str() == node.folder.id
+        );
         let indent = TREE_INDENT * f32::from(node.depth);
 
         let mut item_row = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
@@ -935,7 +945,9 @@ fn render_label_tree<'a>(
                 .padding(PAD_NAV_ITEM)
                 .width(Length::Fill),
         )
-        .on_press(SidebarMessage::SelectLabel(Some(node.folder.id.clone())))
+        .on_press(SidebarMessage::Select(SidebarSelection::ProviderFolder(
+            FolderId::from(node.folder.id.clone()),
+        )))
         .padding(0)
         .style(theme::ButtonClass::Nav { active }.style())
         .width(Length::Fill)
@@ -961,13 +973,18 @@ fn render_flat_labels<'a>(
         .iter()
         .take(12)
         .map(|f| {
-            let active = sidebar.selected_label.as_deref() == Some(&f.id);
+            let active = matches!(
+                &sidebar.selection,
+                SidebarSelection::ProviderFolder(fid) if fid.as_str() == f.id
+            );
             let label_btn = widgets::label_nav_item(
                 &f.name,
                 &f.id,
                 theme::avatar_color(&f.name),
                 active,
-                SidebarMessage::SelectLabel(Some(f.id.clone())),
+                SidebarMessage::Select(SidebarSelection::ProviderFolder(
+                    FolderId::from(f.id.clone()),
+                )),
             );
             let query_prefix = build_search_here_prefix(&f.name, sidebar);
             mouse_area(label_btn)
@@ -1022,6 +1039,29 @@ fn quote_if_needed(s: &str) -> String {
     }
 }
 
+/// Map a universal folder's DB ID to the corresponding `SidebarSelection`.
+pub(crate) fn universal_folder_selection(id: &str) -> SidebarSelection {
+    use types::{Bundle, FeatureView, SystemFolder};
+    match id {
+        "INBOX" => SidebarSelection::Inbox,
+        "STARRED" => SidebarSelection::Folder(SystemFolder::Starred),
+        "SENT" => SidebarSelection::Folder(SystemFolder::Sent),
+        "DRAFT" => SidebarSelection::Folder(SystemFolder::Draft),
+        "SNOOZED" => SidebarSelection::Folder(SystemFolder::Snoozed),
+        "TRASH" => SidebarSelection::Folder(SystemFolder::Trash),
+        "SPAM" => SidebarSelection::Folder(SystemFolder::Spam),
+        "ALL_MAIL" => SidebarSelection::Folder(SystemFolder::AllMail),
+        "CATEGORY_PRIMARY" => SidebarSelection::Bundle(Bundle::Primary),
+        "CATEGORY_UPDATES" => SidebarSelection::Bundle(Bundle::Updates),
+        "CATEGORY_PROMOTIONS" => SidebarSelection::Bundle(Bundle::Promotions),
+        "CATEGORY_SOCIAL" => SidebarSelection::Bundle(Bundle::Social),
+        "CATEGORY_NEWSLETTERS" => SidebarSelection::Bundle(Bundle::Newsletters),
+        "TASKS" => SidebarSelection::FeatureView(FeatureView::Tasks),
+        "ATTACHMENTS" => SidebarSelection::FeatureView(FeatureView::Attachments),
+        other => SidebarSelection::ProviderFolder(FolderId::from(other)),
+    }
+}
+
 // ── Tags section (section 4) ────────────────────────────
 
 fn tags_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
@@ -1035,21 +1075,25 @@ fn tags_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
         .iter()
         .filter(|f| matches!(f.folder_kind, FolderKind::AccountTag))
         .map(|f| {
+            let is_active = matches!(
+                &sidebar.selection,
+                SidebarSelection::Tag(tid) if tid.as_str() == f.id
+            );
             widgets::nav_button(
                 None,
                 &f.name,
-                sidebar.selected_label.as_deref() == Some(&f.id),
+                is_active,
                 widgets::NavSize::Compact,
                 Some(f.unread_count),
-                SidebarMessage::SelectLabel(Some(f.id.clone())),
+                SidebarMessage::Select(SidebarSelection::Tag(TagId::from(f.id.clone()))),
             )
         })
         .collect();
 
     widgets::collapsible_section(
         "LABELS",
-        sidebar.labels_expanded,
-        SidebarMessage::ToggleLabelsSection,
+        sidebar.tags_expanded,
+        SidebarMessage::ToggleTagsSection,
         children,
     )
 }
