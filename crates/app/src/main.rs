@@ -56,12 +56,14 @@ use rtsk::db::queries_extra::navigation::{
 use rtsk::db::queries_extra::{
     get_public_folder_items, get_threads_for_shared_mailbox, get_threads_scoped,
 };
+use rtsk::db::queries::get_threads_for_bundle;
 use rtsk::db::types::{AccountScope, DbThread};
 use rtsk::generation::{GenerationCounter, GenerationToken, Nav, PopOut, Search, ThreadDetail};
 use rtsk::scope::ViewScope;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use types::{Bundle, FeatureView, SidebarSelection};
 use ui::add_account::{AddAccountMessage, AddAccountWizard};
 use ui::calendar::{CalendarMessage, CalendarOverlay, CalendarState, CalendarView};
 use ui::layout::{
@@ -2248,7 +2250,7 @@ impl App {
     ) -> Task<Message> {
         let db = Arc::clone(&self.db);
         let view_scope = self.sidebar.selected_scope.clone();
-        let label_id = self.sidebar.selection.folder_id_for_thread_query();
+        let selection = self.sidebar.selection.clone();
         Task::perform(
             async move {
                 let r = match &view_scope {
@@ -2258,6 +2260,7 @@ impl App {
                     } => {
                         let aid = account_id.clone();
                         let mid = mailbox_id.clone();
+                        let label_id = selection.folder_id_for_thread_query();
                         load_shared_mailbox_threads(db, aid, mid, label_id).await
                     }
                     ViewScope::PublicFolder {
@@ -2270,7 +2273,18 @@ impl App {
                     }
                     _ => {
                         let scope = view_scope.to_account_scope().unwrap_or(AccountScope::All);
-                        load_threads_scoped(db, scope, label_id).await
+                        match &selection {
+                            SidebarSelection::Bundle(bundle) => {
+                                load_threads_for_bundle_view(db, scope, *bundle).await
+                            }
+                            SidebarSelection::FeatureView(feature) => {
+                                load_threads_for_feature_view(*feature).await
+                            }
+                            _ => {
+                                let label_id = selection.folder_id_for_thread_query();
+                                load_threads_scoped(db, scope, label_id).await
+                            }
+                        }
                     }
                 };
                 (load_gen, r)
@@ -2718,6 +2732,54 @@ async fn load_threads_scoped(
         Ok(threads)
     })
     .await
+}
+
+async fn load_threads_for_bundle_view(
+    db: Arc<Db>,
+    scope: AccountScope,
+    bundle: Bundle,
+) -> Result<Vec<Thread>, String> {
+    db.with_conn(move |conn| {
+        let bundle_name = match bundle {
+            Bundle::Primary => "Primary",
+            Bundle::Updates => "Updates",
+            Bundle::Promotions => "Promotions",
+            Bundle::Social => "Social",
+            Bundle::Newsletters => "Newsletters",
+        };
+
+        let account_ids: Vec<String> = match &scope {
+            AccountScope::Single(id) => vec![id.clone()],
+            AccountScope::Multiple(ids) => ids.clone(),
+            AccountScope::All => {
+                let mut stmt = conn
+                    .prepare("SELECT id FROM accounts WHERE is_active = 1 ORDER BY email ASC")
+                    .map_err(|e| e.to_string())?;
+                stmt.query_map([], |row| row.get::<_, String>(0))
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?
+            }
+        };
+
+        let mut threads = Vec::new();
+        for account_id in &account_ids {
+            let db_threads =
+                get_threads_for_bundle(conn, account_id, bundle_name, Some(1000), None)?;
+            threads.extend(db_threads.into_iter().map(db_thread_to_app_thread));
+        }
+
+        threads.sort_by_key(|t| std::cmp::Reverse(t.last_message_at));
+        Ok(threads)
+    })
+    .await
+}
+
+async fn load_threads_for_feature_view(feature: FeatureView) -> Result<Vec<Thread>, String> {
+    match feature {
+        // These sidebar destinations do not map to the mail thread list yet.
+        FeatureView::Tasks | FeatureView::Attachments => Ok(Vec::new()),
+    }
 }
 
 async fn load_shared_mailbox_navigation(

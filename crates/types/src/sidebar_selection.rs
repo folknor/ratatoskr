@@ -87,15 +87,15 @@ impl FeatureView {
 }
 
 impl SidebarSelection {
-    /// The folder/label ID for thread-loading DB queries.
+    /// The folder/label ID for generic thread-loading DB queries.
     ///
     /// Returns `None` for Inbox (no filter convention), bundles, and feature
-    /// views. Returns `Some(id)` for everything else.
+    /// views, which have dedicated loaders.
+    /// Returns `Some(id)` for normal folder/tag selections.
     pub fn folder_id_for_thread_query(&self) -> Option<String> {
         match self {
-            Self::Inbox | Self::FeatureView(_) => None,
+            Self::Inbox | Self::Bundle(_) | Self::FeatureView(_) => None,
             Self::Folder(f) => Some(f.as_folder_id_str().to_string()),
-            Self::Bundle(b) => Some(b.as_id_str().to_string()),
             Self::SmartFolder { id } => Some(id.clone()),
             Self::ProviderFolder(fid) => Some(fid.0.clone()),
             Self::Tag(tid) => Some(tid.0.clone()),
