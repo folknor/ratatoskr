@@ -22,7 +22,6 @@ Multi-provider email client with calendar and contacts. Connects to Gmail, Micro
 
 Built with LLMs. See [LLM.md](LLM.md).
 
-
 ## Features
 
 **Email**
@@ -49,37 +48,6 @@ Built with LLMs. See [LLM.md](LLM.md).
 - AMP email stripping, URL tracking removal
 - BIMI brand indicator verification
 
-## Architecture
-
-Cargo workspace with 23 crates. Key boundaries:
-
-| Crate | Role |
-|-------|------|
-| `app` | iced UI — Elm architecture (boot/update/view) |
-| `rtsk` | Facade over all subsystems: accounts, OAuth, actions, DB |
-| `sync` | Sync pipeline, JWZ threading, filters, categorization |
-| `store` | Body store (flate2+zlib-rs), inline images, attachment cache |
-| `squeeze` | Attachment compression (CLI + library) |
-| `gmail` / `jmap` / `graph` / `imap` | Provider implementations |
-| `cmdk` | Fuzzy command search with context-sensitive keybindings |
-| `smart-folder` | Query parser, date tokens, SQL builder |
-
-## Building
-
-```bash
-# Check all crates
-cargo check --workspace
-
-# Run the app
-cargo run -p app
-
-# Check/test the squeeze compression tool
-cargo check -p squeeze
-cargo test -p squeeze
-```
-
-Requires Rust 1.92+ (edition 2024).
-
 ## License
 
-Proprietary. All rights reserved.
+Apache-2.0.

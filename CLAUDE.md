@@ -34,12 +34,6 @@ Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 
 **Thread detail** (`core/src/db/queries_extra/thread_detail.rs`) — `get_thread_detail()` returns messages (with ownership detection, collapsed summaries, body text from body store), labels (with resolved colors), attachments (with message context), and attachment collapse state for a single thread.
 
-**Label colors** (`core/src/label_colors.rs`) — `resolve_label_color()` returns synced colors for Gmail labels, deterministic hash-based fallback from the 25-preset palette for all other providers.
-
-**Smart folder engine** (`core/src/smart_folder/`) — Query parser, date token resolver (`__LAST_7_DAYS__` etc.), and SQL builder. Supports `AccountScope` for cross-account queries.
-
-**Command palette** (`core/src/command_palette/`) — Command registry, fuzzy search (nucleo-matcher), context-sensitive command availability. `CommandContext` includes `focused_region: Option<FocusedRegion>` for panel-aware shortcut dispatch.
-
 ## Gotchas that will break your code
 
 **Multiple content stores** (`crates/stores/`): Message bodies live outside the main `messages` table in `bodies.db` (compressed), and inline multipart images have their own attachment database. Use `BodyStoreState` / `InlineImageStoreState` rather than assuming message content is in the main SQLite database. The attachment file cache is also in this crate.
@@ -118,9 +112,7 @@ Instructions are piped via stdin. The agents fetch code themselves — just tell
 
 ```bash
 echo "check the new sync logic" | review bugs
-echo "review this change" | review arch
-echo "full review" | review sweep
-echo "look at stores" | review perf
+echo "review this change" | review arch,perf
 ```
 
 Without `--anchor`, stdin goes directly to the session — the sessions are already onboarded with project context and their review focus. Use `--anchor` for the first review in a session or to re-anchor a stale session. When using `--anchor`, reinforce the session's identity in your piped instructions:
@@ -129,8 +121,6 @@ Without `--anchor`, stdin goes directly to the session — the sessions are alre
 - **bugs**: "Remember: you're our QA engineer embedded on ratatoskr."
 - **perf**: "Remember: you're our performance engineer reviewing ratatoskr."
 - **arch**: "Remember: you're our software architect reviewing ratatoskr."
-
-**Never run reviews in parallel to the same archetype.** Each archetype maps to a single persistent session — concurrent sends will race messages into the same conversation and corrupt context. Run sequentially, or only parallelize across different archetypes (e.g. `review bugs` and `review security` can run concurrently, but not two `review bugs` calls).
 
 ## Commit rules
 

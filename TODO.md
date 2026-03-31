@@ -2,6 +2,78 @@
 
 ## Remaining Work
 
+- [ ] **Avatar in main window account selector** - Seems broken? Might be an issue with dev-seed? Currently it seems to show the account color as a small dot instead of the full avatar. Both in the actual input and the dropdown.
+
+- [ ] **Investigate dev-seed labels** - The dev-seed script manages somehow to create accounts that have two Labels sections in the sidebar. Investigate. This should be impossible, even if the dev-script creates them wrong, the sidebar should only have one Label section.
+
+- [ ] **Expand dev-seed** - The dev-seed script needs to create pinned searches, Smart Folders, contact groups, VIP contacts. Also verify that attachments are actual files. Needs to create actual signatures for contacts, both HTML and simple ones. Needs to create more emails with links and other non-text content. Needs to create fake shared accounts and mailboxes. Also needs to set up different labels per account. Should use different names for different accounts; currently every account uses the same name - should be Work/Private/whatever.
+
+- [ ] **dev-seed calendars** - Obvious.
+
+- [ ] **Divide up sidebar** - The top part with the Compose button, account selector, and calendar button should not scroll along with the rest of the content, but be stickied to the top like the Settings button is stickied to the bottom.
+
+- [ ] **Mail list mouse clicks** - Currently when the user clicks or doubleclicks the same thread that is currently opened, we re-render it for every mouse click, which means the whole reading pane flashes once or twice.
+
+- [ ] **Settings row help icon** - Add support for a help (?) icon with a tooltip for settings rows. Should anchor to the right side of the label, hugging the label. First candidate: Message Dates.
+
+- [ ] **Settings/People** - The contacts and group lists here need to conform much closer to the spec at docs/contacts/problem-statement.md. We're quite a ways off.
+
+- [ ] **Settings/Notifications** - VIP Senders should move to contact editing, and this should be a toggle button here.
+
+- [ ] **Compose window help text** - The help text in the compose windows to/cc/bcc fields ("Add recipients...") is not vertically centered in the input field.
+
+- [ ] **Settings slide-in/over panel** - Clicking anywhere on the background of this panel currently closes it for some reason. Only the (1) back button, (2) selecting a different Settings section, or (3) closing the Settings should dismiss the slide-in. Possibly Esc should hotkey to it as well. Currently Esc closes the settings completely, but perhaps it should close a slide-in, if open, first.
+
+- [ ] **Settings/People: Contacts list** - Group/account pills need to lay out horizontally first, then vertically.
+
+- [ ] **Settings/Accounts: Edit Account** - This section needs rework.
+
+- [ ] **Compose window input fields** - The to/cc/bcc and the Subject fields have different styling.
+
+- [ ] **Compose window account dropdown + cc/bcc buttons** - These need similar styling to other such controls with proper hover effects. The chevron icon in the dropdown should also be unified across the codebase, we use different chevron icons all over the place. Actually, the buttons at the bottom as well: Discard/attach/send, they need uniform app styling. Send should probably use the same styling as the main windows Compose button.
+
+- [ ] **Compose window "pop ups"** - There's a popup when you Discard, and to Insert Link. These are not actually modals at the moment; they render at the bottom of the compose window.
+
+- [ ] **Compose window labels** - The From/To/CC/Bcc/Subject labels should be right-aligned, so that they float near their relative inputs.
+
+- [ ] **Attachment saving** - Should remember last folder. Ideally last folder per thread ID.
+
+- [ ] **Reading pane** - There's too much vertical spacing between the top part and the first reply/all/forward action line. Needs a tighter fit; vertical space doesn't come cheap on a laptop.
+
+- [ ] **Collapse individual expanded messages** — Chevron-down button in expanded message header should be a chevron-up to collapse. Also, the button needs a new place to live. Probably a very long, thin button that stretches across the entire horizontal space at the top of the message frame. This needs to be unified with the Attachments panel collapsing, which is currently taking up too much vertical space; also too much padding above the Attachments section.
+
+- [ ] **Attachment "Save All" button** - Needs to have same styling as other in-section buttons in the reading pane, and should not be part of the same interaction block as the collapse/expand header.
+
+- [ ] **Attachments in the reading pane** - They're not interactive? What's supposed to happen when they are clicked? See spec. Same thing in the pop out message window: not interactive there either.
+
+- [ ] **Email body background override setting** — This needs to apply to the pop out window as well, and we need an inset rounded+bordered area in the pop-out viewing window just like in the reading pane.
+
+- [ ] **Compose window close** - Closing the compose window doesn't currently ask the user whether they want to discard the draft. Should wire that in same as the Discard button.
+
+- [ ] **Settings window dropdown rows** - The inlined dropdowns inside settings rows currently have their own background color hover effect, but this is not necessary because the entire settings row has a background hover effect.
+
+- [ ] **Settings window dropdown closing** - The dropdown opens when the settings row is clicked, which is nice - but clicking the settings row again doesn't close it. It closes + reopens it with 1 click.
+
+- [ ] **Settings window row hover** - Currently the hover effect for the settings row doesn't use the same border radius as the bottom/top settings rows, which means hovering those looks a bit weird.
+
+- [ ] **Settings/Composing: Signatures** - This section needs work.
+
+- [ ] **App logo in first-launch modal** — SVG rendered via iced svg feature, embedded with include_bytes, but it's not showing.
+
+- [ ] **Standardized popup/dropdown/modal** - Currently setting dropdowns, various modal dialogs (the Settings slide-in, Add Account modal, etc) use various methods to dim/control/disable/dismiss. We need standardized controls for all this. For example the Add Account modal currently dims the background (rest of the window), but it doesn't prevent interaction with any controls - even controls that are actually directly below it can still be interacted with. We need the same treatment as the Settings slide-in that does in fact disable things behind it.
+
+- [ ] **Label pills in reading pane** — Pills should not show on each message, only at the top. Labels are per-thread, not per-message, at least in the UI.
+
+- [ ] **Link click handling (email content)** — Should open in system browser. Nothing happens.
+
+- [ ] **Pop out message viewer body rendering** - The current pills for selecting Plain/Simple/Original/Source need to move. The spec currently doesn't say clearly where they should go. This needs to be resolved first.
+
+- [ ] **Pop out message viewer body rendering toggle buttons** - The current pills for selecting Plain/Simple/Original/Source have zero effect, and the "Source" button just shows a generic "error" about message bodies being in a separate database. Even with dev-seed.
+
+- [ ] **Pop out message viewer dropdown menu** - It seems to be constrained to the width of the window, which doesn't work because it's all the way on the right side. It needs room to show its contents. Either it needs to be able to render outside the window, or it needs to grow left.
+
+- [ ] **Pop out message viewer paddings/margin** - This needs to be unified. Currently for example the date/time stamp on the right side of the subject hugs the right window edge much closer than the dropdown action button above it. And also I'm not sure the subject and datetime are baseline aligned - it seems the subject floats a bit higher up. Could be wrong about that, haven't measured pixels.
+
 - [ ] **Message box / toast notification system** — Generic modal message box and/or toast notification infrastructure for the app. Needed for: compose draft save failure on close (currently silently aborts the close with no user feedback), action service retry exhaustion warnings, and any future error/confirmation flows. Should support at least: transient toasts (auto-dismiss), persistent error banners, and modal confirmation dialogs.
 
 - [ ] **Starred thread card background** — The golden tint on starred thread cards uses a fixed `mix()` ratio (`STARRED_BG_ALPHA`) which may not look right across all themes. Needs a GPU-level blend/shader effect that adapts to the theme's background luminance so the starred highlight reads consistently in both light and dark themes.
@@ -180,18 +252,12 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 Completed features that need to be visually verified in the running app.
 
-- **Collapse individual expanded messages** — Chevron-down button in expanded message header, chevron-right on collapsed rows.
-- **Email body background override setting** — Three-option setting in Preferences (Always White, Match Theme, Auto). Auto checks theme luminance.
-- **App logo in first-launch modal** — SVG rendered via iced svg feature, embedded with include_bytes.
 - **Compose block-type format toggles** — Blockquote button wired in toolbar. Fixed apply_set_block_type for blockquote-to-paragraph conversion.
-- **Per-pane minimum resize limits** — Sidebar 220, thread list 250, reading pane 300. Divider drag and window resize both clamped.
-- **Label pills in reading pane** — Tag-type labels as colored pills on expanded message headers.
 - **Compose identity auto-selection (shared mailboxes)** — Auto-selects shared mailbox email when replying from SharedMailbox scope.
 - **Rights gating on action buttons (JMAP sharing)** — Mailbox rights flow through CommandContext. Actions disabled when rights deny.
 - **Signature placement in compose** — Auto-resolved on compose open. New compose: bottom. Reply: between content and quoted text.
 - **BIMI avatar display** — Wired BimiLruCache to thread list sender avatars with circular image, initials fallback.
 - **Active auto-reply status indicator** — Status bar shows "Out of Office auto-reply is active" when any account has enabled auto-replies.
-- **Link rendering + click handling (HTML)** — Accent-colored clickable links, opens in system browser.
 - **CID image loading from inline image store** — Wired through thread detail → HTML renderer.
 
 ## Cross-Cutting Architecture Patterns
