@@ -512,7 +512,7 @@ impl App {
             open_task.discard(),
             Task::perform(
                 async move {
-                    // Try body store first (has full zstd-decompressed bodies),
+                    // Try body store first (has full decompressed bodies),
                     // fall back to DB snippet if body store unavailable.
                     if let Some(bs) = body_store {
                         if let Ok(Some(body)) = bs.get(message_id.clone()).await {

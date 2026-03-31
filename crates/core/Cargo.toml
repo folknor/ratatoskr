@@ -47,12 +47,12 @@ mail-parser = "0.11"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
 utf7-imap = "0.3"
 socket2 = "0.6"
-tantivy = "0.25"
-zstd = "0.13"
+tantivy = { version = "0.25", default-features = false, features = ["mmap", "stopwords", "lz4-compression"] }
+flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
 getrandom = { version = "0.2", features = ["std"] }
 urlencoding = "2"
 uuid = { version = "1", features = ["v4"] }
-jmap-client = { path = "/home/folk/Programs/jmap-client" }
+jmap-client = { path = "/home/folk/Programs/jmap-client", default-features = false, features = ["tls-native", "websockets", "mail", "calendars", "contacts"] }
 tokio-tungstenite = { version = "0.29", features = ["native-tls"] }
 async-trait = "0.1"
 hickory-resolver = { version = "0.25", features = ["tokio"] }
@@ -61,7 +61,6 @@ unicode-segmentation = "1.12"
 regex = "1"
 url = "2"
 resvg = { version = "0.47", default-features = false }
-css-inline = "0.20"
 lol_html = "2"
 ammonia = "4"
 calcard = "0.3"

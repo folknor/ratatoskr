@@ -237,7 +237,7 @@ FROM bodies
 WHERE message_id IN (?1, ?2, ...)
 ```
 
-Uses the same chunked approach as `BodyStoreState::get_batch`, but synchronous (direct `&Connection` instead of `async with_conn`). Decompress with zstd.
+Uses the same chunked approach as `BodyStoreState::get_batch`, but synchronous (direct `&Connection` instead of `async with_conn`). Decompress.
 
 #### Step 3: Detect message ownership
 

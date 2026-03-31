@@ -114,7 +114,7 @@ fn convert_attachment(att: thread_detail::ThreadAttachment) -> ThreadAttachment 
 ///
 /// This replaces the two separate `get_thread_messages` + `get_thread_attachments`
 /// calls with a single core function that also provides:
-/// - Body text from the BodyStore (decompressed from zstd)
+/// - Body text from the BodyStore (decompressed)
 /// - Message ownership detection (is_own_message)
 /// - Quote/signature-stripped collapsed summaries
 /// - Resolved label colors

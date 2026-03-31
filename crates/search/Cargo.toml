@@ -13,7 +13,7 @@ workspace = true
 [dependencies]
 serde.workspace = true
 tokio = { workspace = true, features = ["sync", "macros"] }
-tantivy = "0.25"
+tantivy = { version = "0.25", default-features = false, features = ["mmap", "stopwords", "lz4-compression"] }
 log = "0.4"
 
 [dev-dependencies]

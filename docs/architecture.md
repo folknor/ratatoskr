@@ -14,7 +14,7 @@ When evaluating a design: if adding a new call site can silently break existing 
 
 **Provider crates** (`gmail`, `jmap`, `graph`, `imap`) each implement the `ProviderOps` trait (`common/src/ops.rs`). No provider-specific logic should leak into app or core beyond the trait surface.
 
-**`store`** owns all content outside the main SQLite database: zstd-compressed body store (`bodies.db`), inline image store, attachment file cache. Never assume message content is in the main DB.
+**`store`** owns all content outside the main SQLite database: compressed body store (`bodies.db`), inline image store, attachment file cache. Never assume message content is in the main DB.
 
 **`provider`** holds shared provider helpers: encryption (AES-256-GCM), email parsing, HTML sanitization.
 

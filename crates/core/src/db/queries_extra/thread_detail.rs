@@ -185,10 +185,17 @@ fn query_messages(
     Ok(rows)
 }
 
-// ── Body store (zstd-compressed bodies from separate DB) ────
+// ── Body store (zlib-compressed bodies from separate DB) ────
 
 fn decompress_body(data: &[u8]) -> Result<String, String> {
-    let bytes = zstd::decode_all(data).map_err(|e| format!("zstd decompress: {e}"))?;
+    use flate2::read::ZlibDecoder;
+    use std::io::Read;
+
+    let mut decoder = ZlibDecoder::new(data);
+    let mut bytes = Vec::new();
+    decoder
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("zlib decompress: {e}"))?;
     String::from_utf8(bytes).map_err(|e| format!("utf8 decode: {e}"))
 }
 

@@ -4,7 +4,7 @@
 
 Search is the primary way enterprise users find email. Users processing 200+ messages/day don't browse folders — they search. Ratatoskr's search must feel instant, support structured operators for power users, and produce ranked results for everyone else. There is one search bar, one query language, and one API surface.
 
-This document covers the search UX, the query language, and the unification of the two existing search backends into a single pipeline. All search is local — Ratatoskr syncs the full mailbox locally (with zstd compression and inline image deduplication), so there is no need for provider-side search delegation.
+This document covers the search UX, the query language, and the unification of the two existing search backends into a single pipeline. All search is local — Ratatoskr syncs the full mailbox locally (with compression and inline image deduplication), so there is no need for provider-side search delegation.
 
 ## Current State
 
@@ -455,7 +455,7 @@ Redesign the query parser and unify both search engines behind a single `search(
 
 3. **Search scope vs sidebar scope**: Resolved. Search is always cross-account by default, independent of the sidebar's scope. Users narrow via `account:` and `folder:` operators. The "Search here" right-click action on sidebar items prefills scope operators for discoverability. This matches the mental model: scope is for browsing, search is for finding.
 
-4. **Provider-side search**: Not needed. Ratatoskr syncs everything locally — even 300GB mailboxes. Between zstd body compression and multipart inline image deduplication, local storage is significantly more efficient than what providers keep server-side. Since the full corpus is always local, Tantivy searches against complete data. There is no "not yet synced" gap to fill with provider API search.
+4. **Provider-side search**: Not needed. Ratatoskr syncs everything locally — even 300GB mailboxes. Between body compression and multipart inline image deduplication, local storage is significantly more efficient than what providers keep server-side. Since the full corpus is always local, Tantivy searches against complete data. There is no "not yet synced" gap to fill with provider API search.
 
 5. **Body text indexing**: Resolved. Ratatoskr syncs the full mailbox locally, so body text is always available for indexing. The Tantivy index is rebuilt from the body store, which contains every message. No on-demand fetching needed.
 

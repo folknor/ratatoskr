@@ -7,7 +7,7 @@ Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 - **`rtsk`** (`crates/core/`) — Top-level facade: re-exports all subsystem crates, plus owns accounts, oauth, discovery, email actions, DB queries, cloud attachments.
 - **`app`** (`crates/app/`) — iced UI app. Elm architecture (boot/update/view). All UI conventions are in `UI.md` at the repo root — **read UI.md before any UI work.**
 - **`squeeze`** (`crates/squeeze/`) — Attachment compression (CLI + library). Images (mozjpeg-rs + oxipng), PDFs (lopdf), OOXML/ODF.
-- **`store`** (`crates/stores/`) — Content stores: email body store (zstd-compressed), inline image store, attachment file cache.
+- **`store`** (`crates/stores/`) — Content stores: email body store (compressed), inline image store, attachment file cache.
 - **`sync`** (`crates/sync/`) — Sync pipeline, threading (JWZ), categorization, filters, smart labels.
 - **`provider`** (`crates/common/`) — Shared provider helpers, encryption (AES-256-GCM), email parsing, HTML sanitization.
 - **`label-colors`** (`crates/label-colors/`) — Label color resolution + Exchange category color presets.
@@ -42,7 +42,7 @@ Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 
 ## Gotchas that will break your code
 
-**Multiple content stores** (`crates/stores/`): Message bodies live outside the main `messages` table in `bodies.db` (zstd-compressed), and inline multipart images have their own attachment database. Use `BodyStoreState` / `InlineImageStoreState` rather than assuming message content is in the main SQLite database. The attachment file cache is also in this crate.
+**Multiple content stores** (`crates/stores/`): Message bodies live outside the main `messages` table in `bodies.db` (compressed), and inline multipart images have their own attachment database. Use `BodyStoreState` / `InlineImageStoreState` rather than assuming message content is in the main SQLite database. The attachment file cache is also in this crate.
 
 **Four email providers**: `gmail_api`, `jmap`, `graph` (Microsoft), `imap`. All unified behind the `ProviderOps` trait (`common/src/ops.rs`). Folder-accepting methods use `&FolderId`, tag-accepting methods use `&TagId` (`common/src/typed_ids.rs`). Typed IDs flow from `MailActionIntent` through `MailOperation` to the provider — no raw string boundaries in the action pipeline.
 

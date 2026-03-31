@@ -18,5 +18,5 @@ tokio = { workspace = true, features = ["sync", "rt"] }
 base64.workspace = true
 serde.workspace = true
 log = "0.4"
-zstd = "0.13"
+flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }

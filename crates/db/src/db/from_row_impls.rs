@@ -478,14 +478,22 @@ impl_from_row!(SubscriptionEntry {
 
 // ── Simple helper types ─────────────────────────────────────
 
-impl_from_row!(CategoryCount { category, count });
+#[rustfmt::skip]
+impl_from_row!(CategoryCount {
+    category,
+    count,
+});
 
 impl_from_row!(ThreadCategoryRow {
     thread_id,
     category,
 });
 
-impl_from_row!(SnoozedThread { id, account_id });
+#[rustfmt::skip]
+impl_from_row!(SnoozedThread {
+    id,
+    account_id,
+});
 
 impl_from_row!(TriggeredFollowUp {
     id,
@@ -494,9 +502,17 @@ impl_from_row!(TriggeredFollowUp {
     subject,
 });
 
-impl_from_row!(SortOrderItem { id, sort_order });
+#[rustfmt::skip]
+impl_from_row!(SortOrderItem {
+    id,
+    sort_order,
+});
 
-impl_from_row!(LabelSortOrderItem { id, sort_order });
+#[rustfmt::skip]
+impl_from_row!(LabelSortOrderItem {
+    id,
+    sort_order,
+});
 
 impl_from_row!(ImapMessageRow {
     id,

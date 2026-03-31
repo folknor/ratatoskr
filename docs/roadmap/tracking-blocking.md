@@ -61,7 +61,7 @@ No shipping Rust email client renders HTML email in pure Rust today. This is gre
 
 Regardless of backend, the rendering pipeline should be:
 
-1. **Retrieve** raw HTML body from `bodies.db` (zstd-decompress)
+1. **Retrieve** raw HTML body from `bodies.db` (decompress)
 2. **Sanitize** (see section 2) — strip dangerous elements, rewrite/block URLs
 3. **Inject** tracking-blocking rules (remove `<img>` with remote `src`, strip `<link>` and `@import`, etc.) unless the sender is in the `image_allowlist`
 4. **Pass** sanitized HTML to the rendering backend

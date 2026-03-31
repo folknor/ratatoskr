@@ -44,7 +44,7 @@ Built with LLMs. See [LLM.md](LLM.md).
 - Contact import
 
 **Privacy & Security**
-- Local-first — all data stays on disk in SQLite + zstd-compressed content stores
+- Local-first — all data stays on disk in SQLite + compressed content stores
 - AES-256-GCM credential encryption
 - AMP email stripping, URL tracking removal
 - BIMI brand indicator verification
@@ -58,7 +58,7 @@ Cargo workspace with 23 crates. Key boundaries:
 | `app` | iced UI — Elm architecture (boot/update/view) |
 | `rtsk` | Facade over all subsystems: accounts, OAuth, actions, DB |
 | `sync` | Sync pipeline, JWZ threading, filters, categorization |
-| `store` | Body store (zstd), inline images, attachment cache |
+| `store` | Body store (flate2+zlib-rs), inline images, attachment cache |
 | `squeeze` | Attachment compression (CLI + library) |
 | `gmail` / `jmap` / `graph` / `imap` | Provider implementations |
 | `cmdk` | Fuzzy command search with context-sensitive keybindings |

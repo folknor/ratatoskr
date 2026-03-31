@@ -99,9 +99,9 @@ pub struct ThreadMessage {
     /// Quote/signature-stripped summary for collapsed view.
     /// Falls back to snippet when loaded via legacy path.
     pub snippet: Option<String>,
-    /// Full HTML body from the body store (zstd-decompressed).
+    /// Full HTML body from the body store (decompressed).
     pub body_html: Option<String>,
-    /// Full plain text body from the body store (zstd-decompressed).
+    /// Full plain text body from the body store (decompressed).
     pub body_text: Option<String>,
     pub is_read: bool,
     pub is_starred: bool,

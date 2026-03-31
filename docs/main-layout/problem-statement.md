@@ -518,7 +518,7 @@ The conversation view's collapse rules and collapsed-message summaries depend on
 - **Per-message read state** — collapse rules (§ Message Collapsing) need `is_read` per message. Currently available in the DB but not surfaced in a thread-detail query.
 - **Message ownership** — rule 4 (collapse user's own messages) needs matching `from_address` against the account's identity addresses. The `identities` table exists but there's no utility to test "is this message mine?"
 - **Quote/signature stripping** — collapsed message appearance (§ Collapsed Message Appearance) shows "first ~60 characters of the body, stripped of quotes and signatures." This requires a text extraction pass that strips `>` quoted lines and signature blocks (`-- \n` delimiter). Neither utility exists.
-- **Body text access** — even the stripped-summary path needs body text. Bodies live in `bodies.db` (zstd-compressed), accessed via `BodyStore`. The conversation view needs a query that joins thread → messages → bodies, or a denormalized snippet that's pre-stripped.
+- **Body text access** — even the stripped-summary path needs body text. Bodies live in `bodies.db` (compressed), accessed via `BodyStore`. The conversation view needs a query that joins thread → messages → bodies, or a denormalized snippet that's pre-stripped.
 
 **Work required:** A `get_thread_detail()` query/function in core — see `docs/main-layout/implementation-spec.md` Slice 2. This is backend work, not UI work.
 

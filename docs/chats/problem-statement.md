@@ -355,7 +355,7 @@ high-confidence stripping source for sent messages (layer 3 above).
 - **Threading engine already exists** — JWZ threading in `crates/sync/` already
   groups messages into threads
 - **Body store exists** — message content is already parsed and stored in
-  `bodies.db` (zstd-compressed) via `BodyStoreState`
+  `bodies.db` (compressed) via `BodyStoreState`
 - **Contact system exists** — contact sync, deduplication, seen addresses, photo
   cache, and FTS5 search are all implemented
 - **Threads are single-account** — no cross-account thread complexity; the

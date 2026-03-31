@@ -5,7 +5,7 @@ use rusqlite::{Connection, params};
 
 /// Separate SQLite database for compressed email bodies.
 ///
-/// Bodies are stored as zstd-compressed BLOBs, keeping the metadata DB small.
+/// Bodies are stored as zlib-compressed BLOBs, keeping the metadata DB small.
 /// Same `Mutex<Connection>` + `spawn_blocking` pattern as `DbState`.
 #[derive(Clone)]
 pub struct BodyStoreState {
@@ -21,20 +21,34 @@ pub struct MessageBody {
     pub body_text: Option<String>,
 }
 
-/// Zstd compression level — 3 gives ~3-4x ratio with fast compression.
-const ZSTD_LEVEL: i32 = 3;
+/// Zlib compression level — 3 gives a good ratio/speed trade-off.
+const ZLIB_LEVEL: u32 = 3;
 
 fn compress(data: &str) -> Result<Vec<u8>, String> {
-    zstd::encode_all(data.as_bytes(), ZSTD_LEVEL).map_err(|e| {
-        log::error!("zstd compression failed: {e}");
-        format!("zstd compress: {e}")
+    use flate2::write::ZlibEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(ZLIB_LEVEL));
+    encoder.write_all(data.as_bytes()).map_err(|e| {
+        log::error!("zlib compression failed: {e}");
+        format!("zlib compress: {e}")
+    })?;
+    encoder.finish().map_err(|e| {
+        log::error!("zlib compression finish failed: {e}");
+        format!("zlib compress finish: {e}")
     })
 }
 
 fn decompress(data: &[u8]) -> Result<String, String> {
-    let bytes = zstd::decode_all(data).map_err(|e| {
-        log::error!("zstd decompression failed: {e}");
-        format!("zstd decompress: {e}")
+    use flate2::read::ZlibDecoder;
+    use std::io::Read;
+
+    let mut decoder = ZlibDecoder::new(data);
+    let mut bytes = Vec::new();
+    decoder.read_to_end(&mut bytes).map_err(|e| {
+        log::error!("zlib decompression failed: {e}");
+        format!("zlib decompress: {e}")
     })?;
     String::from_utf8(bytes).map_err(|e| {
         log::error!("UTF-8 decode failed after decompression: {e}");
