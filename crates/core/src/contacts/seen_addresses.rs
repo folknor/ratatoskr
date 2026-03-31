@@ -1,16 +1,16 @@
 //! Seen-address integration for the contacts domain.
 //!
-//! This module re-exports and wraps the `ratatoskr-seen-addresses` crate,
-//! providing a unified interface for the contacts system. The `seen-addresses`
+//! This module re-exports and wraps the `seen` crate,
+//! providing a unified interface for the contacts system. The `seen`
 //! crate handles the low-level address observation tracking; this module
 //! bridges it into the contacts domain.
 //!
-//! The seen-addresses crate shares the same DB tables and domain as contacts,
+//! The seen crate shares the same DB tables and domain as contacts,
 //! so it is logically part of the contacts module even though it remains a
 //! separate crate for compilation speed.
 
 // Re-export the core types for consumers.
-pub use ratatoskr_seen_addresses::{
+pub use seen::{
     AddressObservation, Direction, MessageAddresses, SeenAddressMatch,
     backfill_seen_addresses, ingest_from_messages,
 };

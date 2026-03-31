@@ -1,4 +1,4 @@
-use ratatoskr_system_fonts::SystemFonts;
+use system_fonts::SystemFonts;
 
 #[tokio::main]
 async fn main() {
@@ -15,7 +15,7 @@ async fn main() {
     );
 }
 
-fn format_font(font: &Option<ratatoskr_system_fonts::SystemFont>) -> String {
+fn format_font(font: &Option<system_fonts::SystemFont>) -> String {
     match font {
         Some(f) => match f.size {
             Some(size) => format!("{} {}pt", f.family, size),

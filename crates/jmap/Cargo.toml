@@ -23,7 +23,7 @@ base64.workspace = true
 db = { path = "../db" }
 store = { path = "../stores" }
 search = { path = "../search" }
-ratatoskr-seen-addresses = { path = "../seen-addresses" }
+seen = { path = "../seen" }
 common = { path = "../common" }
 sync = { path = "../sync" }
 
@@ -34,6 +34,6 @@ jmap-client = { path = "/home/folk/Programs/jmap-client" }
 tokio-tungstenite = { version = "0.29", features = ["native-tls"] }
 futures = "0.3"
 rusqlite.workspace = true
-sha2 = "0.10"
+sha2 = "0.11"
 native-tls = "0.2"
 uuid = { version = "1", features = ["v4"] }

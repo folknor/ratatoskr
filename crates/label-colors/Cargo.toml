@@ -1,5 +1,5 @@
 [package]
-name = "ratatoskr-label-colors"
+name = "label-colors"
 description = "Deterministic label color resolution for Ratatoskr"
 version.workspace = true
 edition.workspace = true

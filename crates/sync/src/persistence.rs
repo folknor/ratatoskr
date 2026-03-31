@@ -210,14 +210,14 @@ pub fn upsert_thread_participants(
 
     // from_address is a single email (possibly with display name)
     if let Some(from) = from_address {
-        let parsed = ratatoskr_seen_addresses::parse::parse_address_list(from);
+        let parsed = seen::parse::parse_address_list(from);
         for (_, email) in parsed {
             emails.insert(email.to_lowercase());
         }
     }
 
     for field in [to_addresses, cc_addresses, bcc_addresses].into_iter().flatten() {
-        let parsed = ratatoskr_seen_addresses::parse::parse_address_list(field);
+        let parsed = seen::parse::parse_address_list(field);
         for (_, email) in parsed {
             emails.insert(email.to_lowercase());
         }

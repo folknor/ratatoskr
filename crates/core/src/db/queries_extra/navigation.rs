@@ -219,7 +219,7 @@ fn build_smart_folders(
         .into_iter()
         .map(|sf| {
             // Smart folders are scope-exempt: always count across all accounts.
-            let unread_count = ratatoskr_smart_folder::count_smart_folder_unread(
+            let unread_count = smart_folder::count_smart_folder_unread(
                 conn,
                 &sf.query,
                 &AccountScope::All,

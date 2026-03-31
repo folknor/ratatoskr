@@ -26,9 +26,9 @@ db = { path = "../db" }
 store = { path = "../stores" }
 cmdk = { path = "../cmdk" }
 search = { path = "../search" }
-ratatoskr-smart-folder = { path = "../smart-folder" }
-ratatoskr-label-colors = { path = "../label-colors" }
-ratatoskr-seen-addresses = { path = "../seen-addresses" }
+smart-folder = { path = "../smart-folder" }
+label-colors = { path = "../label-colors" }
+seen = { path = "../seen" }
 common = { path = "../common" }
 smtp = { path = "../smtp" }
 sync = { path = "../sync" }
@@ -56,7 +56,7 @@ jmap-client = { path = "/home/folk/Programs/jmap-client" }
 tokio-tungstenite = { version = "0.29", features = ["native-tls"] }
 async-trait = "0.1"
 hickory-resolver = { version = "0.25", features = ["tokio"] }
-sha2 = "0.10"
+sha2 = "0.11"
 unicode-segmentation = "1.12"
 regex = "1"
 url = "2"

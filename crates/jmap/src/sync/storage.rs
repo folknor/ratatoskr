@@ -56,7 +56,7 @@ pub(crate) async fn persist_messages(
         store_bodies(ctx.body_store, messages),
         store_inline_images(ctx, messages),
         index_messages(ctx.search, ctx.account_id, messages),
-        ratatoskr_seen_addresses::ingest_from_messages(ctx.db, ctx.account_id, messages),
+        seen::ingest_from_messages(ctx.db, ctx.account_id, messages),
     );
 
     Ok(())

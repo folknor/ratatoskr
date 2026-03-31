@@ -12,7 +12,7 @@ members = [
     "crates/ai",
     "crates/calendar",
     "crates/label-colors",
-    "crates/seen-addresses",
+    "crates/seen",
     "crates/common",
     "crates/smtp",
     "crates/sync",

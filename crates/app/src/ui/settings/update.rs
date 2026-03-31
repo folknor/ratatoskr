@@ -1079,7 +1079,7 @@ impl Settings {
             return;
         };
         // Resolve current color index from hex
-        let presets = ratatoskr_label_colors::category_colors::all_presets();
+        let presets = label_colors::category_colors::all_presets();
         let color_index = account.account_color.as_deref().and_then(|hex| {
             presets.iter().position(|(_, bg, _)| *bg == hex)
         });
@@ -1114,7 +1114,7 @@ impl Settings {
             return (Task::none(), None);
         }
 
-        let presets = ratatoskr_label_colors::category_colors::all_presets();
+        let presets = label_colors::category_colors::all_presets();
         let color_hex = editor.account_color_index
             .and_then(|i| presets.get(i))
             .map(|(_, bg, _)| (*bg).to_string());

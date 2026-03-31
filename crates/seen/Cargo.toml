@@ -1,5 +1,5 @@
 [package]
-name = "ratatoskr-seen-addresses"
+name = "seen"
 description = "Address observation tracking and autocomplete for Ratatoskr"
 version.workspace = true
 edition.workspace = true

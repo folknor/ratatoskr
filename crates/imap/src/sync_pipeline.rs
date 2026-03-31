@@ -4,7 +4,7 @@ use store::body_store::BodyStoreState;
 use db::db::DbState;
 use store::inline_image_store::{InlineImage, InlineImageStoreState};
 use search::{SearchDocument, SearchState};
-use ratatoskr_seen_addresses::MessageAddresses;
+use seen::MessageAddresses;
 use sync::persistence;
 
 use super::convert::ConvertedMessage;
@@ -253,7 +253,7 @@ pub(crate) async fn store_chunk(
         store_bodies(body_store, chunk),
         store_inline_images(inline_images, chunk),
         index_messages(search, chunk, account_id),
-        ratatoskr_seen_addresses::ingest_from_messages(db, account_id, &addr_data),
+        seen::ingest_from_messages(db, account_id, &addr_data),
     );
 
     Ok(())

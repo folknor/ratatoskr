@@ -23,7 +23,7 @@ rusqlite.workspace = true
 db = { path = "../db" }
 store = { path = "../stores" }
 search = { path = "../search" }
-ratatoskr-seen-addresses = { path = "../seen-addresses" }
+seen = { path = "../seen" }
 
 # Crate-specific deps
 tokio = { workspace = true, features = ["sync"] }

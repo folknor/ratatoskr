@@ -137,7 +137,7 @@ fn main() -> iced::Result {
             .build()
             .ok();
         rt.and_then(|rt| {
-            let fonts = rt.block_on(ratatoskr_system_fonts::SystemFonts::detect());
+            let fonts = rt.block_on(system_fonts::SystemFonts::detect());
             fonts.ui.map(|f| f.family)
         })
     };
@@ -2337,7 +2337,7 @@ impl App {
         // Set search highlight terms when in search mode
         if self.thread_list.mode == ui::thread_list::ThreadListMode::Search {
             let query = self.search_query.text().to_string();
-            let parsed = ratatoskr_smart_folder::parse_query(&query);
+            let parsed = smart_folder::parse_query(&query);
             self.reading_pane.search_highlight_terms = parsed
                 .free_text
                 .split_whitespace()

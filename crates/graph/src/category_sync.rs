@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use super::client::GraphClient;
-use ratatoskr_label_colors::category_colors;
+use label_colors::category_colors;
 use db::db::DbState;
 
 #[derive(Debug, Deserialize)]

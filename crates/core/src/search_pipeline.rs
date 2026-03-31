@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use db::db::types::{AccountScope, DbThread};
 use search::{SearchParams, SearchResult as TantivyResult, SearchState};
-use ratatoskr_smart_folder::{ParsedQuery, parse_query, query_threads};
+use smart_folder::{ParsedQuery, parse_query, query_threads};
 use rusqlite::Connection;
 
 // ── Result type ─────────────────────────────────────────────

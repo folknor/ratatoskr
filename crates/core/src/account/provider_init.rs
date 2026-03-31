@@ -25,7 +25,7 @@ fn next_account_color(conn: &Connection) -> String {
         })
         .unwrap_or_default();
 
-    let presets = ratatoskr_label_colors::category_colors::all_presets();
+    let presets = label_colors::category_colors::all_presets();
     for (_, bg, _) in presets {
         if !used.iter().any(|u| u == *bg) {
             return (*bg).to_string();

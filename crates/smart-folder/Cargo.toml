@@ -1,5 +1,5 @@
 [package]
-name = "ratatoskr-smart-folder"
+name = "smart-folder"
 description = "Smart folder query engine for Ratatoskr"
 version.workspace = true
 edition.workspace = true

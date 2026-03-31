@@ -35,7 +35,7 @@ pub struct ParsedMessageBase {
     pub mdn_requested: bool,
 }
 
-impl ratatoskr_seen_addresses::MessageAddresses for ParsedMessageBase {
+impl seen::MessageAddresses for ParsedMessageBase {
     fn sender_address(&self) -> Option<&str> {
         self.from_address.as_deref()
     }
@@ -60,7 +60,7 @@ impl ratatoskr_seen_addresses::MessageAddresses for ParsedMessageBase {
 #[macro_export]
 macro_rules! impl_message_addresses {
     ($ty:ty) => {
-        impl ratatoskr_seen_addresses::MessageAddresses for $ty {
+        impl seen::MessageAddresses for $ty {
             fn sender_address(&self) -> Option<&str> {
                 self.base.sender_address()
             }
@@ -68,13 +68,13 @@ macro_rules! impl_message_addresses {
                 self.base.sender_name()
             }
             fn to_addresses(&self) -> Option<&str> {
-                ratatoskr_seen_addresses::MessageAddresses::to_addresses(&self.base)
+                seen::MessageAddresses::to_addresses(&self.base)
             }
             fn cc_addresses(&self) -> Option<&str> {
-                ratatoskr_seen_addresses::MessageAddresses::cc_addresses(&self.base)
+                seen::MessageAddresses::cc_addresses(&self.base)
             }
             fn bcc_addresses(&self) -> Option<&str> {
-                ratatoskr_seen_addresses::MessageAddresses::bcc_addresses(&self.base)
+                seen::MessageAddresses::bcc_addresses(&self.base)
             }
             fn msg_date_ms(&self) -> i64 {
                 self.base.msg_date_ms()

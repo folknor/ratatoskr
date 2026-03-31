@@ -10,7 +10,7 @@ Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 - **`store`** (`crates/stores/`) — Content stores: email body store (zstd-compressed), inline image store, attachment file cache.
 - **`sync`** (`crates/sync/`) — Sync pipeline, threading (JWZ), categorization, filters, smart labels.
 - **`provider`** (`crates/common/`) — Shared provider helpers, encryption (AES-256-GCM), email parsing, HTML sanitization.
-- **`ratatoskr-label-colors`** (`crates/label-colors/`) — Label color resolution + Exchange category color presets.
+- **`label-colors`** (`crates/label-colors/`) — Label color resolution + Exchange category color presets.
 - **Providers**: `gmail`, `jmap`, `graph`, `imap` — each in `crates/{name}/`.
 
 ## Commands

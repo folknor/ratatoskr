@@ -43,7 +43,7 @@ pub(super) async fn process_single_thread(
         store_bodies(body_store, &parsed),
         store_inline_images(inline_images, &parsed),
         index_messages(search, account_id, &parsed),
-        ratatoskr_seen_addresses::ingest_from_messages(db, account_id, &parsed),
+        seen::ingest_from_messages(db, account_id, &parsed),
     );
 
     Ok(history_id)

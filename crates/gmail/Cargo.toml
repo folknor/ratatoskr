@@ -22,7 +22,7 @@ chrono.workspace = true
 db = { path = "../db" }
 store = { path = "../stores" }
 search = { path = "../search" }
-ratatoskr-seen-addresses = { path = "../seen-addresses" }
+seen = { path = "../seen" }
 common = { path = "../common" }
 sync = { path = "../sync" }
 
@@ -30,7 +30,7 @@ sync = { path = "../sync" }
 log = "0.4"
 async-trait = "0.1"
 rusqlite.workspace = true
-sha2 = "0.10"
+sha2 = "0.11"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4"] }
 futures = "0.3"

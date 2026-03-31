@@ -25,16 +25,16 @@ rusqlite.workspace = true
 db = { path = "../db" }
 store = { path = "../stores" }
 search = { path = "../search" }
-ratatoskr-seen-addresses = { path = "../seen-addresses" }
+seen = { path = "../seen" }
 common = { path = "../common" }
-ratatoskr-label-colors = { path = "../label-colors" }
+label-colors = { path = "../label-colors" }
 sync = { path = "../sync" }
 
 # Crate-specific deps
 log = "0.4"
 async-trait = "0.1"
 uuid = { version = "1", features = ["v4"] }
-sha2 = "0.10"
+sha2 = "0.11"
 mail-parser = "0.11"
 futures = "0.3"
 urlencoding = "2"

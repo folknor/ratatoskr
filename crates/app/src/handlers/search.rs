@@ -32,9 +32,9 @@ impl App {
         // Trigger typeahead based on cursor context (assume cursor at end)
         let text = self.search_query.text().to_string();
         let cursor_pos = text.len();
-        let ctx = ratatoskr_smart_folder::analyze_cursor_context(&text, cursor_pos);
+        let ctx = smart_folder::analyze_cursor_context(&text, cursor_pos);
         match ctx {
-            ratatoskr_smart_folder::CursorContext::InsideOperator {
+            smart_folder::CursorContext::InsideOperator {
                 operator,
                 partial_value,
                 ..
@@ -271,9 +271,9 @@ impl App {
 
         let query = self.search_query.text().to_string();
         let cursor_pos = query.len();
-        let ctx = ratatoskr_smart_folder::analyze_cursor_context(&query, cursor_pos);
+        let ctx = smart_folder::analyze_cursor_context(&query, cursor_pos);
 
-        if let ratatoskr_smart_folder::CursorContext::InsideOperator {
+        if let smart_folder::CursorContext::InsideOperator {
             value_start,
             value_end,
             ..

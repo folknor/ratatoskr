@@ -411,7 +411,7 @@ The function `count_smart_folder_unread(conn, query, scope)` already exists in `
 **Change in `crates/core/src/db/queries_extra/navigation.rs`:**
 
 ```rust
-use ratatoskr_smart_folder::count_smart_folder_unread;
+use smart_folder::count_smart_folder_unread;
 
 fn build_smart_folders(
     conn: &Connection,
@@ -522,7 +522,7 @@ This is a single query regardless of label count (batched GROUP BY), so it scale
 | File | Change |
 |------|--------|
 | `crates/core/src/db/queries_extra/navigation.rs` | Wire `count_smart_folder_unread`, add `get_label_unread_counts` |
-| `crates/core/Cargo.toml` | Ensure `ratatoskr-smart-folder` is a dependency |
+| `crates/core/Cargo.toml` | Ensure `smart-folder` is a dependency |
 
 ---
 

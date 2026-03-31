@@ -20,4 +20,4 @@ log = "0.4"
 db = { path = "../db" }
 store = { path = "../stores" }
 search = { path = "../search" }
-ratatoskr-seen-addresses = { path = "../seen-addresses" }
+seen = { path = "../seen" }
