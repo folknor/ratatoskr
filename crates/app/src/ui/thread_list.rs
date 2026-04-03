@@ -319,11 +319,23 @@ impl Component for ThreadList {
     ) -> (Task<ThreadListMessage>, Option<ThreadListEvent>) {
         match message {
             ThreadListMessage::SelectThread(idx) => {
+                if self.selected_thread == Some(idx) && self.selected_threads.is_empty() {
+                    return (Task::none(), None);
+                }
+
+                let had_multi_select = !self.selected_threads.is_empty();
                 // Plain click: clear multi-select, select single.
                 self.clear_multi_select();
                 self.selected_thread = Some(idx);
                 self.last_selected_anchor = Some(idx);
-                (Task::none(), Some(ThreadListEvent::ThreadSelected(idx)))
+                if had_multi_select {
+                    (
+                        Task::none(),
+                        Some(ThreadListEvent::MultiSelectionChanged(0)),
+                    )
+                } else {
+                    (Task::none(), Some(ThreadListEvent::ThreadSelected(idx)))
+                }
             }
             ThreadListMessage::ToggleThread(idx) => {
                 // Ctrl+click: toggle individual thread in/out.

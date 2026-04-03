@@ -142,7 +142,10 @@ mod tests {
 
     #[test]
     fn decode_test_split() {
-        assert_eq!(decode_utf7_imap("&AWA-iuk&AWE-liad&ARcBfgEX-"), "Šiukšliadėžė");
+        assert_eq!(
+            decode_utf7_imap("&AWA-iuk&AWE-liad&ARcBfgEX-"),
+            "Šiukšliadėžė"
+        );
     }
 
     #[test]

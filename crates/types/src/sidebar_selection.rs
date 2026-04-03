@@ -123,10 +123,9 @@ impl SidebarSelection {
             Self::Inbox => Some(FolderId::from("INBOX")),
             Self::Folder(f) => Some(FolderId::from(f.as_folder_id_str())),
             Self::ProviderFolder(fid) => Some(fid.clone()),
-            Self::SmartFolder { .. }
-            | Self::Bundle(_)
-            | Self::FeatureView(_)
-            | Self::Tag(_) => None,
+            Self::SmartFolder { .. } | Self::Bundle(_) | Self::FeatureView(_) | Self::Tag(_) => {
+                None
+            }
         }
     }
 

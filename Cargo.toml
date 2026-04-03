@@ -1,35 +1,35 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/db",
-    "crates/core",
-    "crates/app",
-    "crates/squeeze",
-    "crates/cmdk",
-    "crates/search",
-    "crates/stores",
-    "crates/smart-folder",
-    "crates/ai",
-    "crates/calendar",
-    "crates/label-colors",
-    "crates/seen",
-    "crates/common",
-    "crates/smtp",
-    "crates/sync",
-    "crates/gmail",
-    "crates/jmap",
-    "crates/graph",
-    "crates/imap",
-    "crates/system-fonts",
-    "crates/rte",
-    "crates/iced-drop",
-    "crates/import",
-    "crates/dev-seed",
-    "crates/types",
+"crates/db",
+"crates/core",
+"crates/app",
+"crates/squeeze",
+"crates/cmdk",
+"crates/search",
+"crates/stores",
+"crates/smart-folder",
+"crates/ai",
+"crates/calendar",
+"crates/label-colors",
+"crates/seen",
+"crates/common",
+"crates/smtp",
+"crates/sync",
+"crates/gmail",
+"crates/jmap",
+"crates/graph",
+"crates/imap",
+"crates/system-fonts",
+"crates/rte",
+"crates/iced-drop",
+"crates/import",
+"crates/dev-seed",
+"crates/types",
 ]
 
 exclude = [
-    "docs/research/slug-glyph-proto",
+"docs/research/slug-glyph-proto",
 ]
 
 [workspace.package]
@@ -89,7 +89,7 @@ serde_json = "1"
 tokio = { version = "1" }
 
 # Database
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.39" }
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
@@ -118,3 +118,12 @@ panic = "abort"
 
 [profile.release.package."*"]
 opt-level = 3
+
+[profile.dev]
+opt-level = 0
+debug = 1
+incremental = true
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+opt-level = 2

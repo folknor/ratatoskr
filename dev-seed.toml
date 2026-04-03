@@ -1,4 +1,4 @@
 threads = 500
 accounts = 4          # 1-4 (gmail, imap, graph, jmap)
-locale = "mixed"      # "mixed", "latin", "intl"
-seed = 42             # RNG seed for reproducibility
+locale = "latin"      # "mixed", "latin", "intl"
+seed = 46             # RNG seed for reproducibility

@@ -378,9 +378,9 @@ fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
                     .as_deref()
                     .or(acc.display_name.as_deref())
                     .unwrap_or(&acc.email);
-                let icon = match acc.account_color.as_deref() {
-                    Some(hex) => DropdownIcon::ColorDot(theme::hex_to_color(hex)),
-                    None => DropdownIcon::Avatar(name),
+                let icon = DropdownIcon::Avatar {
+                    name,
+                    color: acc.account_color.as_deref().map(theme::hex_to_color),
                 };
                 (icon, name)
             } else {
@@ -423,12 +423,11 @@ fn scope_dropdown(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
             .as_deref()
             .or(acc.display_name.as_deref())
             .unwrap_or(&acc.email);
-        let icon = match acc.account_color.as_deref() {
-            Some(hex) => DropdownIcon::ColorDot(theme::hex_to_color(hex)),
-            None => DropdownIcon::Avatar(name),
-        };
         entries.push(DropdownEntry {
-            icon,
+            icon: DropdownIcon::Avatar {
+                name,
+                color: acc.account_color.as_deref().map(theme::hex_to_color),
+            },
             label: name,
             selected: matches!(&sidebar.selected_scope, ViewScope::Account(id) if *id == acc.id),
             on_press: SidebarMessage::SelectAccount(idx),
@@ -539,9 +538,7 @@ fn smart_folders(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
                     query: query.clone(),
                 }
             } else {
-                SidebarMessage::Select(SidebarSelection::SmartFolder {
-                    id: f.id.clone(),
-                })
+                SidebarMessage::Select(SidebarSelection::SmartFolder { id: f.id.clone() })
             };
             let is_active = matches!(
                 &sidebar.selection,
@@ -1002,9 +999,9 @@ fn render_flat_labels<'a>(
                 &f.id,
                 theme::avatar_color(&f.name),
                 active,
-                SidebarMessage::Select(SidebarSelection::ProviderFolder(
-                    FolderId::from(f.id.clone()),
-                )),
+                SidebarMessage::Select(SidebarSelection::ProviderFolder(FolderId::from(
+                    f.id.clone(),
+                ))),
             );
             let query_prefix = build_search_here_prefix(&f.name, sidebar);
             mouse_area(label_btn)

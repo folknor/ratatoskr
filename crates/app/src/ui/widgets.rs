@@ -113,8 +113,7 @@ pub fn leading_slot<'a, M: 'a>(content: impl Into<Element<'a, M>>, size: f32) ->
 
 // ── Avatar ──────────────────────────────────────────────
 
-pub fn avatar_circle<'a, M: 'a>(name: &str, size: f32) -> Element<'a, M> {
-    let color = theme::avatar_color(name);
+fn avatar_circle_with_color<'a, M: 'a>(name: &str, size: f32, color: Color) -> Element<'a, M> {
     let letter = theme::initial(name);
 
     let circle = Canvas::new(CirclePainter { color, size })
@@ -137,6 +136,20 @@ pub fn avatar_circle<'a, M: 'a>(name: &str, size: f32) -> Element<'a, M> {
     .width(size)
     .height(size)
     .into()
+}
+
+pub fn avatar_circle<'a, M: 'a>(name: &str, size: f32) -> Element<'a, M> {
+    let color = theme::avatar_color(name);
+    avatar_circle_with_color(name, size, color)
+}
+
+pub fn account_avatar_circle<'a, M: 'a>(
+    name: &str,
+    account_color: Option<Color>,
+    size: f32,
+) -> Element<'a, M> {
+    let color = account_color.unwrap_or_else(|| theme::avatar_color(name));
+    avatar_circle_with_color(name, size, color)
 }
 
 /// Render a sender avatar: BIMI logo if available, initials circle otherwise.
@@ -397,7 +410,10 @@ pub fn collapsible_section<'a, M: Clone + 'a>(
 /// Element internally — callers never pass pre-built UI.
 pub enum DropdownIcon<'a> {
     /// Renders an avatar circle from a name string.
-    Avatar(&'a str),
+    Avatar {
+        name: &'a str,
+        color: Option<Color>,
+    },
     /// Renders an icon glyph from a codepoint char.
     Icon(char),
     /// Renders a filled color dot.
@@ -407,7 +423,7 @@ pub enum DropdownIcon<'a> {
 impl DropdownIcon<'_> {
     fn into_element<'a, M: 'a>(self, size: f32) -> Element<'a, M> {
         match self {
-            DropdownIcon::Avatar(name) => avatar_circle(name, size),
+            DropdownIcon::Avatar { name, color } => account_avatar_circle(name, color, size),
             DropdownIcon::Icon(codepoint) => icon::to_icon(codepoint)
                 .size(ICON_XL)
                 .style(text::secondary)

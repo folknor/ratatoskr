@@ -6,8 +6,8 @@
 
 pub mod preset_colors;
 
-use preset_colors::all_presets;
 use db::db::types::DbLabel;
+use preset_colors::all_presets;
 
 /// Deterministic color assignment for a label that has no synced color.
 ///

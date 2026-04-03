@@ -156,7 +156,13 @@ fn current_mailbox_rights(app: &App) -> (Option<bool>, Option<bool>, Option<bool
                 .as_ref()?
                 .folders
                 .iter()
-                .find_map(|f| if f.id == nav_id { f.rights.as_ref() } else { None })
+                .find_map(|f| {
+                    if f.id == nav_id {
+                        f.rights.as_ref()
+                    } else {
+                        None
+                    }
+                })
         });
 
     match rights {
@@ -349,45 +355,37 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
 
         // Navigation — folder/view targets
         CommandId::NavGoInbox => Some(nav_msg(SidebarSelection::Inbox)),
-        CommandId::NavGoStarred => {
-            Some(nav_msg(SidebarSelection::Folder(types::SystemFolder::Starred)))
-        }
-        CommandId::NavGoSent => {
-            Some(nav_msg(SidebarSelection::Folder(types::SystemFolder::Sent)))
-        }
-        CommandId::NavGoDrafts => {
-            Some(nav_msg(SidebarSelection::Folder(types::SystemFolder::Draft)))
-        }
-        CommandId::NavGoSnoozed => {
-            Some(nav_msg(SidebarSelection::Folder(types::SystemFolder::Snoozed)))
-        }
-        CommandId::NavGoTrash => {
-            Some(nav_msg(SidebarSelection::Folder(types::SystemFolder::Trash)))
-        }
-        CommandId::NavGoAllMail => {
-            Some(nav_msg(SidebarSelection::Folder(types::SystemFolder::AllMail)))
-        }
-        CommandId::NavGoPrimary => {
-            Some(nav_msg(SidebarSelection::Bundle(types::Bundle::Primary)))
-        }
-        CommandId::NavGoUpdates => {
-            Some(nav_msg(SidebarSelection::Bundle(types::Bundle::Updates)))
-        }
+        CommandId::NavGoStarred => Some(nav_msg(SidebarSelection::Folder(
+            types::SystemFolder::Starred,
+        ))),
+        CommandId::NavGoSent => Some(nav_msg(SidebarSelection::Folder(types::SystemFolder::Sent))),
+        CommandId::NavGoDrafts => Some(nav_msg(SidebarSelection::Folder(
+            types::SystemFolder::Draft,
+        ))),
+        CommandId::NavGoSnoozed => Some(nav_msg(SidebarSelection::Folder(
+            types::SystemFolder::Snoozed,
+        ))),
+        CommandId::NavGoTrash => Some(nav_msg(SidebarSelection::Folder(
+            types::SystemFolder::Trash,
+        ))),
+        CommandId::NavGoAllMail => Some(nav_msg(SidebarSelection::Folder(
+            types::SystemFolder::AllMail,
+        ))),
+        CommandId::NavGoPrimary => Some(nav_msg(SidebarSelection::Bundle(types::Bundle::Primary))),
+        CommandId::NavGoUpdates => Some(nav_msg(SidebarSelection::Bundle(types::Bundle::Updates))),
         CommandId::NavGoPromotions => {
             Some(nav_msg(SidebarSelection::Bundle(types::Bundle::Promotions)))
         }
-        CommandId::NavGoSocial => {
-            Some(nav_msg(SidebarSelection::Bundle(types::Bundle::Social)))
-        }
-        CommandId::NavGoNewsletters => {
-            Some(nav_msg(SidebarSelection::Bundle(types::Bundle::Newsletters)))
-        }
-        CommandId::NavGoTasks => {
-            Some(nav_msg(SidebarSelection::FeatureView(types::FeatureView::Tasks)))
-        }
-        CommandId::NavGoAttachments => {
-            Some(nav_msg(SidebarSelection::FeatureView(types::FeatureView::Attachments)))
-        }
+        CommandId::NavGoSocial => Some(nav_msg(SidebarSelection::Bundle(types::Bundle::Social))),
+        CommandId::NavGoNewsletters => Some(nav_msg(SidebarSelection::Bundle(
+            types::Bundle::Newsletters,
+        ))),
+        CommandId::NavGoTasks => Some(nav_msg(SidebarSelection::FeatureView(
+            types::FeatureView::Tasks,
+        ))),
+        CommandId::NavGoAttachments => Some(nav_msg(SidebarSelection::FeatureView(
+            types::FeatureView::Attachments,
+        ))),
         CommandId::NavEscape => Some(Message::Escape),
 
         // Email actions
@@ -427,9 +425,9 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
         CommandId::TaskCreate => Some(Message::TaskAction(TaskAction::Create)),
         CommandId::TaskCreateFromEmail => Some(Message::TaskAction(TaskAction::CreateFromEmail)),
         CommandId::TaskTogglePanel => Some(Message::TaskAction(TaskAction::TogglePanel)),
-        CommandId::TaskViewAll => {
-            Some(nav_msg(SidebarSelection::FeatureView(types::FeatureView::Tasks)))
-        }
+        CommandId::TaskViewAll => Some(nav_msg(SidebarSelection::FeatureView(
+            types::FeatureView::Tasks,
+        ))),
 
         // View
         CommandId::ViewToggleSidebar => Some(Message::ToggleSidebar),
@@ -555,16 +553,12 @@ pub fn dispatch_parameterized(id: CommandId, args: CommandArgs) -> Option<Messag
             selection: SidebarSelection::ProviderFolder(folder_id),
             account_id: Some(account_id),
         })),
-        (
-            CommandId::NavigateToLabel,
-            CommandArgs::NavigateToTag {
-                tag_id,
-                account_id,
-            },
-        ) => Some(Message::NavigateTo(NavigationTarget::Sidebar {
-            selection: SidebarSelection::Tag(tag_id),
-            account_id: Some(account_id),
-        })),
+        (CommandId::NavigateToLabel, CommandArgs::NavigateToTag { tag_id, account_id }) => {
+            Some(Message::NavigateTo(NavigationTarget::Sidebar {
+                selection: SidebarSelection::Tag(tag_id),
+                account_id: Some(account_id),
+            }))
+        }
         (CommandId::SmartFolderSave, CommandArgs::SmartFolderSave { name }) => {
             Some(Message::SaveAsSmartFolder(name))
         }

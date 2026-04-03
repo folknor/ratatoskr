@@ -23,10 +23,7 @@ pub enum CommandArgs {
     },
     /// Navigate to a tag-type label. Includes account_id because
     /// cross-account navigation needs to scope the sidebar.
-    NavigateToTag {
-        tag_id: TagId,
-        account_id: String,
-    },
+    NavigateToTag { tag_id: TagId, account_id: String },
     /// SmartFolderSave -- name from Text input
     SmartFolderSave { name: String },
 }

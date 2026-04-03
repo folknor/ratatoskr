@@ -106,22 +106,24 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
 
         for body in &pending_bodies {
             let html_blob = {
-                use flate2::write::ZlibEncoder;
                 use flate2::Compression;
+                use flate2::write::ZlibEncoder;
                 use std::io::Write;
                 let mut enc = ZlibEncoder::new(Vec::new(), Compression::new(3));
                 enc.write_all(body.body_html.as_bytes())
                     .map_err(|e| format!("zlib compress html: {e}"))?;
-                enc.finish().map_err(|e| format!("zlib compress html: {e}"))?
+                enc.finish()
+                    .map_err(|e| format!("zlib compress html: {e}"))?
             };
             let text_blob = {
-                use flate2::write::ZlibEncoder;
                 use flate2::Compression;
+                use flate2::write::ZlibEncoder;
                 use std::io::Write;
                 let mut enc = ZlibEncoder::new(Vec::new(), Compression::new(3));
                 enc.write_all(body.body_text.as_bytes())
                     .map_err(|e| format!("zlib compress text: {e}"))?;
-                enc.finish().map_err(|e| format!("zlib compress text: {e}"))?
+                enc.finish()
+                    .map_err(|e| format!("zlib compress text: {e}"))?
             };
             stmt.execute(rusqlite::params![body.message_id, html_blob, text_blob])
                 .map_err(|e| format!("insert body: {e}"))?;

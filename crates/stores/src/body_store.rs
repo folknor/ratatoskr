@@ -26,8 +26,8 @@ const ZLIB_LEVEL: u32 = 3;
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn compress(data: &str) -> Result<Vec<u8>, String> {
-    use flate2::write::ZlibEncoder;
     use flate2::Compression;
+    use flate2::write::ZlibEncoder;
     use std::io::Write;
 
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(ZLIB_LEVEL));

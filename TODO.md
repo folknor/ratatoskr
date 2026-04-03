@@ -117,6 +117,8 @@
 
 - [ ] **Restore OS-based theme and 1.0 scale** *(Deferred until 1.0)* — Revert to `"System"` theme, persist user prefs.
 
+- [ ] **Bundle SQLite for release builds** *(Deferred until 1.0)* — Re-enable `rusqlite/bundled` feature for release builds so the binary ships a known SQLite version with FTS5 guaranteed. Dev builds use system libsqlite3 for faster compiles.
+
 ## Roadmap Features — Remaining Work
 
 Features with backend complete but UI or integration work remaining. Each references its roadmap spec.

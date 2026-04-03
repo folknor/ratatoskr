@@ -592,9 +592,8 @@ fn execute_search_sql_fallback(
                 ("AND t.account_id = ?2".to_string(), vec![id.clone()])
             }
             rtsk::db::types::AccountScope::Multiple(ids) => {
-                let placeholders: Vec<String> = (0..ids.len())
-                    .map(|i| format!("?{}", i + 2))
-                    .collect();
+                let placeholders: Vec<String> =
+                    (0..ids.len()).map(|i| format!("?{}", i + 2)).collect();
                 (
                     format!("AND t.account_id IN ({})", placeholders.join(",")),
                     ids.clone(),
@@ -635,8 +634,7 @@ fn execute_search_sql_fallback(
                 is_local_draft: false,
             })
         };
-        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
-            vec![Box::new(pattern)];
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(pattern)];
         for p in &scope_params {
             params.push(Box::new(p.clone()));
         }

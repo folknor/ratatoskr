@@ -50,13 +50,13 @@ use iced::widget::{Space, column, container, mouse_area, row, stack};
 use iced::{Element, Length, Point, Size, Task, Theme};
 use pop_out::compose::ComposeMode;
 use pop_out::{PopOutMessage, PopOutWindow};
+use rtsk::db::queries::get_threads_for_bundle;
 use rtsk::db::queries_extra::navigation::{
     NavigationState, get_navigation_state, get_shared_mailbox_navigation,
 };
 use rtsk::db::queries_extra::{
     get_public_folder_items, get_threads_for_shared_mailbox, get_threads_scoped,
 };
-use rtsk::db::queries::get_threads_for_bundle;
 use rtsk::db::types::{AccountScope, DbThread};
 use rtsk::generation::{GenerationCounter, GenerationToken, Nav, PopOut, Search, ThreadDetail};
 use rtsk::scope::ViewScope;
