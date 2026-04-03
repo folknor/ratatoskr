@@ -197,7 +197,7 @@ fn execute_count_query(
 }
 
 /// Label-based folder IDs whose unread count comes from `thread_labels`.
-const LABEL_FOLDER_IDS: &[&str] = &["INBOX", "SENT", "DRAFT", "TRASH", "SPAM"];
+const LABEL_FOLDER_IDS: &[&str] = &["INBOX", "SENT", "DRAFT", "TRASH", "SPAM", "all-mail"];
 
 /// Return unread counts for each universal folder, aggregated across `scope`.
 ///

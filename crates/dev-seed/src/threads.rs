@@ -277,14 +277,14 @@ pub fn generate_threads(
             if num_msgs == 1 {
                 sender_name = participants[0].display_name.clone();
                 sender_email = participants[0].email.clone();
-                to_addr = format!("{} <{}>", acc.name, acc.email);
+                to_addr = format!("{} <{}>", acc.display_name, acc.email);
             } else if mi % 2 == 0 {
                 let p = &participants[(mi as usize) % participants.len()];
                 sender_name = p.display_name.clone();
                 sender_email = p.email.clone();
-                to_addr = format!("{} <{}>", acc.name, acc.email);
+                to_addr = format!("{} <{}>", acc.display_name, acc.email);
             } else {
-                sender_name = acc.name.clone();
+                sender_name = acc.display_name.clone();
                 sender_email = acc.email.clone();
                 to_addr = participants
                     .iter()
@@ -460,12 +460,23 @@ pub fn generate_threads(
             .map_err(|e| format!("insert thread_label (folder): {e}"))?;
         }
 
+        if !matches!(folder_name, "Trash" | "Spam" | "Drafts")
+            && let Some((_, label_id)) = acc.labels.iter().find(|(name, _)| name == "All Mail")
+        {
+            conn.execute(
+                "INSERT OR IGNORE INTO thread_labels (thread_id, account_id, label_id)
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![thread_id, acc.id, label_id],
+            )
+            .map_err(|e| format!("insert thread_label (all mail): {e}"))?;
+        }
+
         // Thread labels: user label based on category
         let category_label = match cat {
-            Category::Work => Some("Work"),
-            Category::Personal => Some("Personal"),
-            Category::Newsletter => Some("Newsletters"),
-            Category::Commerce => Some("Receipts"),
+            Category::Work => acc.category_labels.work,
+            Category::Personal => acc.category_labels.personal,
+            Category::Newsletter => acc.category_labels.newsletters,
+            Category::Commerce => acc.category_labels.receipts,
             Category::Notification => None,
         };
         if let Some(target) = category_label {

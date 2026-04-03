@@ -58,7 +58,7 @@ impl SystemFolder {
             Self::Snoozed => "SNOOZED",
             Self::Trash => "TRASH",
             Self::Spam => "SPAM",
-            Self::AllMail => "ALL_MAIL",
+            Self::AllMail => "all-mail",
         }
     }
 }

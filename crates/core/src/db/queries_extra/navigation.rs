@@ -126,13 +126,11 @@ pub fn get_navigation_state(
             log::error!("Failed to build account labels for {account_id}: {e}");
             e
         })?);
+        folders.extend(build_account_tags(conn, account_id).map_err(|e| {
+            log::error!("Failed to build account tags for {account_id}: {e}");
+            e
+        })?);
     }
-
-    // Tags (section 4) are always loaded from all accounts, regardless of scope.
-    folders.extend(build_all_account_tags(conn).map_err(|e| {
-        log::error!("Failed to build account tags: {e}");
-        e
-    })?);
 
     log::debug!("Navigation state built: {} folders", folders.len());
     Ok(NavigationState {
@@ -160,7 +158,7 @@ const SIDEBAR_UNIVERSAL_FOLDERS: &[(&str, &str)] = &[
     ("DRAFT", "Drafts"),
     ("TRASH", "Trash"),
     ("SPAM", "Spam"),
-    ("ALL_MAIL", "All Mail"),
+    ("all-mail", "All Mail"),
 ];
 
 /// Universal folders with their unread counts.
@@ -303,45 +301,33 @@ fn build_account_labels(
         .collect())
 }
 
-/// Load all tag-type labels from all accounts, grouped by normalized name.
-///
-/// Returns one NavigationFolder per unique normalized label name, with
-/// an aggregated unread count across all accounts that have that label.
-fn build_all_account_tags(conn: &Connection) -> Result<Vec<NavigationFolder>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT l.name,
-                    COALESCE(SUM(CASE WHEN t.is_read = 0 THEN 1 ELSE 0 END), 0) AS unread_count
-             FROM labels l
-             LEFT JOIN thread_labels tl ON l.id = tl.label_id AND l.account_id = tl.account_id
-             LEFT JOIN threads t ON tl.thread_id = t.id AND tl.account_id = t.account_id
-             WHERE l.label_kind = 'tag'
-               AND l.visible = 1
-               AND (t.shared_mailbox_id IS NULL OR t.id IS NULL) AND (t.is_chat_thread = 0 OR t.id IS NULL)
-             GROUP BY l.name COLLATE NOCASE
-             ORDER BY l.name COLLATE NOCASE ASC",
-        )
-        .map_err(|e| e.to_string())?;
+/// Account-specific tag labels.
+fn build_account_tags(conn: &Connection, account_id: &str) -> Result<Vec<NavigationFolder>, String> {
+    let all_labels = get_labels(conn, account_id)?;
+    let unread_by_label = get_label_unread_counts(conn, account_id)?;
 
-    stmt.query_map([], |row| {
-        let name: String = row.get("name")?;
-        let unread_count: i64 = row.get("unread_count")?;
-        Ok(NavigationFolder {
-            id: format!("tag:{}", name.to_lowercase().trim()),
-            name,
-            folder_kind: FolderKind::AccountTag,
-            unread_count,
-            account_id: None, // cross-account
-            parent_id: None,
-            label_semantics: Some(LabelSemantics::Tag),
-            query: None,
-            rights: None,
-            is_subscribed: None,
+    Ok(all_labels
+        .into_iter()
+        .filter(|label| label.visible)
+        .filter(|label| label.label_kind == "tag")
+        .map(|label| {
+            let unread_count = unread_by_label.get(&label.id).copied().unwrap_or(0);
+            let rights = rights_from_label(&label);
+
+            NavigationFolder {
+                is_subscribed: label.is_subscribed,
+                id: label.id,
+                name: label.name,
+                folder_kind: FolderKind::AccountTag,
+                unread_count,
+                account_id: Some(label.account_id),
+                parent_id: None,
+                label_semantics: Some(LabelSemantics::Tag),
+                query: None,
+                rights,
+            }
         })
-    })
-    .map_err(|e| e.to_string())?
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|e| e.to_string())
+        .collect())
 }
 
 /// Determine label semantics based on the email provider.

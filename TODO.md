@@ -2,17 +2,17 @@
 
 ## Remaining Work
 
-- [ ] **Avatar in main window account selector** - Seems broken? Might be an issue with dev-seed? Currently it seems to show the account color as a small dot instead of the full avatar. Both in the actual input and the dropdown.
+- [x] ~~**Avatar in main window account selector**~~ — Fixed: the selector now renders full account avatars in both the trigger and dropdown, using the account color as the avatar background when available.
 
 - [x] ~~**Investigate dev-seed labels**~~ — Fixed: sidebar had two sections both titled "LABELS" sharing the same toggle. Provider folders now render as "FOLDERS" with own toggle; tags render as "LABELS" with own toggle.
 
-- [ ] **Expand dev-seed** - The dev-seed script needs to create pinned searches, Smart Folders, contact groups, VIP contacts. Also verify that attachments are actual files. Needs to create actual signatures for contacts, both HTML and simple ones. Needs to create more emails with links and other non-text content. Needs to create fake shared accounts and mailboxes. Also needs to set up different labels per account. Should use different names for different accounts; currently every account uses the same name - should be Work/Private/whatever.
+- [ ] **Expand dev-seed** - The dev-seed script needs to create pinned searches, Smart Folders, contact groups, VIP contacts. Also verify that attachments are actual files. Needs to create actual signatures for contacts, both HTML and simple ones. Needs to create more emails with links and other non-text content. Needs to create fake shared accounts and mailboxes.
 
 - [ ] **dev-seed calendars** - Obvious.
 
 - [ ] **Divide up sidebar** - The top part with the Compose button, account selector, and calendar button should not scroll along with the rest of the content, but be stickied to the top like the Settings button is stickied to the bottom.
 
-- [ ] **Mail list mouse clicks** - Currently when the user clicks or doubleclicks the same thread that is currently opened, we re-render it for every mouse click, which means the whole reading pane flashes once or twice.
+- [x] ~~**Mail list mouse clicks**~~ — Fixed: clicking or double-clicking the already-open thread no longer reloads the reading pane and cause flashing.
 
 - [ ] **Settings row help icon** - Add support for a help (?) icon with a tooltip for settings rows. Should anchor to the right side of the label, hugging the label. First candidate: Message Dates.
 
@@ -119,6 +119,8 @@
 
 - [ ] **Bundle SQLite for release builds** *(Deferred until 1.0)* — Re-enable `rusqlite/bundled` feature for release builds so the binary ships a known SQLite version with FTS5 guaranteed. Dev builds use system libsqlite3 for faster compiles.
 
+- [ ] **Reconsider sidebar layout** *(Deferred until right before 1.0)* — Currently the spec says: (1) sidebar should not show any Labels section when "All Accounts" is selected, (2) when a single account is selected, only labels belonging to that account should be shown, and (3) that for providers that have a "folder" concept, the users folders should show in the Labels section. We might need to re-think all 3.
+
 ## Roadmap Features — Remaining Work
 
 Features with backend complete but UI or integration work remaining. Each references its roadmap spec.
@@ -202,6 +204,8 @@ Backend complete (Gmail + JMAP sync). Exchange fetch permanently blocked (no pub
 ### BIMI — `docs/roadmap/bimi.md`
 
 Backend complete (DNS + SVG + cache).
+
+- [ ] **BIMI cache** — Is this actually working? I dont think we cache for example if we get no response. We should cache that as well, and not re-ping every time. Caches should persist across sessions as well so we dont re-ping BIMI for every email every time we start the app.
 
 ### Auto-Responses — `docs/auto-responses/problem-statement.md`
 
