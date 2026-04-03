@@ -3,6 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
 
+use super::pinned_searches::ensure_pinned_search_schema;
+
 // ── DB connection ───────────────────────────────────────
 
 pub struct Db {
@@ -47,6 +49,7 @@ impl Db {
 
         // Run pending migrations on the writable connection.
         rtsk::db::migrations::run_all(&write_conn).map_err(|e| format!("migrations: {e}"))?;
+        ensure_pinned_search_schema(&write_conn)?;
 
         log::info!("Database opened, migrations applied");
         Ok(Self {

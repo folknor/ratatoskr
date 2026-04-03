@@ -19,11 +19,34 @@ pub struct PinnedSearch {
     pub query: String,
     pub created_at: i64,
     pub updated_at: i64,
+    pub scope_account_id: Option<String>,
     #[allow(dead_code)]
     pub thread_ids: Option<Vec<(String, String)>>,
 }
 
 // ── Pinned search CRUD ───────────────────────────────────────
+
+pub(crate) fn ensure_pinned_search_schema(conn: &rusqlite::Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS pinned_searches (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             query TEXT NOT NULL,
+             created_at INTEGER NOT NULL,
+             updated_at INTEGER NOT NULL,
+             scope_account_id TEXT
+         );
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_pinned_searches_query
+             ON pinned_searches(query);
+         CREATE TABLE IF NOT EXISTS pinned_search_threads (
+             pinned_search_id INTEGER NOT NULL
+                 REFERENCES pinned_searches(id) ON DELETE CASCADE,
+             thread_id TEXT NOT NULL,
+             account_id TEXT NOT NULL,
+             PRIMARY KEY (pinned_search_id, thread_id, account_id)
+         );",
+    )
+    .map_err(|e| format!("create pinned search schema: {e}"))
+}
 
 impl Db {
     /// Creates a pinned search, or updates the existing one if
@@ -32,6 +55,7 @@ impl Db {
         &self,
         query: String,
         thread_ids: Vec<(String, String)>,
+        scope_account_id: Option<String>,
     ) -> Result<i64, String> {
         self.with_write_conn(move |conn| {
             let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
@@ -47,16 +71,18 @@ impl Db {
 
             let pinned_id = if let Some(id) = existing_id {
                 tx.execute(
-                    "UPDATE pinned_searches SET updated_at = ?1 WHERE id = ?2",
-                    params![now, id],
+                    "UPDATE pinned_searches
+                     SET updated_at = ?1, scope_account_id = ?2
+                     WHERE id = ?3",
+                    params![now, scope_account_id, id],
                 )
                 .map_err(|e| e.to_string())?;
                 id
             } else {
                 tx.execute(
-                    "INSERT INTO pinned_searches (query, created_at, updated_at)
-                     VALUES (?1, ?2, ?2)",
-                    params![query, now],
+                    "INSERT INTO pinned_searches (query, created_at, updated_at, scope_account_id)
+                     VALUES (?1, ?2, ?2, ?3)",
+                    params![query, now, scope_account_id],
                 )
                 .map_err(|e| e.to_string())?;
                 tx.last_insert_rowid()
@@ -98,6 +124,7 @@ impl Db {
         id: i64,
         query: String,
         thread_ids: Vec<(String, String)>,
+        scope_account_id: Option<String>,
     ) -> Result<(), String> {
         self.with_write_conn(move |conn| {
             let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
@@ -118,9 +145,9 @@ impl Db {
 
             tx.execute(
                 "UPDATE pinned_searches
-                 SET query = ?1, updated_at = ?2
-                 WHERE id = ?3",
-                params![query, now, id],
+                 SET query = ?1, updated_at = ?2, scope_account_id = ?3
+                 WHERE id = ?4",
+                params![query, now, scope_account_id, id],
             )
             .map_err(|e| e.to_string())?;
 
@@ -166,7 +193,7 @@ impl Db {
         self.with_conn(|conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, query, created_at, updated_at
+                    "SELECT id, query, created_at, updated_at, scope_account_id
                      FROM pinned_searches
                      ORDER BY updated_at DESC",
                 )
@@ -178,6 +205,7 @@ impl Db {
                     query: row.get("query")?,
                     created_at: row.get("created_at")?,
                     updated_at: row.get("updated_at")?,
+                    scope_account_id: row.get("scope_account_id")?,
                     thread_ids: None,
                 })
             })

@@ -267,6 +267,7 @@ pub enum Message {
     DismissPinnedSearch(i64),
     PinnedSearchDismissed(i64, Result<(), String>),
     PinnedSearchSaved(Result<i64, String>),
+    PinnedSearchRefreshed(i64, Result<Vec<Thread>, String>),
     PinnedSearchesExpired(Result<u64, String>),
     RefreshPinnedSearch(i64),
     ExpiryTick,
@@ -403,6 +404,7 @@ struct App {
     // Pinned searches
     pinned_searches: Vec<db::PinnedSearch>,
     editing_pinned_search: Option<i64>,
+    suppress_next_pinned_search_save: bool,
     expiry_ran: bool,
 
     no_accounts: bool,
@@ -576,6 +578,7 @@ impl App {
             search_history: Vec::new(),
             pinned_searches: Vec::new(),
             editing_pinned_search: None,
+            suppress_next_pinned_search_save: false,
             expiry_ran: false,
             no_accounts: false,
             add_account_wizard: None,
@@ -1067,6 +1070,9 @@ impl App {
                 self.handle_pinned_search_dismissed(id, result)
             }
             Message::PinnedSearchSaved(result) => self.handle_pinned_search_saved(result),
+            Message::PinnedSearchRefreshed(id, result) => {
+                self.handle_pinned_search_refreshed(id, result)
+            }
             Message::PinnedSearchesExpired(result) => self.handle_pinned_searches_expired(result),
             Message::RefreshPinnedSearch(id) => self.handle_refresh_pinned_search(id),
             Message::ExpiryTick => self.handle_expiry_tick(),

@@ -6,6 +6,7 @@ use crate::db::{self, Thread};
 use crate::ui::sidebar::truncate_query;
 use crate::ui::thread_list::ThreadListMode;
 use crate::{App, Message};
+use rtsk::db::types::AccountScope;
 
 // ── Search handling ────────────────────────────────────
 
@@ -90,13 +91,25 @@ impl App {
                 self.thread_list.set_threads(threads);
                 self.clear_thread_selection();
 
+                 if self.suppress_next_pinned_search_save {
+                    self.suppress_next_pinned_search_save = false;
+                    return Task::none();
+                }
+
                 // Create or update pinned search
                 if !query.trim().is_empty() {
                     let db = Arc::clone(&self.db);
+                    let scope_account_id =
+                        self.current_scope().account_id().map(ToOwned::to_owned);
                     if let Some(editing_id) = self.editing_pinned_search {
                         return Task::perform(
                             async move {
-                                db.update_pinned_search(editing_id, query, thread_ids)
+                                db.update_pinned_search(
+                                    editing_id,
+                                    query,
+                                    thread_ids,
+                                    scope_account_id,
+                                )
                                     .await
                                     .map(|()| editing_id)
                             },
@@ -104,13 +117,17 @@ impl App {
                         );
                     }
                     return Task::perform(
-                        async move { db.create_or_update_pinned_search(query, thread_ids).await },
+                        async move {
+                            db.create_or_update_pinned_search(query, thread_ids, scope_account_id)
+                                .await
+                        },
                         Message::PinnedSearchSaved,
                     );
                 }
                 Task::none()
             }
             Err(e) => {
+                self.suppress_next_pinned_search_save = false;
                 self.status = format!("Search error: {e}");
                 Task::none()
             }
@@ -146,6 +163,8 @@ impl App {
         _id: String,
         query: String,
     ) -> Task<Message> {
+        self.clear_pinned_search_context();
+        self.suppress_next_pinned_search_save = true;
         self.search_query.set_text(query.clone());
         self.thread_list.search_query = query;
 
@@ -358,7 +377,6 @@ impl App {
 
         self.sidebar.active_pinned_search = Some(id);
         self.editing_pinned_search = Some(id);
-        self.sidebar.selection = types::SidebarSelection::Inbox;
 
         let _ = self.nav_generation.next();
         let _ = self.thread_generation.next();
@@ -368,7 +386,7 @@ impl App {
         if let Some(ps) = self.pinned_searches.iter().find(|p| p.id == id) {
             let label = truncate_query(&ps.query, 30);
             self.thread_list
-                .set_context(format!("Search: {label}"), "All Accounts".to_string());
+                .set_context(format!("Search: {label}"), pinned_search_scope_name(self, ps));
         }
 
         let db = Arc::clone(&self.db);
@@ -486,6 +504,41 @@ impl App {
         }
     }
 
+    pub(crate) fn handle_pinned_search_refreshed(
+        &mut self,
+        id: i64,
+        result: Result<Vec<Thread>, String>,
+    ) -> Task<Message> {
+        match result {
+            Ok(threads) => {
+                if let Some(ps) = self.pinned_searches.iter().find(|p| p.id == id) {
+                    let label = truncate_query(&ps.query, 30);
+                    self.search_query.reset(ps.query.clone());
+                    self.thread_list.search_query.clone_from(&ps.query);
+                    self.thread_list
+                        .set_context(format!("Search: {label}"), pinned_search_scope_name(self, ps));
+                }
+
+                self.sidebar.active_pinned_search = Some(id);
+                self.editing_pinned_search = Some(id);
+                self.thread_list.mode = ThreadListMode::Search;
+                self.status = format!("{} threads (pinned search)", threads.len());
+                self.thread_list.set_threads(threads);
+                self.clear_thread_selection();
+
+                let db = Arc::clone(&self.db);
+                Task::perform(
+                    async move { db.list_pinned_searches().await },
+                    Message::PinnedSearchesLoaded,
+                )
+            }
+            Err(e) => {
+                self.status = format!("Refresh pinned search error: {e}");
+                Task::none()
+            }
+        }
+    }
+
     pub(crate) fn handle_pinned_searches_expired(
         &mut self,
         result: Result<u64, String>,
@@ -557,9 +610,12 @@ pub(crate) async fn execute_search(
 ) -> Result<Vec<Thread>, String> {
     db.with_conn(move |conn| {
         if let Some(ref ss) = search_state {
-            // TODO: Tantivy path also ignores scope — needs post-filtering or re-indexing
             let results = rtsk::search_pipeline::search(&query, ss, conn)?;
-            Ok(results.into_iter().map(unified_result_to_thread).collect())
+            Ok(results
+                .into_iter()
+                .map(unified_result_to_thread)
+                .filter(|thread| thread_matches_scope(thread, &scope))
+                .collect())
         } else {
             execute_search_sql_fallback(conn, &query, &scope)
         }
@@ -671,17 +727,62 @@ fn unified_result_to_thread(r: rtsk::search_pipeline::UnifiedSearchResult) -> Th
     }
 }
 
+fn thread_matches_scope(thread: &Thread, scope: &AccountScope) -> bool {
+    match scope {
+        AccountScope::All => true,
+        AccountScope::Single(id) => thread.account_id == *id,
+        AccountScope::Multiple(ids) => ids.iter().any(|id| thread.account_id == *id),
+    }
+}
+
+fn pinned_search_scope_name(app: &App, ps: &db::PinnedSearch) -> String {
+    let Some(account_id) = ps.scope_account_id.as_deref() else {
+        return "All Accounts".to_string();
+    };
+
+    app.sidebar
+        .accounts
+        .iter()
+        .find(|account| account.id == account_id)
+        .map(|account| {
+            account
+                .account_name
+                .clone()
+                .or_else(|| account.display_name.clone())
+                .unwrap_or_else(|| account.email.clone())
+        })
+        .unwrap_or_else(|| "All Accounts".to_string())
+}
+
 // ── Search phases 2+4 methods ──────────────────────────
 
 impl App {
     pub(crate) fn handle_refresh_pinned_search(&mut self, id: i64) -> Task<Message> {
-        for ps in &mut self.pinned_searches {
-            if ps.id == id {
-                ps.thread_ids = None;
-                break;
-            }
-        }
-        self.handle_select_pinned_search(id)
+        let Some(ps) = self.pinned_searches.iter().find(|ps| ps.id == id).cloned() else {
+            return Task::none();
+        };
+
+        let query = ps.query.clone();
+        let scope_account_id = ps.scope_account_id.clone();
+        let scope = scope_account_id
+            .as_ref()
+            .map_or(AccountScope::All, |id| AccountScope::Single(id.clone()));
+        let db = Arc::clone(&self.db);
+        let ss = self.search_state.clone();
+
+        Task::perform(
+            async move {
+                let threads = execute_search(Arc::clone(&db), ss, query.clone(), scope).await?;
+                let thread_ids = threads
+                    .iter()
+                    .map(|t| (t.id.clone(), t.account_id.clone()))
+                    .collect();
+                db.update_pinned_search(id, query, thread_ids, scope_account_id)
+                    .await?;
+                Ok(threads)
+            },
+            move |result| Message::PinnedSearchRefreshed(id, result),
+        )
     }
 
     pub(crate) fn handle_expiry_tick(&mut self) -> Task<Message> {

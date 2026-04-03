@@ -2,6 +2,7 @@ pub mod accounts;
 pub mod config;
 pub mod contacts;
 pub mod people;
+pub mod pinned_searches;
 pub mod templates;
 pub mod threads;
 
@@ -80,6 +81,7 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
         config.threads,
     )?;
     contacts::seed_vips(&conn, &mut rng, &pools.combined, &accs)?;
+    pinned_searches::seed_pinned_searches(&conn, &accs)?;
 
     conn.execute_batch("COMMIT")
         .map_err(|e| format!("commit: {e}"))?;

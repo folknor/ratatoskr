@@ -492,7 +492,7 @@ fn nav_items(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
     let mut col = column![].spacing(SPACE_XXS);
     for f in &universal {
         let sel = universal_folder_selection(&f.id);
-        let is_active = sidebar.selection == sel;
+        let is_active = sidebar_nav_selection_is_active(sidebar, &sel);
         let nav_btn = widgets::nav_button(
             None,
             &f.name,
@@ -527,10 +527,11 @@ fn smart_folders(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
             } else {
                 SidebarMessage::Select(SidebarSelection::SmartFolder { id: f.id.clone() })
             };
-            let is_active = matches!(
-                &sidebar.selection,
-                SidebarSelection::SmartFolder { id } if id == &f.id
-            );
+            let is_active = sidebar.active_pinned_search.is_none()
+                && matches!(
+                    &sidebar.selection,
+                    SidebarSelection::SmartFolder { id } if id == &f.id
+                );
             widgets::nav_button(
                 None,
                 &f.name,
@@ -654,6 +655,7 @@ fn pinned_searches_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
 
     for ps in &sidebar.pinned_searches {
         col = col.push(pinned_search_card(
+            sidebar,
             ps,
             sidebar.active_pinned_search == Some(ps.id),
         ));
@@ -672,12 +674,17 @@ fn is_results_stale(updated_at: i64) -> bool {
     delta.num_hours() >= 1
 }
 
-fn pinned_search_card(ps: &PinnedSearch, active: bool) -> Element<'_, SidebarMessage> {
+fn pinned_search_card<'a>(
+    sidebar: &'a Sidebar,
+    ps: &'a PinnedSearch,
+    active: bool,
+) -> Element<'a, SidebarMessage> {
     use iced::widget::text::Wrapping;
 
     let date_label = format_relative_time(ps.updated_at);
     let query_display = truncate_query(&ps.query, PINNED_SEARCH_QUERY_MAX_CHARS);
     let stale = is_results_stale(ps.updated_at);
+    let scope_label = pinned_search_scope_label(sidebar, ps);
 
     // Spec 1E.4: query is primary text, date is secondary
     let query_style: fn(&iced::Theme) -> text::Style =
@@ -692,14 +699,12 @@ fn pinned_search_card(ps: &PinnedSearch, active: bool) -> Element<'_, SidebarMes
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center);
 
-    // Staleness indicator: show when results are > 1 hour old
-    if stale {
-        meta_row = meta_row.push(
-            text("outdated")
-                .size(TEXT_XS)
-                .style(theme::TextClass::Muted.style()),
-        );
-    }
+    meta_row = meta_row.push(
+        text("•")
+            .size(TEXT_XS)
+            .style(theme::TextClass::Muted.style()),
+    );
+    meta_row = meta_row.push(text(scope_label).size(TEXT_SM).style(date_style));
 
     let text_col = column![
         text(query_display)
@@ -754,6 +759,25 @@ fn pinned_search_card(ps: &PinnedSearch, active: bool) -> Element<'_, SidebarMes
         .style(theme::ButtonClass::PinnedSearch { active }.style())
         .width(Length::Fill)
         .into()
+}
+
+fn pinned_search_scope_label(sidebar: &Sidebar, ps: &PinnedSearch) -> String {
+    let Some(account_id) = ps.scope_account_id.as_deref() else {
+        return "All Accounts".to_string();
+    };
+
+    sidebar
+        .accounts
+        .iter()
+        .find(|account| account.id == account_id)
+        .map(|account| {
+            account
+                .account_name
+                .clone()
+                .or_else(|| account.display_name.clone())
+                .unwrap_or_else(|| account.email.clone())
+        })
+        .unwrap_or_else(|| "All Accounts".to_string())
 }
 
 /// Formats a unix timestamp as a relative time string (e.g. "5 min ago", "2 hours ago").
@@ -901,10 +925,11 @@ fn render_label_tree<'a>(
             .iter()
             .any(|f| f.parent_id.as_deref() == Some(&node.folder.id));
         let is_collapsed = sidebar.collapsed_folders.contains(&node.folder.id);
-        let active = matches!(
-            &sidebar.selection,
-            SidebarSelection::ProviderFolder(fid) if fid.as_str() == node.folder.id
-        );
+        let active = sidebar.active_pinned_search.is_none()
+            && matches!(
+                &sidebar.selection,
+                SidebarSelection::ProviderFolder(fid) if fid.as_str() == node.folder.id
+            );
         let indent = TREE_INDENT * f32::from(node.depth);
 
         let mut item_row = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
@@ -983,10 +1008,11 @@ fn render_flat_labels<'a>(
         .iter()
         .take(12)
         .map(|f| {
-            let active = matches!(
-                &sidebar.selection,
-                SidebarSelection::ProviderFolder(fid) if fid.as_str() == f.id
-            );
+            let active = sidebar.active_pinned_search.is_none()
+                && matches!(
+                    &sidebar.selection,
+                    SidebarSelection::ProviderFolder(fid) if fid.as_str() == f.id
+                );
             let label_btn = widgets::label_nav_item(
                 &f.name,
                 &f.id,
@@ -1079,10 +1105,11 @@ fn render_tag_labels<'a>(
     folders
         .iter()
         .map(|f| {
-            let is_active = matches!(
-                &sidebar.selection,
-                SidebarSelection::Tag(tid) if tid.as_str() == f.id
-            );
+            let is_active = sidebar.active_pinned_search.is_none()
+                && matches!(
+                    &sidebar.selection,
+                    SidebarSelection::Tag(tid) if tid.as_str() == f.id
+                );
             widgets::label_nav_item(
                 &f.name,
                 &f.id,
@@ -1092,4 +1119,8 @@ fn render_tag_labels<'a>(
             )
         })
         .collect()
+}
+
+fn sidebar_nav_selection_is_active(sidebar: &Sidebar, selection: &SidebarSelection) -> bool {
+    sidebar.active_pinned_search.is_none() && sidebar.selection == *selection
 }

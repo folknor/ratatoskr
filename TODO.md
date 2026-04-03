@@ -66,6 +66,10 @@
 
 - [ ] **Link click handling (email content)** — Should open in system browser. Nothing happens.
 
+- [ ] **Link hover URL disclosure (email content)** — Links in email bodies need either a tooltip that shows the destination URL or status-bar disclosure. Decision still pending.
+
+- [ ] **Link context menu (email content)** — Right-clicking a link in an email body should offer actions like Copy Link and related link operations.
+
 - [ ] **Pop out message viewer body rendering** - The current pills for selecting Plain/Simple/Original/Source need to move. The spec currently doesn't say clearly where they should go. This needs to be resolved first.
 
 - [ ] **Pop out message viewer body rendering toggle buttons** - The current pills for selecting Plain/Simple/Original/Source have zero effect, and the "Source" button just shows a generic "error" about message bodies being in a separate database. Even with dev-seed.
@@ -134,6 +138,10 @@ Phases 1-6 complete (backend unified). **10 discrepancies remain** — see `docs
 ### Search — `docs/search/problem-statement.md`
 
 Backend pipeline exists (parser, SQL builder, Tantivy, unified router). **29 discrepancies remain** — see `docs/search/discrepancies.md`. Critical: combined path applies free text in SQL before Tantivy ranking, Tantivy-only results show wrong message metadata, date boundaries inconsistent across engines. Also typeahead, pinned search lifecycle, and smart folder management gaps.
+
+- [ ] **Separate search intents with typed contracts** — Smart Folder navigation, ad hoc search, pinned-search activation, and pinned-search refresh currently share the same search execution path, which causes sidebar-state and persistence side effects to leak across features. Smart Folders are scope-exempt first-class sidebar objects and must not inherit pinned-search or ad hoc search behavior from query-string reuse. Refactor this into explicit typed intents with compile-time-enforced handling rules if possible, similar to the action resolver / `types`-crate approach, so each intent must declare its source identity, scope semantics, whether it updates pinned searches, mutates the search bar, restores prior view state, records history, and affects sidebar activation.
+- [ ] **Pinned search refresh action** — Sidebar pinned searches need their `Refresh` button wired so the stored snapshot can be recomputed on demand.
+- [ ] **Promote pinned search to Smart Folder** — Sidebar pinned searches need an action that converts a pinned search into a Smart Folder.
 
 ### Calendar — `docs/calendar/problem-statement.md`
 

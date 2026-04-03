@@ -15,6 +15,7 @@ db = { path = "../db" }
 store = { path = "../stores" }
 
 rusqlite.workspace = true
+chrono.workspace = true
 rand = { version = "0.9", features = ["small_rng"] }
 flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
 toml = "1"
