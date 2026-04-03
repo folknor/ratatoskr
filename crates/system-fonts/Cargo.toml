@@ -12,6 +12,11 @@ workspace = true
 
 [dependencies]
 tracing = "0.1"
+hotpath = { workspace = true, optional = true }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { version = "5", default-features = false, features = ["tokio"] }

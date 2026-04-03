@@ -21,3 +21,8 @@ db = { path = "../db" }
 store = { path = "../stores" }
 search = { path = "../search" }
 seen = { path = "../seen" }
+hotpath = { workspace = true, optional = true }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath", "db/hotpath", "store/hotpath", "search/hotpath", "seen/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "db/hotpath-alloc", "store/hotpath-alloc", "search/hotpath-alloc", "seen/hotpath-alloc"]

@@ -20,3 +20,8 @@ serde.workspace = true
 log = "0.4"
 flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
+hotpath = { workspace = true, optional = true }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath", "db/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "db/hotpath-alloc"]

@@ -91,6 +91,7 @@ const CHORD_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1000
 fn main() -> iced::Result {
     env_logger::init();
     log::info!("Ratatoskr starting");
+    #[cfg(feature = "hotpath")]
     let _hotpath = hotpath::HotpathGuardBuilder::new("ratatoskr::main")
         .percentiles(&[50, 95, 99])
         .with_functions_limit(0)
@@ -798,6 +799,7 @@ impl App {
 
     /// Central message dispatch. Each arm should be a ONE-LINE delegation
     /// to a handler method in `handlers/*.rs`. Do not inline logic here.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             // Component delegation
@@ -1346,6 +1348,7 @@ impl App {
         ui::widgets::empty_placeholder("Window not found", "").into()
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn view_main_window(&self) -> Element<'_, Message> {
         if let Some(ref wizard) = self.add_account_wizard {
             if self.no_accounts {
@@ -1485,6 +1488,7 @@ impl App {
 // ── Component event handlers ───────────────────────────
 
 impl App {
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn handle_sidebar(&mut self, msg: SidebarMessage) -> Task<Message> {
         let (task, event) = self.sidebar.update(msg);
         let mut tasks = vec![task.map(Message::Sidebar)];
@@ -1559,6 +1563,7 @@ impl App {
         self.reading_pane.set_thread(None);
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn handle_thread_list(&mut self, msg: ThreadListMessage) -> Task<Message> {
         let (task, event) = self.thread_list.update(msg);
         let mut tasks = vec![task.map(Message::ThreadList)];
@@ -1634,6 +1639,7 @@ impl App {
         }
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn handle_reading_pane(&mut self, msg: ReadingPaneMessage) -> Task<Message> {
         let (task, event) = self.reading_pane.update(msg);
         let mut tasks = vec![task.map(Message::ReadingPane)];
@@ -2306,6 +2312,7 @@ impl App {
         ])
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn handle_select_thread(&mut self, idx: usize) -> Task<Message> {
         let thread = self.thread_list.threads.get(idx);
         if let Some(t) = thread {
@@ -2481,6 +2488,7 @@ impl App {
             .into()
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn view_main_layout(&self) -> Element<'_, Message> {
         let sidebar = container(self.sidebar.view().map(Message::Sidebar))
             .width(self.sidebar_width)
@@ -2704,10 +2712,12 @@ impl App {
 
 // ── Free functions ─────────────────────────────────────
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(crate) async fn load_accounts(db: Arc<Db>) -> Result<Vec<db::Account>, String> {
     db.get_accounts().await
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 async fn load_navigation(db: Arc<Db>, scope: AccountScope) -> Result<NavigationState, String> {
     db.with_conn(move |conn| get_navigation_state(conn, &scope))
         .await
@@ -2784,6 +2794,7 @@ async fn load_threads_for_bundle_view(
     .await
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 async fn load_threads_for_feature_view(feature: FeatureView) -> Result<Vec<Thread>, String> {
     match feature {
         // These sidebar destinations do not map to the mail thread list yet.
@@ -2791,6 +2802,7 @@ async fn load_threads_for_feature_view(feature: FeatureView) -> Result<Vec<Threa
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 async fn load_shared_mailbox_navigation(
     db: Arc<Db>,
     account_id: String,
@@ -2800,6 +2812,7 @@ async fn load_shared_mailbox_navigation(
         .await
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 async fn load_shared_mailbox_threads(
     db: Arc<Db>,
     account_id: String,
@@ -2822,6 +2835,7 @@ async fn load_shared_mailbox_threads(
     .await
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 async fn load_public_folder_items(
     db: Arc<Db>,
     account_id: String,

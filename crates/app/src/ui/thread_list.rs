@@ -492,6 +492,7 @@ impl Component for ThreadList {
         }
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn view(&self) -> Element<'_, ThreadListMessage> {
         let selection_count = self.selection_count();
         let header = thread_list_header(

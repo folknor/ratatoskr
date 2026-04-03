@@ -17,3 +17,8 @@ serde.workspace = true
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
 mail-parser = "0.11"
 log = "0.4"
+hotpath = { workspace = true, optional = true }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath", "common/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "common/hotpath-alloc"]

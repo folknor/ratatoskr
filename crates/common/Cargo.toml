@@ -39,3 +39,8 @@ lol_html = "2"
 ammonia = "4"
 aes-gcm = "0.10"
 getrandom = { version = "0.2", features = ["std"] }
+hotpath = { workspace = true, optional = true }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath", "db/hotpath", "store/hotpath", "search/hotpath", "seen/hotpath", "types/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "db/hotpath-alloc", "store/hotpath-alloc", "search/hotpath-alloc", "seen/hotpath-alloc", "types/hotpath-alloc"]

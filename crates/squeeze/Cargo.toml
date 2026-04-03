@@ -18,6 +18,8 @@ path = "src/main.rs"
 [features]
 default = []
 heic = ["dep:libheif-rs"]
+hotpath = ["dep:hotpath", "hotpath/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
 
 [lints]
 workspace = true
@@ -37,6 +39,7 @@ lopdf = "0.40"
 zip = { version = "8", default-features = false, features = ["deflate"] }
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
+hotpath = { workspace = true, optional = true }
 log = "0.4"
 
 [dependencies.libheif-rs]

@@ -26,3 +26,8 @@ tokio = { workspace = true, features = ["time"] }
 log = "0.4"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4"] }
+hotpath = { workspace = true, optional = true }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath", "rtsk/hotpath", "gmail/hotpath", "graph/hotpath", "jmap/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "rtsk/hotpath-alloc", "gmail/hotpath-alloc", "graph/hotpath-alloc", "jmap/hotpath-alloc"]

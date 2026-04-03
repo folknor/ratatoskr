@@ -106,6 +106,7 @@ fn system_label_ids() -> Vec<&'static str> {
 ///
 /// Returns universal folders with unread counts, smart folders, and
 /// (when scoped to a single account) that account's non-system labels.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_navigation_state(
     conn: &Connection,
     scope: &AccountScope,
@@ -398,6 +399,7 @@ fn get_label_unread_counts(
 ///
 /// Returns the shared mailbox's folder list with unread counts scoped to
 /// threads belonging to that mailbox.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_shared_mailbox_navigation(
     conn: &Connection,
     account_id: &str,

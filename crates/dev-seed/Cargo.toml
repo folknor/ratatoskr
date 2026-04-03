@@ -20,3 +20,8 @@ flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
 toml = "0.8"
 serde = { workspace = true }
 log = "0.4"
+hotpath = { workspace = true, optional = true }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath", "db/hotpath", "store/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "db/hotpath-alloc", "store/hotpath-alloc"]

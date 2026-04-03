@@ -39,3 +39,8 @@ mail-parser = "0.11"
 futures = "0.3"
 urlencoding = "2"
 getrandom = { version = "0.2", features = ["std"] }
+hotpath = { workspace = true, optional = true }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath", "db/hotpath", "store/hotpath", "search/hotpath", "seen/hotpath", "common/hotpath", "label-colors/hotpath", "sync/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "db/hotpath-alloc", "store/hotpath-alloc", "search/hotpath-alloc", "seen/hotpath-alloc", "common/hotpath-alloc", "label-colors/hotpath-alloc", "sync/hotpath-alloc"]

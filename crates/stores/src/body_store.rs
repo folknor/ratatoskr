@@ -24,6 +24,7 @@ pub struct MessageBody {
 /// Zlib compression level — 3 gives a good ratio/speed trade-off.
 const ZLIB_LEVEL: u32 = 3;
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn compress(data: &str) -> Result<Vec<u8>, String> {
     use flate2::write::ZlibEncoder;
     use flate2::Compression;
@@ -40,6 +41,7 @@ fn compress(data: &str) -> Result<Vec<u8>, String> {
     })
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn decompress(data: &[u8]) -> Result<String, String> {
     use flate2::read::ZlibDecoder;
     use std::io::Read;
@@ -63,6 +65,7 @@ impl BodyStoreState {
     }
 
     /// Open (or create) the body store database.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn init(app_data_dir: &Path) -> Result<Self, String> {
         std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
 
@@ -185,6 +188,7 @@ impl BodyStoreState {
     }
 
     /// Retrieve a single message body (decompressed).
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn get(&self, message_id: String) -> Result<Option<MessageBody>, String> {
         log::debug!("Retrieving body for message_id={message_id}");
         let conn = Arc::clone(&self.conn);
@@ -225,6 +229,7 @@ impl BodyStoreState {
     }
 
     /// Retrieve multiple message bodies in a single query.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn get_batch(&self, message_ids: Vec<String>) -> Result<Vec<MessageBody>, String> {
         if message_ids.is_empty() {
             return Ok(Vec::new());

@@ -500,7 +500,7 @@ impl SearchState {
 
         let combined = BooleanQuery::new(clauses);
         let top_docs = searcher
-            .search(&combined, &TopDocs::with_limit(limit))
+            .search(&combined, &TopDocs::with_limit(limit).order_by_score())
             .map_err(|e| format!("search: {e}"))?;
 
         let results = self.collect_results(&searcher, &top_docs)?;

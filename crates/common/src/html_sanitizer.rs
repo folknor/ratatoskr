@@ -299,6 +299,7 @@ fn whitelist_sanitize(html: &str) -> String {
 ///
 /// If any stage fails internally it logs a warning and passes its input
 /// through unchanged, so the pipeline is best-effort and never panics.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn sanitize_html_body(html: &str) -> String {
     if html.is_empty() {
         return String::new();
@@ -327,6 +328,7 @@ pub fn sanitize_html_body(html: &str) -> String {
 ///   placeholder unless the sender is allowlisted.
 /// - `cid:` URIs are always preserved (inline attachments).
 /// - AMP-specific elements (`amp-img`, `amp-list`, etc.) are stripped.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn sanitize_html_body_with_image_policy(
     html: &str,
     block_remote_images: bool,

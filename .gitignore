@@ -1,6 +1,7 @@
 # Dependencies
 research
 .plans
+.codex
 
 # Environment variables & secrets
 .env

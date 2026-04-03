@@ -11,6 +11,11 @@ rust-version.workspace = true
 iced_core = { path = "/home/folk/Programs/sluggrs/repos/iced/core" }
 iced_widget = { path = "/home/folk/Programs/sluggrs/repos/iced/widget", features = ["wgpu"] }
 iced_runtime = { path = "/home/folk/Programs/sluggrs/repos/iced/runtime" }
+hotpath = { workspace = true, optional = true }
 
 [lints]
 workspace = true
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]

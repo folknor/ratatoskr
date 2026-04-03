@@ -12,3 +12,8 @@ workspace = true
 
 [dependencies]
 serde.workspace = true
+hotpath = { workspace = true, optional = true }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]

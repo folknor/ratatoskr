@@ -752,6 +752,7 @@ fn runs_are_empty(runs: &[StyledRun]) -> bool {
 ///
 /// If the input is empty or unparseable, returns `Document::new()` (single
 /// empty paragraph).
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn from_html(html: &str) -> Document {
     if html.trim().is_empty() {
         return Document::new();

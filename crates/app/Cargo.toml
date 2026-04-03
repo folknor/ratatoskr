@@ -44,10 +44,40 @@ rfd = "0.17"
 store = { path = "../stores" }
 mime_guess = "2"
 dev-seed = { path = "../dev-seed", optional = true }
-hotpath = "0.14"
+hotpath = { workspace = true, optional = true }
 
 [features]
 default = ["dev-seed"]
 dev-seed = ["dep:dev-seed"]
-hotpath = ["rtsk/hotpath", "hotpath/hotpath"]
-hotpath-alloc = ["hotpath", "rtsk/hotpath-alloc", "hotpath/hotpath-alloc"]
+hotpath = [
+    "dep:hotpath",
+    "hotpath/hotpath",
+    "system-fonts/hotpath",
+    "cmdk/hotpath",
+    "rtsk/hotpath",
+    "types/hotpath",
+    "smart-folder/hotpath",
+    "label-colors/hotpath",
+    "iced-drop/hotpath",
+    "rte/hotpath",
+    "cal/hotpath",
+    "import/hotpath",
+    "store/hotpath",
+    "dev-seed?/hotpath",
+]
+hotpath-alloc = [
+    "hotpath",
+    "hotpath/hotpath-alloc",
+    "system-fonts/hotpath-alloc",
+    "cmdk/hotpath-alloc",
+    "rtsk/hotpath-alloc",
+    "types/hotpath-alloc",
+    "smart-folder/hotpath-alloc",
+    "label-colors/hotpath-alloc",
+    "iced-drop/hotpath-alloc",
+    "rte/hotpath-alloc",
+    "cal/hotpath-alloc",
+    "import/hotpath-alloc",
+    "store/hotpath-alloc",
+    "dev-seed?/hotpath-alloc",
+]

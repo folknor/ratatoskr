@@ -137,6 +137,7 @@ fn execute_thread_query_no_label(
 }
 
 /// Like `get_thread_count` but accepts an `AccountScope`.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_thread_count_scoped(
     conn: &Connection,
     scope: &AccountScope,
@@ -163,6 +164,7 @@ pub fn get_thread_count_scoped(
 }
 
 /// Like `get_unread_count` but accepts an `AccountScope`.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_unread_count_scoped(conn: &Connection, scope: &AccountScope) -> Result<i64, String> {
     let (scope_clause, scope_params) = account_scope_clause(scope, 1);
 
@@ -201,6 +203,7 @@ const LABEL_FOLDER_IDS: &[&str] = &["INBOX", "SENT", "DRAFT", "TRASH", "SPAM"];
 ///
 /// Starred uses `threads.is_starred`, Snoozed uses `threads.is_snoozed`,
 /// and all other folders use the `thread_labels` join.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_unread_counts_by_folder(
     conn: &Connection,
     scope: &AccountScope,
@@ -212,6 +215,7 @@ pub fn get_unread_counts_by_folder(
 }
 
 /// Return unread counts for each universal folder, grouped by account.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_unread_counts_by_folder_and_account(
     conn: &Connection,
     scope: &AccountScope,
@@ -357,6 +361,7 @@ fn get_flag_folder_unread_by_account(
 }
 
 /// Threads where `is_starred = 1`, scoped by `AccountScope`.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_starred_threads(
     conn: &Connection,
     scope: &AccountScope,
@@ -367,6 +372,7 @@ pub fn get_starred_threads(
 }
 
 /// Threads where `is_snoozed = 1`, scoped by `AccountScope`.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_snoozed_threads(
     conn: &Connection,
     scope: &AccountScope,
@@ -382,6 +388,7 @@ pub fn get_snoozed_threads(
 /// drafts (in the `local_drafts` table) are not included because they have a
 /// different schema and no `DbThread` representation. Use
 /// `get_draft_count_with_local()` for a count that includes both.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_draft_threads(
     conn: &Connection,
     scope: &AccountScope,
@@ -558,6 +565,7 @@ pub fn get_local_draft_summaries(
 /// Uses a CTE to pre-filter thread IDs by `shared_mailbox_id`, then scopes
 /// the latest-message subquery to only those threads (avoiding a full scan
 /// of the messages table).
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_threads_for_shared_mailbox(
     conn: &Connection,
     account_id: &str,
@@ -673,6 +681,7 @@ pub struct PublicFolderItem {
 }
 
 /// Items from a pinned public folder, ordered by received date.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_public_folder_items(
     conn: &Connection,
     account_id: &str,

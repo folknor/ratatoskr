@@ -393,6 +393,7 @@ impl Component for ReadingPane {
         }
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn view(&self) -> Element<'_, ReadingPaneMessage> {
         match self.current_thread.as_ref() {
             None => empty_reading_pane(),
@@ -411,6 +412,7 @@ impl ReadingPane {
     /// so that toolbar buttons can emit `Message::ExecuteCommand`
     /// directly. Internal reading pane messages are mapped via
     /// `Message::ReadingPane`.
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn view_with_commands(
         &self,
         registry: &CommandRegistry,
@@ -426,6 +428,7 @@ impl ReadingPane {
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn thread_view_with_commands<'a>(
     pane: &'a ReadingPane,
     thread_ref: &'a ThreadRef,
@@ -534,6 +537,7 @@ fn empty_reading_pane<'a>() -> Element<'a, ReadingPaneMessage> {
     .into()
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn thread_view<'a>(
     pane: &'a ReadingPane,
     thread_ref: &'a ThreadRef,
@@ -669,6 +673,7 @@ fn message_matches_search_terms(msg: &ThreadMessage, terms: &[String]) -> bool {
         || check(&msg.snippet)
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
     let messages_pad = Padding::from([0.0, SPACE_LG]);
     let first_message_date = pane.thread_messages.last().and_then(|m| m.date);

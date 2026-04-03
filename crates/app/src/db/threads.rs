@@ -119,6 +119,7 @@ fn convert_attachment(att: thread_detail::ThreadAttachment) -> ThreadAttachment 
 /// - Quote/signature-stripped collapsed summaries
 /// - Resolved label colors
 /// - Persisted attachment collapse state
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub async fn load_thread_detail(
     db: &Db,
     body_store: &BodyStoreState,

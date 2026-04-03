@@ -10,11 +10,14 @@ workspace = true
 [features]
 default = ["widget"]
 widget = ["dep:iced"]
+hotpath = ["dep:hotpath", "hotpath/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
 
 [dependencies]
 bitflags = "2"
 html5ever = "0.39"
 markup5ever = "0.39"
+hotpath = { workspace = true, optional = true }
 
 iced = { path = "/home/folk/Programs/sluggrs/repos/iced", default-features = false, features = [
     "wgpu", "tokio", "lazy", "advanced", "web-colors", "wayland", "image", "svg",

@@ -10,10 +10,6 @@ license.workspace = true
 [lints]
 workspace = true
 
-[features]
-hotpath = ["hotpath/hotpath"]
-hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
-
 [dependencies]
 # Workspace deps
 serde.workspace = true
@@ -51,7 +47,7 @@ mail-parser = "0.11"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
 utf7-imap = "0.3"
 socket2 = "0.6"
-tantivy = { version = "0.25", default-features = false, features = ["mmap", "stopwords", "lz4-compression"] }
+tantivy = { version = "0.26.0", default-features = false, features = ["mmap", "stemmer", "stopwords", "lz4-compression"] }
 flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
 getrandom = { version = "0.2", features = ["std"] }
 urlencoding = "2"
@@ -68,7 +64,11 @@ resvg = { version = "0.47", default-features = false }
 lol_html = "2"
 ammonia = "4"
 calcard = "0.3"
-hotpath = "0.14"
+hotpath = { workspace = true, optional = true }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath", "db/hotpath", "store/hotpath", "cmdk/hotpath", "search/hotpath", "smart-folder/hotpath", "label-colors/hotpath", "seen/hotpath", "common/hotpath", "smtp/hotpath", "sync/hotpath", "gmail/hotpath", "jmap/hotpath", "graph/hotpath", "imap/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "db/hotpath-alloc", "store/hotpath-alloc", "cmdk/hotpath-alloc", "search/hotpath-alloc", "smart-folder/hotpath-alloc", "label-colors/hotpath-alloc", "seen/hotpath-alloc", "common/hotpath-alloc", "smtp/hotpath-alloc", "sync/hotpath-alloc", "gmail/hotpath-alloc", "jmap/hotpath-alloc", "graph/hotpath-alloc", "imap/hotpath-alloc"]
 
 [dev-dependencies]
 tempfile = "3"

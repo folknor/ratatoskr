@@ -520,6 +520,7 @@ fn query_thread_attachments(
 /// Returns `(content_id, content_hash)` pairs for inline attachments
 /// that have both a CID and a content hash stored. Used to resolve
 /// `<img src="cid:...">` references in HTML email bodies.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn query_inline_cid_hashes(
     conn: &Connection,
     account_id: &str,
@@ -570,6 +571,7 @@ pub struct ThreadDbData {
 ///
 /// The caller should release the main DB lock after this returns, then
 /// call [`assemble_thread_detail`] with body data from the body store.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn query_thread_from_db(
     conn: &Connection,
     account_id: &str,
@@ -600,6 +602,7 @@ pub fn query_thread_from_db(
 ///
 /// Runs against the separate `bodies.db` connection. The caller should
 /// hold the body-store lock only for this call.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn fetch_thread_bodies(
     body_store_conn: &Connection,
     messages: &[ThreadDetailMessage],
@@ -612,6 +615,7 @@ pub fn fetch_thread_bodies(
 ///
 /// Pure computation — no DB locks required. Attaches bodies to messages,
 /// detects message ownership, and generates collapsed summaries.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn assemble_thread_detail(
     db_data: ThreadDbData,
     body_map: BodyMap,
@@ -659,6 +663,7 @@ pub fn assemble_thread_detail(
 /// need to minimize lock scope (e.g. when holding `Arc<Mutex<Connection>>`),
 /// use [`query_thread_from_db`], [`fetch_thread_bodies`], and
 /// [`assemble_thread_detail`] individually instead.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_thread_detail(
     conn: &Connection,
     body_store_conn: &Connection,

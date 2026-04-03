@@ -13,8 +13,13 @@ workspace = true
 [dependencies]
 serde.workspace = true
 tokio = { workspace = true, features = ["sync", "macros"] }
-tantivy = { version = "0.25", default-features = false, features = ["mmap", "stopwords", "lz4-compression"] }
+tantivy = { version = "0.26.0", default-features = false, features = ["mmap", "stemmer", "stopwords", "lz4-compression"] }
 log = "0.4"
+hotpath = { workspace = true, optional = true }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
 
 [dev-dependencies]
 tempfile = "3"

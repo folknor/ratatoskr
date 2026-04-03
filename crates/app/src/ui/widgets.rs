@@ -1040,6 +1040,7 @@ pub fn message_card<'a, M: 'a>(thread: &'a Thread) -> Element<'a, M> {
 
 // ── Expanded message card ───────────────────────────────
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 #[allow(clippy::too_many_arguments)]
 pub fn expanded_message_card<'a, M: Clone + 'a>(
     msg: &'a ThreadMessage,
@@ -1260,6 +1261,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
 
 // ── Collapsed message row ───────────────────────────────
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn collapsed_message_row<'a, M: Clone + 'a>(
     msg: &'a ThreadMessage,
     index: usize,

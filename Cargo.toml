@@ -106,6 +106,9 @@ quick-xml = "0.37"
 # Text diffing (for undo/redo)
 dissimilar = "1"
 
+# Profiling
+hotpath = "0.14"
+
 # Optimized release profile
 [profile.release]
 lto = "fat"

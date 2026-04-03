@@ -154,6 +154,7 @@ fn read_setting_map(
         .collect())
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_threads(
     conn: &Connection,
     account_id: &str,
@@ -190,6 +191,7 @@ pub fn get_threads(
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_threads_for_bundle(
     conn: &Connection,
     account_id: &str,
@@ -232,6 +234,7 @@ pub fn get_threads_for_bundle(
     }
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_thread_by_id(
     conn: &Connection,
     account_id: &str,
@@ -264,6 +267,7 @@ pub fn get_thread_label_ids(
     .map_err(|e| e.to_string())
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub async fn get_messages_for_thread(
     db: &DbState,
     body_store: &BodyStoreState,
@@ -622,6 +626,7 @@ pub fn delete_label(conn: &Connection, account_id: &str, label_id: &str) -> Resu
     Ok(())
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn get_bundle_unread_counts(
     conn: &Connection,
     account_id: &str,
@@ -693,6 +698,7 @@ pub fn get_attachments_for_message(
     )
 }
 
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn search_contacts(
     conn: &Connection,
     query: &str,

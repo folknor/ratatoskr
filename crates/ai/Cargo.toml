@@ -21,3 +21,8 @@ log = "0.4"
 regex = "1"
 async-trait = "0.1"
 urlencoding = "2"
+hotpath = { workspace = true, optional = true }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath", "rtsk/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "rtsk/hotpath-alloc"]

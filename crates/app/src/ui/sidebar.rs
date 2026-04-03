@@ -266,6 +266,7 @@ impl Component for Sidebar {
         }
     }
 
+    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn view(&self) -> Element<'_, SidebarMessage> {
         let show_labels = matches!(
             self.selected_scope,

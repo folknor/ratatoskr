@@ -16,3 +16,8 @@ serde_json.workspace = true
 rusqlite.workspace = true
 tokio = { workspace = true, features = ["rt"] }
 log = "0.4"
+hotpath = { workspace = true, optional = true }
+
+[features]
+hotpath = ["dep:hotpath", "hotpath/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]

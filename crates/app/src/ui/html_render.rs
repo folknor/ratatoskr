@@ -28,6 +28,7 @@ pub enum HtmlComplexity {
 }
 
 /// Assess whether an HTML email is simple enough for native rendering.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn assess_complexity(html: &str) -> HtmlComplexity {
     let lower = html.to_lowercase();
     let mut table_depth: usize = 0;
@@ -79,6 +80,7 @@ pub(super) enum CachedHtmlBody {
 ///
 /// Call once when thread detail loads; store the result and use
 /// `render_cached_html` on each view cycle.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(super) fn preparse_html(html: &str) -> CachedHtmlBody {
     if assess_complexity(html) == HtmlComplexity::Complex {
         return CachedHtmlBody::Complex;
@@ -93,6 +95,7 @@ pub(super) fn preparse_html(html: &str) -> CachedHtmlBody {
 
 /// Render pre-parsed HTML blocks to iced widgets, using fallback text for
 /// complex/empty HTML. Avoids re-parsing HTML on every view cycle.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn render_cached_html<'a, M: Clone + 'a>(
     cached: &CachedHtmlBody,
     fallback_text: Option<&str>,
