@@ -1,5 +1,6 @@
 use quick_xml::Reader;
 use quick_xml::events::Event;
+use quick_xml::escape::unescape;
 
 use super::ews::EwsHeaders;
 
@@ -265,7 +266,9 @@ fn parse_user_settings(xml: &str) -> Vec<(String, String)> {
                 buf.clear();
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(text) = e.unescape() {
+                if let Ok(raw) = std::str::from_utf8(e.as_ref())
+                    && let Ok(text) = unescape(raw)
+                {
                     buf.push_str(&text);
                 }
             }
@@ -322,7 +325,9 @@ fn parse_alternative_mailboxes(xml: &str) -> Vec<SharedMailbox> {
                 buf.clear();
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(text) = e.unescape() {
+                if let Ok(raw) = std::str::from_utf8(e.as_ref())
+                    && let Ok(text) = unescape(raw)
+                {
                     buf.push_str(&text);
                 }
             }

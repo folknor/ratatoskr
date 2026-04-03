@@ -11,6 +11,7 @@ use mail_parser::MessageParser;
 use super::connection::{IMAP_CMD_TIMEOUT, IMAP_FETCH_TIMEOUT, ImapSession};
 use super::parse::{build_imap_section_map, detect_special_use, parse_message};
 use super::types::*;
+use super::utf7_imap;
 
 // Re-export submodule items
 pub use commands::*;
@@ -57,7 +58,7 @@ pub async fn list_folders(session: &mut ImapSession) -> Result<Vec<ImapFolder>, 
         let delimiter = name.delimiter().unwrap_or("/").to_string();
 
         // Decode modified UTF-7 (RFC 3501 §5.1.3) to UTF-8 for display
-        let path = utf7_imap::decode_utf7_imap(raw_path.clone());
+        let path = utf7_imap::decode_utf7_imap(&raw_path);
 
         // Extract display name (last segment after delimiter)
         let display_name = path
@@ -146,7 +147,7 @@ pub async fn list_shared_folders(
         for name in &names {
             let raw_path = name.name().to_string();
             let delimiter = name.delimiter().unwrap_or("/").to_string();
-            let path = utf7_imap::decode_utf7_imap(raw_path.clone());
+            let path = utf7_imap::decode_utf7_imap(&raw_path);
             let display_name = path
                 .rsplit_once(&delimiter)
                 .map(|(_, last)| last.to_string())

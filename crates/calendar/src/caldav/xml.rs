@@ -1,5 +1,6 @@
 /// XML namespace prefix discovery and element extraction helpers for CalDAV.
 use quick_xml::Reader;
+use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 
 /// Known CalDAV namespace URIs to search for prefixes.
@@ -232,7 +233,8 @@ fn extract_element_text(element: &str) -> Option<String> {
             Ok(Event::Start(_)) => depth += 1,
             Ok(Event::Text(event)) => {
                 if depth >= 1
-                    && let Ok(unescaped) = event.unescape()
+                    && let Ok(raw) = std::str::from_utf8(event.as_ref())
+                    && let Ok(unescaped) = unescape(raw)
                 {
                     text.push_str(&unescaped);
                 }

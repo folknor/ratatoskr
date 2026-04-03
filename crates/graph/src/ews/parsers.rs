@@ -1,6 +1,7 @@
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use quick_xml::Reader;
 use quick_xml::events::Event;
+use quick_xml::escape::unescape;
 
 use super::xml_helpers::{extract_attribute, strip_ns};
 use super::{EwsEffectiveRights, EwsFolder, EwsItem, EwsRecipient, FindItemsResult};
@@ -64,7 +65,9 @@ pub(super) fn parse_find_folder_response(xml: &str) -> Result<Vec<EwsFolder>, St
                 }
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(text) = e.unescape() {
+                if let Ok(raw) = std::str::from_utf8(e.as_ref())
+                    && let Ok(text) = unescape(raw)
+                {
                     buf.push_str(&text);
                 }
             }
@@ -181,7 +184,9 @@ pub(super) fn parse_get_folder_response(xml: &str) -> Result<EwsFolder, String> 
                 }
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(text) = e.unescape() {
+                if let Ok(raw) = std::str::from_utf8(e.as_ref())
+                    && let Ok(text) = unescape(raw)
+                {
                     buf.push_str(&text);
                 }
             }
@@ -326,7 +331,9 @@ pub(super) fn parse_find_items_response(xml: &str) -> Result<FindItemsResult, St
                 }
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(text) = e.unescape() {
+                if let Ok(raw) = std::str::from_utf8(e.as_ref())
+                    && let Ok(text) = unescape(raw)
+                {
                     buf.push_str(&text);
                 }
             }
@@ -467,7 +474,9 @@ pub(super) fn parse_get_item_response(xml: &str) -> Result<EwsItem, String> {
                 }
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(text) = e.unescape() {
+                if let Ok(raw) = std::str::from_utf8(e.as_ref())
+                    && let Ok(text) = unescape(raw)
+                {
                     buf.push_str(&text);
                 }
             }

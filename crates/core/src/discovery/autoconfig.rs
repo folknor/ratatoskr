@@ -4,6 +4,7 @@ use crate::discovery::types::{
     UsernameFormat,
 };
 use quick_xml::Reader;
+use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 
 /// Stage 2: Fetch and parse Mozilla autoconfig XML.
@@ -70,7 +71,9 @@ fn parse_autoconfig_xml(xml: &str, email: &str, source_url: &str) -> Vec<Protoco
                 buf.clear();
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(text) = e.unescape() {
+                if let Ok(raw) = std::str::from_utf8(e.as_ref())
+                    && let Ok(text) = unescape(raw)
+                {
                     buf.push_str(&text);
                 }
             }

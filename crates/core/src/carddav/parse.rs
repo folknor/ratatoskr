@@ -92,6 +92,7 @@ fn is_url(s: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 use quick_xml::Reader;
+use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 
 /// A single contact entry from a PROPFIND listing.
@@ -130,7 +131,9 @@ pub fn parse_propfind_contacts(xml: &str) -> Vec<CardDavContactEntry> {
                 buf.clear();
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(text) = e.unescape() {
+                if let Ok(raw) = std::str::from_utf8(e.as_ref())
+                    && let Ok(text) = unescape(raw)
+                {
                     buf.push_str(&text);
                 }
             }
@@ -187,7 +190,9 @@ pub fn parse_ctag(xml: &str) -> Option<String> {
                 buf.clear();
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(text) = e.unescape() {
+                if let Ok(raw) = std::str::from_utf8(e.as_ref())
+                    && let Ok(text) = unescape(raw)
+                {
                     buf.push_str(&text);
                 }
             }
@@ -235,7 +240,9 @@ pub fn parse_multiget_report(xml: &str) -> Vec<(String, String)> {
                 buf.clear();
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(text) = e.unescape() {
+                if let Ok(raw) = std::str::from_utf8(e.as_ref())
+                    && let Ok(text) = unescape(raw)
+                {
                     buf.push_str(&text);
                 }
             }

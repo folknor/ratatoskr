@@ -11,6 +11,7 @@ pub mod public_folders;
 pub mod raw;
 pub mod sync_pipeline;
 pub mod types;
+mod utf7_imap;
 
 /// Check whether an error message indicates a connection-level failure
 /// (as opposed to a protocol-level or per-folder error).

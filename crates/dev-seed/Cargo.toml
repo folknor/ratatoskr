@@ -17,7 +17,7 @@ store = { path = "../stores" }
 rusqlite.workspace = true
 rand = { version = "0.9", features = ["small_rng"] }
 flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
-toml = "0.8"
+toml = "1"
 serde = { workspace = true }
 log = "0.4"
 hotpath = { workspace = true, optional = true }

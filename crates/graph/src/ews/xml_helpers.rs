@@ -1,5 +1,6 @@
 use quick_xml::Reader;
 use quick_xml::events::Event;
+use quick_xml::escape::unescape;
 
 // ── SOAP envelope ───────────────────────────────────────────
 
@@ -81,7 +82,9 @@ pub(super) fn check_soap_fault(xml: &str) -> Result<(), String> {
                 buf.clear();
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(text) = e.unescape() {
+                if let Ok(raw) = std::str::from_utf8(e.as_ref())
+                    && let Ok(text) = unescape(raw)
+                {
                     buf.push_str(&text);
                 }
             }

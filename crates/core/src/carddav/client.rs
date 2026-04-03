@@ -360,6 +360,7 @@ const PROPFIND_CTAG: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 /// For example, `current-user-principal` contains `<D:href>/principals/user/</D:href>`.
 fn extract_href_property(xml: &str, property_name: &str) -> Option<String> {
     use quick_xml::Reader;
+    use quick_xml::escape::unescape;
     use quick_xml::events::Event;
 
     let mut reader = Reader::from_str(xml);
@@ -378,7 +379,9 @@ fn extract_href_property(xml: &str, property_name: &str) -> Option<String> {
                 buf.clear();
             }
             Ok(Event::Text(ref e)) => {
-                if let Ok(text) = e.unescape() {
+                if let Ok(raw) = std::str::from_utf8(e.as_ref())
+                    && let Ok(text) = unescape(raw)
+                {
                     buf.push_str(&text);
                 }
             }

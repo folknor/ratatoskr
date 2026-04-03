@@ -101,7 +101,7 @@ reqwest = { version = "0.13", default-features = false, features = ["native-tls"
 base64 = "0.22"
 
 # XML
-quick-xml = "0.37"
+quick-xml = "0.39"
 
 # Text diffing (for undo/redo)
 dissimilar = "1"
