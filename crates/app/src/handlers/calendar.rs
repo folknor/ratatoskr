@@ -197,10 +197,14 @@ impl App {
                 }
                 Task::none()
             }
-            CalendarMessage::ConfirmDeleteEvent(id, title, account_id) => {
+            CalendarMessage::ConfirmDeleteEvent {
+                event_id,
+                title,
+                account_id,
+            } => {
                 self.calendar.active_popover = None;
                 self.calendar.active_modal = Some(CalendarModal::ConfirmDelete {
-                    event_id: id,
+                    event_id,
                     title,
                     account_id,
                 });

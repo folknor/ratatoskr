@@ -443,7 +443,11 @@ pub enum CalendarMessage {
     /// Async save completed.
     EventSaved(Result<(), String>),
     /// Start deleting an event (shows confirmation).
-    ConfirmDeleteEvent(String, String, Option<String>),
+    ConfirmDeleteEvent {
+        event_id: String,
+        title: String,
+        account_id: Option<String>,
+    },
     /// User confirmed deletion.
     DeleteEvent(String),
     /// Async delete completed.
@@ -692,11 +696,11 @@ fn event_detail_popover(event: &CalendarEventData) -> Element<'_, CalendarMessag
 
     let delete_btn = if let Some(ref id) = event.id {
         button(text("Delete").size(TEXT_SM))
-            .on_press(CalendarMessage::ConfirmDeleteEvent(
-                id.clone(),
-                event.title.clone(),
-                event.account_id.clone(),
-            ))
+            .on_press(CalendarMessage::ConfirmDeleteEvent {
+                event_id: id.clone(),
+                title: event.title.clone(),
+                account_id: event.account_id.clone(),
+            })
             .padding(PAD_BUTTON)
             .style(theme::ButtonClass::Ghost.style())
     } else {
@@ -914,11 +918,11 @@ fn event_full_modal<'a>(
     if let Some(ref id) = event.id {
         action_row = action_row.push(
             button(text("Delete").size(TEXT_SM))
-                .on_press(CalendarMessage::ConfirmDeleteEvent(
-                    id.clone(),
-                    event.title.clone(),
-                    event.account_id.clone(),
-                ))
+                .on_press(CalendarMessage::ConfirmDeleteEvent {
+                    event_id: id.clone(),
+                    title: event.title.clone(),
+                    account_id: event.account_id.clone(),
+                })
                 .padding(PAD_BUTTON)
                 .style(theme::ButtonClass::Ghost.style()),
         );
