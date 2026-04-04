@@ -24,7 +24,7 @@ pub fn handle_save_signature(
     Task::perform(
         async move {
             let body_text = html_to_plain_text(&req.body_html);
-            let core_db = rtsk::db::DbState::from_arc(db.write_conn_arc());
+            let core_db = db.write_db_state();
 
             if let Some(ref id) = req.id {
                 // Update existing signature via core CRUD.
@@ -68,7 +68,7 @@ pub fn handle_delete_signature(db: &Arc<Db>, sig_id: String) -> Task<super::Sign
     let db = Arc::clone(db);
     Task::perform(
         async move {
-            let core_db = rtsk::db::DbState::from_arc(db.write_conn_arc());
+            let core_db = db.write_db_state();
             rtsk::db::queries_extra::db_delete_signature(&core_db, sig_id).await
         },
         |result| {
@@ -87,7 +87,7 @@ pub fn load_signatures_async(db: &Arc<Db>) -> Task<super::SignatureResult> {
     let db = Arc::clone(db);
     Task::perform(
         async move {
-            let core_db = rtsk::db::DbState::from_arc(db.conn_arc());
+            let core_db = db.read_db_state();
             let db_sigs = rtsk::db::queries_extra::db_get_all_signatures(&core_db).await?;
             // Convert DbSignature to the app's SignatureEntry type.
             let entries: Vec<SignatureEntry> = db_sigs
@@ -121,7 +121,7 @@ pub fn handle_reorder_signatures(
     let db = Arc::clone(db);
     Task::perform(
         async move {
-            let core_db = rtsk::db::DbState::from_arc(db.write_conn_arc());
+            let core_db = db.write_db_state();
             rtsk::db::queries_extra::db_reorder_signatures(&core_db, ordered_ids).await
         },
         |result| {

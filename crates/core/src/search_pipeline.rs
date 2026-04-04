@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use db::db::types::{AccountScope, DbThread};
-use rusqlite::Connection;
+use rusqlite::{Connection, params_from_iter};
 use search::{SearchParams, SearchResult as TantivyResult, SearchState};
 use smart_folder::{ParsedQuery, parse_query, query_threads};
 
@@ -76,6 +76,76 @@ pub fn search(
     }
 
     result
+}
+
+/// SQL-only fallback entry point for cases where no Tantivy search state is
+/// available. This keeps SQL shape and row mapping out of presentation-layer
+/// code even in degraded search mode.
+pub fn search_sql_fallback(
+    query: &str,
+    conn: &Connection,
+    scope: &AccountScope,
+) -> Result<Vec<UnifiedSearchResult>, String> {
+    let parsed = parse_query(query);
+    let scope = scope.clone();
+
+    if parsed.has_any_operator() || parsed.free_text.is_empty() {
+        let db_threads = query_threads(conn, &parsed, &scope, Some(200), Some(0))?;
+        Ok(db_threads.into_iter().map(db_thread_to_unified).collect())
+    } else {
+        let pattern = format!("%{}%", parsed.free_text);
+        let (scope_clause, scope_params): (String, Vec<String>) = match &scope {
+            AccountScope::All => (String::new(), vec![]),
+            AccountScope::Single(id) => ("AND t.account_id = ?2".to_string(), vec![id.clone()]),
+            AccountScope::Multiple(ids) => {
+                let placeholders: Vec<String> =
+                    (0..ids.len()).map(|i| format!("?{}", i + 2)).collect();
+                (
+                    format!("AND t.account_id IN ({})", placeholders.join(",")),
+                    ids.clone(),
+                )
+            }
+        };
+        let sql = format!(
+            "SELECT t.id, t.account_id, t.subject, t.snippet,
+                    t.last_message_at, t.message_count,
+                    t.is_read, t.is_starred, t.has_attachments,
+                    t.from_name, t.from_address
+             FROM threads t
+             WHERE (t.subject LIKE ?1 OR t.snippet LIKE ?1)
+             {scope_clause}
+             ORDER BY t.last_message_at DESC
+             LIMIT 200"
+        );
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| format!("prepare search: {e}"))?;
+        let mut params: Vec<String> = Vec::with_capacity(1 + scope_params.len());
+        params.push(pattern);
+        params.extend(scope_params);
+        let rows = stmt
+            .query_map(params_from_iter(params.iter()), |row| {
+                Ok(UnifiedSearchResult {
+                    thread_id: row.get(0)?,
+                    account_id: row.get(1)?,
+                    subject: row.get(2)?,
+                    snippet: row.get(3)?,
+                    from_name: row.get(9)?,
+                    from_address: row.get(10)?,
+                    date: row.get::<_, Option<String>>(4)?.and_then(|s| s.parse().ok()),
+                    is_read: row.get(6)?,
+                    is_starred: row.get(7)?,
+                    message_count: Some(row.get(5)?),
+                    rank: 0.0,
+                })
+            })
+            .map_err(|e| format!("search query: {e}"))?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row.map_err(|e| format!("search row: {e}"))?);
+        }
+        Ok(results)
+    }
 }
 
 // ── Path 1: SQL only ────────────────────────────────────────

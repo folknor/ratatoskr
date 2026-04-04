@@ -14,7 +14,7 @@ impl App {
         self.clear_thread_selection();
         self.chat_timeline = Some(ChatTimeline::new(email.clone()));
 
-        let db_state = rtsk::db::DbState::from_arc(self.db.conn_arc());
+        let db_state = self.db.read_db_state();
         let user_emails = self.user_emails();
         let token = self.chat_generation.next();
 
@@ -54,7 +54,7 @@ impl App {
                     return Task::none();
                 };
                 let contact = timeline.contact_email.clone();
-                let db_state = rtsk::db::DbState::from_arc(self.db.conn_arc());
+                let db_state = self.db.read_db_state();
                 let user_emails = self.user_emails();
 
                 let email = contact.clone();

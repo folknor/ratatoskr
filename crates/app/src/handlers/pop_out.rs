@@ -849,40 +849,6 @@ impl DraftData {
         }
     }
 
-    fn execute(self, conn: &rusqlite::Connection) -> Result<(), String> {
-        conn.execute(
-            "INSERT INTO local_drafts \
-             (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
-              subject, body_html, reply_to_message_id, thread_id, \
-              from_email, signature_id, signature_separator_index, \
-              updated_at, sync_status) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
-                     unixepoch(), 'pending') \
-             ON CONFLICT(id) DO UPDATE SET \
-               account_id = ?2, \
-               to_addresses = ?3, cc_addresses = ?4, bcc_addresses = ?5, \
-               subject = ?6, body_html = ?7, reply_to_message_id = ?8, \
-               thread_id = ?9, from_email = ?10, signature_id = ?11, \
-               signature_separator_index = ?12, \
-               updated_at = unixepoch(), sync_status = 'pending'",
-            rusqlite::params![
-                self.draft_id,
-                self.account_id,
-                self.to_csv,
-                self.cc_csv,
-                self.bcc_csv,
-                self.subject,
-                self.body_html,
-                self.reply_to_message_id,
-                self.thread_id,
-                self.from_email,
-                self.signature_id,
-                self.signature_separator_index,
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    }
 }
 
 impl App {
@@ -915,7 +881,23 @@ impl App {
         let db = Arc::clone(&self.db);
 
         Task::perform(
-            async move { db.with_write_conn(move |conn| data.execute(&conn)).await },
+            async move {
+                db.save_local_draft(
+                    data.draft_id,
+                    data.account_id,
+                    data.to_csv,
+                    data.cc_csv,
+                    data.bcc_csv,
+                    data.subject,
+                    data.body_html,
+                    data.reply_to_message_id,
+                    data.thread_id,
+                    data.from_email,
+                    data.signature_id,
+                    data.signature_separator_index,
+                )
+                .await
+            },
             move |result| {
                 if let Err(e) = result {
                     log::error!("Failed to auto-save compose draft: {e}");
@@ -940,7 +922,20 @@ impl App {
         }
         let data = DraftData::from_compose(state);
 
-        let result = self.db.with_write_conn_sync(|conn| data.execute(conn));
+        let result = self.db.save_local_draft_sync(
+            data.draft_id,
+            data.account_id,
+            data.to_csv,
+            data.cc_csv,
+            data.bcc_csv,
+            data.subject,
+            data.body_html,
+            data.reply_to_message_id,
+            data.thread_id,
+            data.from_email,
+            data.signature_id,
+            data.signature_separator_index,
+        );
         match result {
             Ok(()) => {
                 if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id)
@@ -1146,7 +1141,7 @@ impl App {
 
         Task::perform(
             async move {
-                let core_db = rtsk::db::DbState::from_arc(db.conn_arc());
+                let core_db = db.read_db_state();
                 let sig = rtsk::db::queries_extra::db_resolve_signature_for_compose(
                     &core_db, account_id, from_email, is_reply,
                 )

@@ -500,7 +500,7 @@ impl App {
             encryption_key,
         ) {
             (Some(bs), Some(iis), Some(ss), Some(key)) => Some(rtsk::actions::ActionContext {
-                db: rtsk::db::DbState::from_arc(db.write_conn_arc()),
+                db: db.write_db_state(),
                 body_store: bs.clone(),
                 inline_images: iis.clone(),
                 search: (**ss).clone(),
@@ -2295,7 +2295,7 @@ impl App {
                 let db = Arc::clone(&self.db);
                 return Task::perform(
                     async move {
-                        let core_db = rtsk::db::DbState::from_arc(db.conn_arc());
+                        let core_db = db.read_db_state();
                         rtsk::db::queries_extra::db_get_local_draft(&core_db, draft_id).await
                     },
                     Message::LocalDraftLoaded,

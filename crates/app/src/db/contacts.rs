@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use rtsk::db::{build_fts_query, make_like_pattern};
 
@@ -349,6 +349,32 @@ pub struct GroupEntry {
 // ── Contact management CRUD ──────────────────────────────────
 
 impl Db {
+    pub async fn find_contact_id_by_email(&self, email: String) -> Result<Option<String>, String> {
+        self.with_conn(move |conn| {
+            conn.query_row(
+                "SELECT id FROM contacts WHERE email = ?1 LIMIT 1",
+                params![email],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())
+        })
+        .await
+    }
+
+    pub async fn find_group_id_by_name(&self, name: String) -> Result<Option<String>, String> {
+        self.with_conn(move |conn| {
+            conn.query_row(
+                "SELECT id FROM contact_groups WHERE name = ?1 LIMIT 1",
+                params![name],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())
+        })
+        .await
+    }
+
     /// Load contacts for the settings management list, optionally
     /// filtered.
     pub async fn get_contacts_for_settings(

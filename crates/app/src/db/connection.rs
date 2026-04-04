@@ -1,7 +1,8 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
+use rtsk::db::DbState;
 
 use super::pinned_searches::ensure_pinned_search_schema;
 
@@ -70,6 +71,14 @@ impl Db {
         Arc::clone(&self.write_conn)
     }
 
+    pub fn read_db_state(&self) -> DbState {
+        DbState::from_arc(self.conn_arc())
+    }
+
+    pub fn write_db_state(&self) -> DbState {
+        DbState::from_arc(self.write_conn_arc())
+    }
+
     /// Execute a closure on the writable connection.
     pub async fn with_write_conn<F, T>(&self, f: F) -> Result<T, String>
     where
@@ -122,4 +131,119 @@ impl Db {
             .map_err(|e| format!("db lock poisoned: {e}"))?;
         f(&conn)
     }
+
+    pub async fn save_local_draft(
+        &self,
+        id: String,
+        account_id: String,
+        to_addresses: Option<String>,
+        cc_addresses: Option<String>,
+        bcc_addresses: Option<String>,
+        subject: Option<String>,
+        body_html: Option<String>,
+        reply_to_message_id: Option<String>,
+        thread_id: Option<String>,
+        from_email: Option<String>,
+        signature_id: Option<String>,
+        signature_separator_index: Option<i64>,
+    ) -> Result<(), String> {
+        self.with_write_conn(move |conn| save_local_draft_inner(
+            conn,
+            id,
+            account_id,
+            to_addresses,
+            cc_addresses,
+            bcc_addresses,
+            subject,
+            body_html,
+            reply_to_message_id,
+            thread_id,
+            from_email,
+            signature_id,
+            signature_separator_index,
+        ))
+        .await
+    }
+
+    pub fn save_local_draft_sync(
+        &self,
+        id: String,
+        account_id: String,
+        to_addresses: Option<String>,
+        cc_addresses: Option<String>,
+        bcc_addresses: Option<String>,
+        subject: Option<String>,
+        body_html: Option<String>,
+        reply_to_message_id: Option<String>,
+        thread_id: Option<String>,
+        from_email: Option<String>,
+        signature_id: Option<String>,
+        signature_separator_index: Option<i64>,
+    ) -> Result<(), String> {
+        self.with_write_conn_sync(move |conn| save_local_draft_inner(
+            conn,
+            id,
+            account_id,
+            to_addresses,
+            cc_addresses,
+            bcc_addresses,
+            subject,
+            body_html,
+            reply_to_message_id,
+            thread_id,
+            from_email,
+            signature_id,
+            signature_separator_index,
+        ))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn save_local_draft_inner(
+    conn: &Connection,
+    id: String,
+    account_id: String,
+    to_addresses: Option<String>,
+    cc_addresses: Option<String>,
+    bcc_addresses: Option<String>,
+    subject: Option<String>,
+    body_html: Option<String>,
+    reply_to_message_id: Option<String>,
+    thread_id: Option<String>,
+    from_email: Option<String>,
+    signature_id: Option<String>,
+    signature_separator_index: Option<i64>,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO local_drafts \
+         (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
+          subject, body_html, reply_to_message_id, thread_id, \
+          from_email, signature_id, signature_separator_index, \
+          updated_at, sync_status) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
+                 unixepoch(), 'pending') \
+         ON CONFLICT(id) DO UPDATE SET \
+           account_id = ?2, \
+           to_addresses = ?3, cc_addresses = ?4, bcc_addresses = ?5, \
+           subject = ?6, body_html = ?7, reply_to_message_id = ?8, \
+           thread_id = ?9, from_email = ?10, signature_id = ?11, \
+           signature_separator_index = ?12, \
+           updated_at = unixepoch(), sync_status = 'pending'",
+        params![
+            id,
+            account_id,
+            to_addresses,
+            cc_addresses,
+            bcc_addresses,
+            subject,
+            body_html,
+            reply_to_message_id,
+            thread_id,
+            from_email,
+            signature_id,
+            signature_separator_index,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }

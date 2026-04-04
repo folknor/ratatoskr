@@ -226,21 +226,7 @@ async fn execute_contact_import(
         }
 
         // Check for existing contact by email
-        let db_check = Arc::clone(db);
-        let email_check = email.clone();
-        let exists = db_check
-            .with_conn(move |conn| {
-                let mut stmt = conn
-                    .prepare("SELECT id FROM contacts WHERE email = ?1 LIMIT 1")
-                    .map_err(|e| e.to_string())?;
-                let found = stmt
-                    .query_row(rusqlite::params![email_check], |row| {
-                        row.get::<_, String>(0)
-                    })
-                    .ok();
-                Ok(found)
-            })
-            .await?;
+        let exists = db.find_contact_id_by_email(email.clone()).await?;
 
         if let Some(existing_id) = exists {
             if update_existing {
@@ -288,25 +274,10 @@ async fn execute_contact_import(
 
     // Create or update each group
     for (group_name, members) in &group_members {
-        let db_grp = Arc::clone(db);
-        let name = group_name.clone();
         let member_list = members.clone();
 
         // Check if group already exists by name
-        let existing = db_grp
-            .with_conn(move |conn| {
-                let mut stmt = conn
-                    .prepare(
-                        "SELECT id FROM contact_groups
-                         WHERE name = ?1 LIMIT 1",
-                    )
-                    .map_err(|e| e.to_string())?;
-                let found = stmt
-                    .query_row(rusqlite::params![name], |row| row.get::<_, String>(0))
-                    .ok();
-                Ok(found)
-            })
-            .await?;
+        let existing = db.find_group_id_by_name(group_name.clone()).await?;
 
         let group_id = existing.unwrap_or_else(|| {
             groups_created += 1;
