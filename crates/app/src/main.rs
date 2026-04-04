@@ -65,7 +65,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use types::{Bundle, FeatureView, SidebarSelection};
 use ui::add_account::{AddAccountMessage, AddAccountWizard};
-use ui::calendar::{CalendarMessage, CalendarOverlay, CalendarState, CalendarView};
+use ui::calendar::{CalendarMessage, CalendarState, CalendarView};
 use ui::layout::{
     READING_PANE_MIN_WIDTH, RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH, SIDEBAR_MIN_WIDTH,
     THREAD_LIST_MIN_WIDTH,
@@ -938,8 +938,12 @@ impl App {
             Message::ExecuteParameterized(id, args) => self.handle_execute_parameterized(id, args),
             Message::NavigateTo(target) => self.handle_navigate_to(target),
             Message::Escape => {
-                if !matches!(self.calendar.overlay, CalendarOverlay::None) {
-                    self.calendar.overlay = CalendarOverlay::None;
+                if self.calendar.active_popover.is_some() {
+                    self.calendar.active_popover = None;
+                    return Task::none();
+                }
+                if self.calendar.active_modal.is_some() {
+                    self.calendar.active_modal = None;
                     return Task::none();
                 }
                 if self.show_settings {
@@ -1722,7 +1726,7 @@ impl App {
 
     /// Create a calendar event pre-filled from the given email message.
     fn create_event_from_email(&mut self, message_index: usize) -> Task<Message> {
-        use crate::ui::calendar::{CalendarEventData, CalendarMessage, CalendarOverlay};
+        use crate::ui::calendar::{CalendarEventData, CalendarModal};
         use chrono::Timelike;
 
         let msg = self.reading_pane.thread_messages.get(message_index);
@@ -1745,11 +1749,12 @@ impl App {
 
         self.calendar.reset_editor_undo(&event);
         let original_title = event.title.clone();
-        self.calendar.overlay = CalendarOverlay::EventEditor {
+        self.calendar.active_popover = None;
+        self.calendar.active_modal = Some(CalendarModal::EventEditor {
             event,
             is_new: true,
             original_title,
-        };
+        });
 
         // If calendar is popped out, focus that window instead of switching main to calendar.
         if let Some((&win_id, _)) = self
@@ -1782,7 +1787,8 @@ impl App {
         if self.show_settings {
             self.close_settings();
         }
-        self.calendar.overlay = crate::ui::calendar::CalendarOverlay::None;
+        self.calendar.active_popover = None;
+        self.calendar.active_modal = None;
         self.add_account_wizard = None;
     }
 

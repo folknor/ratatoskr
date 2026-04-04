@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod calendars;
 pub mod config;
 pub mod contacts;
 pub mod people;
@@ -71,6 +72,7 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
         .map_err(|e| format!("begin: {e}"))?;
 
     let accs = accounts::seed_accounts(&conn, &mut rng, config.accounts)?;
+    calendars::seed_calendars(&conn, &mut rng, &accs)?;
     let pools = people::generate_pools(&mut rng);
     let (pending_bodies, stats) = threads::generate_threads(
         &conn,

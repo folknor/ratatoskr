@@ -224,6 +224,7 @@ Implementation:
 Notes:
 - separate stack implementation, not using `ui/anchored_overlay.rs`
 - this is an important duplication point
+- now represented in calendar state as `CalendarPopover::EventDetail`
 
 ### Modal Dialogs
 
@@ -243,38 +244,47 @@ Current code name:
 `discard_confirmation`
 
 Actual type:
-intended `Modal Dialog`, currently rendered inline
+`Modal Dialog`
 
 Implementation:
 - [crates/app/src/pop_out/compose.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/compose.rs)
 
-Current issue:
-- not actually modal
+Notes:
+- now rendered as a true blocking modal in compose
 
 3. Compose link insertion dialog
 Current code name:
 `link_dialog`
 
 Actual type:
-intended `Modal Dialog`, currently rendered inline
+`Modal Dialog`
 
 Implementation:
 - [crates/app/src/pop_out/compose.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/compose.rs)
 
-Current issue:
-- not actually modal
+Notes:
+- now rendered as a true blocking modal in compose
 
 4. Calendar full event modal
 Implementation:
 - [crates/app/src/ui/calendar.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/calendar.rs)
 
+Notes:
+- now represented in calendar state as `CalendarModal::EventFull`
+
 5. Calendar event editor modal
 Implementation:
 - [crates/app/src/ui/calendar.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/calendar.rs)
 
+Notes:
+- now represented in calendar state as `CalendarModal::EventEditor`
+
 6. Calendar delete confirmation dialog
 Implementation:
 - [crates/app/src/ui/calendar.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/calendar.rs)
+
+Notes:
+- now represented in calendar state as `CalendarModal::ConfirmDelete`
 
 7. Command palette
 Current code name:
@@ -377,10 +387,7 @@ Phase 1 naming cleanup was completed in commit `18ea25e0`.
 It established:
 - `AnchoredOverlay` as the primitive anchored-surface layer in [crates/app/src/ui/anchored_overlay.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/anchored_overlay.rs)
 - `SettingsSheetPage`, `active_sheet`, and `sheet_anim` as the settings sheet terminology in [crates/app/src/ui/settings/types.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/settings/types.rs)
-
-The remaining naming cleanup question is deferred:
-- `CalendarOverlay`
-- likely split by surface kind rather than renamed as a single enum
+- the former mixed `CalendarOverlay` state has since been split into `CalendarPopover` and `CalendarModal`
 
 ## Phase 2: Behavioral Fixes
 
@@ -389,19 +396,14 @@ their canonical type behavior.
 
 | Surface | Location | Semantic Type | Current Problem | Notes |
 |---|---|---|---|---|
-| `link_dialog` | [crates/app/src/pop_out/compose.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/compose.rs) | `Modal` | rendered inline, not truly blocking | Keep the semantic target; fix implementation later. |
-| `discard_confirmation` | [crates/app/src/pop_out/compose.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/compose.rs) | `Modal` | rendered inline, not truly blocking | Rename only if needed when behavior is fixed. |
-| `token_context_menu` | [crates/app/src/pop_out/compose.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/compose.rs) | `ContextMenu` | rendered inline instead of anchored overlay | Semantic name is already correct. |
-| Compose autocomplete dropdown | [crates/app/src/pop_out/compose.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/compose.rs) | `Dropdown` | rendered inline in field flow | May or may not remain visually similar after reimplementation. |
 | `overflow_menu` | [crates/app/src/pop_out/message_view.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/message_view.rs) | `ContextMenu` | action surface built on anchored overlay primitive | It presents actions, not choices, so it is a context menu even though it is trigger-opened rather than right-click-opened. |
 
 ## Immediate Next Step
 
 After review of this catalogue:
 
-1. Choose the first Phase 2 behavioral surface to fix
-   - likely compose modal/dialog surfaces or token context menu
+1. Continue Phase 2 with the remaining misimplemented surfaces
+   - most obviously [crates/app/src/pop_out/message_view.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/message_view.rs) `overflow_menu`
 
-2. Keep the calendar sum type deferred
-   - [crates/app/src/ui/calendar.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/calendar.rs)
-   - likely split by semantic surface kind rather than renamed as one enum
+2. Simplify settings help to a strict tooltip
+   - remove the legacy pinned/sticky help behavior so it matches the `Tooltip` contract

@@ -43,17 +43,20 @@ impl CalendarView {
     }
 }
 
-// ── Overlay state ─────────────────────────────────────
+// ── Surface state ─────────────────────────────────────
 
-/// Which overlay is currently visible on the calendar.
+/// The active calendar popover, if any.
 #[derive(Debug, Clone)]
-pub enum CalendarOverlay {
-    /// No overlay.
-    None,
+pub enum CalendarPopover {
     /// Quick-glance event popover (~300px compact card).
     EventDetail { event: CalendarEventData },
+}
+
+/// The active calendar modal, if any.
+#[derive(Debug, Clone)]
+pub enum CalendarModal {
     /// Full event detail modal (two-panel: 70% detail + 30% day view).
-    EventFullModal { event: CalendarEventData },
+    EventFull { event: CalendarEventData },
     /// Editing or creating an event.
     EventEditor {
         /// The event being edited. Fields are mutated as the user types.
@@ -64,7 +67,11 @@ pub enum CalendarOverlay {
         original_title: String,
     },
     /// Delete confirmation dialog.
-    ConfirmDelete { event_id: String, title: String },
+    ConfirmDelete {
+        event_id: String,
+        title: String,
+        account_id: Option<String>,
+    },
 }
 
 /// Data for a calendar event in the UI layer.
@@ -207,8 +214,10 @@ pub struct CalendarState {
     pub month_grid: calendar_month::MonthGridData,
     /// Cached time grid config for day/work-week/week views.
     pub time_grid_config: calendar_time_grid::TimeGridConfig,
-    /// Current overlay (detail view, editor, delete confirm, or none).
-    pub overlay: CalendarOverlay,
+    /// Current quick-glance popover, if any.
+    pub active_popover: Option<CalendarPopover>,
+    /// Current blocking modal, if any.
+    pub active_modal: Option<CalendarModal>,
     /// Cached events from the DB. Reloaded after CRUD operations.
     pub events: Vec<calendar_time_grid::TimeGridEvent>,
     /// Undo state for event editor text fields.
@@ -245,7 +254,8 @@ impl CalendarState {
             week_start: Weekday::Mon,
             month_grid,
             time_grid_config,
-            overlay: CalendarOverlay::None,
+            active_popover: None,
+            active_modal: None,
             events: Vec::new(),
             editor_undo_title: UndoableText::new(),
             editor_undo_location: UndoableText::new(),
@@ -266,7 +276,7 @@ impl CalendarState {
         }
     }
 
-    /// Reset editor undo state when opening the editor overlay.
+    /// Reset editor undo state when opening the editor modal.
     pub fn reset_editor_undo(&mut self, event: &CalendarEventData) {
         self.editor_undo_title = UndoableText::with_initial(&event.title);
         self.editor_undo_location = UndoableText::with_initial(&event.location);
@@ -414,10 +424,12 @@ pub enum CalendarMessage {
     Today,
     /// An event was clicked (event ID).
     EventClicked(String),
-    /// Close any open overlay.
-    CloseOverlay,
-    /// Expand the popover to a full modal.
-    ExpandToFullModal,
+    /// Close the active popover.
+    ClosePopover,
+    /// Close the active modal.
+    CloseModal,
+    /// Expand the event-detail popover into a full modal.
+    ExpandPopoverToModal,
     /// Open the event editor. `None` = create new event.
     OpenEventEditor(Option<CalendarEventData>),
     /// A field in the event editor changed.
@@ -431,7 +443,7 @@ pub enum CalendarMessage {
     /// Async save completed.
     EventSaved(Result<(), String>),
     /// Start deleting an event (shows confirmation).
-    ConfirmDeleteEvent(String, String),
+    ConfirmDeleteEvent(String, String, Option<String>),
     /// User confirmed deletion.
     DeleteEvent(String),
     /// Async delete completed.
@@ -462,7 +474,7 @@ pub enum CalendarMessage {
 
 // ── View ───────────────────────────────────────────────
 
-/// Render the full calendar layout (sidebar + main area + overlay).
+/// Render the full calendar layout (sidebar + main area + calendar surfaces).
 ///
 /// Returns an `Element<CalendarMessage>` — the parent maps this to the
 /// top-level app Message.
@@ -472,21 +484,23 @@ pub fn calendar_layout(state: &CalendarState) -> Element<'_, CalendarMessage> {
 
     let base = row![sidebar, main_view].height(Length::Fill);
 
-    // If an overlay is active, stack it on top with a backdrop.
-    match &state.overlay {
-        CalendarOverlay::None => base.into(),
-        CalendarOverlay::EventDetail { event } => {
-            popover_stack(base.into(), event_detail_popover(event))
+    if let Some(modal) = &state.active_modal {
+        let card = match modal {
+            CalendarModal::EventFull { event } => event_full_modal(event, state),
+            CalendarModal::EventEditor { event, is_new, .. } => event_editor_card(event, *is_new),
+            CalendarModal::ConfirmDelete {
+                event_id, title, ..
+            } => delete_confirm_card(event_id, title),
+        };
+        modal_stack(base.into(), card)
+    } else if let Some(popover) = &state.active_popover {
+        match popover {
+            CalendarPopover::EventDetail { event } => {
+                popover_stack(base.into(), event_detail_popover(event))
+            }
         }
-        CalendarOverlay::EventFullModal { event } => {
-            overlay_stack(base.into(), event_full_modal(event, state))
-        }
-        CalendarOverlay::EventEditor { event, is_new, .. } => {
-            overlay_stack(base.into(), event_editor_card(event, *is_new))
-        }
-        CalendarOverlay::ConfirmDelete { event_id, title } => {
-            overlay_stack(base.into(), delete_confirm_card(event_id, title))
-        }
+    } else {
+        base.into()
     }
 }
 
@@ -496,7 +510,7 @@ fn popover_stack<'a>(
     card: Element<'a, CalendarMessage>,
 ) -> Element<'a, CalendarMessage> {
     let backdrop = mouse_area(container("").width(Length::Fill).height(Length::Fill))
-        .on_press(CalendarMessage::CloseOverlay);
+        .on_press(CalendarMessage::ClosePopover);
 
     // Position the popover toward the right side of the view.
     let positioned = container(container(card).align_y(Alignment::Center).max_width(320.0))
@@ -510,7 +524,7 @@ fn popover_stack<'a>(
 }
 
 /// Wrap a base layout with a modal overlay (backdrop + centered card).
-fn overlay_stack<'a>(
+fn modal_stack<'a>(
     base: Element<'a, CalendarMessage>,
     card: Element<'a, CalendarMessage>,
 ) -> Element<'a, CalendarMessage> {
@@ -520,7 +534,7 @@ fn overlay_stack<'a>(
             .height(Length::Fill)
             .style(theme::ContainerClass::ModalBackdrop.style()),
     )
-    .on_press(CalendarMessage::CloseOverlay);
+    .on_press(CalendarMessage::CloseModal);
 
     let centered = container(card)
         .width(Length::Fill)
@@ -544,12 +558,12 @@ fn event_detail_popover(event: &CalendarEventData) -> Element<'_, CalendarMessag
         &event.title
     };
     let expand_btn = button(text("\u{2197}").size(TEXT_MD))
-        .on_press(CalendarMessage::ExpandToFullModal)
+        .on_press(CalendarMessage::ExpandPopoverToModal)
         .padding(PAD_ICON_BTN)
         .style(theme::ButtonClass::Ghost.style());
 
     let close_btn = button(text("\u{2715}").size(TEXT_SM))
-        .on_press(CalendarMessage::CloseOverlay)
+        .on_press(CalendarMessage::ClosePopover)
         .padding(PAD_ICON_BTN)
         .style(theme::ButtonClass::Ghost.style());
 
@@ -681,6 +695,7 @@ fn event_detail_popover(event: &CalendarEventData) -> Element<'_, CalendarMessag
             .on_press(CalendarMessage::ConfirmDeleteEvent(
                 id.clone(),
                 event.title.clone(),
+                event.account_id.clone(),
             ))
             .padding(PAD_BUTTON)
             .style(theme::ButtonClass::Ghost.style())
@@ -715,7 +730,7 @@ fn event_full_modal<'a>(
 
     // Close button row
     let close_btn = button(text("\u{2715}").size(TEXT_SM))
-        .on_press(CalendarMessage::CloseOverlay)
+        .on_press(CalendarMessage::CloseModal)
         .padding(PAD_ICON_BTN)
         .style(theme::ButtonClass::Ghost.style());
 
@@ -902,6 +917,7 @@ fn event_full_modal<'a>(
                 .on_press(CalendarMessage::ConfirmDeleteEvent(
                     id.clone(),
                     event.title.clone(),
+                    event.account_id.clone(),
                 ))
                 .padding(PAD_BUTTON)
                 .style(theme::ButtonClass::Ghost.style()),
@@ -1007,7 +1023,7 @@ fn event_editor_card(event: &CalendarEventData, is_new: bool) -> Element<'_, Cal
 
     // Heading + close button
     let close_btn = button(text("\u{2715}").size(TEXT_SM))
-        .on_press(CalendarMessage::CloseOverlay)
+        .on_press(CalendarMessage::CloseModal)
         .padding(PAD_ICON_BTN)
         .style(theme::ButtonClass::Ghost.style());
     content = content.push(
@@ -1210,7 +1226,7 @@ fn event_editor_card(event: &CalendarEventData, is_new: bool) -> Element<'_, Cal
         .style(theme::ButtonClass::Nav { active: true }.style());
 
     let cancel_btn = button(text("Cancel").size(TEXT_SM))
-        .on_press(CalendarMessage::CloseOverlay)
+        .on_press(CalendarMessage::CloseModal)
         .padding(PAD_BUTTON)
         .style(theme::ButtonClass::Ghost.style());
 
@@ -1317,7 +1333,7 @@ fn delete_confirm_card<'a>(event_id: &str, title: &str) -> Element<'a, CalendarM
                 .padding(PAD_BUTTON)
                 .style(theme::ButtonClass::Nav { active: true }.style()),
             button(text("Cancel").size(TEXT_SM))
-                .on_press(CalendarMessage::CloseOverlay)
+                .on_press(CalendarMessage::CloseModal)
                 .padding(PAD_BUTTON)
                 .style(theme::ButtonClass::Ghost.style()),
         ]

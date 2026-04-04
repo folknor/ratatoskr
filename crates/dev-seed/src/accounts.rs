@@ -274,6 +274,8 @@ pub struct Account {
     pub email: String,
     pub display_name: String,
     pub account_name: String,
+    pub provider: String,
+    pub color: String,
     /// Map from label name -> label id
     pub labels: Vec<(String, String)>,
     pub category_labels: CategoryLabels,
@@ -362,6 +364,8 @@ pub fn seed_accounts(
             email: preset.email.to_string(),
             display_name: preset.display_name.to_string(),
             account_name: preset.account_name.to_string(),
+            provider: preset.provider.to_string(),
+            color: preset.color.to_string(),
             labels,
             category_labels: preset.category_labels,
         });

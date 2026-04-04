@@ -4,8 +4,8 @@ use chrono::{Datelike, NaiveDate, Timelike};
 use iced::Task;
 
 use crate::ui::calendar::{
-    AttendeeEntry, CalendarEventData, CalendarMessage, CalendarOverlay, EventField, EventTextField,
-    ReminderEntry,
+    CalendarEventData, CalendarMessage, CalendarModal, CalendarPopover, EventField,
+    EventTextField,
 };
 use crate::{App, Message};
 
@@ -46,11 +46,12 @@ impl App {
                 // Double-click opens event creation dialog with time pre-filled.
                 let event = CalendarEventData::new_at(date, hour);
                 self.calendar.reset_editor_undo(&event);
-                self.calendar.overlay = CalendarOverlay::EventEditor {
+                self.calendar.active_popover = None;
+                self.calendar.active_modal = Some(CalendarModal::EventEditor {
                     event,
                     is_new: true,
                     original_title: String::new(),
-                };
+                });
                 Task::none()
             }
             CalendarMessage::EventClicked(event_id) => {
@@ -87,7 +88,9 @@ impl App {
             CalendarMessage::EventLoaded(result) => {
                 match result {
                     Ok(data) => {
-                        self.calendar.overlay = CalendarOverlay::EventDetail { event: data };
+                        self.calendar.active_modal = None;
+                        self.calendar.active_popover =
+                            Some(CalendarPopover::EventDetail { event: data });
                     }
                     Err(e) => {
                         log::error!("Failed to load calendar event: {e}");
@@ -96,33 +99,39 @@ impl App {
                 }
                 Task::none()
             }
-            CalendarMessage::CloseOverlay => {
+            CalendarMessage::ClosePopover => {
+                self.calendar.active_popover = None;
+                Task::none()
+            }
+            CalendarMessage::CloseModal => {
                 // Check for unsaved changes in the editor.
-                if let CalendarOverlay::EventEditor {
+                if let Some(CalendarModal::EventEditor {
                     ref event,
                     ref original_title,
                     ..
-                } = self.calendar.overlay
+                }) = self.calendar.active_modal
                 {
                     if event.title != *original_title
                         || !event.description.is_empty()
                         || !event.location.is_empty()
                     {
                         // Has changes — show confirmation.
-                        self.calendar.overlay = CalendarOverlay::ConfirmDelete {
+                        self.calendar.active_modal = Some(CalendarModal::ConfirmDelete {
                             event_id: "__discard__".to_string(),
                             title: "Discard unsaved changes?".to_string(),
-                        };
+                            account_id: event.account_id.clone(),
+                        });
                         return Task::none();
                     }
                 }
-                self.calendar.overlay = CalendarOverlay::None;
+                self.calendar.active_modal = None;
                 Task::none()
             }
-            CalendarMessage::ExpandToFullModal => {
-                if let CalendarOverlay::EventDetail { event } = &self.calendar.overlay {
+            CalendarMessage::ExpandPopoverToModal => {
+                if let Some(CalendarPopover::EventDetail { event }) = &self.calendar.active_popover {
                     let event = event.clone();
-                    self.calendar.overlay = CalendarOverlay::EventFullModal { event };
+                    self.calendar.active_popover = None;
+                    self.calendar.active_modal = Some(CalendarModal::EventFull { event });
                 }
                 Task::none()
             }
@@ -140,11 +149,12 @@ impl App {
                 };
                 self.calendar.reset_editor_undo(&event);
                 let original_title = event.title.clone();
-                self.calendar.overlay = CalendarOverlay::EventEditor {
+                self.calendar.active_popover = None;
+                self.calendar.active_modal = Some(CalendarModal::EventEditor {
                     event,
                     is_new,
                     original_title,
-                };
+                });
                 Task::none()
             }
             CalendarMessage::CreateEvent => {
@@ -152,11 +162,12 @@ impl App {
                 let hour = self.calendar.selected_hour.unwrap_or(9);
                 let event = CalendarEventData::new_at(date, hour);
                 self.calendar.reset_editor_undo(&event);
-                self.calendar.overlay = CalendarOverlay::EventEditor {
+                self.calendar.active_popover = None;
+                self.calendar.active_modal = Some(CalendarModal::EventEditor {
                     event,
                     is_new: true,
                     original_title: String::new(),
-                };
+                });
                 Task::none()
             }
             CalendarMessage::EventFieldChanged(field) => {
@@ -176,7 +187,7 @@ impl App {
                 match result {
                     Ok(()) => {
                         log::info!("Calendar event saved");
-                        self.calendar.overlay = CalendarOverlay::None;
+                        self.calendar.active_modal = None;
                         return self.reload_calendar_events();
                     }
                     Err(e) => {
@@ -186,39 +197,33 @@ impl App {
                 }
                 Task::none()
             }
-            CalendarMessage::ConfirmDeleteEvent(id, title) => {
-                self.calendar.overlay = CalendarOverlay::ConfirmDelete {
+            CalendarMessage::ConfirmDeleteEvent(id, title, account_id) => {
+                self.calendar.active_popover = None;
+                self.calendar.active_modal = Some(CalendarModal::ConfirmDelete {
                     event_id: id,
                     title,
-                };
+                    account_id,
+                });
                 Task::none()
             }
             CalendarMessage::DeleteEvent(event_id) => {
                 // Handle discard-unsaved-changes sentinel.
                 if event_id == "__discard__" {
-                    self.calendar.overlay = CalendarOverlay::None;
+                    self.calendar.active_modal = None;
                     return Task::none();
                 }
                 let Some(ctx) = self.action_ctx() else {
                     return Task::none();
                 };
-                // Resolve account_id from the event editor overlay if available,
-                // fall back to first account.
-                let account_id = match &self.calendar.overlay {
-                    CalendarOverlay::ConfirmDelete { .. } | CalendarOverlay::EventEditor { .. } => {
-                        // Try to get account_id from the event data
-                        if let CalendarOverlay::EventEditor { event, .. } = &self.calendar.overlay {
-                            event.account_id.clone()
-                        } else {
-                            None
-                        }
-                    }
+                let account_id = match &self.calendar.active_modal {
+                    Some(CalendarModal::ConfirmDelete { account_id, .. }) => account_id.clone(),
+                    Some(CalendarModal::EventEditor { event, .. }) => event.account_id.clone(),
                     _ => None,
                 }
                 .or_else(|| self.sidebar.accounts.first().map(|a| a.id.clone()))
                 .unwrap_or_default();
 
-                self.calendar.overlay = CalendarOverlay::None;
+                self.calendar.active_modal = None;
                 Task::perform(
                     async move {
                         let outcome =
@@ -320,7 +325,7 @@ impl App {
     }
 
     fn handle_event_field_changed(&mut self, field: EventField) {
-        if let CalendarOverlay::EventEditor { ref mut event, .. } = self.calendar.overlay {
+        if let Some(CalendarModal::EventEditor { ref mut event, .. }) = self.calendar.active_modal {
             match field {
                 EventField::Title(s) => {
                     self.calendar.editor_undo_title.set_text(s.clone());
@@ -349,7 +354,7 @@ impl App {
     }
 
     fn handle_event_field_undo(&mut self, text_field: EventTextField) {
-        if let CalendarOverlay::EventEditor { ref mut event, .. } = self.calendar.overlay {
+        if let Some(CalendarModal::EventEditor { ref mut event, .. }) = self.calendar.active_modal {
             match text_field {
                 EventTextField::Title => {
                     if let Some(t) = self.calendar.editor_undo_title.undo() {
@@ -371,7 +376,7 @@ impl App {
     }
 
     fn handle_event_field_redo(&mut self, text_field: EventTextField) {
-        if let CalendarOverlay::EventEditor { ref mut event, .. } = self.calendar.overlay {
+        if let Some(CalendarModal::EventEditor { ref mut event, .. }) = self.calendar.active_modal {
             match text_field {
                 EventTextField::Title => {
                     if let Some(t) = self.calendar.editor_undo_title.redo() {
@@ -393,8 +398,8 @@ impl App {
     }
 
     fn handle_save_event(&mut self) -> Task<Message> {
-        let event = match &self.calendar.overlay {
-            CalendarOverlay::EventEditor { event, .. } => event.clone(),
+        let event = match &self.calendar.active_modal {
+            Some(CalendarModal::EventEditor { event, .. }) => event.clone(),
             _ => return Task::none(),
         };
 
