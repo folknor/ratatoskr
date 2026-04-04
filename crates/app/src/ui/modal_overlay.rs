@@ -35,32 +35,35 @@ pub fn modal_overlay<'a, Message: Clone + 'a>(
 ) -> Element<'a, Message> {
     match surface {
         ModalSurface::Modal => {
-            let blocker = mouse_area(
+            let blocker: Element<'a, Message> = mouse_area(
                 container("")
                     .width(Length::Fill)
                     .height(Length::Fill)
                     .style(theme::ContainerClass::ModalBackdrop.style()),
             )
-            .on_press(blocker_msg);
+            .on_press(blocker_msg)
+            .into();
 
-            let centered = container(content)
+            let centered: Element<'a, Message> = container(content)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .center_x(Length::Fill)
-                .center_y(Length::Fill);
+                .center_y(Length::Fill)
+                .into();
 
-            iced::widget::stack![base.into(), blocker.into(), centered.into()].into()
+            iced::widget::stack![base.into(), blocker, centered].into()
         }
         ModalSurface::Sheet { offset } => {
-            let blocker = mouse_area(
+            let blocker: Element<'a, Message> = mouse_area(
                 container(Space::new().width(Length::Fill).height(Length::Fill))
                     .width(Length::Fill)
                     .height(Length::Fill),
             )
             .on_press(blocker_msg)
-            .interaction(mouse::Interaction::default());
+            .interaction(mouse::Interaction::default())
+            .into();
 
-            let sheet = container(content)
+            let sheet: Element<'a, Message> = container(content)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .padding(Padding {
@@ -68,9 +71,10 @@ pub fn modal_overlay<'a, Message: Clone + 'a>(
                     right: 0.0,
                     bottom: 0.0,
                     left: offset,
-                });
+                })
+                .into();
 
-            iced::widget::stack![base.into(), blocker.into(), sheet.into()]
+            iced::widget::stack![base.into(), blocker, sheet]
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into()

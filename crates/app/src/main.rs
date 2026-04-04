@@ -1811,8 +1811,6 @@ impl App {
     /// Navigates to Settings > People and opens the editor, creating a
     /// new local contact if none exists for that email.
     fn open_contact_editor_for_email(&mut self, email: String) -> Task<Message> {
-        use crate::ui::settings::SettingsMessage;
-
         self.open_settings(crate::ui::settings::types::Tab::People);
 
         // Look up existing contact or create new editor state

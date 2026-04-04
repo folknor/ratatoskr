@@ -62,6 +62,10 @@
 
 - [ ] **Standardized popup/dropdown/modal** - Currently setting dropdowns, various modal dialogs (the Settings slide-in, Add Account modal, etc) use various methods to dim/control/disable/dismiss. We need standardized controls for all this. For example the Add Account modal currently dims the background (rest of the window), but it doesn't prevent interaction with any controls - even controls that are actually directly below it can still be interacted with. We need the same treatment as the Settings slide-in that does in fact disable things behind it. See `docs/ui/overlay-standardization-plan.md` for the implementation plan.
 
+- [ ] **Compose window close should prompt for unsaved changes** — Clicking the window X on a compose pop-out silently saves the draft and closes. It should show the discard confirmation modal if the message has been edited, giving the user the choice to discard or keep editing. Currently `handle_window_close()` in `main.rs` skips the prompt entirely.
+
+- [ ] **Cursor bleed-through on blocking overlays** — When a Sheet or Modal is active, hovering over the blocker area may still show pointer/hand cursors from widgets in the base layer underneath. The `mouse_area` blocker sets `.interaction(mouse::Interaction::default())` but iced's `stack!` may composite `mouse_interaction` from all layers. May be pre-existing. Investigate whether iced's stack respects the topmost layer's cursor or falls through.
+
 - [ ] **Focus trapping for modals and sheets** — iced does not natively support focus trapping. Modal and Sheet surfaces should trap Tab/Shift-Tab focus within their content, but currently focus can escape to widgets behind the blocker. If iced adds focus trapping support, `modal_overlay()` (see `docs/ui/overlay-standardization-plan.md`) is the single place to wire it in. Until then, this is a known contract gap.
 
 - [ ] **Label pills in reading pane** — Pills should not show on each message, only at the top. Labels are per-thread, not per-message, at least in the UI.
@@ -148,6 +152,34 @@ Backend pipeline exists (parser, SQL builder, Tantivy, unified router). **29 dis
 ### Calendar — `docs/calendar/problem-statement.md`
 
 Views, editor, pop-out, sidebar all partially implemented. **39 discrepancies remain** — see `docs/calendar/discrepancies.md`. Critical: new event creation broken (no calendar selector), calendar sync never triggered from app, timezone handling treats everything as UTC, two competing CalDAV implementations. Also drag interactions, RSVP actions, reminder system, meeting invite detection.
+
+**Calendar UI issues (observed 2026-04-04):**
+
+Event popover (quick-glance card):
+- [ ] Position is wrong — currently right-aligned in the calendar view, should anchor near the clicked event pill
+- [ ] Styling needs work (visual polish pass)
+- [ ] Escape doesn't close it
+- [ ] Clicking a different event pill while the popover is open just closes the popover instead of closing and immediately opening the new event's popover
+
+Event detail modal:
+- [ ] Needs significant visual and layout work
+- [ ] Escape doesn't close it
+
+Event editor modal:
+- [ ] Does not adhere to the editor spec at all — needs a full implementation pass
+- [ ] Deleting an event from the editor doesn't work
+- [ ] Discarding changes doesn't work (but doesn't save changes either, so no data loss)
+
+Month view:
+- [ ] Days that have room for more event pills only show 2 and then "+N more" — should fill available space before collapsing
+
+Week view:
+- [ ] All-day events are not laid out properly at the top of the day columns
+
+Calendar sidebar:
+- [ ] Clicking a calendar name doesn't toggle visibility — have to click the checkbox directly. The entire row should be a click target.
+- [ ] Calendar rows need a hover effect
+- [ ] Mini month view: the "has event" dot under each day pushes the date number upward instead of being laid out without affecting the date position
 
 ### Generic OAuth — `docs/generic-oauth/problem-statement.md`
 

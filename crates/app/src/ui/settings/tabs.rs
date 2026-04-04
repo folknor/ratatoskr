@@ -104,7 +104,7 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
             content_area,
             sheet_panel,
             crate::ui::modal_overlay::ModalSurface::Sheet { offset },
-            SettingsMessage::CloseSheet,
+            SettingsMessage::Noop,
         )
     } else {
         content_area.into()
