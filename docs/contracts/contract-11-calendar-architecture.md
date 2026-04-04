@@ -1,118 +1,76 @@
-# Contract #11: Calendar Architecture — Problem Statement
+# Contract #11: Calendar Architecture
 
-## Problem
+## Status
 
-Calendar behavior has improved enough that the feature is now meaningfully usable, but it still lacks a clearly enforced architectural contract. Event detail, editing, deletion, seeded data, and surface behavior now work well enough to expose real problems, yet the feature still behaves like a set of working slices rather than a coherent subsystem. That increases the risk that future fixes will be local, correct-looking patches that further entangle view state, editing state, persistence behavior, and ownership rules.
+Implemented. Phases A–D completed. This document describes the architectural boundaries the calendar feature now enforces.
 
-The problem is not simply that calendar has missing features or rough edges. The deeper issue is that calendar sits in an in-between state: substantial enough to need real architectural boundaries, but not yet constrained enough that those boundaries are explicit in the code. Calendar currently depends too heavily on handler-layer conventions about what state is active, which surface is open, and how identity is recovered or preserved. Until those boundaries are explicit, new work will keep succeeding tactically while remaining fragile strategically.
+## Architecture
 
-Today those concerns are spread primarily across [crates/app/src/handlers/calendar.rs](/home/folk/Programs/ratatoskr/crates/app/src/handlers/calendar.rs) and [crates/app/src/ui/calendar.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/calendar.rs), where workflow meaning, editor state, and surface state currently live too close together.
+Calendar separates four concerns with explicit typed boundaries:
 
-## Current Failure Shape
+1. **View/navigation state** — selected date, selected hour, active view, mini-month position, visible calendars. Lives on `CalendarState`. No workflow or editing semantics.
 
-The current implementation mixes four different concerns in one feature path:
+2. **Workflow state** — `CalendarWorkflow` enum: `Idle`, `ViewingEvent`, `CreatingEvent`, `EditingEvent`, `ConfirmingDiscard`, `ConfirmingDelete`. Source of truth for what the user is doing. All lifecycle meaning and identity comes from this enum.
 
-1. View/navigation state
-   - selected date
-   - selected hour
-   - active calendar view
-   - sidebar mini-month position
-   - visible calendars
+3. **Editor session state** — `EditorSession` on `CreatingEvent` / `EditingEvent`: mutable draft, original snapshot (`EventSnapshot` with 14 editable fields), per-field undo buffers. Single source of truth for all editable event state during editing.
 
-2. Surface state
-   - event detail popover
-   - full event modal
-   - event editor modal
-   - confirm-delete / confirm-discard modal
+4. **Surface state** — `CalendarPopover` / `CalendarModal` on `CalendarState`. Presentation caches written exclusively by `CalendarState::sync_surfaces()`, derived from workflow state. Never independently mutated by handlers.
 
-3. Editor/session state
-   - mutable event draft data
-   - undo state for text fields
-   - dirty detection
+## Invariants
 
-4. Persistence and ownership state
-   - create/update/delete dispatch
-   - account/calendar ownership
-   - reload behavior after mutation
+1. **Workflow-first:** Handlers update workflow state, then call `sync_surfaces()`. No handler writes `active_modal` or `active_popover` directly.
 
-Those concerns are not isolated by stable boundaries, so the current code relies on fragile conventions:
+2. **Workflow-authoritative:** Reads of lifecycle meaning and identity come from workflow state only. Surfaces are never used to recover workflow semantics.
 
-- discard confirmation is encoded through the fake delete sentinel `"__discard__"`
-- delete semantics are overloaded to mean both “delete persisted event” and “discard unsaved editor changes”
-- account ownership is sometimes reconstructed from surface state and sometimes defaulted from `sidebar.accounts.first()`
-- create vs edit semantics are carried by `is_new: bool` on the editor modal instead of being represented as a first-class workflow distinction
-- event detail loads, editor opening, and modal transitions are intertwined rather than treated as separate lifecycle steps
+3. **Editor session owns editable state:** No handler reads editable event data from `active_modal`. The `CalendarModal::EventEditor` variant is a unit marker — the draft lives on `EditorSession` in the workflow.
 
-None of those are isolated bugs. They are symptoms of a missing contract.
+4. **Dirty detection is full-struct:** `EditorSession::is_dirty()` compares `EventSnapshot` (14 editable fields) against the original snapshot. No partial field checks.
 
-## Contract Goals
+5. **`EventEditor` modal without `CreatingEvent`/`EditingEvent` workflow is a contract violation.** View code asserts this.
 
-This contract needs to define:
+## Identity Ownership
 
-1. What state belongs to calendar view/navigation
-2. What state belongs to event workflow/session
-3. What state belongs to UI surfaces only
-4. How event identity, account ownership, and calendar ownership are preserved through the feature
-5. How editor state and dirty detection are represented
-6. What persistence responsibilities calendar may own in `app`, and what must be treated as feature/domain logic
+- **`event_id`**: Workflow state is authoritative (`EditingEvent.event_id`, `ConfirmingDelete.event_id`). `session.draft.id` is a carried display copy, consistent by construction, never read for lifecycle decisions.
 
-The goal is not to move all calendar logic out of `app`. The goal is to ensure that whatever remains in `app` is presentation logic, while workflow semantics, ownership rules, and mutation boundaries become explicit enough that they cannot silently collapse back into ad hoc state rewriting.
+- **`account_id`**: Workflow state is authoritative for mutation dispatch (`CreatingEvent.account_id`, `EditingEvent.account_id`). `session.draft.account_id` is a synced display copy — updated alongside the workflow field by the `CalendarSelected` handler.
+
+- **`calendar_id`**: The draft (`session.draft.calendar_id`) is the authoritative editable source. Not carried on workflow variants. `handle_save_event` reads it from the session draft.
 
 ## Ownership Rules
 
-Calendar needs explicit ownership rules in three places:
+1. **Existing events** carry stable identity on their workflow variant.
 
-1. Existing events
-   - stable event identity
-   - stable account ownership
-   - stable calendar ownership when available
+2. **New event drafts** must acquire ownership before save. If `calendar_id` is `None`, save is blocked. Pre-assignment occurs when unambiguous (single eligible calendar).
 
-2. New event drafts
-   - explicit rules for how account/calendar ownership is assigned before save
-   - no hidden dependence on unrelated sidebar/default state
+3. **Surface transitions** (popover → full modal → editor) preserve identity through the workflow state. `ViewingSurface` captures the popover-vs-modal distinction for `ExpandPopoverToModal` — the one transition where workflow identity stays the same while presentation changes.
 
-3. Surface transitions
-   - popover -> full modal -> editor must preserve identity rather than re-derive it from whichever surface happens to be open
-
-Right now those rules are inconsistent. Existing events mostly carry identity correctly, but delete and edit paths still reconstruct ownership from modal state or fall back to defaults when data is missing. That makes event lifecycle correctness depend on current surface wiring rather than stable identity.
+4. **Calendar picker is disabled for existing events.** Moving an event between calendars requires provider-specific semantics not yet implemented.
 
 ## Editor Contract
 
-The editor currently lacks a structurally sound dirty-state model.
+The editor owns an `EditorSession` containing:
+- `draft: CalendarEventData` — mutable, updated as the user types
+- `original: EventSnapshot` — snapshot at editor open time
+- `undo_title`, `undo_location`, `undo_description: UndoableText` — scoped to the session
 
-The immediate visible bug is that dirty detection only checks a subset of editable fields. But the deeper problem is that the model itself does not capture the full original editable state. `CalendarModal::EventEditor` stores a mutable event draft plus a sibling `original_title: String`, which means the current representation cannot support full-struct dirty comparison even in principle. The issue is not only that some fields were omitted; it is that the model does not represent “original editor state” as a complete object.
-
-As long as that remains true:
-
-- discard confirmation will be incomplete or heuristic
-- undo state will remain loosely attached rather than clearly scoped to an editor session
-- closing behavior will keep depending on partial field checks instead of a real editor contract
+Discard confirmation (`ConfirmingDiscard`) preserves the full session so cancel-discard can restore the editor.
 
 ## Loading Contract
 
-Calendar loads already use generation tokens, which is directionally correct. The problem is not the freshness model itself, but what happens immediately after load:
+Calendar loads use generation tokens for async staleness detection. Loaded event data (including enriched attendees, reminders, calendar name, color) is stored on `ViewingEvent.event_data` in the workflow state. Surface derivation reads from this workflow data.
 
-- loaded DB event data is converted into UI/editor data ad hoc
-- attendee/reminder enrichment is mixed into surface-opening logic
-- surface transitions are driven directly from load completions
+## What This Contract Eliminated
 
-So the loading problem is not “stale results win.” It is that loading, conversion, and workflow transition are still too entangled. Calendar needs a clearer boundary between:
-
-- loading event data
-- translating it into UI/editor form
-- deciding which workflow/session state is entered
-
-## What This Contract Must Eliminate
-
-- sentinel identifiers like `"__discard__"`
-- delete semantics overloaded to mean discard confirmation
-- partial dirty detection based on an incomplete original-state model
-- account/calendar fallback from unrelated sidebar state during mutation
-- identity reconstruction from whichever modal or popover is currently open
-- direct workflow branching encoded as surface mutation
+- Sentinel identifiers (`"__discard__"`)
+- Delete semantics overloaded for discard confirmation
+- `is_new: bool` on the editor modal
+- `original_title: String` as the only dirty-detection baseline
+- Account/calendar fallback from `sidebar.accounts.first()` during save
+- Identity reconstruction from whichever modal or popover is currently open
+- Direct surface mutation by handlers (now centralized in `sync_surfaces()`)
 
 ## Open Questions
 
-1. What is the explicit rule for account/calendar ownership when creating a new event, given that the current editor path does not give the user a real calendar selector and create-event currently falls back to an empty calendar ID? Should the contract require explicit selection before save, or define a stable default-calendar rule?
-2. Does this contract need to cover calendar pop-out window state as well, or should pop-out workflow/session behavior be treated as a separate concern?
-3. Should attendee/reminder editing remain out of scope until the main event workflow contract is stabilized, or is their omission already causing architectural distortion elsewhere?
+1. ~~Account/calendar ownership for new events~~ **Resolved.** Pre-assign when unambiguous, block save otherwise.
+2. ~~Calendar pop-out state~~ Not addressed by this contract. Pop-out may need its own workflow/session state in the future.
+3. Attendee/reminder editing remains out of scope. These are read-only display fields excluded from `EventSnapshot`. No architectural distortion observed from their omission.

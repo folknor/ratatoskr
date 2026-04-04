@@ -80,11 +80,20 @@ pub enum CalendarWorkflow {
         surface: ViewingSurface,
     },
     /// Creating a new event in the editor.
+    ///
+    /// `account_id` is authoritative for mutation dispatch.
+    /// `session.draft.account_id` is a synced display copy — updated
+    /// alongside this field by the `CalendarSelected` handler, never
+    /// read for lifecycle decisions.
     CreatingEvent {
         account_id: Option<String>,
         session: EditorSession,
     },
     /// Editing an existing event in the editor.
+    ///
+    /// `event_id` and `account_id` are authoritative for mutation dispatch.
+    /// `session.draft.id` / `session.draft.account_id` are carried display
+    /// copies — consistent by construction, never read for lifecycle decisions.
     EditingEvent {
         event_id: String,
         account_id: String,
@@ -118,9 +127,8 @@ pub enum CalendarPopover {
 
 /// The active calendar modal, if any.
 ///
-/// These are presentation state, not workflow state. The workflow
-/// enum is the source of truth for lifecycle meaning. Modals are
-/// synchronized from workflow state by the handler.
+/// Presentation cache, not workflow state. Written exclusively by
+/// `CalendarState::sync_surfaces()`, derived from `CalendarWorkflow`.
 #[derive(Debug, Clone)]
 pub enum CalendarModal {
     /// Full event detail modal (two-panel: 70% detail + 30% day view).
@@ -661,9 +669,9 @@ pub enum CalendarMessage {
         title: String,
         account_id: Option<String>,
     },
-    /// User confirmed deletion. The String payload is transitional —
-    /// the handler reads identity from workflow state (ConfirmingDelete).
-    DeleteEvent(String),
+    /// User confirmed deletion. Identity is read from workflow state
+    /// (ConfirmingDelete), not from this message.
+    DeleteEvent,
     /// User confirmed discarding unsaved editor changes.
     DiscardChanges,
     /// Async delete completed.
@@ -726,7 +734,7 @@ pub fn calendar_layout(state: &CalendarState) -> Element<'_, CalendarMessage> {
             }
             CalendarModal::ConfirmDelete {
                 event_id, title, ..
-            } => delete_confirm_card(event_id, title),
+            } => delete_confirm_card(title),
             CalendarModal::ConfirmDiscard { title } => discard_confirm_card(title),
         };
         crate::ui::modal_overlay::modal_overlay(
@@ -1559,14 +1567,12 @@ fn time_input_row(event: &CalendarEventData) -> Element<'_, CalendarMessage> {
 // ── Delete confirmation card ───────────────────────────
 
 /// Confirmation dialog before deleting an event.
-fn delete_confirm_card<'a>(event_id: &str, title: &str) -> Element<'a, CalendarMessage> {
+fn delete_confirm_card(title: &str) -> Element<'_, CalendarMessage> {
     let display_title = if title.is_empty() {
         "(Untitled)"
     } else {
         title
     };
-    let id = event_id.to_string();
-
     let content = column![
         text("Delete Event")
             .size(TEXT_HEADING)
@@ -1579,7 +1585,7 @@ fn delete_confirm_card<'a>(event_id: &str, title: &str) -> Element<'a, CalendarM
         Space::new().height(SPACE_MD),
         row![
             button(text("Delete").size(TEXT_SM))
-                .on_press(CalendarMessage::DeleteEvent(id))
+                .on_press(CalendarMessage::DeleteEvent)
                 .padding(PAD_BUTTON)
                 .style(theme::ButtonClass::Nav { active: true }.style()),
             button(text("Cancel").size(TEXT_SM))

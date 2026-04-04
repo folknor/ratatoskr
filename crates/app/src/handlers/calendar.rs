@@ -205,8 +205,7 @@ impl App {
                         CalendarEventData::new_at(date, hour)
                     }
                 };
-                // Transitional rule: create-vs-edit derived from event.id presence.
-                // Phase C makes this explicit from the caller.
+                // Create-vs-edit derived from event.id presence.
                 let is_editing = event.id.is_some();
                 if !is_editing {
                     self.pre_assign_calendar_if_unambiguous(&mut event, None);
@@ -287,9 +286,8 @@ impl App {
                 self.calendar.sync_surfaces();
                 Task::none()
             }
-            CalendarMessage::DeleteEvent(_event_id) => {
-                // Read identity from workflow state — the message payload
-                // is transitional and ignored for the persisted-delete path.
+            CalendarMessage::DeleteEvent => {
+                // Read identity from workflow state.
                 let CalendarWorkflow::ConfirmingDelete {
                     event_id,
                     account_id,
