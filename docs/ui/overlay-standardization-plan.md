@@ -1,9 +1,10 @@
 # Overlay Standardization Plan
 
 Architectural plan for unifying overlay code paths across the app crate.
-The [overlay inventory](overlay-inventory.md) catalogued every surface and
-aligned naming. This document defines the target architecture, decides which
-primitives survive, and lays out the migration.
+The [overlay surfaces glossary](../glossary/overlay-surfaces.md) defines the
+canonical semantic surface types and naming rules. This document defines the
+target architecture, decides which primitives survive, and lays out the
+migration.
 
 ## Current State
 
@@ -102,7 +103,7 @@ or an explicit button. Sheets dismiss via an explicit close button only.
 - Animation — the caller computes the offset for `Sheet` (e.g., from
   `sheet_anim`) and passes it in. `modal_overlay()` applies it.
 - Focus trapping — iced does not natively support focus trapping. This is
-  a known gap between the behavioral contract (inventory says Modal and
+  a known gap between the behavioral contract (the glossary says Modal and
   Sheet trap focus) and what iced can enforce.
 
 ### What `modal_overlay()` replaces
@@ -200,7 +201,7 @@ standardization effort.
 
 ### Focus trapping
 
-The overlay inventory's behavior table specifies that Modal and Sheet
+The overlay surfaces glossary specifies that Modal and Sheet
 surfaces trap focus within their content. iced does not natively support
 focus trapping. This is a known gap. If iced adds focus trapping support
 in the future, `modal_overlay()` would be the single place to wire it in.

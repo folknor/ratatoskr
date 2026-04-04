@@ -2212,20 +2212,6 @@ impl App {
         &self.sidebar.selected_scope
     }
 
-    /// Convert the current view scope to an `AccountScope` for query functions
-    /// that only understand personal accounts. For shared mailbox / public
-    /// folder scopes, falls back to the parent account (not `All`).
-    fn current_account_scope(&self) -> AccountScope {
-        match &self.sidebar.selected_scope {
-            ViewScope::AllAccounts => AccountScope::All,
-            ViewScope::Account(id) => AccountScope::Single(id.clone()),
-            ViewScope::SharedMailbox { account_id, .. }
-            | ViewScope::PublicFolder { account_id, .. } => {
-                AccountScope::Single(account_id.clone())
-            }
-        }
-    }
-
     fn fire_navigation_load(&self, load_gen: GenerationToken<Nav>) -> Task<Message> {
         let db = Arc::clone(&self.db);
         let view_scope = self.sidebar.selected_scope.clone();

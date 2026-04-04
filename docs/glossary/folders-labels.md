@@ -1,8 +1,8 @@
-# Ratatoskr Glossary
+# Folders and Labels Glossary
 
-Canonical definitions for terms used across the codebase and documentation. When a term here conflicts with its provider-native meaning (Gmail, IMAP, Exchange, JMAP), the Ratatoskr definition wins.
+Canonical definitions for Ratatoskr's folders-and-labels terminology. When a term here conflicts with its provider-native meaning (Gmail, IMAP, Exchange, JMAP), the Ratatoskr definition wins.
 
-All other documents should reference this glossary, not redefine terms.
+Other documents that discuss folders or labels should reference this glossary entry rather than redefining these terms.
 
 ---
 
@@ -185,32 +185,14 @@ These terms appear in provider documentation but are **not** Ratatoskr concepts:
 - **Mailbox** — not a Ratatoskr term. What IMAP/JMAP call mailboxes are **folders** in Ratatoskr.
 - **Category** — not a Ratatoskr term. What Exchange calls categories are **labels** in Ratatoskr.
 
-## Known Terminology Debt: "category" in the Codebase
+Provider-native names still appear in code and docs where Ratatoskr is
+translating provider behavior rather than defining user-facing concepts. For
+example:
 
-The word "category" currently means three unrelated things in the code. This is a source of confusion and needs cleanup.
+- Exchange still has a `masterCategories` API, even though Ratatoskr treats
+  those objects as labels.
+- Gmail still exposes provider-native `CATEGORY_*` bundle labels, even though
+  Ratatoskr treats inbox bundling as a separate bundles/classification system.
 
-### 1. Provider labels (Exchange categories, IMAP keywords, JMAP keywords) — RESOLVED
-
-Cleaned up in labels unification Phase 6 *(2026-03-24)*. `apply_category()`/`remove_category()` removed from `ProviderOps`. `categories` and `message_categories` tables dropped (migration 72). All label dispatch unified through `add_tag`/`remove_tag`. The only remaining trace is the module filename `graph/src/category_sync.rs` (function inside renamed to `graph_label_sync`).
-
-### 2. AI inbox bundles (Primary, Updates, Promotions, Social, Newsletters)
-
-The `thread_categories` table and `sync/src/categorization.rs`. This is an automated classification system for inbox bundling — completely unrelated to user-facing labels. Should be renamed to `thread_bundles` / `bundling` / `classifications` to eliminate the name collision.
-
-**Files:** `sync/src/categorization.rs`, `core/src/db/queries_extra/bundles_categories.rs`, `db/src/db/queries.rs`, `ai/src/` (orchestration, parsing, types), `sync/src/notifications.rs`, `app/src/command_dispatch.rs` (`CATEGORY_PRIMARY` etc.).
-
-### 3. Exchange color presets
-
-`label-colors/src/category_colors.rs` — the 25 Exchange preset colors used as the canonical label color palette. The colors themselves are fine; the module name should change to `preset_colors.rs` or `exchange_presets.rs`.
-
-**Files:** `label-colors/src/category_colors.rs`, `label-colors/src/lib.rs`.
-
-### Cleanup plan
-
-This is not urgent but should happen before 1.0. Each is independent:
-
-- [x] ~~Rename `apply_category`/`remove_category`~~ → removed from `ProviderOps`. Label dispatch unified through `add_tag`/`remove_tag`. *(2026-03-24)*
-- [x] ~~Drop `categories` and `message_categories` tables~~ (labels unification Phase 6). *(2026-03-24)*
-- [x] ~~Rename `category_sync.rs` → `label_sync.rs` in the graph crate.~~ Renamed `graph_categories_sync` → `graph_label_sync`. File retains old name for now. *(2026-03-24)*
-- [x] ~~Rename `categorization.rs` → `bundling.rs`, `bundles_categories.rs` → `bundles.rs`, `category_colors.rs` → `preset_colors.rs`.~~ Also renamed `ThreadCategory` → `ThreadBundle`, `CATEGORY_PRIMARY` → `BUNDLE_PRIMARY`, `ViewType::Category` → `ViewType::Bundle`, and all related function/type names. *(2026-03-31)*
-- [x] ~~Rename `thread_categories` table → `thread_bundles` and `category` column → `bundle` in DB schema, SQL strings, and struct fields.~~ Also renamed `bundle_rules.category` → `bundle_rules.bundle`, `bundled_threads.category` → `bundled_threads.bundle`. *(2026-03-31)*
+When those provider-native names appear, they should be read as transport-layer
+or sync-layer terminology, not as Ratatoskr concepts.

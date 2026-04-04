@@ -7,10 +7,267 @@ use crate::ui::sidebar::truncate_query;
 use crate::ui::thread_list::ThreadListMode;
 use crate::{App, Message};
 use rtsk::db::types::AccountScope;
+use rtsk::scope::ViewScope;
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+enum SearchIntent {
+    AdHoc { query: String, scope: ViewScope },
+    SmartFolder { id: String, query: String },
+    PinnedActivation { id: i64 },
+    PinnedRefresh { id: i64 },
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct UiSearchContext {
+    current_scope: ViewScope,
+    editing_pinned_search: Option<i64>,
+    entered_from_folder_view: bool,
+    pinned_searches: Vec<db::PinnedSearch>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+enum SearchScope {
+    View(ViewScope),
+    QueryIntrinsic,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+enum SearchExecution {
+    Query { query: String, scope: SearchScope },
+    Snapshot { pinned_search_id: i64 },
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+enum SearchPersistenceBehavior {
+    None,
+    CreatePinnedSnapshot,
+    UpdatePinnedSnapshot { id: i64 },
+    RefreshPinnedSnapshot { id: i64 },
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+enum PinnedSearchRef {
+    Existing(i64),
+    FromPersistence,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+enum SearchPinnedStateBehavior {
+    Clear,
+    SmartFolder { id: String },
+    PinnedSearch {
+        active: PinnedSearchRef,
+        editing: PinnedSearchRef,
+    },
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+enum SearchPostSuccessEffect {
+    None,
+    RefreshPinnedSearchList,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+enum FolderRestoreBehavior {
+    LeaveAsIs,
+    EnterSearchFromFolderView,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct SearchCompletionBehavior {
+    persistence: SearchPersistenceBehavior,
+    pinned_state: SearchPinnedStateBehavior,
+    post_success: SearchPostSuccessEffect,
+    folder_restore: FolderRestoreBehavior,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct ResolvedSearch {
+    intent: SearchIntent,
+    execution: SearchExecution,
+    completion: SearchCompletionBehavior,
+}
+
+fn resolve_search_intent(intent: SearchIntent, ctx: &UiSearchContext) -> ResolvedSearch {
+    let folder_restore = if ctx.entered_from_folder_view {
+        FolderRestoreBehavior::EnterSearchFromFolderView
+    } else {
+        FolderRestoreBehavior::LeaveAsIs
+    };
+
+    match intent.clone() {
+        SearchIntent::AdHoc { query, scope } => {
+            let (persistence, pinned_state) = if let Some(id) = ctx.editing_pinned_search {
+                (
+                    SearchPersistenceBehavior::UpdatePinnedSnapshot { id },
+                    SearchPinnedStateBehavior::PinnedSearch {
+                        active: PinnedSearchRef::Existing(id),
+                        editing: PinnedSearchRef::Existing(id),
+                    },
+                )
+            } else {
+                (
+                    SearchPersistenceBehavior::CreatePinnedSnapshot,
+                    SearchPinnedStateBehavior::PinnedSearch {
+                        active: PinnedSearchRef::FromPersistence,
+                        editing: PinnedSearchRef::FromPersistence,
+                    },
+                )
+            };
+
+            ResolvedSearch {
+                intent,
+                execution: SearchExecution::Query {
+                    query,
+                    scope: SearchScope::View(scope),
+                },
+                completion: SearchCompletionBehavior {
+                    persistence,
+                    pinned_state,
+                    post_success: SearchPostSuccessEffect::RefreshPinnedSearchList,
+                    folder_restore,
+                },
+            }
+        }
+        SearchIntent::SmartFolder { id, query } => ResolvedSearch {
+            intent,
+            execution: SearchExecution::Query {
+                query,
+                scope: SearchScope::QueryIntrinsic,
+            },
+            completion: SearchCompletionBehavior {
+                persistence: SearchPersistenceBehavior::None,
+                pinned_state: SearchPinnedStateBehavior::SmartFolder { id },
+                post_success: SearchPostSuccessEffect::None,
+                folder_restore,
+            },
+        },
+        SearchIntent::PinnedActivation { id } => ResolvedSearch {
+            intent,
+            execution: SearchExecution::Snapshot {
+                pinned_search_id: id,
+            },
+            completion: SearchCompletionBehavior {
+                persistence: SearchPersistenceBehavior::None,
+                pinned_state: SearchPinnedStateBehavior::PinnedSearch {
+                    active: PinnedSearchRef::Existing(id),
+                    editing: PinnedSearchRef::Existing(id),
+                },
+                post_success: SearchPostSuccessEffect::None,
+                folder_restore,
+            },
+        },
+        SearchIntent::PinnedRefresh { id } => {
+            let ps = ctx
+                .pinned_searches
+                .iter()
+                .find(|ps| ps.id == id)
+                .unwrap_or_else(|| panic!("Pinned refresh intent resolved without pinned search {id}"));
+            let scope = ps
+                .scope_account_id
+                .as_ref()
+                .map_or(AccountScope::All, |id| AccountScope::Single(id.clone()));
+            let query = ps.query.clone();
+
+            ResolvedSearch {
+                intent,
+                execution: SearchExecution::Query {
+                    query,
+                    scope: match scope {
+                        AccountScope::All => SearchScope::View(ViewScope::AllAccounts),
+                        AccountScope::Single(id) => SearchScope::View(ViewScope::Account(id)),
+                        AccountScope::Multiple(_) => SearchScope::QueryIntrinsic,
+                    },
+                },
+                completion: SearchCompletionBehavior {
+                    persistence: SearchPersistenceBehavior::RefreshPinnedSnapshot { id },
+                    pinned_state: SearchPinnedStateBehavior::PinnedSearch {
+                        active: PinnedSearchRef::Existing(id),
+                        editing: PinnedSearchRef::Existing(id),
+                    },
+                    post_success: SearchPostSuccessEffect::RefreshPinnedSearchList,
+                    folder_restore: FolderRestoreBehavior::LeaveAsIs,
+                },
+            }
+        }
+    }
+}
+
+fn execution_scope_to_account_scope(scope: &SearchScope) -> AccountScope {
+    match scope {
+        SearchScope::QueryIntrinsic => AccountScope::All,
+        SearchScope::View(ViewScope::AllAccounts) => AccountScope::All,
+        SearchScope::View(ViewScope::Account(id)) => AccountScope::Single(id.clone()),
+        SearchScope::View(ViewScope::SharedMailbox { account_id, .. })
+        | SearchScope::View(ViewScope::PublicFolder { account_id, .. }) => {
+            AccountScope::Single(account_id.clone())
+        }
+    }
+}
 
 // ── Search handling ────────────────────────────────────
 
 impl App {
+    fn current_ui_search_context(&self) -> UiSearchContext {
+        UiSearchContext {
+            current_scope: self.current_scope().clone(),
+            editing_pinned_search: self.editing_pinned_search,
+            entered_from_folder_view: self.thread_list.mode == ThreadListMode::Folder,
+            pinned_searches: self.pinned_searches.clone(),
+        }
+    }
+
+    fn apply_search_folder_restore(&mut self, behavior: FolderRestoreBehavior) {
+        if matches!(behavior, FolderRestoreBehavior::EnterSearchFromFolderView) {
+            self.was_in_folder_view = true;
+        }
+    }
+
+    fn dispatch_resolved_search(&mut self, resolved: ResolvedSearch) -> Task<Message> {
+        self.apply_search_folder_restore(resolved.completion.folder_restore);
+
+        match &resolved.execution {
+            SearchExecution::Query { query, scope } => {
+                let generation = self.search_generation.next();
+                let db = Arc::clone(&self.db);
+                let ss = self.search_state.clone();
+                let query = query.clone();
+                let scope = execution_scope_to_account_scope(scope);
+
+                Task::perform(
+                    async move {
+                        let result = execute_search(db, ss, query, scope).await;
+                        (generation, result)
+                    },
+                    |(g, result)| Message::SearchResultsLoaded(g, result),
+                )
+            }
+            SearchExecution::Snapshot { pinned_search_id } => {
+                let db = Arc::clone(&self.db);
+                let load_gen = self.nav_generation.next();
+                let pinned_search_id = *pinned_search_id;
+                Task::perform(
+                    async move {
+                        let ids = db.get_pinned_search_thread_ids(pinned_search_id).await;
+                        (load_gen, pinned_search_id, ids)
+                    },
+                    |(g, id, result)| Message::PinnedSearchThreadIdsLoaded(g, id, result),
+                )
+            }
+        }
+    }
+
     pub(crate) fn handle_search_query_changed(&mut self, query: String) -> Task<Message> {
         self.search_query.set_text(query);
         self.thread_list.search_query = self.search_query.text().to_string();
@@ -54,23 +311,12 @@ impl App {
             return self.restore_folder_view();
         }
 
-        // Remember that we were in folder mode before searching
-        if self.thread_list.mode == ThreadListMode::Folder {
-            self.was_in_folder_view = true;
-        }
-
-        let generation = self.search_generation.next();
-        let db = Arc::clone(&self.db);
-        let ss = self.search_state.clone();
-        let scope = self.current_account_scope();
-
-        Task::perform(
-            async move {
-                let result = execute_search(db, ss, query, scope).await;
-                (generation, result)
-            },
-            |(g, result)| Message::SearchResultsLoaded(g, result),
-        )
+        let intent = SearchIntent::AdHoc {
+            query,
+            scope: self.current_ui_search_context().current_scope.clone(),
+        };
+        let resolved = resolve_search_intent(intent, &self.current_ui_search_context());
+        self.dispatch_resolved_search(resolved)
     }
 
     pub(crate) fn handle_search_results(
@@ -160,31 +406,19 @@ impl App {
     /// and execute the query via the unified search pipeline.
     pub(crate) fn handle_smart_folder_selected(
         &mut self,
-        _id: String,
+        id: String,
         query: String,
     ) -> Task<Message> {
         self.clear_pinned_search_context();
         self.suppress_next_pinned_search_save = true;
         self.search_query.set_text(query.clone());
         self.thread_list.search_query = query;
-
-        if self.thread_list.mode == ThreadListMode::Folder {
-            self.was_in_folder_view = true;
-        }
-
-        let generation = self.search_generation.next();
-        let db = Arc::clone(&self.db);
-        let ss = self.search_state.clone();
-        let scope = self.current_account_scope();
-
-        let search_query = self.search_query.text().to_string();
-        Task::perform(
-            async move {
-                let result = execute_search(db, ss, search_query, scope).await;
-                (generation, result)
-            },
-            |(g, result)| Message::SearchResultsLoaded(g, result),
-        )
+        let intent = SearchIntent::SmartFolder {
+            id,
+            query: self.search_query.text().to_string(),
+        };
+        let resolved = resolve_search_intent(intent, &self.current_ui_search_context());
+        self.dispatch_resolved_search(resolved)
     }
 
     /// Dispatch an async typeahead query based on operator type.
@@ -368,13 +602,6 @@ impl App {
     }
 
     pub(crate) fn handle_select_pinned_search(&mut self, id: i64) -> Task<Message> {
-        // Remember that we were in folder mode before switching to pinned search
-        if self.sidebar.active_pinned_search.is_none()
-            && self.thread_list.mode == ThreadListMode::Folder
-        {
-            self.was_in_folder_view = true;
-        }
-
         self.sidebar.active_pinned_search = Some(id);
         self.editing_pinned_search = Some(id);
 
@@ -388,16 +615,9 @@ impl App {
             self.thread_list
                 .set_context(format!("Search: {label}"), pinned_search_scope_name(self, ps));
         }
-
-        let db = Arc::clone(&self.db);
-        let load_gen = self.nav_generation.next();
-        Task::perform(
-            async move {
-                let ids = db.get_pinned_search_thread_ids(id).await;
-                (load_gen, id, ids)
-            },
-            |(g, id, result)| Message::PinnedSearchThreadIdsLoaded(g, id, result),
-        )
+        let intent = SearchIntent::PinnedActivation { id };
+        let resolved = resolve_search_intent(intent, &self.current_ui_search_context());
+        self.dispatch_resolved_search(resolved)
     }
 
     pub(crate) fn handle_pinned_search_thread_ids_loaded(
@@ -758,31 +978,39 @@ fn pinned_search_scope_name(app: &App, ps: &db::PinnedSearch) -> String {
 
 impl App {
     pub(crate) fn handle_refresh_pinned_search(&mut self, id: i64) -> Task<Message> {
-        let Some(ps) = self.pinned_searches.iter().find(|ps| ps.id == id).cloned() else {
+        if !self.pinned_searches.iter().any(|ps| ps.id == id) {
             return Task::none();
-        };
+        }
 
-        let query = ps.query.clone();
-        let scope_account_id = ps.scope_account_id.clone();
-        let scope = scope_account_id
-            .as_ref()
-            .map_or(AccountScope::All, |id| AccountScope::Single(id.clone()));
-        let db = Arc::clone(&self.db);
-        let ss = self.search_state.clone();
-
-        Task::perform(
-            async move {
-                let threads = execute_search(Arc::clone(&db), ss, query.clone(), scope).await?;
-                let thread_ids = threads
+        let intent = SearchIntent::PinnedRefresh { id };
+        let resolved = resolve_search_intent(intent, &self.current_ui_search_context());
+        match resolved.execution {
+            SearchExecution::Query { query, scope } => {
+                let scope = execution_scope_to_account_scope(&scope);
+                let scope_account_id = self
+                    .pinned_searches
                     .iter()
-                    .map(|t| (t.id.clone(), t.account_id.clone()))
-                    .collect();
-                db.update_pinned_search(id, query, thread_ids, scope_account_id)
-                    .await?;
-                Ok(threads)
-            },
-            move |result| Message::PinnedSearchRefreshed(id, result),
-        )
+                    .find(|ps| ps.id == id)
+                    .and_then(|ps| ps.scope_account_id.clone());
+                let db = Arc::clone(&self.db);
+                let ss = self.search_state.clone();
+
+                Task::perform(
+                    async move {
+                        let threads = execute_search(Arc::clone(&db), ss, query.clone(), scope).await?;
+                        let thread_ids = threads
+                            .iter()
+                            .map(|t| (t.id.clone(), t.account_id.clone()))
+                            .collect();
+                        db.update_pinned_search(id, query, thread_ids, scope_account_id)
+                            .await?;
+                        Ok(threads)
+                    },
+                    move |result| Message::PinnedSearchRefreshed(id, result),
+                )
+            }
+            SearchExecution::Snapshot { .. } => Task::none(),
+        }
     }
 
     pub(crate) fn handle_expiry_tick(&mut self) -> Task<Message> {
