@@ -1,4 +1,5 @@
 pub mod add_account;
+pub mod anchored_overlay;
 pub mod animated_toggler;
 pub mod calendar;
 pub mod calendar_month;
@@ -8,7 +9,6 @@ pub mod emoji_picker;
 pub mod html_render;
 pub mod layout;
 pub mod palette;
-pub mod popover;
 pub mod reading_pane;
 pub mod right_sidebar;
 pub mod settings;

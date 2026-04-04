@@ -788,12 +788,12 @@ impl App {
 
         if self
             .settings
-            .overlay_anim
+            .sheet_anim
             .is_animating(iced::time::Instant::now())
         {
             subs.push(
                 iced::window::frames()
-                    .map(|at| Message::Settings(SettingsMessage::OverlayAnimTick(at))),
+                    .map(|at| Message::Settings(SettingsMessage::SheetAnimTick(at))),
             );
         }
 
@@ -1787,14 +1787,14 @@ impl App {
     }
 
     /// Open settings to a specific tab. Handles the full protocol:
-    /// dismiss conflicting overlays, show_settings, overlay reset, animation
+    /// dismiss conflicting overlays, show_settings, sheet reset, animation
     /// reset, tab, begin_editing.
     fn open_settings(&mut self, tab: crate::ui::settings::Tab) {
         self.dismiss_overlays();
         self.show_settings = true;
-        self.settings.overlay = None;
+        self.settings.active_sheet = None;
         self.settings
-            .overlay_anim
+            .sheet_anim
             .go_mut(false, iced::time::Instant::now());
         self.settings.active_tab = tab;
         self.settings.begin_editing();

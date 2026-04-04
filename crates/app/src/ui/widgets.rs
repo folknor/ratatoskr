@@ -523,7 +523,7 @@ pub fn dropdown<'a, M: Clone + 'a>(
         .style(theme::ContainerClass::SelectMenu.style())
         .width(Length::Fill);
 
-    crate::ui::popover::popover(trigger)
+    crate::ui::anchored_overlay::anchored_overlay(trigger)
         .popup(menu)
         .popup_width(SIDEBAR_MIN_WIDTH)
         .on_dismiss(on_toggle)
@@ -610,7 +610,7 @@ pub fn select<'a, M: Clone + 'a>(
         .padding(PAD_DROPDOWN)
         .style(theme::ContainerClass::SelectMenu.style());
 
-    crate::ui::popover::popover(trigger)
+    crate::ui::anchored_overlay::anchored_overlay(trigger)
         .popup(menu)
         .on_dismiss(on_toggle.clone())
         .into()

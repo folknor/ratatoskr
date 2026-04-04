@@ -4,17 +4,17 @@ use iced::{Event, Length, Point, Rectangle, Renderer, Size, Theme, Vector, mouse
 /// A widget that displays a base element and optionally floats a popup
 /// overlay relative to it, without affecting layout. Clicks outside the
 /// popup dismiss it via `on_dismiss`.
-pub struct Popover<'a, Message> {
+pub struct AnchoredOverlay<'a, Message> {
     base: iced::Element<'a, Message>,
     popup: Option<iced::Element<'a, Message>>,
     on_dismiss: Option<Message>,
     popup_width: Option<f32>,
-    position: Position,
+    position: AnchorPosition,
 }
 
 /// Where the popup appears relative to the base widget.
 #[derive(Debug, Clone, Copy, Default)]
-pub enum Position {
+pub enum AnchorPosition {
     /// Below the base, left-aligned.
     #[default]
     Below,
@@ -22,19 +22,19 @@ pub enum Position {
     BelowRight,
 }
 
-pub fn popover<'a, Message: 'a>(
+pub fn anchored_overlay<'a, Message: 'a>(
     base: impl Into<iced::Element<'a, Message>>,
-) -> Popover<'a, Message> {
-    Popover {
+) -> AnchoredOverlay<'a, Message> {
+    AnchoredOverlay {
         base: base.into(),
         popup: None,
         on_dismiss: None,
         popup_width: None,
-        position: Position::default(),
+        position: AnchorPosition::default(),
     }
 }
 
-impl<'a, Message: Clone + 'a> Popover<'a, Message> {
+impl<'a, Message: Clone + 'a> AnchoredOverlay<'a, Message> {
     pub fn popup(mut self, popup: impl Into<iced::Element<'a, Message>>) -> Self {
         self.popup = Some(popup.into());
         self
@@ -51,13 +51,13 @@ impl<'a, Message: Clone + 'a> Popover<'a, Message> {
         self
     }
 
-    pub fn position(mut self, position: Position) -> Self {
+    pub fn position(mut self, position: AnchorPosition) -> Self {
         self.position = position;
         self
     }
 }
 
-impl<Message: Clone> Widget<Message, Theme, Renderer> for Popover<'_, Message> {
+impl<Message: Clone> Widget<Message, Theme, Renderer> for AnchoredOverlay<'_, Message> {
     fn size(&self) -> Size<Length> {
         self.base.as_widget().size()
     }
@@ -185,7 +185,7 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Popover<'_, Message> {
         );
 
         let base_position = layout.position() + translation;
-        let overlay = overlay::Element::new(Box::new(PopoverOverlay {
+        let overlay = overlay::Element::new(Box::new(AnchoredOverlayLayer {
             content: popup,
             tree: &mut second[0],
             base_bounds: layout.bounds(),
@@ -203,13 +203,13 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for Popover<'_, Message> {
     }
 }
 
-impl<'a, Message: Clone + 'a> From<Popover<'a, Message>> for iced::Element<'a, Message> {
-    fn from(popover: Popover<'a, Message>) -> Self {
-        iced::Element::new(popover)
+impl<'a, Message: Clone + 'a> From<AnchoredOverlay<'a, Message>> for iced::Element<'a, Message> {
+    fn from(overlay: AnchoredOverlay<'a, Message>) -> Self {
+        iced::Element::new(overlay)
     }
 }
 
-struct PopoverOverlay<'a, 'b, Message> {
+struct AnchoredOverlayLayer<'a, 'b, Message> {
     content: &'b mut iced::Element<'a, Message>,
     tree: &'b mut widget::Tree,
     base_bounds: Rectangle,
@@ -217,11 +217,11 @@ struct PopoverOverlay<'a, 'b, Message> {
     viewport: Rectangle,
     on_dismiss: Option<Message>,
     popup_width: Option<f32>,
-    position: Position,
+    position: AnchorPosition,
 }
 
 impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
-    for PopoverOverlay<'_, '_, Message>
+    for AnchoredOverlayLayer<'_, '_, Message>
 {
     fn layout(&mut self, renderer: &Renderer, bounds: Size) -> layout::Node {
         let popup_width = self.popup_width.unwrap_or(self.base_bounds.width);
@@ -244,8 +244,8 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
 
         // Calculate X based on position mode
         let x = match self.position {
-            Position::Below => self.base_position.x,
-            Position::BelowRight => {
+            AnchorPosition::Below => self.base_position.x,
+            AnchorPosition::BelowRight => {
                 let right_edge = self.base_position.x + self.base_bounds.width;
                 (right_edge - node.size().width).max(0.0)
             }

@@ -24,7 +24,7 @@ Use these terms consistently going forward:
   - light interaction surface
 
 - `Context Menu`
-  - anchored action menu, usually right-click triggered
+  - anchored action menu
   - transient action list
   - dismisses on outside click / Escape
 
@@ -42,37 +42,28 @@ Use these terms consistently going forward:
   - large panel sliding over content from an edge
   - may be modal or non-modal, but that must be explicit
 
-## Shared Contract Axes
+## Canonical Behavior Table
 
-Every surface should eventually declare:
+These are the fixed behavioral expectations for each canonical surface type.
+If an implementation deviates, that is a bug or misclassification, not a cue
+to make the type system more configurable.
 
-- `surface_type`
-- `anchor_strategy`
-  - anchored
-  - centered
-  - edge-sheet
-- `focus_policy`
-  - takes focus
-  - preserves prior focus
-  - traps focus
-- `backdrop_policy`
-  - none
-  - click-through
-  - click-blocking
-  - dimming + blocking
-- `dismiss_policy`
-  - outside click
-  - Escape
-  - explicit button only
-  - route/state change
-- `interaction_policy`
-  - informational only
-  - single-select
-  - multi-control interactive
-- `ownership`
-  - app-global
-  - screen-local
-  - widget-local
+Key semantic distinction:
+- `Dropdown` = anchored selection surface
+- `ContextMenu` = anchored action surface
+
+The difference is purpose, not input method. A context menu does not need to be
+opened by right-click; a trigger-opened overflow action list is still a
+`ContextMenu` if it presents actions rather than choices.
+
+| Type | Positioning | Blocks Background | Dismiss | Focus |
+|---|---|---|---|---|
+| `Tooltip` | Anchored | No | Unhover, unfocus | None |
+| `Dropdown` | Anchored | Click-dismiss | Outside click, Escape, selection | Menu items |
+| `ContextMenu` | Anchored | Click-dismiss | Outside click, Escape, selection | Menu items |
+| `Popover` | Anchored | Click-dismiss | Outside click, Escape | Content |
+| `Modal` | Centered | Dimming + blocking | Escape, explicit button | Trapped in content |
+| `Sheet` | Edge-slide | Dimming + blocking | Escape, explicit close | Trapped in content |
 
 ## Inventory
 
@@ -87,15 +78,31 @@ Actual type:
 
 Implementation:
 - [crates/app/src/ui/settings/row_widgets.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/settings/row_widgets.rs)
-- built with [crates/app/src/ui/popover.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/popover.rs)
+- built with [crates/app/src/ui/anchored_overlay.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/anchored_overlay.rs)
 
 Notes:
-- currently implemented with the generic popover widget
+- currently implemented with the generic anchored overlay primitive
 - likely needs a dedicated tooltip contract even if it reuses the same placement engine
+- lifecycle is not just hover-only; settings also tracks help visibility/pinning state in
+  [crates/app/src/ui/settings/types.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/settings/types.rs)
+  so this is currently the most stateful tooltip-family surface in the app
+- intended target is still `Tooltip`, not `Popover`
+- pinned/sticky help behavior should be removed during cleanup rather than preserved as a separate hybrid surface type
 
 2. Calendar pop-out button tooltip
 Implementation:
 - [crates/app/src/ui/calendar.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/calendar.rs)
+
+Current code name:
+`pop_out_btn`
+
+Actual type:
+`Tooltip`
+
+Notes:
+- implemented directly with `iced::widget::tooltip`
+- anchored to the calendar sidebar’s bottom `Pop Out` button
+- tooltip text is `Open calendar in a separate window`
 
 3. Emoji picker hover tooltips
 Implementation:
@@ -117,7 +124,7 @@ Actual type:
 Implementation:
 - [crates/app/src/ui/sidebar.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/sidebar.rs)
 - [crates/app/src/ui/widgets.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/widgets.rs)
-- built on [crates/app/src/ui/popover.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/popover.rs)
+- built on [crates/app/src/ui/anchored_overlay.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/anchored_overlay.rs)
 
 2. Generic app dropdown widget
 Implementation:
@@ -137,7 +144,7 @@ Implementation:
 
 Notes:
 - dropdowns are partly standardized through `widgets.rs`
-- they still rely on the generic popover substrate
+- they still rely on the generic anchored overlay substrate
 
 ### Context Menus
 
@@ -178,30 +185,31 @@ Notes:
 
 ### Popovers
 
-1. Shared generic popover engine
+1. Shared anchored overlay engine
 Implementation:
-- [crates/app/src/ui/popover.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/popover.rs)
+- [crates/app/src/ui/anchored_overlay.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/anchored_overlay.rs)
 
 Current role:
 - shared anchor-positioned overlay primitive
 - used by dropdowns and some help surfaces
 
 Concern:
-- currently named `popover`, but in practice serves as the lower-level anchored overlay primitive for multiple higher-level surface types
+- now correctly named as the lower-level anchored overlay primitive for multiple higher-level surface types
 
 2. Pop-out message overflow menu
 Current code name:
 `overflow_menu`
 
 Actual type:
-closer to `Popover` or `Context Menu` depending on final contract
+`ContextMenu`
 
 Implementation:
 - [crates/app/src/pop_out/message_view.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/message_view.rs)
 
 Notes:
 - anchored action list opened from a trigger
-- semantically it behaves more like a context/action menu than a dropdown
+- semantically it is a `ContextMenu`, because it presents actions rather than choices
+- trigger-opened is still compatible with `ContextMenu`; right-click is not required by the taxonomy
 
 3. Calendar event detail quick-glance card
 Current code name:
@@ -214,7 +222,7 @@ Implementation:
 - [crates/app/src/ui/calendar.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/calendar.rs)
 
 Notes:
-- separate stack implementation, not using `ui/popover.rs`
+- separate stack implementation, not using `ui/anchored_overlay.rs`
 - this is an important duplication point
 
 ### Modal Dialogs
@@ -287,7 +295,7 @@ Notes:
 
 1. Settings slide-in panel
 Current code name:
-`overlay`
+`active_sheet`
 
 Actual type:
 `Sheet`
@@ -306,7 +314,6 @@ Examples inside the sheet system:
 - create filter
 
 Current issue:
-- code uses `overlay`, but semantically this is a right-edge sheet system
 - backdrop dismiss semantics are currently wrong per `TODO.md`
 
 ## Inline-Rendered Surfaces That Should Be Reclassified
@@ -338,7 +345,7 @@ These are especially important because their current name and behavior diverge:
 Today the codebase appears to have at least these separate implementation paths:
 
 1. Native `iced::widget::tooltip`
-2. Custom anchored overlay primitive in [ui/popover.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/popover.rs)
+2. Custom anchored overlay primitive in [ui/anchored_overlay.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/anchored_overlay.rs)
 3. Manual `stack![]` + backdrop modal composition in `main.rs` and `calendar.rs`
 4. Manual inline pseudo-overlays in `pop_out/compose.rs`
 5. Manual slide-in sheet composition in `ui/settings/tabs.rs`
@@ -349,26 +356,69 @@ This is the fragmentation we need to normalize.
 
 Before refactoring behavior, the code should move toward these naming conventions:
 
-- `popover.rs`
-  - consider renaming to something like `anchored_surface.rs` or `anchored_overlay.rs`
+- `anchored_overlay.rs`
+  - keep `AnchoredOverlay` as the lower-level placement primitive
   - reserve `Popover` for the higher-level semantic type, not the generic placement primitive
 
-- Settings `overlay`
-  - rename toward `sheet`
+- Settings sheet state/messages
+  - keep `sheet` terminology
 
 - Compose inline “dialog” helpers
   - keep dialog names, but only after they become true modal surfaces
 
 - Overflow “menu”
-  - classify either as `Context Menu` or `Popover Action Menu`
+  - classify as `ContextMenu`
   - avoid ambiguous `popup`
+
+## Phase 1: Naming Cleanup
+
+Pure naming cleanup targets. These should not change behavior.
+
+| Previous Name | Location | Actual Role | Current Name | Priority | Notes |
+|---|---|---|---|---|---|
+| `Popover` | [crates/app/src/ui/anchored_overlay.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/anchored_overlay.rs) | generic anchored overlay primitive | `AnchoredOverlay` | High | Completed. This primitive name no longer collides with the semantic `Popover` type. |
+| `popover()` | [crates/app/src/ui/anchored_overlay.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/anchored_overlay.rs) | builder for anchored overlay placement | `anchored_overlay()` | High | Completed. Semantic `Popover` is now free for actual feature-level popovers. |
+| `Position` (inside primitive module) | [crates/app/src/ui/anchored_overlay.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/anchored_overlay.rs) | anchor-relative placement enum | `AnchorPosition` | High | Completed. Clarifies primitive-layer intent. |
+| `PopoverOverlay` | [crates/app/src/ui/anchored_overlay.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/anchored_overlay.rs) | overlay runtime object for anchored primitive | `AnchoredOverlayLayer` | Medium | Completed. |
+| `SettingsOverlay` | [crates/app/src/ui/settings/types.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/settings/types.rs) | right-edge sheet content enum | `SettingsSheetPage` | High | Completed. |
+| `overlay` field in `Settings` | [crates/app/src/ui/settings/types.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/settings/types.rs) | active settings sheet content | `active_sheet` | High | Completed. |
+| `overlay_anim` in `Settings` | [crates/app/src/ui/settings/types.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/settings/types.rs) | sheet slide animation | `sheet_anim` | High | Completed. |
+| `OpenOverlay` / `CloseOverlay` | [crates/app/src/ui/settings/types.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/settings/types.rs) | open/close settings sheet | `OpenSheet` / `CloseSheet` | High | Completed. |
+| `OverlayAnimTick` | [crates/app/src/ui/settings/types.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/settings/types.rs) | settings sheet animation tick | `SheetAnimTick` | Medium | Completed. |
+| `create_filter_overlay`, `account_editor_overlay`, `signature_editor_overlay`, `contact_editor_overlay`, `group_editor_overlay`, `import_wizard_overlay` | [crates/app/src/ui/settings/tabs.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/settings/tabs.rs) | settings sheet page renderers | `*_sheet` | Medium | Completed. These renderers now match the sheet system terminology. |
+
+### Recommended Rename Order
+
+1. Primitive layer rename
+   - completed
+
+2. Settings sheet system rename
+   - completed
+
+3. Revisit mixed sum types later:
+   - `CalendarOverlay`
+   - likely split by surface kind rather than rename as a single unit
+
+## Phase 2: Behavioral Fixes
+
+These are semantically named surfaces whose implementation does not yet match
+their canonical type behavior.
+
+| Surface | Location | Semantic Type | Current Problem | Notes |
+|---|---|---|---|---|
+| `link_dialog` | [crates/app/src/pop_out/compose.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/compose.rs) | `Modal` | rendered inline, not truly blocking | Keep the semantic target; fix implementation later. |
+| `discard_confirmation` | [crates/app/src/pop_out/compose.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/compose.rs) | `Modal` | rendered inline, not truly blocking | Rename only if needed when behavior is fixed. |
+| `token_context_menu` | [crates/app/src/pop_out/compose.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/compose.rs) | `ContextMenu` | rendered inline instead of anchored overlay | Semantic name is already correct. |
+| Compose autocomplete dropdown | [crates/app/src/pop_out/compose.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/compose.rs) | `Dropdown` | rendered inline in field flow | May or may not remain visually similar after reimplementation. |
+| `overflow_menu` | [crates/app/src/pop_out/message_view.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/message_view.rs) | `ContextMenu` | action surface built on anchored overlay primitive | It presents actions, not choices, so it is a context menu even though it is trigger-opened rather than right-click-opened. |
 
 ## Immediate Next Step
 
 After review of this catalogue:
 
-1. agree canonical names for the six surface types
-2. map every current surface to one of those types
-3. decide which generic primitives are actually needed
-4. rename the obviously wrong code-level terms
-5. only then unify behavior contracts
+1. Choose the first Phase 2 behavioral surface to fix
+   - likely compose modal/dialog surfaces or token context menu
+
+2. Keep the calendar sum type deferred
+   - [crates/app/src/ui/calendar.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/calendar.rs)
+   - likely split by semantic surface kind rather than renamed as one enum

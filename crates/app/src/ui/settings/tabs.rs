@@ -33,8 +33,8 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
     };
 
     let now = Instant::now();
-    let overlay_t: f32 = state.overlay_anim.interpolate(0.0, 1.0, now);
-    let show_overlay = state.overlay.is_some() || overlay_t > 0.001;
+    let sheet_t: f32 = state.sheet_anim.interpolate(0.0, 1.0, now);
+    let show_sheet = state.active_sheet.is_some() || sheet_t > 0.001;
 
     let content_area = container(
         scrollable(
@@ -49,19 +49,19 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
     .height(Length::Fill)
     .style(theme::ContainerClass::Content.style());
 
-    let main_content: Element<'_, SettingsMessage> = if show_overlay {
-        let overlay_content = match state.overlay {
-            Some(SettingsOverlay::CreateFilter) => create_filter_overlay(),
-            Some(SettingsOverlay::AccountEditor) => account_editor_overlay(state),
-            Some(SettingsOverlay::EditSignature { .. }) => signature_editor_overlay(state),
-            Some(SettingsOverlay::EditContact { .. }) => contact_editor_overlay(state),
-            Some(SettingsOverlay::EditGroup { .. }) => group_editor_overlay(state),
-            Some(SettingsOverlay::ImportContacts) => import_wizard_overlay(state),
+    let main_content: Element<'_, SettingsMessage> = if show_sheet {
+        let sheet_content = match state.active_sheet {
+            Some(SettingsSheetPage::CreateFilter) => create_filter_sheet(),
+            Some(SettingsSheetPage::AccountEditor) => account_editor_sheet(state),
+            Some(SettingsSheetPage::EditSignature { .. }) => signature_editor_sheet(state),
+            Some(SettingsSheetPage::EditContact { .. }) => contact_editor_sheet(state),
+            Some(SettingsSheetPage::EditGroup { .. }) => group_editor_sheet(state),
+            Some(SettingsSheetPage::ImportContacts) => import_wizard_sheet(state),
             None => column![].into(), // closing animation
         };
 
-        // Overlay panel: back button header + scrollable content
-        let overlay_panel = container(column![
+        // Sheet panel: back button header + scrollable content
+        let sheet_panel = container(column![
             container(
                 button(
                     row![
@@ -78,14 +78,14 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
                     .spacing(SPACE_XS)
                     .align_y(Alignment::Center),
                 )
-                .on_press(SettingsMessage::CloseOverlay)
+                .on_press(SettingsMessage::CloseSheet)
                 .padding(PAD_NAV_ITEM)
                 .style(theme::ButtonClass::BareIcon.style()),
             )
             .padding(PAD_SETTINGS_ROW)
             .width(Length::Fill),
             scrollable(
-                container(overlay_content)
+                container(sheet_content)
                     .padding(PAD_SETTINGS_CONTENT)
                     .align_x(Alignment::Center)
             )
@@ -98,22 +98,22 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
 
         // Slide from right: use a large fixed offset (2000px) scaled by (1-t).
         // The stack clips to bounds so overshooting doesn't matter.
-        let offset = ((1.0 - overlay_t) * 2000.0).round();
+        let offset = ((1.0 - sheet_t) * 2000.0).round();
 
-        // Event blocker: opaque mouse_area between content and overlay
+        // Event blocker: opaque mouse_area between content and sheet
         // prevents clicks/hovers from reaching the content underneath.
         let blocker = mouse_area(
             container(Space::new().width(Length::Fill).height(Length::Fill))
                 .width(Length::Fill)
                 .height(Length::Fill),
         )
-        .on_press(SettingsMessage::CloseOverlay)
+        .on_press(SettingsMessage::CloseSheet)
         .interaction(iced::mouse::Interaction::default());
 
         iced::widget::stack![
             content_area,
             blocker,
-            container(overlay_panel)
+            container(sheet_panel)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .padding(iced::Padding {
@@ -795,7 +795,7 @@ fn mail_rules_tab(state: &Settings) -> Element<'_, SettingsMessage> {
             Some("Add a new mail filter rule"),
             Some(icon::filter()),
             ActionKind::InApp,
-            SettingsMessage::OpenOverlay(SettingsOverlay::CreateFilter),
+            SettingsMessage::OpenSheet(SettingsSheetPage::CreateFilter),
         )],
     ));
     if !state.demo_filters.is_empty() {
@@ -824,7 +824,7 @@ fn mail_rules_tab(state: &Settings) -> Element<'_, SettingsMessage> {
 
 // ── Overlays ─────────────────────────────────────────────
 
-fn create_filter_overlay<'a>() -> Element<'a, SettingsMessage> {
+fn create_filter_sheet<'a>() -> Element<'a, SettingsMessage> {
     let mut col = column![]
         .spacing(SPACE_LG)
         .width(Length::Fill)
@@ -850,9 +850,9 @@ fn create_filter_overlay<'a>() -> Element<'a, SettingsMessage> {
     col.into()
 }
 
-// ── Account editor overlay ───────────────────────────────
+// ── Account editor sheet ────────────────────────────────
 
-fn account_editor_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
+fn account_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
     let editor = match &state.editing_account {
         Some(e) => e,
         None => return column![].into(),
@@ -1240,7 +1240,7 @@ fn signature_row<'a>(sig: &'a SignatureEntry, global_index: usize) -> Element<'a
         );
     }
 
-    // Remove button — opens editor overlay with delete confirmation
+    // Remove button — opens editor sheet with delete confirmation
     let del_id = sig.id.clone();
     content = content.push(
         button(
@@ -1267,9 +1267,9 @@ fn signature_row<'a>(sig: &'a SignatureEntry, global_index: usize) -> Element<'a
     .into()
 }
 
-// ── Signature editor overlay ────────────────────────────
+// ── Signature editor sheet ─────────────────────────────
 
-fn signature_editor_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
+fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
     let Some(ref editor) = state.signature_editor else {
         return column![].into();
     };
@@ -1716,9 +1716,9 @@ fn people_add_button(label: &str, on_press: SettingsMessage) -> Element<'_, Sett
     .into()
 }
 
-// ── Contact editor overlay ──────────────────────────────
+// ── Contact editor sheet ───────────────────────────────
 
-fn contact_editor_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
+fn contact_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
     let Some(ref editor) = state.contact_editor else {
         return column![].into();
     };
@@ -1943,9 +1943,9 @@ fn contact_editor_buttons<'a>(
     btn_row.into()
 }
 
-// ── Group editor overlay ────────────────────────────────
+// ── Group editor sheet ─────────────────────────────────
 
-fn group_editor_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
+fn group_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
     let Some(ref editor) = state.group_editor else {
         return column![].into();
     };
@@ -2661,9 +2661,9 @@ fn format_last_sync(last_sync_at: Option<i64>) -> String {
     }
 }
 
-// ── Import wizard overlay ───────────────────────────────
+// ── Import wizard sheet ────────────────────────────────
 
-fn import_wizard_overlay(state: &Settings) -> Element<'_, SettingsMessage> {
+fn import_wizard_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
     let Some(ref wizard) = state.import_wizard else {
         return column![].into();
     };

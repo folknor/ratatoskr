@@ -115,10 +115,10 @@ pub enum SettingsMessage {
     HelpUnhover(String),
     ToggleHelpPin(String),
     DismissHelp,
-    // Overlay
-    OpenOverlay(SettingsOverlay),
-    CloseOverlay,
-    OverlayAnimTick(iced::time::Instant),
+    // Sheet
+    OpenSheet(SettingsSheetPage),
+    CloseSheet,
+    SheetAnimTick(iced::time::Instant),
     // Accounts tab
     AddAccountFromSettings,
     AccountCardClicked(String),
@@ -138,7 +138,7 @@ pub enum SettingsMessage {
     DeleteAccountConfirmed(String),
     DeleteAccountCancelled,
     // Signatures
-    SignatureEdit(String),            // signature_id — open editor overlay
+    SignatureEdit(String),            // signature_id — open editor sheet
     SignatureCreate(String),          // account_id — open editor for new sig
     SignatureDelete(String),          // signature_id — request delete (shows confirm)
     SignatureDeleteConfirmed(String), // signature_id — confirmed delete
@@ -258,10 +258,10 @@ pub enum SettingsEvent {
     ReauthenticateAccount(String),
 }
 
-/// Overlays that slide in from the right, covering the settings content.
+/// Settings pages that slide in from the right, covering the settings content.
 /// One level deep — no stacking.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SettingsOverlay {
+pub enum SettingsSheetPage {
     CreateFilter,
     AccountEditor,
     EditSignature {
@@ -417,7 +417,7 @@ pub struct SignatureSaveRequest {
     pub is_reply_default: bool,
 }
 
-/// Editing state for the signature editor overlay.
+/// Editing state for the signature editor sheet.
 #[derive(Debug, Clone)]
 pub struct SignatureEditorState {
     /// The signature being edited (None = new).
@@ -445,7 +445,7 @@ pub struct SignatureDragState {
     pub is_dragging: bool,
 }
 
-/// Editing state for the contact editor overlay.
+/// Editing state for the contact editor sheet.
 #[derive(Debug, Clone)]
 pub struct ContactEditorState {
     pub contact_id: Option<String>,
@@ -465,7 +465,7 @@ pub struct ContactEditorState {
     pub dirty: bool,
 }
 
-/// Editing state for the group editor overlay.
+/// Editing state for the group editor sheet.
 #[derive(Debug, Clone)]
 pub struct GroupEditorState {
     pub group_id: Option<String>,
@@ -677,9 +677,9 @@ pub struct Settings {
     pub ai_auto_archive_social: bool,
     pub ai_auto_archive_newsletters: bool,
     pub ai_key_saved: bool,
-    // Overlay
-    pub overlay: Option<SettingsOverlay>,
-    pub overlay_anim: animation::Animation<bool>,
+    // Sheet
+    pub active_sheet: Option<SettingsSheetPage>,
+    pub sheet_anim: animation::Animation<bool>,
     // Help tooltips
     pub hovered_help: Option<String>,
     pub pinned_help: Option<String>,
@@ -945,8 +945,8 @@ impl Default for Settings {
             ai_auto_archive_social: false,
             ai_auto_archive_newsletters: false,
             ai_key_saved: false,
-            overlay: None,
-            overlay_anim: animation::Animation::new(false)
+            active_sheet: None,
+            sheet_anim: animation::Animation::new(false)
                 .easing(Easing::EaseOutCubic)
                 .duration(Duration::from_millis(200)),
             hovered_help: None,

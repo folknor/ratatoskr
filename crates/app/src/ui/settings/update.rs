@@ -63,8 +63,8 @@ impl Component for Settings {
             }
             SettingsMessage::CloseAccountEditor => {
                 self.editing_account = None;
-                self.overlay = None;
-                self.overlay_anim.go_mut(false, Instant::now());
+                self.active_sheet = None;
+                self.sheet_anim.go_mut(false, Instant::now());
                 return (Task::none(), None);
             }
             SettingsMessage::SaveAccountEditor => {
@@ -80,8 +80,8 @@ impl Component for Settings {
             }
             SettingsMessage::DeleteAccountConfirmed(id) => {
                 self.editing_account = None;
-                self.overlay = None;
-                self.overlay_anim.go_mut(false, Instant::now());
+                self.active_sheet = None;
+                self.sheet_anim.go_mut(false, Instant::now());
                 return (Task::none(), Some(SettingsEvent::DeleteAccount(id)));
             }
             SettingsMessage::DeleteAccountCancelled => {
@@ -114,11 +114,11 @@ impl Component for Settings {
                             is_reply_default: sig.is_reply_default,
                             dirty: false,
                         });
-                        self.overlay = Some(SettingsOverlay::EditSignature {
+                        self.active_sheet = Some(SettingsSheetPage::EditSignature {
                             signature_id: Some(sig.id.clone()),
                             account_id: sig.account_id.clone(),
                         });
-                        self.overlay_anim.go_mut(true, Instant::now());
+                        self.sheet_anim.go_mut(true, Instant::now());
                     }
                 }
                 self.confirm_delete_signature = Some(id.clone());
@@ -126,8 +126,8 @@ impl Component for Settings {
             }
             SettingsMessage::SignatureDeleteConfirmed(id) => {
                 self.confirm_delete_signature = None;
-                self.overlay = None;
-                self.overlay_anim.go_mut(false, Instant::now());
+                self.active_sheet = None;
+                self.sheet_anim.go_mut(false, Instant::now());
                 self.signature_editor = None;
                 return (Task::none(), Some(SettingsEvent::DeleteSignature(id)));
             }
@@ -200,8 +200,8 @@ impl Component for Settings {
             }
             SettingsMessage::ImportContactsOpen => {
                 self.import_wizard = Some(ImportWizardState::new());
-                self.overlay = Some(SettingsOverlay::ImportContacts);
-                self.overlay_anim.go_mut(true, Instant::now());
+                self.active_sheet = Some(SettingsSheetPage::ImportContacts);
+                self.sheet_anim.go_mut(true, Instant::now());
                 return (Task::none(), None);
             }
             SettingsMessage::ImportFileSelected(path, data) => {
@@ -268,8 +268,8 @@ impl Component for Settings {
                         ImportStep::Summary => {
                             // Close the wizard
                             self.import_wizard = None;
-                            self.overlay = None;
-                            self.overlay_anim.go_mut(false, Instant::now());
+                            self.active_sheet = None;
+                            self.sheet_anim.go_mut(false, Instant::now());
                             return (
                                 Task::none(),
                                 Some(SettingsEvent::LoadContacts(self.contact_filter.clone())),
@@ -308,7 +308,7 @@ impl Settings {
             SettingsMessage::Noop
             | SettingsMessage::CheckForUpdates
             | SettingsMessage::OpenGithub
-            | SettingsMessage::OverlayAnimTick(_) => {}
+            | SettingsMessage::SheetAnimTick(_) => {}
             SettingsMessage::UndoInput(field) => {
                 self.undo_field(field);
             }
@@ -572,11 +572,11 @@ impl Settings {
                         is_reply_default: sig.is_reply_default,
                         dirty: false,
                     });
-                    self.overlay = Some(SettingsOverlay::EditSignature {
+                    self.active_sheet = Some(SettingsSheetPage::EditSignature {
                         signature_id: Some(sig.id.clone()),
                         account_id: sig.account_id.clone(),
                     });
-                    self.overlay_anim.go_mut(true, Instant::now());
+                    self.sheet_anim.go_mut(true, Instant::now());
                 }
             }
             SettingsMessage::SignatureCreate(account_id) => {
@@ -589,11 +589,11 @@ impl Settings {
                     is_reply_default: false,
                     dirty: false,
                 });
-                self.overlay = Some(SettingsOverlay::EditSignature {
+                self.active_sheet = Some(SettingsSheetPage::EditSignature {
                     signature_id: None,
                     account_id,
                 });
-                self.overlay_anim.go_mut(true, Instant::now());
+                self.sheet_anim.go_mut(true, Instant::now());
             }
             SettingsMessage::SignatureEditorNameChanged(v) => {
                 if let Some(ref mut editor) = self.signature_editor {
@@ -623,13 +623,13 @@ impl Settings {
                     editor.dirty = true;
                 }
             }
-            SettingsMessage::OpenOverlay(overlay) => {
-                self.overlay = Some(overlay);
-                self.overlay_anim.go_mut(true, Instant::now());
+            SettingsMessage::OpenSheet(sheet) => {
+                self.active_sheet = Some(sheet);
+                self.sheet_anim.go_mut(true, Instant::now());
             }
-            SettingsMessage::CloseOverlay => {
-                self.overlay = None;
-                self.overlay_anim.go_mut(false, Instant::now());
+            SettingsMessage::CloseSheet => {
+                self.active_sheet = None;
+                self.sheet_anim.go_mut(false, Instant::now());
                 self.signature_editor = None;
                 self.editing_account = None;
                 self.contact_editor = None;
@@ -886,9 +886,9 @@ impl Settings {
             is_default: editor.is_default,
             is_reply_default: editor.is_reply_default,
         };
-        // Close overlay
-        self.overlay = None;
-        self.overlay_anim.go_mut(false, Instant::now());
+        // Close sheet
+        self.active_sheet = None;
+        self.sheet_anim.go_mut(false, Instant::now());
         self.signature_editor = None;
         (Task::none(), Some(SettingsEvent::SaveSignature(request)))
     }
@@ -908,10 +908,10 @@ impl Settings {
                 server_id: contact.server_id.clone(),
                 dirty: false,
             });
-            self.overlay = Some(SettingsOverlay::EditContact {
+            self.active_sheet = Some(SettingsSheetPage::EditContact {
                 contact_id: Some(contact.id.clone()),
             });
-            self.overlay_anim.go_mut(true, Instant::now());
+            self.sheet_anim.go_mut(true, Instant::now());
         }
     }
 
@@ -929,8 +929,8 @@ impl Settings {
             server_id: None,
             dirty: false,
         });
-        self.overlay = Some(SettingsOverlay::EditContact { contact_id: None });
-        self.overlay_anim.go_mut(true, Instant::now());
+        self.active_sheet = Some(SettingsSheetPage::EditContact { contact_id: None });
+        self.sheet_anim.go_mut(true, Instant::now());
     }
 
     fn handle_contact_save(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
@@ -958,8 +958,8 @@ impl Settings {
             source: editor.source.clone().or_else(|| Some("user".to_string())),
             server_id: editor.server_id.clone(),
         };
-        self.overlay = None;
-        self.overlay_anim.go_mut(false, Instant::now());
+        self.active_sheet = None;
+        self.sheet_anim.go_mut(false, Instant::now());
         self.contact_editor = None;
         (Task::none(), Some(SettingsEvent::SaveContact(entry)))
     }
@@ -968,8 +968,8 @@ impl Settings {
         &mut self,
         id: String,
     ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
-        self.overlay = None;
-        self.overlay_anim.go_mut(false, Instant::now());
+        self.active_sheet = None;
+        self.sheet_anim.go_mut(false, Instant::now());
         self.contact_editor = None;
         (Task::none(), Some(SettingsEvent::DeleteContact(id)))
     }
@@ -983,10 +983,10 @@ impl Settings {
                 filter: String::new(),
                 dirty: false,
             });
-            self.overlay = Some(SettingsOverlay::EditGroup {
+            self.active_sheet = Some(SettingsSheetPage::EditGroup {
                 group_id: Some(group.id.clone()),
             });
-            self.overlay_anim.go_mut(true, Instant::now());
+            self.sheet_anim.go_mut(true, Instant::now());
         }
     }
 
@@ -998,8 +998,8 @@ impl Settings {
             filter: String::new(),
             dirty: false,
         });
-        self.overlay = Some(SettingsOverlay::EditGroup { group_id: None });
-        self.overlay_anim.go_mut(true, Instant::now());
+        self.active_sheet = Some(SettingsSheetPage::EditGroup { group_id: None });
+        self.sheet_anim.go_mut(true, Instant::now());
     }
 
     fn handle_group_save(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
@@ -1023,8 +1023,8 @@ impl Settings {
             updated_at: 0,
         };
         let members = editor.members.clone();
-        self.overlay = None;
-        self.overlay_anim.go_mut(false, Instant::now());
+        self.active_sheet = None;
+        self.sheet_anim.go_mut(false, Instant::now());
         self.group_editor = None;
         (Task::none(), Some(SettingsEvent::SaveGroup(group, members)))
     }
@@ -1033,8 +1033,8 @@ impl Settings {
         &mut self,
         id: String,
     ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
-        self.overlay = None;
-        self.overlay_anim.go_mut(false, Instant::now());
+        self.active_sheet = None;
+        self.sheet_anim.go_mut(false, Instant::now());
         self.group_editor = None;
         (Task::none(), Some(SettingsEvent::DeleteGroup(id)))
     }
@@ -1207,8 +1207,8 @@ impl Settings {
             show_delete_confirmation: false,
             dirty: false,
         });
-        self.overlay = Some(SettingsOverlay::AccountEditor);
-        self.overlay_anim.go_mut(true, iced::time::Instant::now());
+        self.active_sheet = Some(SettingsSheetPage::AccountEditor);
+        self.sheet_anim.go_mut(true, iced::time::Instant::now());
     }
 
     fn handle_account_editor_save(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
@@ -1218,8 +1218,8 @@ impl Settings {
         if !editor.dirty {
             // Nothing changed — just close
             self.editing_account = None;
-            self.overlay = None;
-            self.overlay_anim.go_mut(false, iced::time::Instant::now());
+            self.active_sheet = None;
+            self.sheet_anim.go_mut(false, iced::time::Instant::now());
             return (Task::none(), None);
         }
 
@@ -1240,8 +1240,8 @@ impl Settings {
         let account_id = editor.account_id.clone();
 
         self.editing_account = None;
-        self.overlay = None;
-        self.overlay_anim.go_mut(false, iced::time::Instant::now());
+        self.active_sheet = None;
+        self.sheet_anim.go_mut(false, iced::time::Instant::now());
         (
             Task::none(),
             Some(SettingsEvent::SaveAccountChanges { account_id, params }),

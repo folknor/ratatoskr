@@ -417,9 +417,9 @@ fn overflow_menu<'a>(open: bool, window_id: iced::window::Id) -> Element<'a, Mes
         .padding(PAD_DROPDOWN)
         .style(theme::ContainerClass::SelectMenu.style());
 
-    crate::ui::popover::popover(trigger)
+    crate::ui::anchored_overlay::anchored_overlay(trigger)
         .popup(menu)
-        .position(crate::ui::popover::Position::BelowRight)
+        .position(crate::ui::anchored_overlay::AnchorPosition::BelowRight)
         .on_dismiss(Message::PopOut(
             window_id,
             PopOutMessage::MessageView(MessageViewMessage::ToggleOverflowMenu),

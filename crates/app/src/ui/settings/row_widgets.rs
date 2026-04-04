@@ -101,8 +101,8 @@ fn section_inner<'a>(
             .on_enter(SettingsMessage::HelpHover(help_id_hover))
             .on_exit(SettingsMessage::HelpUnhover(help_id_unhover));
 
-            let mut pop = crate::ui::popover::popover(help_icon)
-                .position(crate::ui::popover::Position::BelowRight)
+            let mut pop = crate::ui::anchored_overlay::anchored_overlay(help_icon)
+                .position(crate::ui::anchored_overlay::AnchorPosition::BelowRight)
                 .popup_width(HELP_TOOLTIP_WIDTH);
 
             if help_cfg.visible {
