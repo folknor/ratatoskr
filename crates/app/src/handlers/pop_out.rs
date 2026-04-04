@@ -28,8 +28,6 @@ use crate::ui::layout::{
 use crate::{APP_DATA_DIR, App, Message};
 
 use rtsk::actions::SendAttachment;
-use rusqlite::OptionalExtension;
-
 // ── Pop-out message dispatch ────────────────────────────
 
 impl App {
@@ -371,17 +369,8 @@ impl App {
             ref mailbox_id,
         } = self.sidebar.selected_scope
         {
-            if let Ok(Some(shared_email)) = self.db.with_conn_sync(|conn| {
-                conn.query_row(
-                    "SELECT email_address FROM shared_mailbox_sync_state \
-                     WHERE account_id = ?1 AND mailbox_id = ?2",
-                    rusqlite::params![account_id, mailbox_id],
-                    |row| row.get::<_, Option<String>>(0),
-                )
-                .optional()
-                .map_err(|e| format!("shared mailbox email: {e}"))
-                .map(|opt| opt.flatten())
-            }) {
+            if let Ok(Some(shared_email)) = self.db.get_shared_mailbox_email(account_id, mailbox_id)
+            {
                 state.set_shared_mailbox_from(account_id, &shared_email);
             }
         }

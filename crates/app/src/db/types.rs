@@ -1,7 +1,3 @@
-use rusqlite::Row;
-
-// ── Date display mode ───────────────────────────────────────
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DateDisplay {
     /// Absolute date + relative offset from first message ("+14d")
@@ -147,23 +143,4 @@ pub struct CalendarEvent {
     pub rsvp_status: Option<String>,
     pub availability: Option<String>,
     pub visibility: Option<String>,
-}
-
-pub(crate) fn row_to_thread(row: &Row<'_>) -> rusqlite::Result<Thread> {
-    Ok(Thread {
-        id: row.get("id")?,
-        account_id: row.get("account_id")?,
-        subject: row.get("subject")?,
-        snippet: row.get("snippet")?,
-        last_message_at: row.get("last_message_at")?,
-        message_count: row.get("message_count")?,
-        is_read: row.get::<_, i64>("is_read")? != 0,
-        is_starred: row.get::<_, i64>("is_starred")? != 0,
-        is_pinned: row.get::<_, i64>("is_pinned")? != 0,
-        is_muted: row.get::<_, i64>("is_muted")? != 0,
-        has_attachments: row.get::<_, i64>("has_attachments")? != 0,
-        from_name: row.get("from_name")?,
-        from_address: row.get("from_address")?,
-        is_local_draft: false,
-    })
 }

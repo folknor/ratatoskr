@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use iced::Task;
 
 use crate::ui::chat_timeline::{ChatTimeline, ChatTimelineEvent};
@@ -97,15 +95,10 @@ impl App {
             .map(|a| a.email.clone())
             .collect();
 
-        // Include send-as aliases from send_identities table.
-        if let Ok(conn) = self.db.conn_arc().lock() {
-            if let Ok(mut stmt) = conn.prepare("SELECT DISTINCT email FROM send_identities") {
-                if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
-                    for email in rows.flatten() {
-                        if !emails.iter().any(|e| e.eq_ignore_ascii_case(&email)) {
-                            emails.push(email);
-                        }
-                    }
+        if let Ok(send_identities) = self.db.get_send_identity_emails_sync() {
+            for email in send_identities {
+                if !emails.iter().any(|e| e.eq_ignore_ascii_case(&email)) {
+                    emails.push(email);
                 }
             }
         }

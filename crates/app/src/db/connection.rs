@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use rtsk::db::DbState;
 
 use super::pinned_searches::ensure_pinned_search_schema;
@@ -130,6 +130,28 @@ impl Db {
             .lock()
             .map_err(|e| format!("db lock poisoned: {e}"))?;
         f(&conn)
+    }
+
+    pub fn get_calendar_default_view(&self) -> Result<Option<String>, String> {
+        self.with_conn_sync(|conn| {
+            conn.query_row(
+                "SELECT value FROM settings WHERE key = 'calendar_default_view'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())
+        })
+    }
+
+    pub fn mark_queued_drafts_failed(&self) -> Result<usize, String> {
+        self.with_write_conn_sync(|conn| {
+            conn.execute(
+                "UPDATE local_drafts SET sync_status = 'failed' WHERE sync_status = 'queued'",
+                [],
+            )
+            .map_err(|e| e.to_string())
+        })
     }
 
     pub async fn save_local_draft(

@@ -1,10 +1,62 @@
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 use super::connection::Db;
 use super::types::*;
 use crate::ui::thread_list::TypeaheadItem;
 
 impl Db {
+    pub fn get_account_auth_info(
+        &self,
+        account_id: &str,
+    ) -> Result<rtsk::db::queries_extra::AccountAuthInfo, String> {
+        self.with_conn_sync(|conn| rtsk::db::queries_extra::get_account_auth_info_sync(conn, account_id))
+    }
+
+    pub fn get_shared_mailbox_email(
+        &self,
+        account_id: &str,
+        mailbox_id: &str,
+    ) -> Result<Option<String>, String> {
+        self.with_conn_sync(|conn| {
+            conn.query_row(
+                "SELECT email_address FROM shared_mailbox_sync_state
+                 WHERE account_id = ?1 AND mailbox_id = ?2",
+                params![account_id, mailbox_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|e| format!("shared mailbox email: {e}"))
+            .map(|opt| opt.flatten())
+        })
+    }
+
+    pub fn get_send_identity_emails_sync(&self) -> Result<Vec<String>, String> {
+        self.with_conn_sync(|conn| {
+            let mut stmt = conn
+                .prepare("SELECT DISTINCT email FROM send_identities")
+                .map_err(|e| e.to_string())?;
+
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())
+        })
+    }
+
+    pub async fn get_send_identity_emails(&self) -> Result<Vec<String>, String> {
+        self.with_conn(|conn| {
+            let mut stmt = conn
+                .prepare("SELECT DISTINCT email FROM send_identities")
+                .map_err(|e| e.to_string())?;
+
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())
+        })
+        .await
+    }
+
     pub async fn get_accounts(&self) -> Result<Vec<Account>, String> {
         self.with_conn(|conn| {
             let mut stmt = conn
@@ -264,5 +316,12 @@ impl Db {
             .map_err(|e| e.to_string())
         })
         .await
+    }
+
+    pub async fn any_auto_response_active(&self) -> Result<bool, String> {
+        let db = self.read_db_state();
+        tokio::runtime::Handle::current().block_on(async move {
+            db.with_conn(rtsk::auto_responses::any_auto_response_active).await
+        })
     }
 }

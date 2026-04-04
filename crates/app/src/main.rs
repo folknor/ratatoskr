@@ -519,16 +519,10 @@ impl App {
         let session = pop_out::session::SessionState::load(data_dir);
 
         let calendar_default_view = db
-            .with_conn_sync(|conn| {
-                let view_name = conn
-                    .query_row(
-                        "SELECT value FROM settings WHERE key = 'calendar_default_view'",
-                        [],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .unwrap_or_else(|_| "month".to_string());
-                Ok(CalendarState::parse_view_name(&view_name))
-            })
+            .get_calendar_default_view()
+            .ok()
+            .flatten()
+            .map(|view_name| CalendarState::parse_view_name(&view_name))
             .unwrap_or(CalendarView::Month);
 
         let bimi_cache = Arc::new(rtsk::bimi::BimiLruCache::new());
@@ -591,14 +585,7 @@ impl App {
         // Resurface orphaned 'queued' drafts from the old send path.
         // These were never sent — transition to 'failed' so they're visible
         // to future outbox UI rather than silently deleting user data.
-        if let Err(e) = app.db.with_conn_sync(|conn| {
-            conn.execute(
-                "UPDATE local_drafts SET sync_status = 'failed' WHERE sync_status = 'queued'",
-                [],
-            )
-            .map_err(|e| e.to_string())?;
-            Ok(())
-        }) {
+        if let Err(e) = app.db.mark_queued_drafts_failed() {
             log::warn!("Failed to resurface orphaned queued drafts: {e}");
         }
 
@@ -1921,12 +1908,9 @@ impl App {
     /// Spawn an async task that checks whether any account has an active
     /// auto-reply and delivers the result as `Message::AutoReplyChecked`.
     fn check_auto_reply_status(&self) -> Task<Message> {
-        let conn = self.db.conn_arc();
+        let db = std::sync::Arc::clone(&self.db);
         Task::perform(
-            async move {
-                let guard = conn.lock().map_err(|e| format!("lock: {e}"))?;
-                rtsk::auto_responses::any_auto_response_active(&guard)
-            },
+            async move { db.any_auto_response_active().await },
             |result| Message::AutoReplyChecked(result.unwrap_or(false)),
         )
     }

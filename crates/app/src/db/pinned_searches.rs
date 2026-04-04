@@ -8,7 +8,7 @@
 use rusqlite::params;
 
 use super::connection::Db;
-use super::types::{Thread, row_to_thread};
+use super::types::Thread;
 
 // ── Pinned search type ───────────────────────────────────────
 
@@ -381,4 +381,23 @@ impl Db {
         })
         .await
     }
+}
+
+fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
+    Ok(Thread {
+        id: row.get("id")?,
+        account_id: row.get("account_id")?,
+        subject: row.get("subject")?,
+        snippet: row.get("snippet")?,
+        last_message_at: row.get("last_message_at")?,
+        message_count: row.get("message_count")?,
+        is_read: row.get::<_, i64>("is_read")? != 0,
+        is_starred: row.get::<_, i64>("is_starred")? != 0,
+        is_pinned: row.get::<_, i64>("is_pinned")? != 0,
+        is_muted: row.get::<_, i64>("is_muted")? != 0,
+        has_attachments: row.get::<_, i64>("has_attachments")? != 0,
+        from_name: row.get("from_name")?,
+        from_address: row.get("from_address")?,
+        is_local_draft: false,
+    })
 }
