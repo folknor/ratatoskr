@@ -43,6 +43,54 @@ impl CalendarView {
     }
 }
 
+// ── Workflow state ────────────────────────────────────
+
+/// What the user is currently doing in the calendar feature.
+///
+/// Source of truth for event lifecycle meaning. Surfaces
+/// (`active_popover`, `active_modal`) are presentation caches
+/// synchronized from this state.
+///
+/// **Invariant:** Handlers update workflow state first, then surfaces.
+/// Reads of lifecycle meaning and identity come from workflow only.
+/// Surfaces must never be used to recover workflow semantics.
+#[derive(Debug, Clone)]
+pub enum CalendarWorkflow {
+    /// No active event workflow. User is browsing/navigating.
+    Idle,
+    /// Viewing an existing event (popover or full modal).
+    ViewingEvent {
+        event_id: String,
+        account_id: String,
+        calendar_id: Option<String>,
+    },
+    /// Creating a new event in the editor.
+    CreatingEvent {
+        account_id: Option<String>,
+        calendar_id: Option<String>,
+        /// Transitional: partial dirty-detection baseline.
+        /// Phase B replaces with a full original snapshot.
+        original_title: String,
+    },
+    /// Editing an existing event in the editor.
+    EditingEvent {
+        event_id: String,
+        account_id: String,
+        calendar_id: Option<String>,
+        /// Transitional: partial dirty-detection baseline.
+        /// Phase B replaces with a full original snapshot.
+        original_title: String,
+    },
+    /// Confirming discard of unsaved editor changes.
+    ConfirmingDiscard,
+    /// Confirming deletion of a persisted event.
+    ConfirmingDelete {
+        event_id: String,
+        account_id: String,
+        title: String,
+    },
+}
+
 // ── Surface state ─────────────────────────────────────
 
 /// The active calendar popover, if any.
@@ -53,18 +101,19 @@ pub enum CalendarPopover {
 }
 
 /// The active calendar modal, if any.
+///
+/// These are presentation state, not workflow state. The workflow
+/// enum is the source of truth for lifecycle meaning. Modals are
+/// synchronized from workflow state by the handler.
 #[derive(Debug, Clone)]
 pub enum CalendarModal {
     /// Full event detail modal (two-panel: 70% detail + 30% day view).
     EventFull { event: CalendarEventData },
-    /// Editing or creating an event.
+    /// Editing or creating an event. Create-vs-edit semantics
+    /// come from `CalendarWorkflow`, not from this variant.
     EventEditor {
         /// The event being edited. Fields are mutated as the user types.
         event: CalendarEventData,
-        /// Whether this is a new event (true) or editing existing (false).
-        is_new: bool,
-        /// Snapshot of the event at editor open time, for dirty detection.
-        original_title: String,
     },
     /// Delete confirmation dialog.
     ConfirmDelete {
@@ -72,6 +121,8 @@ pub enum CalendarModal {
         title: String,
         account_id: Option<String>,
     },
+    /// Discard-unsaved-changes confirmation dialog.
+    ConfirmDiscard { title: String },
 }
 
 /// Data for a calendar event in the UI layer.
@@ -214,9 +265,12 @@ pub struct CalendarState {
     pub month_grid: calendar_month::MonthGridData,
     /// Cached time grid config for day/work-week/week views.
     pub time_grid_config: calendar_time_grid::TimeGridConfig,
-    /// Current quick-glance popover, if any.
+    /// Current event lifecycle workflow state. Source of truth for
+    /// what the user is doing — surfaces are synchronized from this.
+    pub workflow: CalendarWorkflow,
+    /// Current quick-glance popover, if any (presentation cache).
     pub active_popover: Option<CalendarPopover>,
-    /// Current blocking modal, if any.
+    /// Current blocking modal, if any (presentation cache).
     pub active_modal: Option<CalendarModal>,
     /// Cached events from the DB. Reloaded after CRUD operations.
     pub events: Vec<calendar_time_grid::TimeGridEvent>,
@@ -254,6 +308,7 @@ impl CalendarState {
             week_start: Weekday::Mon,
             month_grid,
             time_grid_config,
+            workflow: CalendarWorkflow::Idle,
             active_popover: None,
             active_modal: None,
             events: Vec::new(),
@@ -448,8 +503,11 @@ pub enum CalendarMessage {
         title: String,
         account_id: Option<String>,
     },
-    /// User confirmed deletion.
+    /// User confirmed deletion. The String payload is transitional —
+    /// the handler reads identity from workflow state (ConfirmingDelete).
     DeleteEvent(String),
+    /// User confirmed discarding unsaved editor changes.
+    DiscardChanges,
     /// Async delete completed.
     EventDeleted(Result<(), String>),
     /// Create a new event (from command palette or UI action).
@@ -493,10 +551,15 @@ pub fn calendar_layout(state: &CalendarState) -> Element<'_, CalendarMessage> {
     if let Some(modal) = &state.active_modal {
         let card = match modal {
             CalendarModal::EventFull { event } => event_full_modal(event, state),
-            CalendarModal::EventEditor { event, is_new, .. } => event_editor_card(event, *is_new),
+            CalendarModal::EventEditor { event } => {
+                let is_creating =
+                    matches!(state.workflow, CalendarWorkflow::CreatingEvent { .. });
+                event_editor_card(event, is_creating)
+            }
             CalendarModal::ConfirmDelete {
                 event_id, title, ..
             } => delete_confirm_card(event_id, title),
+            CalendarModal::ConfirmDiscard { title } => discard_confirm_card(title),
         };
         crate::ui::modal_overlay::modal_overlay(
             base,
@@ -1006,8 +1069,15 @@ fn event_full_modal<'a>(
 // ── Event editor card ──────────────────────────────────
 
 /// Event creation/editing form (rendered as a centered modal).
-fn event_editor_card(event: &CalendarEventData, is_new: bool) -> Element<'_, CalendarMessage> {
-    let heading = if is_new { "New Event" } else { "Edit Event" };
+fn event_editor_card(
+    event: &CalendarEventData,
+    is_creating: bool,
+) -> Element<'_, CalendarMessage> {
+    let heading = if is_creating {
+        "New Event"
+    } else {
+        "Edit Event"
+    };
 
     let mut content = column![].spacing(SPACE_SM);
 
@@ -1320,6 +1390,44 @@ fn delete_confirm_card<'a>(event_id: &str, title: &str) -> Element<'a, CalendarM
         row![
             button(text("Delete").size(TEXT_SM))
                 .on_press(CalendarMessage::DeleteEvent(id))
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Nav { active: true }.style()),
+            button(text("Cancel").size(TEXT_SM))
+                .on_press(CalendarMessage::CloseModal)
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Ghost.style()),
+        ]
+        .spacing(SPACE_XS),
+    ]
+    .spacing(SPACE_XXS);
+
+    container(content)
+        .width(Length::Fixed(CALENDAR_OVERLAY_WIDTH))
+        .padding(PAD_CARD)
+        .style(theme::ContainerClass::Elevated.style())
+        .into()
+}
+
+// ── Discard confirmation card ─────────────────────────
+
+/// Confirmation dialog before discarding unsaved editor changes.
+fn discard_confirm_card(title: &str) -> Element<'_, CalendarMessage> {
+    let display_title = if title.is_empty() {
+        "Discard unsaved changes?"
+    } else {
+        title
+    };
+
+    let content = column![
+        text("Unsaved Changes")
+            .size(TEXT_HEADING)
+            .font(crate::font::text_semibold()),
+        Space::new().height(SPACE_XS),
+        text(display_title).size(TEXT_MD),
+        Space::new().height(SPACE_MD),
+        row![
+            button(text("Discard").size(TEXT_SM))
+                .on_press(CalendarMessage::DiscardChanges)
                 .padding(PAD_BUTTON)
                 .style(theme::ButtonClass::Nav { active: true }.style()),
             button(text("Cancel").size(TEXT_SM))

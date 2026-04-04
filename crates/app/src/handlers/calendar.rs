@@ -4,8 +4,8 @@ use chrono::{Datelike, NaiveDate, Timelike};
 use iced::Task;
 
 use crate::ui::calendar::{
-    CalendarEventData, CalendarMessage, CalendarModal, CalendarPopover, EventField,
-    EventTextField,
+    CalendarEventData, CalendarMessage, CalendarModal, CalendarPopover, CalendarWorkflow,
+    EventField, EventTextField,
 };
 use crate::{App, Message};
 
@@ -46,12 +46,14 @@ impl App {
                 // Double-click opens event creation dialog with time pre-filled.
                 let event = CalendarEventData::new_at(date, hour);
                 self.calendar.reset_editor_undo(&event);
-                self.calendar.active_popover = None;
-                self.calendar.active_modal = Some(CalendarModal::EventEditor {
-                    event,
-                    is_new: true,
+                // Workflow first, then surface.
+                self.calendar.workflow = CalendarWorkflow::CreatingEvent {
+                    account_id: None,
+                    calendar_id: None,
                     original_title: String::new(),
-                });
+                };
+                self.calendar.active_popover = None;
+                self.calendar.active_modal = Some(CalendarModal::EventEditor { event });
                 Task::none()
             }
             CalendarMessage::EventClicked(event_id) => {
@@ -88,6 +90,12 @@ impl App {
             CalendarMessage::EventLoaded(result) => {
                 match result {
                     Ok(data) => {
+                        // Workflow first, then surface.
+                        self.calendar.workflow = CalendarWorkflow::ViewingEvent {
+                            event_id: data.id.clone().unwrap_or_default(),
+                            account_id: data.account_id.clone().unwrap_or_default(),
+                            calendar_id: data.calendar_id.clone(),
+                        };
                         self.calendar.active_modal = None;
                         self.calendar.active_popover =
                             Some(CalendarPopover::EventDetail { event: data });
@@ -101,35 +109,45 @@ impl App {
             }
             CalendarMessage::Noop => Task::none(),
             CalendarMessage::ClosePopover => {
+                self.calendar.workflow = CalendarWorkflow::Idle;
                 self.calendar.active_popover = None;
                 Task::none()
             }
             CalendarMessage::CloseModal => {
                 // Check for unsaved changes in the editor.
-                if let Some(CalendarModal::EventEditor {
-                    ref event,
-                    ref original_title,
-                    ..
-                }) = self.calendar.active_modal
+                if let Some(CalendarModal::EventEditor { ref event, .. }) =
+                    self.calendar.active_modal
                 {
-                    if event.title != *original_title
+                    // Read dirty-detection baseline from workflow state (transitional:
+                    // Phase B replaces with full snapshot comparison).
+                    let original_title = match &self.calendar.workflow {
+                        CalendarWorkflow::CreatingEvent { original_title, .. }
+                        | CalendarWorkflow::EditingEvent { original_title, .. } => {
+                            original_title.as_str()
+                        }
+                        _ => "",
+                    };
+                    if event.title != original_title
                         || !event.description.is_empty()
                         || !event.location.is_empty()
                     {
-                        // Has changes — show confirmation.
-                        self.calendar.active_modal = Some(CalendarModal::ConfirmDelete {
-                            event_id: "__discard__".to_string(),
+                        // Has changes — show discard confirmation.
+                        self.calendar.workflow = CalendarWorkflow::ConfirmingDiscard;
+                        self.calendar.active_modal = Some(CalendarModal::ConfirmDiscard {
                             title: "Discard unsaved changes?".to_string(),
-                            account_id: event.account_id.clone(),
                         });
                         return Task::none();
                     }
                 }
+                self.calendar.workflow = CalendarWorkflow::Idle;
                 self.calendar.active_modal = None;
                 Task::none()
             }
             CalendarMessage::ExpandPopoverToModal => {
-                if let Some(CalendarPopover::EventDetail { event }) = &self.calendar.active_popover {
+                // Workflow stays ViewingEvent — only the surface changes.
+                if let Some(CalendarPopover::EventDetail { event }) =
+                    &self.calendar.active_popover
+                {
                     let event = event.clone();
                     self.calendar.active_popover = None;
                     self.calendar.active_modal = Some(CalendarModal::EventFull { event });
@@ -137,25 +155,34 @@ impl App {
                 Task::none()
             }
             CalendarMessage::OpenEventEditor(data) => {
-                let (event, is_new) = match data {
-                    Some(e) => {
-                        let new = e.id.is_none();
-                        (e, new)
-                    }
+                let event = match data {
+                    Some(e) => e,
                     None => {
                         let date = self.calendar.selected_date;
                         let hour = self.calendar.selected_hour.unwrap_or(9);
-                        (CalendarEventData::new_at(date, hour), true)
+                        CalendarEventData::new_at(date, hour)
                     }
                 };
                 self.calendar.reset_editor_undo(&event);
                 let original_title = event.title.clone();
+                // Transitional rule: create-vs-edit derived from event.id presence.
+                // Phase C makes this explicit from the caller.
+                if event.id.is_some() {
+                    self.calendar.workflow = CalendarWorkflow::EditingEvent {
+                        event_id: event.id.clone().unwrap_or_default(),
+                        account_id: event.account_id.clone().unwrap_or_default(),
+                        calendar_id: event.calendar_id.clone(),
+                        original_title,
+                    };
+                } else {
+                    self.calendar.workflow = CalendarWorkflow::CreatingEvent {
+                        account_id: event.account_id.clone(),
+                        calendar_id: event.calendar_id.clone(),
+                        original_title,
+                    };
+                }
                 self.calendar.active_popover = None;
-                self.calendar.active_modal = Some(CalendarModal::EventEditor {
-                    event,
-                    is_new,
-                    original_title,
-                });
+                self.calendar.active_modal = Some(CalendarModal::EventEditor { event });
                 Task::none()
             }
             CalendarMessage::CreateEvent => {
@@ -163,12 +190,14 @@ impl App {
                 let hour = self.calendar.selected_hour.unwrap_or(9);
                 let event = CalendarEventData::new_at(date, hour);
                 self.calendar.reset_editor_undo(&event);
-                self.calendar.active_popover = None;
-                self.calendar.active_modal = Some(CalendarModal::EventEditor {
-                    event,
-                    is_new: true,
+                // Workflow first, then surface.
+                self.calendar.workflow = CalendarWorkflow::CreatingEvent {
+                    account_id: None,
+                    calendar_id: None,
                     original_title: String::new(),
-                });
+                };
+                self.calendar.active_popover = None;
+                self.calendar.active_modal = Some(CalendarModal::EventEditor { event });
                 Task::none()
             }
             CalendarMessage::EventFieldChanged(field) => {
@@ -188,6 +217,7 @@ impl App {
                 match result {
                     Ok(()) => {
                         log::info!("Calendar event saved");
+                        self.calendar.workflow = CalendarWorkflow::Idle;
                         self.calendar.active_modal = None;
                         return self.reload_calendar_events();
                     }
@@ -203,6 +233,12 @@ impl App {
                 title,
                 account_id,
             } => {
+                // Workflow first, then surface.
+                self.calendar.workflow = CalendarWorkflow::ConfirmingDelete {
+                    event_id: event_id.clone(),
+                    account_id: account_id.clone().unwrap_or_default(),
+                    title: title.clone(),
+                };
                 self.calendar.active_popover = None;
                 self.calendar.active_modal = Some(CalendarModal::ConfirmDelete {
                     event_id,
@@ -211,32 +247,40 @@ impl App {
                 });
                 Task::none()
             }
-            CalendarMessage::DeleteEvent(event_id) => {
-                // Handle discard-unsaved-changes sentinel.
-                if event_id == "__discard__" {
-                    self.calendar.active_modal = None;
+            CalendarMessage::DeleteEvent(_event_id) => {
+                // Read identity from workflow state — the message payload
+                // is transitional and ignored for the persisted-delete path.
+                let CalendarWorkflow::ConfirmingDelete {
+                    event_id,
+                    account_id,
+                    ..
+                } = &self.calendar.workflow
+                else {
+                    log::warn!("DeleteEvent received outside ConfirmingDelete workflow");
                     return Task::none();
-                }
+                };
+                let event_id = event_id.clone();
+                let account_id = account_id.clone();
                 let Some(ctx) = self.action_ctx() else {
                     return Task::none();
                 };
-                let account_id = match &self.calendar.active_modal {
-                    Some(CalendarModal::ConfirmDelete { account_id, .. }) => account_id.clone(),
-                    Some(CalendarModal::EventEditor { event, .. }) => event.account_id.clone(),
-                    _ => None,
-                }
-                .or_else(|| self.sidebar.accounts.first().map(|a| a.id.clone()))
-                .unwrap_or_default();
 
+                self.calendar.workflow = CalendarWorkflow::Idle;
                 self.calendar.active_modal = None;
                 Task::perform(
                     async move {
                         let outcome =
-                            cal::actions::delete_calendar_event(&ctx, &account_id, &event_id).await;
+                            cal::actions::delete_calendar_event(&ctx, &account_id, &event_id)
+                                .await;
                         calendar_outcome_to_result(outcome)
                     },
                     |r| Message::Calendar(Box::new(CalendarMessage::EventDeleted(r))),
                 )
+            }
+            CalendarMessage::DiscardChanges => {
+                self.calendar.workflow = CalendarWorkflow::Idle;
+                self.calendar.active_modal = None;
+                Task::none()
             }
             CalendarMessage::EventDeleted(result) => {
                 match result {
@@ -403,6 +447,8 @@ impl App {
     }
 
     fn handle_save_event(&mut self) -> Task<Message> {
+        // Extract draft data from the surface (transitional — Phase B
+        // moves the draft into the editor session on workflow state).
         let event = match &self.calendar.active_modal {
             Some(CalendarModal::EventEditor { event, .. }) => event.clone(),
             _ => return Task::none(),
@@ -423,12 +469,6 @@ impl App {
             event.end_minute_u32(),
         );
 
-        let account_id = event
-            .account_id
-            .clone()
-            .or_else(|| self.sidebar.accounts.first().map(|a| a.id.clone()))
-            .unwrap_or_default();
-
         let input = cal::actions::CalendarEventInput {
             title: event.title.clone(),
             description: event.description.clone(),
@@ -442,26 +482,56 @@ impl App {
             visibility: event.visibility.clone(),
         };
 
-        if let Some(id) = event.id.clone() {
-            let aid = account_id.clone();
-            Task::perform(
-                async move {
-                    let outcome = cal::actions::update_calendar_event(&ctx, &aid, &id, input).await;
-                    calendar_outcome_to_result(outcome)
-                },
-                |r| Message::Calendar(Box::new(CalendarMessage::EventSaved(r))),
-            )
-        } else {
-            let cal_id = event.calendar_id.clone().unwrap_or_default();
-            let aid = account_id.clone();
-            Task::perform(
-                async move {
-                    let outcome =
-                        cal::actions::create_calendar_event(&ctx, &aid, &cal_id, input).await;
-                    calendar_outcome_to_result(outcome)
-                },
-                |r| Message::Calendar(Box::new(CalendarMessage::EventSaved(r))),
-            )
+        // Read create-vs-update and identity from workflow state.
+        // Transitional: still falls back to sidebar.accounts.first()
+        // for CreatingEvent with account_id: None (Phase C eliminates).
+        match &self.calendar.workflow {
+            CalendarWorkflow::EditingEvent {
+                event_id,
+                account_id,
+                ..
+            } => {
+                let event_id = event_id.clone();
+                let account_id = account_id.clone();
+                Task::perform(
+                    async move {
+                        let outcome =
+                            cal::actions::update_calendar_event(&ctx, &account_id, &event_id, input)
+                                .await;
+                        calendar_outcome_to_result(outcome)
+                    },
+                    |r| Message::Calendar(Box::new(CalendarMessage::EventSaved(r))),
+                )
+            }
+            CalendarWorkflow::CreatingEvent {
+                account_id,
+                calendar_id,
+                ..
+            } => {
+                // Transitional fallback for account_id (Phase C: block save instead).
+                let account_id = account_id
+                    .clone()
+                    .or_else(|| self.sidebar.accounts.first().map(|a| a.id.clone()))
+                    .unwrap_or_default();
+                let calendar_id = calendar_id.clone().unwrap_or_default();
+                Task::perform(
+                    async move {
+                        let outcome = cal::actions::create_calendar_event(
+                            &ctx,
+                            &account_id,
+                            &calendar_id,
+                            input,
+                        )
+                        .await;
+                        calendar_outcome_to_result(outcome)
+                    },
+                    |r| Message::Calendar(Box::new(CalendarMessage::EventSaved(r))),
+                )
+            }
+            _ => {
+                log::warn!("SaveEvent received outside editing/creating workflow");
+                Task::none()
+            }
         }
     }
 
