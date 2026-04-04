@@ -12,6 +12,6 @@ pub use contacts::{ContactEntry, ContactMatch, GroupEntry, search_contacts_for_a
 pub use pinned_searches::PinnedSearch;
 pub use threads::{AppThreadDetail, ResolvedLabel};
 pub use types::{
-    Account, CalendarEvent, DateDisplay, Label, MessageViewAttachment, PinnedPublicFolder,
-    SharedMailbox, Thread, ThreadAttachment, ThreadMessage,
+    Account, CalendarEvent, DateDisplay, MessageViewAttachment, PinnedPublicFolder, SharedMailbox,
+    Thread, ThreadAttachment, ThreadMessage,
 };

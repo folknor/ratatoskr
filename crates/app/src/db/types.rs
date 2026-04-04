@@ -76,12 +76,6 @@ pub struct Thread {
 }
 
 #[derive(Debug, Clone)]
-pub struct Label {
-    pub id: String,
-    pub name: String,
-}
-
-#[derive(Debug, Clone)]
 pub struct ThreadMessage {
     pub id: String,
     pub thread_id: String,

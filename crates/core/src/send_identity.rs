@@ -59,6 +59,13 @@ pub fn get_send_identities(
     rows.collect()
 }
 
+/// Return all distinct send-identity email addresses across accounts.
+pub fn get_all_send_identity_emails(conn: &Connection) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT DISTINCT email FROM send_identities")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    rows.collect()
+}
+
 // ---------------------------------------------------------------------------
 // Auto-From selection
 // ---------------------------------------------------------------------------

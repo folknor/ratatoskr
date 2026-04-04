@@ -32,63 +32,28 @@ impl Db {
 
     pub fn get_send_identity_emails_sync(&self) -> Result<Vec<String>, String> {
         self.with_conn_sync(|conn| {
-            let mut stmt = conn
-                .prepare("SELECT DISTINCT email FROM send_identities")
-                .map_err(|e| e.to_string())?;
-
-            stmt.query_map([], |row| row.get::<_, String>(0))
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())
+            rtsk::send_identity::get_all_send_identity_emails(conn).map_err(|e| e.to_string())
         })
-    }
-
-    pub async fn get_send_identity_emails(&self) -> Result<Vec<String>, String> {
-        self.with_conn(|conn| {
-            let mut stmt = conn
-                .prepare("SELECT DISTINCT email FROM send_identities")
-                .map_err(|e| e.to_string())?;
-
-            stmt.query_map([], |row| row.get::<_, String>(0))
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())
-        })
-        .await
     }
 
     pub async fn get_accounts(&self) -> Result<Vec<Account>, String> {
-        self.with_conn(|conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, email, display_name, provider,
-                            account_name, account_color, last_sync_at,
-                            token_expires_at, is_active,
-                            COALESCE(sort_order, 0) AS sort_order
-                     FROM accounts
-                     ORDER BY sort_order ASC, created_at ASC",
-                )
-                .map_err(|e| e.to_string())?;
-
-            stmt.query_map([], |row| {
-                Ok(Account {
-                    id: row.get("id")?,
-                    email: row.get("email")?,
-                    display_name: row.get("display_name")?,
-                    provider: row.get("provider")?,
-                    account_name: row.get("account_name")?,
-                    account_color: row.get("account_color")?,
-                    last_sync_at: row.get("last_sync_at")?,
-                    token_expires_at: row.get("token_expires_at")?,
-                    is_active: row.get::<_, i64>("is_active")? != 0,
-                    sort_order: row.get("sort_order")?,
-                })
+        let db = self.read_db_state();
+        let rows = rtsk::db::queries_extra::db_get_all_accounts(&db).await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| Account {
+                id: row.id,
+                email: row.email,
+                display_name: row.display_name,
+                provider: row.provider,
+                account_name: row.account_name,
+                account_color: row.account_color,
+                last_sync_at: row.last_sync_at,
+                token_expires_at: row.token_expires_at,
+                is_active: row.is_active != 0,
+                sort_order: row.sort_order,
             })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
-        })
-        .await
+            .collect())
     }
 
     /// Load all shared mailboxes for sidebar display, across all accounts.
@@ -147,53 +112,6 @@ impl Db {
                     sync_enabled: row.get::<_, i64>("sync_enabled")? != 0,
                     position: row.get("position")?,
                     unread_count: row.get("unread_count")?,
-                })
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
-        })
-        .await
-    }
-
-    /// Persist a discovered shared mailbox (from Autodiscover).
-    /// Inserts or updates the shared_mailbox_sync_state row.
-    /// Auto-enables sync for newly discovered mailboxes.
-    pub async fn upsert_shared_mailbox(
-        &self,
-        account_id: String,
-        mailbox_id: String,
-        display_name: Option<String>,
-    ) -> Result<(), String> {
-        self.with_write_conn(move |conn| {
-            conn.execute(
-                "INSERT INTO shared_mailbox_sync_state
-                    (account_id, mailbox_id, display_name, is_sync_enabled)
-                 VALUES (?1, ?2, ?3, 1)
-                 ON CONFLICT (account_id, mailbox_id)
-                 DO UPDATE SET display_name = COALESCE(excluded.display_name, display_name)",
-                params![account_id, mailbox_id, display_name],
-            )
-            .map_err(|e| e.to_string())?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn get_labels(&self, account_id: String) -> Result<Vec<Label>, String> {
-        self.with_conn(move |conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, name FROM labels
-                     WHERE account_id = ?1 AND visible = 1
-                     ORDER BY sort_order ASC, name ASC",
-                )
-                .map_err(|e| e.to_string())?;
-
-            stmt.query_map(params![account_id], |row| {
-                Ok(Label {
-                    id: row.get("id")?,
-                    name: row.get("name")?,
                 })
             })
             .map_err(|e| e.to_string())?
