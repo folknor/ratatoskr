@@ -919,14 +919,12 @@ impl App {
             Message::ExecuteParameterized(id, args) => self.handle_execute_parameterized(id, args),
             Message::NavigateTo(target) => self.handle_navigate_to(target),
             Message::Escape => {
-                if self.calendar.active_popover.is_some() {
+                if !matches!(
+                    self.calendar.workflow,
+                    crate::ui::calendar::CalendarWorkflow::Idle
+                ) {
                     self.calendar.workflow = crate::ui::calendar::CalendarWorkflow::Idle;
-                    self.calendar.active_popover = None;
-                    return Task::none();
-                }
-                if self.calendar.active_modal.is_some() {
-                    self.calendar.workflow = crate::ui::calendar::CalendarWorkflow::Idle;
-                    self.calendar.active_modal = None;
+                    self.calendar.sync_surfaces();
                     return Task::none();
                 }
                 if self.show_settings {
@@ -1689,7 +1687,7 @@ impl App {
     /// Create a calendar event pre-filled from the given email message.
     fn create_event_from_email(&mut self, message_index: usize) -> Task<Message> {
         use crate::ui::calendar::{
-            CalendarEventData, CalendarModal, CalendarWorkflow, EditorSession,
+            CalendarEventData, CalendarWorkflow, EditorSession,
         };
         use chrono::Timelike;
 
@@ -1733,8 +1731,7 @@ impl App {
             account_id,
             session,
         };
-        self.calendar.active_popover = None;
-        self.calendar.active_modal = Some(CalendarModal::EventEditor);
+        self.calendar.sync_surfaces();
 
         // If calendar is popped out, focus that window instead of switching main to calendar.
         if let Some((&win_id, _)) = self
@@ -1768,8 +1765,7 @@ impl App {
             self.close_settings();
         }
         self.calendar.workflow = crate::ui::calendar::CalendarWorkflow::Idle;
-        self.calendar.active_popover = None;
-        self.calendar.active_modal = None;
+        self.calendar.sync_surfaces();
         self.add_account_wizard = None;
     }
 

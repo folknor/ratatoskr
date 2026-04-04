@@ -4,8 +4,8 @@ use chrono::{Datelike, NaiveDate, Timelike};
 use iced::Task;
 
 use crate::ui::calendar::{
-    CalendarEventData, CalendarMessage, CalendarModal, CalendarPopover, CalendarWorkflow,
-    EditorSession, EventField, EventTextField,
+    CalendarEventData, CalendarMessage, CalendarWorkflow, EditorSession, EventField,
+    EventTextField, ViewingSurface,
 };
 use crate::{App, Message};
 
@@ -45,17 +45,14 @@ impl App {
             CalendarMessage::DoubleClickSlot(date, hour) => {
                 // Double-click opens event creation dialog with time pre-filled.
                 let mut event = CalendarEventData::new_at(date, hour);
-                // Pre-assign calendar when unambiguous.
                 self.pre_assign_calendar_if_unambiguous(&mut event, None);
                 let account_id = event.account_id.clone();
                 let session = EditorSession::new(event);
-                // Workflow first, then surface.
                 self.calendar.workflow = CalendarWorkflow::CreatingEvent {
                     account_id,
                     session,
                 };
-                self.calendar.active_popover = None;
-                self.calendar.active_modal = Some(CalendarModal::EventEditor);
+                self.calendar.sync_surfaces();
                 Task::none()
             }
             CalendarMessage::EventClicked(event_id) => {
@@ -92,15 +89,11 @@ impl App {
             CalendarMessage::EventLoaded(result) => {
                 match result {
                     Ok(data) => {
-                        // Workflow first, then surface.
                         self.calendar.workflow = CalendarWorkflow::ViewingEvent {
-                            event_id: data.id.clone().unwrap_or_default(),
-                            account_id: data.account_id.clone().unwrap_or_default(),
-                            calendar_id: data.calendar_id.clone(),
+                            event_data: data,
+                            surface: ViewingSurface::Popover,
                         };
-                        self.calendar.active_modal = None;
-                        self.calendar.active_popover =
-                            Some(CalendarPopover::EventDetail { event: data });
+                        self.calendar.sync_surfaces();
                     }
                     Err(e) => {
                         log::error!("Failed to load calendar event: {e}");
@@ -112,7 +105,7 @@ impl App {
             CalendarMessage::Noop => Task::none(),
             CalendarMessage::ClosePopover => {
                 self.calendar.workflow = CalendarWorkflow::Idle;
-                self.calendar.active_popover = None;
+                self.calendar.sync_surfaces();
                 Task::none()
             }
             CalendarMessage::CloseModal => {
@@ -148,7 +141,7 @@ impl App {
                             session,
                         };
                     }
-                    self.calendar.active_modal = Some(CalendarModal::EventEditor);
+                    self.calendar.sync_surfaces();
                     return Task::none();
                 }
 
@@ -185,24 +178,21 @@ impl App {
                         account_id,
                         session,
                     };
-                    self.calendar.active_modal = Some(CalendarModal::ConfirmDiscard {
-                        title: "Discard unsaved changes?".to_string(),
-                    });
+                    self.calendar.sync_surfaces();
                     return Task::none();
                 }
 
                 self.calendar.workflow = CalendarWorkflow::Idle;
-                self.calendar.active_modal = None;
+                self.calendar.sync_surfaces();
                 Task::none()
             }
             CalendarMessage::ExpandPopoverToModal => {
-                // Workflow stays ViewingEvent — only the surface changes.
-                if let Some(CalendarPopover::EventDetail { event }) =
-                    &self.calendar.active_popover
+                // Workflow identity stays the same — only the surface changes.
+                if let CalendarWorkflow::ViewingEvent { surface, .. } =
+                    &mut self.calendar.workflow
                 {
-                    let event = event.clone();
-                    self.calendar.active_popover = None;
-                    self.calendar.active_modal = Some(CalendarModal::EventFull { event });
+                    *surface = ViewingSurface::FullModal;
+                    self.calendar.sync_surfaces();
                 }
                 Task::none()
             }
@@ -236,8 +226,7 @@ impl App {
                         session,
                     };
                 }
-                self.calendar.active_popover = None;
-                self.calendar.active_modal = Some(CalendarModal::EventEditor);
+                self.calendar.sync_surfaces();
                 Task::none()
             }
             CalendarMessage::CreateEvent => {
@@ -253,8 +242,7 @@ impl App {
                     account_id,
                     session,
                 };
-                self.calendar.active_popover = None;
-                self.calendar.active_modal = Some(CalendarModal::EventEditor);
+                self.calendar.sync_surfaces();
                 Task::none()
             }
             CalendarMessage::EventFieldChanged(field) => {
@@ -275,7 +263,7 @@ impl App {
                     Ok(()) => {
                         log::info!("Calendar event saved");
                         self.calendar.workflow = CalendarWorkflow::Idle;
-                        self.calendar.active_modal = None;
+                        self.calendar.sync_surfaces();
                         return self.reload_calendar_events();
                     }
                     Err(e) => {
@@ -296,12 +284,7 @@ impl App {
                     account_id: account_id.clone().unwrap_or_default(),
                     title: title.clone(),
                 };
-                self.calendar.active_popover = None;
-                self.calendar.active_modal = Some(CalendarModal::ConfirmDelete {
-                    event_id,
-                    title,
-                    account_id,
-                });
+                self.calendar.sync_surfaces();
                 Task::none()
             }
             CalendarMessage::DeleteEvent(_event_id) => {
@@ -323,7 +306,7 @@ impl App {
                 };
 
                 self.calendar.workflow = CalendarWorkflow::Idle;
-                self.calendar.active_modal = None;
+                self.calendar.sync_surfaces();
                 Task::perform(
                     async move {
                         let outcome =
@@ -336,7 +319,7 @@ impl App {
             }
             CalendarMessage::DiscardChanges => {
                 self.calendar.workflow = CalendarWorkflow::Idle;
-                self.calendar.active_modal = None;
+                self.calendar.sync_surfaces();
                 Task::none()
             }
             CalendarMessage::EventDeleted(result) => {

@@ -52,18 +52,32 @@ impl CalendarView {
 /// (`active_popover`, `active_modal`) are presentation caches
 /// synchronized from this state.
 ///
-/// **Invariant:** Handlers update workflow state first, then surfaces.
+/// Which presentation surface is active for a `ViewingEvent` workflow.
+///
+/// Exists because `ExpandPopoverToModal` is the one transition where
+/// workflow identity stays the same while presentation changes — the
+/// user is still viewing the same event, only the surface differs.
+#[derive(Debug, Clone)]
+pub enum ViewingSurface {
+    /// Quick-glance popover.
+    Popover,
+    /// Full event detail modal.
+    FullModal,
+}
+
+/// **Invariant:** Handlers update workflow state, then call
+/// `sync_surfaces()`. Surfaces are written exclusively by
+/// `sync_surfaces()`, never independently by handlers.
 /// Reads of lifecycle meaning and identity come from workflow only.
-/// Surfaces must never be used to recover workflow semantics.
 #[derive(Debug, Clone)]
 pub enum CalendarWorkflow {
     /// No active event workflow. User is browsing/navigating.
     Idle,
     /// Viewing an existing event (popover or full modal).
+    /// Identity is read from `event_data.id` / `event_data.account_id`.
     ViewingEvent {
-        event_id: String,
-        account_id: String,
-        calendar_id: Option<String>,
+        event_data: CalendarEventData,
+        surface: ViewingSurface,
     },
     /// Creating a new event in the editor.
     CreatingEvent {
@@ -423,7 +437,58 @@ impl CalendarState {
         }
     }
 
-    /// Reset editor undo state when opening the editor modal.
+    /// Derive surface state from workflow state.
+    ///
+    /// Call after every workflow state mutation. This is the single
+    /// place where `active_popover` and `active_modal` are written.
+    pub fn sync_surfaces(&mut self) {
+        match &self.workflow {
+            CalendarWorkflow::Idle => {
+                self.active_popover = None;
+                self.active_modal = None;
+            }
+            CalendarWorkflow::ViewingEvent {
+                event_data,
+                surface,
+            } => match surface {
+                ViewingSurface::Popover => {
+                    self.active_popover = Some(CalendarPopover::EventDetail {
+                        event: event_data.clone(),
+                    });
+                    self.active_modal = None;
+                }
+                ViewingSurface::FullModal => {
+                    self.active_popover = None;
+                    self.active_modal = Some(CalendarModal::EventFull {
+                        event: event_data.clone(),
+                    });
+                }
+            },
+            CalendarWorkflow::CreatingEvent { .. }
+            | CalendarWorkflow::EditingEvent { .. } => {
+                self.active_popover = None;
+                self.active_modal = Some(CalendarModal::EventEditor);
+            }
+            CalendarWorkflow::ConfirmingDiscard { .. } => {
+                self.active_popover = None;
+                self.active_modal = Some(CalendarModal::ConfirmDiscard {
+                    title: "Discard unsaved changes?".to_string(),
+                });
+            }
+            CalendarWorkflow::ConfirmingDelete {
+                title,
+                event_id,
+                account_id,
+            } => {
+                self.active_popover = None;
+                self.active_modal = Some(CalendarModal::ConfirmDelete {
+                    event_id: event_id.clone(),
+                    title: title.clone(),
+                    account_id: Some(account_id.clone()),
+                });
+            }
+        }
+    }
 
     /// Navigate the mini-month to the previous month.
     pub fn prev_month(&mut self) {
