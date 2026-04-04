@@ -68,6 +68,12 @@
 
 - [ ] **Focus trapping for modals and sheets** — iced does not natively support focus trapping. Modal and Sheet surfaces should trap Tab/Shift-Tab focus within their content, but currently focus can escape to widgets behind the blocker. If iced adds focus trapping support, `modal_overlay()` (see `docs/ui/overlay-standardization-plan.md`) is the single place to wire it in. Until then, this is a known contract gap.
 
+- [ ] **Calendar event detail popover → AnchoredOverlay** — `calendar::popover_stack()` is the only anchored surface still using a hand-rolled `stack![]` instead of the `AnchoredOverlay` primitive. Target behavior: anchor near the clicked event pill using `anchor_point`. Requires capturing click coordinates in `CalendarPopover::EventDetail` (not currently stored). See `docs/ui/overlay-standardization-plan.md` deferred work.
+
+- [ ] **Settings help tooltip → Ratatoskr Tooltip primitive** — The settings help surface uses `AnchoredOverlay` but is semantically a tooltip (hover-triggered, non-blocking, informational). The legacy pinned/sticky behavior has been removed. Should migrate to a Ratatoskr Tooltip primitive once one exists. Independent of the overlay standardization effort.
+
+- [ ] **Escape key audit for overlay surfaces** — Verify every Modal surface dismisses on Escape. Verify no Sheet surface dismisses on Escape. Verify calendar modals (event detail, editor, delete confirm) all handle Escape correctly. Mechanical verification pass, best done after `modal_overlay()` has been in use for a bit.
+
 - [ ] **Label pills in reading pane** — Pills should not show on each message, only at the top. Labels are per-thread, not per-message, at least in the UI.
 
 - [ ] **Link click handling (email content)** — Should open in system browser. Nothing happens.
