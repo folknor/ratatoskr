@@ -113,8 +113,6 @@ pub enum SettingsMessage {
     // Help tooltips
     HelpHover(String),
     HelpUnhover(String),
-    ToggleHelpPin(String),
-    DismissHelp,
     // Sheet
     OpenSheet(SettingsSheetPage),
     CloseSheet,
@@ -682,7 +680,6 @@ pub struct Settings {
     pub sheet_anim: animation::Animation<bool>,
     // Help tooltips
     pub hovered_help: Option<String>,
-    pub pinned_help: Option<String>,
     // Editable lists
     pub drag_state: Option<DragState>,
     // Demo data for Mail Rules tab
@@ -950,7 +947,6 @@ impl Default for Settings {
                 .easing(Easing::EaseOutCubic)
                 .duration(Duration::from_millis(200)),
             hovered_help: None,
-            pinned_help: None,
             drag_state: None,
             demo_labels: vec![
                 EditableItem {

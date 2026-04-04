@@ -47,7 +47,6 @@ pub(super) struct SectionHelp<'a> {
     pub id: &'a str,
     pub content: Element<'a, SettingsMessage>,
     pub visible: bool,
-    pub pinned: bool,
 }
 
 fn section_inner<'a>(
@@ -82,19 +81,12 @@ fn section_inner<'a>(
             let help_id = help_cfg.id.to_string();
             let help_id_hover = help_id.clone();
             let help_id_unhover = help_id.clone();
-            let icon_style: fn(&iced::Theme) -> text::Style = if help_cfg.pinned {
-                text::primary
-            } else {
-                theme::TextClass::Muted.style()
-            };
-
             let help_icon = mouse_area(
                 button(
-                    container(icon::help_circle().size(ICON_XL).style(icon_style))
+                    container(icon::help_circle().size(ICON_XL).style(theme::TextClass::Muted.style()))
                         .align_x(Alignment::Center)
                         .align_y(Alignment::Center),
                 )
-                .on_press(SettingsMessage::ToggleHelpPin(help_id.clone()))
                 .padding(PAD_ICON_BTN)
                 .style(theme::ButtonClass::BareIcon.style()),
             )
@@ -112,8 +104,7 @@ fn section_inner<'a>(
                             .padding(PAD_SETTINGS_ROW)
                             .width(Length::Fill)
                             .style(theme::ContainerClass::Floating.style()),
-                    )
-                    .on_dismiss(SettingsMessage::DismissHelp);
+                    );
             }
 
             row![title_text, Space::new().width(Length::Fill), pop,]

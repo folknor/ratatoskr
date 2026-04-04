@@ -278,8 +278,7 @@ fn general_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     ));
 
     let privacy_help_id = "privacy-security";
-    let privacy_help_visible = state.hovered_help.as_deref() == Some(privacy_help_id)
-        || state.pinned_help.as_deref() == Some(privacy_help_id);
+    let privacy_help_visible = state.hovered_help.as_deref() == Some(privacy_help_id);
     col = col.push(section_with_help("Privacy & Security", SectionHelp {
         id: privacy_help_id,
         content: column![
@@ -293,7 +292,6 @@ fn general_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         ]
         .into(),
         visible: privacy_help_visible,
-        pinned: state.pinned_help.as_deref() == Some(privacy_help_id),
     }, vec![
         toggle_row("Block Remote Images", "Don't load remote images in email bodies", state.block_remote_images, SettingsMessage::ToggleBlockRemoteImages),
         toggle_row("Phishing Detection", "Warn about suspicious emails", state.phishing_detection, SettingsMessage::TogglePhishingDetection),

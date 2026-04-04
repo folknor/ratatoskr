@@ -146,7 +146,6 @@ impl Component for Settings {
             }
             SettingsMessage::SelectTab(Tab::People) => {
                 self.active_tab = Tab::People;
-                self.pinned_help = None;
                 // LoadContacts handler in main.rs also loads groups.
                 return (
                     Task::none(),
@@ -321,20 +320,9 @@ impl Settings {
                     self.hovered_help = None;
                 }
             }
-            SettingsMessage::ToggleHelpPin(id) => {
-                if self.pinned_help.as_ref() == Some(&id) {
-                    self.pinned_help = None;
-                } else {
-                    self.pinned_help = Some(id);
-                }
-            }
-            SettingsMessage::DismissHelp => {
-                self.pinned_help = None;
-                self.hovered_help = None;
-            }
             SettingsMessage::SelectTab(tab) => {
                 self.active_tab = tab;
-                self.pinned_help = None;
+                self.hovered_help = None;
             }
             SettingsMessage::ToggleSelect(field) => {
                 self.open_select = if self.open_select == Some(field) {
