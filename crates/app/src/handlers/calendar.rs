@@ -99,6 +99,7 @@ impl App {
                 }
                 Task::none()
             }
+            CalendarMessage::Noop => Task::none(),
             CalendarMessage::ClosePopover => {
                 self.calendar.active_popover = None;
                 Task::none()

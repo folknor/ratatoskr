@@ -1458,16 +1458,6 @@ impl App {
         };
 
         if self.palette.is_open() {
-            let backdrop = mouse_area(
-                container("")
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .style(ui::theme::ContainerClass::PaletteBackdrop.style()),
-            )
-            .on_press(Message::Palette(PaletteMessage::Close(
-                cmdk::CommandContext::default(),
-            )));
-
             let palette_widget = self.palette.view().map(Message::Palette);
 
             let palette_positioned = container(palette_widget)
@@ -1480,7 +1470,12 @@ impl App {
                 })
                 .align_x(iced::Alignment::Center);
 
-            stack![main_layout, backdrop, palette_positioned].into()
+            ui::modal_overlay::modal_overlay(
+                main_layout,
+                palette_positioned,
+                ui::modal_overlay::ModalSurface::Modal,
+                Message::Noop,
+            )
         } else if let Some(ref pending) = self.pending_chord {
             let chord_display = pending.first.display(current_platform());
             let indicator = ui::palette::chord_indicator::<Message>(&chord_display);
@@ -2480,24 +2475,12 @@ impl App {
             .padding(ui::layout::PAD_SETTINGS_CONTENT)
             .style(ui::theme::ContainerClass::Elevated.style());
 
-        let centered_modal = container(modal)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill);
-
-        let blocker = mouse_area(
-            container("")
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .style(ui::theme::ContainerClass::ModalBackdrop.style()),
+        ui::modal_overlay::modal_overlay(
+            base_layout,
+            modal,
+            ui::modal_overlay::ModalSurface::Modal,
+            Message::Noop,
         )
-        .on_press(Message::Noop);
-
-        stack![base_layout, blocker, centered_modal]
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
     }
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]

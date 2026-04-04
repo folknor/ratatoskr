@@ -60,7 +60,9 @@
 
 - [ ] **App logo in first-launch modal** — SVG rendered via iced svg feature, embedded with include_bytes, but it's not showing.
 
-- [ ] **Standardized popup/dropdown/modal** - Currently setting dropdowns, various modal dialogs (the Settings slide-in, Add Account modal, etc) use various methods to dim/control/disable/dismiss. We need standardized controls for all this. For example the Add Account modal currently dims the background (rest of the window), but it doesn't prevent interaction with any controls - even controls that are actually directly below it can still be interacted with. We need the same treatment as the Settings slide-in that does in fact disable things behind it.
+- [ ] **Standardized popup/dropdown/modal** - Currently setting dropdowns, various modal dialogs (the Settings slide-in, Add Account modal, etc) use various methods to dim/control/disable/dismiss. We need standardized controls for all this. For example the Add Account modal currently dims the background (rest of the window), but it doesn't prevent interaction with any controls - even controls that are actually directly below it can still be interacted with. We need the same treatment as the Settings slide-in that does in fact disable things behind it. See `docs/ui/overlay-standardization-plan.md` for the implementation plan.
+
+- [ ] **Focus trapping for modals and sheets** — iced does not natively support focus trapping. Modal and Sheet surfaces should trap Tab/Shift-Tab focus within their content, but currently focus can escape to widgets behind the blocker. If iced adds focus trapping support, `modal_overlay()` (see `docs/ui/overlay-standardization-plan.md`) is the single place to wire it in. Until then, this is a known contract gap.
 
 - [ ] **Label pills in reading pane** — Pills should not show on each message, only at the top. Labels are per-thread, not per-message, at least in the UI.
 

@@ -464,6 +464,8 @@ pub enum CalendarMessage {
     ),
     /// Switch back to mail mode.
     SwitchToMail,
+    /// No-op event sink for modal blocker (iced requires on_press to capture).
+    Noop,
     /// Pop out the calendar into a separate window.
     PopOutCalendar,
     /// Toggle visibility of a calendar (checkbox in sidebar).
@@ -496,7 +498,12 @@ pub fn calendar_layout(state: &CalendarState) -> Element<'_, CalendarMessage> {
                 event_id, title, ..
             } => delete_confirm_card(event_id, title),
         };
-        modal_stack(base.into(), card)
+        crate::ui::modal_overlay::modal_overlay(
+            base,
+            card,
+            crate::ui::modal_overlay::ModalSurface::Modal,
+            CalendarMessage::Noop,
+        )
     } else if let Some(popover) = &state.active_popover {
         match popover {
             CalendarPopover::EventDetail { event } => {
@@ -527,27 +534,6 @@ fn popover_stack<'a>(
     iced::widget::stack![base, backdrop, positioned].into()
 }
 
-/// Wrap a base layout with a modal overlay (backdrop + centered card).
-fn modal_stack<'a>(
-    base: Element<'a, CalendarMessage>,
-    card: Element<'a, CalendarMessage>,
-) -> Element<'a, CalendarMessage> {
-    let backdrop = mouse_area(
-        container("")
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(theme::ContainerClass::ModalBackdrop.style()),
-    )
-    .on_press(CalendarMessage::CloseModal);
-
-    let centered = container(card)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill);
-
-    iced::widget::stack![base, backdrop, centered].into()
-}
 
 // ── Event detail card ──────────────────────────────────
 

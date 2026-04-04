@@ -100,32 +100,12 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
         // The stack clips to bounds so overshooting doesn't matter.
         let offset = ((1.0 - sheet_t) * 2000.0).round();
 
-        // Event blocker: opaque mouse_area between content and sheet
-        // prevents clicks/hovers from reaching the content underneath.
-        let blocker = mouse_area(
-            container(Space::new().width(Length::Fill).height(Length::Fill))
-                .width(Length::Fill)
-                .height(Length::Fill),
-        )
-        .on_press(SettingsMessage::CloseSheet)
-        .interaction(iced::mouse::Interaction::default());
-
-        iced::widget::stack![
+        crate::ui::modal_overlay::modal_overlay(
             content_area,
-            blocker,
-            container(sheet_panel)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .padding(iced::Padding {
-                    top: 0.0,
-                    right: 0.0,
-                    bottom: 0.0,
-                    left: offset
-                }),
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+            sheet_panel,
+            crate::ui::modal_overlay::ModalSurface::Sheet { offset },
+            SettingsMessage::CloseSheet,
+        )
     } else {
         content_area.into()
     };

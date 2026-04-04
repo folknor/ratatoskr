@@ -63,7 +63,7 @@ opened by right-click; a trigger-opened overflow action list is still a
 | `ContextMenu` | Anchored | Click-dismiss | Outside click, Escape, selection | Menu items |
 | `Popover` | Anchored | Click-dismiss | Outside click, Escape | Content |
 | `Modal` | Centered | Dimming + blocking | Escape, explicit button | Trapped in content |
-| `Sheet` | Edge-slide | Dimming + blocking | Escape, explicit close | Trapped in content |
+| `Sheet` | Edge-slide | Full blocking | Explicit close only | Trapped in content |
 
 ## Inventory
 
@@ -159,8 +159,8 @@ Implementation:
 - [crates/app/src/pop_out/compose.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/compose.rs)
 - token event source in [crates/app/src/ui/token_input.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/token_input.rs)
 
-Current issue:
-- rendered inline into the compose column instead of as a proper anchored overlay
+Notes:
+- now rendered as a proper anchored context menu in compose
 - naming is correct, behavior is not
 
 2. Right-click “Search here” sidebar actions
@@ -196,9 +196,9 @@ Current role:
 Concern:
 - now correctly named as the lower-level anchored overlay primitive for multiple higher-level surface types
 
-2. Pop-out message overflow menu
+2. Pop-out message action context menu
 Current code name:
-`overflow_menu`
+`overflow_context_menu`
 
 Actual type:
 `ContextMenu`
@@ -326,29 +326,22 @@ Examples inside the sheet system:
 Current issue:
 - backdrop dismiss semantics are currently wrong per `TODO.md`
 
-## Inline-Rendered Surfaces That Should Be Reclassified
+## Reclassified Surfaces Completed
 
-These are especially important because their current name and behavior diverge:
+These previously mismatched surfaces have now been aligned with their semantic
+types:
 
 1. Compose token context menu
-- named as context menu
-- rendered inline
-- should become anchored context menu
+- now rendered as an anchored `ContextMenu`
 
 2. Compose discard confirmation
-- named/treated as dialog
-- rendered inline
-- should become modal dialog
+- now rendered as a blocking `Modal`
 
 3. Compose link insertion dialog
-- named/treated as dialog
-- rendered inline
-- should become modal dialog
+- now rendered as a blocking `Modal`
 
 4. Compose autocomplete dropdown
-- semantically a dropdown
-- rendered inline in the header flow
-- may still be acceptable visually, but contractually it behaves more like an anchored overlay
+- now rendered as an anchored `Dropdown`
 
 ## Current Implementation Buckets
 
@@ -391,19 +384,22 @@ It established:
 
 ## Phase 2: Behavioral Fixes
 
-These are semantically named surfaces whose implementation does not yet match
-their canonical type behavior.
-
-| Surface | Location | Semantic Type | Current Problem | Notes |
-|---|---|---|---|---|
-| `overflow_menu` | [crates/app/src/pop_out/message_view.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/message_view.rs) | `ContextMenu` | action surface built on anchored overlay primitive | It presents actions, not choices, so it is a context menu even though it is trigger-opened rather than right-click-opened. |
+Phase 2 behavior alignment has been completed for the surfaces tracked in this
+inventory:
+- compose recipient token context menu
+- compose autocomplete dropdown
+- compose discard confirmation modal
+- compose link insertion modal
+- calendar popover/modal split
+- settings help tooltip simplification
+- pop-out message action context menu
 
 ## Immediate Next Step
 
 After review of this catalogue:
 
-1. Continue Phase 2 with the remaining misimplemented surfaces
-   - most obviously [crates/app/src/pop_out/message_view.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/message_view.rs) `overflow_menu`
+1. Use this inventory as reference while tackling the broader overlay/modal
+   standardization item in [TODO.md](/home/folk/Programs/ratatoskr/TODO.md)
 
-2. Resolve remaining feature-level naming drift for context menus and dropdowns
-   - make feature state/messages read semantically, not just the shared primitive layer
+2. Treat newly added overlay surfaces as required to fit one of the canonical
+   types and naming conventions documented here

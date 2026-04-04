@@ -1296,9 +1296,21 @@ pub fn view_compose_window<'a>(
     };
 
     if state.discard_confirm_open {
-        compose_modal_stack(window_id, with_context_menu, discard_confirmation(window_id))
+        let noop = Message::PopOut(window_id, PopOutMessage::Compose(ComposeMessage::Noop));
+        crate::ui::modal_overlay::modal_overlay(
+            with_context_menu,
+            container(discard_confirmation(window_id)).padding(PAD_CONTENT),
+            crate::ui::modal_overlay::ModalSurface::Modal,
+            noop,
+        )
     } else if state.link_dialog_open {
-        compose_modal_stack(window_id, with_context_menu, link_dialog(window_id, state))
+        let noop = Message::PopOut(window_id, PopOutMessage::Compose(ComposeMessage::Noop));
+        crate::ui::modal_overlay::modal_overlay(
+            with_context_menu,
+            container(link_dialog(window_id, state)).padding(PAD_CONTENT),
+            crate::ui::modal_overlay::ModalSurface::Modal,
+            noop,
+        )
     } else {
         with_context_menu
     }
@@ -1822,31 +1834,6 @@ fn discard_confirmation<'a>(window_id: iced::window::Id) -> Element<'a, Message>
     .into()
 }
 
-fn compose_modal_stack<'a>(
-    window_id: iced::window::Id,
-    base: Element<'a, Message>,
-    card: Element<'a, Message>,
-) -> Element<'a, Message> {
-    let backdrop = mouse_area(
-        container("")
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(theme::ContainerClass::ModalBackdrop.style()),
-    )
-    .on_press(Message::PopOut(
-        window_id,
-        PopOutMessage::Compose(ComposeMessage::Noop),
-    ));
-
-    let centered = container(card)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
-        .padding(PAD_CONTENT);
-
-    iced::widget::stack![base, backdrop, centered].into()
-}
 
 // ── Attachment list ──────────────────────────────────────
 
