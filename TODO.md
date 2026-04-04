@@ -74,7 +74,7 @@
 
 - [ ] **Settings help tooltip → Ratatoskr Tooltip primitive** — The settings help surface uses `AnchoredOverlay` but is semantically a tooltip (hover-triggered, non-blocking, informational). The legacy pinned/sticky behavior has been removed. Should migrate to a Ratatoskr Tooltip primitive once one exists. Independent of the overlay standardization effort.
 
-- [ ] **Escape key audit for overlay surfaces** — Verify every Modal surface dismisses on Escape. Verify no Sheet surface dismisses on Escape. Verify calendar modals (event detail, editor, delete confirm) all handle Escape correctly. Mechanical verification pass, best done after `modal_overlay()` has been in use for a bit.
+- [ ] **Escape key audit for overlay surfaces** — Verify every Modal surface dismisses on Escape. Verify no Sheet surface dismisses on Escape. Verify calendar modals (event detail, editor, delete confirm, discard confirm) all handle Escape correctly. Includes nested-modal case: Escape from ConfirmDiscard should return to the editor (preserving the draft), not close everything. Requires routing Escape through the calendar handler for workflow-aware dispatch rather than the current blunt `is_some() → None` in main.rs. Mechanical verification pass, best done after `modal_overlay()` has been in use for a bit.
 
 - [ ] **Label pills in reading pane** — Pills should not show on each message, only at the top. Labels are per-thread, not per-message, at least in the UI.
 

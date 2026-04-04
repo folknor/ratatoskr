@@ -1689,7 +1689,7 @@ impl App {
     /// Create a calendar event pre-filled from the given email message.
     fn create_event_from_email(&mut self, message_index: usize) -> Task<Message> {
         use crate::ui::calendar::{
-            CalendarEventData, CalendarModal, CalendarWorkflow,
+            CalendarEventData, CalendarModal, CalendarWorkflow, EditorSession,
         };
         use chrono::Timelike;
 
@@ -1712,16 +1712,14 @@ impl App {
             event.account_id = Some(id.clone());
         }
 
-        self.calendar.reset_editor_undo(&event);
-        let original_title = event.title.clone();
+        let session = EditorSession::new(event);
         // Workflow first, then surface.
         self.calendar.workflow = CalendarWorkflow::CreatingEvent {
             account_id,
-            calendar_id: None,
-            original_title,
+            session,
         };
         self.calendar.active_popover = None;
-        self.calendar.active_modal = Some(CalendarModal::EventEditor { event });
+        self.calendar.active_modal = Some(CalendarModal::EventEditor);
 
         // If calendar is popped out, focus that window instead of switching main to calendar.
         if let Some((&win_id, _)) = self

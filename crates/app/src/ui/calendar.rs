@@ -67,22 +67,23 @@ pub enum CalendarWorkflow {
     /// Creating a new event in the editor.
     CreatingEvent {
         account_id: Option<String>,
-        calendar_id: Option<String>,
-        /// Transitional: partial dirty-detection baseline.
-        /// Phase B replaces with a full original snapshot.
-        original_title: String,
+        session: EditorSession,
     },
     /// Editing an existing event in the editor.
     EditingEvent {
         event_id: String,
         account_id: String,
-        calendar_id: Option<String>,
-        /// Transitional: partial dirty-detection baseline.
-        /// Phase B replaces with a full original snapshot.
-        original_title: String,
+        session: EditorSession,
     },
     /// Confirming discard of unsaved editor changes.
-    ConfirmingDiscard,
+    /// Carries the full session so cancel-discard can restore the editor.
+    ConfirmingDiscard {
+        /// `true` = was creating, `false` = was editing.
+        was_creating: bool,
+        event_id: Option<String>,
+        account_id: Option<String>,
+        session: EditorSession,
+    },
     /// Confirming deletion of a persisted event.
     ConfirmingDelete {
         event_id: String,
@@ -110,11 +111,13 @@ pub enum CalendarModal {
     /// Full event detail modal (two-panel: 70% detail + 30% day view).
     EventFull { event: CalendarEventData },
     /// Editing or creating an event. Create-vs-edit semantics
-    /// come from `CalendarWorkflow`, not from this variant.
-    EventEditor {
-        /// The event being edited. Fields are mutated as the user types.
-        event: CalendarEventData,
-    },
+    /// and the mutable draft come from `CalendarWorkflow`, not from
+    /// this variant. This is a unit marker — the draft lives on
+    /// `EditorSession` in the workflow state.
+    ///
+    /// **Invariant:** `EventEditor` without `CreatingEvent` or
+    /// `EditingEvent` in workflow state is a contract violation.
+    EventEditor,
     /// Delete confirmation dialog.
     ConfirmDelete {
         event_id: String,
@@ -232,6 +235,100 @@ impl CalendarEventData {
     pub fn end_minute_u32(&self) -> u32 {
         self.end_minute.parse().unwrap_or(0).min(59)
     }
+
+    /// Snapshot the editable persisted fields for dirty detection.
+    ///
+    /// Excludes identity (`id`, `account_id`) and display-only fields
+    /// (`organizer_*`, `rsvp_status`, `calendar_name`, `color`,
+    /// `attendees`, `reminders`).
+    pub fn snapshot(&self) -> EventSnapshot {
+        EventSnapshot {
+            title: self.title.clone(),
+            start_date: self.start_date,
+            start_hour: self.start_hour.clone(),
+            start_minute: self.start_minute.clone(),
+            end_hour: self.end_hour.clone(),
+            end_minute: self.end_minute.clone(),
+            all_day: self.all_day,
+            location: self.location.clone(),
+            description: self.description.clone(),
+            calendar_id: self.calendar_id.clone(),
+            timezone: self.timezone.clone(),
+            recurrence_rule: self.recurrence_rule.clone(),
+            availability: self.availability.clone(),
+            visibility: self.visibility.clone(),
+        }
+    }
+}
+
+// ── Editor session types ──────────────────────────────
+
+/// Snapshot of editable event fields, used for dirty detection.
+///
+/// Includes only fields that the user can modify in the editor.
+/// Excludes identity (`id`, `account_id`), display-only fields
+/// (`organizer_*`, `rsvp_status`, `calendar_name`, `color`),
+/// and read-only collections (`attendees`, `reminders`).
+///
+/// `calendar_id` is included because the draft is the authoritative
+/// editable source for calendar assignment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventSnapshot {
+    pub title: String,
+    pub start_date: NaiveDate,
+    pub start_hour: String,
+    pub start_minute: String,
+    pub end_hour: String,
+    pub end_minute: String,
+    pub all_day: bool,
+    pub location: String,
+    pub description: String,
+    pub calendar_id: Option<String>,
+    pub timezone: Option<String>,
+    pub recurrence_rule: Option<String>,
+    pub availability: Option<String>,
+    pub visibility: Option<String>,
+}
+
+/// Bundles all editor state for a calendar event being created or edited.
+///
+/// Lives on the workflow state (`CreatingEvent` / `EditingEvent`).
+/// The single source of truth for all editable event state during editing.
+#[derive(Debug, Clone)]
+pub struct EditorSession {
+    /// The mutable draft — fields are updated as the user types.
+    pub draft: CalendarEventData,
+    /// Snapshot of editable fields at editor open time, for dirty detection.
+    pub original: EventSnapshot,
+    /// Per-text-field undo/redo history.
+    pub undo_title: UndoableText,
+    pub undo_location: UndoableText,
+    pub undo_description: UndoableText,
+}
+
+impl EditorSession {
+    /// Create a new editor session from an event.
+    ///
+    /// Takes a snapshot of the editable fields as the original baseline
+    /// and initializes undo buffers for text fields.
+    pub fn new(event: CalendarEventData) -> Self {
+        let original = event.snapshot();
+        let undo_title = UndoableText::with_initial(&event.title);
+        let undo_location = UndoableText::with_initial(&event.location);
+        let undo_description = UndoableText::with_initial(&event.description);
+        Self {
+            draft: event,
+            original,
+            undo_title,
+            undo_location,
+            undo_description,
+        }
+    }
+
+    /// Whether the draft has been modified from its original state.
+    pub fn is_dirty(&self) -> bool {
+        self.draft.snapshot() != self.original
+    }
 }
 
 // ── Calendar list entry ────────────────────────────────
@@ -274,10 +371,6 @@ pub struct CalendarState {
     pub active_modal: Option<CalendarModal>,
     /// Cached events from the DB. Reloaded after CRUD operations.
     pub events: Vec<calendar_time_grid::TimeGridEvent>,
-    /// Undo state for event editor text fields.
-    pub editor_undo_title: UndoableText,
-    pub editor_undo_location: UndoableText,
-    pub editor_undo_description: UndoableText,
     /// All calendars across accounts (for sidebar list).
     pub calendars: Vec<CalendarListEntry>,
     /// Set of dates that have at least one event (for mini-month dots).
@@ -312,9 +405,6 @@ impl CalendarState {
             active_popover: None,
             active_modal: None,
             events: Vec::new(),
-            editor_undo_title: UndoableText::new(),
-            editor_undo_location: UndoableText::new(),
-            editor_undo_description: UndoableText::new(),
             calendars: Vec::new(),
             dates_with_events: HashSet::new(),
             load_generation: rtsk::generation::GenerationCounter::new(),
@@ -332,11 +422,6 @@ impl CalendarState {
     }
 
     /// Reset editor undo state when opening the editor modal.
-    pub fn reset_editor_undo(&mut self, event: &CalendarEventData) {
-        self.editor_undo_title = UndoableText::with_initial(&event.title);
-        self.editor_undo_location = UndoableText::with_initial(&event.location);
-        self.editor_undo_description = UndoableText::with_initial(&event.description);
-    }
 
     /// Navigate the mini-month to the previous month.
     pub fn prev_month(&mut self) {
@@ -551,10 +636,20 @@ pub fn calendar_layout(state: &CalendarState) -> Element<'_, CalendarMessage> {
     if let Some(modal) = &state.active_modal {
         let card = match modal {
             CalendarModal::EventFull { event } => event_full_modal(event, state),
-            CalendarModal::EventEditor { event } => {
-                let is_creating =
-                    matches!(state.workflow, CalendarWorkflow::CreatingEvent { .. });
-                event_editor_card(event, is_creating)
+            CalendarModal::EventEditor => {
+                let (draft, is_creating) = match &state.workflow {
+                    CalendarWorkflow::CreatingEvent { session, .. } => (&session.draft, true),
+                    CalendarWorkflow::EditingEvent { session, .. } => (&session.draft, false),
+                    other => {
+                        debug_assert!(
+                            false,
+                            "EventEditor modal without editing workflow: {other:?}"
+                        );
+                        log::error!("EventEditor modal without editing workflow state");
+                        return container(text("")).into();
+                    }
+                };
+                event_editor_card(draft, is_creating)
             }
             CalendarModal::ConfirmDelete {
                 event_id, title, ..

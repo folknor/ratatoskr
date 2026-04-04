@@ -5,7 +5,7 @@ use iced::Task;
 
 use crate::ui::calendar::{
     CalendarEventData, CalendarMessage, CalendarModal, CalendarPopover, CalendarWorkflow,
-    EventField, EventTextField,
+    EditorSession, EventField, EventTextField,
 };
 use crate::{App, Message};
 
@@ -45,15 +45,14 @@ impl App {
             CalendarMessage::DoubleClickSlot(date, hour) => {
                 // Double-click opens event creation dialog with time pre-filled.
                 let event = CalendarEventData::new_at(date, hour);
-                self.calendar.reset_editor_undo(&event);
+                let session = EditorSession::new(event);
                 // Workflow first, then surface.
                 self.calendar.workflow = CalendarWorkflow::CreatingEvent {
                     account_id: None,
-                    calendar_id: None,
-                    original_title: String::new(),
+                    session,
                 };
                 self.calendar.active_popover = None;
-                self.calendar.active_modal = Some(CalendarModal::EventEditor { event });
+                self.calendar.active_modal = Some(CalendarModal::EventEditor);
                 Task::none()
             }
             CalendarMessage::EventClicked(event_id) => {
@@ -114,31 +113,81 @@ impl App {
                 Task::none()
             }
             CalendarMessage::CloseModal => {
-                // Check for unsaved changes in the editor.
-                if let Some(CalendarModal::EventEditor { ref event, .. }) =
-                    self.calendar.active_modal
+                // If we're in the discard confirmation, "Close" means cancel
+                // the discard and return to the editor.
+                if let CalendarWorkflow::ConfirmingDiscard {
+                    was_creating,
+                    event_id,
+                    account_id,
+                    ..
+                } = &self.calendar.workflow
                 {
-                    // Read dirty-detection baseline from workflow state (transitional:
-                    // Phase B replaces with full snapshot comparison).
-                    let original_title = match &self.calendar.workflow {
-                        CalendarWorkflow::CreatingEvent { original_title, .. }
-                        | CalendarWorkflow::EditingEvent { original_title, .. } => {
-                            original_title.as_str()
-                        }
-                        _ => "",
+                    let was_creating = *was_creating;
+                    let event_id = event_id.clone();
+                    let account_id = account_id.clone();
+                    // Take ownership of the session from ConfirmingDiscard.
+                    let session = match std::mem::replace(
+                        &mut self.calendar.workflow,
+                        CalendarWorkflow::Idle,
+                    ) {
+                        CalendarWorkflow::ConfirmingDiscard { session, .. } => session,
+                        _ => unreachable!(),
                     };
-                    if event.title != original_title
-                        || !event.description.is_empty()
-                        || !event.location.is_empty()
-                    {
-                        // Has changes — show discard confirmation.
-                        self.calendar.workflow = CalendarWorkflow::ConfirmingDiscard;
-                        self.calendar.active_modal = Some(CalendarModal::ConfirmDiscard {
-                            title: "Discard unsaved changes?".to_string(),
-                        });
-                        return Task::none();
+                    if was_creating {
+                        self.calendar.workflow = CalendarWorkflow::CreatingEvent {
+                            account_id,
+                            session,
+                        };
+                    } else {
+                        self.calendar.workflow = CalendarWorkflow::EditingEvent {
+                            event_id: event_id.unwrap_or_default(),
+                            account_id: account_id.unwrap_or_default(),
+                            session,
+                        };
                     }
+                    self.calendar.active_modal = Some(CalendarModal::EventEditor);
+                    return Task::none();
                 }
+
+                // Check for unsaved changes in the editor.
+                let is_dirty = match &self.calendar.workflow {
+                    CalendarWorkflow::CreatingEvent { session, .. }
+                    | CalendarWorkflow::EditingEvent { session, .. } => session.is_dirty(),
+                    _ => false,
+                };
+                if is_dirty {
+                    // Preserve session for cancel-discard.
+                    let (was_creating, event_id, account_id) = match &self.calendar.workflow {
+                        CalendarWorkflow::CreatingEvent { account_id, .. } => {
+                            (true, None, account_id.clone())
+                        }
+                        CalendarWorkflow::EditingEvent {
+                            event_id,
+                            account_id,
+                            ..
+                        } => (false, Some(event_id.clone()), Some(account_id.clone())),
+                        _ => unreachable!(),
+                    };
+                    let session = match std::mem::replace(
+                        &mut self.calendar.workflow,
+                        CalendarWorkflow::Idle,
+                    ) {
+                        CalendarWorkflow::CreatingEvent { session, .. }
+                        | CalendarWorkflow::EditingEvent { session, .. } => session,
+                        _ => unreachable!(),
+                    };
+                    self.calendar.workflow = CalendarWorkflow::ConfirmingDiscard {
+                        was_creating,
+                        event_id,
+                        account_id,
+                        session,
+                    };
+                    self.calendar.active_modal = Some(CalendarModal::ConfirmDiscard {
+                        title: "Discard unsaved changes?".to_string(),
+                    });
+                    return Task::none();
+                }
+
                 self.calendar.workflow = CalendarWorkflow::Idle;
                 self.calendar.active_modal = None;
                 Task::none()
@@ -163,41 +212,40 @@ impl App {
                         CalendarEventData::new_at(date, hour)
                     }
                 };
-                self.calendar.reset_editor_undo(&event);
-                let original_title = event.title.clone();
                 // Transitional rule: create-vs-edit derived from event.id presence.
                 // Phase C makes this explicit from the caller.
-                if event.id.is_some() {
+                let is_editing = event.id.is_some();
+                let event_id = event.id.clone().unwrap_or_default();
+                let account_id = event.account_id.clone();
+                let session = EditorSession::new(event);
+                if is_editing {
                     self.calendar.workflow = CalendarWorkflow::EditingEvent {
-                        event_id: event.id.clone().unwrap_or_default(),
-                        account_id: event.account_id.clone().unwrap_or_default(),
-                        calendar_id: event.calendar_id.clone(),
-                        original_title,
+                        event_id,
+                        account_id: account_id.unwrap_or_default(),
+                        session,
                     };
                 } else {
                     self.calendar.workflow = CalendarWorkflow::CreatingEvent {
-                        account_id: event.account_id.clone(),
-                        calendar_id: event.calendar_id.clone(),
-                        original_title,
+                        account_id,
+                        session,
                     };
                 }
                 self.calendar.active_popover = None;
-                self.calendar.active_modal = Some(CalendarModal::EventEditor { event });
+                self.calendar.active_modal = Some(CalendarModal::EventEditor);
                 Task::none()
             }
             CalendarMessage::CreateEvent => {
                 let date = self.calendar.selected_date;
                 let hour = self.calendar.selected_hour.unwrap_or(9);
                 let event = CalendarEventData::new_at(date, hour);
-                self.calendar.reset_editor_undo(&event);
+                let session = EditorSession::new(event);
                 // Workflow first, then surface.
                 self.calendar.workflow = CalendarWorkflow::CreatingEvent {
                     account_id: None,
-                    calendar_id: None,
-                    original_title: String::new(),
+                    session,
                 };
                 self.calendar.active_popover = None;
-                self.calendar.active_modal = Some(CalendarModal::EventEditor { event });
+                self.calendar.active_modal = Some(CalendarModal::EventEditor);
                 Task::none()
             }
             CalendarMessage::EventFieldChanged(field) => {
@@ -374,125 +422,103 @@ impl App {
     }
 
     fn handle_event_field_changed(&mut self, field: EventField) {
-        if let Some(CalendarModal::EventEditor { ref mut event, .. }) = self.calendar.active_modal {
-            match field {
-                EventField::Title(s) => {
-                    self.calendar.editor_undo_title.set_text(s.clone());
-                    event.title = s;
-                }
-                EventField::Location(s) => {
-                    self.calendar.editor_undo_location.set_text(s.clone());
-                    event.location = s;
-                }
-                EventField::Description(s) => {
-                    self.calendar.editor_undo_description.set_text(s.clone());
-                    event.description = s;
-                }
-                EventField::StartHour(s) => event.start_hour = s,
-                EventField::StartMinute(s) => event.start_minute = s,
-                EventField::EndHour(s) => event.end_hour = s,
-                EventField::EndMinute(s) => event.end_minute = s,
-                EventField::AllDay(b) => event.all_day = b,
-                EventField::CalendarId(id) => event.calendar_id = id,
-                EventField::Timezone(tz) => event.timezone = tz,
-                EventField::Availability(a) => event.availability = a,
-                EventField::Visibility(v) => event.visibility = v,
-                EventField::RecurrenceRule(r) => event.recurrence_rule = r,
+        let session = match &mut self.calendar.workflow {
+            CalendarWorkflow::CreatingEvent { session, .. }
+            | CalendarWorkflow::EditingEvent { session, .. } => session,
+            _ => return,
+        };
+        match field {
+            EventField::Title(s) => {
+                session.undo_title.set_text(s.clone());
+                session.draft.title = s;
             }
+            EventField::Location(s) => {
+                session.undo_location.set_text(s.clone());
+                session.draft.location = s;
+            }
+            EventField::Description(s) => {
+                session.undo_description.set_text(s.clone());
+                session.draft.description = s;
+            }
+            EventField::StartHour(s) => session.draft.start_hour = s,
+            EventField::StartMinute(s) => session.draft.start_minute = s,
+            EventField::EndHour(s) => session.draft.end_hour = s,
+            EventField::EndMinute(s) => session.draft.end_minute = s,
+            EventField::AllDay(b) => session.draft.all_day = b,
+            EventField::CalendarId(id) => session.draft.calendar_id = id,
+            EventField::Timezone(tz) => session.draft.timezone = tz,
+            EventField::Availability(a) => session.draft.availability = a,
+            EventField::Visibility(v) => session.draft.visibility = v,
+            EventField::RecurrenceRule(r) => session.draft.recurrence_rule = r,
         }
     }
 
     fn handle_event_field_undo(&mut self, text_field: EventTextField) {
-        if let Some(CalendarModal::EventEditor { ref mut event, .. }) = self.calendar.active_modal {
-            match text_field {
-                EventTextField::Title => {
-                    if let Some(t) = self.calendar.editor_undo_title.undo() {
-                        event.title = t.to_owned();
-                    }
+        let session = match &mut self.calendar.workflow {
+            CalendarWorkflow::CreatingEvent { session, .. }
+            | CalendarWorkflow::EditingEvent { session, .. } => session,
+            _ => return,
+        };
+        match text_field {
+            EventTextField::Title => {
+                if let Some(t) = session.undo_title.undo() {
+                    session.draft.title = t.to_owned();
                 }
-                EventTextField::Location => {
-                    if let Some(t) = self.calendar.editor_undo_location.undo() {
-                        event.location = t.to_owned();
-                    }
+            }
+            EventTextField::Location => {
+                if let Some(t) = session.undo_location.undo() {
+                    session.draft.location = t.to_owned();
                 }
-                EventTextField::Description => {
-                    if let Some(t) = self.calendar.editor_undo_description.undo() {
-                        event.description = t.to_owned();
-                    }
+            }
+            EventTextField::Description => {
+                if let Some(t) = session.undo_description.undo() {
+                    session.draft.description = t.to_owned();
                 }
             }
         }
     }
 
     fn handle_event_field_redo(&mut self, text_field: EventTextField) {
-        if let Some(CalendarModal::EventEditor { ref mut event, .. }) = self.calendar.active_modal {
-            match text_field {
-                EventTextField::Title => {
-                    if let Some(t) = self.calendar.editor_undo_title.redo() {
-                        event.title = t.to_owned();
-                    }
+        let session = match &mut self.calendar.workflow {
+            CalendarWorkflow::CreatingEvent { session, .. }
+            | CalendarWorkflow::EditingEvent { session, .. } => session,
+            _ => return,
+        };
+        match text_field {
+            EventTextField::Title => {
+                if let Some(t) = session.undo_title.redo() {
+                    session.draft.title = t.to_owned();
                 }
-                EventTextField::Location => {
-                    if let Some(t) = self.calendar.editor_undo_location.redo() {
-                        event.location = t.to_owned();
-                    }
+            }
+            EventTextField::Location => {
+                if let Some(t) = session.undo_location.redo() {
+                    session.draft.location = t.to_owned();
                 }
-                EventTextField::Description => {
-                    if let Some(t) = self.calendar.editor_undo_description.redo() {
-                        event.description = t.to_owned();
-                    }
+            }
+            EventTextField::Description => {
+                if let Some(t) = session.undo_description.redo() {
+                    session.draft.description = t.to_owned();
                 }
             }
         }
     }
 
     fn handle_save_event(&mut self) -> Task<Message> {
-        // Extract draft data from the surface (transitional — Phase B
-        // moves the draft into the editor session on workflow state).
-        let event = match &self.calendar.active_modal {
-            Some(CalendarModal::EventEditor { event, .. }) => event.clone(),
-            _ => return Task::none(),
-        };
-
         let Some(ctx) = self.action_ctx() else {
             return Task::none();
         };
 
-        let start_ts = calendar_data_to_timestamp(
-            event.start_date,
-            event.start_hour_u32(),
-            event.start_minute_u32(),
-        );
-        let end_ts = calendar_data_to_timestamp(
-            event.start_date,
-            event.end_hour_u32(),
-            event.end_minute_u32(),
-        );
-
-        let input = cal::actions::CalendarEventInput {
-            title: event.title.clone(),
-            description: event.description.clone(),
-            location: event.location.clone(),
-            start_time: start_ts,
-            end_time: end_ts,
-            is_all_day: event.all_day,
-            timezone: event.timezone.clone(),
-            recurrence_rule: event.recurrence_rule.clone(),
-            availability: event.availability.clone(),
-            visibility: event.visibility.clone(),
-        };
-
-        // Read create-vs-update and identity from workflow state.
-        // Transitional: still falls back to sidebar.accounts.first()
-        // for CreatingEvent with account_id: None (Phase C eliminates).
+        // Read create-vs-update, identity, and draft from workflow state.
+        // calendar_id comes from session.draft (the authoritative editable source).
         match &self.calendar.workflow {
             CalendarWorkflow::EditingEvent {
                 event_id,
                 account_id,
-                ..
+                session,
             } => {
                 let event_id = event_id.clone();
                 let account_id = account_id.clone();
+                let input = Self::build_event_input(&session.draft);
                 Task::perform(
                     async move {
                         let outcome =
@@ -505,15 +531,15 @@ impl App {
             }
             CalendarWorkflow::CreatingEvent {
                 account_id,
-                calendar_id,
-                ..
+                session,
             } => {
                 // Transitional fallback for account_id (Phase C: block save instead).
                 let account_id = account_id
                     .clone()
                     .or_else(|| self.sidebar.accounts.first().map(|a| a.id.clone()))
                     .unwrap_or_default();
-                let calendar_id = calendar_id.clone().unwrap_or_default();
+                let calendar_id = session.draft.calendar_id.clone().unwrap_or_default();
+                let input = Self::build_event_input(&session.draft);
                 Task::perform(
                     async move {
                         let outcome = cal::actions::create_calendar_event(
@@ -532,6 +558,31 @@ impl App {
                 log::warn!("SaveEvent received outside editing/creating workflow");
                 Task::none()
             }
+        }
+    }
+
+    fn build_event_input(draft: &CalendarEventData) -> cal::actions::CalendarEventInput {
+        let start_ts = calendar_data_to_timestamp(
+            draft.start_date,
+            draft.start_hour_u32(),
+            draft.start_minute_u32(),
+        );
+        let end_ts = calendar_data_to_timestamp(
+            draft.start_date,
+            draft.end_hour_u32(),
+            draft.end_minute_u32(),
+        );
+        cal::actions::CalendarEventInput {
+            title: draft.title.clone(),
+            description: draft.description.clone(),
+            location: draft.location.clone(),
+            start_time: start_ts,
+            end_time: end_ts,
+            is_all_day: draft.all_day,
+            timezone: draft.timezone.clone(),
+            recurrence_rule: draft.recurrence_rule.clone(),
+            availability: draft.availability.clone(),
+            visibility: draft.visibility.clone(),
         }
     }
 
