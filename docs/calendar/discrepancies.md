@@ -8,7 +8,7 @@ Audit date: 2026-03-30
 
 ### High
 
-1. **New event creation appears broken.** Editor never gives the user a real calendar selector. Save path requires a `calendar_id` and falls back to `""` for new events. `create_calendar_event()` then requires that ID to resolve a provider calendar. A plain "New Event" save has no valid calendar target.
+1. ~~**New event creation appears broken.**~~ ✅ Fixed — editor now has a `pick_list` calendar selector dropdown populated from `state.calendars`. `EventField::CalendarId` updates the draft. Phase C of contract #11 will enforce blocking save when no calendar is selected.
 
 2. ~~**Calendar visibility toggles are mostly cosmetic.**~~ ✅ Fixed — event-loading query now filters by `is_visible = 1`. Side effect of `EventSaved` reuse on toggle still exists but is cosmetic.
 

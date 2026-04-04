@@ -9,7 +9,8 @@ use std::collections::HashSet;
 
 use chrono::{Datelike, Local, NaiveDate, Weekday};
 use iced::widget::{
-    Space, button, checkbox, column, container, mouse_area, row, scrollable, text, text_input,
+    Space, button, checkbox, column, container, mouse_area, pick_list, row, scrollable, text,
+    text_input,
 };
 use iced::{Alignment, Element, Length, Theme};
 
@@ -334,7 +335,8 @@ impl EditorSession {
 // ── Calendar list entry ────────────────────────────────
 
 /// A calendar for the sidebar list with visibility toggle.
-#[derive(Debug, Clone)]
+/// Also used in the editor's calendar selector dropdown.
+#[derive(Debug, Clone, PartialEq)]
 pub struct CalendarListEntry {
     pub id: String,
     pub account_id: String,
@@ -649,7 +651,7 @@ pub fn calendar_layout(state: &CalendarState) -> Element<'_, CalendarMessage> {
                         return container(text("")).into();
                     }
                 };
-                event_editor_card(draft, is_creating)
+                event_editor_card(draft, is_creating, &state.calendars)
             }
             CalendarModal::ConfirmDelete {
                 event_id, title, ..
@@ -1164,10 +1166,11 @@ fn event_full_modal<'a>(
 // ── Event editor card ──────────────────────────────────
 
 /// Event creation/editing form (rendered as a centered modal).
-fn event_editor_card(
-    event: &CalendarEventData,
+fn event_editor_card<'a>(
+    event: &'a CalendarEventData,
     is_creating: bool,
-) -> Element<'_, CalendarMessage> {
+    calendars: &'a [CalendarListEntry],
+) -> Element<'a, CalendarMessage> {
     let heading = if is_creating {
         "New Event"
     } else {
@@ -1193,23 +1196,28 @@ fn event_editor_card(
     );
 
     // Calendar selector (spec: first field)
-    // Uses the calendars from state — but since we only have the event data here,
-    // show the current calendar name or a text input for calendar_id.
-    if let Some(ref cal_name) = event.calendar_name {
-        content = content.push(form_field(
-            "Calendar",
-            row![
-                if let Some(ref hex) = event.color {
-                    text("\u{25CF}").size(TEXT_MD).color(parse_hex_color(hex))
-                } else {
-                    text("\u{25CF}").size(TEXT_MD)
-                },
-                text(cal_name).size(TEXT_MD),
-            ]
-            .spacing(SPACE_XXS)
-            .align_y(Alignment::Center)
-            .into(),
-        ));
+    {
+        let selected = calendars
+            .iter()
+            .find(|c| Some(&c.id) == event.calendar_id.as_ref())
+            .cloned();
+        let options: Vec<CalendarListEntry> = calendars.to_vec();
+        let picker = pick_list(selected, options, |c: &CalendarListEntry| {
+            if let Some(ref name) = c.name {
+                name.clone()
+            } else {
+                c.id.clone()
+            }
+        })
+        .on_select(|entry: CalendarListEntry| {
+            CalendarMessage::EventFieldChanged(EventField::CalendarId(Some(entry.id)))
+        })
+        .placeholder("Select calendar...")
+        .text_size(TEXT_MD)
+        .padding(PAD_INPUT)
+        .width(Length::Fill)
+        .style(theme::PickListClass::Ghost.style());
+        content = content.push(form_field("Calendar", picker.into()));
     }
 
     // Title
