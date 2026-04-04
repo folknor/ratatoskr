@@ -109,6 +109,8 @@ pub fn mime_from_extension(name: &str) -> String {
 
 #[derive(Debug, Clone)]
 pub enum ComposeMessage {
+    /// Event sink used by the modal backdrop to block background clicks
+    /// without dismissing the active modal.
     Noop,
     SubjectChanged(String),
     BodyChanged(RteAction),
@@ -1428,13 +1430,13 @@ fn build_from_row<'a>(
 fn build_to_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Element<'a, Message> {
     let ac_open = state.autocomplete.active_field == RecipientField::To
         && !state.autocomplete.results.is_empty();
-    let autocomplete_popup = ac_open.then(|| autocomplete_popup(window_id, state));
+    let autocomplete_dropdown = ac_open.then(|| autocomplete_dropdown(window_id, state));
     build_recipient_row_inner(
         "To",
         &state.to,
         state.selected_to_token,
         ac_open,
-        autocomplete_popup,
+        autocomplete_dropdown,
         window_id,
         "Add recipients...",
         ComposeMessage::ToTokenInput,
@@ -1444,13 +1446,13 @@ fn build_to_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Ele
 fn build_cc_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Element<'a, Message> {
     let ac_open = state.autocomplete.active_field == RecipientField::Cc
         && !state.autocomplete.results.is_empty();
-    let autocomplete_popup = ac_open.then(|| autocomplete_popup(window_id, state));
+    let autocomplete_dropdown = ac_open.then(|| autocomplete_dropdown(window_id, state));
     build_recipient_row_inner(
         "Cc",
         &state.cc,
         state.selected_cc_token,
         ac_open,
-        autocomplete_popup,
+        autocomplete_dropdown,
         window_id,
         "Add Cc...",
         ComposeMessage::CcTokenInput,
@@ -1460,13 +1462,13 @@ fn build_cc_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Ele
 fn build_bcc_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Element<'a, Message> {
     let ac_open = state.autocomplete.active_field == RecipientField::Bcc
         && !state.autocomplete.results.is_empty();
-    let autocomplete_popup = ac_open.then(|| autocomplete_popup(window_id, state));
+    let autocomplete_dropdown = ac_open.then(|| autocomplete_dropdown(window_id, state));
     build_recipient_row_inner(
         "Bcc",
         &state.bcc,
         state.selected_bcc_token,
         ac_open,
-        autocomplete_popup,
+        autocomplete_dropdown,
         window_id,
         "Add Bcc...",
         ComposeMessage::BccTokenInput,
@@ -1478,7 +1480,7 @@ fn build_recipient_row_inner<'a>(
     value: &'a TokenInputValue,
     selected: Option<TokenId>,
     autocomplete_open: bool,
-    autocomplete_popup: Option<Element<'a, Message>>,
+    autocomplete_dropdown: Option<Element<'a, Message>>,
     window_id: iced::window::Id,
     placeholder: &'a str,
     wrap: fn(TokenInputMessage) -> ComposeMessage,
@@ -1492,9 +1494,9 @@ fn build_recipient_row_inner<'a>(
         move |msg| Message::PopOut(window_id, PopOutMessage::Compose(wrap(msg))),
     );
 
-    let field: Element<'a, Message> = if let Some(popup) = autocomplete_popup {
+    let field: Element<'a, Message> = if let Some(dropdown) = autocomplete_dropdown {
         crate::ui::anchored_overlay::anchored_overlay(field)
-            .popup(popup)
+            .popup(dropdown)
             .on_dismiss(Message::PopOut(
                 window_id,
                 PopOutMessage::Compose(ComposeMessage::AutocompleteDismiss),
@@ -1886,7 +1888,7 @@ fn attachment_list<'a>(
 
 // ── Autocomplete dropdown ───────────────────────────────
 
-fn autocomplete_popup<'a>(
+fn autocomplete_dropdown<'a>(
     window_id: iced::window::Id,
     state: &'a ComposeState,
 ) -> Element<'a, Message> {

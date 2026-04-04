@@ -1,6 +1,7 @@
 use iced::Task;
 
 use crate::command_dispatch::{self, KeyEventMessage};
+use crate::pop_out::PopOutWindow;
 use crate::ui::thread_list::{ThreadListMessage, TypeaheadDirection};
 use crate::{App, Message, PendingChord};
 use cmdk::{Chord, CommandId, ResolveResult};
@@ -14,6 +15,24 @@ impl App {
                 status,
                 window_id,
             } => {
+                if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)
+                    && window_id != self.main_window_id
+                {
+                    if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id)
+                    {
+                        if state.link_dialog_open {
+                            state.link_dialog_open = false;
+                            state.link_url.clear();
+                            state.link_text.clear();
+                            return Task::none();
+                        }
+                        if state.discard_confirm_open {
+                            state.discard_confirm_open = false;
+                            return Task::none();
+                        }
+                    }
+                }
+
                 // Escape in a pop-out window closes that window
                 if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)
                     && window_id != self.main_window_id

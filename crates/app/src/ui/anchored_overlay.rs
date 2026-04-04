@@ -1,6 +1,8 @@
 use iced::advanced::{Clipboard, Layout, Shell, Widget, layout, overlay, renderer, widget};
 use iced::{Event, Length, Point, Rectangle, Renderer, Size, Theme, Vector, mouse};
 
+const POINT_ANCHORED_POPUP_MIN_WIDTH: f32 = 160.0;
+
 /// A widget that displays a base element and optionally floats a popup
 /// overlay relative to it, without affecting layout. Clicks outside the
 /// popup dismiss it via `on_dismiss`.
@@ -47,7 +49,8 @@ impl<'a, Message: Clone + 'a> AnchoredOverlay<'a, Message> {
         self
     }
 
-    /// Set a fixed width for the popup. If unset, the popup uses the base's width.
+    /// Set a fixed width for the popup. If unset, the popup uses the base's
+    /// width, or a small safe default when point-anchored.
     pub fn popup_width(mut self, width: f32) -> Self {
         self.popup_width = Some(width);
         self
@@ -245,7 +248,13 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
             self.base_bounds.height
         };
 
-        let popup_width = self.popup_width.unwrap_or(anchor_width);
+        let popup_width = self.popup_width.unwrap_or_else(|| {
+            if self.anchor_point.is_some() {
+                POINT_ANCHORED_POPUP_MIN_WIDTH
+            } else {
+                anchor_width
+            }
+        });
         let below_y = anchor_position.y + anchor_height;
         let available_height = (bounds.height - below_y).max(0.0);
 
