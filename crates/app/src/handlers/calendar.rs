@@ -44,11 +44,14 @@ impl App {
             }
             CalendarMessage::DoubleClickSlot(date, hour) => {
                 // Double-click opens event creation dialog with time pre-filled.
-                let event = CalendarEventData::new_at(date, hour);
+                let mut event = CalendarEventData::new_at(date, hour);
+                // Pre-assign calendar when unambiguous.
+                self.pre_assign_calendar_if_unambiguous(&mut event, None);
+                let account_id = event.account_id.clone();
                 let session = EditorSession::new(event);
                 // Workflow first, then surface.
                 self.calendar.workflow = CalendarWorkflow::CreatingEvent {
-                    account_id: None,
+                    account_id,
                     session,
                 };
                 self.calendar.active_popover = None;
@@ -204,7 +207,7 @@ impl App {
                 Task::none()
             }
             CalendarMessage::OpenEventEditor(data) => {
-                let event = match data {
+                let mut event = match data {
                     Some(e) => e,
                     None => {
                         let date = self.calendar.selected_date;
@@ -215,6 +218,9 @@ impl App {
                 // Transitional rule: create-vs-edit derived from event.id presence.
                 // Phase C makes this explicit from the caller.
                 let is_editing = event.id.is_some();
+                if !is_editing {
+                    self.pre_assign_calendar_if_unambiguous(&mut event, None);
+                }
                 let event_id = event.id.clone().unwrap_or_default();
                 let account_id = event.account_id.clone();
                 let session = EditorSession::new(event);
@@ -237,11 +243,14 @@ impl App {
             CalendarMessage::CreateEvent => {
                 let date = self.calendar.selected_date;
                 let hour = self.calendar.selected_hour.unwrap_or(9);
-                let event = CalendarEventData::new_at(date, hour);
+                let mut event = CalendarEventData::new_at(date, hour);
+                // Pre-assign calendar when unambiguous.
+                self.pre_assign_calendar_if_unambiguous(&mut event, None);
+                let account_id = event.account_id.clone();
                 let session = EditorSession::new(event);
                 // Workflow first, then surface.
                 self.calendar.workflow = CalendarWorkflow::CreatingEvent {
-                    account_id: None,
+                    account_id,
                     session,
                 };
                 self.calendar.active_popover = None;
@@ -422,6 +431,32 @@ impl App {
     }
 
     fn handle_event_field_changed(&mut self, field: EventField) {
+        // CalendarSelected needs to update both draft and workflow account_id,
+        // which requires two mutable accesses to self.calendar.workflow.
+        // Handle it separately to avoid borrow conflicts.
+        if let EventField::CalendarSelected {
+            calendar_id,
+            account_id,
+        } = field
+        {
+            match &mut self.calendar.workflow {
+                CalendarWorkflow::CreatingEvent {
+                    account_id: wf_account,
+                    session,
+                } => {
+                    session.draft.calendar_id = calendar_id;
+                    session.draft.account_id = account_id.clone();
+                    *wf_account = account_id;
+                }
+                CalendarWorkflow::EditingEvent { session, .. } => {
+                    // Picker is disabled for edit mode, but handle defensively.
+                    session.draft.calendar_id = calendar_id;
+                }
+                _ => {}
+            }
+            return;
+        }
+
         let session = match &mut self.calendar.workflow {
             CalendarWorkflow::CreatingEvent { session, .. }
             | CalendarWorkflow::EditingEvent { session, .. } => session,
@@ -445,7 +480,7 @@ impl App {
             EventField::EndHour(s) => session.draft.end_hour = s,
             EventField::EndMinute(s) => session.draft.end_minute = s,
             EventField::AllDay(b) => session.draft.all_day = b,
-            EventField::CalendarId(id) => session.draft.calendar_id = id,
+            EventField::CalendarSelected { .. } => unreachable!("handled above"),
             EventField::Timezone(tz) => session.draft.timezone = tz,
             EventField::Availability(a) => session.draft.availability = a,
             EventField::Visibility(v) => session.draft.visibility = v,
@@ -533,12 +568,16 @@ impl App {
                 account_id,
                 session,
             } => {
-                // Transitional fallback for account_id (Phase C: block save instead).
-                let account_id = account_id
-                    .clone()
-                    .or_else(|| self.sidebar.accounts.first().map(|a| a.id.clone()))
-                    .unwrap_or_default();
-                let calendar_id = session.draft.calendar_id.clone().unwrap_or_default();
+                let Some(ref account_id) = account_id else {
+                    self.status = "Select a calendar before saving".to_string();
+                    return Task::none();
+                };
+                let Some(ref calendar_id) = session.draft.calendar_id else {
+                    self.status = "Select a calendar before saving".to_string();
+                    return Task::none();
+                };
+                let account_id = account_id.clone();
+                let calendar_id = calendar_id.clone();
                 let input = Self::build_event_input(&session.draft);
                 Task::perform(
                     async move {
@@ -583,6 +622,37 @@ impl App {
             recurrence_rule: draft.recurrence_rule.clone(),
             availability: draft.availability.clone(),
             visibility: draft.visibility.clone(),
+        }
+    }
+
+    /// Pre-assign calendar (and account) ownership on a new event when
+    /// unambiguous.
+    ///
+    /// If `for_account` is `Some`, only calendars on that account are
+    /// considered. If `None`, all calendars are considered.
+    ///
+    /// **Assumption:** all entries in `self.calendar.calendars` are treated
+    /// as eligible create targets.
+    fn pre_assign_calendar_if_unambiguous(
+        &self,
+        event: &mut CalendarEventData,
+        for_account: Option<&str>,
+    ) {
+        if event.calendar_id.is_some() {
+            return;
+        }
+        let eligible: Vec<_> = self
+            .calendar
+            .calendars
+            .iter()
+            .filter(|c| {
+                for_account
+                    .map_or(true, |acct| c.account_id == acct)
+            })
+            .collect();
+        if eligible.len() == 1 {
+            event.calendar_id = Some(eligible[0].id.clone());
+            event.account_id = Some(eligible[0].account_id.clone());
         }
     }
 

@@ -1706,10 +1706,25 @@ impl App {
         event.title = title;
         event.description = description;
 
-        // Set the account_id from the current context.
+        // Set the account_id from the current email context.
         let account_id = self.sidebar.accounts.first().map(|a| a.id.clone());
         if let Some(ref id) = account_id {
             event.account_id = Some(id.clone());
+        }
+
+        // Pre-assign calendar when unambiguous for this account.
+        if event.calendar_id.is_none() {
+            if let Some(ref acct) = account_id {
+                let account_cals: Vec<_> = self
+                    .calendar
+                    .calendars
+                    .iter()
+                    .filter(|c| &c.account_id == acct)
+                    .collect();
+                if account_cals.len() == 1 {
+                    event.calendar_id = Some(account_cals[0].id.clone());
+                }
+            }
         }
 
         let session = EditorSession::new(event);

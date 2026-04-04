@@ -533,7 +533,13 @@ pub enum EventField {
     EndHour(String),
     EndMinute(String),
     AllDay(bool),
-    CalendarId(Option<String>),
+    /// Calendar selection carrying both calendar and account ownership.
+    /// `account_id` comes from `CalendarListEntry.account_id` at selection
+    /// time — not reconstructed from a later lookup.
+    CalendarSelected {
+        calendar_id: Option<String>,
+        account_id: Option<String>,
+    },
     Timezone(Option<String>),
     Availability(Option<String>),
     Visibility(Option<String>),
@@ -1196,7 +1202,8 @@ fn event_editor_card<'a>(
     );
 
     // Calendar selector (spec: first field)
-    {
+    // Enabled for new events; read-only for existing events (move semantics deferred).
+    if is_creating {
         let selected = calendars
             .iter()
             .find(|c| Some(&c.id) == event.calendar_id.as_ref())
@@ -1210,7 +1217,10 @@ fn event_editor_card<'a>(
             }
         })
         .on_select(|entry: CalendarListEntry| {
-            CalendarMessage::EventFieldChanged(EventField::CalendarId(Some(entry.id)))
+            CalendarMessage::EventFieldChanged(EventField::CalendarSelected {
+                calendar_id: Some(entry.id),
+                account_id: Some(entry.account_id),
+            })
         })
         .placeholder("Select calendar...")
         .text_size(TEXT_MD)
@@ -1218,6 +1228,13 @@ fn event_editor_card<'a>(
         .width(Length::Fill)
         .style(theme::PickListClass::Ghost.style());
         content = content.push(form_field("Calendar", picker.into()));
+    } else {
+        let label = event
+            .calendar_name
+            .as_deref()
+            .or(event.calendar_id.as_deref())
+            .unwrap_or("Unknown calendar");
+        content = content.push(form_field("Calendar", text(label).size(TEXT_MD).into()));
     }
 
     // Title
@@ -1382,11 +1399,16 @@ fn event_editor_card<'a>(
         .style(theme::ButtonClass::Ghost.style());
     content = content.push(form_field("Recurrence", recurrence_toggle.into()));
 
-    // Action buttons
+    // Action buttons — save is disabled when no calendar is selected.
+    let can_save = event.calendar_id.is_some();
     let save_btn = button(text("Save").size(TEXT_SM))
-        .on_press(CalendarMessage::SaveEvent)
         .padding(PAD_BUTTON)
         .style(theme::ButtonClass::Nav { active: true }.style());
+    let save_btn = if can_save {
+        save_btn.on_press(CalendarMessage::SaveEvent)
+    } else {
+        save_btn
+    };
 
     let cancel_btn = button(text("Cancel").size(TEXT_SM))
         .on_press(CalendarMessage::CloseModal)
