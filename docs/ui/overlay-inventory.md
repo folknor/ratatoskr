@@ -372,32 +372,15 @@ Before refactoring behavior, the code should move toward these naming convention
 
 ## Phase 1: Naming Cleanup
 
-Pure naming cleanup targets. These should not change behavior.
+Phase 1 naming cleanup was completed in commit `18ea25e0`.
 
-| Previous Name | Location | Actual Role | Current Name | Priority | Notes |
-|---|---|---|---|---|---|
-| `Popover` | [crates/app/src/ui/anchored_overlay.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/anchored_overlay.rs) | generic anchored overlay primitive | `AnchoredOverlay` | High | Completed. This primitive name no longer collides with the semantic `Popover` type. |
-| `popover()` | [crates/app/src/ui/anchored_overlay.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/anchored_overlay.rs) | builder for anchored overlay placement | `anchored_overlay()` | High | Completed. Semantic `Popover` is now free for actual feature-level popovers. |
-| `Position` (inside primitive module) | [crates/app/src/ui/anchored_overlay.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/anchored_overlay.rs) | anchor-relative placement enum | `AnchorPosition` | High | Completed. Clarifies primitive-layer intent. |
-| `PopoverOverlay` | [crates/app/src/ui/anchored_overlay.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/anchored_overlay.rs) | overlay runtime object for anchored primitive | `AnchoredOverlayLayer` | Medium | Completed. |
-| `SettingsOverlay` | [crates/app/src/ui/settings/types.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/settings/types.rs) | right-edge sheet content enum | `SettingsSheetPage` | High | Completed. |
-| `overlay` field in `Settings` | [crates/app/src/ui/settings/types.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/settings/types.rs) | active settings sheet content | `active_sheet` | High | Completed. |
-| `overlay_anim` in `Settings` | [crates/app/src/ui/settings/types.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/settings/types.rs) | sheet slide animation | `sheet_anim` | High | Completed. |
-| `OpenOverlay` / `CloseOverlay` | [crates/app/src/ui/settings/types.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/settings/types.rs) | open/close settings sheet | `OpenSheet` / `CloseSheet` | High | Completed. |
-| `OverlayAnimTick` | [crates/app/src/ui/settings/types.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/settings/types.rs) | settings sheet animation tick | `SheetAnimTick` | Medium | Completed. |
-| `create_filter_overlay`, `account_editor_overlay`, `signature_editor_overlay`, `contact_editor_overlay`, `group_editor_overlay`, `import_wizard_overlay` | [crates/app/src/ui/settings/tabs.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/settings/tabs.rs) | settings sheet page renderers | `*_sheet` | Medium | Completed. These renderers now match the sheet system terminology. |
+It established:
+- `AnchoredOverlay` as the primitive anchored-surface layer in [crates/app/src/ui/anchored_overlay.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/anchored_overlay.rs)
+- `SettingsSheetPage`, `active_sheet`, and `sheet_anim` as the settings sheet terminology in [crates/app/src/ui/settings/types.rs](/home/folk/Programs/ratatoskr/crates/app/src/ui/settings/types.rs)
 
-### Recommended Rename Order
-
-1. Primitive layer rename
-   - completed
-
-2. Settings sheet system rename
-   - completed
-
-3. Revisit mixed sum types later:
-   - `CalendarOverlay`
-   - likely split by surface kind rather than rename as a single unit
+The remaining naming cleanup question is deferred:
+- `CalendarOverlay`
+- likely split by surface kind rather than renamed as a single enum
 
 ## Phase 2: Behavioral Fixes
 

@@ -10,6 +10,7 @@ pub struct AnchoredOverlay<'a, Message> {
     on_dismiss: Option<Message>,
     popup_width: Option<f32>,
     position: AnchorPosition,
+    anchor_point: Option<Point>,
 }
 
 /// Where the popup appears relative to the base widget.
@@ -31,6 +32,7 @@ pub fn anchored_overlay<'a, Message: 'a>(
         on_dismiss: None,
         popup_width: None,
         position: AnchorPosition::default(),
+        anchor_point: None,
     }
 }
 
@@ -53,6 +55,11 @@ impl<'a, Message: Clone + 'a> AnchoredOverlay<'a, Message> {
 
     pub fn position(mut self, position: AnchorPosition) -> Self {
         self.position = position;
+        self
+    }
+
+    pub fn anchor_point(mut self, point: Point) -> Self {
+        self.anchor_point = Some(point);
         self
     }
 }
@@ -194,6 +201,7 @@ impl<Message: Clone> Widget<Message, Theme, Renderer> for AnchoredOverlay<'_, Me
             on_dismiss: self.on_dismiss.clone(),
             popup_width: self.popup_width,
             position: self.position,
+            anchor_point: self.anchor_point,
         }));
 
         Some(
@@ -218,14 +226,27 @@ struct AnchoredOverlayLayer<'a, 'b, Message> {
     on_dismiss: Option<Message>,
     popup_width: Option<f32>,
     position: AnchorPosition,
+    anchor_point: Option<Point>,
 }
 
 impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
     for AnchoredOverlayLayer<'_, '_, Message>
 {
     fn layout(&mut self, renderer: &Renderer, bounds: Size) -> layout::Node {
-        let popup_width = self.popup_width.unwrap_or(self.base_bounds.width);
-        let below_y = self.base_position.y + self.base_bounds.height;
+        let anchor_position = self.anchor_point.unwrap_or(self.base_position);
+        let anchor_width = if self.anchor_point.is_some() {
+            0.0
+        } else {
+            self.base_bounds.width
+        };
+        let anchor_height = if self.anchor_point.is_some() {
+            0.0
+        } else {
+            self.base_bounds.height
+        };
+
+        let popup_width = self.popup_width.unwrap_or(anchor_width);
+        let below_y = anchor_position.y + anchor_height;
         let available_height = (bounds.height - below_y).max(0.0);
 
         let limits = layout::Limits::new(
@@ -244,9 +265,9 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
 
         // Calculate X based on position mode
         let x = match self.position {
-            AnchorPosition::Below => self.base_position.x,
+            AnchorPosition::Below => anchor_position.x,
             AnchorPosition::BelowRight => {
-                let right_edge = self.base_position.x + self.base_bounds.width;
+                let right_edge = anchor_position.x + anchor_width;
                 (right_edge - node.size().width).max(0.0)
             }
         };

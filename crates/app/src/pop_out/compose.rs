@@ -109,6 +109,7 @@ pub fn mime_from_extension(name: &str) -> String {
 
 #[derive(Debug, Clone)]
 pub enum ComposeMessage {
+    Noop,
     SubjectChanged(String),
     BodyChanged(RteAction),
     FromAccountChanged(AccountInfo),
@@ -645,6 +646,10 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             // Handled by the caller (close window)
         }
         ComposeMessage::ToggleDiscardConfirm => {
+            state.link_dialog_open = false;
+            state.context_menu = None;
+            state.autocomplete.results.clear();
+            state.autocomplete.highlighted = None;
             state.discard_confirm_open = !state.discard_confirm_open;
         }
         // Autocomplete
@@ -927,6 +932,10 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                 state.link_text = state.body.selection_text();
                 state.link_url.clear();
             }
+            state.discard_confirm_open = false;
+            state.context_menu = None;
+            state.autocomplete.results.clear();
+            state.autocomplete.highlighted = None;
             state.link_dialog_open = !state.link_dialog_open;
         }
         ComposeMessage::LinkUrlChanged(url) => state.link_url = url,
@@ -962,6 +971,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             state.link_url.clear();
             state.link_text.clear();
         }
+        ComposeMessage::Noop => {}
         // Attachments
         ComposeMessage::AttachFiles => {
             // Handled by the pop-out handler (async file picker)
@@ -1264,26 +1274,32 @@ pub fn view_compose_window<'a>(
     content = content.push(widgets::divider());
     content = content.push(footer);
 
-    // Token context menu overlay
-    if let Some(ref ctx) = state.context_menu {
-        content = content.push(token_context_menu(window_id, ctx));
-    }
-
-    // Discard confirmation overlay
-    if state.discard_confirm_open {
-        content = content.push(discard_confirmation(window_id));
-    }
-
-    // Link insertion dialog overlay
-    if state.link_dialog_open {
-        content = content.push(link_dialog(window_id, state));
-    }
-
-    container(content)
+    let base = container(content)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(theme::ContainerClass::Content.style())
-        .into()
+        .style(theme::ContainerClass::Content.style());
+
+    let with_context_menu: Element<'a, Message> = if let Some(ref ctx) = state.context_menu {
+        crate::ui::anchored_overlay::anchored_overlay(base)
+            .popup(token_context_menu(window_id, ctx))
+            .popup_width(180.0)
+            .anchor_point(ctx.position)
+            .on_dismiss(Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::DismissContextMenu),
+            ))
+            .into()
+    } else {
+        base.into()
+    };
+
+    if state.discard_confirm_open {
+        compose_modal_stack(window_id, with_context_menu, discard_confirmation(window_id))
+    } else if state.link_dialog_open {
+        compose_modal_stack(window_id, with_context_menu, link_dialog(window_id, state))
+    } else {
+        with_context_menu
+    }
 }
 
 fn compose_header<'a>(
@@ -1307,11 +1323,6 @@ fn compose_header<'a>(
     // Bcc field (if shown)
     if state.show_bcc {
         fields = fields.push(build_bcc_row(window_id, state));
-    }
-
-    // Autocomplete dropdown (rendered below the active recipient field)
-    if !state.autocomplete.query.is_empty() && !state.autocomplete.results.is_empty() {
-        fields = fields.push(autocomplete_dropdown(window_id, state));
     }
 
     // Subject
@@ -1417,11 +1428,13 @@ fn build_from_row<'a>(
 fn build_to_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Element<'a, Message> {
     let ac_open = state.autocomplete.active_field == RecipientField::To
         && !state.autocomplete.results.is_empty();
+    let autocomplete_popup = ac_open.then(|| autocomplete_popup(window_id, state));
     build_recipient_row_inner(
         "To",
         &state.to,
         state.selected_to_token,
         ac_open,
+        autocomplete_popup,
         window_id,
         "Add recipients...",
         ComposeMessage::ToTokenInput,
@@ -1431,11 +1444,13 @@ fn build_to_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Ele
 fn build_cc_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Element<'a, Message> {
     let ac_open = state.autocomplete.active_field == RecipientField::Cc
         && !state.autocomplete.results.is_empty();
+    let autocomplete_popup = ac_open.then(|| autocomplete_popup(window_id, state));
     build_recipient_row_inner(
         "Cc",
         &state.cc,
         state.selected_cc_token,
         ac_open,
+        autocomplete_popup,
         window_id,
         "Add Cc...",
         ComposeMessage::CcTokenInput,
@@ -1445,11 +1460,13 @@ fn build_cc_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Ele
 fn build_bcc_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Element<'a, Message> {
     let ac_open = state.autocomplete.active_field == RecipientField::Bcc
         && !state.autocomplete.results.is_empty();
+    let autocomplete_popup = ac_open.then(|| autocomplete_popup(window_id, state));
     build_recipient_row_inner(
         "Bcc",
         &state.bcc,
         state.selected_bcc_token,
         ac_open,
+        autocomplete_popup,
         window_id,
         "Add Bcc...",
         ComposeMessage::BccTokenInput,
@@ -1461,6 +1478,7 @@ fn build_recipient_row_inner<'a>(
     value: &'a TokenInputValue,
     selected: Option<TokenId>,
     autocomplete_open: bool,
+    autocomplete_popup: Option<Element<'a, Message>>,
     window_id: iced::window::Id,
     placeholder: &'a str,
     wrap: fn(TokenInputMessage) -> ComposeMessage,
@@ -1473,6 +1491,18 @@ fn build_recipient_row_inner<'a>(
         autocomplete_open,
         move |msg| Message::PopOut(window_id, PopOutMessage::Compose(wrap(msg))),
     );
+
+    let field: Element<'a, Message> = if let Some(popup) = autocomplete_popup {
+        crate::ui::anchored_overlay::anchored_overlay(field)
+            .popup(popup)
+            .on_dismiss(Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::AutocompleteDismiss),
+            ))
+            .into()
+    } else {
+        field
+    };
 
     row![
         container(
@@ -1741,17 +1771,10 @@ fn token_context_menu<'a>(
         ));
     }
 
-    let menu = container(items)
+    container(items)
         .padding(PAD_DROPDOWN)
         .style(theme::ContainerClass::Elevated.style())
-        .width(180.0);
-
-    // Wrap in a mouse_area to dismiss when clicking outside
-    mouse_area(menu)
-        .on_press(Message::PopOut(
-            window_id,
-            PopOutMessage::Compose(ComposeMessage::DismissContextMenu),
-        ))
+        .width(180.0)
         .into()
 }
 
@@ -1793,7 +1816,34 @@ fn discard_confirmation<'a>(window_id: iced::window::Id) -> Element<'a, Message>
     .padding(PAD_CONTENT)
     .style(theme::ContainerClass::Elevated.style())
     .width(Length::Fill)
+    .max_width(420.0)
     .into()
+}
+
+fn compose_modal_stack<'a>(
+    window_id: iced::window::Id,
+    base: Element<'a, Message>,
+    card: Element<'a, Message>,
+) -> Element<'a, Message> {
+    let backdrop = mouse_area(
+        container("")
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(theme::ContainerClass::ModalBackdrop.style()),
+    )
+    .on_press(Message::PopOut(
+        window_id,
+        PopOutMessage::Compose(ComposeMessage::Noop),
+    ));
+
+    let centered = container(card)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .padding(PAD_CONTENT);
+
+    iced::widget::stack![base, backdrop, centered].into()
 }
 
 // ── Attachment list ──────────────────────────────────────
@@ -1836,7 +1886,7 @@ fn attachment_list<'a>(
 
 // ── Autocomplete dropdown ───────────────────────────────
 
-fn autocomplete_dropdown<'a>(
+fn autocomplete_popup<'a>(
     window_id: iced::window::Id,
     state: &'a ComposeState,
 ) -> Element<'a, Message> {
@@ -1873,23 +1923,10 @@ fn autocomplete_dropdown<'a>(
         );
     }
 
-    let dropdown = scrollable(items).height(Length::Shrink);
-
-    // Offset by label width to align with the token input fields
-    let offset_row = row![
-        Space::new().width(COMPOSE_LABEL_WIDTH + SPACE_XS),
-        container(dropdown)
-            .max_height(AUTOCOMPLETE_MAX_HEIGHT)
-            .width(Length::Fill)
-            .style(theme::ContainerClass::Elevated.style()),
-    ];
-
-    // Wrap in a mouse_area to dismiss when clicking outside
-    mouse_area(offset_row)
-        .on_press(Message::PopOut(
-            window_id,
-            PopOutMessage::Compose(ComposeMessage::AutocompleteDismiss),
-        ))
+    container(scrollable(items).height(Length::Shrink))
+        .max_height(AUTOCOMPLETE_MAX_HEIGHT)
+        .width(Length::Fill)
+        .style(theme::ContainerClass::Elevated.style())
         .into()
 }
 
