@@ -405,5 +405,5 @@ After review of this catalogue:
 1. Continue Phase 2 with the remaining misimplemented surfaces
    - most obviously [crates/app/src/pop_out/message_view.rs](/home/folk/Programs/ratatoskr/crates/app/src/pop_out/message_view.rs) `overflow_menu`
 
-2. Simplify settings help to a strict tooltip
-   - remove the legacy pinned/sticky help behavior so it matches the `Tooltip` contract
+2. Resolve remaining feature-level naming drift for context menus and dropdowns
+   - make feature state/messages read semantically, not just the shared primitive layer

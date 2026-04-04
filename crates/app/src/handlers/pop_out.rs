@@ -233,8 +233,12 @@ fn handle_message_view_update(
             state.rendering_mode = mode;
             Task::none()
         }
-        MessageViewMessage::ToggleOverflowMenu => {
-            state.overflow_menu_open = !state.overflow_menu_open;
+        MessageViewMessage::OpenContextMenu => {
+            state.context_menu_open = true;
+            Task::none()
+        }
+        MessageViewMessage::CloseContextMenu => {
+            state.context_menu_open = false;
             Task::none()
         }
         MessageViewMessage::LoadRemoteContent => {
@@ -581,17 +585,19 @@ impl App {
         window_id: iced::window::Id,
         intent: crate::action_resolve::MailActionIntent,
     ) -> Task<Message> {
-        let Some(PopOutWindow::MessageView(state)) = self.pop_out_windows.get_mut(&window_id)
-        else {
-            return Task::none();
+        let (threads, selection) = {
+            let Some(PopOutWindow::MessageView(state)) = self.pop_out_windows.get_mut(&window_id)
+            else {
+                return Task::none();
+            };
+            state.context_menu_open = false;
+            let threads = vec![(state.account_id.clone(), state.thread_id.clone())];
+            let selection = state
+                .source_selection
+                .clone()
+                .unwrap_or(types::SidebarSelection::Inbox);
+            (threads, selection)
         };
-        let threads = vec![(state.account_id.clone(), state.thread_id.clone())];
-        let selection = state
-            .source_selection
-            .clone()
-            .unwrap_or(types::SidebarSelection::Inbox);
-        state.overflow_menu_open = false;
-        drop(state);
 
         use crate::action_resolve::{self as ar, UiContext};
         let ui_ctx = UiContext { selection };

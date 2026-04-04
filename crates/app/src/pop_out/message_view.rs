@@ -53,8 +53,9 @@ pub enum MessageViewMessage {
     Delete,
     Print,
     SaveAs,
-    /// Overflow menu toggle.
-    ToggleOverflowMenu,
+    /// Open or close the message action context menu.
+    OpenContextMenu,
+    CloseContextMenu,
     /// Load remote content in Original HTML mode.
     LoadRemoteContent,
     /// No-op (placeholder for unimplemented actions).
@@ -92,7 +93,7 @@ pub struct MessageViewState {
 
     // ── Window-local state ──
     pub rendering_mode: RenderingMode,
-    pub overflow_menu_open: bool,
+    pub context_menu_open: bool,
     pub remote_content_loaded: bool,
     pub error_banner: Option<String>,
 
@@ -138,7 +139,7 @@ impl MessageViewState {
             attachments: Vec::new(),
             rendering_mode: default_rendering_mode,
 
-            overflow_menu_open: false,
+            context_menu_open: false,
             remote_content_loaded: false,
             error_banner: None,
             source_selection,
@@ -173,7 +174,7 @@ impl MessageViewState {
             attachments: Vec::new(),
             rendering_mode: default_rendering_mode,
 
-            overflow_menu_open: false,
+            context_menu_open: false,
             remote_content_loaded: false,
             error_banner: None,
             source_selection: None, // not available on session restore
@@ -351,7 +352,7 @@ fn action_buttons_with_overflow<'a>(
             PopOutMessage::MessageView(MessageViewMessage::Forward),
         ),
     );
-    let overflow = overflow_menu(state.overflow_menu_open, window_id);
+    let overflow = overflow_context_menu(state.context_menu_open, window_id);
 
     row![reply_btn, reply_all_btn, forward_btn, overflow]
         .spacing(SPACE_XXS)
@@ -360,7 +361,7 @@ fn action_buttons_with_overflow<'a>(
 
 // ── Overflow menu ──────────────────────────────────────
 
-fn overflow_menu<'a>(open: bool, window_id: iced::window::Id) -> Element<'a, Message> {
+fn overflow_context_menu<'a>(open: bool, window_id: iced::window::Id) -> Element<'a, Message> {
     let trigger = button(
         icon::ellipsis_vertical()
             .size(ICON_MD)
@@ -368,7 +369,7 @@ fn overflow_menu<'a>(open: bool, window_id: iced::window::Id) -> Element<'a, Mes
     )
     .on_press(Message::PopOut(
         window_id,
-        PopOutMessage::MessageView(MessageViewMessage::ToggleOverflowMenu),
+        PopOutMessage::MessageView(MessageViewMessage::OpenContextMenu),
     ))
     .padding(PAD_ICON_BTN)
     .style(theme::ButtonClass::BareIcon.style());
@@ -378,7 +379,7 @@ fn overflow_menu<'a>(open: bool, window_id: iced::window::Id) -> Element<'a, Mes
     }
 
     let menu_items = column![
-        overflow_menu_item(
+        context_menu_item(
             icon::archive(),
             "Archive",
             Message::PopOut(
@@ -386,7 +387,7 @@ fn overflow_menu<'a>(open: bool, window_id: iced::window::Id) -> Element<'a, Mes
                 PopOutMessage::MessageView(MessageViewMessage::Archive),
             ),
         ),
-        overflow_menu_item(
+        context_menu_item(
             icon::trash(),
             "Delete",
             Message::PopOut(
@@ -394,7 +395,7 @@ fn overflow_menu<'a>(open: bool, window_id: iced::window::Id) -> Element<'a, Mes
                 PopOutMessage::MessageView(MessageViewMessage::Delete),
             ),
         ),
-        overflow_menu_item(
+        context_menu_item(
             icon::printer(),
             "Print",
             Message::PopOut(
@@ -402,7 +403,7 @@ fn overflow_menu<'a>(open: bool, window_id: iced::window::Id) -> Element<'a, Mes
                 PopOutMessage::MessageView(MessageViewMessage::Print),
             ),
         ),
-        overflow_menu_item(
+        context_menu_item(
             icon::download(),
             "Save As",
             Message::PopOut(
@@ -422,12 +423,12 @@ fn overflow_menu<'a>(open: bool, window_id: iced::window::Id) -> Element<'a, Mes
         .position(crate::ui::anchored_overlay::AnchorPosition::BelowRight)
         .on_dismiss(Message::PopOut(
             window_id,
-            PopOutMessage::MessageView(MessageViewMessage::ToggleOverflowMenu),
+            PopOutMessage::MessageView(MessageViewMessage::CloseContextMenu),
         ))
         .into()
 }
 
-fn overflow_menu_item<'a>(
+fn context_menu_item<'a>(
     ico: iced::widget::Text<'a>,
     label: &'a str,
     on_press: Message,
