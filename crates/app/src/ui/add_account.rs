@@ -17,7 +17,7 @@ use crate::ui::widgets;
 
 use rtsk::db::queries_extra::{
     CreateAccountParams, ReauthAccountParams, account_exists_by_email_sync, create_account_sync,
-    get_account_auth_info_sync, update_account_tokens_sync,
+    update_account_tokens_sync,
 };
 use rtsk::discovery::types::{
     AuthMethod, DiscoveredConfig, DiscoverySource, Protocol, ProtocolOption, Security,
@@ -342,7 +342,7 @@ impl AddAccountWizard {
         email: String,
         db: Arc<Db>,
     ) -> Result<(Self, Task<AddAccountMessage>), String> {
-        let auth_info = db.with_conn_sync(|conn| get_account_auth_info_sync(conn, &account_id))?;
+        let auth_info = db.get_account_auth_info(&account_id)?;
 
         let mut wizard = Self::new(false, Vec::new(), db);
         wizard.email = email;
@@ -936,9 +936,7 @@ impl AddAccountWizard {
             self.error = None;
             // Look up auth info again for the retry
             let aid = self.reauth_account_id.clone().unwrap_or_default();
-            let auth_info = self
-                .db
-                .with_conn_sync(|conn| get_account_auth_info_sync(conn, &aid));
+            let auth_info = self.db.get_account_auth_info(&aid);
             match auth_info {
                 Ok(info) => {
                     let task = self.start_reauth_oauth(

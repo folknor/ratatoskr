@@ -128,19 +128,18 @@ pub async fn load_thread_detail(
     thread_id: String,
 ) -> Result<AppThreadDetail, String> {
     let bs_conn = body_store.conn();
-    let db_conn = db.conn_arc();
     let iis_conn = inline_image_store.map(InlineImageStoreState::conn);
+    let db_account_id = account_id.clone();
+    let db_thread_id = thread_id.clone();
+    let (db_data, cid_hashes) = db
+        .with_conn(move |conn| {
+            let data = query_thread_from_db(conn, &db_account_id, &db_thread_id)?;
+            let cids = query_inline_cid_hashes(conn, &db_account_id, &db_thread_id)?;
+            Ok((data, cids))
+        })
+        .await?;
 
     tokio::task::spawn_blocking(move || {
-        // Phase 1: hold main DB lock only for DB queries, then release.
-        let (db_data, cid_hashes) = {
-            let conn = db_conn.lock().map_err(|e| format!("db lock: {e}"))?;
-            let data = query_thread_from_db(&conn, &account_id, &thread_id)?;
-            let cids = query_inline_cid_hashes(&conn, &account_id, &thread_id)?;
-            (data, cids)
-        };
-
-        // Phase 2: hold body store lock only for body fetches, then release.
         let body_map = {
             let bs = bs_conn
                 .lock()
@@ -148,7 +147,6 @@ pub async fn load_thread_detail(
             fetch_thread_bodies(&bs, &db_data.messages)?
         };
 
-        // Phase 2b: fetch inline images from the inline image store.
         let inline_images = if let Some(ref iis_conn) = iis_conn {
             if !cid_hashes.is_empty() {
                 let iis = iis_conn
@@ -162,7 +160,6 @@ pub async fn load_thread_detail(
             HashMap::new()
         };
 
-        // Phase 3: pure computation, no locks needed.
         let detail = assemble_thread_detail(db_data, body_map, &account_id, &thread_id);
         let mut app_detail = convert_thread_detail(detail);
         app_detail.inline_images = inline_images;
@@ -179,13 +176,8 @@ pub async fn persist_attachments_collapsed(
     thread_id: String,
     collapsed: bool,
 ) -> Result<(), String> {
-    let conn = db.write_conn_arc();
-    tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().map_err(|e| format!("db write lock: {e}"))?;
-        set_attachments_collapsed(&conn, &account_id, &thread_id, collapsed)
-    })
-    .await
-    .map_err(|e| format!("spawn_blocking: {e}"))?
+    db.with_write_conn(move |conn| set_attachments_collapsed(conn, &account_id, &thread_id, collapsed))
+        .await
 }
 
 // ── Per-message queries — delegated to core ─────────────
@@ -203,13 +195,8 @@ impl Db {
         account_id: String,
         message_id: String,
     ) -> Result<(Option<String>, Option<String>), String> {
-        let conn = self.conn_arc();
-        tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-            message_queries::get_message_body(&conn, &account_id, &message_id)
-        })
-        .await
-        .map_err(|e| format!("spawn_blocking: {e}"))?
+        self.with_conn(move |conn| message_queries::get_message_body(conn, &account_id, &message_id))
+            .await
     }
 
     /// Load attachments for a single message (used by pop-out windows).
@@ -218,11 +205,8 @@ impl Db {
         account_id: String,
         message_id: String,
     ) -> Result<Vec<super::types::MessageViewAttachment>, String> {
-        let conn = self.conn_arc();
-        tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-            let core_atts =
-                message_queries::get_message_attachments(&conn, &account_id, &message_id)?;
+        self.with_conn(move |conn| {
+            let core_atts = message_queries::get_message_attachments(conn, &account_id, &message_id)?;
             Ok(core_atts
                 .into_iter()
                 .map(|a| super::types::MessageViewAttachment {
@@ -234,7 +218,6 @@ impl Db {
                 .collect())
         })
         .await
-        .map_err(|e| format!("spawn_blocking: {e}"))?
     }
 
     /// Load raw email source for a message (used by pop-out Source view).
@@ -243,13 +226,8 @@ impl Db {
         account_id: String,
         message_id: String,
     ) -> Result<String, String> {
-        let conn = self.conn_arc();
-        tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-            message_queries::get_message_raw_source(&conn, &account_id, &message_id)
-        })
-        .await
-        .map_err(|e| format!("spawn_blocking: {e}"))?
+        self.with_conn(move |conn| message_queries::get_message_raw_source(conn, &account_id, &message_id))
+            .await
     }
 }
 

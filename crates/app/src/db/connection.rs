@@ -59,24 +59,12 @@ impl Db {
         })
     }
 
-    /// Access the underlying read-only connection Arc for synchronous use
-    /// across thread boundaries (e.g., passing to core functions).
-    pub fn conn_arc(&self) -> Arc<Mutex<Connection>> {
-        Arc::clone(&self.conn)
-    }
-
-    /// Access the underlying writable connection Arc for synchronous use
-    /// across thread boundaries.
-    pub fn write_conn_arc(&self) -> Arc<Mutex<Connection>> {
-        Arc::clone(&self.write_conn)
-    }
-
     pub fn read_db_state(&self) -> DbState {
-        DbState::from_arc(self.conn_arc())
+        DbState::from_arc(Arc::clone(&self.conn))
     }
 
     pub fn write_db_state(&self) -> DbState {
-        DbState::from_arc(self.write_conn_arc())
+        DbState::from_arc(Arc::clone(&self.write_conn))
     }
 
     /// Execute a closure on the writable connection.
