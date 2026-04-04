@@ -1283,11 +1283,7 @@ fn event_editor_card<'a>(
             .cloned();
         let options: Vec<CalendarListEntry> = calendars.to_vec();
         let picker = pick_list(selected, options, |c: &CalendarListEntry| {
-            if let Some(ref name) = c.name {
-                name.clone()
-            } else {
-                c.id.clone()
-            }
+            c.display_name.clone()
         })
         .on_select(|entry: CalendarListEntry| {
             CalendarMessage::EventFieldChanged(EventField::CalendarSelected {

@@ -549,11 +549,11 @@ impl App {
                 account_id,
                 session,
             } => {
-                let Some(ref account_id) = account_id else {
+                let Some(account_id) = account_id else {
                     self.status = "Select a calendar before saving".to_string();
                     return Task::none();
                 };
-                let Some(ref calendar_id) = session.draft.calendar_id else {
+                let Some(calendar_id) = session.draft.calendar_id.as_ref() else {
                     self.status = "Select a calendar before saving".to_string();
                     return Task::none();
                 };

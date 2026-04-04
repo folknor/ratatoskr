@@ -9,6 +9,7 @@ pub mod caldav;
 pub mod carddav;
 pub mod chat;
 pub mod cloud_attachments;
+pub mod command_palette_queries;
 pub mod contacts;
 pub use sync::bundling;
 pub mod contact_photos;

@@ -565,6 +565,77 @@ pub fn get_calendar_event_sync(
     }
 }
 
+/// Load attendees for a given event (synchronous).
+pub fn get_event_attendees_sync(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+    event_id: &str,
+) -> Result<Vec<DbCalendarAttendee>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {ATTENDEE_COLS} FROM calendar_attendees
+             WHERE account_id = ?1 AND event_id = ?2
+             ORDER BY is_organizer DESC, email ASC"
+        ))
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_map(params![account_id, event_id], DbCalendarAttendee::from_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+/// Load reminders for a given event (synchronous).
+pub fn get_event_reminders_sync(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+    event_id: &str,
+) -> Result<Vec<DbCalendarReminder>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {REMINDER_COLS} FROM calendar_reminders
+             WHERE account_id = ?1 AND event_id = ?2
+             ORDER BY minutes_before ASC"
+        ))
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_map(params![account_id, event_id], DbCalendarReminder::from_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+/// Load all calendars for the sidebar list (synchronous).
+pub fn load_calendars_for_sidebar_sync(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<DbCalendar>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {CALENDAR_COLS} FROM calendars
+             ORDER BY account_id, sort_order ASC, is_primary DESC, display_name ASC"
+        ))
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_map([], DbCalendar::from_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+/// Set calendar visibility (synchronous).
+pub fn set_calendar_visibility_sync(
+    conn: &rusqlite::Connection,
+    calendar_id: &str,
+    visible: bool,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE calendars SET is_visible = ?1, updated_at = unixepoch() WHERE id = ?2",
+        params![visible as i64, calendar_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Parameters for creating/updating a local calendar event (synchronous).
 #[derive(Debug, Clone, Default)]
 pub struct LocalCalendarEventParams {
