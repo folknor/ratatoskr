@@ -249,7 +249,7 @@ pub enum Message {
     // Search
     SearchQueryChanged(String),
     SearchExecute,
-    SearchResultsLoaded(GenerationToken<Search>, Result<Vec<Thread>, String>),
+    SearchCompleted(crate::handlers::search::SearchExecutionResult),
     SearchClear,
     FocusSearchBar,
     SearchBlur,
@@ -258,16 +258,9 @@ pub enum Message {
     // Pinned searches
     PinnedSearchesLoaded(Result<Vec<db::PinnedSearch>, String>),
     SelectPinnedSearch(i64),
-    PinnedSearchThreadIdsLoaded(
-        GenerationToken<Nav>,
-        i64,
-        Result<Vec<(String, String)>, String>,
-    ),
-    PinnedSearchThreadsLoaded(GenerationToken<Nav>, Result<Vec<Thread>, String>),
     DismissPinnedSearch(i64),
     PinnedSearchDismissed(i64, Result<(), String>),
     PinnedSearchSaved(Result<i64, String>),
-    PinnedSearchRefreshed(i64, Result<Vec<Thread>, String>),
     PinnedSearchesExpired(Result<u64, String>),
     RefreshPinnedSearch(i64),
     ExpiryTick,
@@ -404,7 +397,6 @@ struct App {
     // Pinned searches
     pinned_searches: Vec<db::PinnedSearch>,
     editing_pinned_search: Option<i64>,
-    suppress_next_pinned_search_save: bool,
     expiry_ran: bool,
 
     no_accounts: bool,
@@ -578,7 +570,6 @@ impl App {
             search_history: Vec::new(),
             pinned_searches: Vec::new(),
             editing_pinned_search: None,
-            suppress_next_pinned_search_save: false,
             expiry_ran: false,
             no_accounts: false,
             add_account_wizard: None,
@@ -1034,10 +1025,7 @@ impl App {
             // Search — delegated to handlers/search.rs
             Message::SearchQueryChanged(query) => self.handle_search_query_changed(query),
             Message::SearchExecute => self.handle_search_execute(),
-            Message::SearchResultsLoaded(g, _) if !self.search_generation.is_current(g) => {
-                Task::none()
-            }
-            Message::SearchResultsLoaded(_, result) => self.handle_search_results(result),
+            Message::SearchCompleted(result) => self.handle_search_completed(result),
             Message::SearchClear => self.handle_search_clear(),
             Message::FocusSearchBar => self.handle_focus_search_bar(),
             Message::SearchBlur => {
@@ -1057,26 +1045,11 @@ impl App {
             // Pinned searches — delegated to handlers/search.rs
             Message::PinnedSearchesLoaded(result) => self.handle_pinned_searches_loaded(result),
             Message::SelectPinnedSearch(id) => self.handle_select_pinned_search(id),
-            Message::PinnedSearchThreadIdsLoaded(g, _, _) if !self.nav_generation.is_current(g) => {
-                Task::none()
-            }
-            Message::PinnedSearchThreadIdsLoaded(_, ps_id, result) => {
-                self.handle_pinned_search_thread_ids_loaded(ps_id, result)
-            }
-            Message::PinnedSearchThreadsLoaded(g, _) if !self.nav_generation.is_current(g) => {
-                Task::none()
-            }
-            Message::PinnedSearchThreadsLoaded(_, result) => {
-                self.handle_pinned_search_threads_loaded(result)
-            }
             Message::DismissPinnedSearch(id) => self.handle_dismiss_pinned_search(id),
             Message::PinnedSearchDismissed(id, result) => {
                 self.handle_pinned_search_dismissed(id, result)
             }
             Message::PinnedSearchSaved(result) => self.handle_pinned_search_saved(result),
-            Message::PinnedSearchRefreshed(id, result) => {
-                self.handle_pinned_search_refreshed(id, result)
-            }
             Message::PinnedSearchesExpired(result) => self.handle_pinned_searches_expired(result),
             Message::RefreshPinnedSearch(id) => self.handle_refresh_pinned_search(id),
             Message::ExpiryTick => self.handle_expiry_tick(),
