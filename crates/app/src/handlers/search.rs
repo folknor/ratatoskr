@@ -74,11 +74,11 @@ pub(crate) enum FolderRestoreBehavior {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SearchCompletionBehavior {
-    pub persistence: SearchPersistenceBehavior,
-    pub pinned_state: SearchPinnedStateBehavior,
-    pub post_success: SearchPostSuccessEffect,
-    pub folder_restore: FolderRestoreBehavior,
+pub struct SearchCompletionBehavior {
+    pub(crate) persistence: SearchPersistenceBehavior,
+    pub(crate) pinned_state: SearchPinnedStateBehavior,
+    pub(crate) post_success: SearchPostSuccessEffect,
+    pub(crate) folder_restore: FolderRestoreBehavior,
 }
 
 #[derive(Debug, Clone)]
@@ -228,6 +228,12 @@ fn execution_scope_to_account_scope(scope: &SearchScope) -> AccountScope {
 // ── Search handling ────────────────────────────────────
 
 impl App {
+    fn record_search_restore_origin(&mut self) {
+        if self.thread_list.mode == ThreadListMode::Folder {
+            self.was_in_folder_view = true;
+        }
+    }
+
     fn current_ui_search_context(&self) -> UiSearchContext {
         UiSearchContext {
             current_scope: self.current_scope().clone(),
@@ -239,7 +245,7 @@ impl App {
 
     fn apply_search_folder_restore(&mut self, behavior: FolderRestoreBehavior) {
         if matches!(behavior, FolderRestoreBehavior::EnterSearchFromFolderView) {
-            self.was_in_folder_view = true;
+            self.record_search_restore_origin();
         }
     }
 
@@ -295,7 +301,6 @@ impl App {
             self.search_debounce_deadline = None;
             self.thread_list.typeahead.visible = false;
             if self.thread_list.mode == ThreadListMode::Search {
-                self.clear_pinned_search_context();
                 let _ = self.nav_generation.next();
                 let _ = self.search_generation.next();
                 return self.restore_folder_view();
@@ -392,12 +397,13 @@ impl App {
                         let db = Arc::clone(&self.db);
                         let query = query.clone();
                         let scope_account_id = scope_account_id.clone();
+                        let completion = result.resolved.completion.clone();
                         Task::perform(
                             async move {
                                 db.create_or_update_pinned_search(query, thread_ids, scope_account_id)
                                     .await
                             },
-                            Message::PinnedSearchSaved,
+                            move |save_result| Message::PinnedSearchPersisted(completion.clone(), save_result),
                         )
                     }
                     (
@@ -408,13 +414,14 @@ impl App {
                         let query = query.clone();
                         let scope_account_id = scope_account_id.clone();
                         let id = *id;
+                        let completion = result.resolved.completion.clone();
                         Task::perform(
                             async move {
                                 db.update_pinned_search(id, query, thread_ids, scope_account_id)
                                     .await
                                     .map(|()| id)
                             },
-                            Message::PinnedSearchSaved,
+                            move |save_result| Message::PinnedSearchPersisted(completion.clone(), save_result),
                         )
                     }
                     (
@@ -425,13 +432,14 @@ impl App {
                         let query = query.clone();
                         let scope_account_id = scope_account_id.clone();
                         let id = *id;
+                        let completion = result.resolved.completion.clone();
                         Task::perform(
                             async move {
                                 db.update_pinned_search(id, query, thread_ids, scope_account_id)
                                     .await
                                     .map(|()| id)
                             },
-                            Message::PinnedSearchSaved,
+                            move |save_result| Message::PinnedSearchPersisted(completion.clone(), save_result),
                         )
                     }
                     _ => Task::none(),
@@ -708,19 +716,9 @@ impl App {
     }
 
     pub(crate) fn handle_select_pinned_search(&mut self, id: i64) -> Task<Message> {
-        self.sidebar.active_pinned_search = Some(id);
-        self.editing_pinned_search = Some(id);
-
         let _ = self.nav_generation.next();
         let _ = self.thread_generation.next();
         self.clear_thread_selection();
-
-        // Update thread list context
-        if let Some(ps) = self.pinned_searches.iter().find(|p| p.id == id) {
-            let label = truncate_query(&ps.query, 30);
-            self.thread_list
-                .set_context(format!("Search: {label}"), pinned_search_scope_name(self, ps));
-        }
         let intent = SearchIntent::PinnedActivation { id };
         let resolved = resolve_search_intent(intent, &self.current_ui_search_context());
         self.dispatch_resolved_search(resolved)
@@ -760,15 +758,15 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_pinned_search_saved(
+    pub(crate) fn handle_pinned_search_persisted(
         &mut self,
+        completion: SearchCompletionBehavior,
         result: Result<i64, String>,
     ) -> Task<Message> {
         match result {
             Ok(id) => {
-                self.sidebar.active_pinned_search = Some(id);
-                self.editing_pinned_search = Some(id);
-                self.apply_search_post_success(SearchPostSuccessEffect::RefreshPinnedSearchList)
+                self.apply_search_pinned_state(&completion.pinned_state, Some(id));
+                self.apply_search_post_success(completion.post_success)
             }
             Err(e) => {
                 self.status = format!("Save pinned search error: {e}");
@@ -826,6 +824,7 @@ impl App {
         self.thread_list.mode = ThreadListMode::Folder;
         self.search_query.reset(String::new());
         self.thread_list.search_query.clear();
+        self.clear_pinned_search_context();
         self.clear_thread_selection();
         if self.was_in_folder_view {
             self.was_in_folder_view = false;
@@ -1014,9 +1013,7 @@ impl App {
     }
 
     pub(crate) fn handle_search_here(&mut self, query_prefix: String) -> Task<Message> {
-        if self.thread_list.mode == ThreadListMode::Folder {
-            self.was_in_folder_view = true;
-        }
+        self.record_search_restore_origin();
         self.search_query.reset(query_prefix.clone());
         self.thread_list.search_query = query_prefix;
         self.clear_pinned_search_context();

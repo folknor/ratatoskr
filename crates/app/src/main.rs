@@ -260,7 +260,10 @@ pub enum Message {
     SelectPinnedSearch(i64),
     DismissPinnedSearch(i64),
     PinnedSearchDismissed(i64, Result<(), String>),
-    PinnedSearchSaved(Result<i64, String>),
+    PinnedSearchPersisted(
+        crate::handlers::search::SearchCompletionBehavior,
+        Result<i64, String>,
+    ),
     PinnedSearchesExpired(Result<u64, String>),
     RefreshPinnedSearch(i64),
     ExpiryTick,
@@ -1049,7 +1052,9 @@ impl App {
             Message::PinnedSearchDismissed(id, result) => {
                 self.handle_pinned_search_dismissed(id, result)
             }
-            Message::PinnedSearchSaved(result) => self.handle_pinned_search_saved(result),
+            Message::PinnedSearchPersisted(completion, result) => {
+                self.handle_pinned_search_persisted(completion, result)
+            }
             Message::PinnedSearchesExpired(result) => self.handle_pinned_searches_expired(result),
             Message::RefreshPinnedSearch(id) => self.handle_refresh_pinned_search(id),
             Message::ExpiryTick => self.handle_expiry_tick(),
