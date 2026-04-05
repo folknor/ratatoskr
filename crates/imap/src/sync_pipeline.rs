@@ -1,6 +1,9 @@
 use rusqlite::Connection;
 
 use db::db::DbState;
+use db::db::queries_extra::{
+    AttachmentInsertRow, MessageInsertRow, insert_attachments, insert_messages,
+};
 use search::{SearchDocument, SearchState};
 use seen::MessageAddresses;
 use store::body_store::BodyStoreState;
@@ -133,74 +136,54 @@ impl DbInsertData {
         )
         .map_err(|e| format!("upsert placeholder thread: {e}"))?;
 
-        // Message (bodies in body store)
-        tx.execute(
-            "INSERT OR REPLACE INTO messages \
-             (id, account_id, thread_id, from_address, from_name, to_addresses, \
-              cc_addresses, bcc_addresses, reply_to, subject, snippet, date, \
-              is_read, is_starred, raw_size, internal_date, \
-              list_unsubscribe, list_unsubscribe_post, auth_results, \
-              message_id_header, references_header, in_reply_to_header, \
-              imap_uid, imap_folder, body_cached, mdn_requested) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
-                     ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
-            rusqlite::params![
-                self.id,
-                self.account_id,
-                self.id, // placeholder thread_id = message_id
-                self.from_address,
-                self.from_name,
-                self.to_addresses,
-                self.cc_addresses,
-                self.bcc_addresses,
-                self.reply_to,
-                self.subject,
-                self.snippet,
-                self.date,
-                self.is_read,
-                self.is_starred,
-                self.raw_size,
-                self.date, // internal_date
-                self.list_unsubscribe,
-                self.list_unsubscribe_post,
-                self.auth_results,
-                self.message_id_header,
-                self.references_header,
-                self.in_reply_to_header,
-                self.imap_uid as i64,
-                self.imap_folder,
-                if self.has_body { 1i64 } else { 0i64 },
-                self.mdn_requested,
-            ],
-        )
-        .map_err(|e| format!("upsert message: {e}"))?;
+        let message = MessageInsertRow {
+            id: self.id.clone(),
+            account_id: self.account_id.clone(),
+            thread_id: self.id.clone(),
+            from_address: self.from_address.clone(),
+            from_name: self.from_name.clone(),
+            to_addresses: self.to_addresses.clone(),
+            cc_addresses: self.cc_addresses.clone(),
+            bcc_addresses: self.bcc_addresses.clone(),
+            reply_to: self.reply_to.clone(),
+            subject: self.subject.clone(),
+            snippet: self.snippet.clone(),
+            date: self.date,
+            is_read: self.is_read,
+            is_starred: self.is_starred,
+            raw_size: Some(i64::from(self.raw_size)),
+            internal_date: Some(self.date),
+            list_unsubscribe: self.list_unsubscribe.clone(),
+            list_unsubscribe_post: self.list_unsubscribe_post.clone(),
+            auth_results: self.auth_results.clone(),
+            message_id_header: self.message_id_header.clone(),
+            references_header: self.references_header.clone(),
+            in_reply_to_header: self.in_reply_to_header.clone(),
+            body_cached: self.has_body,
+            mdn_requested: self.mdn_requested,
+            is_reaction: false,
+            imap_uid: Some(i64::from(self.imap_uid)),
+            imap_folder: Some(self.imap_folder.clone()),
+        };
+        insert_messages(tx, &[message])?;
 
-        // Attachments
-        for att in &self.attachments {
-            tx.execute(
-                "INSERT INTO attachments \
-                 (id, message_id, account_id, filename, mime_type, size, \
-                  gmail_attachment_id, content_id, is_inline, content_hash) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
-                 ON CONFLICT(id) DO UPDATE SET \
-                   filename = ?4, mime_type = ?5, size = ?6, \
-                   gmail_attachment_id = ?7, content_id = ?8, is_inline = ?9, \
-                   content_hash = COALESCE(?10, attachments.content_hash)",
-                rusqlite::params![
-                    att.att_id,
-                    att.message_id,
-                    att.account_id,
-                    att.filename,
-                    att.mime_type,
-                    att.size,
-                    att.part_id,
-                    att.content_id,
-                    att.is_inline,
-                    att.content_hash,
-                ],
-            )
-            .map_err(|e| format!("upsert attachment: {e}"))?;
-        }
+        let attachments: Vec<AttachmentInsertRow> = self
+            .attachments
+            .iter()
+            .map(|att| AttachmentInsertRow {
+                id: att.att_id.clone(),
+                message_id: att.message_id.clone(),
+                account_id: att.account_id.clone(),
+                filename: Some(att.filename.clone()),
+                mime_type: Some(att.mime_type.clone()),
+                size: Some(i64::from(att.size)),
+                remote_attachment_id: Some(att.part_id.clone()),
+                content_hash: att.content_hash.clone(),
+                content_id: att.content_id.clone(),
+                is_inline: att.is_inline,
+            })
+            .collect();
+        insert_attachments(tx, &attachments)?;
 
         Ok(())
     }
