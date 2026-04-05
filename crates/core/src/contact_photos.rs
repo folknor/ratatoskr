@@ -1,8 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use log::{info, warn};
-use rusqlite::OptionalExtension;
-use rusqlite::params;
 
 use crate::db::DbState;
 use store::attachment_cache::hash_bytes;
@@ -192,37 +190,15 @@ pub async fn cache_photo(
     let etag_owned = etag.map(str::to_string);
 
     db.with_conn(move |conn| {
-        conn.execute(
-            "INSERT INTO contact_photo_cache \
-             (email, account_id, content_hash, file_path, size_bytes, etag, \
-              fetched_at, last_accessed_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, unixepoch(), unixepoch()) \
-             ON CONFLICT(email, account_id) DO UPDATE SET \
-               content_hash = excluded.content_hash, \
-               file_path = excluded.file_path, \
-               size_bytes = excluded.size_bytes, \
-               etag = excluded.etag, \
-               fetched_at = excluded.fetched_at, \
-               last_accessed_at = excluded.last_accessed_at",
-            params![
-                email_owned,
-                account_id_owned,
-                content_hash_owned,
-                file_path_db,
-                size_bytes,
-                etag_owned,
-            ],
+        crate::db::queries_extra::contact_photos::upsert_photo_cache_sync(
+            conn,
+            &email_owned,
+            &account_id_owned,
+            &content_hash_owned,
+            &file_path_db,
+            size_bytes,
+            etag_owned.as_deref(),
         )
-        .map_err(|e| format!("upsert contact photo cache: {e}"))?;
-
-        // Update contacts.avatar_url to point to the local cached file
-        conn.execute(
-            "UPDATE contacts SET avatar_url = ?1, updated_at = unixepoch() WHERE email = ?2",
-            params![file_path_db, email_owned],
-        )
-        .map_err(|e| format!("update contact avatar_url: {e}"))?;
-
-        Ok(())
     })
     .await?;
 
@@ -241,26 +217,11 @@ pub async fn get_cached_photo_path(
     let account_id_owned = account_id.to_string();
 
     db.with_conn(move |conn| {
-        let path: Option<String> = conn
-            .query_row(
-                "SELECT file_path FROM contact_photo_cache \
-                 WHERE email = ?1 AND account_id = ?2",
-                params![email_owned, account_id_owned],
-                |row| row.get("file_path"),
-            )
-            .optional()
-            .map_err(|e| format!("query contact photo cache: {e}"))?;
-
-        if path.is_some() {
-            conn.execute(
-                "UPDATE contact_photo_cache SET last_accessed_at = unixepoch() \
-                 WHERE email = ?1 AND account_id = ?2",
-                params![email_owned, account_id_owned],
-            )
-            .map_err(|e| format!("update contact photo last_accessed_at: {e}"))?;
-        }
-
-        Ok(path)
+        crate::db::queries_extra::contact_photos::get_cached_photo_path_sync(
+            conn,
+            &email_owned,
+            &account_id_owned,
+        )
     })
     .await
 }
@@ -278,39 +239,18 @@ pub async fn evict_photos_to_size(
     loop {
         let total_size: i64 = db
             .with_conn(|conn| {
-                conn.query_row(
-                    "SELECT COALESCE(SUM(size_bytes), 0) AS total FROM contact_photo_cache",
-                    [],
-                    |row| row.get("total"),
-                )
-                .map_err(|e| format!("query contact photo cache size: {e}"))
+                crate::db::queries_extra::contact_photos::get_cache_total_size_sync(conn)
             })
             .await?;
 
-        #[allow(clippy::cast_sign_loss)] // total_size is COALESCE(SUM(...), 0), always >= 0
+        #[allow(clippy::cast_sign_loss)]
         if total_size <= 0 || (total_size as u64) <= max_bytes {
             break;
         }
 
-        // Find the oldest entry by last_accessed_at
         let oldest: Option<(String, String, String)> = db
             .with_conn(|conn| {
-                conn.query_row(
-                    "SELECT email, account_id, file_path \
-                     FROM contact_photo_cache \
-                     ORDER BY last_accessed_at ASC \
-                     LIMIT 1",
-                    [],
-                    |row| {
-                        Ok((
-                            row.get("email")?,
-                            row.get("account_id")?,
-                            row.get("file_path")?,
-                        ))
-                    },
-                )
-                .optional()
-                .map_err(|e| format!("query oldest contact photo: {e}"))
+                crate::db::queries_extra::contact_photos::get_oldest_cache_entry_sync(conn)
             })
             .await?;
 
@@ -333,12 +273,9 @@ pub async fn evict_photos_to_size(
 
         // Remove DB entry
         db.with_conn(move |conn| {
-            conn.execute(
-                "DELETE FROM contact_photo_cache WHERE email = ?1 AND account_id = ?2",
-                params![email, account_id],
+            crate::db::queries_extra::contact_photos::delete_cache_entry_sync(
+                conn, &email, &account_id,
             )
-            .map_err(|e| format!("delete evicted contact photo: {e}"))?;
-            Ok(())
         })
         .await?;
 
@@ -398,30 +335,10 @@ async fn sync_graph_photos(
     let account_id_owned = account_id.to_string();
     let contacts_to_fetch: Vec<(String, String)> = db
         .with_conn(move |conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT DISTINCT gcm.email, gcm.graph_contact_id \
-                     FROM graph_contact_map gcm \
-                     WHERE gcm.account_id = ?1 \
-                       AND NOT EXISTS ( \
-                         SELECT 1 FROM contact_photo_cache cpc \
-                         WHERE cpc.email = gcm.email AND cpc.account_id = ?1 \
-                       )",
-                )
-                .map_err(|e| format!("prepare graph photo query: {e}"))?;
-
-            let rows = stmt
-                .query_map(params![account_id_owned], |row| {
-                    Ok((
-                        row.get::<_, String>("email")?,
-                        row.get::<_, String>("graph_contact_id")?,
-                    ))
-                })
-                .map_err(|e| format!("query graph contacts for photos: {e}"))?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("collect graph contacts for photos: {e}"))?;
-
-            Ok(rows)
+            crate::db::queries_extra::contact_photos::get_uncached_graph_contacts_sync(
+                conn,
+                &account_id_owned,
+            )
         })
         .await?;
 
@@ -468,33 +385,10 @@ async fn sync_google_photos(
     let account_id_owned = account_id.to_string();
     let contacts_to_fetch: Vec<(String, String)> = db
         .with_conn(move |conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT c.email, c.avatar_url \
-                     FROM contacts c \
-                     INNER JOIN google_contact_map gcm ON gcm.contact_email = c.email \
-                       AND gcm.account_id = ?1 \
-                     WHERE c.avatar_url IS NOT NULL \
-                       AND c.avatar_url LIKE 'http%' \
-                       AND NOT EXISTS ( \
-                         SELECT 1 FROM contact_photo_cache cpc \
-                         WHERE cpc.email = c.email AND cpc.account_id = ?1 \
-                       )",
-                )
-                .map_err(|e| format!("prepare google photo query: {e}"))?;
-
-            let rows = stmt
-                .query_map(params![account_id_owned], |row| {
-                    Ok((
-                        row.get::<_, String>("email")?,
-                        row.get::<_, String>("avatar_url")?,
-                    ))
-                })
-                .map_err(|e| format!("query google contacts for photos: {e}"))?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("collect google contacts for photos: {e}"))?;
-
-            Ok(rows)
+            crate::db::queries_extra::contact_photos::get_uncached_google_contacts_sync(
+                conn,
+                &account_id_owned,
+            )
         })
         .await?;
 
