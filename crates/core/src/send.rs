@@ -330,9 +330,9 @@ mod tests {
         let raw = build_mime_message(&req).expect("should build");
         let text = String::from_utf8_lossy(&raw);
         assert!(text.contains("Cc: carol@example.com"));
-        // BCC should be in headers (for envelope extraction) but providers
-        // typically strip it before delivery
-        assert!(text.contains("Bcc:"));
+        // Bcc recipients are part of send-time envelope handling, but lettre
+        // does not serialize a Bcc header into the final MIME.
+        assert!(!text.contains("Bcc:"));
     }
 
     #[test]

@@ -592,7 +592,7 @@ fn is_icalendar_resource(href: &str, content_type: &str) -> bool {
         return true;
     }
     // Accept entries with an etag but no content type info
-    content_type.is_empty()
+    content_type.is_empty() && !href.ends_with('/')
 }
 
 // ---------------------------------------------------------------------------
