@@ -139,23 +139,9 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
         let conn = conn
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        conn.query_row(
-            "SELECT source, server_id, account_id FROM contacts WHERE id = ?1",
-            rusqlite::params![cid],
-            |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                ))
-            },
-        )
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => {
-                ActionError::not_found(format!("contact lookup: {e}"))
-            }
-            _ => ActionError::db(format!("contact lookup: {e}")),
-        })
+        crate::db::queries_extra::action_helpers::get_contact_meta_by_id_sync(&conn, &cid)
+            .map_err(ActionError::db)?
+            .ok_or_else(|| ActionError::not_found(format!("contact {cid} not found")))
     })
     .await
     .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))

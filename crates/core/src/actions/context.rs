@@ -62,14 +62,12 @@ impl ActionContext {
         let conn = conn
             .lock()
             .map_err(|e| super::outcome::ActionError::db(format!("db lock: {e}")))?;
-        let exists: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM threads WHERE account_id = ?1 AND id = ?2",
-                rusqlite::params![account_id, thread_id],
-                |row| row.get::<_, i64>(0),
-            )
-            .map(|n| n > 0)
-            .map_err(|e| super::outcome::ActionError::db(e.to_string()))?;
+        let exists = crate::db::queries_extra::action_helpers::thread_exists_sync(
+            &conn,
+            account_id,
+            thread_id,
+        )
+        .map_err(super::outcome::ActionError::db)?;
         if exists {
             Ok(())
         } else {

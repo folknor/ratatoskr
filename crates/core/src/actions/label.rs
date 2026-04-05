@@ -29,19 +29,11 @@ pub(crate) async fn add_label_local(
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
-        let label_kind: String = conn
-            .query_row(
-                "SELECT label_kind FROM labels \
-                 WHERE id = ?1 AND account_id = ?2 LIMIT 1",
-                rusqlite::params![lid, aid],
-                |row| row.get(0),
-            )
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    ActionError::not_found("label not found for this account")
-                }
-                other => ActionError::db(format!("label lookup: {other}")),
-            })?;
+        let label_kind = crate::db::queries_extra::action_helpers::get_label_kind_sync(
+            &conn, &lid, &aid,
+        )
+        .map_err(|e| ActionError::db(format!("label lookup: {e}")))?
+        .ok_or_else(|| ActionError::not_found("label not found for this account"))?;
 
         if label_kind != "tag" {
             return Err(ActionError::invalid_state(
@@ -180,19 +172,11 @@ pub(crate) async fn remove_label_local(
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
-        let label_kind: String = conn
-            .query_row(
-                "SELECT label_kind FROM labels \
-                 WHERE id = ?1 AND account_id = ?2 LIMIT 1",
-                rusqlite::params![lid, aid],
-                |row| row.get(0),
-            )
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    ActionError::not_found("label not found for this account")
-                }
-                other => ActionError::db(format!("label lookup: {other}")),
-            })?;
+        let label_kind = crate::db::queries_extra::action_helpers::get_label_kind_sync(
+            &conn, &lid, &aid,
+        )
+        .map_err(|e| ActionError::db(format!("label lookup: {e}")))?
+        .ok_or_else(|| ActionError::not_found("label not found for this account"))?;
 
         if label_kind != "tag" {
             return Err(ActionError::invalid_state(

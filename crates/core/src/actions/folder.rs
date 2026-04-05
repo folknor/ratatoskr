@@ -97,27 +97,19 @@ pub async fn create_folder(
         let conn = conn
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        conn.execute(
-            "INSERT INTO labels (id, account_id, name, type, color_bg, color_fg, \
-             imap_folder_path, imap_special_use, parent_label_id, label_kind) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'container') \
-             ON CONFLICT(account_id, id) DO UPDATE SET \
-               name = ?3, type = ?4, color_bg = ?5, color_fg = ?6, \
-               imap_folder_path = ?7, imap_special_use = ?8, \
-               parent_label_id = ?9, label_kind = 'container'",
-            rusqlite::params![
-                m.id,
-                aid,
-                m.name,
-                m.folder_type,
-                m.color_bg,
-                m.color_fg,
-                m.path,
-                m.special_use,
-                parent_id_for_db,
-            ],
+        crate::db::queries_extra::action_helpers::upsert_folder_from_mutation_sync(
+            &conn,
+            &m.id,
+            &aid,
+            &m.name,
+            &m.folder_type,
+            m.color_bg.as_deref(),
+            m.color_fg.as_deref(),
+            Some(m.path.as_str()),
+            m.special_use.as_deref(),
+            parent_id_for_db.as_deref(),
         )
-        .map_err(|e| ActionError::db(format!("local insert: {e}")))?;
+        .map_err(ActionError::db)?;
         Ok(())
     })
     .await
@@ -194,22 +186,19 @@ pub async fn rename_folder(
         let conn = conn
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        conn.execute(
-            "UPDATE labels SET name = ?1, type = ?2, color_bg = ?3, color_fg = ?4, \
-             imap_folder_path = ?5, imap_special_use = ?6 \
-             WHERE account_id = ?7 AND id = ?8",
-            rusqlite::params![
-                m.name,
-                m.folder_type,
-                m.color_bg,
-                m.color_fg,
-                m.path,
-                m.special_use,
-                aid,
-                fid,
-            ],
+        crate::db::queries_extra::action_helpers::upsert_folder_from_mutation_sync(
+            &conn,
+            &fid,
+            &aid,
+            &m.name,
+            &m.folder_type,
+            m.color_bg.as_deref(),
+            m.color_fg.as_deref(),
+            Some(m.path.as_str()),
+            m.special_use.as_deref(),
+            None, // parent_label_id not changed in rename
         )
-        .map_err(|e| ActionError::db(format!("local update: {e}")))?;
+        .map_err(ActionError::db)?;
         Ok(())
     })
     .await
@@ -273,16 +262,8 @@ pub async fn delete_folder(
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         // Delete thread_labels first — no FK cascade from labels to thread_labels.
-        conn.execute(
-            "DELETE FROM thread_labels WHERE account_id = ?1 AND label_id = ?2",
-            rusqlite::params![aid, fid],
-        )
-        .map_err(|e| ActionError::db(format!("thread_labels cleanup: {e}")))?;
-        conn.execute(
-            "DELETE FROM labels WHERE account_id = ?1 AND id = ?2",
-            rusqlite::params![aid, fid],
-        )
-        .map_err(|e| ActionError::db(format!("local delete: {e}")))?;
+        crate::db::queries_extra::action_helpers::delete_folder_sync(&conn, &aid, &fid)
+            .map_err(ActionError::db)?;
         Ok(())
     })
     .await

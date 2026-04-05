@@ -19,12 +19,7 @@ pub async fn snooze(
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
         crate::email_actions::remove_label(&conn, &aid, &tid, "INBOX")?;
-        conn.execute(
-            "UPDATE threads SET is_snoozed = 1, snooze_until = ?3 \
-             WHERE account_id = ?1 AND id = ?2",
-            rusqlite::params![aid, tid, until],
-        )
-        .map_err(|e| format!("snooze: {e}"))?;
+        crate::db::queries_extra::action_helpers::snooze_thread_sync(&conn, &aid, &tid, until)?;
         Ok(())
     })
     .await
@@ -51,12 +46,7 @@ pub async fn unsnooze(ctx: &ActionContext, account_id: &str, thread_id: &str) ->
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
         crate::email_actions::insert_label(&conn, &aid, &tid, "INBOX")?;
-        conn.execute(
-            "UPDATE threads SET is_snoozed = 0, snooze_until = NULL \
-             WHERE account_id = ?1 AND id = ?2",
-            rusqlite::params![aid, tid],
-        )
-        .map_err(|e| format!("unsnooze: {e}"))?;
+        crate::db::queries_extra::action_helpers::unsnooze_thread_sync(&conn, &aid, &tid)?;
         Ok(())
     })
     .await

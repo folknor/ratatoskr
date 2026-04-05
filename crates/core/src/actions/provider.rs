@@ -13,19 +13,12 @@ pub async fn create_provider(
     account_id: &str,
     encryption_key: [u8; 32],
 ) -> Result<Box<dyn ProviderOps>, String> {
-    let conn = db.conn();
     let aid = account_id.to_string();
-    let provider = tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        conn.query_row(
-            "SELECT provider FROM accounts WHERE id = ?1",
-            rusqlite::params![aid],
-            |row| row.get::<_, String>(0),
-        )
-        .map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| format!("spawn_blocking: {e}"))??;
+    let provider = db
+        .with_conn(move |conn| {
+            crate::db::queries_extra::contacts::get_account_provider_sync(conn, &aid)
+        })
+        .await?;
 
     match provider.as_str() {
         "gmail_api" => {

@@ -3,6 +3,7 @@ use rusqlite::Connection;
 // Re-export from the db queries module so siblings can use `super::load_recent_rule_bundled_threads`.
 pub use super::queries::load_recent_rule_bundled_threads;
 
+pub mod action_helpers;
 mod accounts_crud;
 pub mod auto_responses;
 pub mod bimi;
@@ -32,6 +33,7 @@ pub mod search_fallback;
 pub mod send_identity;
 mod tasks;
 
+pub use action_helpers::*;
 pub use accounts_crud::*;
 pub use auto_responses::*;
 pub use bimi::*;
