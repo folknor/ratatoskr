@@ -3,7 +3,7 @@
 //! Queries live in `db::queries_extra::send_identity`. This module
 //! keeps the selection algorithm and domain types.
 
-use rusqlite::Connection;
+use crate::db::Connection;
 
 // Re-export from db (flat re-exports via queries_extra::*).
 pub use crate::db::queries_extra::{SendIdentity, get_all_send_identity_emails, get_send_identities};

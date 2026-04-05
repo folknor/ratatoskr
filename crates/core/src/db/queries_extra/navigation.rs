@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use rusqlite::{Connection, OptionalExtension, params};
+use crate::db::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::db::queries::get_labels;
@@ -342,7 +342,7 @@ fn label_semantics_for_provider(provider: &str) -> LabelSemantics {
 fn get_account_provider(conn: &Connection, account_id: &str) -> Result<String, String> {
     conn.query_row(
         "SELECT provider FROM accounts WHERE id = ?1",
-        rusqlite::params![account_id],
+        params![account_id],
         |row| row.get::<_, String>(0),
     )
     .map_err(|e| format!("get_account_provider: {e}"))
@@ -409,7 +409,7 @@ pub fn get_shared_mailbox_navigation(
         )
         .map_err(|e| e.to_string())?;
     let unread_by_label: HashMap<String, i64> = unread_stmt
-        .query_map(rusqlite::params![account_id, mailbox_id], |row| {
+        .query_map(params![account_id, mailbox_id], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })
         .map_err(|e| e.to_string())?
@@ -547,7 +547,7 @@ pub fn get_shared_mailbox_email_sync(
     conn.query_row(
         "SELECT email_address FROM shared_mailbox_sync_state
          WHERE account_id = ?1 AND mailbox_id = ?2",
-        rusqlite::params![account_id, mailbox_id],
+        params![account_id, mailbox_id],
         |row| row.get::<_, Option<String>>(0),
     )
     .optional()

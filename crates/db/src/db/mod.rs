@@ -11,6 +11,10 @@ pub mod sql_fragments;
 pub mod types;
 pub use from_row::{FromRow, query_as, query_one};
 pub use rusqlite::Connection;
+pub use rusqlite::Error as SqlError;
+pub use rusqlite::OptionalExtension;
+pub use rusqlite::Row;
+pub use rusqlite::params;
 
 /// Default row limit for queries (contact lists, search results, thread
 /// batches) when the caller doesn't specify an explicit limit.

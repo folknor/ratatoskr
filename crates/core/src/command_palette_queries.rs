@@ -1,5 +1,5 @@
 use cmdk::OptionItem;
-use rusqlite::Connection;
+use crate::db::Connection;
 
 use crate::db::queries_extra::command_palette;
 

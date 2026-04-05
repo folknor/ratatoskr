@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use db::db::types::{AccountScope, DbThread};
-use rusqlite::Connection;
+use crate::db::Connection;
 use search::{SearchParams, SearchResult as TantivyResult, SearchState};
 use smart_folder::{ParsedQuery, parse_query, query_threads};
 

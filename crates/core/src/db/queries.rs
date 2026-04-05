@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use rusqlite::{Connection, Row, params};
+use super::{Connection, Row, params};
 
 use super::DbState;
 use super::types::DbMessage;
@@ -19,7 +19,7 @@ pub use db::db::queries::{
 // Re-export FTS5/LIKE helpers.
 pub use db::db::sql_fragments::{build_fts_query, make_like_pattern};
 
-pub(crate) fn row_to_message(row: &Row<'_>) -> rusqlite::Result<DbMessage> {
+pub(crate) fn row_to_message(row: &Row<'_>) -> std::result::Result<DbMessage, super::SqlError> {
     Ok(DbMessage {
         id: row.get("id")?,
         account_id: row.get("account_id")?,
@@ -296,7 +296,7 @@ pub fn get_ui_bootstrap_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use rusqlite::Connection;
+    use crate::db::Connection;
 
     use super::{
         get_settings_bootstrap_snapshot, get_settings_secrets_snapshot, get_ui_bootstrap_snapshot,
@@ -319,7 +319,7 @@ mod tests {
     fn insert_setting(conn: &Connection, key: &str, value: &str) {
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2)",
-            rusqlite::params![key, value],
+            params![key, value],
         )
         .expect("insert setting");
     }

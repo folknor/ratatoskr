@@ -2,6 +2,10 @@
 pub use db::db::DbState;
 pub use db::db::ReadWriteDb;
 pub use db::db::Connection;
+pub use db::db::Row;
+pub use db::db::SqlError;
+pub use db::db::OptionalExtension;
+pub use db::db::params;
 pub use db::db::from_row;
 pub use db::db::from_row::{FromRow, query_as, query_one};
 pub use db::db::migrations;

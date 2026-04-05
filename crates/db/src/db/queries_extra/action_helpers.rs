@@ -123,6 +123,33 @@ pub fn upsert_folder_from_mutation_sync(
     Ok(())
 }
 
+/// Get all message IDs for an account.
+pub fn get_message_ids_for_account_sync(
+    conn: &Connection,
+    account_id: &str,
+) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id FROM messages WHERE account_id = ?1")
+        .map_err(|e| format!("prepare resync message query: {e}"))?;
+    stmt.query_map(params![account_id], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("query resync message ids: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("collect resync message ids: {e}"))
+}
+
+/// Delete all threads for an account within a transaction.
+pub fn delete_threads_for_account_sync(
+    conn: &Connection,
+    account_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM threads WHERE account_id = ?1",
+        params![account_id],
+    )
+    .map_err(|e| format!("delete threads for account: {e}"))?;
+    Ok(())
+}
+
 /// Delete a folder/label and its thread_labels associations.
 pub fn delete_folder_sync(
     conn: &Connection,

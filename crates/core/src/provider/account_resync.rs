@@ -20,14 +20,11 @@ pub async fn prepare_account_resync(
         .with_conn({
             let account_id = account_id_owned.clone();
             move |conn| {
-                let mut stmt = conn
-                    .prepare("SELECT id FROM messages WHERE account_id = ?1")
-                    .map_err(|e| format!("prepare resync message query: {e}"))?;
-                let msg_ids = stmt
-                    .query_map(rusqlite::params![account_id], |row| row.get::<_, String>(0))
-                    .map_err(|e| format!("query resync message ids: {e}"))?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| format!("collect resync message ids: {e}"))?;
+                let msg_ids =
+                    crate::db::queries_extra::action_helpers::get_message_ids_for_account_sync(
+                        conn,
+                        &account_id,
+                    )?;
                 let hashes = crate::inline_image_store::collect_inline_hashes_for_account(
                     conn,
                     &account_id,
@@ -43,11 +40,10 @@ pub async fn prepare_account_resync(
         let tx = conn
             .unchecked_transaction()
             .map_err(|e| format!("begin resync transaction: {e}"))?;
-        tx.execute(
-            "DELETE FROM threads WHERE account_id = ?1",
-            rusqlite::params![account_id_owned],
-        )
-        .map_err(|e| format!("delete threads for account: {e}"))?;
+        crate::db::queries_extra::action_helpers::delete_threads_for_account_sync(
+            &tx,
+            &account_id_owned,
+        )?;
         crate::sync::pipeline::clear_account_history_id(&tx, &account_id_owned)?;
         crate::sync::pipeline::clear_all_folder_sync_states(&tx, &account_id_owned)?;
         tx.commit()
