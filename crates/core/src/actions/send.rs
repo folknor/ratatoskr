@@ -60,8 +60,14 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
         )
         .map_err(ActionError::db)?;
 
-        crate::db::queries_extra::draft_lifecycle::mark_draft_sending_sync(&conn, &draft_id)
-            .map_err(|e| ActionError::invalid_state(e))?;
+        let transitioned =
+            crate::db::queries_extra::draft_lifecycle::mark_draft_sending_sync(&conn, &draft_id)
+                .map_err(ActionError::db)?;
+        if !transitioned {
+            return Err(ActionError::invalid_state(format!(
+                "Draft {draft_id} not found or already sending/sent"
+            )));
+        }
 
         Ok(mime_base64url)
     })

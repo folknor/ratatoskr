@@ -211,7 +211,14 @@ pub fn build_mime_message_base64url(req: &SendRequest) -> Result<String, SendErr
 /// Prevents duplicate sends if the user triggers send again while in flight.
 pub async fn mark_draft_sending(db: &DbState, draft_id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
-        crate::db::queries_extra::draft_lifecycle::mark_draft_sending_sync(conn, &draft_id)
+        let transitioned =
+            crate::db::queries_extra::draft_lifecycle::mark_draft_sending_sync(conn, &draft_id)?;
+        if !transitioned {
+            return Err(format!(
+                "Draft {draft_id} not found or already sending/sent"
+            ));
+        }
+        Ok(())
     })
     .await
 }

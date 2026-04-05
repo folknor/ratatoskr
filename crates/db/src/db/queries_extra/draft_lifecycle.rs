@@ -53,9 +53,9 @@ pub fn persist_draft_pending_sync(
     Ok(())
 }
 
-/// Transition a draft to 'sending'. Returns Ok(()) if the transition
-/// succeeded, or Err if the draft was not found or already sending/sent.
-pub fn mark_draft_sending_sync(conn: &Connection, draft_id: &str) -> Result<(), String> {
+/// Transition a draft to 'sending'. Returns `Ok(true)` if the transition
+/// succeeded, `Ok(false)` if the draft was not found or already sending/sent.
+pub fn mark_draft_sending_sync(conn: &Connection, draft_id: &str) -> Result<bool, String> {
     let rows = conn
         .execute(
             "UPDATE local_drafts SET sync_status = 'sending' \
@@ -63,12 +63,7 @@ pub fn mark_draft_sending_sync(conn: &Connection, draft_id: &str) -> Result<(), 
             params![draft_id],
         )
         .map_err(|e| format!("mark sending: {e}"))?;
-    if rows == 0 {
-        return Err(format!(
-            "Draft {draft_id} not found or already sending/sent"
-        ));
-    }
-    Ok(())
+    Ok(rows > 0)
 }
 
 /// Transition a draft to 'sent' with the provider-assigned message ID.
