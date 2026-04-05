@@ -12,7 +12,7 @@ pub use seen::{
 };
 
 // Re-export the stats type from db.
-pub use db::db::queries_extra::contacts::SeenAddressStats;
+pub use crate::db::queries_extra::contacts::SeenAddressStats;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -21,7 +21,7 @@ pub use db::db::queries_extra::contacts::SeenAddressStats;
 /// Promote a seen address to a full contact.
 pub async fn promote_seen_to_contact(db: &DbState, email: String) -> Result<(), String> {
     db.with_conn(move |conn| {
-        db::db::queries_extra::contacts::promote_seen_to_contact_sync(conn, &email)
+        crate::db::queries_extra::contacts::promote_seen_to_contact_sync(conn, &email)
     })
     .await
 }
@@ -32,7 +32,7 @@ pub async fn get_seen_address_stats(
     email: String,
 ) -> Result<Option<SeenAddressStats>, String> {
     db.with_conn(move |conn| {
-        db::db::queries_extra::contacts::get_seen_address_stats_sync(conn, &email)
+        crate::db::queries_extra::contacts::get_seen_address_stats_sync(conn, &email)
     })
     .await
 }

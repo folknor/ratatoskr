@@ -10,7 +10,7 @@
 use crate::db::DbState;
 
 // Re-export the storage parameter type so existing callers keep working.
-pub use db::db::queries_extra::contacts::ContactUpdate;
+pub use crate::db::queries_extra::contacts::ContactUpdate;
 
 // ---------------------------------------------------------------------------
 // Domain types (stay in core)
@@ -41,7 +41,7 @@ pub enum WriteBackResult {
 /// Determine whether a contact is local or synced.
 pub async fn get_contact_source(db: &DbState, email: String) -> Result<ContactSource, String> {
     db.with_conn(move |conn| {
-        let source = db::db::queries_extra::contacts::get_contact_source_sync(conn, &email)?;
+        let source = crate::db::queries_extra::contacts::get_contact_source_sync(conn, &email)?;
         match source.as_deref() {
             Some("user") | None => Ok(ContactSource::Local),
             Some(provider) => Ok(ContactSource::Synced(provider.to_string())),
@@ -53,7 +53,7 @@ pub async fn get_contact_source(db: &DbState, email: String) -> Result<ContactSo
 /// Save a local contact immediately (no Save button needed).
 pub async fn save_local_contact(db: &DbState, update: ContactUpdate) -> Result<(), String> {
     db.with_conn(move |conn| {
-        db::db::queries_extra::contacts::save_local_contact_fields_sync(conn, &update)
+        crate::db::queries_extra::contacts::save_local_contact_fields_sync(conn, &update)
     })
     .await
 }
@@ -61,7 +61,7 @@ pub async fn save_local_contact(db: &DbState, update: ContactUpdate) -> Result<(
 /// Save a synced contact's local edits (called when user clicks Save).
 pub async fn save_synced_contact(db: &DbState, update: ContactUpdate) -> Result<(), String> {
     db.with_conn(move |conn| {
-        db::db::queries_extra::contacts::save_synced_contact_fields_sync(conn, &update)
+        crate::db::queries_extra::contacts::save_synced_contact_fields_sync(conn, &update)
     })
     .await
 }

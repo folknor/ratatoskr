@@ -1,74 +1,22 @@
 //! GAL (Global Address List) / organization directory caching.
 //!
-//! Pre-fetches organization directory at startup for providers that
-//! support it (Microsoft Graph `/users`, Google Directory API).
-//! The cache is stored in the `gal_cache` table and refreshed by polling.
-//!
-//! Autocomplete searches include GAL entries via the app-level
-//! `search_gal_cache()` function, so autocomplete is always local.
-
-use rusqlite::{OptionalExtension, params};
+//! SQL lives in `db::queries_extra::contacts`. This module keeps
+//! HTTP fetch logic and cache-age orchestration.
 
 use crate::db::DbState;
 
-/// A single GAL entry to cache.
-#[derive(Debug, Clone)]
-pub struct GalEntry {
-    pub email: String,
-    pub display_name: Option<String>,
-    pub phone: Option<String>,
-    pub company: Option<String>,
-    pub title: Option<String>,
-    pub department: Option<String>,
-}
+// Re-export the entry type from db.
+pub use crate::db::queries_extra::contacts::GalEntry;
 
-/// Store fetched GAL entries in the cache for a given account.
-///
-/// This replaces all existing entries for the account (full refresh).
+/// Store fetched GAL entries in the cache for a given account (full refresh).
 pub async fn cache_gal_entries(
     db: &DbState,
     account_id: String,
     entries: Vec<GalEntry>,
 ) -> Result<usize, String> {
-    let count = entries.len();
+    let aid = account_id;
     db.with_conn(move |conn| {
-        let tx = conn
-            .unchecked_transaction()
-            .map_err(|e| format!("begin gal tx: {e}"))?;
-
-        // Clear existing entries for this account
-        tx.execute(
-            "DELETE FROM gal_cache WHERE account_id = ?1",
-            params![account_id],
-        )
-        .map_err(|e| format!("clear gal_cache: {e}"))?;
-
-        // Insert new entries
-        let mut stmt = tx
-            .prepare(
-                "INSERT OR REPLACE INTO gal_cache
-                 (email, display_name, phone, company, title, department, account_id, cached_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, unixepoch())",
-            )
-            .map_err(|e| format!("prepare gal insert: {e}"))?;
-
-        for entry in &entries {
-            stmt.execute(params![
-                entry.email,
-                entry.display_name,
-                entry.phone,
-                entry.company,
-                entry.title,
-                entry.department,
-                account_id,
-            ])
-            .map_err(|e| format!("insert gal entry: {e}"))?;
-        }
-
-        drop(stmt);
-        tx.commit().map_err(|e| format!("commit gal tx: {e}"))?;
-
-        Ok(count)
+        crate::db::queries_extra::contacts::cache_gal_entries_sync(conn, &aid, &entries)
     })
     .await
 }
@@ -236,16 +184,11 @@ pub async fn refresh_gal_for_account(
         }
     }
 
-    // Look up provider type
+    // Look up provider type via db
     let aid = account_id.to_string();
     let provider: String = db
         .with_conn(move |conn| {
-            conn.query_row(
-                "SELECT provider FROM accounts WHERE id = ?1",
-                params![aid],
-                |row| row.get(0),
-            )
-            .map_err(|e| format!("lookup provider: {e}"))
+            crate::db::queries_extra::contacts::get_account_provider_sync(conn, &aid)
         })
         .await?;
 
@@ -272,40 +215,17 @@ pub async fn refresh_gal_for_account(
 }
 
 /// Record that a GAL refresh was performed for an account.
-///
-/// Stores the current unix timestamp in the `settings` table so the
-/// staleness check works even when the fetch returns zero entries.
 async fn record_gal_refresh(db: &DbState, account_id: String) -> Result<(), String> {
-    let now = chrono::Utc::now().timestamp().to_string();
     db.with_conn(move |conn| {
-        let key = format!("gal_refresh_{account_id}");
-        conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
-            params![key, now],
-        )
-        .map_err(|e| format!("record gal refresh: {e}"))?;
-        Ok(())
+        crate::db::queries_extra::contacts::record_gal_refresh_sync(conn, &account_id)
     })
     .await
 }
 
 /// Get the timestamp of the last GAL refresh attempt for an account.
-/// Returns None if no refresh has ever been performed.
 pub async fn gal_cache_age(db: &DbState, account_id: String) -> Result<Option<i64>, String> {
     db.with_conn(move |conn| {
-        let key = format!("gal_refresh_{account_id}");
-        conn.query_row(
-            "SELECT value FROM settings WHERE key = ?1",
-            params![key],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .map_err(|e| format!("query gal refresh age: {e}"))?
-        .map(|v| {
-            v.parse::<i64>()
-                .map_err(|e| format!("parse gal timestamp: {e}"))
-        })
-        .transpose()
+        crate::db::queries_extra::contacts::gal_cache_age_sync(conn, &account_id)
     })
     .await
 }

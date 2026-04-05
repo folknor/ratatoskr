@@ -631,6 +631,245 @@ pub fn get_seen_address_stats_sync(
     .or_else(|_| Ok(None))
 }
 
+// ---------------------------------------------------------------------------
+// Google contact enrichment
+// ---------------------------------------------------------------------------
+
+/// Extracted fields from a Google People API Person for enrichment.
+#[derive(Debug, Clone)]
+pub struct GoogleContactFields {
+    pub email: String,
+    pub resource_name: Option<String>,
+    pub phone: Option<String>,
+    pub company: Option<String>,
+}
+
+/// Server-side info for a Google contact.
+#[derive(Debug, Clone)]
+pub struct GoogleServerInfo {
+    pub resource_name: String,
+    pub account_id: String,
+}
+
+/// Enrich contacts with Google People API fields (phone, company, account_id, server_id).
+pub fn enrich_google_contacts_sync(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+    persons: &[GoogleContactFields],
+) -> Result<usize, String> {
+    let mut enriched = 0;
+    for person in persons {
+        let changed = conn
+            .execute(
+                "UPDATE contacts SET \
+                   phone = COALESCE(?1, phone), \
+                   company = COALESCE(?2, company), \
+                   account_id = COALESCE(?3, account_id), \
+                   server_id = COALESCE(?4, server_id), \
+                   updated_at = unixepoch() \
+                 WHERE email = ?5 AND source IN ('google', 'user')",
+                rusqlite::params![
+                    person.phone,
+                    person.company,
+                    account_id,
+                    person.resource_name,
+                    person.email,
+                ],
+            )
+            .map_err(|e| format!("enrich google contact: {e}"))?;
+        if changed > 0 {
+            enriched += 1;
+        }
+    }
+    Ok(enriched)
+}
+
+/// Look up the Google resource name and account ID for a contact.
+pub fn get_google_contact_server_info_sync(
+    conn: &rusqlite::Connection,
+    email: &str,
+) -> Result<Option<GoogleServerInfo>, String> {
+    let normalized = email.to_lowercase();
+    conn.query_row(
+        "SELECT m.resource_name, m.account_id \
+         FROM google_contact_map m \
+         WHERE m.contact_email = ?1 \
+         LIMIT 1",
+        rusqlite::params![normalized],
+        |row| {
+            Ok(GoogleServerInfo {
+                resource_name: row.get("resource_name")?,
+                account_id: row.get("account_id")?,
+            })
+        },
+    )
+    .map_err(|e| e.to_string())
+    .map(Some)
+    .or_else(|_| Ok(None))
+}
+
+// ---------------------------------------------------------------------------
+// Graph contact enrichment
+// ---------------------------------------------------------------------------
+
+/// Server-side info for a Graph contact.
+#[derive(Debug, Clone)]
+pub struct GraphServerInfo {
+    pub graph_contact_id: String,
+    pub account_id: String,
+}
+
+/// Enrich contacts with Graph account_id and server_id via graph_contact_map.
+pub fn enrich_graph_contacts_sync(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+) -> Result<usize, String> {
+    conn.execute(
+        "UPDATE contacts SET \
+           account_id = ?1, \
+           server_id = (
+             SELECT m.graph_contact_id FROM graph_contact_map m
+             WHERE m.email = contacts.email AND m.account_id = ?1
+             LIMIT 1
+           ) \
+         WHERE source = 'graph' \
+           AND email IN (
+             SELECT m2.email FROM graph_contact_map m2 WHERE m2.account_id = ?1
+           ) \
+           AND (account_id IS NULL OR account_id = ?1)",
+        rusqlite::params![account_id],
+    )
+    .map_err(|e| format!("enrich graph contacts: {e}"))
+}
+
+/// Look up the Graph contact ID and account for a contact email.
+pub fn get_graph_contact_server_info_sync(
+    conn: &rusqlite::Connection,
+    email: &str,
+) -> Result<Option<GraphServerInfo>, String> {
+    let normalized = email.to_lowercase();
+    conn.query_row(
+        "SELECT m.graph_contact_id, m.account_id \
+         FROM graph_contact_map m \
+         WHERE m.email = ?1 \
+         LIMIT 1",
+        rusqlite::params![normalized],
+        |row| {
+            Ok(GraphServerInfo {
+                graph_contact_id: row.get("graph_contact_id")?,
+                account_id: row.get("account_id")?,
+            })
+        },
+    )
+    .map_err(|e| e.to_string())
+    .map(Some)
+    .or_else(|_| Ok(None))
+}
+
+// ---------------------------------------------------------------------------
+// GAL (Global Address List) cache
+// ---------------------------------------------------------------------------
+
+/// A GAL entry for bulk cache insert.
+#[derive(Debug, Clone)]
+pub struct GalEntry {
+    pub email: String,
+    pub display_name: Option<String>,
+    pub phone: Option<String>,
+    pub company: Option<String>,
+    pub title: Option<String>,
+    pub department: Option<String>,
+}
+
+/// Clear and refill the GAL cache for an account.
+pub fn cache_gal_entries_sync(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+    entries: &[GalEntry],
+) -> Result<usize, String> {
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("begin gal tx: {e}"))?;
+
+    tx.execute(
+        "DELETE FROM gal_cache WHERE account_id = ?1",
+        rusqlite::params![account_id],
+    )
+    .map_err(|e| format!("clear gal cache: {e}"))?;
+
+    let mut stmt = tx
+        .prepare(
+            "INSERT OR REPLACE INTO gal_cache \
+             (email, display_name, phone, company, title, department, account_id, cached_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, unixepoch())",
+        )
+        .map_err(|e| format!("prepare gal insert: {e}"))?;
+
+    for entry in entries {
+        stmt.execute(rusqlite::params![
+            entry.email,
+            entry.display_name,
+            entry.phone,
+            entry.company,
+            entry.title,
+            entry.department,
+            account_id,
+        ])
+        .map_err(|e| format!("insert gal entry: {e}"))?;
+    }
+
+    drop(stmt);
+    tx.commit().map_err(|e| format!("commit gal tx: {e}"))?;
+    Ok(entries.len())
+}
+
+/// Get the timestamp of the last GAL refresh for an account.
+pub fn gal_cache_age_sync(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+) -> Result<Option<i64>, String> {
+    let key = format!("gal_refresh_{account_id}");
+    conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        rusqlite::params![key],
+        |row| row.get::<_, String>(0),
+    )
+    .ok()
+    .map(|v| {
+        v.parse::<i64>()
+            .map_err(|e| format!("parse gal timestamp: {e}"))
+    })
+    .transpose()
+}
+
+/// Record that a GAL refresh was performed for an account.
+pub fn record_gal_refresh_sync(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+) -> Result<(), String> {
+    let now = chrono::Utc::now().timestamp().to_string();
+    let key = format!("gal_refresh_{account_id}");
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+        rusqlite::params![key, now],
+    )
+    .map_err(|e| format!("record gal refresh: {e}"))?;
+    Ok(())
+}
+
+/// Look up the provider type for an account.
+pub fn get_account_provider_sync(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+) -> Result<String, String> {
+    conn.query_row(
+        "SELECT provider FROM accounts WHERE id = ?1",
+        rusqlite::params![account_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| format!("lookup provider: {e}"))
+}
+
 pub async fn db_update_contact_avatar(
     db: &DbState,
     email: String,
