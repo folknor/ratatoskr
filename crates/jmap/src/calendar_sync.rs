@@ -11,6 +11,11 @@ use jmap_client::calendar_event::{CalendarEvent, CalendarEventGet, CalendarEvent
 use jmap_client::core::set::SetObject;
 
 use db::db::DbState;
+use db::db::queries_extra::{
+    CalendarAttendeeWriteRow, CalendarReminderWriteRow, UpsertCalendarEventParams,
+    delete_event_by_remote_id_sync, replace_event_attendees_sync, replace_event_reminders_sync,
+    upsert_calendar_event_sync, upsert_calendar_sync,
+};
 
 use crate::client::JmapClient;
 
@@ -483,57 +488,55 @@ async fn persist_jmap_event(
     let eid2 = eid.clone();
 
     db.with_conn(move |conn| {
-        let id = uuid::Uuid::new_v4().to_string();
-
-        conn.execute(
-            "INSERT INTO calendar_events \
-                 (id, account_id, google_event_id, summary, description, location, \
-                  start_time, end_time, is_all_day, status, organizer_email, \
-                  attendees_json, html_link, calendar_id, remote_event_id, etag, \
-                  ical_data, uid) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL, ?13, ?14, NULL, ?15, ?16) \
-             ON CONFLICT(account_id, google_event_id) DO UPDATE SET \
-                 summary = ?4, description = ?5, location = ?6, \
-                 start_time = ?7, end_time = ?8, is_all_day = ?9, \
-                 status = ?10, organizer_email = ?11, attendees_json = ?12, \
-                 calendar_id = ?13, remote_event_id = ?14, \
-                 ical_data = ?15, uid = ?16, updated_at = unixepoch()",
-            rusqlite::params![
-                id,
-                aid,
-                eid,
-                title,
+        let local_event_id = upsert_calendar_event_sync(
+            conn,
+            &UpsertCalendarEventParams {
+                account_id: aid.clone(),
+                google_event_id: eid.clone(),
+                summary: title,
                 description,
                 location,
                 start_time,
                 end_time,
-                is_all_day as i64,
+                is_all_day,
                 status,
                 organizer_email,
                 attendees_json,
+                html_link: None,
                 calendar_id,
-                eid2,
+                remote_event_id: Some(eid2),
+                etag: None,
                 ical_data,
                 uid,
-            ],
-        )
-        .map_err(|e| format!("upsert JMAP calendar event: {e}"))?;
+                title: None,
+                timezone: None,
+                recurrence_rule: None,
+                organizer_name: None,
+                rsvp_status: None,
+                availability: None,
+                visibility: None,
+            },
+        )?;
 
-        // Look up the actual local event ID (may differ from `id` on conflict)
-        let local_event_id: String = conn
-            .query_row(
-                "SELECT id FROM calendar_events WHERE account_id = ?1 AND google_event_id = ?2",
-                rusqlite::params![aid, eid],
-                |row| row.get(0),
-            )
-            .map_err(|e| format!("fetch event id: {e}"))?;
+        let attendee_rows: Vec<CalendarAttendeeWriteRow> = attendees
+            .iter()
+            .map(|att| CalendarAttendeeWriteRow {
+                email: att.email.clone(),
+                name: att.name.clone(),
+                rsvp_status: att.rsvp_status.clone(),
+                is_organizer: att.is_organizer,
+            })
+            .collect();
+        replace_event_attendees_sync(conn, &aid, &local_event_id, &attendee_rows)?;
 
-        // Sync attendees
-        persist_attendee_rows(conn, &aid, &local_event_id, &attendees)?;
-
-        // Sync reminders
-        persist_reminder_rows(conn, &aid, &local_event_id, &reminders)?;
-
+        let reminder_rows: Vec<CalendarReminderWriteRow> = reminders
+            .iter()
+            .map(|rem| CalendarReminderWriteRow {
+                minutes_before: rem.minutes_before,
+                method: rem.method.clone(),
+            })
+            .collect();
+        replace_event_reminders_sync(conn, &aid, &local_event_id, &reminder_rows)?;
         Ok(())
     })
     .await
@@ -548,31 +551,7 @@ async fn delete_event_by_jmap_id(
     let aid = account_id.to_string();
     let eid = jmap_event_id.to_string();
 
-    db.with_conn(move |conn| {
-        // Delete attendees and reminders first
-        conn.execute(
-            "DELETE FROM calendar_attendees WHERE account_id = ?1 AND event_id IN \
-             (SELECT id FROM calendar_events WHERE account_id = ?1 AND google_event_id = ?2)",
-            rusqlite::params![aid, eid],
-        )
-        .map_err(|e| format!("delete attendees for JMAP event: {e}"))?;
-
-        conn.execute(
-            "DELETE FROM calendar_reminders WHERE account_id = ?1 AND event_id IN \
-             (SELECT id FROM calendar_events WHERE account_id = ?1 AND google_event_id = ?2)",
-            rusqlite::params![aid, eid],
-        )
-        .map_err(|e| format!("delete reminders for JMAP event: {e}"))?;
-
-        conn.execute(
-            "DELETE FROM calendar_events WHERE account_id = ?1 AND google_event_id = ?2",
-            rusqlite::params![aid, eid],
-        )
-        .map_err(|e| format!("delete JMAP calendar event: {e}"))?;
-
-        Ok(())
-    })
-    .await
+    db.with_conn(move |conn| delete_event_by_remote_id_sync(conn, &aid, &eid)).await
 }
 
 // ── JSCalendar property extraction ─────────────────────────
@@ -927,41 +906,6 @@ fn extract_attendee_rows(event: &CalendarEvent<Get>) -> Vec<AttendeeRow> {
     rows
 }
 
-/// Persist pre-extracted attendee rows into the database.
-fn persist_attendee_rows(
-    conn: &rusqlite::Connection,
-    account_id: &str,
-    local_event_id: &str,
-    attendees: &[AttendeeRow],
-) -> Result<(), String> {
-    conn.execute(
-        "DELETE FROM calendar_attendees WHERE account_id = ?1 AND event_id = ?2",
-        rusqlite::params![account_id, local_event_id],
-    )
-    .map_err(|e| format!("delete attendees: {e}"))?;
-
-    for att in attendees {
-        conn.execute(
-            "INSERT INTO calendar_attendees \
-                 (event_id, account_id, email, name, rsvp_status, is_organizer) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
-             ON CONFLICT(account_id, event_id, email) DO UPDATE SET \
-                 name = ?4, rsvp_status = ?5, is_organizer = ?6",
-            rusqlite::params![
-                local_event_id,
-                account_id,
-                att.email,
-                att.name,
-                att.rsvp_status,
-                att.is_organizer as i64,
-            ],
-        )
-        .map_err(|e| format!("upsert attendee: {e}"))?;
-    }
-
-    Ok(())
-}
-
 /// Extracted reminder row, ready to be persisted inside a `with_conn` closure.
 struct ReminderRow {
     minutes_before: i64,
@@ -1018,32 +962,6 @@ fn extract_reminder_rows(event: &CalendarEvent<Get>) -> Vec<ReminderRow> {
     rows
 }
 
-/// Persist pre-extracted reminder rows into the database.
-fn persist_reminder_rows(
-    conn: &rusqlite::Connection,
-    account_id: &str,
-    local_event_id: &str,
-    reminders: &[ReminderRow],
-) -> Result<(), String> {
-    conn.execute(
-        "DELETE FROM calendar_reminders WHERE account_id = ?1 AND event_id = ?2",
-        rusqlite::params![account_id, local_event_id],
-    )
-    .map_err(|e| format!("delete reminders: {e}"))?;
-
-    for rem in reminders {
-        conn.execute(
-            "INSERT INTO calendar_reminders \
-                 (event_id, account_id, minutes_before, method) \
-             VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![local_event_id, account_id, rem.minutes_before, rem.method],
-        )
-        .map_err(|e| format!("insert reminder: {e}"))?;
-    }
-
-    Ok(())
-}
-
 // ── Sync state persistence ─────────────────────────────────
 
 /// Save a JMAP sync state for calendar objects.
@@ -1084,25 +1002,7 @@ async fn upsert_calendar(
     let col = color.map(String::from);
 
     db.with_conn(move |conn| {
-        let id = uuid::Uuid::new_v4().to_string();
-        conn.execute(
-            "INSERT INTO calendars (id, account_id, provider, remote_id, display_name, color, is_primary)
-                 VALUES (?1, ?2, 'jmap', ?3, ?4, ?5, ?6)
-                 ON CONFLICT(account_id, remote_id) DO UPDATE SET
-                   display_name = ?4, color = ?5, is_primary = ?6, updated_at = unixepoch()",
-            rusqlite::params![id, aid, rid, dname, col, is_primary as i64],
-        )
-        .map_err(|e| format!("upsert JMAP calendar: {e}"))?;
-
-        let actual_id: String = conn
-            .query_row(
-                "SELECT id FROM calendars WHERE account_id = ?1 AND remote_id = ?2",
-                rusqlite::params![aid, rid],
-                |row| row.get(0),
-            )
-            .map_err(|e| format!("fetch calendar id: {e}"))?;
-
-        Ok(actual_id)
+        upsert_calendar_sync(conn, &aid, "jmap", &rid, dname.as_deref(), col.as_deref(), is_primary)
     })
     .await
 }

@@ -7,6 +7,10 @@ use std::collections::HashSet;
 
 use common::types::{ProviderCtx, SyncResult};
 use db::db::DbState;
+use db::db::queries_extra::{
+    UpsertCalendarEventParams, delete_event_by_remote_id_sync, save_calendar_sync_token_sync,
+    upsert_calendar_event_sync, upsert_calendar_sync,
+};
 use db::progress::ProgressReporter;
 use search::SearchState;
 use store::body_store::BodyStoreState;
@@ -499,15 +503,15 @@ async fn upsert_graph_calendars(
     db.with_conn(move |conn| {
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         for (i, (remote_id, color, is_primary)) in data.iter().enumerate() {
-            let id = uuid::Uuid::new_v4().to_string();
-            tx.execute(
-                "INSERT INTO calendars (id, account_id, provider, remote_id, display_name, color, is_primary)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                 ON CONFLICT(account_id, remote_id) DO UPDATE SET
-                   display_name = ?5, color = ?6, is_primary = ?7, updated_at = unixepoch()",
-                rusqlite::params![id, aid, "graph", remote_id, names[i], color, *is_primary as i64],
-            )
-            .map_err(|e| e.to_string())?;
+            upsert_calendar_sync(
+                &tx,
+                &aid,
+                "graph",
+                remote_id,
+                Some(names[i].as_str()),
+                color.as_deref(),
+                *is_primary,
+            )?;
         }
         tx.commit().map_err(|e| e.to_string())?;
         Ok(())
@@ -562,39 +566,43 @@ async fn persist_graph_calendar_events(
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
 
         for event in created.into_iter().chain(updated) {
-            let id = uuid::Uuid::new_v4().to_string();
-            tx.execute(
-                "INSERT INTO calendar_events (id, account_id, google_event_id, summary, description, location, start_time, end_time, is_all_day, status, organizer_email, attendees_json, html_link, calendar_id, remote_event_id, etag, ical_data, uid)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
-                 ON CONFLICT(account_id, google_event_id) DO UPDATE SET
-                   summary = ?4, description = ?5, location = ?6, start_time = ?7, end_time = ?8,
-                   is_all_day = ?9, status = ?10, organizer_email = ?11, attendees_json = ?12,
-                   html_link = ?13, calendar_id = ?14, remote_event_id = ?15, etag = ?16,
-                   ical_data = ?17, uid = ?18, updated_at = unixepoch()",
-                rusqlite::params![
-                    id, aid, event.remote_event_id, event.summary, event.description,
-                    event.location, event.start_time, event.end_time, event.is_all_day as i64,
-                    event.status, event.organizer_email, event.attendees_json, event.html_link,
-                    cal_id, event.remote_event_id, event.etag, event.ical_data, event.uid,
-                ],
-            )
-            .map_err(|e| e.to_string())?;
+            upsert_calendar_event_sync(
+                &tx,
+                &UpsertCalendarEventParams {
+                    account_id: aid.clone(),
+                    google_event_id: event.remote_event_id.clone(),
+                    summary: event.summary.clone(),
+                    description: event.description.clone(),
+                    location: event.location.clone(),
+                    start_time: event.start_time,
+                    end_time: event.end_time,
+                    is_all_day: event.is_all_day,
+                    status: event.status.clone(),
+                    organizer_email: event.organizer_email.clone(),
+                    attendees_json: event.attendees_json.clone(),
+                    html_link: event.html_link.clone(),
+                    calendar_id: Some(cal_id.clone()),
+                    remote_event_id: Some(event.remote_event_id.clone()),
+                    etag: event.etag.clone(),
+                    ical_data: event.ical_data.clone(),
+                    uid: event.uid.clone(),
+                    title: None,
+                    timezone: None,
+                    recurrence_rule: None,
+                    organizer_name: None,
+                    rsvp_status: None,
+                    availability: None,
+                    visibility: None,
+                },
+            )?;
         }
 
         for remote_event_id in &deleted_ids {
-            tx.execute(
-                "DELETE FROM calendar_events WHERE calendar_id = ?1 AND remote_event_id = ?2",
-                rusqlite::params![cal_id, remote_event_id],
-            )
-            .map_err(|e| e.to_string())?;
+            delete_event_by_remote_id_sync(&tx, &cal_id, remote_event_id)?;
         }
 
         if let Some(ref delta_link) = new_delta_link {
-            tx.execute(
-                "UPDATE calendars SET sync_token = ?1, updated_at = unixepoch() WHERE id = ?2",
-                rusqlite::params![delta_link, cal_id],
-            )
-            .map_err(|e| e.to_string())?;
+            save_calendar_sync_token_sync(&tx, &cal_id, Some(delta_link.as_str()))?;
         }
 
         tx.commit().map_err(|e| e.to_string())?;

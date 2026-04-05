@@ -192,6 +192,219 @@ pub struct UpsertCalendarEventParams {
     pub visibility: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct CalendarAttendeeWriteRow {
+    pub email: String,
+    pub name: Option<String>,
+    pub rsvp_status: Option<String>,
+    pub is_organizer: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct CalendarReminderWriteRow {
+    pub minutes_before: i64,
+    pub method: Option<String>,
+}
+
+pub fn upsert_calendar_sync(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+    provider: &str,
+    remote_id: &str,
+    display_name: Option<&str>,
+    color: Option<&str>,
+    is_primary: bool,
+) -> Result<String, String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO calendars (id, account_id, provider, remote_id, display_name, color, is_primary)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(account_id, remote_id) DO UPDATE SET
+               display_name = ?5, color = ?6, is_primary = ?7, updated_at = unixepoch()",
+        params![id, account_id, provider, remote_id, display_name, color, is_primary as i64],
+    )
+    .map_err(|e| e.to_string())?;
+
+    conn.query_row(
+        "SELECT id FROM calendars WHERE account_id = ?1 AND remote_id = ?2",
+        params![account_id, remote_id],
+        |row| row.get("id"),
+    )
+    .map_err(|e| e.to_string())
+}
+
+pub fn load_calendar_sync_token_sync(
+    conn: &rusqlite::Connection,
+    calendar_id: &str,
+) -> Result<Option<String>, String> {
+    let result = conn.query_row(
+        "SELECT sync_token FROM calendars WHERE id = ?1",
+        params![calendar_id],
+        |row| row.get::<_, Option<String>>(0),
+    );
+    match result {
+        Ok(token) => Ok(token),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(format!("load sync token: {e}")),
+    }
+}
+
+pub fn save_calendar_sync_token_sync(
+    conn: &rusqlite::Connection,
+    calendar_id: &str,
+    token: Option<&str>,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE calendars SET sync_token = ?1, updated_at = unixepoch() WHERE id = ?2",
+        params![token, calendar_id],
+    )
+    .map_err(|e| format!("save sync token: {e}"))?;
+    Ok(())
+}
+
+pub fn upsert_calendar_event_sync(
+    conn: &rusqlite::Connection,
+    p: &UpsertCalendarEventParams,
+) -> Result<String, String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO calendar_events (id, account_id, google_event_id, summary, description, \
+             location, start_time, end_time, is_all_day, status, organizer_email, \
+             attendees_json, html_link, calendar_id, remote_event_id, etag, ical_data, uid, \
+             title, timezone, recurrence_rule, organizer_name, rsvp_status, created_at, \
+             availability, visibility)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
+                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, unixepoch(), ?24, ?25)
+             ON CONFLICT(account_id, google_event_id) DO UPDATE SET
+               summary = ?4, description = ?5, location = ?6, start_time = ?7, end_time = ?8,
+               is_all_day = ?9, status = ?10, organizer_email = ?11, attendees_json = ?12,
+               html_link = ?13, calendar_id = ?14, remote_event_id = ?15, etag = ?16,
+               ical_data = ?17, uid = ?18, title = ?19, timezone = ?20, recurrence_rule = ?21,
+               organizer_name = ?22, rsvp_status = ?23, availability = ?24, visibility = ?25,
+               updated_at = unixepoch()",
+        params![
+            id,
+            p.account_id,
+            p.google_event_id,
+            p.summary,
+            p.description,
+            p.location,
+            p.start_time,
+            p.end_time,
+            p.is_all_day as i64,
+            p.status,
+            p.organizer_email,
+            p.attendees_json,
+            p.html_link,
+            p.calendar_id,
+            p.remote_event_id,
+            p.etag,
+            p.ical_data,
+            p.uid,
+            p.title,
+            p.timezone,
+            p.recurrence_rule,
+            p.organizer_name,
+            p.rsvp_status,
+            p.availability,
+            p.visibility
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    conn.query_row(
+        "SELECT id FROM calendar_events WHERE account_id = ?1 AND google_event_id = ?2",
+        params![p.account_id, p.google_event_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| format!("fetch event id: {e}"))
+}
+
+pub fn replace_event_attendees_sync(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+    event_id: &str,
+    attendees: &[CalendarAttendeeWriteRow],
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM calendar_attendees WHERE account_id = ?1 AND event_id = ?2",
+        params![account_id, event_id],
+    )
+    .map_err(|e| format!("delete attendees: {e}"))?;
+
+    for attendee in attendees {
+        if attendee.email.is_empty() {
+            continue;
+        }
+        conn.execute(
+            "INSERT INTO calendar_attendees (event_id, account_id, email, name, rsvp_status, is_organizer)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(account_id, event_id, email) DO UPDATE SET
+                   name = ?4, rsvp_status = ?5, is_organizer = ?6",
+            params![
+                event_id,
+                account_id,
+                attendee.email,
+                attendee.name,
+                attendee.rsvp_status,
+                attendee.is_organizer as i64
+            ],
+        )
+        .map_err(|e| format!("upsert attendee: {e}"))?;
+    }
+
+    Ok(())
+}
+
+pub fn replace_event_reminders_sync(
+    conn: &rusqlite::Connection,
+    account_id: &str,
+    event_id: &str,
+    reminders: &[CalendarReminderWriteRow],
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM calendar_reminders WHERE account_id = ?1 AND event_id = ?2",
+        params![account_id, event_id],
+    )
+    .map_err(|e| format!("delete reminders: {e}"))?;
+
+    for reminder in reminders {
+        conn.execute(
+            "INSERT INTO calendar_reminders (event_id, account_id, minutes_before, method)
+                 VALUES (?1, ?2, ?3, ?4)",
+            params![event_id, account_id, reminder.minutes_before, reminder.method],
+        )
+        .map_err(|e| format!("insert reminder: {e}"))?;
+    }
+
+    Ok(())
+}
+
+pub fn delete_event_by_remote_id_sync(
+    conn: &rusqlite::Connection,
+    calendar_id: &str,
+    remote_event_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM calendar_attendees WHERE event_id IN \
+         (SELECT id FROM calendar_events WHERE calendar_id = ?1 AND remote_event_id = ?2)",
+        params![calendar_id, remote_event_id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM calendar_reminders WHERE event_id IN \
+         (SELECT id FROM calendar_events WHERE calendar_id = ?1 AND remote_event_id = ?2)",
+        params![calendar_id, remote_event_id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM calendar_events WHERE calendar_id = ?1 AND remote_event_id = ?2",
+        params![calendar_id, remote_event_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub async fn db_upsert_calendar_event(
     db: &DbState,
     p: UpsertCalendarEventParams,
