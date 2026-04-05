@@ -3,7 +3,13 @@ use super::super::types::{
     ContactAttachmentRow, ContactStats, DbContact, RecentThread, SameDomainContact,
 };
 use crate::db::FromRow;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
+
+#[derive(Debug, Clone)]
+pub struct ExpandedGroupContact {
+    pub email: String,
+    pub display_name: Option<String>,
+}
 
 pub async fn db_get_all_contacts(
     db: &DbState,
@@ -88,6 +94,22 @@ pub async fn db_update_contact_notes(
         )
         .map_err(|e| e.to_string())?;
         Ok(())
+    })
+    .await
+}
+
+pub async fn db_find_contact_id_by_email(
+    db: &DbState,
+    email: String,
+) -> Result<Option<String>, String> {
+    db.with_conn(move |conn| {
+        conn.query_row(
+            "SELECT id FROM contacts WHERE email = ?1 LIMIT 1",
+            params![email],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())
     })
     .await
 }
@@ -284,6 +306,8 @@ pub struct ContactSettingsEntry {
     pub account_id: Option<String>,
     pub account_color: Option<String>,
     pub groups: Vec<String>,
+    pub source: Option<String>,
+    pub server_id: Option<String>,
 }
 
 /// Load contacts for the settings management list (synchronous).
@@ -292,16 +316,17 @@ pub fn load_contacts_for_settings_sync(
     filter: &str,
 ) -> Result<Vec<ContactSettingsEntry>, String> {
     let trimmed = filter.trim();
-    let pattern = format!("%{trimmed}%");
+    let escaped = trimmed.replace('%', r"\%").replace('_', r"\_");
+    let pattern = format!("%{escaped}%");
 
     let sql = if trimmed.is_empty() {
         "SELECT c.id, c.email, c.display_name, c.email2, c.phone,
-                c.company, c.notes, c.account_id,
+                c.company, c.notes, c.account_id, c.source, c.server_id,
                 a.account_color,
                 GROUP_CONCAT(g.name, '||') AS group_names
          FROM contacts c
-         LEFT JOIN accounts a ON a.id = c.account_id
-         LEFT JOIN contact_group_members m
+        LEFT JOIN accounts a ON a.id = c.account_id
+        LEFT JOIN contact_group_members m
            ON m.member_type = 'email' AND m.member_value = c.email
          LEFT JOIN contact_groups g ON g.id = m.group_id
          WHERE c.source != 'seen'
@@ -311,7 +336,7 @@ pub fn load_contacts_for_settings_sync(
          LIMIT 200"
     } else {
         "SELECT c.id, c.email, c.display_name, c.email2, c.phone,
-                c.company, c.notes, c.account_id,
+                c.company, c.notes, c.account_id, c.source, c.server_id,
                 a.account_color,
                 GROUP_CONCAT(g.name, '||') AS group_names
          FROM contacts c
@@ -320,9 +345,9 @@ pub fn load_contacts_for_settings_sync(
            ON m.member_type = 'email' AND m.member_value = c.email
          LEFT JOIN contact_groups g ON g.id = m.group_id
          WHERE c.source != 'seen'
-           AND (c.email LIKE ?1
-                OR c.display_name LIKE ?1
-                OR c.company LIKE ?1)
+           AND (c.email LIKE ?1 ESCAPE '\\'
+                OR c.display_name LIKE ?1 ESCAPE '\\'
+                OR c.company LIKE ?1 ESCAPE '\\')
          GROUP BY c.id
          ORDER BY c.last_contacted_at DESC NULLS LAST,
                   c.display_name ASC
@@ -350,6 +375,8 @@ pub fn load_contacts_for_settings_sync(
                 account_id: row.get("account_id")?,
                 account_color: row.get("account_color")?,
                 groups,
+                source: row.get("source")?,
+                server_id: row.get("server_id")?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -364,11 +391,12 @@ pub fn save_contact_sync(
     entry: &ContactSettingsEntry,
 ) -> Result<(), String> {
     let now = chrono::Utc::now().timestamp();
+    let source = entry.source.as_deref().unwrap_or("user");
     conn.execute(
         "INSERT INTO contacts (id, email, display_name, email2, phone,
                                company, notes, account_id, source,
                                created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'user', ?9, ?9)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)
          ON CONFLICT(id) DO UPDATE SET
              email = excluded.email,
              display_name = excluded.display_name,
@@ -387,6 +415,7 @@ pub fn save_contact_sync(
             entry.company,
             entry.notes,
             entry.account_id,
+            source,
             now,
         ],
     )

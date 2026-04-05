@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 use super::super::DbState;
 use super::super::types::{DbContactGroup, DbContactGroupMember};
+use super::contacts::ExpandedGroupContact;
 use crate::db::from_row::FromRow;
 
 pub async fn db_create_contact_group(db: &DbState, id: String, name: String) -> Result<(), String> {
@@ -200,6 +201,22 @@ pub async fn db_search_contact_groups(
     .await
 }
 
+pub async fn db_find_contact_group_id_by_name(
+    db: &DbState,
+    name: String,
+) -> Result<Option<String>, String> {
+    db.with_conn(move |conn| {
+        conn.query_row(
+            "SELECT id FROM contact_groups WHERE name = ?1 LIMIT 1",
+            params![name],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())
+    })
+    .await
+}
+
 pub async fn db_expand_contact_group(
     db: &DbState,
     group_id: String,
@@ -213,6 +230,13 @@ pub async fn db_expand_contact_group(
         Ok(result)
     })
     .await
+}
+
+pub async fn db_expand_contact_group_with_names(
+    db: &DbState,
+    group_id: String,
+) -> Result<Vec<ExpandedGroupContact>, String> {
+    db.with_conn(move |conn| expand_group_with_names_sync(conn, &group_id)).await
 }
 
 // ── Synchronous group helpers (for app-layer settings UI) ──
@@ -353,6 +377,70 @@ pub fn delete_group_sync(conn: &rusqlite::Connection, group_id: &str) -> Result<
 
     tx.commit().map_err(|e| format!("commit tx: {e}"))?;
     Ok(())
+}
+
+pub fn expand_group_with_names_sync(
+    conn: &rusqlite::Connection,
+    group_id: &str,
+) -> Result<Vec<ExpandedGroupContact>, String> {
+    fn recurse(
+        conn: &rusqlite::Connection,
+        gid: &str,
+        visited: &mut HashSet<String>,
+        result: &mut Vec<ExpandedGroupContact>,
+        seen_emails: &mut HashSet<String>,
+    ) -> Result<(), String> {
+        if !visited.insert(gid.to_string()) {
+            return Ok(());
+        }
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT member_type, member_value
+                 FROM contact_group_members
+                 WHERE group_id = ?1",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<(String, String)> = stmt
+            .query_map(params![gid], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        for (member_type, member_value) in rows {
+            if member_type == "group" {
+                recurse(conn, &member_value, visited, result, seen_emails)?;
+            } else {
+                let email_lower = member_value.to_lowercase();
+                if seen_emails.insert(email_lower) {
+                    let display_name: Option<String> = conn
+                        .query_row(
+                            "SELECT display_name FROM contacts
+                             WHERE LOWER(email) = LOWER(?1) LIMIT 1",
+                            params![member_value],
+                            |row| row.get(0),
+                        )
+                        .ok()
+                        .flatten();
+                    result.push(ExpandedGroupContact {
+                        email: member_value,
+                        display_name,
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    let mut visited = HashSet::new();
+    let mut result = Vec::new();
+    let mut seen_emails = HashSet::new();
+    recurse(conn, group_id, &mut visited, &mut result, &mut seen_emails)?;
+    result.sort_by(|a, b| a.email.cmp(&b.email));
+    Ok(result)
 }
 
 // ---------------------------------------------------------------------------

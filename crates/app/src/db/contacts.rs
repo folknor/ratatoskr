@@ -1,9 +1,10 @@
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, params};
 
 use rtsk::db::{build_fts_query, make_like_pattern};
 use rtsk::db::queries_extra::{
-    GroupSettingsEntry, delete_group_sync, load_group_member_emails_sync,
-    load_groups_for_settings_sync, save_group_sync,
+    ContactSettingsEntry, GroupSettingsEntry, delete_group_sync, load_contacts_for_settings_sync,
+    load_group_member_emails_sync, load_groups_for_settings_sync, save_contact_sync,
+    save_group_sync,
 };
 
 use super::connection::Db;
@@ -354,29 +355,13 @@ pub struct GroupEntry {
 
 impl Db {
     pub async fn find_contact_id_by_email(&self, email: String) -> Result<Option<String>, String> {
-        self.with_conn(move |conn| {
-            conn.query_row(
-                "SELECT id FROM contacts WHERE email = ?1 LIMIT 1",
-                params![email],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(|e| e.to_string())
-        })
-        .await
+        let db = self.read_db_state();
+        rtsk::db::queries_extra::db_find_contact_id_by_email(&db, email).await
     }
 
     pub async fn find_group_id_by_name(&self, name: String) -> Result<Option<String>, String> {
-        self.with_conn(move |conn| {
-            conn.query_row(
-                "SELECT id FROM contact_groups WHERE name = ?1 LIMIT 1",
-                params![name],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(|e| e.to_string())
-        })
-        .await
+        let db = self.read_db_state();
+        rtsk::db::queries_extra::db_find_contact_group_id_by_name(&db, name).await
     }
 
     /// Load contacts for the settings management list, optionally
@@ -385,8 +370,26 @@ impl Db {
         &self,
         filter: String,
     ) -> Result<Vec<ContactEntry>, String> {
-        self.with_conn(move |conn| load_contacts_filtered(conn, &filter))
-            .await
+        self.with_conn(move |conn| {
+            Ok(load_contacts_for_settings_sync(conn, &filter)?
+                .into_iter()
+                .map(|row| ContactEntry {
+                    id: row.id,
+                    email: row.email,
+                    display_name: row.display_name,
+                    email2: row.email2,
+                    phone: row.phone,
+                    company: row.company,
+                    notes: row.notes,
+                    account_id: row.account_id,
+                    account_color: row.account_color,
+                    groups: row.groups,
+                    source: row.source,
+                    server_id: row.server_id,
+                })
+                .collect())
+        })
+        .await
     }
 
     /// Load contact groups for the settings management list.
@@ -418,14 +421,36 @@ impl Db {
         &self,
         group_id: String,
     ) -> Result<Vec<(String, Option<String>)>, String> {
-        self.with_conn(move |conn| expand_group_with_names(conn, &group_id))
-            .await
+        let db = self.read_db_state();
+        Ok(rtsk::db::queries_extra::db_expand_contact_group_with_names(&db, group_id)
+            .await?
+            .into_iter()
+            .map(|row| (row.email, row.display_name))
+            .collect())
     }
 
     /// Insert or update a contact.
     pub async fn save_contact(&self, entry: ContactEntry) -> Result<(), String> {
-        self.with_write_conn(move |conn| save_contact_inner(conn, &entry))
-            .await
+        self.with_write_conn(move |conn| {
+            save_contact_sync(
+                conn,
+                &ContactSettingsEntry {
+                    id: entry.id,
+                    email: entry.email,
+                    display_name: entry.display_name,
+                    email2: entry.email2,
+                    phone: entry.phone,
+                    company: entry.company,
+                    notes: entry.notes,
+                    account_id: entry.account_id,
+                    account_color: entry.account_color,
+                    groups: entry.groups,
+                    source: entry.source,
+                    server_id: entry.server_id,
+                },
+            )
+        })
+        .await
     }
 
     /// Insert or update a contact group.
@@ -455,178 +480,4 @@ impl Db {
         self.with_write_conn(move |conn| delete_group_sync(conn, &group_id))
         .await
     }
-}
-
-/// Load contacts with group memberships via a single JOIN query
-/// (replaces the N+1 pattern of calling load_contact_groups per
-/// contact).
-fn load_contacts_filtered(conn: &Connection, filter: &str) -> Result<Vec<ContactEntry>, String> {
-    let trimmed = filter.trim();
-    let escaped = trimmed.replace('%', r"\%").replace('_', r"\_");
-    let pattern = format!("%{escaped}%");
-
-    // Single query that JOINs contacts with their group memberships.
-    let sql = if trimmed.is_empty() {
-        "SELECT c.id, c.email, c.display_name, c.email2, c.phone,
-                c.company, c.notes, c.account_id, c.source, c.server_id,
-                a.account_color,
-                GROUP_CONCAT(g.name, '||') AS group_names
-         FROM contacts c
-         LEFT JOIN accounts a ON a.id = c.account_id
-         LEFT JOIN contact_group_members m
-           ON m.member_type = 'email' AND m.member_value = c.email
-         LEFT JOIN contact_groups g ON g.id = m.group_id
-         WHERE c.source != 'seen'
-         GROUP BY c.id
-         ORDER BY c.last_contacted_at DESC NULLS LAST,
-                  c.display_name ASC
-         LIMIT 200"
-    } else {
-        "SELECT c.id, c.email, c.display_name, c.email2, c.phone,
-                c.company, c.notes, c.account_id, c.source, c.server_id,
-                a.account_color,
-                GROUP_CONCAT(g.name, '||') AS group_names
-         FROM contacts c
-         LEFT JOIN accounts a ON a.id = c.account_id
-         LEFT JOIN contact_group_members m
-           ON m.member_type = 'email' AND m.member_value = c.email
-         LEFT JOIN contact_groups g ON g.id = m.group_id
-         WHERE c.source != 'seen'
-           AND (c.email LIKE ?1 ESCAPE '\\'
-                OR c.display_name LIKE ?1 ESCAPE '\\'
-                OR c.company LIKE ?1 ESCAPE '\\')
-         GROUP BY c.id
-         ORDER BY c.last_contacted_at DESC NULLS LAST,
-                  c.display_name ASC
-         LIMIT 200"
-    };
-
-    let db_params: &[&dyn rusqlite::types::ToSql] =
-        if trimmed.is_empty() { &[] } else { &[&pattern] };
-
-    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(db_params, |row| {
-            let group_names: Option<String> = row.get("group_names")?;
-            let groups = group_names
-                .map(|s| s.split("||").map(String::from).collect::<Vec<_>>())
-                .unwrap_or_default();
-            Ok(ContactEntry {
-                id: row.get("id")?,
-                email: row.get("email")?,
-                display_name: row.get("display_name")?,
-                email2: row.get("email2")?,
-                phone: row.get("phone")?,
-                company: row.get("company")?,
-                notes: row.get("notes")?,
-                account_id: row.get("account_id")?,
-                account_color: row.get("account_color")?,
-                groups,
-                source: row.get("source")?,
-                server_id: row.get("server_id")?,
-            })
-        })
-        .map_err(|e| e.to_string())?;
-
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
-}
-
-/// Expand a contact group into (email, display_name) pairs.
-/// Recursively expands nested groups (group-type members) with cycle
-/// detection via a visited set.
-fn expand_group_with_names(
-    conn: &Connection,
-    group_id: &str,
-) -> Result<Vec<(String, Option<String>)>, String> {
-    use std::collections::HashSet;
-
-    fn recurse(
-        conn: &Connection,
-        gid: &str,
-        visited: &mut HashSet<String>,
-        result: &mut Vec<(String, Option<String>)>,
-        seen_emails: &mut HashSet<String>,
-    ) -> Result<(), String> {
-        if !visited.insert(gid.to_string()) {
-            return Ok(()); // cycle
-        }
-        let mut stmt = conn
-            .prepare(
-                "SELECT member_type, member_value
-                 FROM contact_group_members
-                 WHERE group_id = ?1",
-            )
-            .map_err(|e| e.to_string())?;
-        let rows: Vec<(String, String)> = stmt
-            .query_map(params![gid], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-
-        for (member_type, member_value) in rows {
-            if member_type == "group" {
-                recurse(conn, &member_value, visited, result, seen_emails)?;
-            } else {
-                let email_lower = member_value.to_lowercase();
-                if seen_emails.insert(email_lower) {
-                    // Look up display name from contacts table
-                    let display_name: Option<String> = conn
-                        .query_row(
-                            "SELECT display_name FROM contacts
-                             WHERE LOWER(email) = LOWER(?1) LIMIT 1",
-                            params![member_value],
-                            |row| row.get(0),
-                        )
-                        .ok()
-                        .flatten();
-                    result.push((member_value, display_name));
-                }
-            }
-        }
-        Ok(())
-    }
-
-    let mut visited = HashSet::new();
-    let mut result = Vec::new();
-    let mut seen_emails = HashSet::new();
-    recurse(conn, group_id, &mut visited, &mut result, &mut seen_emails)?;
-    result.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(result)
-}
-
-fn save_contact_inner(conn: &Connection, entry: &ContactEntry) -> Result<(), String> {
-    let now = chrono::Utc::now().timestamp();
-    let source = entry.source.as_deref().unwrap_or("user");
-    conn.execute(
-        "INSERT INTO contacts (id, email, display_name, email2, phone,
-                               company, notes, account_id, source,
-                               created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)
-         ON CONFLICT(id) DO UPDATE SET
-             email = excluded.email,
-             display_name = excluded.display_name,
-             email2 = excluded.email2,
-             phone = excluded.phone,
-             company = excluded.company,
-             notes = excluded.notes,
-             account_id = excluded.account_id,
-             updated_at = excluded.updated_at",
-        params![
-            entry.id,
-            entry.email,
-            entry.display_name,
-            entry.email2,
-            entry.phone,
-            entry.company,
-            entry.notes,
-            entry.account_id,
-            source,
-            now,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
 }
