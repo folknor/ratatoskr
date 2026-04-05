@@ -1,7 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::params;
-
 use crate::db::DbState;
 use crate::db::queries_extra::calendars::{
     UpsertCalendarEventParams, db_delete_events_for_calendar, db_update_calendar_sync_token,
@@ -186,21 +184,11 @@ async fn sync_calendar_events(
         let cal_id = calendar_id.to_string();
         let deleted_owned = deleted_uris;
         db.with_conn(move |conn| {
-            for uri in &deleted_owned {
-                conn.execute(
-                    "DELETE FROM calendar_events WHERE calendar_id = ?1 AND remote_event_id = ?2",
-                    params![cal_id, uri],
-                )
-                .map_err(|e| format!("delete caldav event: {e}"))?;
-
-                // Also remove from mapping table
-                conn.execute(
-                    "DELETE FROM caldav_event_map WHERE calendar_id = ?1 AND uri = ?2",
-                    params![cal_id, uri],
-                )
-                .map_err(|e| format!("delete caldav event map: {e}"))?;
-            }
-            Ok(())
+            crate::db::queries_extra::caldav_sync::delete_caldav_events_sync(
+                conn,
+                &cal_id,
+                &deleted_owned,
+            )
         })
         .await?;
     }
@@ -277,14 +265,13 @@ async fn upsert_parsed_event(
     let etag_owned = etag.to_string();
     let uid_for_map = uid.clone();
     db.with_conn(move |conn| {
-        conn.execute(
-            "INSERT OR REPLACE INTO caldav_event_map \
-             (uri, calendar_id, event_uid, etag) \
-             VALUES (?1, ?2, ?3, ?4)",
-            params![uri_owned, cal_id, uid_for_map, etag_owned],
+        crate::db::queries_extra::caldav_sync::upsert_caldav_event_map_sync(
+            conn,
+            &uri_owned,
+            &cal_id,
+            &uid_for_map,
+            &etag_owned,
         )
-        .map_err(|e| format!("upsert caldav event map: {e}"))?;
-        Ok(())
     })
     .await?;
 
@@ -313,57 +300,28 @@ async fn sync_event_attendees(
 
     let aid = account_id.to_string();
     let geid = google_event_id.to_string();
-    let attendees = event.attendees.clone();
+    let db_attendees: Vec<crate::db::queries_extra::caldav_sync::CalDavAttendee> = event
+        .attendees
+        .iter()
+        .map(|a| crate::db::queries_extra::caldav_sync::CalDavAttendee {
+            email: a.email.clone(),
+            name: a.name.clone(),
+            partstat: a.partstat.clone(),
+            is_organizer: a.is_organizer,
+        })
+        .collect();
     let organizer_email = event.organizer_email.clone();
     let organizer_name = event.organizer_name.clone();
 
     db.with_conn(move |conn| {
-        // Find the event id
-        let event_id: Option<String> = conn
-            .query_row(
-                "SELECT id FROM calendar_events WHERE account_id = ?1 AND google_event_id = ?2",
-                params![aid, geid],
-                |row| row.get("id"),
-            )
-            .ok();
-
-        let Some(event_id) = event_id else {
-            return Ok(());
-        };
-
-        // Delete old attendees
-        conn.execute(
-            "DELETE FROM calendar_attendees WHERE account_id = ?1 AND event_id = ?2",
-            params![aid, event_id],
+        crate::db::queries_extra::caldav_sync::sync_caldav_attendees_sync(
+            conn,
+            &aid,
+            &geid,
+            &db_attendees,
+            organizer_email.as_deref(),
+            organizer_name.as_deref(),
         )
-        .map_err(|e| format!("delete attendees: {e}"))?;
-
-        // Insert attendees
-        for att in &attendees {
-            let rsvp = att.partstat.as_deref().map(str::to_lowercase);
-            conn.execute(
-                "INSERT INTO calendar_attendees (event_id, account_id, email, name, rsvp_status, is_organizer) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![event_id, aid, att.email, att.name, rsvp, att.is_organizer as i64],
-            )
-            .map_err(|e| format!("insert attendee: {e}"))?;
-        }
-
-        // Add organizer as attendee if not already in the list
-        if let Some(ref org_email) = organizer_email {
-            let org_lower = org_email.to_lowercase();
-            let already_present = attendees.iter().any(|a| a.email.to_lowercase() == org_lower);
-            if !already_present {
-                conn.execute(
-                    "INSERT INTO calendar_attendees (event_id, account_id, email, name, rsvp_status, is_organizer) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, 1)",
-                    params![event_id, aid, org_email, organizer_name, "accepted"],
-                )
-                .map_err(|e| format!("insert organizer attendee: {e}"))?;
-            }
-        }
-
-        Ok(())
     })
     .await
 }
@@ -381,39 +339,22 @@ async fn sync_event_reminders(
 
     let aid = account_id.to_string();
     let geid = google_event_id.to_string();
-    let reminders = event.reminders.clone();
+    let db_reminders: Vec<crate::db::queries_extra::caldav_sync::CalDavReminder> = event
+        .reminders
+        .iter()
+        .map(|r| crate::db::queries_extra::caldav_sync::CalDavReminder {
+            minutes_before: r.minutes_before,
+            method: r.method.clone(),
+        })
+        .collect();
 
     db.with_conn(move |conn| {
-        let event_id: Option<String> = conn
-            .query_row(
-                "SELECT id FROM calendar_events WHERE account_id = ?1 AND google_event_id = ?2",
-                params![aid, geid],
-                |row| row.get("id"),
-            )
-            .ok();
-
-        let Some(event_id) = event_id else {
-            return Ok(());
-        };
-
-        // Delete old reminders
-        conn.execute(
-            "DELETE FROM calendar_reminders WHERE account_id = ?1 AND event_id = ?2",
-            params![aid, event_id],
+        crate::db::queries_extra::caldav_sync::sync_caldav_reminders_sync(
+            conn,
+            &aid,
+            &geid,
+            &db_reminders,
         )
-        .map_err(|e| format!("delete reminders: {e}"))?;
-
-        // Insert reminders
-        for rem in &reminders {
-            conn.execute(
-                "INSERT INTO calendar_reminders (event_id, account_id, minutes_before, method) \
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![event_id, aid, rem.minutes_before, rem.method],
-            )
-            .map_err(|e| format!("insert reminder: {e}"))?;
-        }
-
-        Ok(())
     })
     .await
 }
@@ -426,45 +367,18 @@ async fn sync_event_reminders(
 async fn load_calendar_ctag(db: &DbState, calendar_id: &str) -> Result<Option<String>, String> {
     let cid = calendar_id.to_string();
     db.with_conn(move |conn| {
-        conn.query_row(
-            "SELECT ctag FROM calendars WHERE id = ?1",
-            params![cid],
-            |row| row.get::<_, Option<String>>("ctag"),
-        )
-        .map_err(|e| format!("load calendar ctag: {e}"))
+        crate::db::queries_extra::caldav_sync::load_calendar_ctag_sync(conn, &cid)
     })
     .await
 }
 
-/// Load stored ETags for events in a calendar from the mapping table.
 async fn load_stored_etags(
     db: &DbState,
     calendar_id: &str,
 ) -> Result<HashMap<String, String>, String> {
     let cid = calendar_id.to_string();
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare("SELECT uri, etag FROM caldav_event_map WHERE calendar_id = ?1")
-            .map_err(|e| format!("prepare etag query: {e}"))?;
-
-        let rows = stmt
-            .query_map(params![cid], |row| {
-                Ok((
-                    row.get::<_, String>("uri")?,
-                    row.get::<_, Option<String>>("etag")?,
-                ))
-            })
-            .map_err(|e| format!("query etags: {e}"))?;
-
-        let mut map = HashMap::new();
-        for row in rows {
-            let (uri, etag) = row.map_err(|e| format!("read etag row: {e}"))?;
-            if let Some(etag) = etag {
-                map.insert(uri, etag);
-            }
-        }
-
-        Ok(map)
+        crate::db::queries_extra::caldav_sync::load_caldav_etags_sync(conn, &cid)
     })
     .await
 }
@@ -485,12 +399,7 @@ pub async fn full_resync_calendar(
     // Clear the event map
     let cid = calendar_id.to_string();
     db.with_conn(move |conn| {
-        conn.execute(
-            "DELETE FROM caldav_event_map WHERE calendar_id = ?1",
-            params![cid],
-        )
-        .map_err(|e| format!("clear caldav event map: {e}"))?;
-        Ok(())
+        crate::db::queries_extra::caldav_sync::clear_caldav_event_map_sync(conn, &cid)
     })
     .await?;
 

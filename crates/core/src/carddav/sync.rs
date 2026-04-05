@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::params;
-
 use crate::db::DbState;
+use crate::db::queries_extra::contact_carddav::CarddavContactUpsert;
 
 use super::client::CardDavClient;
 use super::parse::{self, ParsedVCard};
@@ -116,29 +115,40 @@ pub async fn sync_carddav_contacts(
         }
     }
 
-    let upserted = parsed_contacts.len();
+    // Map parsed vCards to db upsert structs
+    let mut upserts = Vec::with_capacity(parsed_contacts.len());
+    for (uri, etag, parsed) in &parsed_contacts {
+        let email = match &parsed.email {
+            Some(e) => e.clone(),
+            None => continue,
+        };
+        let display_name = parsed
+            .display_name
+            .clone()
+            .unwrap_or_else(|| email.clone());
+        upserts.push(CarddavContactUpsert {
+            uri: uri.clone(),
+            etag: etag.clone(),
+            email,
+            display_name,
+            avatar_url: parsed.photo_url.clone(),
+            phone: parsed.phone.clone(),
+            company: parsed.organization.clone(),
+        });
+    }
+    let upserted = upserts.len();
     let deleted_count = deleted_uris.len();
 
-    // Persist to database
+    // Persist to database via db layer (single transaction)
     let aid = account_id.to_string();
     let deleted_owned = deleted_uris;
     db.with_conn(move |conn| {
-        let tx = conn
-            .unchecked_transaction()
-            .map_err(|e| format!("begin tx: {e}"))?;
-
-        // Upsert changed/new contacts
-        for (uri, etag, parsed) in &parsed_contacts {
-            persist_carddav_contact(&tx, &aid, uri, etag, parsed)?;
-        }
-
-        // Delete removed contacts
-        for uri in &deleted_owned {
-            delete_carddav_contact(&tx, &aid, uri)?;
-        }
-
-        tx.commit().map_err(|e| format!("commit tx: {e}"))?;
-        Ok(())
+        crate::db::queries_extra::contact_carddav::persist_carddav_contacts_sync(
+            conn,
+            &aid,
+            &upserts,
+            &deleted_owned,
+        )
     })
     .await?;
 
@@ -162,164 +172,29 @@ pub async fn sync_carddav_contacts(
 // ---------------------------------------------------------------------------
 // Persistence helpers
 // ---------------------------------------------------------------------------
-
-fn persist_carddav_contact(
-    conn: &rusqlite::Connection,
-    account_id: &str,
-    uri: &str,
-    etag: &str,
-    parsed: &ParsedVCard,
-) -> Result<(), String> {
-    let email = parsed.email.as_ref().ok_or("contact has no email")?;
-
-    let local_id = format!("carddav-{account_id}-{email}");
-    let display_name = parsed.display_name.as_deref().unwrap_or(email.as_str());
-    let avatar_url = parsed.photo_url.as_deref();
-
-    // Upsert into contacts table — don't overwrite user-edited or higher-priority sources
-    conn.execute(
-        "INSERT INTO contacts (id, email, display_name, avatar_url, phone, company,
-                               source, account_id, server_id) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'carddav', ?7, ?8) \
-         ON CONFLICT(email) DO UPDATE SET \
-           display_name = CASE \
-             WHEN contacts.source = 'user' THEN contacts.display_name \
-             WHEN contacts.display_name_overridden = 1 THEN contacts.display_name \
-             ELSE COALESCE(excluded.display_name, contacts.display_name) \
-           END, \
-           avatar_url = CASE \
-             WHEN contacts.source = 'user' THEN contacts.avatar_url \
-             ELSE COALESCE(excluded.avatar_url, contacts.avatar_url) \
-           END, \
-           phone = CASE \
-             WHEN contacts.source = 'user' THEN contacts.phone \
-             ELSE COALESCE(excluded.phone, contacts.phone) \
-           END, \
-           company = CASE \
-             WHEN contacts.source = 'user' THEN contacts.company \
-             ELSE COALESCE(excluded.company, contacts.company) \
-           END, \
-           source = CASE \
-             WHEN contacts.source = 'user' THEN 'user' \
-             ELSE 'carddav' \
-           END, \
-           account_id = COALESCE(excluded.account_id, contacts.account_id), \
-           server_id = COALESCE(excluded.server_id, contacts.server_id), \
-           updated_at = unixepoch()",
-        params![
-            local_id,
-            email,
-            display_name,
-            avatar_url,
-            parsed.phone,
-            parsed.organization,
-            account_id,
-            uri,
-        ],
-    )
-    .map_err(|e| format!("upsert carddav contact: {e}"))?;
-
-    // Track in mapping table
-    conn.execute(
-        "INSERT OR REPLACE INTO carddav_contact_map \
-         (uri, account_id, contact_email, etag) \
-         VALUES (?1, ?2, ?3, ?4)",
-        params![uri, account_id, email, etag],
-    )
-    .map_err(|e| format!("upsert carddav contact map: {e}"))?;
-
-    Ok(())
-}
-
-fn delete_carddav_contact(
-    conn: &rusqlite::Connection,
-    account_id: &str,
-    uri: &str,
-) -> Result<(), String> {
-    // Look up the email for this CardDAV contact
-    let email: Option<String> = conn
-        .query_row(
-            "SELECT contact_email FROM carddav_contact_map \
-             WHERE uri = ?1 AND account_id = ?2",
-            params![uri, account_id],
-            |row| row.get("contact_email"),
-        )
-        .ok();
-
-    // Remove the mapping row
-    conn.execute(
-        "DELETE FROM carddav_contact_map \
-         WHERE uri = ?1 AND account_id = ?2",
-        params![uri, account_id],
-    )
-    .map_err(|e| format!("delete carddav contact map: {e}"))?;
-
-    // Only delete the contacts row if no other mapping references that email
-    if let Some(ref email) = email {
-        let carddav_remaining: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) AS cnt FROM carddav_contact_map WHERE contact_email = ?1",
-                params![email],
-                |row| row.get("cnt"),
-            )
-            .map_err(|e| format!("count remaining carddav mappings: {e}"))?;
-
-        // Also check other providers' mappings
-        let google_remaining: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) AS cnt FROM google_contact_map WHERE contact_email = ?1",
-                params![email],
-                |row| row.get("cnt"),
-            )
-            .unwrap_or(0);
-
-        let graph_remaining: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) AS cnt FROM graph_contact_map WHERE email = ?1",
-                params![email],
-                |row| row.get("cnt"),
-            )
-            .unwrap_or(0);
-
-        if carddav_remaining == 0 && google_remaining == 0 && graph_remaining == 0 {
-            conn.execute(
-                "DELETE FROM contacts WHERE email = ?1 AND source = 'carddav'",
-                params![email],
-            )
-            .map_err(|e| format!("delete orphaned carddav contact: {e}"))?;
-        }
-    }
-
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// CTag persistence (settings table)
+// CTag / ETag / persist / delete — delegated to db
 // ---------------------------------------------------------------------------
 
 async fn load_ctag(db: &DbState, account_id: &str) -> Result<Option<String>, String> {
-    let key = format!("carddav_ctag:{account_id}");
-    db.with_conn(move |conn| crate::db::get_setting(conn, &key))
-        .await
-}
-
-async fn save_ctag(db: &DbState, account_id: &str, ctag: &str) -> Result<(), String> {
-    let key = format!("carddav_ctag:{account_id}");
-    let ctag_owned = ctag.to_string();
+    let aid = account_id.to_string();
     db.with_conn(move |conn| {
-        conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
-            params![key, ctag_owned],
-        )
-        .map_err(|e| format!("save carddav ctag: {e}"))?;
-        Ok(())
+        crate::db::queries_extra::contact_carddav::load_carddav_ctag_sync(conn, &aid)
     })
     .await
 }
 
-// ---------------------------------------------------------------------------
-// ETag loading for incremental sync
-// ---------------------------------------------------------------------------
+async fn save_ctag(db: &DbState, account_id: &str, ctag: &str) -> Result<(), String> {
+    let aid = account_id.to_string();
+    let ctag_owned = ctag.to_string();
+    db.with_conn(move |conn| {
+        crate::db::queries_extra::contact_carddav::save_carddav_ctag_sync(
+            conn,
+            &aid,
+            &ctag_owned,
+        )
+    })
+    .await
+}
 
 async fn load_stored_etags(
     db: &DbState,
@@ -327,28 +202,7 @@ async fn load_stored_etags(
 ) -> Result<HashMap<String, String>, String> {
     let aid = account_id.to_string();
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare("SELECT uri, etag FROM carddav_contact_map WHERE account_id = ?1")
-            .map_err(|e| format!("prepare etag query: {e}"))?;
-
-        let rows = stmt
-            .query_map(params![aid], |row| {
-                Ok((
-                    row.get::<_, String>("uri")?,
-                    row.get::<_, Option<String>>("etag")?,
-                ))
-            })
-            .map_err(|e| format!("query etags: {e}"))?;
-
-        let mut map = HashMap::new();
-        for row in rows {
-            let (uri, etag) = row.map_err(|e| format!("read etag row: {e}"))?;
-            if let Some(etag) = etag {
-                map.insert(uri, etag);
-            }
-        }
-
-        Ok(map)
+        crate::db::queries_extra::contact_carddav::load_carddav_etags_sync(conn, &aid)
     })
     .await
 }
