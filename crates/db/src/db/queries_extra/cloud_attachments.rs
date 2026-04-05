@@ -167,16 +167,10 @@ pub fn insert_incoming_cloud_links_sync(
 
     let mut count: usize = 0;
     for (provider, url) in links {
-        count += conn
-            .execute(
-                "INSERT OR IGNORE INTO cloud_attachments
-                    (message_id, account_id, direction, provider, cloud_url, upload_status)
-                 VALUES (?1, ?2, 'incoming', ?3, ?4, 'complete')",
-                params![message_id, account_id, provider, url],
-            )
+        count += stmt
+            .execute(params![message_id, account_id, provider, url])
             .map_err(|e| e.to_string())?;
     }
-    drop(stmt);
 
     Ok(count)
 }
