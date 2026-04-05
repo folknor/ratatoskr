@@ -9,7 +9,7 @@ use crate::provider::folder_roles::SYSTEM_FOLDER_ROLES;
 
 use crate::db::from_row::FromRow;
 
-use db::db::queries_extra::scoped_queries::{get_draft_count_with_local, get_unread_counts_by_folder};
+use crate::db::queries_extra::scoped_queries::{get_draft_count_with_local, get_unread_counts_by_folder};
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -477,7 +477,7 @@ pub fn get_shared_mailbox_navigation(
 ///
 /// Returns `None` if no rights are set (all fields are `None`), meaning
 /// the provider doesn't supply rights data for this label.
-fn rights_from_label(label: &db::db::types::DbLabel) -> Option<MailboxRightsInfo> {
+fn rights_from_label(label: &crate::db::types::DbLabel) -> Option<MailboxRightsInfo> {
     if label.right_read.is_none() {
         return None;
     }

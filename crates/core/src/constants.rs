@@ -25,6 +25,5 @@ pub const DAV_CLIENT_TIMEOUT: Duration = Duration::from_secs(30);
 // Query defaults
 // ---------------------------------------------------------------------------
 
-/// Default row limit for list queries (contacts, search candidates, dedup
-/// batches) when the caller doesn't specify an explicit limit.
-pub const DEFAULT_QUERY_LIMIT: i64 = 500;
+/// Re-export from `db` — the canonical definition lives at the storage layer.
+pub use db::db::DEFAULT_QUERY_LIMIT;

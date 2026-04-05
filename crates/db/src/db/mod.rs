@@ -11,6 +11,10 @@ pub mod types;
 pub use from_row::{FromRow, query_as, query_one};
 pub use rusqlite::Connection;
 
+/// Default row limit for queries (contact lists, search results, thread
+/// batches) when the caller doesn't specify an explicit limit.
+pub const DEFAULT_QUERY_LIMIT: i64 = 500;
+
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
