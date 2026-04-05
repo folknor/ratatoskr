@@ -1,5 +1,6 @@
-use rusqlite::{Connection, OptionalExtension};
-
+use crate::db::Connection;
+use crate::db::queries_extra::{get_account_sync, get_all_accounts_sync};
+use crate::db::types::DbAccount;
 use crate::provider::crypto::{decrypt_value, is_encrypted};
 use crate::sync::config;
 
@@ -25,31 +26,17 @@ pub fn get_caldav_connection_info(
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<Option<CaldavConnectionInfo>, String> {
-    let Some(row) = conn
-        .query_row(
-            "SELECT email, caldav_url, caldav_username, caldav_password FROM accounts WHERE id = ?1",
-            rusqlite::params![account_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>("email")?,
-                    row.get::<_, Option<String>>("caldav_url")?,
-                    row.get::<_, Option<String>>("caldav_username")?,
-                    row.get::<_, Option<String>>("caldav_password")?,
-                ))
-            },
-        )
-        .optional()
-        .map_err(|e| format!("query caldav account: {e}"))?
+    let Some(account) = get_account_sync(conn, account_id)?
     else {
         return Ok(None);
     };
 
-    let server_url = row
-        .1
+    let server_url = account
+        .caldav_url
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "CalDAV credentials not configured".to_string())?;
-    let password_raw = row
-        .3
+    let password_raw = account
+        .caldav_password
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "CalDAV credentials not configured".to_string())?;
     let password = if is_encrypted(&password_raw) {
@@ -57,10 +44,10 @@ pub fn get_caldav_connection_info(
     } else {
         password_raw
     };
-    let username = row
-        .2
+    let username = account
+        .caldav_username
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or(row.0);
+        .unwrap_or(account.email);
 
     Ok(Some(CaldavConnectionInfo {
         server_url,
@@ -73,44 +60,11 @@ pub fn get_basic_info(
     conn: &Connection,
     account_id: &str,
 ) -> Result<Option<AccountBasicInfo>, String> {
-    conn.query_row(
-        "SELECT id, email, display_name, avatar_url, provider, is_active FROM accounts WHERE id = ?1",
-        rusqlite::params![account_id],
-        |row| {
-            Ok(AccountBasicInfo {
-                id: row.get("id")?,
-                email: row.get("email")?,
-                display_name: row.get("display_name")?,
-                avatar_url: row.get("avatar_url")?,
-                provider: row.get("provider")?,
-                is_active: row.get::<_, i64>("is_active")? != 0,
-            })
-        },
-    )
-    .optional()
-    .map_err(|e| format!("query account basic info: {e}"))
+    get_account_sync(conn, account_id).map(|account| account.map(map_basic_info))
 }
 
 pub fn list_basic_info(conn: &Connection) -> Result<Vec<AccountBasicInfo>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, email, display_name, avatar_url, provider, is_active \
-             FROM accounts ORDER BY created_at ASC",
-        )
-        .map_err(|e| format!("prepare account list: {e}"))?;
-    stmt.query_map([], |row| {
-        Ok(AccountBasicInfo {
-            id: row.get("id")?,
-            email: row.get("email")?,
-            display_name: row.get("display_name")?,
-            avatar_url: row.get("avatar_url")?,
-            provider: row.get("provider")?,
-            is_active: row.get::<_, i64>("is_active")? != 0,
-        })
-    })
-    .map_err(|e| format!("query account list: {e}"))?
-    .collect::<Result<Vec<_>, _>>()
-    .map_err(|e| format!("collect account list: {e}"))
+    get_all_accounts_sync(conn).map(|accounts| accounts.into_iter().map(map_basic_info).collect())
 }
 
 pub fn get_caldav_settings_info(
@@ -118,13 +72,9 @@ pub fn get_caldav_settings_info(
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<Option<AccountCaldavSettingsInfo>, String> {
-    conn.query_row(
-        "SELECT id, email, caldav_url, caldav_username, caldav_password, calendar_provider \
-         FROM accounts WHERE id = ?1",
-        rusqlite::params![account_id],
-        |row| {
-            let password_raw: Option<String> = row.get("caldav_password")?;
-            let caldav_password = password_raw.map(|raw| {
+    get_account_sync(conn, account_id).map(|account| {
+        account.map(|account| {
+            let caldav_password = account.caldav_password.map(|raw| {
                 if is_encrypted(&raw) {
                     decrypt_value(encryption_key, &raw).unwrap_or(raw)
                 } else {
@@ -132,18 +82,16 @@ pub fn get_caldav_settings_info(
                 }
             });
 
-            Ok(AccountCaldavSettingsInfo {
-                id: row.get("id")?,
-                email: row.get("email")?,
-                caldav_url: row.get("caldav_url")?,
-                caldav_username: row.get("caldav_username")?,
+            AccountCaldavSettingsInfo {
+                id: account.id,
+                email: account.email,
+                caldav_url: account.caldav_url,
+                caldav_username: account.caldav_username,
                 caldav_password,
-                calendar_provider: row.get("calendar_provider")?,
-            })
-        },
-    )
-    .optional()
-    .map_err(|e| format!("query account caldav settings info: {e}"))
+                calendar_provider: account.calendar_provider,
+            }
+        })
+    })
 }
 
 pub fn get_oauth_credentials(
@@ -151,28 +99,14 @@ pub fn get_oauth_credentials(
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<Option<AccountOAuthCredentials>, String> {
-    conn.query_row(
-        "SELECT provider, oauth_client_id, oauth_client_secret
-         FROM accounts
-         WHERE id = ?1",
-        rusqlite::params![account_id],
-        |row| {
-            Ok((
-                row.get::<_, String>("provider")?,
-                row.get::<_, Option<String>>("oauth_client_id")?,
-                row.get::<_, Option<String>>("oauth_client_secret")?,
-            ))
-        },
-    )
-    .optional()
-    .map_err(|e| format!("query account oauth credentials: {e}"))
-    .map(|result| {
-        result.and_then(|(provider, client_id, client_secret)| {
-            if provider != "gmail_api" && provider != "graph" {
+    get_account_sync(conn, account_id).map(|account| {
+        account.and_then(|account| {
+            if account.provider != "gmail_api" && account.provider != "graph" {
                 return None;
             }
 
-            let client_id = client_id
+            let client_id = account
+                .oauth_client_id
                 .filter(|value| !value.trim().is_empty())
                 .map(|value| {
                     if is_encrypted(&value) {
@@ -181,16 +115,16 @@ pub fn get_oauth_credentials(
                         value
                     }
                 })?;
-            let client_secret =
-                client_secret
-                    .filter(|value| !value.trim().is_empty())
-                    .map(|value| {
-                        if is_encrypted(&value) {
-                            decrypt_value(encryption_key, &value).unwrap_or(value)
-                        } else {
-                            value
-                        }
-                    });
+            let client_secret = account
+                .oauth_client_secret
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| {
+                    if is_encrypted(&value) {
+                        decrypt_value(encryption_key, &value).unwrap_or(value)
+                    } else {
+                        value
+                    }
+                });
 
             Some(AccountOAuthCredentials {
                 client_id,
@@ -198,4 +132,15 @@ pub fn get_oauth_credentials(
             })
         })
     })
+}
+
+fn map_basic_info(account: DbAccount) -> AccountBasicInfo {
+    AccountBasicInfo {
+        id: account.id,
+        email: account.email,
+        display_name: account.display_name,
+        avatar_url: account.avatar_url,
+        provider: account.provider,
+        is_active: account.is_active != 0,
+    }
 }

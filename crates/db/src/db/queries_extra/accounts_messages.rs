@@ -48,26 +48,14 @@ fn row_to_account(row: &Row<'_>) -> rusqlite::Result<DbAccount> {
 
 pub async fn db_get_all_accounts(db: &DbState) -> Result<Vec<DbAccount>, String> {
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare("SELECT * FROM accounts ORDER BY sort_order ASC, created_at ASC")
-            .map_err(|e| e.to_string())?;
-        stmt.query_map([], row_to_account)
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
+        get_all_accounts_sync(conn)
     })
     .await
 }
 
 pub async fn db_get_account(db: &DbState, id: String) -> Result<Option<DbAccount>, String> {
     db.with_conn(move |conn| {
-        Ok(conn
-            .query_row(
-                "SELECT * FROM accounts WHERE id = ?1",
-                params![id],
-                row_to_account,
-            )
-            .ok())
+        get_account_sync(conn, &id)
     })
     .await
 }
@@ -86,6 +74,26 @@ pub async fn db_get_account_by_email(
             .ok())
     })
     .await
+}
+
+pub fn get_account_sync(conn: &rusqlite::Connection, id: &str) -> Result<Option<DbAccount>, String> {
+    Ok(conn
+        .query_row(
+            "SELECT * FROM accounts WHERE id = ?1",
+            params![id],
+            row_to_account,
+        )
+        .ok())
+}
+
+pub fn get_all_accounts_sync(conn: &rusqlite::Connection) -> Result<Vec<DbAccount>, String> {
+    let mut stmt = conn
+        .prepare("SELECT * FROM accounts ORDER BY sort_order ASC, created_at ASC")
+        .map_err(|e| e.to_string())?;
+    stmt.query_map([], row_to_account)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 pub fn get_active_account_ids_sync(conn: &rusqlite::Connection) -> Result<Vec<String>, String> {

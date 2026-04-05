@@ -1,6 +1,6 @@
 use super::super::DbState;
 use super::dynamic_update;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 /// Parameters for creating a new account.
 #[derive(Debug, Clone)]
@@ -257,6 +257,286 @@ pub struct ReauthAccountParams {
     /// IMAP/SMTP password fields (set when re-auth was password-based)
     pub imap_password: Option<String>,
     pub smtp_password: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct InsertGmailAccountParams {
+    pub account_id: String,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: i64,
+    pub encrypted_client_id: String,
+    pub encrypted_client_secret: Option<String>,
+    pub account_name: String,
+    pub account_color: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct InsertImapOAuthAccountParams {
+    pub account_id: String,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: i64,
+    pub imap_host: String,
+    pub imap_port: i64,
+    pub imap_security: String,
+    pub smtp_host: String,
+    pub smtp_port: i64,
+    pub smtp_security: String,
+    pub oauth_provider: String,
+    pub oauth_client_id: String,
+    pub oauth_client_secret: Option<String>,
+    pub oauth_token_url: Option<String>,
+    pub imap_username: Option<String>,
+    pub accept_invalid_certs: bool,
+    pub account_name: String,
+    pub account_color: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct InsertGraphAccountParams {
+    pub account_id: String,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: i64,
+    pub encrypted_client_id: String,
+    pub account_name: String,
+    pub account_color: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredOAuthCredentials {
+    pub oauth_client_id: Option<String>,
+    pub oauth_client_secret: Option<String>,
+}
+
+pub fn check_gmail_duplicate_sync(conn: &Connection, email: &str) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT id FROM accounts WHERE email = ?1 AND provider = 'gmail_api' LIMIT 1",
+        params![email],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(|e| format!("Duplicate Gmail check failed: {e}"))
+}
+
+pub fn get_used_account_colors_sync(conn: &Connection) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT account_color FROM accounts WHERE account_color IS NOT NULL")
+        .map_err(|e| format!("prepare used account colors: {e}"))?;
+    stmt.query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("query used account colors: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("collect used account colors: {e}"))
+}
+
+pub fn insert_gmail_account_sync(
+    conn: &Connection,
+    params: &InsertGmailAccountParams,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO accounts (id, email, display_name, avatar_url, access_token, \
+         refresh_token, token_expires_at, provider, auth_method, oauth_client_id, \
+         oauth_client_secret, account_name, account_color) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'gmail_api', 'oauth2', ?8, ?9, ?10, ?11)",
+        params![
+            params.account_id,
+            params.email,
+            params.display_name,
+            params.avatar_url,
+            params.access_token,
+            params.refresh_token,
+            params.expires_at,
+            params.encrypted_client_id,
+            params.encrypted_client_secret,
+            params.account_name,
+            params.account_color,
+        ],
+    )
+    .map_err(|e| format!("Failed to insert Gmail account: {e}"))?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+pub fn insert_imap_oauth_account_sync(
+    conn: &Connection,
+    params: &InsertImapOAuthAccountParams,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO accounts (id, email, display_name, avatar_url, access_token, \
+         refresh_token, token_expires_at, provider, auth_method, imap_host, imap_port, \
+         imap_security, smtp_host, smtp_port, smtp_security, oauth_provider, \
+         oauth_client_id, oauth_client_secret, oauth_token_url, imap_username, \
+         accept_invalid_certs, account_name, account_color) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'imap', 'oauth2', ?8, ?9, ?10, ?11, ?12, \
+         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+        params![
+            params.account_id,
+            params.email,
+            params.display_name,
+            params.avatar_url,
+            params.access_token,
+            params.refresh_token,
+            params.expires_at,
+            params.imap_host,
+            params.imap_port,
+            params.imap_security,
+            params.smtp_host,
+            params.smtp_port,
+            params.smtp_security,
+            params.oauth_provider,
+            params.oauth_client_id,
+            params.oauth_client_secret,
+            params.oauth_token_url,
+            params.imap_username,
+            if params.accept_invalid_certs { 1 } else { 0 },
+            params.account_name,
+            params.account_color,
+        ],
+    )
+    .map_err(|e| format!("Failed to insert OAuth IMAP account: {e}"))?;
+    Ok(())
+}
+
+pub fn insert_graph_account_sync(
+    conn: &Connection,
+    params: &InsertGraphAccountParams,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO accounts (id, email, display_name, avatar_url, access_token, \
+         refresh_token, token_expires_at, provider, auth_method, oauth_client_id, \
+         account_name, account_color) \
+         VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, 'graph', 'oauth2', ?7, ?8, ?9)",
+        params![
+            params.account_id,
+            params.email,
+            params.display_name,
+            params.access_token,
+            params.refresh_token,
+            params.expires_at,
+            params.encrypted_client_id,
+            params.account_name,
+            params.account_color,
+        ],
+    )
+    .map_err(|e| format!("Failed to insert Graph account: {e}"))?;
+    Ok(())
+}
+
+pub fn finalize_graph_profile_sync(
+    conn: &Connection,
+    account_id: &str,
+    email: &str,
+    display_name: &str,
+    account_name: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE accounts SET email = ?1, display_name = ?2, account_name = ?3, \
+         updated_at = unixepoch() \
+         WHERE id = ?4",
+        params![email, display_name, account_name, account_id],
+    )
+    .map_err(|e| format!("Failed to finalize Graph account profile: {e}"))?;
+    Ok(())
+}
+
+pub fn update_gmail_reauth_tokens_sync(
+    conn: &Connection,
+    account_id: &str,
+    access_token: &str,
+    refresh_token: &str,
+    expires_at: i64,
+    new_encrypted_cid: Option<&str>,
+    new_encrypted_cs: Option<&str>,
+) -> Result<(), String> {
+    if let Some(enc_cid) = new_encrypted_cid {
+        conn.execute(
+            "UPDATE accounts SET access_token = ?1, refresh_token = ?2, \
+             token_expires_at = ?3, oauth_client_id = ?4, oauth_client_secret = ?5, \
+             updated_at = unixepoch() WHERE id = ?6",
+            params![
+                access_token,
+                refresh_token,
+                expires_at,
+                enc_cid,
+                new_encrypted_cs,
+                account_id,
+            ],
+        )
+        .map_err(|e| format!("Failed to update Gmail account tokens: {e}"))?;
+    } else {
+        conn.execute(
+            "UPDATE accounts SET access_token = ?1, refresh_token = ?2, \
+             token_expires_at = ?3, updated_at = unixepoch() WHERE id = ?4",
+            params![access_token, refresh_token, expires_at, account_id],
+        )
+        .map_err(|e| format!("Failed to update Gmail account tokens: {e}"))?;
+    }
+    Ok(())
+}
+
+pub fn update_graph_reauth_tokens_sync(
+    conn: &Connection,
+    account_id: &str,
+    access_token: &str,
+    refresh_token: &str,
+    expires_at: i64,
+    new_encrypted_cid: Option<&str>,
+) -> Result<(), String> {
+    if let Some(enc_cid) = new_encrypted_cid {
+        conn.execute(
+            "UPDATE accounts SET access_token = ?1, refresh_token = ?2, \
+             token_expires_at = ?3, oauth_client_id = ?4, \
+             updated_at = unixepoch() WHERE id = ?5",
+            params![access_token, refresh_token, expires_at, enc_cid, account_id],
+        )
+        .map_err(|e| format!("Failed to update Graph account tokens: {e}"))?;
+    } else {
+        conn.execute(
+            "UPDATE accounts SET access_token = ?1, refresh_token = ?2, \
+             token_expires_at = ?3, updated_at = unixepoch() WHERE id = ?4",
+            params![access_token, refresh_token, expires_at, account_id],
+        )
+        .map_err(|e| format!("Failed to update Graph account tokens: {e}"))?;
+    }
+    Ok(())
+}
+
+pub fn get_stored_oauth_credentials_sync(
+    conn: &Connection,
+    account_id: &str,
+) -> Result<StoredOAuthCredentials, String> {
+    conn.query_row(
+        "SELECT oauth_client_id, oauth_client_secret FROM accounts WHERE id = ?1",
+        params![account_id],
+        |row| {
+            Ok(StoredOAuthCredentials {
+                oauth_client_id: row.get::<_, Option<String>>(0)?,
+                oauth_client_secret: row.get::<_, Option<String>>(1)?,
+            })
+        },
+    )
+    .map_err(|e| format!("Failed to read account credentials: {e}"))
+}
+
+pub fn get_stored_graph_client_id_sync(
+    conn: &Connection,
+    account_id: &str,
+) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT oauth_client_id FROM accounts WHERE id = ?1",
+        params![account_id],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .map_err(|e| format!("Failed to read account credentials: {e}"))
 }
 
 /// Synchronous token/credential update for re-authentication.

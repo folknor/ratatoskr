@@ -4,6 +4,7 @@ use rusqlite::Connection;
 pub use super::queries::load_recent_rule_bundled_threads;
 
 mod accounts_crud;
+mod account_delete;
 mod accounts_messages;
 mod ai_state;
 mod allowlists;
@@ -21,6 +22,7 @@ pub mod scoped_queries;
 mod tasks;
 
 pub use accounts_crud::*;
+pub use account_delete::*;
 pub use accounts_messages::*;
 pub use ai_state::*;
 pub use allowlists::*;

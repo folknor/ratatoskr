@@ -1,5 +1,13 @@
-use rusqlite::{Connection, OptionalExtension};
-
+use crate::db::Connection;
+use crate::db::queries_extra::{
+    InsertGmailAccountParams as DbInsertGmailAccountParams,
+    InsertGraphAccountParams as DbInsertGraphAccountParams,
+    InsertImapOAuthAccountParams as DbInsertImapOAuthAccountParams, check_gmail_duplicate_sync,
+    finalize_graph_profile_sync, get_stored_graph_client_id_sync,
+    get_stored_oauth_credentials_sync, get_used_account_colors_sync, insert_gmail_account_sync,
+    insert_graph_account_sync, insert_imap_oauth_account_sync, update_gmail_reauth_tokens_sync,
+    update_graph_reauth_tokens_sync,
+};
 use crate::provider::crypto::{decrypt_value, encrypt_value, is_encrypted};
 
 /// Derive an account name from an email address.
@@ -17,13 +25,7 @@ fn derive_account_name(email: &str) -> String {
 /// Pick the next unused account color from the label-colors palette.
 /// Falls back to the first color if all are used.
 fn next_account_color(conn: &Connection) -> String {
-    let used: Vec<String> = conn
-        .prepare("SELECT account_color FROM accounts WHERE account_color IS NOT NULL")
-        .and_then(|mut stmt| {
-            stmt.query_map([], |row| row.get::<_, String>(0))
-                .map(|rows| rows.filter_map(Result::ok).collect())
-        })
-        .unwrap_or_default();
+    let used = get_used_account_colors_sync(conn).unwrap_or_default();
 
     let presets = label_colors::preset_colors::all_presets();
     for (_, bg, _) in presets {
@@ -40,13 +42,7 @@ fn next_account_color(conn: &Connection) -> String {
 /// Check if a Gmail account with the given email already exists.
 /// Returns `Some(id)` if a duplicate exists.
 pub fn check_gmail_duplicate(conn: &Connection, email: &str) -> Result<Option<String>, String> {
-    conn.query_row(
-        "SELECT id FROM accounts WHERE email = ?1 AND provider = 'gmail_api' LIMIT 1",
-        rusqlite::params![email],
-        |row| row.get::<_, String>(0),
-    )
-    .optional()
-    .map_err(|e| format!("Duplicate Gmail check failed: {e}"))
+    check_gmail_duplicate_sync(conn, email)
 }
 
 /// Parameters for inserting a new Gmail account.
@@ -60,6 +56,8 @@ pub struct InsertGmailAccountParams {
     pub expires_at: i64,
     pub encrypted_client_id: String,
     pub encrypted_client_secret: Option<String>,
+    pub account_name: String,
+    pub account_color: String,
 }
 
 /// Insert a new Gmail account into the database.
@@ -67,29 +65,22 @@ pub fn insert_gmail_account(
     conn: &Connection,
     params: &InsertGmailAccountParams,
 ) -> Result<(), String> {
-    let account_name = derive_account_name(&params.email);
-    let account_color = next_account_color(conn);
-    conn.execute(
-        "INSERT INTO accounts (id, email, display_name, avatar_url, access_token, \
-         refresh_token, token_expires_at, provider, auth_method, oauth_client_id, \
-         oauth_client_secret, account_name, account_color) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'gmail_api', 'oauth2', ?8, ?9, ?10, ?11)",
-        rusqlite::params![
-            params.account_id,
-            params.email,
-            params.display_name,
-            params.avatar_url,
-            params.access_token,
-            params.refresh_token,
-            params.expires_at,
-            params.encrypted_client_id,
-            params.encrypted_client_secret,
-            account_name,
-            account_color,
-        ],
+    insert_gmail_account_sync(
+        conn,
+        &DbInsertGmailAccountParams {
+            account_id: params.account_id.clone(),
+            email: params.email.clone(),
+            display_name: params.display_name.clone(),
+            avatar_url: params.avatar_url.clone(),
+            access_token: params.access_token.clone(),
+            refresh_token: params.refresh_token.clone(),
+            expires_at: params.expires_at,
+            encrypted_client_id: params.encrypted_client_id.clone(),
+            encrypted_client_secret: params.encrypted_client_secret.clone(),
+            account_name: params.account_name.clone(),
+            account_color: params.account_color.clone(),
+        },
     )
-    .map_err(|e| format!("Failed to insert Gmail account: {e}"))?;
-    Ok(())
 }
 
 /// Parameters for inserting a new IMAP OAuth account.
@@ -113,6 +104,8 @@ pub struct InsertImapOAuthAccountParams {
     pub oauth_token_url: Option<String>,
     pub imap_username: Option<String>,
     pub accept_invalid_certs: bool,
+    pub account_name: String,
+    pub account_color: String,
 }
 
 /// Insert a new IMAP OAuth account into the database.
@@ -121,42 +114,32 @@ pub fn insert_imap_oauth_account(
     conn: &Connection,
     params: &InsertImapOAuthAccountParams,
 ) -> Result<(), String> {
-    let account_name = derive_account_name(&params.email);
-    let account_color = next_account_color(conn);
-    conn.execute(
-        "INSERT INTO accounts (id, email, display_name, avatar_url, access_token, \
-         refresh_token, token_expires_at, provider, auth_method, imap_host, imap_port, \
-         imap_security, smtp_host, smtp_port, smtp_security, oauth_provider, \
-         oauth_client_id, oauth_client_secret, oauth_token_url, imap_username, \
-         accept_invalid_certs, account_name, account_color) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'imap', 'oauth2', ?8, ?9, ?10, ?11, ?12, \
-         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
-        rusqlite::params![
-            params.account_id,
-            params.email,
-            params.display_name,
-            params.avatar_url,
-            params.access_token,
-            params.refresh_token,
-            params.expires_at,
-            params.imap_host,
-            params.imap_port,
-            params.imap_security,
-            params.smtp_host,
-            params.smtp_port,
-            params.smtp_security,
-            params.oauth_provider,
-            params.oauth_client_id,
-            params.oauth_client_secret,
-            params.oauth_token_url,
-            params.imap_username,
-            if params.accept_invalid_certs { 1 } else { 0 },
-            account_name,
-            account_color,
-        ],
+    insert_imap_oauth_account_sync(
+        conn,
+        &DbInsertImapOAuthAccountParams {
+            account_id: params.account_id.clone(),
+            email: params.email.clone(),
+            display_name: params.display_name.clone(),
+            avatar_url: params.avatar_url.clone(),
+            access_token: params.access_token.clone(),
+            refresh_token: params.refresh_token.clone(),
+            expires_at: params.expires_at,
+            imap_host: params.imap_host.clone(),
+            imap_port: params.imap_port,
+            imap_security: params.imap_security.clone(),
+            smtp_host: params.smtp_host.clone(),
+            smtp_port: params.smtp_port,
+            smtp_security: params.smtp_security.clone(),
+            oauth_provider: params.oauth_provider.clone(),
+            oauth_client_id: params.oauth_client_id.clone(),
+            oauth_client_secret: params.oauth_client_secret.clone(),
+            oauth_token_url: params.oauth_token_url.clone(),
+            imap_username: params.imap_username.clone(),
+            accept_invalid_certs: params.accept_invalid_certs,
+            account_name: params.account_name.clone(),
+            account_color: params.account_color.clone(),
+        },
     )
-    .map_err(|e| format!("Failed to insert OAuth IMAP account: {e}"))?;
-    Ok(())
 }
 
 /// Parameters for inserting a new Graph (Microsoft) account.
@@ -168,6 +151,8 @@ pub struct InsertGraphAccountParams {
     pub refresh_token: String,
     pub expires_at: i64,
     pub encrypted_client_id: String,
+    pub account_name: String,
+    pub account_color: String,
 }
 
 /// Insert a new Graph (Microsoft) account into the database.
@@ -175,27 +160,20 @@ pub fn insert_graph_account(
     conn: &Connection,
     params: &InsertGraphAccountParams,
 ) -> Result<(), String> {
-    let account_name = derive_account_name(&params.email);
-    let account_color = next_account_color(conn);
-    conn.execute(
-        "INSERT INTO accounts (id, email, display_name, avatar_url, access_token, \
-         refresh_token, token_expires_at, provider, auth_method, oauth_client_id, \
-         account_name, account_color) \
-         VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, 'graph', 'oauth2', ?7, ?8, ?9)",
-        rusqlite::params![
-            params.account_id,
-            params.email,
-            params.display_name,
-            params.access_token,
-            params.refresh_token,
-            params.expires_at,
-            params.encrypted_client_id,
-            account_name,
-            account_color,
-        ],
+    insert_graph_account_sync(
+        conn,
+        &DbInsertGraphAccountParams {
+            account_id: params.account_id.clone(),
+            email: params.email.clone(),
+            display_name: params.display_name.clone(),
+            access_token: params.access_token.clone(),
+            refresh_token: params.refresh_token.clone(),
+            expires_at: params.expires_at,
+            encrypted_client_id: params.encrypted_client_id.clone(),
+            account_name: params.account_name.clone(),
+            account_color: params.account_color.clone(),
+        },
     )
-    .map_err(|e| format!("Failed to insert Graph account: {e}"))?;
-    Ok(())
 }
 
 /// Finalize a Graph account profile after fetching from Microsoft Graph API.
@@ -205,17 +183,8 @@ pub fn finalize_graph_profile(
     email: &str,
     display_name: &str,
 ) -> Result<(), String> {
-    // Re-derive account_name from the finalized email, since the email
-    // known at insert time may differ from the real one returned by Graph.
     let account_name = derive_account_name(email);
-    conn.execute(
-        "UPDATE accounts SET email = ?1, display_name = ?2, account_name = ?3, \
-         updated_at = unixepoch() \
-         WHERE id = ?4",
-        rusqlite::params![email, display_name, account_name, account_id],
-    )
-    .map_err(|e| format!("Failed to finalize Graph account profile: {e}"))?;
-    Ok(())
+    finalize_graph_profile_sync(conn, account_id, email, display_name, &account_name)
 }
 
 /// Update tokens and optionally credentials for a Gmail reauthorization.
@@ -228,30 +197,15 @@ pub fn update_gmail_reauth_tokens(
     new_encrypted_cid: Option<&str>,
     new_encrypted_cs: Option<&str>,
 ) -> Result<(), String> {
-    if let Some(enc_cid) = new_encrypted_cid {
-        conn.execute(
-            "UPDATE accounts SET access_token = ?1, refresh_token = ?2, \
-             token_expires_at = ?3, oauth_client_id = ?4, oauth_client_secret = ?5, \
-             updated_at = unixepoch() WHERE id = ?6",
-            rusqlite::params![
-                access_token,
-                refresh_token,
-                expires_at,
-                enc_cid,
-                new_encrypted_cs,
-                account_id,
-            ],
-        )
-        .map_err(|e| format!("Failed to update Gmail account tokens: {e}"))?;
-    } else {
-        conn.execute(
-            "UPDATE accounts SET access_token = ?1, refresh_token = ?2, \
-             token_expires_at = ?3, updated_at = unixepoch() WHERE id = ?4",
-            rusqlite::params![access_token, refresh_token, expires_at, account_id],
-        )
-        .map_err(|e| format!("Failed to update Gmail account tokens: {e}"))?;
-    }
-    Ok(())
+    update_gmail_reauth_tokens_sync(
+        conn,
+        account_id,
+        access_token,
+        refresh_token,
+        expires_at,
+        new_encrypted_cid,
+        new_encrypted_cs,
+    )
 }
 
 /// Update tokens and optionally client ID for a Graph reauthorization.
@@ -263,23 +217,14 @@ pub fn update_graph_reauth_tokens(
     expires_at: i64,
     new_encrypted_cid: Option<&str>,
 ) -> Result<(), String> {
-    if let Some(enc_cid) = new_encrypted_cid {
-        conn.execute(
-            "UPDATE accounts SET access_token = ?1, refresh_token = ?2, \
-             token_expires_at = ?3, oauth_client_id = ?4, \
-             updated_at = unixepoch() WHERE id = ?5",
-            rusqlite::params![access_token, refresh_token, expires_at, enc_cid, account_id],
-        )
-        .map_err(|e| format!("Failed to update Graph account tokens: {e}"))?;
-    } else {
-        conn.execute(
-            "UPDATE accounts SET access_token = ?1, refresh_token = ?2, \
-             token_expires_at = ?3, updated_at = unixepoch() WHERE id = ?4",
-            rusqlite::params![access_token, refresh_token, expires_at, account_id],
-        )
-        .map_err(|e| format!("Failed to update Graph account tokens: {e}"))?;
-    }
-    Ok(())
+    update_graph_reauth_tokens_sync(
+        conn,
+        account_id,
+        access_token,
+        refresh_token,
+        expires_at,
+        new_encrypted_cid,
+    )
 }
 
 /// Resolve OAuth credentials for a Gmail reauthorization. If `client_id` is
@@ -289,19 +234,8 @@ pub fn resolve_gmail_reauth_credentials(
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<(String, String), String> {
-    conn.query_row(
-        "SELECT oauth_client_id, oauth_client_secret FROM accounts WHERE id = ?1",
-        rusqlite::params![account_id],
-        |row| {
-            Ok((
-                row.get::<_, Option<String>>(0)?,
-                row.get::<_, Option<String>>(1)?,
-            ))
-        },
-    )
-    .map_err(|e| format!("Failed to read account credentials: {e}"))
-    .and_then(|(cid, cs)| {
-        let cid = cid.filter(|s| !s.is_empty()).ok_or_else(|| {
+    get_stored_oauth_credentials_sync(conn, account_id).and_then(|creds| {
+        let cid = creds.oauth_client_id.filter(|s| !s.is_empty()).ok_or_else(|| {
             "Account has no stored OAuth credentials. Provide client_id to reauthorize.".to_string()
         })?;
         let cid = if is_encrypted(&cid) {
@@ -309,7 +243,8 @@ pub fn resolve_gmail_reauth_credentials(
         } else {
             cid
         };
-        let cs = cs
+        let cs = creds
+            .oauth_client_secret
             .filter(|s| !s.is_empty())
             .map(|s| {
                 if is_encrypted(&s) {
@@ -331,13 +266,7 @@ pub fn resolve_graph_reauth_client_id(
     encryption_key: &[u8; 32],
     default_client_id: &str,
 ) -> Result<String, String> {
-    conn.query_row(
-        "SELECT oauth_client_id FROM accounts WHERE id = ?1",
-        rusqlite::params![account_id],
-        |row| row.get::<_, Option<String>>(0),
-    )
-    .map_err(|e| format!("Failed to read account credentials: {e}"))
-    .map(|cid| match cid.filter(|s| !s.is_empty()) {
+    get_stored_graph_client_id_sync(conn, account_id).map(|cid| match cid.filter(|s| !s.is_empty()) {
         Some(encrypted) => {
             if is_encrypted(&encrypted) {
                 decrypt_value(encryption_key, &encrypted).unwrap_or(encrypted)
