@@ -11,10 +11,13 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+chrono.workspace = true
+lol_html = "2"
 serde.workspace = true
 serde_json.workspace = true
 rusqlite.workspace = true
 tokio = { workspace = true, features = ["rt"] }
+uuid = { version = "1", features = ["v4"] }
 log = "0.4"
 hotpath = { workspace = true, optional = true }
 

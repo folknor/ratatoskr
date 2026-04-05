@@ -10,8 +10,10 @@ pub use db::db::sql_fragments;
 pub use db::db::types;
 pub use db::impl_from_row;
 
-// Core-specific DB modules
-pub mod pending_ops;
+// Re-export pending_ops from db crate
+pub use db::db::pending_ops;
+
+// Core-specific DB modules (queries.rs stays in core due to body_store/crypto deps)
 pub mod queries;
 pub mod queries_extra;
 pub use queries::*;

@@ -18,7 +18,7 @@ pub async fn db_get_all_contacts(
 ) -> Result<Vec<DbContact>, String> {
     log::debug!("Loading contacts: limit={limit:?}, offset={offset:?}");
     db.with_conn(move |conn| {
-        let lim = limit.unwrap_or(crate::constants::DEFAULT_QUERY_LIMIT);
+        let lim = limit.unwrap_or(500);
         let off = offset.unwrap_or(0);
         let mut stmt = conn
             .prepare(

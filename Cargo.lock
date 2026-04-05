@@ -1408,12 +1408,15 @@ checksum = "c286de4e81ea2590afc24d754e0f83810c566f50a1388fa75ebd57928c0d9745"
 name = "db"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "hotpath",
  "log",
+ "lol_html",
  "rusqlite",
  "serde",
  "serde_json",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

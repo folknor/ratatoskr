@@ -9,7 +9,7 @@ use crate::provider::folder_roles::SYSTEM_FOLDER_ROLES;
 
 use crate::db::from_row::FromRow;
 
-use super::scoped_queries::{get_draft_count_with_local, get_unread_counts_by_folder};
+use db::db::queries_extra::scoped_queries::{get_draft_count_with_local, get_unread_counts_by_folder};
 
 // ── Types ───────────────────────────────────────────────────
 
