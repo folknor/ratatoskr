@@ -1,30 +1,20 @@
 //! Contact save logic implementing the spec's dual save pattern:
 //!
-//! - **Local contacts** (`source = 'user'`): save immediately on edit, no
-//!   explicit Save button needed.
-//! - **Synced contacts** (`source` is `'google'`, `'graph'`, `'carddav'`, `'jmap'`):
-//!   edits are held locally until the user clicks an explicit Save button,
-//!   which triggers a provider write-back. Display name is always a local-only
-//!   override (sets `display_name_overridden = 1`).
-
-use rusqlite::{Connection, params};
+//! - **Local contacts** (`source = 'user'`): save immediately on edit.
+//! - **Synced contacts**: edits held locally until explicit Save;
+//!   display name is always a local-only override.
+//!
+//! SQL lives in `db::queries_extra::contacts`. This module provides
+//! async wrappers and domain types.
 
 use crate::db::DbState;
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+// Re-export the storage parameter type so existing callers keep working.
+pub use db::db::queries_extra::contacts::ContactUpdate;
 
-/// A contact update payload. Fields set to `None` are not changed.
-#[derive(Debug, Clone)]
-pub struct ContactUpdate {
-    pub email: String,
-    pub display_name: Option<String>,
-    pub email2: Option<Option<String>>,
-    pub phone: Option<Option<String>>,
-    pub company: Option<Option<String>>,
-    pub notes: Option<Option<String>>,
-}
+// ---------------------------------------------------------------------------
+// Domain types (stay in core)
+// ---------------------------------------------------------------------------
 
 /// Whether a contact is local or synced.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,14 +41,7 @@ pub enum WriteBackResult {
 /// Determine whether a contact is local or synced.
 pub async fn get_contact_source(db: &DbState, email: String) -> Result<ContactSource, String> {
     db.with_conn(move |conn| {
-        let source: Option<String> = conn
-            .query_row(
-                "SELECT source FROM contacts WHERE email = ?1",
-                params![email],
-                |row| row.get("source"),
-            )
-            .ok();
-
+        let source = db::db::queries_extra::contacts::get_contact_source_sync(conn, &email)?;
         match source.as_deref() {
             Some("user") | None => Ok(ContactSource::Local),
             Some(provider) => Ok(ContactSource::Synced(provider.to_string())),
@@ -68,101 +51,17 @@ pub async fn get_contact_source(db: &DbState, email: String) -> Result<ContactSo
 }
 
 /// Save a local contact immediately (no Save button needed).
-///
-/// For `source = 'user'` contacts, this persists all field changes
-/// directly to the database.
 pub async fn save_local_contact(db: &DbState, update: ContactUpdate) -> Result<(), String> {
     db.with_conn(move |conn| {
-        apply_contact_update(conn, &update, true)?;
-        Ok(())
+        db::db::queries_extra::contacts::save_local_contact_fields_sync(conn, &update)
     })
     .await
 }
 
 /// Save a synced contact's local edits (called when user clicks Save).
-///
-/// This applies the edits to the local database and marks the contact
-/// for provider write-back. Display name changes always set
-/// `display_name_overridden = 1` and are NOT pushed to the provider.
-/// Other fields (email2, phone, company, notes) are pushed.
 pub async fn save_synced_contact(db: &DbState, update: ContactUpdate) -> Result<(), String> {
     db.with_conn(move |conn| {
-        apply_contact_update(conn, &update, false)?;
-        Ok(())
+        db::db::queries_extra::contacts::save_synced_contact_fields_sync(conn, &update)
     })
     .await
-}
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-fn apply_contact_update(
-    conn: &Connection,
-    update: &ContactUpdate,
-    is_local: bool,
-) -> Result<(), String> {
-    let normalized_email = update.email.to_lowercase();
-
-    // Update display name if provided
-    if let Some(ref name) = update.display_name {
-        if is_local {
-            conn.execute(
-                "UPDATE contacts SET display_name = ?1, updated_at = unixepoch() \
-                 WHERE email = ?2",
-                params![name, normalized_email],
-            )
-            .map_err(|e| format!("update display_name: {e}"))?;
-        } else {
-            // Synced contact: mark display name as overridden (local-only change)
-            conn.execute(
-                "UPDATE contacts SET display_name = ?1, display_name_overridden = 1, \
-                 updated_at = unixepoch() WHERE email = ?2",
-                params![name, normalized_email],
-            )
-            .map_err(|e| format!("update display_name (synced): {e}"))?;
-        }
-    }
-
-    // Update email2 if provided
-    if let Some(ref email2) = update.email2 {
-        conn.execute(
-            "UPDATE contacts SET email2 = ?1, updated_at = unixepoch() \
-             WHERE email = ?2",
-            params![email2, normalized_email],
-        )
-        .map_err(|e| format!("update email2: {e}"))?;
-    }
-
-    // Update phone if provided
-    if let Some(ref phone) = update.phone {
-        conn.execute(
-            "UPDATE contacts SET phone = ?1, updated_at = unixepoch() \
-             WHERE email = ?2",
-            params![phone, normalized_email],
-        )
-        .map_err(|e| format!("update phone: {e}"))?;
-    }
-
-    // Update company if provided
-    if let Some(ref company) = update.company {
-        conn.execute(
-            "UPDATE contacts SET company = ?1, updated_at = unixepoch() \
-             WHERE email = ?2",
-            params![company, normalized_email],
-        )
-        .map_err(|e| format!("update company: {e}"))?;
-    }
-
-    // Update notes if provided
-    if let Some(ref notes) = update.notes {
-        conn.execute(
-            "UPDATE contacts SET notes = ?1, updated_at = unixepoch() \
-             WHERE email = ?2",
-            params![notes, normalized_email],
-        )
-        .map_err(|e| format!("update notes: {e}"))?;
-    }
-
-    Ok(())
 }

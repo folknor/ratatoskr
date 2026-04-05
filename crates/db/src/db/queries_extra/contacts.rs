@@ -430,6 +430,207 @@ pub fn delete_contact_sync(conn: &rusqlite::Connection, id: &str) -> Result<(), 
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Contact save (dual local/synced pattern)
+// ---------------------------------------------------------------------------
+
+/// A contact update payload. Fields set to `None` are not changed.
+/// Double-option fields (`Option<Option<String>>`) use outer None = "no change",
+/// inner None = "clear field".
+#[derive(Debug, Clone)]
+pub struct ContactUpdate {
+    pub email: String,
+    pub display_name: Option<String>,
+    pub email2: Option<Option<String>>,
+    pub phone: Option<Option<String>>,
+    pub company: Option<Option<String>>,
+    pub notes: Option<Option<String>>,
+}
+
+/// Save a local contact's fields. Does not set `display_name_overridden`.
+pub fn save_local_contact_fields_sync(
+    conn: &rusqlite::Connection,
+    update: &ContactUpdate,
+) -> Result<(), String> {
+    apply_contact_update_inner(conn, update, true)
+}
+
+/// Save a synced contact's fields. Sets `display_name_overridden = 1`
+/// for display name changes (local-only override, not pushed to provider).
+pub fn save_synced_contact_fields_sync(
+    conn: &rusqlite::Connection,
+    update: &ContactUpdate,
+) -> Result<(), String> {
+    apply_contact_update_inner(conn, update, false)
+}
+
+/// Look up the raw source string for a contact by email.
+/// Returns `None` if no contact with that email exists.
+pub fn get_contact_source_sync(
+    conn: &rusqlite::Connection,
+    email: &str,
+) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT source FROM contacts WHERE email = ?1",
+        rusqlite::params![email],
+        |row| row.get("source"),
+    )
+    .ok()
+    .map_or(Ok(None), |v| Ok(Some(v)))
+}
+
+fn apply_contact_update_inner(
+    conn: &rusqlite::Connection,
+    update: &ContactUpdate,
+    is_local: bool,
+) -> Result<(), String> {
+    let normalized_email = update.email.to_lowercase();
+
+    if let Some(ref name) = update.display_name {
+        if is_local {
+            conn.execute(
+                "UPDATE contacts SET display_name = ?1, updated_at = unixepoch() \
+                 WHERE email = ?2",
+                rusqlite::params![name, normalized_email],
+            )
+            .map_err(|e| format!("update display_name: {e}"))?;
+        } else {
+            conn.execute(
+                "UPDATE contacts SET display_name = ?1, display_name_overridden = 1, \
+                 updated_at = unixepoch() WHERE email = ?2",
+                rusqlite::params![name, normalized_email],
+            )
+            .map_err(|e| format!("update display_name (synced): {e}"))?;
+        }
+    }
+
+    if let Some(ref email2) = update.email2 {
+        conn.execute(
+            "UPDATE contacts SET email2 = ?1, updated_at = unixepoch() WHERE email = ?2",
+            rusqlite::params![email2, normalized_email],
+        )
+        .map_err(|e| format!("update email2: {e}"))?;
+    }
+
+    if let Some(ref phone) = update.phone {
+        conn.execute(
+            "UPDATE contacts SET phone = ?1, updated_at = unixepoch() WHERE email = ?2",
+            rusqlite::params![phone, normalized_email],
+        )
+        .map_err(|e| format!("update phone: {e}"))?;
+    }
+
+    if let Some(ref company) = update.company {
+        conn.execute(
+            "UPDATE contacts SET company = ?1, updated_at = unixepoch() WHERE email = ?2",
+            rusqlite::params![company, normalized_email],
+        )
+        .map_err(|e| format!("update company: {e}"))?;
+    }
+
+    if let Some(ref notes) = update.notes {
+        conn.execute(
+            "UPDATE contacts SET notes = ?1, updated_at = unixepoch() WHERE email = ?2",
+            rusqlite::params![notes, normalized_email],
+        )
+        .map_err(|e| format!("update notes: {e}"))?;
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Seen address helpers
+// ---------------------------------------------------------------------------
+
+/// Aggregated stats for a seen address across all accounts.
+#[derive(Debug, Clone)]
+pub struct SeenAddressStats {
+    pub email: String,
+    pub display_name: Option<String>,
+    pub times_sent_to: i64,
+    pub times_received_from: i64,
+    pub first_seen_at: i64,
+    pub last_seen_at: i64,
+}
+
+/// Promote a seen address to a contact with source = 'user'.
+/// No-op if a contact with that email already exists.
+pub fn promote_seen_to_contact_sync(
+    conn: &rusqlite::Connection,
+    email: &str,
+) -> Result<(), String> {
+    let normalized = email.to_lowercase();
+
+    // Check if already a contact
+    let exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) AS cnt FROM contacts WHERE email = ?1",
+            rusqlite::params![normalized],
+            |row| row.get::<_, i64>("cnt"),
+        )
+        .map_err(|e| format!("check contact exists: {e}"))?
+        > 0;
+
+    if exists {
+        return Ok(());
+    }
+
+    // Get display name from seen_addresses
+    let display_name: Option<String> = conn
+        .query_row(
+            "SELECT display_name FROM seen_addresses \
+             WHERE email = ?1 \
+             ORDER BY last_seen_at DESC LIMIT 1",
+            rusqlite::params![normalized],
+            |row| row.get("display_name"),
+        )
+        .ok()
+        .flatten();
+
+    let id = format!("promoted-{normalized}");
+    conn.execute(
+        "INSERT INTO contacts (id, email, display_name, source) \
+         VALUES (?1, ?2, ?3, 'user')",
+        rusqlite::params![id, normalized, display_name],
+    )
+    .map_err(|e| format!("promote seen to contact: {e}"))?;
+
+    Ok(())
+}
+
+/// Get aggregated stats for a seen address across all accounts.
+pub fn get_seen_address_stats_sync(
+    conn: &rusqlite::Connection,
+    email: &str,
+) -> Result<Option<SeenAddressStats>, String> {
+    let normalized = email.to_lowercase();
+    conn.query_row(
+        "SELECT email, display_name,
+                SUM(times_sent_to) AS total_sent,
+                SUM(times_received_from) AS total_received,
+                MIN(first_seen_at) AS first_seen,
+                MAX(last_seen_at) AS last_seen
+         FROM seen_addresses
+         WHERE email = ?1
+         GROUP BY email",
+        rusqlite::params![normalized],
+        |row| {
+            Ok(SeenAddressStats {
+                email: row.get("email")?,
+                display_name: row.get("display_name")?,
+                times_sent_to: row.get("total_sent")?,
+                times_received_from: row.get("total_received")?,
+                first_seen_at: row.get("first_seen")?,
+                last_seen_at: row.get("last_seen")?,
+            })
+        },
+    )
+    .map_err(|e| e.to_string())
+    .map(Some)
+    .or_else(|_| Ok(None))
+}
+
 pub async fn db_update_contact_avatar(
     db: &DbState,
     email: String,
