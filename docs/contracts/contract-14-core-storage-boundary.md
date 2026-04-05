@@ -652,9 +652,69 @@ Verification:
 - `cargo check -p db`, `cargo check -p rtsk`, `cargo check --workspace` after each group
 - Confirm rusqlite removed from each touched module
 
-### Phase E: Remove `rusqlite` from core's `Cargo.toml`
+### Phase E: Break the circular dependency cycles and remove `rusqlite` from core
 
-Once all SQL has moved to `db`, remove `rusqlite` from core's dependencies. This is the enforcement gate: if it compiles without `rusqlite`, the boundary holds.
+Phases A–D moved all extractable SQL to `db`. Four modules remain in core because they depend on crates that themselves depend on `db`, creating circular dependency chains. Phase E resolves these cycles so the remaining SQL can move, and `rusqlite` can be removed from core's `Cargo.toml`.
+
+#### The three cycles
+
+**Cycle 1: `common` → `db`**
+
+`navigation.rs` and `thread_detail.rs` import `SYSTEM_FOLDER_ROLES` from `common::folder_roles`. `queries.rs` imports `decrypt_value`/`is_encrypted` from `common::crypto`. The `common` crate depends on `db` (for `DbState` in `ProviderCtx` and `ProgressReporter`).
+
+However, `folder_roles.rs` itself does not use `db` at all — it is pure static data. And `crypto.rs` does not use `db` — it is pure encryption utilities. The cycle is incidental: these modules are in a crate that depends on `db` for other reasons (`ProviderCtx`), not because they themselves need `db`.
+
+**Resolution:** Move `SYSTEM_FOLDER_ROLES` (the `folder_roles` module) and `crypto` (encrypt/decrypt utilities) to either:
+- The `types` crate (which has minimal deps: serde only), or
+- The `db` crate directly (folder_roles is static data; crypto is utility functions with no db dependency), or
+- A new lightweight `shared` crate that both `db` and `common` can depend on
+
+The lightest option: move `folder_roles.rs` and `crypto.rs` into `db` as utility modules. They have no db dependency themselves. `common` re-exports them from `db` to preserve existing import paths.
+
+Once `SYSTEM_FOLDER_ROLES` and `crypto` are accessible from `db`, `navigation.rs`, `thread_detail.rs`, and the crypto-dependent parts of `queries.rs` can move.
+
+**Cycle 2: `label-colors` → `db`**
+
+`thread_detail.rs` imports `resolve_label_color` from the `label-colors` crate. `label-colors` depends on `db` because `resolve_label_color` takes `&DbLabel` as its parameter.
+
+However, `resolve_label_color` only reads four fields from `DbLabel`: `.name`, `.account_id`, `.color_bg`, `.color_fg`. The function signature binds it to the full 20+ field `DbLabel` struct unnecessarily.
+
+**Resolution:** Change `resolve_label_color` to take the four fields it actually needs as individual parameters (or a small trait / struct), eliminating label-colors's dependency on `db` entirely:
+
+```rust
+// Before: fn resolve_label_color(label: &DbLabel) -> (&str, &str)
+// After:  fn resolve_label_color(name: &str, account_id: &str, color_bg: Option<&str>, color_fg: Option<&str>) -> (&str, &str)
+```
+
+Then `label-colors` no longer depends on `db`. The `db` crate can depend on `label-colors` (or inline the logic), and `thread_detail.rs` can move to `db`.
+
+**Cycle 3: `store` → `db`**
+
+`queries.rs` imports `BodyStoreState` and `MessageBody` from the `store` crate. The `store` crate depends on `db`.
+
+This is the hardest cycle. `queries.rs` needs `BodyStoreState` to read message bodies from the separate body-store database, and it needs `MessageBody` as a return type. These are not pure utility types — they represent a separate storage subsystem.
+
+**Resolution options:**
+
+a. **Decompose `queries.rs`**: The body-store-dependent functions in `queries.rs` (message body retrieval) are a small subset. Extract the body-store-free portions to `db` and leave only the body-store-dependent functions in core. This narrows the exception to a handful of functions rather than the entire 893-line file.
+
+b. **Pass `BodyStoreState` as a callback/closure**: Instead of `queries.rs` importing `BodyStoreState` directly, the caller (in core) passes a closure that performs the body lookup. The SQL query in `db` returns the row without the body, and core enriches it with body data.
+
+c. **Define body-store types in `db`**: Move `MessageBody` (a simple struct) to `db::types`. `BodyStoreState` is harder — it wraps its own `Arc<Mutex<Connection>>` and cannot easily live in `db` without `store`'s implementation.
+
+Option (a) is the most pragmatic: decompose `queries.rs` so most of it moves to `db`, leaving a thin body-enrichment layer in core. This matches the Phase B pattern (account deletion: SQL in db, orchestration in core).
+
+#### Migration steps
+
+1. **Break cycle 1**: Move `folder_roles.rs` and `crypto.rs` utilities into `db` (or `types`). Update `common` to re-export from the new location. Move `navigation.rs` to `db`.
+
+2. **Break cycle 2**: Refactor `resolve_label_color` to take individual parameters instead of `&DbLabel`. Remove `label-colors`'s dependency on `db`. Move `thread_detail.rs` and `thread_ui_state.rs` to `db`.
+
+3. **Break cycle 3**: Decompose `queries.rs` — move body-store-free functions to `db`, leave body-enrichment functions in core.
+
+4. **Remove `rusqlite` from `core/Cargo.toml`**: The enforcement gate. Also remove `&Connection` from the remaining orchestration functions in `bimi.rs` and `search_pipeline.rs` (replace with `&DbState` or db API calls).
+
+5. **Verify**: `cargo check --workspace`. Core compiles without `rusqlite`.
 
 ## What This Eliminates
 
