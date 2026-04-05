@@ -669,9 +669,11 @@ However, `folder_roles.rs` itself does not use `db` at all — it is pure static
 - The `db` crate directly (folder_roles is static data; crypto is utility functions with no db dependency), or
 - A new lightweight `shared` crate that both `db` and `common` can depend on
 
-The lightest option: move `folder_roles.rs` and `crypto.rs` into `db` as utility modules. They have no db dependency themselves. `common` re-exports them from `db` to preserve existing import paths.
+**Resolution — folder_roles:** Move `folder_roles.rs` to `db` (or `types`). It is pure static data — a const array of `SystemFolderRole` structs with label ID/name/JMAP-role/IMAP-special-use mappings. No code dependencies beyond `&'static str`. `common` re-exports from the new location.
 
-Once `SYSTEM_FOLDER_ROLES` and `crypto` are accessible from `db`, `navigation.rs`, `thread_detail.rs`, and the crypto-dependent parts of `queries.rs` can move.
+**Resolution — crypto:** Move encrypt/decrypt utilities to a lightweight shared location. Crypto is more semantically central than folder_roles — it is not just static data but utility code for AES-256-GCM encryption. Putting it in `db` is possible but a tiny shared crate or `types` may be cleaner long-term. The decision depends on whether `db` should own encryption semantics or just consume them.
+
+Once `SYSTEM_FOLDER_ROLES` is accessible from `db`, `navigation.rs` can move. Once crypto is accessible from `db`, the settings-decryption functions in `queries.rs` can move.
 
 **Cycle 2: `label-colors` → `db`**
 
@@ -704,6 +706,20 @@ c. **Define body-store types in `db`**: Move `MessageBody` (a simple struct) to 
 
 Option (a) is the most pragmatic: decompose `queries.rs` so most of it moves to `db`, leaving a thin body-enrichment layer in core. This matches the Phase B pattern (account deletion: SQL in db, orchestration in core).
 
+**What stays in core after decomposition:**
+- `get_messages_for_thread` — the only function that takes `&BodyStoreState`. Queries messages from db, then enriches with body content from the body store. The SQL portion can be extracted to a db helper that returns messages without bodies; core calls that helper then enriches.
+- `get_secure_setting`, `get_settings_bootstrap_snapshot`, `get_settings_secrets_snapshot` — use `decode_secure_setting_value` which calls `decrypt_value`/`is_encrypted`. These stay in core unless crypto moves first (see Cycle 1 resolution). If crypto moves, these functions move to db too.
+
+**What moves to db (~25 functions):**
+- Thread queries: `get_threads`, `get_threads_for_bundle`, `get_thread_by_id`, `get_thread_label_ids`, `get_thread_count`
+- Label queries: `get_labels`, `upsert_label`, `delete_label`
+- Settings: `set_setting` (the non-encrypted write)
+- UI bootstrap: `get_ui_bootstrap_snapshot` (does not use crypto)
+- Bundle/category: `get_bundle_unread_counts`, `get_categories_for_threads`
+- Contact/attachment lookups: `search_contacts`, `get_contact_by_email`, `get_attachments_for_message`
+- Provider lookup: `get_provider_type`
+- Unread count: `get_unread_count`
+
 #### Migration steps
 
 1. **Break cycle 1**: Move `folder_roles.rs` and `crypto.rs` utilities into `db` (or `types`). Update `common` to re-export from the new location. Move `navigation.rs` to `db`.
@@ -712,9 +728,11 @@ Option (a) is the most pragmatic: decompose `queries.rs` so most of it moves to 
 
 3. **Break cycle 3**: Decompose `queries.rs` — move body-store-free functions to `db`, leave body-enrichment functions in core.
 
-4. **Remove `rusqlite` from `core/Cargo.toml`**: The enforcement gate. Also remove `&Connection` from the remaining orchestration functions in `bimi.rs` and `search_pipeline.rs` (replace with `&DbState` or db API calls).
+4. **Clean up remaining `&Connection` parameters**: Remove `&Connection` from orchestration functions in `bimi.rs` and `search_pipeline.rs`. Replace with `&DbState` or db API calls. These modules no longer own SQL but still pass raw connections to db helpers.
 
-5. **Verify**: `cargo check --workspace`. Core compiles without `rusqlite`.
+5. **Remove `rusqlite` from `core/Cargo.toml`**: The enforcement gate. This is a separate step after all signature cleanups are done. If it compiles without `rusqlite`, the boundary holds.
+
+6. **Verify**: `cargo check --workspace`. Core compiles without `rusqlite`.
 
 ## What This Eliminates
 
