@@ -330,7 +330,7 @@ The rule is the contract-wide one: storage-shaped intermediate data may move dow
 
 ### Phase C: Extract SQL from contacts
 
-This phase removes direct SQL from all 8 modules under `contacts/`. The contacts domain has no core-internal dependency blockers (no crypto, no body_store, no label_colors), so every module can be fully extracted.
+This phase removes the remaining direct SQL from all 8 modules under `contacts/`. The contacts domain has no core-internal dependency blockers (no crypto, no body_store, no label_colors), so every module can be fully extracted. The amount of work varies: sync_google.rs and sync_graph.rs are already mostly core wrappers with a couple of `DbState` SQL closures, while dedup.rs and sync_carddav.rs are full SQL hosts with transactional complexity.
 
 The contacts modules divide into three difficulty tiers:
 
@@ -342,7 +342,7 @@ The contacts modules divide into three difficulty tiers:
 
 Contacts shares the same three patterns as accounts (reads, writes, transactional orchestration) but adds two new challenges that Phase B did not face:
 
-- **SQL-level domain logic in ON CONFLICT clauses.** sync_carddav.rs encodes source-priority rules as multi-way CASE statements inside INSERT ON CONFLICT. This is domain policy expressed as SQL, not just a query.
+- **Business policy expressed at the storage boundary.** sync_carddav.rs encodes source-priority rules as multi-way CASE statements inside INSERT ON CONFLICT. This is business policy that must live in SQL because atomic upsert semantics require it — reading the row first, deciding in Rust, then writing would lose atomicity and add a round-trip. This is the first place where the contract intentionally allows policy-shaped logic to remain in `db`.
 - **Cross-provider orphan detection.** sync_carddav.rs checks three provider mapping tables (carddav, google, graph) before deleting a contact. This cascading check couples the write path to knowledge of all provider sync strategies.
 
 If Phase C handles these cleanly, the remaining phases (D and E) will be straightforward — email_actions, mdn, bimi, etc. are all simpler than this.
@@ -355,12 +355,12 @@ Pure storage. No domain logic, no transactions, no core-internal deps.
 
 Move to `db`:
 - `search_contacts_unified` and all 5 private helpers (FTS5+LIKE waterfall across contacts, gal_cache, seen_addresses, contact_groups)
-- The `ContactSearchResult` and `ContactSearchKind` types
 
 Keep in `core`:
-- Nothing. This module becomes an empty re-export or is deleted, with callers importing from `db` directly.
+- `ContactSearchResult` and `ContactSearchKind` are defined in `db::queries_extra::contact_search` (they have no core-internal deps). Core's `contacts/search.rs` re-exports them, preserving the `rtsk::contacts::search::*` import path as the stable API surface.
+- Callers should not be updated to import from `db` directly during Phase C — that is downstream import churn for a separate cleanup pass.
 
-This is the simplest module in Phase C. It already uses `&Connection` (not `&DbState`), references only `crate::db::{build_fts_query, make_like_pattern}` which are in `db`, and returns types it defines locally.
+This is the simplest module in Phase C. The implementation and private helpers move to db; the public types and module path are preserved through re-exports.
 
 ##### `contacts/save.rs`
 
@@ -368,14 +368,18 @@ Pure storage with dual-save semantics. No transactions.
 
 Move to `db`:
 - `get_contact_source` (single-row SELECT)
-- `apply_contact_update` inner function (conditional field-level UPDATEs)
+- Two explicit db operations:
+  - `save_local_contact_sync` — applies all field updates without setting `display_name_overridden`
+  - `save_synced_contact_sync` — applies field updates and sets `display_name_overridden = 1` for display name changes
 - The `ContactSource` and `ContactUpdate` types if they are storage-shaped
 
 Keep in `core`:
-- `save_local_contact` and `save_synced_contact` as thin domain wrappers that decide `is_local` and delegate to the db update function
-- Or, if save_local/save_synced add no logic beyond passing the flag, they can also move and core re-exports them
+- `save_local_contact` and `save_synced_contact` as thin wrappers that delegate to the corresponding explicit db operation
+- Re-export shim preserving `rtsk::contacts::save::*`
 
-The `display_name_overridden` flag logic (synced contacts mark display name as locally overridden) is a domain rule, but it is currently encoded in the UPDATE SQL itself. When moving to db, the flag semantics stay in the SQL — this is acceptable because it is a storage-level invariant ("this column tracks whether the value was user-set"), not a business workflow decision.
+The db layer exposes two explicit operations rather than one function with an `is_local` boolean flag. The product semantics (local contacts save immediately, synced contacts mark display name as user-overridden) are different enough that hiding them behind a flag obscures the policy.
+
+The `display_name_overridden` flag logic stays in the SQL — it is a storage-level invariant ("this column tracks whether the value was user-set"), not a business workflow decision.
 
 ##### `contacts/seen_addresses.rs`
 
@@ -392,7 +396,7 @@ The promotion logic (normalize email, check if already a contact, insert with so
 
 ##### `contacts/sync_google.rs`
 
-Pure storage enrichment. No transactions.
+Thin storage enrichment wrapper. No transactions. Already mostly a core wrapper with a couple of `DbState` SQL closures.
 
 Move to `db`:
 - `enrich_google_contacts` (UPDATE with COALESCE across phone/company/account_id/server_id)
@@ -406,7 +410,7 @@ The COALESCE strategy ("only enrich if not already set") is a storage-level merg
 
 ##### `contacts/sync_graph.rs`
 
-Pure storage enrichment. No transactions.
+Thin storage enrichment wrapper. No transactions. Same shape as sync_google.rs.
 
 Move to `db`:
 - `enrich_graph_contacts` (UPDATE with subquery correlation against graph_contact_map)
@@ -415,20 +419,18 @@ Move to `db`:
 Keep in `core`:
 - `build_graph_contact_update_body` (builds JSON for PATCH request — no SQL)
 
-Same pattern as sync_google.rs.
-
 ##### `contacts/gal.rs`
 
 Bulk cache management with a transactional clear-and-refill, plus cache-age checking and provider-specific HTTP fetch.
 
 Move to `db`:
 - `cache_gal_entries` (DELETE + INSERT OR REPLACE in a transaction)
-- `record_gal_refresh` (INSERT OR REPLACE into settings)
-- `gal_cache_age` (SELECT from settings)
-- The provider-type lookup query inside `refresh_gal_for_account` (SELECT provider FROM accounts)
+- GAL cache-age read (SELECT from settings — current function name in code is `gal_cache_age`)
+- GAL refresh timestamp write (INSERT OR REPLACE into settings — if a new db API name is needed, say so explicitly during implementation)
+- Provider-type lookup (SELECT provider FROM accounts) — this read is part of the `refresh_gal_for_account` orchestration entry point. It must become a db helper that the core orchestration function consumes, since core should not do the SELECT itself.
 
 Keep in `core`:
-- `refresh_gal_for_account` as domain orchestration (check cache age, dispatch to provider-specific HTTP fetch, call db cache function)
+- `refresh_gal_for_account` as domain orchestration: call db for provider lookup → check cache age via db → dispatch to provider-specific HTTP fetch → call db cache function
 - `fetch_graph_gal` and `fetch_google_gal` (HTTP client calls, no SQL)
 - The 24-hour staleness threshold decision
 
@@ -440,24 +442,22 @@ Transactional domain+storage mix. This is one of the two hard modules.
 
 Move to `db`:
 - The duplicate-finding query (JOIN contacts with seen_addresses, with limit)
-- The single-pair merge operation: read merge contact fields → COALESCE update into keep contact → migrate group memberships → delete merge contact
+- A per-pair merge operation that performs one merge atomically: read merge contact fields → COALESCE update into keep contact → migrate group memberships → delete merge contact
 - The manual `merge_contacts` operation (same SQL as pair merge but for explicit user-initiated merge)
 
 Keep in `core`:
 - `find_duplicates` as a domain function that calls the db query and returns `DuplicatePair` results
 - `auto_merge_duplicates` as domain orchestration: calls db to find duplicates, then loops and calls db merge per pair, accumulating error/skip counts
+- Source-priority decisions (which contact to keep, which to merge) — computed in core before calling db
 
-Transaction rule for dedup (same precedent as Phase B delete.rs):
-- `db` exposes an operation-specific merge function that performs one pair merge atomically (read fields → update → migrate groups → delete)
-- `core` drives the loop: find duplicates, then for each pair, call db's merge function
-- The current `unchecked_transaction()` wrapping the entire loop should be replaced with per-pair transactional calls from db, or db exposes a batch-merge function that takes all pairs and commits at the end
-- Source-priority decisions (which contact to keep, which to merge) stay in core — they are computed before calling db
-
-The key design question is whether the transaction wraps all pairs or one pair at a time. The current code wraps all pairs in one transaction and continues on per-pair errors (partial success). If that behavior is intentional, db should expose a batch-merge API. If atomicity per pair is sufficient, db exposes a single-pair merge and core loops.
+Transaction rule for dedup:
+- `db` exposes a per-pair merge function that performs one pair merge atomically within its own transaction (read fields → update → migrate groups → delete → commit)
+- `core` drives the loop: find duplicates, then for each pair, call db's per-pair merge function, accumulating success/skip/error counts
+- The current behavior wraps all pairs in one `unchecked_transaction()` and continues on per-pair errors. Phase C replaces this with per-pair transactional db operations while preserving the user-visible partial-success counting behavior. This is the cleaner boundary and matches the current "best effort" spirit — the one-big-transaction wrapper added no real atomicity guarantee since per-pair errors were already tolerated.
 
 ##### `contacts/sync_carddav.rs`
 
-The hardest contacts module. Transactional sync with domain logic encoded in SQL.
+The hardest contacts module. Transactional sync with business policy encoded at the storage boundary.
 
 Move to `db`:
 - `persist_carddav_contact_full` (INSERT ON CONFLICT with source-priority CASE statements)
@@ -471,24 +471,23 @@ Keep in `core`:
 
 Transaction rule for sync_carddav:
 - `db` exposes an operation-specific sync-persist function that takes parsed contact data and deleted URIs, and performs the full persist+delete pass atomically within a single transaction
-- Alternatively, db exposes per-contact persist and per-URI delete functions, and core calls them in a batch. The transaction boundary then needs to be negotiated — either db wraps the batch, or core passes all data in one call and db handles the transaction.
-- The current approach (core opens transaction, loops, commits) must not survive — core should not hold a raw Transaction.
+- The current approach (core opens transaction, loops, commits) must not survive — core should not hold a raw Transaction
 
 The source-priority CASE logic in the ON CONFLICT clause:
-- This stays in the SQL. It is a storage-level merge rule ("if the existing row was user-created, don't overwrite their edits"). Moving it out of SQL would mean reading the existing row first, applying the rule in Rust, then writing — which loses atomicity and adds a round-trip. Keeping it in SQL is the right call.
+- This stays in the SQL. It is business policy expressed at the storage boundary because atomic upsert semantics require it. Moving it out of SQL would mean reading the existing row first, applying the rule in Rust, then writing — which loses atomicity and adds a round-trip. This is intentional: db is allowed to encode policy-shaped logic when the alternative would break storage invariants.
 
 The cascading delete check (3-way provider map lookup):
-- This also stays in db. It is storage-level referential integrity ("only delete a contact if no provider still claims it"). The check queries `carddav_contact_map`, `google_contact_map`, and `graph_contact_map` — all storage tables. The domain decision is "should we delete this contact?" and the answer is "only if orphaned across all providers." That belongs in db.
+- This also stays in db. It is storage-level referential integrity ("only delete a contact if no provider still claims it"). The check queries `carddav_contact_map`, `google_contact_map`, and `graph_contact_map` — all storage tables.
 
 #### Migration steps
 
 1. `contacts/search.rs`
-   - Move `search_contacts_unified`, helpers, and types to db (likely a new `db::queries_extra::contact_search` module, or extend existing `contacts.rs`)
-   - Delete or empty the core module
-   - Update callers (app's compose autocomplete) to import from db
+   - Move `search_contacts_unified` and helpers to db (likely a new `db::queries_extra::contact_search` module, or extend existing `contacts.rs`)
+   - `ContactSearchResult` and `ContactSearchKind` live in db; core re-exports via shim
+   - Keep `contacts/search.rs` as a re-export shim preserving `rtsk::contacts::search::*`
 
 2. `contacts/save.rs`, `contacts/seen_addresses.rs`
-   - Add db query functions for contact source lookup, field-level update, promotion, stats
+   - Add two explicit db save operations (local and synced) plus contact source lookup, promotion, and stats queries
    - Rewrite core modules to delegate to db
    - Remove rusqlite from both
 
@@ -498,18 +497,18 @@ The cascading delete check (3-way provider map lookup):
    - Remove rusqlite from both
 
 4. `contacts/gal.rs`
-   - Move cache CRUD and settings queries to db
+   - Move cache CRUD, settings queries, and provider-type lookup to db
    - Keep HTTP fetch and cache-age orchestration in core
    - Remove rusqlite from gal.rs
 
 5. `contacts/dedup.rs`
-   - Add db merge operation (single-pair or batch — decide during implementation)
+   - Add db per-pair merge operation (atomically transactional per pair)
    - Add db duplicate-finding query
-   - Rewrite core to orchestrate find → merge loop without holding transactions
+   - Rewrite core to orchestrate find → merge loop with per-pair db calls, preserving partial-success counting
    - Remove rusqlite from dedup.rs
 
 6. `contacts/sync_carddav.rs`
-   - Add db sync-persist and delete operations (with source-priority and cascading-delete logic in SQL)
+   - Add db sync-persist function (batch persist+delete in one transaction, with source-priority and cascading-delete logic in SQL)
    - Add db ctag/etag helpers
    - Rewrite core to orchestrate fetch → parse → call db persist/delete
    - Remove rusqlite from sync_carddav.rs
@@ -529,13 +528,129 @@ The cascading delete check (3-way provider map lookup):
 - It does not unify the 3 provider mapping table schemas (google_contact_map, graph_contact_map, carddav_contact_map) — that is a Contract #13 concern
 - It does not change the source-priority rules, only moves them to their correct crate
 - It does not address the `seen` crate's own SQL (that crate has its own `rusqlite` dependency, which is a separate Contract #12 question)
+- It does not update downstream callers to import from `db` directly — re-export shims preserve existing import paths during Phase C
 
 ### Phase D: Extract SQL from email operations and other domains
 
-- `email_actions/mod.rs`: Move label add/remove to `db`.
-- `mdn.rs`: Move hierarchical policy lookup to `db`. Core keeps the fallback-chain logic.
-- `send_identity.rs`: Move identity queries to `db`. Core keeps priority selection logic.
-- `auto_responses.rs`, `bimi.rs`, `command_palette_queries.rs`, `search_pipeline.rs`: Move queries to `db`. Core keeps domain interpretation.
+This phase covers the remaining feature modules in core that contain direct SQL. None have core-internal dependency blockers. The modules split into two groups by signal value.
+
+#### Group 1: Email operation modules (pattern-setting)
+
+##### `email_actions/mod.rs`
+
+Trivial. Three functions (`remove_label`, `insert_label`, `remove_inbox_label`) that do DELETE/INSERT OR IGNORE on `thread_labels`. Pure storage, no domain logic, no transactions. All take `&Connection`.
+
+Move to `db`: all three functions.
+Keep in `core`: nothing — module becomes a re-export shim or is emptied.
+
+##### `mdn.rs`
+
+Mixes SQL (policy lookup, MDN-sent flag read/write on `messages`, `read_receipt_policy`) with non-SQL (MDN MIME message building, IMAP/JMAP flag-setting protocol calls). All SQL takes `&Connection`.
+
+Move to `db`:
+- `resolve_read_receipt_policy` — hierarchical lookup: sender → domain → account → global default
+- `query_policy` — single-row SELECT from `read_receipt_policy`
+- `is_mdn_already_sent` — SELECT `mdn_sent` from `messages`
+- `mark_mdn_sent_local` — UPDATE `mdn_sent = 1` on `messages`
+- `is_mdn_requested_graph` — SELECT `mdn_requested` from `messages`
+
+Keep in `core`:
+- `build_mdn_message` — MIME construction, no SQL
+- `mark_mdn_sent_jmap` — JMAP protocol call
+- `mark_mdn_sent_imap` / `is_mdn_sent_imap` — IMAP protocol calls
+
+The fallback-chain logic in `resolve_read_receipt_policy` (sender → domain → account → global) is query-shaped, not domain-shaped. Each level is a separate query with the same structure. It stays in db as a single function.
+
+##### `send_identity.rs`
+
+Pure storage reads plus Rust-side selection logic. All take `&Connection`.
+
+Move to `db`:
+- `get_send_identities` — SELECT from `send_identities` ordered by `is_primary`
+- `get_all_send_identity_emails` — SELECT DISTINCT email
+
+Keep in `core`:
+- `select_from_address` — priority-based selection (mailbox match → reply_to → primary). This reads identities via the db function, then applies domain logic to choose the best match. The selection algorithm is domain behavior; the query is storage.
+- `SendIdentity` struct and `FromSelectionContext` — these are domain types used by the selection logic. They stay in core if they have no storage coupling, or move to db if they are pure data structs returned by the query. Since `SendIdentity` maps 1:1 to the `send_identities` row, it can live in db and be re-exported.
+
+#### Group 2: Standalone query hosts
+
+##### `auto_responses.rs`
+
+Mixes SQL (SELECT/INSERT ON CONFLICT on `auto_responses`) with provider-specific HTTP fetch/push (Graph, Gmail, JMAP).
+
+Move to `db`:
+- `db_get_auto_response` — SELECT from `auto_responses`
+- `db_upsert_auto_response` — INSERT ON CONFLICT
+- `any_auto_response_active` — SELECT EXISTS
+
+Keep in `core`:
+- `fetch_graph_auto_response` / `push_graph_auto_response` — Graph HTTP
+- `fetch_gmail_auto_response` / `push_gmail_auto_response` — Gmail HTTP
+- `fetch_jmap_auto_response` / `push_jmap_auto_response` — JMAP protocol
+- `normalize_dotnet_datetime` — date parsing utility
+- `AutoResponseConfig` — domain type (may move to db if it's a pure row struct)
+
+##### `bimi.rs`
+
+Mixes SQL (cache read/write on `bimi_cache`, domain-warming query on `messages`) with DNS lookup, SVG fetch/validation, and rasterization.
+
+Move to `db`:
+- `get_bimi_cache` — SELECT from `bimi_cache` with expiry check
+- `upsert_bimi_cache` — INSERT ON CONFLICT
+- `domains_to_warm` — SELECT DISTINCT domains from `messages` (complex SUBSTR/INSTR query)
+
+Keep in `core`:
+- `lookup_bimi` — orchestration (check cache → DNS → fetch SVG → validate → rasterize → cache)
+- `cache_negative` — calls upsert_bimi_cache with `has_bimi = false`
+- `warm_bimi_cache` — concurrent warming loop
+- All DNS, HTTP, SVG validation, rasterization functions
+- `BimiCacheEntry`, `BimiRecord` — domain types
+
+##### `command_palette_queries.rs`
+
+Pure storage. All reads, no domain logic beyond Rust-side formatting. All take `&Connection`.
+
+Move to `db`: all 5 query functions:
+- `get_user_folders_for_palette`
+- `get_user_labels_for_palette`
+- `get_thread_labels_for_palette`
+- `get_all_labels_cross_account`
+- `is_folder_based_provider`
+
+Keep in `core`: nothing — module becomes a re-export shim.
+
+Note: these functions return `cmdk::OptionItem`. The `cmdk` crate must be accessible from `db` for this to work. If `cmdk` depends on `db` (creating a cycle), the functions stay in core or the `OptionItem` construction moves to a mapping layer. Check the dependency graph before moving.
+
+##### `search_pipeline.rs`
+
+The hardest module in group 2. One direct SQL query (`search_sql_fallback`) mixed with multi-backend routing (SQL, Tantivy, combined).
+
+Move to `db`:
+- `search_sql_fallback` — SELECT threads with LIKE pattern, scope clause
+- `search_sql_only` — routes to `smart_folder::query_threads` which already lives in a separate crate
+
+Keep in `core`:
+- `search` — top-level routing (parse query → choose backend → combine results)
+- `search_tantivy_only` — Tantivy-only path
+- `search_combined` — intersection + enrichment
+- All result mapping functions (`db_thread_to_unified`, `enrich_from_sql`, etc.)
+
+The `search_sql_fallback` function dynamically builds a scope clause (`AND t.account_id = ?` or `AND t.account_id IN (?...)`) and uses `params_from_iter`. This dynamic SQL is storage-shaped. It moves to db and takes `AccountScope` as a parameter.
+
+#### Migration steps
+
+1. `email_actions/mod.rs` — move 3 label-mutation functions to db
+2. `send_identity.rs` — move identity queries to db, keep selection logic in core
+3. `mdn.rs` — move policy lookup and MDN state queries to db, keep MIME/protocol in core
+4. `auto_responses.rs` — move get/upsert/exists queries to db, keep HTTP in core
+5. `bimi.rs` — move cache CRUD and domain-warming query to db, keep DNS/SVG/raster in core
+6. `command_palette_queries.rs` — move all queries to db (check cmdk dep first)
+7. `search_pipeline.rs` — move SQL fallback to db, keep routing in core
+
+Verification:
+- `cargo check -p db`, `cargo check -p rtsk`, `cargo check --workspace` after each group
+- Confirm rusqlite removed from each touched module
 
 ### Phase E: Remove `rusqlite` from core's `Cargo.toml`
 

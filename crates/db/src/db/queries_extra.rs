@@ -5,6 +5,8 @@ pub use super::queries::load_recent_rule_bundled_threads;
 
 mod accounts_crud;
 pub mod auto_responses;
+pub mod bimi;
+pub mod command_palette;
 pub mod contact_carddav;
 pub mod contact_search;
 pub mod email_actions;
@@ -24,11 +26,14 @@ pub mod mdn;
 pub mod message_queries;
 mod misc;
 pub mod scoped_queries;
+pub mod search_fallback;
 pub mod send_identity;
 mod tasks;
 
 pub use accounts_crud::*;
 pub use auto_responses::*;
+pub use bimi::*;
+pub use command_palette::*;
 pub use contact_carddav::*;
 pub use contact_search::*;
 pub use email_actions::*;
@@ -48,6 +53,7 @@ pub use mdn::*;
 pub use message_queries::*;
 pub use misc::*;
 pub use scoped_queries::*;
+pub use search_fallback::*;
 pub use send_identity::*;
 pub use tasks::*;
 
