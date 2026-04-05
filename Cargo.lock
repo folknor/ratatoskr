@@ -246,7 +246,6 @@ dependencies = [
  "rfd",
  "rte",
  "rtsk",
- "rusqlite",
  "serde",
  "serde_json",
  "smart-folder",

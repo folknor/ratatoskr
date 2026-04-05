@@ -55,7 +55,8 @@ use rtsk::db::queries_extra::navigation::{
     NavigationState, get_navigation_state, get_shared_mailbox_navigation,
 };
 use rtsk::db::queries_extra::{
-    db_update_account_sort_order, get_active_account_ids_sync, get_public_folder_items,
+    db_mark_queued_drafts_failed_sync, db_update_account_sort_order,
+    get_active_account_ids_sync, get_calendar_default_view_sync, get_public_folder_items,
     get_threads_for_shared_mailbox, get_threads_scoped,
 };
 use rtsk::db::types::{AccountScope, DbThread};
@@ -520,7 +521,8 @@ impl App {
         let session = pop_out::session::SessionState::load(data_dir);
 
         let calendar_default_view = db
-            .get_calendar_default_view()
+            .read_db_state()
+            .with_conn_sync(get_calendar_default_view_sync)
             .ok()
             .flatten()
             .map(|view_name| CalendarState::parse_view_name(&view_name))
@@ -586,7 +588,11 @@ impl App {
         // Resurface orphaned 'queued' drafts from the old send path.
         // These were never sent — transition to 'failed' so they're visible
         // to future outbox UI rather than silently deleting user data.
-        if let Err(e) = app.db.mark_queued_drafts_failed() {
+        if let Err(e) = app
+            .db
+            .write_db_state()
+            .with_conn_sync(db_mark_queued_drafts_failed_sync)
+        {
             log::warn!("Failed to resurface orphaned queued drafts: {e}");
         }
 

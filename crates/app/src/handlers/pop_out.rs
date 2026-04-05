@@ -28,6 +28,7 @@ use crate::ui::layout::{
 use crate::{APP_DATA_DIR, App, Message};
 
 use rtsk::actions::SendAttachment;
+use rtsk::db::queries_extra::{db_save_local_draft, db_save_local_draft_sync};
 // ── Pop-out message dispatch ────────────────────────────
 
 impl App {
@@ -871,7 +872,9 @@ impl App {
 
         Task::perform(
             async move {
-                db.save_local_draft(
+                let core_db = db.write_db_state();
+                db_save_local_draft(
+                    &core_db,
                     data.draft_id,
                     data.account_id,
                     data.to_csv,
@@ -883,6 +886,8 @@ impl App {
                     data.thread_id,
                     data.from_email,
                     data.signature_id,
+                    None,
+                    None,
                     data.signature_separator_index,
                 )
                 .await
@@ -911,20 +916,25 @@ impl App {
         }
         let data = DraftData::from_compose(state);
 
-        let result = self.db.save_local_draft_sync(
-            data.draft_id,
-            data.account_id,
-            data.to_csv,
-            data.cc_csv,
-            data.bcc_csv,
-            data.subject,
-            data.body_html,
-            data.reply_to_message_id,
-            data.thread_id,
-            data.from_email,
-            data.signature_id,
-            data.signature_separator_index,
-        );
+        let result = self.db.write_db_state().with_conn_sync(|conn| {
+            db_save_local_draft_sync(
+                conn,
+                data.draft_id,
+                data.account_id,
+                data.to_csv,
+                data.cc_csv,
+                data.bcc_csv,
+                data.subject,
+                data.body_html,
+                data.reply_to_message_id,
+                data.thread_id,
+                data.from_email,
+                data.signature_id,
+                None,
+                None,
+                data.signature_separator_index,
+            )
+        });
         match result {
             Ok(()) => {
                 if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id)

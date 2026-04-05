@@ -555,6 +555,65 @@ pub async fn db_save_local_draft(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn db_save_local_draft_sync(
+    conn: &crate::db::Connection,
+    id: String,
+    account_id: String,
+    to_addresses: Option<String>,
+    cc_addresses: Option<String>,
+    bcc_addresses: Option<String>,
+    subject: Option<String>,
+    body_html: Option<String>,
+    reply_to_message_id: Option<String>,
+    thread_id: Option<String>,
+    from_email: Option<String>,
+    signature_id: Option<String>,
+    remote_draft_id: Option<String>,
+    attachments: Option<String>,
+    signature_separator_index: Option<i64>,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO local_drafts (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
+            subject, body_html, reply_to_message_id, thread_id, from_email, signature_id, \
+            remote_draft_id, attachments, signature_separator_index, updated_at, sync_status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, unixepoch(), 'pending')
+             ON CONFLICT(id) DO UPDATE SET
+               to_addresses = ?3, cc_addresses = ?4, bcc_addresses = ?5,
+               subject = ?6, body_html = ?7, reply_to_message_id = ?8,
+               thread_id = ?9, from_email = ?10, signature_id = ?11,
+               remote_draft_id = ?12, attachments = ?13,
+               signature_separator_index = ?14,
+               updated_at = unixepoch(), sync_status = 'pending'",
+        params![
+            id,
+            account_id,
+            to_addresses,
+            cc_addresses,
+            bcc_addresses,
+            subject,
+            body_html,
+            reply_to_message_id,
+            thread_id,
+            from_email,
+            signature_id,
+            remote_draft_id,
+            attachments,
+            signature_separator_index,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn db_mark_queued_drafts_failed_sync(conn: &crate::db::Connection) -> Result<usize, String> {
+    conn.execute(
+        "UPDATE local_drafts SET sync_status = 'failed' WHERE sync_status = 'queued'",
+        [],
+    )
+    .map_err(|e| e.to_string())
+}
+
 pub async fn db_get_local_draft(db: &DbState, id: String) -> Result<Option<DbLocalDraft>, String> {
     db.with_conn(move |conn| {
         query_one::<DbLocalDraft>(conn, "SELECT * FROM local_drafts WHERE id = ?1", &[&id])
