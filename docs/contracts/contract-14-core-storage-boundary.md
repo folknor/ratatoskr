@@ -728,11 +728,64 @@ Option (a) is the most pragmatic: decompose `queries.rs` so most of it moves to 
 
 3. **Break cycle 3**: Decompose `queries.rs` — move body-store-free functions to `db`, leave body-enrichment functions in core.
 
-4. **Clean up remaining `&Connection` parameters**: Remove `&Connection` from orchestration functions in `bimi.rs` and `search_pipeline.rs`. Replace with `&DbState` or db API calls. These modules no longer own SQL but still pass raw connections to db helpers.
+### Phase F: Extract remaining core SQL (actions, chat, cloud attachments, sync helpers)
 
-5. **Remove `rusqlite` from `core/Cargo.toml`**: The enforcement gate. This is a separate step after all signature cleanups are done. If it compiles without `rusqlite`, the boundary holds.
+Phases A–E underestimated the remaining core SQL surface. 16 files across actions, chat, cloud attachments, sync helpers, and send pipeline still contain direct SQL. Phase F extracts all of them to reach the enforcement gate.
 
-6. **Verify**: `cargo check --workspace`. Core compiles without `rusqlite`.
+No new circular dependency blockers exist in this set. All files use pure storage SQL (except `chat.rs` which mixes domain logic, and `provider/account_resync.rs` which uses body_store). The extraction pattern is the same as Phases C–D: move SQL to db helpers, leave domain logic in core.
+
+#### Group 1: Action-path SQL (7 files, ~20 SQL statements total)
+
+These are the email action handlers in `actions/`. They execute SQL inside `spawn_blocking` closures via `&Connection`. Most are 1-3 SQL statements per file.
+
+| File | SQL | Tables | Extraction |
+|---|---|---|---|
+| `actions/label.rs` | 2 SELECT (label existence check) | labels | Delegate to existing db label helpers |
+| `actions/snooze.rs` | 2 UPDATE (snooze_until, inbox label) | threads | Add db snooze helpers |
+| `actions/folder.rs` | 5 SQL (folder create/rename/delete) | labels, thread_labels | Add db folder mutation helpers |
+| `actions/send.rs` | 4 SQL (draft INSERT/UPDATE/SELECT) | local_drafts | Add db draft lifecycle helpers |
+| `actions/contacts.rs` | 2 SQL (contact existence, source lookup) | contacts | Delegate to existing db contact helpers |
+| `actions/provider.rs` | 1 SELECT (provider type) | accounts | Delegate to existing db provider lookup |
+| `actions/context.rs` | 1 SELECT (thread existence) | threads | Add db thread existence helper |
+
+`actions/tests.rs` contains test fixtures that use raw SQL for DB setup. These can either move to db's test harness or remain as integration tests with rusqlite in `[dev-dependencies]` only.
+
+#### Group 2: Standalone storage hosts (5 files, ~36 SQL statements total)
+
+| File | SQL | Tables | Extraction |
+|---|---|---|---|
+| `chat.rs` | 9 SQL (chat thread queries, contact summary upserts, transaction) | chat_contacts, messages, threads | Split: domain logic (chat eligibility) stays in core, query/upsert SQL moves to db |
+| `cloud_attachments.rs` | 9 SQL (full CRUD for upload queue) | cloud_attachments | Move entire storage layer to db |
+| `contact_photos.rs` | 12 SQL (avatar cache CRUD) | contact_photo_cache | Move cache ops to db |
+| `scheduled_send.rs` | 3 SQL (scheduled email queries) | scheduled_emails | Move to db |
+| `send.rs` | 3 SQL (draft lifecycle) | local_drafts | Move draft helpers to db |
+
+`chat.rs` is the hardest in this group: it has transaction-scoped domain logic (chat thread detection, contact summary updates) that needs the same kind of split as Phase C's dedup.rs.
+
+#### Group 3: Sync-helper SQL (3 files, ~11 SQL statements total)
+
+| File | SQL | Tables | Extraction |
+|---|---|---|---|
+| `carddav/sync.rs` | 5 SQL (CTag/ETag, contact upsert transaction) | contacts, carddav_contact_map, settings | Delegate to existing db carddav helpers |
+| `caldav/sync.rs` | 4 SQL (calendar event upsert) | calendar_events, calendars | Delegate to existing db calendar helpers |
+| `provider/account_resync.rs` | 2 SQL (delete threads, clear sync state) | threads, folder_sync_state | Add db resync helpers. Note: also uses body_store (same pattern as queries.rs — keep body cleanup in core, move SQL to db) |
+
+#### Group 4: Remaining documented exceptions + enforcement gate
+
+After Groups 1–3 are extracted:
+
+- `navigation.rs` remains in core (smart_folder cycle — documented)
+- `queries.rs` remainder stays in core (body_store + crypto — documented)
+- `bimi.rs` and `search_pipeline.rs` still take `&Connection` — convert to `&DbState` or db API calls
+- `auto_responses.rs` still takes `&rusqlite::Connection` in one function — convert
+
+Then:
+
+4. **Clean up remaining `&Connection` parameters**: Remove `&Connection` from all core modules that no longer own SQL but still pass raw connections to db helpers.
+
+5. **Move `rusqlite` to `[dev-dependencies]` only**: `actions/tests.rs` may still need rusqlite for test fixtures. If so, rusqlite moves from `[dependencies]` to `[dev-dependencies]`, which still satisfies the boundary rule (production code doesn't use it).
+
+6. **Verify**: `cargo check --workspace`. Core compiles without rusqlite in production deps.
 
 ## What This Eliminates
 
