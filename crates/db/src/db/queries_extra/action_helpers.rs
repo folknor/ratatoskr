@@ -123,23 +123,6 @@ pub fn upsert_folder_from_mutation_sync(
     Ok(())
 }
 
-/// Rename a folder/label.
-pub fn rename_folder_sync(
-    conn: &Connection,
-    label_id: &str,
-    account_id: &str,
-    new_name: &str,
-    new_path: Option<&str>,
-) -> Result<(), String> {
-    conn.execute(
-        "UPDATE labels SET name = ?3, imap_folder_path = ?4 \
-         WHERE id = ?1 AND account_id = ?2",
-        params![label_id, account_id, new_name, new_path],
-    )
-    .map_err(|e| format!("rename folder: {e}"))?;
-    Ok(())
-}
-
 /// Delete a folder/label and its thread_labels associations.
 pub fn delete_folder_sync(
     conn: &Connection,
