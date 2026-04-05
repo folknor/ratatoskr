@@ -6,6 +6,7 @@ pub use super::queries::load_recent_rule_bundled_threads;
 mod accounts_crud;
 pub mod contact_carddav;
 pub mod contact_search;
+mod email_actions;
 mod account_delete;
 mod accounts_messages;
 mod ai_state;
@@ -21,11 +22,13 @@ mod labels_attachments;
 pub mod message_queries;
 mod misc;
 pub mod scoped_queries;
+mod send_identity;
 mod tasks;
 
 pub use accounts_crud::*;
 pub use contact_carddav::*;
 pub use contact_search::*;
+pub use email_actions::*;
 pub use account_delete::*;
 pub use accounts_messages::*;
 pub use ai_state::*;
@@ -41,6 +44,7 @@ pub use labels_attachments::*;
 pub use message_queries::*;
 pub use misc::*;
 pub use scoped_queries::*;
+pub use send_identity::*;
 pub use tasks::*;
 
 pub(super) fn dynamic_update(
