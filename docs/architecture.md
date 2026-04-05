@@ -10,17 +10,34 @@ When evaluating a design: if adding a new call site can silently break existing 
 
 ## Crate Boundaries
 
-**`rtsk`** is the facade. All business logic lives here — accounts, OAuth, discovery, email actions, DB queries, cloud attachments. The app crate calls core functions directly.
+**`rtsk`** is the facade. Business logic and domain orchestration live here — accounts, OAuth, discovery, email actions, calendar workflow, search routing, cloud-attachment orchestration. The app crate calls core functions directly.
+
+**`db`** owns the main application SQLite schema and all shared-table SQL. Query shape, write shape, conflict resolution, and transaction-scoped shared-table persistence belong here. If multiple crates need to write the same table, `db` owns that write API.
 
 **Provider crates** (`gmail`, `jmap`, `graph`, `imap`) each implement the `ProviderOps` trait (`common/src/ops.rs`). No provider-specific logic should leak into app or core beyond the trait surface.
+
+For shared-table persistence, providers normalize protocol payloads into `db` write structs and call `db` APIs. They do not independently own SQL for shared tables like `messages`, `attachments`, `labels`, `contacts`, `threads`, or calendar tables.
 
 **`store`** owns all content outside the main SQLite database: compressed body store (`bodies.db`), inline image store, attachment file cache. Never assume message content is in the main DB.
 
 **`provider`** holds shared provider helpers: encryption (AES-256-GCM), email parsing, HTML sanitization.
 
-**`app`** is the iced UI. Elm architecture (boot/update/view). It should contain presentation logic only — no direct DB writes, no provider calls, no business rules.
+**`app`** is the iced UI. Elm architecture (boot/update/view). It contains presentation logic only — no direct SQLite ownership, no provider calls, no business rules.
 
 ## Architectural Boundaries
+
+### Shared-table SQL belongs to `db`
+
+Shared application tables are not owned by `app`, `core`, `sync`, or provider crates. They are owned by `db`.
+
+That includes:
+- message/thread persistence
+- attachment persistence
+- label and folder persistence
+- shared contact persistence
+- shared calendar persistence
+
+**Enforcement:** `app` no longer depends on `rusqlite`. `core` no longer depends on `rusqlite`. Provider and sync crates now route shared-table writes through `db` APIs instead of embedding their own SQL for those tables.
 
 ### Action service as mutation gate
 
@@ -34,6 +51,11 @@ The four providers are unified behind `ProviderOps`. All provider-specific behav
 
 **Enforcement:** `FolderId` and `TagId` newtypes in `crates/common/src/typed_ids.rs`. The `ProviderOps` trait uses `&FolderId` for `move_to_folder`, `rename_folder`, `delete_folder` and `&TagId` for `add_tag`, `remove_tag`. Passing a folder ID where a tag ID is expected is a compile error. Typed IDs flow from `MailActionIntent` through `MailOperation` through `batch_execute` to the provider — no raw string boundaries except JSON deserialization in `pending.rs` and `CommandArgs` in the palette crate.
 
+For persistence, the provider boundary is:
+- providers fetch and translate protocol payloads
+- `db` owns shared-table writes
+- provider-local sync tables are explicit exceptions, not accidental ownership of shared schema
+
 ### Scope as a single source of truth
 
 The active scope (which account, shared mailbox, or public folder the user is looking at) must be consistent across sidebar, navigation context, and all DB queries.
@@ -45,6 +67,28 @@ The active scope (which account, shared mailbox, or public folder the user is lo
 Async loads (nav, threads, search, etc.) must not overwrite fresher state. Each load site captures a generation counter before dispatch and checks it on completion — stale results are discarded.
 
 **Enforcement:** `GenerationCounter<T>` and `GenerationToken<T>` types in `crates/core/src/generation.rs`. Phantom type brands prevent cross-counter token comparison at compile time. `next()` is the only way to get a token (`#[must_use]` — use `let _ =` for invalidation-only bumps). `is_current()` is the only way to check freshness. All 9 counters are migrated: App-level (`Nav`, `ThreadDetail`, `Search`, `PopOut`) and component-level (`Calendar`, `PaletteOptions`, `Typeahead`, `AddAccount`, `Autocomplete`).
+
+### Calendar workflow state owns meaning
+
+Calendar state is split into four layers:
+- view/navigation state
+- workflow state
+- editor session state
+- surface state
+
+Workflow state is authoritative for lifecycle meaning and identity. The editor session is the single source of truth for editable event state. Surface state (`CalendarPopover`, `CalendarModal`) is derived from workflow state and is never used to recover workflow semantics.
+
+**Enforcement:** handlers update workflow first and then synchronize surfaces. Editable event data is read from the editor session, not from `active_modal`.
+
+### Folder vs label semantics are explicit
+
+Ratatoskr has exactly two persisted sidebar concepts:
+- folders: `label_kind = "container"`
+- labels: `label_kind = "tag"`
+
+The `labels` table stores both. Provider-native concepts must be normalized into these two semantics before persistence. System folders use canonical Ratatoskr IDs (`INBOX`, `SENT`, `TRASH`, etc.), not provider-native IDs.
+
+**Enforcement:** provider label/folder sync paths map their payloads into shared `db` label writes with explicit `label_kind`. Sidebar/navigation code branches on `label_kind` rather than provider-specific heuristics.
 
 ## Adding a New Email Action
 
@@ -81,3 +125,10 @@ These are verified, adopted project-wide, and should be followed for all new wor
 **`ProgressReporter` trait** — All event emission from core goes through `&dyn ProgressReporter`. The app provides its own implementation.
 
 **State types are `Clone`** — `DbState`, `BodyStoreState`, `InlineImageStoreState`, `SearchState`, `AppCryptoState` all wrap `Arc<Mutex<_>>` and implement `Clone`.
+
+## Current Exceptions
+
+These are intentional unresolved areas, not reasons to bypass the boundaries above.
+
+- **Signatures** are not yet a settled architecture surface. Gmail and JMAP signature sync/write behavior exists, but the product/spec is not finalized enough to treat that path as a completed shared persistence contract.
+- **Provider-local sync tables** may still live in provider or sync crates. That is acceptable only for provider-owned state, not for shared application tables.

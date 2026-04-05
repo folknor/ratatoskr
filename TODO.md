@@ -141,6 +141,8 @@
 
 - [ ] **Bundle SQLite for release builds** *(Deferred until 1.0)* — Re-enable `rusqlite/bundled` feature for release builds so the binary ships a known SQLite version with FTS5 guaranteed. Dev builds use system libsqlite3 for faster compiles.
 
+- [ ] **Scope provider-local sync/state tables explicitly** — Shared-table provider writes now route through `db`, but provider-owned state tables still need a final ownership pass. Enumerate tables like sync tokens, contact maps, delta tokens, folder/public-folder sync state, and push/subscription state; decide per table group whether it remains provider-owned or moves behind narrow `db` helpers. The boundary must be explicit in schema/docs rather than accidental.
+
 - [ ] **Reconsider sidebar layout** *(Deferred until right before 1.0)* — Currently the spec says: (1) sidebar should not show any Labels section when "All Accounts" is selected, (2) when a single account is selected, only labels belonging to that account should be shown, and (3) that for providers that have a "folder" concept, the users folders should show in the Labels section. We might need to re-think all 3.
 
 ## Roadmap Features — Remaining Work
@@ -157,7 +159,6 @@ Phases 1-6 complete (backend unified). **10 discrepancies remain** — see `docs
 
 Backend pipeline exists (parser, SQL builder, Tantivy, unified router). **29 discrepancies remain** — see `docs/search/discrepancies.md`. Critical: combined path applies free text in SQL before Tantivy ranking, Tantivy-only results show wrong message metadata, date boundaries inconsistent across engines. Also typeahead, pinned search lifecycle, and smart folder management gaps.
 
-- [ ] **Separate search intents with typed contracts** — Smart Folder navigation, ad hoc search, pinned-search activation, and pinned-search refresh currently share the same search execution path, which causes sidebar-state and persistence side effects to leak across features. Smart Folders are scope-exempt first-class sidebar objects and must not inherit pinned-search or ad hoc search behavior from query-string reuse. Refactor this into explicit typed intents with compile-time-enforced handling rules if possible, similar to the action resolver / `types`-crate approach, so each intent must declare its source identity, scope semantics, whether it updates pinned searches, mutates the search bar, restores prior view state, records history, and affects sidebar activation.
 - [ ] **Pinned search refresh action** — Sidebar pinned searches need their `Refresh` button wired so the stored snapshot can be recomputed on demand.
 - [ ] **Promote pinned search to Smart Folder** — Sidebar pinned searches need an action that converts a pinned search into a Smart Folder.
 
