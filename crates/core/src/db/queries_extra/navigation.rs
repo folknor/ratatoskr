@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::db::queries::get_labels;
@@ -492,4 +492,228 @@ fn rights_from_label(label: &db::db::types::DbLabel) -> Option<MailboxRightsInfo
         may_delete: label.right_delete,
         may_submit: label.right_submit,
     })
+}
+
+// ── Shared mailbox queries ─────────────────────────────────
+
+/// A shared/delegated mailbox row for sidebar display.
+#[derive(Debug, Clone)]
+pub struct SharedMailboxRow {
+    pub mailbox_id: String,
+    pub display_name: Option<String>,
+    pub account_id: String,
+    pub is_sync_enabled: bool,
+    pub last_synced_at: Option<i64>,
+    pub sync_error: Option<String>,
+}
+
+/// Load all shared mailboxes for sidebar display, across all active accounts.
+pub fn get_shared_mailboxes_sync(conn: &Connection) -> Result<Vec<SharedMailboxRow>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT s.mailbox_id, s.display_name, s.account_id,
+                    s.is_sync_enabled, s.last_synced_at, s.sync_error
+             FROM shared_mailbox_sync_state s
+             JOIN accounts a ON s.account_id = a.id
+             WHERE a.is_active = 1
+             ORDER BY a.sort_order ASC, s.display_name ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_map([], |row| {
+        Ok(SharedMailboxRow {
+            mailbox_id: row.get("mailbox_id")?,
+            display_name: row.get("display_name")?,
+            account_id: row.get("account_id")?,
+            is_sync_enabled: row.get::<_, i64>("is_sync_enabled")? != 0,
+            last_synced_at: row.get("last_synced_at")?,
+            sync_error: row.get("sync_error")?,
+        })
+    })
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
+}
+
+/// Look up the email address for a shared mailbox.
+///
+/// Used by pop-out compose to determine the sender identity for shared
+/// mailbox contexts — not a sidebar boot query.
+pub fn get_shared_mailbox_email_sync(
+    conn: &Connection,
+    account_id: &str,
+    mailbox_id: &str,
+) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT email_address FROM shared_mailbox_sync_state
+         WHERE account_id = ?1 AND mailbox_id = ?2",
+        rusqlite::params![account_id, mailbox_id],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .optional()
+    .map_err(|e| format!("shared mailbox email: {e}"))
+    .map(|opt| opt.flatten())
+}
+
+// ── Pinned public folder queries ───────────────────────────
+
+/// A pinned public folder row for sidebar display.
+#[derive(Debug, Clone)]
+pub struct PinnedPublicFolderRow {
+    pub folder_id: String,
+    pub display_name: String,
+    pub account_id: String,
+    pub sync_enabled: bool,
+    pub position: i64,
+    pub unread_count: i64,
+}
+
+/// Load pinned public folders for sidebar display, across all active accounts.
+pub fn get_pinned_public_folders_sync(
+    conn: &Connection,
+) -> Result<Vec<PinnedPublicFolderRow>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT p.folder_id, p.display_name, p.account_id,
+                    p.sync_enabled, p.position,
+                    COALESCE(f.unread_count, 0) AS unread_count
+             FROM public_folder_pins p
+             LEFT JOIN public_folders f
+               ON p.folder_id = f.id AND p.account_id = f.account_id
+             JOIN accounts a ON p.account_id = a.id
+             WHERE a.is_active = 1
+             ORDER BY p.position ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_map([], |row| {
+        Ok(PinnedPublicFolderRow {
+            folder_id: row.get("folder_id")?,
+            display_name: row.get("display_name")?,
+            account_id: row.get("account_id")?,
+            sync_enabled: row.get::<_, i64>("sync_enabled")? != 0,
+            position: row.get("position")?,
+            unread_count: row.get("unread_count")?,
+        })
+    })
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
+}
+
+// ── Operator typeahead queries ─────────────────────────────
+//
+// Search-operator typeahead queries for the search bar's `label:`,
+// `folder:`, `from:`, `to:`, and `account:` completions.
+
+/// A label row for search-operator typeahead.
+#[derive(Debug, Clone)]
+pub struct LabelTypeaheadRow {
+    pub name: String,
+    pub account_email: String,
+}
+
+/// Search visible labels for `label:` / `folder:` operator typeahead.
+pub fn search_labels_for_typeahead_sync(
+    conn: &Connection,
+    query: &str,
+) -> Result<Vec<LabelTypeaheadRow>, String> {
+    let pattern = crate::db::make_like_pattern(query.trim());
+    let mut stmt = conn
+        .prepare(
+            "SELECT DISTINCT l.name, a.email AS account_email
+             FROM labels l
+             JOIN accounts a ON l.account_id = a.id
+             WHERE l.visible = 1
+               AND l.name LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+             ORDER BY l.name ASC
+             LIMIT 10",
+        )
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_map(params![pattern], |row| {
+        Ok(LabelTypeaheadRow {
+            name: row.get("name")?,
+            account_email: row.get("account_email")?,
+        })
+    })
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
+}
+
+/// A seen-address row for search-operator typeahead.
+#[derive(Debug, Clone)]
+pub struct SeenAddressTypeaheadRow {
+    pub email: String,
+    pub display_name: Option<String>,
+}
+
+/// Search seen addresses for `from:` / `to:` operator typeahead.
+///
+/// This queries `seen_addresses` (addresses observed in message headers),
+/// not the synced contacts table.
+pub fn search_seen_addresses_for_typeahead_sync(
+    conn: &Connection,
+    query: &str,
+) -> Result<Vec<SeenAddressTypeaheadRow>, String> {
+    let pattern = crate::db::make_like_pattern(query.trim());
+    let mut stmt = conn
+        .prepare(
+            "SELECT DISTINCT display_name, email
+             FROM seen_addresses
+             WHERE (display_name LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+                    OR email LIKE ?1 ESCAPE '\\' COLLATE NOCASE)
+             ORDER BY last_seen_at DESC
+             LIMIT 10",
+        )
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_map(params![pattern], |row| {
+        Ok(SeenAddressTypeaheadRow {
+            email: row.get("email")?,
+            display_name: row.get("display_name")?,
+        })
+    })
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
+}
+
+/// An account row for search-operator typeahead.
+#[derive(Debug, Clone)]
+pub struct AccountTypeaheadRow {
+    pub email: String,
+    pub display_name: Option<String>,
+    pub account_name: Option<String>,
+}
+
+/// Search accounts for `account:` operator typeahead.
+pub fn search_accounts_for_typeahead_sync(
+    conn: &Connection,
+    query: &str,
+) -> Result<Vec<AccountTypeaheadRow>, String> {
+    let pattern = crate::db::make_like_pattern(query.trim());
+    let mut stmt = conn
+        .prepare(
+            "SELECT email, display_name, account_name
+             FROM accounts
+             WHERE (email LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+                    OR display_name LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+                    OR account_name LIKE ?1 ESCAPE '\\' COLLATE NOCASE)
+             ORDER BY sort_order ASC
+             LIMIT 10",
+        )
+        .map_err(|e| e.to_string())?;
+
+    stmt.query_map(params![pattern], |row| {
+        Ok(AccountTypeaheadRow {
+            email: row.get("email")?,
+            display_name: row.get("display_name")?,
+            account_name: row.get("account_name")?,
+        })
+    })
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
 }

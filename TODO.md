@@ -76,6 +76,10 @@
 
 - [ ] **Escape key audit for overlay surfaces** — Verify every Modal surface dismisses on Escape. Verify no Sheet surface dismisses on Escape. Verify calendar modals (event detail, editor, delete confirm, discard confirm) all handle Escape correctly. Includes nested-modal case: Escape from ConfirmDiscard should return to the editor (preserving the draft), not close everything. Requires routing Escape through the calendar handler for workflow-aware dispatch rather than the current blunt `is_some() → None` in main.rs. Mechanical verification pass, best done after `modal_overlay()` has been in use for a bit.
 
+- [ ] **Calendar move semantics for existing events** — The calendar picker is disabled for `EditingEvent` because moving an event between calendars requires provider-specific support (some providers need delete+create). When provider calendar-move APIs are implemented, re-enable the picker for existing events and update `account_id` ownership logic in the `CalendarSelected` handler accordingly.
+
+- [ ] **`create_event_from_email` account derivation** — Currently uses `sidebar.accounts.first()` for account prefill (`main.rs`). This is the last surviving sidebar-accounts reference in the calendar flow. Should derive account from the email message's actual account rather than assuming the first sidebar account is correct.
+
 - [ ] **Label pills in reading pane** — Pills should not show on each message, only at the top. Labels are per-thread, not per-message, at least in the UI.
 
 - [ ] **Link click handling (email content)** — Should open in system browser. Nothing happens.
