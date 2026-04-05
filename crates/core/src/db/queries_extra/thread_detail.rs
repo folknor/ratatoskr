@@ -417,38 +417,19 @@ fn query_thread_labels(
             continue;
         }
 
-        // Build a minimal DbLabel to pass to resolve_label_color
-        let db_label = crate::db::types::DbLabel {
-            id: lr.id.clone(),
-            account_id: lr.account_id,
-            name: lr.name.clone(),
-            label_type: None,
-            label_kind: lr.label_kind.clone(),
-            color_bg: lr.color_bg,
-            color_fg: lr.color_fg,
-            visible: true,
-            sort_order: 0,
-            imap_folder_path: None,
-            imap_special_use: None,
-            parent_label_id: None,
-            right_read: None,
-            right_add: None,
-            right_remove: None,
-            right_set_seen: None,
-            right_set_keywords: None,
-            right_create_child: None,
-            right_rename: None,
-            right_delete: None,
-            right_submit: None,
-            is_subscribed: None,
-        };
-
-        let (bg, fg) = resolve_label_color(&db_label);
+        let (bg, fg) = resolve_label_color(
+            &lr.name,
+            &lr.account_id,
+            lr.color_bg.as_deref(),
+            lr.color_fg.as_deref(),
+        );
+        let color_bg = bg.to_string();
+        let color_fg = fg.to_string();
         labels.push(ThreadLabel {
             label_id: lr.id,
             name: lr.name,
-            color_bg: bg.to_string(),
-            color_fg: fg.to_string(),
+            color_bg,
+            color_fg,
             label_kind: lr.label_kind,
         });
     }

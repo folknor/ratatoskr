@@ -1,3 +1,4 @@
+pub mod folder_roles;
 pub mod from_row;
 mod from_row_impls;
 pub mod lookups;

@@ -3,7 +3,7 @@ pub mod crypto;
 pub mod email_parsing;
 pub mod encoding;
 pub mod error;
-pub mod folder_roles;
+pub use db::db::folder_roles;
 pub mod headers;
 pub mod html_sanitizer;
 pub mod http;

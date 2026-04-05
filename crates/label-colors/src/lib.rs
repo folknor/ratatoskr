@@ -6,7 +6,6 @@
 
 pub mod preset_colors;
 
-use db::db::types::DbLabel;
 use preset_colors::all_presets;
 
 /// Deterministic color assignment for a label that has no synced color.
@@ -23,8 +22,6 @@ pub fn color_for_label(label_name: &str, namespace: &str) -> (&'static str, &'st
     namespace.hash(&mut hasher);
     label_name.hash(&mut hasher);
     let presets = all_presets();
-    // Truncation from u64 to usize on 32-bit targets is fine here — we only
-    // need an arbitrary hash value to index into a 25-element table.
     #[allow(clippy::cast_possible_truncation)]
     let index = (hasher.finish() as usize) % presets.len();
     let (_, bg, fg) = presets[index];
@@ -33,16 +30,20 @@ pub fn color_for_label(label_name: &str, namespace: &str) -> (&'static str, &'st
 
 /// Resolve display colors for a label.
 ///
-/// If the label has synced `color_bg`/`color_fg` (Gmail), return those.
-/// Otherwise, deterministically assign from the preset palette.
-pub fn resolve_label_color(label: &DbLabel) -> (&str, &str) {
-    let result = match (&label.color_bg, &label.color_fg) {
-        (Some(bg), Some(fg)) => (bg.as_str(), fg.as_str()),
-        _ => color_for_label(&label.name, &label.account_id),
+/// If `color_bg`/`color_fg` are both provided (e.g. synced from Gmail),
+/// return those. Otherwise, deterministically assign from the preset palette.
+pub fn resolve_label_color<'a>(
+    name: &'a str,
+    account_id: &'a str,
+    color_bg: Option<&'a str>,
+    color_fg: Option<&'a str>,
+) -> (&'a str, &'a str) {
+    let result = match (color_bg, color_fg) {
+        (Some(bg), Some(fg)) => (bg, fg),
+        _ => color_for_label(name, account_id),
     };
     log::debug!(
-        "Resolved label color: name={}, bg={}, fg={}",
-        label.name,
+        "Resolved label color: name={name}, bg={}, fg={}",
         result.0,
         result.1,
     );
@@ -71,42 +72,21 @@ mod tests {
 
     #[test]
     fn resolve_prefers_synced() {
-        let label = DbLabel {
-            id: "l1".to_string(),
-            account_id: "acc-1".to_string(),
-            name: "Important".to_string(),
-            label_type: None,
-            color_bg: Some("#ff0000".to_string()),
-            color_fg: Some("#ffffff".to_string()),
-            visible: true,
-            sort_order: 0,
-            imap_folder_path: None,
-            imap_special_use: None,
-        };
-        let (bg, fg) = resolve_label_color(&label);
+        let (bg, fg) = resolve_label_color(
+            "Important",
+            "acc-1",
+            Some("#ff0000"),
+            Some("#ffffff"),
+        );
         assert_eq!(bg, "#ff0000");
         assert_eq!(fg, "#ffffff");
     }
 
     #[test]
     fn resolve_falls_back_to_hash() {
-        let label = DbLabel {
-            id: "l2".to_string(),
-            account_id: "acc-1".to_string(),
-            name: "Custom".to_string(),
-            label_type: None,
-            color_bg: None,
-            color_fg: None,
-            visible: true,
-            sort_order: 0,
-            imap_folder_path: None,
-            imap_special_use: None,
-        };
-        let (bg, fg) = resolve_label_color(&label);
-        // Should be a valid preset color (starts with #)
+        let (bg, fg) = resolve_label_color("Custom", "acc-1", None, None);
         assert!(bg.starts_with('#'));
         assert!(fg.starts_with('#'));
-        // Should match the direct hash call
         let (expected_bg, expected_fg) = color_for_label("Custom", "acc-1");
         assert_eq!(bg, expected_bg);
         assert_eq!(fg, expected_fg);

@@ -11,10 +11,9 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-db = { path = "../db" }
 log = "0.4"
 hotpath = { workspace = true, optional = true }
 
 [features]
-hotpath = ["dep:hotpath", "hotpath/hotpath", "db/hotpath"]
-hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc", "db/hotpath-alloc"]
+hotpath = ["dep:hotpath", "hotpath/hotpath"]
+hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
