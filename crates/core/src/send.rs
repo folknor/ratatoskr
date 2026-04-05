@@ -14,7 +14,6 @@ use chrono::Utc;
 use lettre::message::{
     Attachment, Mailbox, MessageBuilder, MultiPart, SinglePart, header::ContentType,
 };
-use rusqlite::params;
 
 use crate::db::DbState;
 use crate::provider::encoding::encode_base64url_nopad;
@@ -212,54 +211,31 @@ pub fn build_mime_message_base64url(req: &SendRequest) -> Result<String, SendErr
 /// Prevents duplicate sends if the user triggers send again while in flight.
 pub async fn mark_draft_sending(db: &DbState, draft_id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
-        let rows = conn
-            .execute(
-                "UPDATE local_drafts SET sync_status = 'sending' \
-                 WHERE id = ?1 AND sync_status IN ('pending', 'synced', 'failed')",
-                params![draft_id],
-            )
-            .map_err(|e| e.to_string())?;
-        if rows == 0 {
-            return Err(format!(
-                "Draft {draft_id} not found or already sending/sent"
-            ));
-        }
-        Ok(())
+        crate::db::queries_extra::draft_lifecycle::mark_draft_sending_sync(conn, &draft_id)
     })
     .await
 }
 
 /// Transition a local draft to `'sent'` status after successful provider send.
-///
-/// The `sent_message_id` is the provider-assigned ID for the sent message.
 pub async fn mark_draft_sent(
     db: &DbState,
     draft_id: String,
     sent_message_id: String,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
-        conn.execute(
-            "UPDATE local_drafts SET sync_status = 'sent', remote_draft_id = ?1 \
-             WHERE id = ?2",
-            params![sent_message_id, draft_id],
+        crate::db::queries_extra::draft_lifecycle::mark_draft_sent_sync(
+            conn,
+            &draft_id,
+            &sent_message_id,
         )
-        .map_err(|e| e.to_string())?;
-        Ok(())
     })
     .await
 }
 
 /// Transition a local draft to `'failed'` status after a send error.
-///
-/// The error message is stored so the UI can display it.
 pub async fn mark_draft_failed(db: &DbState, draft_id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
-        conn.execute(
-            "UPDATE local_drafts SET sync_status = 'failed' WHERE id = ?1",
-            params![draft_id],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
+        crate::db::queries_extra::draft_lifecycle::mark_draft_failed_sync(conn, &draft_id)
     })
     .await
 }

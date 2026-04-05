@@ -44,58 +44,24 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
-        // Persist draft as 'pending'.
-        // Field mapping: SendRequest → local_drafts columns
-        //   request.from        → from_email
-        //   request.to          → to_addresses (joined)
-        //   request.cc          → cc_addresses (joined)
-        //   request.bcc         → bcc_addresses (joined)
-        //   request.in_reply_to → reply_to_message_id
-        //   mime_base64url       → attachments
-        // INSERT with ON CONFLICT so retries (same draft_id after failure)
-        // update the existing row instead of creating a new one.
-        conn.execute(
-            "INSERT INTO local_drafts \
-             (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
-              subject, body_html, reply_to_message_id, thread_id, \
-              from_email, attachments, updated_at, sync_status) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, \
-                     unixepoch(), 'pending') \
-             ON CONFLICT(id) DO UPDATE SET \
-               to_addresses = ?3, cc_addresses = ?4, bcc_addresses = ?5, \
-               subject = ?6, body_html = ?7, reply_to_message_id = ?8, \
-               thread_id = ?9, from_email = ?10, attachments = ?11, \
-               updated_at = unixepoch(), sync_status = 'pending'",
-            rusqlite::params![
-                draft_id,
-                account_id,
-                request.to.join(", "),
-                request.cc.join(", "),
-                request.bcc.join(", "),
-                request.subject,
-                request.body_html,
-                request.in_reply_to,
-                thread_id,
-                request.from,
-                mime_base64url,
-            ],
+        crate::db::queries_extra::draft_lifecycle::persist_draft_pending_sync(
+            &conn,
+            &draft_id,
+            &account_id,
+            &request.to.join(", "),
+            &request.cc.join(", "),
+            &request.bcc.join(", "),
+            request.subject.as_deref(),
+            &request.body_html,
+            request.in_reply_to.as_deref(),
+            thread_id.as_deref(),
+            &request.from,
+            &mime_base64url,
         )
-        .map_err(|e| ActionError::db(format!("draft persist: {e}")))?;
+        .map_err(ActionError::db)?;
 
-        // Transition to 'sending' — same state-machine validation as
-        // mark_draft_sending(): rejects already-sent/sending drafts.
-        let rows = conn
-            .execute(
-                "UPDATE local_drafts SET sync_status = 'sending' \
-                 WHERE id = ?1 AND sync_status IN ('pending', 'synced', 'failed')",
-                rusqlite::params![draft_id],
-            )
-            .map_err(|e| ActionError::db(format!("mark sending: {e}")))?;
-        if rows == 0 {
-            return Err(ActionError::invalid_state(format!(
-                "Draft {draft_id} not found or already sending/sent"
-            )));
-        }
+        crate::db::queries_extra::draft_lifecycle::mark_draft_sending_sync(&conn, &draft_id)
+            .map_err(|e| ActionError::invalid_state(e))?;
 
         Ok(mime_base64url)
     })
@@ -172,21 +138,12 @@ pub async fn delete_draft(ctx: &ActionContext, account_id: &str, draft_id: &str)
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
-        let remote_id: Option<String> = match conn.query_row(
-            "SELECT remote_draft_id FROM local_drafts WHERE id = ?1",
-            rusqlite::params![did],
-            |row| row.get(0),
-        ) {
-            Ok(id) => id,
-            Err(rusqlite::Error::QueryReturnedNoRows) => None,
-            Err(e) => return Err(ActionError::db(format!("draft lookup: {e}"))),
-        };
+        let remote_id =
+            crate::db::queries_extra::draft_lifecycle::get_remote_draft_id_sync(&conn, &did)
+                .map_err(ActionError::db)?;
 
-        conn.execute(
-            "DELETE FROM local_drafts WHERE id = ?1",
-            rusqlite::params![did],
-        )
-        .map_err(|e| ActionError::db(format!("draft delete: {e}")))?;
+        crate::db::queries_extra::draft_lifecycle::delete_draft_sync(&conn, &did)
+            .map_err(ActionError::db)?;
 
         Ok(remote_id)
     })

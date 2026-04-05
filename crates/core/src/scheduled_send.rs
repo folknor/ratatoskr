@@ -4,11 +4,9 @@
 //! (Exchange via `PidTagDeferredSendTime`, JMAP via FUTURERELEASE) or handled
 //! locally by a client-side timer (Gmail, IMAP).
 
-use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use crate::db::DbState;
-use crate::db::from_row::FromRow;
 use crate::db::types::DbScheduledEmail;
 
 // ── Delegation types ────────────────────────────────────────
@@ -169,24 +167,13 @@ pub async fn check_overdue_scheduled_emails(
     now_unix: i64,
 ) -> Result<Vec<OverdueAction>, String> {
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT * FROM scheduled_emails \
-                 WHERE status = 'pending' AND delegation = 'local' AND scheduled_at <= ?1 \
-                 ORDER BY scheduled_at ASC",
-            )
-            .map_err(|e| e.to_string())?;
-
-        let rows = stmt
-            .query_map(
-                params![now_unix],
-                crate::db::types::DbScheduledEmail::from_row,
-            )
-            .map_err(|e| e.to_string())?;
+        let emails =
+            crate::db::queries_extra::draft_lifecycle::get_overdue_local_scheduled_sync(
+                conn, now_unix,
+            )?;
 
         let mut actions = Vec::new();
-        for row in rows {
-            let email = row.map_err(|e| e.to_string())?;
+        for email in emails {
             let overdue_secs = now_unix - email.scheduled_at;
             let action = if overdue_secs > OVERDUE_REVIEW_THRESHOLD_SECS {
                 OverdueResolution::NeedsReview
@@ -249,12 +236,11 @@ pub async fn mark_delegated(
     remote_message_id: String,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
-        conn.execute(
-            "UPDATE scheduled_emails SET status = 'delegated', remote_message_id = ?1 WHERE id = ?2",
-            params![remote_message_id, email_id],
+        crate::db::queries_extra::draft_lifecycle::mark_scheduled_delegated_sync(
+            conn,
+            &email_id,
+            &remote_message_id,
         )
-        .map_err(|e| e.to_string())?;
-        Ok(())
     })
     .await
 }
@@ -266,12 +252,11 @@ pub async fn mark_failed(
     error_message: String,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
-        conn.execute(
-            "UPDATE scheduled_emails SET status = 'failed', error_message = ?1, retry_count = retry_count + 1 WHERE id = ?2",
-            params![error_message, email_id],
+        crate::db::queries_extra::draft_lifecycle::mark_scheduled_failed_sync(
+            conn,
+            &email_id,
+            &error_message,
         )
-        .map_err(|e| e.to_string())?;
-        Ok(())
     })
     .await
 }
