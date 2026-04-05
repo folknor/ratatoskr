@@ -44,11 +44,13 @@ pub struct ContactSearchResult {
 // Unified search
 // ---------------------------------------------------------------------------
 
-/// Search contacts, seen addresses, and groups for autocomplete.
+/// Search contacts, GAL cache, seen addresses, and groups for autocomplete.
 ///
 /// Uses FTS5 prefix matching for the contacts and seen_addresses tables
-/// (with LIKE fallback if the FTS5 tables are unavailable).
-/// Deduplicates by email (contacts take priority over seen addresses).
+/// (with LIKE fallback if the FTS5 tables are unavailable). GAL cache uses
+/// LIKE-only matching.
+/// Deduplicates by email with priority order:
+/// contacts -> GAL cache -> seen addresses -> groups.
 /// Returns up to `limit` results.
 pub fn search_contacts_unified(
     conn: &Connection,
@@ -73,7 +75,13 @@ pub fn search_contacts_unified(
         &mut results,
     )?;
 
-    // 2. Search seen_addresses table (lower priority, fills remaining) — FTS5 with LIKE fallback.
+    // 2. Search GAL cache (second priority, after synced contacts).
+    let gal_remaining = limit - i64::try_from(results.len()).unwrap_or(i64::MAX);
+    if gal_remaining > 0 {
+        search_gal_cache(conn, &like_pattern, gal_remaining, &mut seen_emails, &mut results)?;
+    }
+
+    // 3. Search seen_addresses table (lower priority, fills remaining) — FTS5 with LIKE fallback.
     let remaining = limit - i64::try_from(results.len()).unwrap_or(i64::MAX);
     if remaining > 0 {
         search_seen_addresses_fts_or_like(
@@ -86,7 +94,7 @@ pub fn search_contacts_unified(
         )?;
     }
 
-    // 3. Search contact groups by name.
+    // 4. Search contact groups by name.
     let group_remaining = limit - i64::try_from(results.len()).unwrap_or(i64::MAX);
     if group_remaining > 0 {
         search_groups_table(conn, &like_pattern, group_remaining, &mut results)?;
@@ -141,6 +149,38 @@ fn search_contacts_fts_or_like(
 
     // LIKE fallback
     search_contacts_table(conn, like_pattern, limit, seen_emails, results)
+}
+
+fn search_gal_cache(
+    conn: &Connection,
+    pattern: &str,
+    limit: i64,
+    seen_emails: &mut std::collections::HashSet<String>,
+    results: &mut Vec<ContactSearchResult>,
+) -> Result<(), String> {
+    let sql = "SELECT email, display_name FROM gal_cache
+               WHERE email LIKE ?1 ESCAPE '\\' OR display_name LIKE ?1 ESCAPE '\\'
+               ORDER BY display_name ASC
+               LIMIT ?2";
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![pattern, limit], |row| {
+            Ok(ContactSearchResult {
+                email: row.get("email")?,
+                display_name: row.get("display_name")?,
+                kind: ContactSearchKind::Contact,
+                source: Some("gal_cache".to_string()),
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        let result = row.map_err(|e| e.to_string())?;
+        let key = result.email.to_lowercase();
+        if seen_emails.insert(key) {
+            results.push(result);
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

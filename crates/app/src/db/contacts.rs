@@ -1,6 +1,4 @@
-use rusqlite::{Connection, params};
-
-use rtsk::db::{build_fts_query, make_like_pattern};
+use rtsk::contacts::search::{ContactSearchKind, search_contacts_unified};
 use rtsk::db::queries_extra::{
     ContactSettingsEntry, GroupSettingsEntry, delete_group_sync, load_contacts_for_settings_sync,
     load_group_member_emails_sync, load_groups_for_settings_sync, save_contact_sync,
@@ -24,284 +22,6 @@ pub struct ContactMatch {
     pub member_count: Option<i64>,
 }
 
-/// Search contacts, seen addresses, and groups for autocomplete.
-///
-/// Uses FTS5 prefix matching for the contacts and seen_addresses tables
-/// (with LIKE fallback if the FTS5 tables are unavailable). For GAL cache,
-/// short queries (1-2 chars) use prefix LIKE (`pattern%`) which can use
-/// a B-tree index; longer queries use substring LIKE (`%pattern%`) for
-/// mid-word matches. Returns up to `limit` results.
-pub fn search_contacts_for_autocomplete(
-    conn: &Connection,
-    query: &str,
-    limit: i64,
-) -> Result<Vec<ContactMatch>, String> {
-    let trimmed = query.trim();
-    if trimmed.is_empty() {
-        return Ok(Vec::new());
-    }
-    let like_pattern = make_like_pattern(trimmed);
-    let mut results = Vec::new();
-    let mut seen_emails: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    // Search contacts table first (higher priority) — FTS5 with LIKE fallback.
-    search_contacts_fts_or_like(
-        conn,
-        trimmed,
-        &like_pattern,
-        limit,
-        &mut seen_emails,
-        &mut results,
-    )?;
-
-    // Search GAL cache (second priority, after synced contacts).
-    #[allow(clippy::cast_possible_wrap)]
-    let gal_remaining = limit - results.len() as i64;
-    if gal_remaining > 0 {
-        search_gal_cache(
-            conn,
-            &like_pattern,
-            gal_remaining,
-            &mut seen_emails,
-            &mut results,
-        )?;
-    }
-
-    // Search seen_addresses table (lower priority, fills remaining) — FTS5 with LIKE fallback.
-    #[allow(clippy::cast_possible_wrap)]
-    let remaining = limit - results.len() as i64;
-    if remaining > 0 {
-        search_seen_addresses_fts_or_like(
-            conn,
-            trimmed,
-            &like_pattern,
-            remaining,
-            &mut seen_emails,
-            &mut results,
-        )?;
-    }
-
-    // Search contact groups by name.
-    #[allow(clippy::cast_possible_wrap)]
-    let group_remaining = limit - results.len() as i64;
-    if group_remaining > 0 {
-        search_groups(conn, &like_pattern, group_remaining, &mut results)?;
-    }
-
-    Ok(results)
-}
-
-/// Search contacts via FTS5 prefix matching, falling back to LIKE if
-/// the FTS5 table is unavailable (e.g. old DB without migration 32).
-fn search_contacts_fts_or_like(
-    conn: &Connection,
-    raw_query: &str,
-    like_pattern: &str,
-    limit: i64,
-    seen_emails: &mut std::collections::HashSet<String>,
-    results: &mut Vec<ContactMatch>,
-) -> Result<(), String> {
-    let fts_query = build_fts_query(raw_query);
-    if !fts_query.is_empty() {
-        let fts_sql = "SELECT c.email, c.display_name
-                       FROM contacts c
-                       INNER JOIN contacts_fts ON contacts_fts.rowid = c.rowid
-                       WHERE contacts_fts MATCH ?1
-                       ORDER BY c.last_contacted_at DESC NULLS LAST,
-                                c.display_name ASC
-                       LIMIT ?2";
-        match conn.prepare(fts_sql).and_then(|mut stmt| {
-            stmt.query_map(params![&fts_query, limit], |row| {
-                Ok(ContactMatch {
-                    email: row.get("email")?,
-                    display_name: row.get("display_name")?,
-                    is_group: false,
-                    group_id: None,
-                    member_count: None,
-                })
-            })
-            .map(|rows| rows.filter_map(Result::ok).collect::<Vec<_>>())
-        }) {
-            Ok(contacts) => {
-                for contact in contacts {
-                    let key = contact.email.to_lowercase();
-                    if seen_emails.insert(key) {
-                        results.push(contact);
-                    }
-                }
-                return Ok(());
-            }
-            Err(_) => { /* FTS5 table missing — fall through to LIKE */ }
-        }
-    }
-
-    // LIKE fallback
-    let like_sql = "SELECT email, display_name FROM contacts
-                    WHERE email LIKE ?1 ESCAPE '\\' OR display_name LIKE ?1 ESCAPE '\\'
-                    ORDER BY last_contacted_at DESC NULLS LAST,
-                             display_name ASC
-                    LIMIT ?2";
-    let mut stmt = conn.prepare(like_sql).map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![like_pattern, limit], |row| {
-            Ok(ContactMatch {
-                email: row.get("email")?,
-                display_name: row.get("display_name")?,
-                is_group: false,
-                group_id: None,
-                member_count: None,
-            })
-        })
-        .map_err(|e| e.to_string())?;
-    for row in rows {
-        let contact = row.map_err(|e| e.to_string())?;
-        let key = contact.email.to_lowercase();
-        if seen_emails.insert(key) {
-            results.push(contact);
-        }
-    }
-    Ok(())
-}
-
-/// Search the GAL cache for autocomplete matches.
-fn search_gal_cache(
-    conn: &Connection,
-    pattern: &str,
-    limit: i64,
-    seen_emails: &mut std::collections::HashSet<String>,
-    results: &mut Vec<ContactMatch>,
-) -> Result<(), String> {
-    let sql = "SELECT email, display_name FROM gal_cache
-               WHERE email LIKE ?1 ESCAPE '\\' OR display_name LIKE ?1 ESCAPE '\\'
-               ORDER BY display_name ASC
-               LIMIT ?2";
-    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![pattern, limit], |row| {
-            Ok(ContactMatch {
-                email: row.get("email")?,
-                display_name: row.get("display_name")?,
-                is_group: false,
-                group_id: None,
-                member_count: None,
-            })
-        })
-        .map_err(|e| e.to_string())?;
-    for row in rows {
-        let contact = row.map_err(|e| e.to_string())?;
-        let key = contact.email.to_lowercase();
-        if seen_emails.insert(key) {
-            results.push(contact);
-        }
-    }
-    Ok(())
-}
-
-/// Search seen_addresses via FTS5 prefix matching, falling back to LIKE if
-/// the FTS5 table is unavailable (e.g. old DB without migration 79).
-fn search_seen_addresses_fts_or_like(
-    conn: &Connection,
-    raw_query: &str,
-    like_pattern: &str,
-    limit: i64,
-    seen_emails: &mut std::collections::HashSet<String>,
-    results: &mut Vec<ContactMatch>,
-) -> Result<(), String> {
-    let fts_query = build_fts_query(raw_query);
-    if !fts_query.is_empty() {
-        let fts_sql = "SELECT s.email, s.display_name
-                       FROM seen_addresses s
-                       INNER JOIN seen_addresses_fts ON seen_addresses_fts.rowid = s.rowid
-                       WHERE seen_addresses_fts MATCH ?1
-                       ORDER BY s.last_seen_at DESC
-                       LIMIT ?2";
-        match conn.prepare(fts_sql).and_then(|mut stmt| {
-            stmt.query_map(params![&fts_query, limit], |row| {
-                Ok(ContactMatch {
-                    email: row.get("email")?,
-                    display_name: row.get("display_name")?,
-                    is_group: false,
-                    group_id: None,
-                    member_count: None,
-                })
-            })
-            .map(|rows| rows.filter_map(Result::ok).collect::<Vec<_>>())
-        }) {
-            Ok(matches) => {
-                for contact in matches {
-                    let key = contact.email.to_lowercase();
-                    if seen_emails.insert(key) {
-                        results.push(contact);
-                    }
-                }
-                return Ok(());
-            }
-            Err(_) => { /* FTS5 table missing — fall through to LIKE */ }
-        }
-    }
-
-    // LIKE fallback
-    let seen_sql = "SELECT email, display_name FROM seen_addresses
-                    WHERE email LIKE ?1 ESCAPE '\\' OR display_name LIKE ?1 ESCAPE '\\'
-                    ORDER BY last_seen_at DESC
-                    LIMIT ?2";
-    let mut seen_stmt = conn.prepare(seen_sql).map_err(|e| e.to_string())?;
-    let seen_rows = seen_stmt
-        .query_map(params![like_pattern, limit], |row| {
-            Ok(ContactMatch {
-                email: row.get("email")?,
-                display_name: row.get("display_name")?,
-                is_group: false,
-                group_id: None,
-                member_count: None,
-            })
-        })
-        .map_err(|e| e.to_string())?;
-    for row in seen_rows {
-        let contact = row.map_err(|e| e.to_string())?;
-        let key = contact.email.to_lowercase();
-        if seen_emails.insert(key) {
-            results.push(contact);
-        }
-    }
-    Ok(())
-}
-
-/// Search contact groups by name for autocomplete.
-fn search_groups(
-    conn: &Connection,
-    pattern: &str,
-    limit: i64,
-    results: &mut Vec<ContactMatch>,
-) -> Result<(), String> {
-    let groups_sql = "SELECT g.id, g.name,
-                (SELECT COUNT(*) FROM contact_group_members m
-                 WHERE m.group_id = g.id) AS member_count
-         FROM contact_groups g
-         WHERE g.name LIKE ?1 ESCAPE '\\'
-         ORDER BY g.name ASC
-         LIMIT ?2";
-    let mut stmt = conn.prepare(groups_sql).map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![pattern, limit], |row| {
-            let id: String = row.get("id")?;
-            let name: String = row.get("name")?;
-            let count: i64 = row.get("member_count")?;
-            Ok(ContactMatch {
-                email: String::new(),
-                display_name: Some(name),
-                is_group: true,
-                group_id: Some(id),
-                member_count: Some(count),
-            })
-        })
-        .map_err(|e| e.to_string())?;
-    for row in rows {
-        results.push(row.map_err(|e| e.to_string())?);
-    }
-    Ok(())
-}
-
 // ── Async autocomplete wrapper for Db ─────────────────────────
 
 impl Db {
@@ -312,8 +32,31 @@ impl Db {
         query: String,
         limit: i64,
     ) -> Result<Vec<ContactMatch>, String> {
-        self.with_conn(move |conn| search_contacts_for_autocomplete(conn, &query, limit))
-            .await
+        self.with_conn(move |conn| {
+            Ok(search_contacts_unified(conn, &query, limit)?
+                .into_iter()
+                .map(|row| match row.kind {
+                    ContactSearchKind::Contact | ContactSearchKind::SeenAddress => ContactMatch {
+                        email: row.email,
+                        display_name: row.display_name,
+                        is_group: false,
+                        group_id: None,
+                        member_count: None,
+                    },
+                    ContactSearchKind::Group {
+                        group_id,
+                        member_count,
+                    } => ContactMatch {
+                        email: row.email,
+                        display_name: row.display_name,
+                        is_group: true,
+                        group_id: Some(group_id),
+                        member_count: Some(member_count),
+                    },
+                })
+                .collect())
+        })
+        .await
     }
 }
 
