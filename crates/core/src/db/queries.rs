@@ -789,48 +789,8 @@ fn search_contacts_like(
     query_as::<DbContact>(conn, &sql, &[&pattern, &limit])
 }
 
-/// Convert user input to an FTS5 prefix-match expression.
-///
-/// `"john sm"` → `"john* sm*"` — each token gets a trailing `*` for prefix matching.
-/// FTS5 operators are stripped to prevent injection. Email-significant characters
-/// (`@`, `.`, `-`, `_`) are preserved since the tokenizer includes them via `tokenchars`.
-/// Build a LIKE pattern from user input, escaping SQL LIKE wildcards.
-///
-/// Short queries (1-2 chars) produce a prefix pattern (`input%`) which can
-/// use a B-tree index; longer queries produce a substring pattern
-/// (`%input%`) for mid-word hits.
-///
-/// `%` and `_` in the input are escaped with `\` so they match literally.
-/// Callers **must** append `ESCAPE '\'` to the SQL LIKE clause.
-pub fn make_like_pattern(trimmed: &str) -> String {
-    // Escape LIKE wildcards (order matters: escape the escape char first
-    // if we ever used one, but `\` isn't a LIKE wildcard so just escape
-    // `%` and `_`).
-    let escaped = trimmed.replace('%', r"\%").replace('_', r"\_");
-    if trimmed.len() <= 2 {
-        format!("{escaped}%")
-    } else {
-        format!("%{escaped}%")
-    }
-}
-
-pub fn build_fts_query(raw: &str) -> String {
-    raw.split_whitespace()
-        .map(|token| {
-            // Strip everything except alphanumeric and email-significant chars.
-            let clean: String = token
-                .chars()
-                .filter(|c| c.is_alphanumeric() || *c == '@' || *c == '.' || *c == '-' || *c == '_')
-                .collect();
-            // Quote the token to prevent FTS5 operator interpretation
-            // (`.`, `-` etc. can be parsed as syntax otherwise).
-            // The `*` suffix goes outside the quotes for prefix matching.
-            format!("\"{clean}\"*")
-        })
-        .filter(|t| t.len() > 3) // skip empty tokens (just `""*`)
-        .collect::<Vec<_>>()
-        .join(" ")
-}
+// Re-export FTS5/LIKE helpers from db where the canonical definitions now live.
+pub use db::db::sql_fragments::{build_fts_query, make_like_pattern};
 
 pub fn get_contact_by_email(conn: &Connection, email: &str) -> Result<Option<DbContact>, String> {
     let normalized = email.to_lowercase();

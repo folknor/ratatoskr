@@ -25,6 +25,41 @@ CAST(
      / 86400000.0 / 90.0)
 AS INTEGER)";
 
+// ---------------------------------------------------------------------------
+// FTS5 / LIKE helpers
+// ---------------------------------------------------------------------------
+
+/// Build a `LIKE` pattern from a search query, escaping SQL wildcards.
+///
+/// Short queries (1-2 chars) use prefix matching (`pattern%`) which can use
+/// a B-tree index. Longer queries use substring matching (`%pattern%`).
+pub fn make_like_pattern(trimmed: &str) -> String {
+    let escaped = trimmed.replace('%', r"\%").replace('_', r"\_");
+    if trimmed.len() <= 2 {
+        format!("{escaped}%")
+    } else {
+        format!("%{escaped}%")
+    }
+}
+
+/// Build an FTS5 prefix query from raw user input.
+///
+/// Each whitespace-separated token is cleaned, quoted, and given a `*`
+/// suffix for prefix matching. Empty tokens are dropped.
+pub fn build_fts_query(raw: &str) -> String {
+    raw.split_whitespace()
+        .map(|token| {
+            let clean: String = token
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == '@' || *c == '.' || *c == '-' || *c == '_')
+                .collect();
+            format!("\"{clean}\"*")
+        })
+        .filter(|t| t.len() > 3)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Valid boolean columns on the `threads` table that can be toggled.
 /// Used by [`super::queries::set_thread_bool_field`] to prevent SQL injection.
 const VALID_THREAD_BOOL_COLUMNS: &[&str] = &["is_read", "is_starred", "is_pinned", "is_muted"];
