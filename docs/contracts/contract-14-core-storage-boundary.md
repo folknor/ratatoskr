@@ -728,64 +728,77 @@ Option (a) is the most pragmatic: decompose `queries.rs` so most of it moves to 
 
 3. **Break cycle 3**: Decompose `queries.rs` — move body-store-free functions to `db`, leave body-enrichment functions in core.
 
-### Phase F: Extract remaining core SQL (actions, chat, cloud attachments, sync helpers)
+### Phase F: Extract remaining core rusqlite surface
 
-Phases A–E underestimated the remaining core SQL surface. 16 files across actions, chat, cloud attachments, sync helpers, and send pipeline still contain direct SQL. Phase F extracts all of them to reach the enforcement gate.
+Phases A–E underestimated the remaining rusqlite surface in core. The remaining files fall into three categories:
 
-No new circular dependency blockers exist in this set. All files use pure storage SQL (except `chat.rs` which mixes domain logic, and `provider/account_resync.rs` which uses body_store). The extraction pattern is the same as Phases C–D: move SQL to db helpers, leave domain logic in core.
+- **SQL-owning modules** (still contain inline SQL): 13 files
+- **Signature holdouts** (no longer own SQL but still import `rusqlite::Connection` or `rusqlite::params` for function signatures or db helper calls): 5 files (`bimi.rs`, `search_pipeline.rs`, `command_palette_queries.rs`, `send_identity.rs`, `auto_responses.rs`)
+- **Test-only usage**: `actions/tests.rs`
 
-#### Group 1: Action-path SQL (7 files, ~20 SQL statements total)
+Phase F extracts SQL from the 13 SQL-owning modules and converts the 5 signature holdouts. Tests are out of scope for extraction — they only need to compile after helper moves.
 
-These are the email action handlers in `actions/`. They execute SQL inside `spawn_blocking` closures via `&Connection`. Most are 1-3 SQL statements per file.
+No new circular dependency blockers exist in this set.
+
+#### Group 1: Action-path SQL (6 files, ~16 SQL statements total)
+
+Email action handlers in `actions/`. They execute SQL inside `spawn_blocking` closures via `&Connection`.
 
 | File | SQL | Tables | Extraction |
 |---|---|---|---|
-| `actions/label.rs` | 2 SELECT (label existence check) | labels | Delegate to existing db label helpers |
+| `actions/label.rs` | 2 SELECT (label existence check) | labels | Add action-specific label existence helper in db, or reuse existing label query if the check shape matches |
 | `actions/snooze.rs` | 2 UPDATE (snooze_until, inbox label) | threads | Add db snooze helpers |
 | `actions/folder.rs` | 5 SQL (folder create/rename/delete) | labels, thread_labels | Add db folder mutation helpers |
-| `actions/send.rs` | 4 SQL (draft INSERT/UPDATE/SELECT) | local_drafts | Add db draft lifecycle helpers |
 | `actions/contacts.rs` | 2 SQL (contact existence, source lookup) | contacts | Delegate to existing db contact helpers |
 | `actions/provider.rs` | 1 SELECT (provider type) | accounts | Delegate to existing db provider lookup |
 | `actions/context.rs` | 1 SELECT (thread existence) | threads | Add db thread existence helper |
 
-`actions/tests.rs` contains test fixtures that use raw SQL for DB setup. These can either move to db's test harness or remain as integration tests with rusqlite in `[dev-dependencies]` only.
+#### Group 2: Draft/send lifecycle + standalone storage (6 files, ~40 SQL statements total)
 
-#### Group 2: Standalone storage hosts (5 files, ~36 SQL statements total)
+`actions/send.rs` and `send.rs` share the `local_drafts` table seam — they should be extracted together.
 
 | File | SQL | Tables | Extraction |
 |---|---|---|---|
-| `chat.rs` | 9 SQL (chat thread queries, contact summary upserts, transaction) | chat_contacts, messages, threads | Split: domain logic (chat eligibility) stays in core, query/upsert SQL moves to db |
+| `actions/send.rs` | 4 SQL (draft INSERT/UPDATE/SELECT, QueryReturnedNoRows handling) | local_drafts | Shared seam with `send.rs` — extract draft lifecycle helpers to db together |
+| `send.rs` | 3 SQL (draft status lifecycle) | local_drafts | Shared seam with `actions/send.rs` |
+| `chat.rs` | 9 SQL (chat thread queries, contact summary upserts, transaction) | chat_contacts, messages, threads | Split: domain logic (chat eligibility, 1:1 detection) stays in core; query/upsert SQL moves to db. Same pattern as Phase C's dedup.rs. |
 | `cloud_attachments.rs` | 9 SQL (full CRUD for upload queue) | cloud_attachments | Move entire storage layer to db |
 | `contact_photos.rs` | 12 SQL (avatar cache CRUD) | contact_photo_cache | Move cache ops to db |
 | `scheduled_send.rs` | 3 SQL (scheduled email queries) | scheduled_emails | Move to db |
-| `send.rs` | 3 SQL (draft lifecycle) | local_drafts | Move draft helpers to db |
 
-`chat.rs` is the hardest in this group: it has transaction-scoped domain logic (chat thread detection, contact summary updates) that needs the same kind of split as Phase C's dedup.rs.
-
-#### Group 3: Sync-helper SQL (3 files, ~11 SQL statements total)
+#### Group 3: Sync-helper SQL (3 files, ~24 SQL statements total)
 
 | File | SQL | Tables | Extraction |
 |---|---|---|---|
-| `carddav/sync.rs` | 5 SQL (CTag/ETag, contact upsert transaction) | contacts, carddav_contact_map, settings | Delegate to existing db carddav helpers |
-| `caldav/sync.rs` | 4 SQL (calendar event upsert) | calendar_events, calendars | Delegate to existing db calendar helpers |
-| `provider/account_resync.rs` | 2 SQL (delete threads, clear sync state) | threads, folder_sync_state | Add db resync helpers. Note: also uses body_store (same pattern as queries.rs — keep body cleanup in core, move SQL to db) |
+| `carddav/sync.rs` | 11 SQL (contact upsert with ON CONFLICT, CTag/ETag, cascading delete) | contacts, carddav_contact_map, google_contact_map, graph_contact_map, settings | Phase C created db carddav helpers, but this file retains its own inline copies. Replace with delegation to `db::queries_extra::contact_carddav::*`. |
+| `caldav/sync.rs` | 13 SQL (calendar event upsert, attendees, reminders, CTag/ETag, event map) | calendar_events, calendar_attendees, calendar_reminders, caldav_event_map, calendars | Substantial sync persistence — not just residual state helpers. Needs new db helpers or delegation to existing calendar modules. |
+| `provider/account_resync.rs` | 2 SQL (delete threads, clear sync state) | threads, folder_sync_state | Follows the queries.rs decomposition pattern: SQL moves to db, body-store and inline-image cleanup stays in core. Must be split explicitly — the body_store dependency makes this a mixed module, not a pure extraction. |
 
-#### Group 4: Remaining documented exceptions + enforcement gate
+#### Group 4: Signature holdouts + enforcement gate
 
 After Groups 1–3 are extracted:
 
-- `navigation.rs` remains in core (smart_folder cycle — documented)
-- `queries.rs` remainder stays in core (body_store + crypto — documented)
-- `bimi.rs` and `search_pipeline.rs` still take `&Connection` — convert to `&DbState` or db API calls
-- `auto_responses.rs` still takes `&rusqlite::Connection` in one function — convert
+**Signature holdouts** (5 files that no longer own SQL but still import rusqlite for `&Connection` parameters or `params!` macro):
+- `bimi.rs` — takes `&Connection` in orchestration functions that call db helpers
+- `search_pipeline.rs` — takes `&Connection` for multi-backend routing
+- `command_palette_queries.rs` — takes `&Connection` for OptionItem mapping wrappers
+- `send_identity.rs` — takes `&Connection` for `select_from_address`
+- `auto_responses.rs` — takes `&rusqlite::Connection` in `any_auto_response_active`
 
-Then:
+Convert all to `&DbState` or remove the rusqlite import by using `crate::db::Connection` re-export.
 
-4. **Clean up remaining `&Connection` parameters**: Remove `&Connection` from all core modules that no longer own SQL but still pass raw connections to db helpers.
+**Documented exceptions** (2 modules that cannot lose rusqlite without resolving deeper structural blockers):
+- `navigation.rs` — smart_folder cycle
+- `queries.rs` — body_store + crypto deps
 
-5. **Move `rusqlite` to `[dev-dependencies]` only**: `actions/tests.rs` may still need rusqlite for test fixtures. If so, rusqlite moves from `[dependencies]` to `[dev-dependencies]`, which still satisfies the boundary rule (production code doesn't use it).
+**Tests**: `actions/tests.rs` uses rusqlite for test fixture setup. Out of scope for extraction. Remains via `[dev-dependencies]`.
 
-6. **Verify**: `cargo check --workspace`. Core compiles without rusqlite in production deps.
+**Enforcement gate (precise):**
+1. `rusqlite` removed from core's `[dependencies]`
+2. `rusqlite` allowed in core's `[dev-dependencies]` for test fixtures only
+3. `navigation.rs` and `queries.rs` documented exceptions carved out explicitly — they retain rusqlite access via `crate::db::Connection` re-export, not via direct rusqlite import
+4. `cargo check --workspace` passes
+5. No file in `crates/core/src/` contains `use rusqlite` except `actions/tests.rs` (dev-only)
 
 ## What This Eliminates
 
