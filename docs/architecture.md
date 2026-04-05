@@ -131,4 +131,17 @@ These are verified, adopted project-wide, and should be followed for all new wor
 These are intentional unresolved areas, not reasons to bypass the boundaries above.
 
 - **Signatures** are not yet a settled architecture surface. Gmail and JMAP signature sync/write behavior exists, but the product/spec is not finalized enough to treat that path as a completed shared persistence contract.
-- **Provider-local sync tables** may still live in provider or sync crates. That is acceptable only for provider-owned state, not for shared application tables.
+- **Provider-local sync/state tables** may still live in provider or sync crates. That is acceptable only for provider-owned or protocol-owned state, not for shared application tables. The ownership is now explicit:
+  - **Provider-owned mapping/state tables** stay with the provider logic that interprets them:
+    - Gmail: `google_contact_map`, `google_other_contact_map`
+    - Graph: `graph_contact_map`, `graph_subscriptions`
+    - JMAP: `jmap_push_state`
+  - **Sync-owned protocol coordination tables** stay with sync/protocol helpers until there is a clear benefit to moving them behind narrow `db` APIs:
+    - `jmap_sync_state`
+    - `graph_folder_delta_tokens`
+    - `graph_contact_delta_tokens`
+    - `graph_shared_mailbox_delta_tokens`
+    - `shared_mailbox_sync_state`
+    - `folder_sync_state`
+    - `public_folder_sync_state`
+  - These tables are exceptions because they track provider protocol state, cursors, subscriptions, or mapping identity. They do not make the provider or sync crates owners of shared application tables like `messages`, `labels`, `contacts`, or calendar rows.

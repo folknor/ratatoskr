@@ -363,16 +363,22 @@ impl App {
             }
         }
 
-        // Auto-select shared mailbox identity when replying from shared
-        // mailbox context.  Query the cached email address synchronously.
-        if let rtsk::scope::ViewScope::SharedMailbox {
-            ref account_id,
-            ref mailbox_id,
-        } = self.sidebar.selected_scope
+        // Auto-select shared mailbox identity only for reply/forward flows
+        // originating from shared-mailbox scope, and only when mailbox rights
+        // do not explicitly deny submit.
+        if state.reply_thread_id.is_some()
+            && self.current_mailbox_may_submit().unwrap_or(true)
         {
-            if let Ok(Some(shared_email)) = self.db.get_shared_mailbox_email(account_id, mailbox_id)
+            if let rtsk::scope::ViewScope::SharedMailbox {
+                ref account_id,
+                ref mailbox_id,
+            } = self.sidebar.selected_scope
             {
-                state.set_shared_mailbox_from(account_id, &shared_email);
+                if let Ok(Some(shared_email)) =
+                    self.db.get_shared_mailbox_email(account_id, mailbox_id)
+                {
+                    state.set_shared_mailbox_from(account_id, &shared_email);
+                }
             }
         }
 
@@ -394,6 +400,22 @@ impl App {
         let sig_task = self.resolve_compose_signature(window_id);
 
         Task::batch([open_task.discard(), sig_task])
+    }
+
+    fn current_mailbox_may_submit(&self) -> Option<bool> {
+        self.sidebar
+            .selection
+            .navigation_folder_id()
+            .and_then(|nav_id| {
+                self.sidebar
+                    .nav_state
+                    .as_ref()?
+                    .folders
+                    .iter()
+                    .find(|folder| folder.id == nav_id)
+                    .and_then(|folder| folder.rights.as_ref())
+                    .and_then(|rights| rights.may_submit)
+            })
     }
 
     /// Open a compose window from a message view's Reply/ReplyAll/Forward.

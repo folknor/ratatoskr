@@ -127,7 +127,7 @@
 - [ ] **App-specific-password help not clickable** — Discovery types carry `help_url` but UI shows plain text "Check {domain} for setup instructions" — no clickable link to provider app-password pages.
 - [ ] **Deleted-account compose/pop-out cleanup** — Account deletion doesn't close compose windows or message-view pop-outs for the deleted account, and doesn't block sending from a deleted identity.
 - [ ] **Sync-task cancellation on account deletion** — Delete flow removes DB data but doesn't cancel in-flight sync tasks. Stale sync completions could write to deleted account state.
-- [x] ~~**Search scope respects ViewScope**~~ — SQL fallback and free-text LIKE search now pass `current_account_scope()` through. Tantivy path still ignores scope (needs post-filtering or re-indexing — left as TODO comment in code).
+- [x] ~~**Search scope respects ViewScope**~~ — SQL fallback takes `AccountScope` directly, and the Tantivy path is post-filtered by scope in `execute_search()`, so search results now respect the current `ViewScope`.
 
 - [ ] **Scroll virtualization** — Thread list renders all cards in `column![]` inside `scrollable`. Needs iced-level virtual scrolling for large mailboxes.
 
@@ -141,7 +141,6 @@
 
 - [ ] **Bundle SQLite for release builds** *(Deferred until 1.0)* — Re-enable `rusqlite/bundled` feature for release builds so the binary ships a known SQLite version with FTS5 guaranteed. Dev builds use system libsqlite3 for faster compiles.
 
-- [ ] **Scope provider-local sync/state tables explicitly** — Shared-table provider writes now route through `db`, but provider-owned state tables still need a final ownership pass. Enumerate tables like sync tokens, contact maps, delta tokens, folder/public-folder sync state, and push/subscription state; decide per table group whether it remains provider-owned or moves behind narrow `db` helpers. The boundary must be explicit in schema/docs rather than accidental.
 
 - [ ] **Reconsider sidebar layout** *(Deferred until right before 1.0)* — Currently the spec says: (1) sidebar should not show any Labels section when "All Accounts" is selected, (2) when a single account is selected, only labels belonging to that account should be shown, and (3) that for providers that have a "folder" concept, the users folders should show in the Labels section. We might need to re-think all 3.
 
@@ -159,7 +158,6 @@ Phases 1-6 complete (backend unified). **10 discrepancies remain** — see `docs
 
 Backend pipeline exists (parser, SQL builder, Tantivy, unified router). **29 discrepancies remain** — see `docs/search/discrepancies.md`. Critical: combined path applies free text in SQL before Tantivy ranking, Tantivy-only results show wrong message metadata, date boundaries inconsistent across engines. Also typeahead, pinned search lifecycle, and smart folder management gaps.
 
-- [ ] **Pinned search refresh action** — Sidebar pinned searches need their `Refresh` button wired so the stored snapshot can be recomputed on demand.
 - [ ] **Promote pinned search to Smart Folder** — Sidebar pinned searches need an action that converts a pinned search into a Smart Folder.
 
 ### Calendar — `docs/calendar/problem-statement.md`
@@ -235,7 +233,6 @@ Exchange Graph sync + Autodiscover + sidebar integration done. Remaining:
 All 6 backend phases complete (discovery, sync, rights, subscription, notifications, identity resolution). Remaining app-crate UI integration:
 
 - [ ] **Subscription toggle in sidebar** — `NavigationFolder.is_subscribed` is populated from JMAP `isSubscribed`. App needs a UI toggle (context menu or button) on shared account labels that calls `JmapOps::subscribe_mailbox()` / `unsubscribe_mailbox()`. These accept an optional `jmap_account_id` for shared accounts.
-- [ ] **Compose identity auto-selection from shared mailbox** — `shared_mailbox_sync_state.email_address` is resolved via JMAP Principals (Phase 6). When replying from a shared mailbox context, compose should query `sync_state::get_shared_mailbox_email()` and auto-set From. Also check `may_submit` from the mailbox rights before offering the identity.
 
 ### Labels — `docs/labels-unification/problem-statement.md`
 
