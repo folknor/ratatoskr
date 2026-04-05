@@ -1414,6 +1414,7 @@ dependencies = [
  "label-colors",
  "log",
  "lol_html",
+ "mail-parser",
  "rusqlite",
  "serde",
  "serde_json",

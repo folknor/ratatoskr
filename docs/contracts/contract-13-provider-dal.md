@@ -113,6 +113,8 @@ A provider reading `accounts` for its OAuth tokens, or reading `messages` for IM
 
 - Move `compute_thread_aggregate`, `upsert_thread_aggregate`, `upsert_thread_participants`, `replace_thread_labels`, `maybe_update_chat_state`, `delete_messages_and_cleanup_threads`, and `query_user_emails` from `sync/persistence.rs` into `db`.
 - Keep `store_message_bodies`, `store_inline_images`, `index_search_documents` in `sync` (they target `stores` and the search index, not the main DB).
+- Preserve the existing `&Transaction` signatures in this phase. Transaction-shape redesign is deferred; Phase A is an ownership move, not a transaction API redesign.
+- Move the storage-behavior tests for these functions with the code into `db`.
 - Update all callers (gmail, graph, jmap, imap, sync/pipeline) to import from `db`.
 
 ### Phase B: Unify message and attachment writes
@@ -120,17 +122,20 @@ A provider reading `accounts` for its OAuth tokens, or reading `messages` for IM
 - Define `MessageInsertRow` and `AttachmentInsertRow` structs in `db`.
 - Implement a single `db::insert_messages` / `db::insert_attachments` function.
 - Have each provider map its protocol type into the common struct.
+- Keep thread aggregate recomputation and participant/label updates as explicit DAL calls rather than folding them into `insert_messages` in this phase.
 - Remove the four per-provider upsert implementations.
 
 ### Phase C: Unify label writes
 
 - Define a `LabelWriteRow` struct in `db` with optional provider-specific fields.
 - Implement a single `db::upsert_labels` function that handles conflict resolution.
+- If one fully unified label write API becomes too contorted, it is acceptable to split regular label/folder writes from category-style label writes behind two `db` APIs, as long as `db` still owns the shared-table SQL.
 - Replace the four per-provider label persist functions.
 
 ### Phase D: Unify contact, signature, and calendar writes
 
 - Same pattern as Phase C for each domain.
+- Treat this as a bucket of later sub-phases, not one implementation step. Contacts, signatures, and calendar persistence have different write shapes and should be split if that keeps the migration reviewable.
 - Contact sync bookkeeping tables (`google_contact_map`, `graph_contact_map`) either stay provider-owned or move to `db::provider_maps`.
 
 ### Phase E: Scope provider-local state
@@ -159,7 +164,7 @@ Contract #12 defines which crates may depend on `rusqlite`. This contract define
 
 ## Open Questions
 
-1. Should `sync::persistence` move to `db` as-is (preserving `&Transaction` signatures), or should `db` expose a higher-level API that manages its own transactions?
+1. After Phase A preserves the current `&Transaction` signatures, should a later phase redesign the DAL around higher-level transaction ownership in `db`, or is explicit transaction passing the intended steady state?
 2. Should IMAP's `sync_pipeline.rs` inline threading logic be unified with `sync::pipeline.rs`, or do they represent genuinely different threading strategies?
 3. For label writes, is one struct with many optional fields better than a base struct with provider-specific extension traits?
 4. Should the `settings` table (currently used as a key-value store for Google sync tokens) be replaced with a dedicated sync-token table?

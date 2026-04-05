@@ -36,6 +36,7 @@ mod misc;
 pub mod scoped_queries;
 pub mod search_fallback;
 pub mod send_identity;
+pub mod thread_persistence;
 mod tasks;
 
 pub use action_helpers::*;
@@ -71,6 +72,7 @@ pub use misc::*;
 pub use scoped_queries::*;
 pub use search_fallback::*;
 pub use send_identity::*;
+pub use thread_persistence::*;
 pub use tasks::*;
 
 pub(super) fn dynamic_update(
