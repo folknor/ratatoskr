@@ -2,6 +2,7 @@ use serde::Deserialize;
 
 use super::client::GraphClient;
 use db::db::DbState;
+use db::db::queries_extra::{LabelWriteRow, upsert_labels};
 use label_colors::preset_colors;
 
 #[derive(Debug, Deserialize)]
@@ -40,37 +41,47 @@ pub async fn graph_label_sync(
             .unchecked_transaction()
             .map_err(|e| format!("label sync tx: {e}"))?;
 
-        for (i, cat) in categories.iter().enumerate() {
-            let color_preset = cat.color.as_deref().unwrap_or("None");
-            let (color_bg, color_fg) = if color_preset == "None" {
-                (None, None)
-            } else {
-                match preset_colors::preset_to_hex(color_preset) {
-                    Some((bg, fg)) => (Some(bg), Some(fg)),
-                    None => (None, None),
-                }
-            };
+        let rows: Vec<LabelWriteRow> = categories
+            .iter()
+            .enumerate()
+            .map(|(i, cat)| {
+                let color_preset = cat.color.as_deref().unwrap_or("None");
+                let (color_bg, color_fg) = if color_preset == "None" {
+                    (None, None)
+                } else {
+                    match preset_colors::preset_to_hex(color_preset) {
+                        Some((bg, fg)) => (Some(bg.to_string()), Some(fg.to_string())),
+                        None => (None, None),
+                    }
+                };
 
-            let label_id = format!("cat:{}", cat.display_name);
-            tx.execute(
-                "INSERT INTO labels (id, account_id, name, type, label_kind, color_bg, color_fg, sort_order)
-                 VALUES (?1, ?2, ?3, 'user', 'tag', ?4, ?5, ?6)
-                 ON CONFLICT (account_id, id) DO UPDATE SET
-                     name = excluded.name,
-                     color_bg = excluded.color_bg,
-                     color_fg = excluded.color_fg,
-                     sort_order = excluded.sort_order",
-                rusqlite::params![
-                    label_id,
-                    aid,
-                    cat.display_name,
+                LabelWriteRow {
+                    id: format!("cat:{}", cat.display_name),
+                    account_id: aid.clone(),
+                    name: cat.display_name.clone(),
+                    label_type: "user".to_string(),
+                    label_kind: "tag".to_string(),
                     color_bg,
                     color_fg,
-                    i64::try_from(i).unwrap_or(0),
-                ],
-            )
-            .map_err(|e| format!("upsert category label: {e}"))?;
-        }
+                    sort_order: Some(i64::try_from(i).unwrap_or(0)),
+                    imap_folder_path: None,
+                    imap_special_use: None,
+                    parent_label_id: None,
+                    right_read: None,
+                    right_add: None,
+                    right_remove: None,
+                    right_set_seen: None,
+                    right_set_keywords: None,
+                    right_create_child: None,
+                    right_rename: None,
+                    right_delete: None,
+                    right_submit: None,
+                    is_subscribed: None,
+                }
+            })
+            .collect();
+
+        upsert_labels(&tx, &rows)?;
 
         tx.commit()
             .map_err(|e| format!("label sync commit: {e}"))?;

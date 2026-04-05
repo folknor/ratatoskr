@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use db::db::queries_extra::{AttachmentInsertRow, MessageInsertRow, insert_attachments, insert_messages};
+use db::db::queries_extra::{
+    AttachmentInsertRow, LabelWriteRow, MessageInsertRow, insert_attachments, insert_messages,
+    upsert_labels,
+};
 use search::{SearchDocument, SearchState};
 use store::attachment_cache::hash_bytes;
 use store::body_store::BodyStoreState;
@@ -276,12 +279,32 @@ fn sync_keyword_labels(
 
     for keyword in &unique_keywords {
         let label_id = format!("kw:{keyword}");
-        tx.execute(
-            "INSERT OR IGNORE INTO labels (id, account_id, name, type, label_kind) \
-             VALUES (?1, ?2, ?3, 'user', 'tag')",
-            rusqlite::params![label_id, account_id, keyword],
-        )
-        .map_err(|e| format!("upsert jmap keyword label: {e}"))?;
+        upsert_labels(
+            tx,
+            &[LabelWriteRow {
+                id: label_id.clone(),
+                account_id: account_id.to_string(),
+                name: keyword.clone(),
+                label_type: "user".to_string(),
+                label_kind: "tag".to_string(),
+                color_bg: None,
+                color_fg: None,
+                sort_order: None,
+                imap_folder_path: None,
+                imap_special_use: None,
+                parent_label_id: None,
+                right_read: None,
+                right_add: None,
+                right_remove: None,
+                right_set_seen: None,
+                right_set_keywords: None,
+                right_create_child: None,
+                right_rename: None,
+                right_delete: None,
+                right_submit: None,
+                is_subscribed: None,
+            }],
+        )?;
         tx.execute(
             "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
              VALUES (?1, ?2, ?3)",

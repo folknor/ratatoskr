@@ -2,7 +2,8 @@ use rusqlite::Connection;
 
 use db::db::DbState;
 use db::db::queries_extra::{
-    AttachmentInsertRow, MessageInsertRow, insert_attachments, insert_messages,
+    AttachmentInsertRow, LabelWriteRow, MessageInsertRow, insert_attachments, insert_messages,
+    upsert_labels,
 };
 use search::{SearchDocument, SearchState};
 use seen::MessageAddresses;
@@ -367,6 +368,10 @@ pub fn sync_folders_to_labels(
     account_id: &str,
     folders: &[&ImapFolder],
 ) -> Result<(), String> {
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("begin label tx: {e}"))?;
+
     // Build path → label_id map for parent resolution
     let path_to_label_id: std::collections::HashMap<&str, String> = folders
         .iter()
@@ -376,43 +381,65 @@ pub fn sync_folders_to_labels(
         })
         .collect();
 
-    for folder in folders {
-        let mapping = map_folder_to_label(folder);
+    let mut rows: Vec<LabelWriteRow> = folders
+        .iter()
+        .map(|folder| {
+            let mapping = map_folder_to_label(folder);
+            let parent_label_id =
+                derive_imap_parent_label_id(&folder.path, &folder.delimiter, &path_to_label_id);
 
-        // Derive parent_label_id from folder path by splitting on delimiter
-        let parent_label_id =
-            derive_imap_parent_label_id(&folder.path, &folder.delimiter, &path_to_label_id);
-
-        conn.execute(
-            "INSERT INTO labels \
-             (id, account_id, name, type, imap_folder_path, imap_special_use, parent_label_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
-             ON CONFLICT(account_id, id) DO UPDATE SET \
-               name = excluded.name, \
-               type = excluded.type, \
-               imap_folder_path = excluded.imap_folder_path, \
-               imap_special_use = excluded.imap_special_use, \
-               parent_label_id = excluded.parent_label_id",
-            rusqlite::params![
-                mapping.label_id,
-                account_id,
-                mapping.label_name,
-                mapping.label_type,
-                folder.raw_path,
-                folder.special_use,
+            LabelWriteRow {
+                id: mapping.label_id,
+                account_id: account_id.to_string(),
+                name: mapping.label_name,
+                label_type: mapping.label_type,
+                label_kind: "container".to_string(),
+                color_bg: None,
+                color_fg: None,
+                sort_order: None,
+                imap_folder_path: Some(folder.raw_path.clone()),
+                imap_special_use: folder.special_use.clone(),
                 parent_label_id,
-            ],
-        )
-        .map_err(|e| format!("upsert label: {e}"))?;
-    }
+                right_read: None,
+                right_add: None,
+                right_remove: None,
+                right_set_seen: None,
+                right_set_keywords: None,
+                right_create_child: None,
+                right_rename: None,
+                right_delete: None,
+                right_submit: None,
+                is_subscribed: None,
+            }
+        })
+        .collect();
 
-    // Ensure UNREAD pseudo-label exists
-    conn.execute(
-        "INSERT OR IGNORE INTO labels (id, account_id, name, type) VALUES (?1, ?2, 'Unread', 'system')",
-        rusqlite::params!["UNREAD", account_id],
-    )
-    .map_err(|e| format!("upsert UNREAD label: {e}"))?;
+    rows.push(LabelWriteRow {
+        id: "UNREAD".to_string(),
+        account_id: account_id.to_string(),
+        name: "Unread".to_string(),
+        label_type: "system".to_string(),
+        label_kind: "tag".to_string(),
+        color_bg: None,
+        color_fg: None,
+        sort_order: None,
+        imap_folder_path: None,
+        imap_special_use: None,
+        parent_label_id: None,
+        right_read: None,
+        right_add: None,
+        right_remove: None,
+        right_set_seen: None,
+        right_set_keywords: None,
+        right_create_child: None,
+        right_rename: None,
+        right_delete: None,
+        right_submit: None,
+        is_subscribed: None,
+    });
 
+    upsert_labels(&tx, &rows)?;
+    tx.commit().map_err(|e| format!("commit labels: {e}"))?;
     Ok(())
 }
 
@@ -588,13 +615,32 @@ pub fn apply_flag_changes(
 
         for kw in &change.keywords {
             let label_id = format!("kw:{kw}");
-            // Ensure the label exists
-            tx.execute(
-                "INSERT OR IGNORE INTO labels (id, account_id, name, type, label_kind) \
-                 VALUES (?1, ?2, ?3, 'user', 'tag')",
-                rusqlite::params![label_id, account_id, kw],
-            )
-            .map_err(|e| format!("upsert keyword label: {e}"))?;
+            upsert_labels(
+                &tx,
+                &[LabelWriteRow {
+                    id: label_id.clone(),
+                    account_id: account_id.to_string(),
+                    name: kw.clone(),
+                    label_type: "user".to_string(),
+                    label_kind: "tag".to_string(),
+                    color_bg: None,
+                    color_fg: None,
+                    sort_order: None,
+                    imap_folder_path: None,
+                    imap_special_use: None,
+                    parent_label_id: None,
+                    right_read: None,
+                    right_add: None,
+                    right_remove: None,
+                    right_set_seen: None,
+                    right_set_keywords: None,
+                    right_create_child: None,
+                    right_rename: None,
+                    right_delete: None,
+                    right_submit: None,
+                    is_subscribed: None,
+                }],
+            )?;
             // Link to thread
             tx.execute(
                 "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \

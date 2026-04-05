@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use common::types::ProviderCtx;
 use db::db::DbState;
+use db::db::queries_extra::{LabelWriteRow, upsert_labels};
 
 use super::super::client::GraphClient;
 use super::super::folder_mapper::FolderMap;
@@ -52,24 +53,56 @@ pub(super) async fn sync_folders(
 async fn persist_labels(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Result<(), String> {
     let aid = ctx.account_id.to_string();
 
-    let label_rows: Vec<(String, String, String, String, Option<String>)> = folder_map
+    let label_rows: Vec<LabelWriteRow> = folder_map
         .all_mappings()
         .map(|m| {
-            (
-                m.label_id.clone(),
-                aid.clone(),
-                m.label_name.clone(),
-                m.label_type.to_string(),
-                m.parent_label_id.clone(),
-            )
+            LabelWriteRow {
+                id: m.label_id.clone(),
+                account_id: aid.clone(),
+                name: m.label_name.clone(),
+                label_type: m.label_type.to_string(),
+                label_kind: "container".to_string(),
+                color_bg: None,
+                color_fg: None,
+                sort_order: None,
+                imap_folder_path: None,
+                imap_special_use: None,
+                parent_label_id: m.parent_label_id.clone(),
+                right_read: None,
+                right_add: None,
+                right_remove: None,
+                right_set_seen: None,
+                right_set_keywords: None,
+                right_create_child: None,
+                right_rename: None,
+                right_delete: None,
+                right_submit: None,
+                is_subscribed: None,
+            }
         })
-        .chain(std::iter::once((
-            "UNREAD".to_string(),
-            aid.clone(),
-            "Unread".to_string(),
-            "system".to_string(),
-            None,
-        )))
+        .chain(std::iter::once(LabelWriteRow {
+            id: "UNREAD".to_string(),
+            account_id: aid.clone(),
+            name: "Unread".to_string(),
+            label_type: "system".to_string(),
+            label_kind: "tag".to_string(),
+            color_bg: None,
+            color_fg: None,
+            sort_order: None,
+            imap_folder_path: None,
+            imap_special_use: None,
+            parent_label_id: None,
+            right_read: None,
+            right_add: None,
+            right_remove: None,
+            right_set_seen: None,
+            right_set_keywords: None,
+            right_create_child: None,
+            right_rename: None,
+            right_delete: None,
+            right_submit: None,
+            is_subscribed: None,
+        }))
         .collect();
 
     ctx.db
@@ -77,18 +110,7 @@ async fn persist_labels(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Result
             let tx = conn
                 .unchecked_transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
-            for (label_id, account_id, name, label_type, parent_label_id) in &label_rows {
-                tx.execute(
-                    "INSERT INTO labels (id, account_id, name, type, parent_label_id) \
-                     VALUES (?1, ?2, ?3, ?4, ?5) \
-                     ON CONFLICT(account_id, id) DO UPDATE SET \
-                       name = excluded.name, \
-                       type = excluded.type, \
-                       parent_label_id = excluded.parent_label_id",
-                    rusqlite::params![label_id, account_id, name, label_type, parent_label_id],
-                )
-                .map_err(|e| format!("upsert label: {e}"))?;
-            }
+            upsert_labels(&tx, &label_rows)?;
             tx.commit().map_err(|e| format!("commit labels: {e}"))?;
             Ok(())
         })

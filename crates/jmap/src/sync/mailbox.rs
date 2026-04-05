@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use db::db::queries_extra::{LabelWriteRow, upsert_labels};
 use jmap_client::email::EmailGet;
 use jmap_client::mailbox::{MailboxGet, MailboxRights, Role};
 
@@ -12,10 +13,10 @@ use super::SyncCtx;
 // ---------------------------------------------------------------------------
 
 /// A row to be persisted into the `labels` table, including optional rights.
-struct LabelRow {
-    label_id: String,
+struct MailboxLabelRow {
+    id: String,
     account_id: String,
-    label_name: String,
+    name: String,
     label_type: String,
     parent_label_id: Option<String>,
     rights: Option<MailboxRights>,
@@ -55,7 +56,7 @@ pub(crate) async fn sync_mailboxes(
     }
 
     // Second pass: build label rows with parent_label_id resolved + rights
-    let mut label_rows: Vec<LabelRow> = Vec::new();
+    let mut label_rows: Vec<MailboxLabelRow> = Vec::new();
 
     for mb in &mailboxes {
         let Some(id) = mb.id() else { continue };
@@ -82,10 +83,10 @@ pub(crate) async fn sync_mailboxes(
             .parent_id()
             .and_then(|pid| jmap_id_to_label_id.get(pid))
             .cloned();
-        label_rows.push(LabelRow {
-            label_id: mapping.label_id,
+        label_rows.push(MailboxLabelRow {
+            id: mapping.label_id,
             account_id: aid.clone(),
-            label_name: mapping.label_name,
+            name: mapping.label_name,
             label_type: mapping.label_type.to_string(),
             parent_label_id,
             rights: mb.my_rights().cloned(),
@@ -94,10 +95,10 @@ pub(crate) async fn sync_mailboxes(
     }
 
     // Also add pseudo-labels
-    label_rows.push(LabelRow {
-        label_id: "UNREAD".to_string(),
+    label_rows.push(MailboxLabelRow {
+        id: "UNREAD".to_string(),
         account_id: aid.clone(),
-        label_name: "Unread".to_string(),
+        name: "Unread".to_string(),
         label_type: "system".to_string(),
         parent_label_id: None,
         rights: None,
@@ -110,36 +111,10 @@ pub(crate) async fn sync_mailboxes(
             let tx = conn
                 .unchecked_transaction()
                 .map_err(|e| format!("begin tx: {e}"))?;
-            for row in &label_rows {
-                let (r_read, r_add, r_remove, r_seen, r_kw, r_child, r_rename, r_del, r_submit) =
-                    rights_to_ints(row.rights.as_ref());
-                tx.execute(
-                    "INSERT INTO labels \
-                     (id, account_id, name, type, parent_label_id, \
-                      right_read, right_add, right_remove, right_set_seen, \
-                      right_set_keywords, right_create_child, right_rename, \
-                      right_delete, right_submit, is_subscribed) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15) \
-                     ON CONFLICT(account_id, id) DO UPDATE SET \
-                       name = excluded.name, \
-                       type = excluded.type, \
-                       parent_label_id = excluded.parent_label_id, \
-                       right_read = excluded.right_read, \
-                       right_add = excluded.right_add, \
-                       right_remove = excluded.right_remove, \
-                       right_set_seen = excluded.right_set_seen, \
-                       right_set_keywords = excluded.right_set_keywords, \
-                       right_create_child = excluded.right_create_child, \
-                       right_rename = excluded.right_rename, \
-                       right_delete = excluded.right_delete, \
-                       right_submit = excluded.right_submit, \
-                       is_subscribed = excluded.is_subscribed",
-                    rusqlite::params![
-                        row.label_id,
-                        row.account_id,
-                        row.label_name,
-                        row.label_type,
-                        row.parent_label_id,
+            let rows: Vec<LabelWriteRow> = label_rows
+                .iter()
+                .map(|row| {
+                    let (
                         r_read,
                         r_add,
                         r_remove,
@@ -149,11 +124,37 @@ pub(crate) async fn sync_mailboxes(
                         r_rename,
                         r_del,
                         r_submit,
-                        row.is_subscribed,
-                    ],
-                )
-                .map_err(|e| format!("upsert label: {e}"))?;
-            }
+                    ) = rights_to_ints(row.rights.as_ref());
+                    LabelWriteRow {
+                        id: row.id.clone(),
+                        account_id: row.account_id.clone(),
+                        name: row.name.clone(),
+                        label_type: row.label_type.clone(),
+                        label_kind: if row.id == "UNREAD" {
+                            "tag".to_string()
+                        } else {
+                            "container".to_string()
+                        },
+                        color_bg: None,
+                        color_fg: None,
+                        sort_order: None,
+                        imap_folder_path: None,
+                        imap_special_use: None,
+                        parent_label_id: row.parent_label_id.clone(),
+                        right_read: r_read,
+                        right_add: r_add,
+                        right_remove: r_remove,
+                        right_set_seen: r_seen,
+                        right_set_keywords: r_kw,
+                        right_create_child: r_child,
+                        right_rename: r_rename,
+                        right_delete: r_del,
+                        right_submit: r_submit,
+                        is_subscribed: row.is_subscribed.map(i64::from),
+                    }
+                })
+                .collect();
+            upsert_labels(&tx, &rows)?;
             tx.commit().map_err(|e| format!("commit labels: {e}"))?;
             Ok(())
         })

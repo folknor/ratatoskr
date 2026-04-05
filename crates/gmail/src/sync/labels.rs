@@ -4,6 +4,7 @@ use super::super::client::GmailClient;
 use super::super::types::{GmailLabel, GmailSendAs};
 use super::SyncCtx;
 use db::db::DbState;
+use db::db::queries_extra::{LabelWriteRow, upsert_labels};
 
 // ---------------------------------------------------------------------------
 // Label sync
@@ -23,31 +24,50 @@ fn persist_labels(
     account_id: &str,
     labels: &[GmailLabel],
 ) -> Result<(), String> {
-    for label in labels {
-        let color_bg = label.color.as_ref().map(|c| c.background_color.clone());
-        let color_fg = label.color.as_ref().map(|c| c.text_color.clone());
-        let label_type = label.label_type.as_deref().unwrap_or("user");
-        let label_kind = if label_type == "system" {
-            "container"
-        } else {
-            "tag"
-        };
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("begin label tx: {e}"))?;
 
-        conn.execute(
-            "INSERT INTO labels (id, account_id, name, type, color_bg, color_fg, label_kind) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
-             ON CONFLICT(account_id, id) DO UPDATE SET \
-               name = excluded.name, \
-               type = excluded.type, \
-               color_bg = excluded.color_bg, \
-               color_fg = excluded.color_fg, \
-               label_kind = excluded.label_kind",
-            rusqlite::params![
-                label.id, account_id, label.name, label_type, color_bg, color_fg, label_kind,
-            ],
-        )
-        .map_err(|e| format!("upsert label: {e}"))?;
-    }
+    let rows: Vec<LabelWriteRow> = labels
+        .iter()
+        .map(|label| {
+            let color_bg = label.color.as_ref().map(|c| c.background_color.clone());
+            let color_fg = label.color.as_ref().map(|c| c.text_color.clone());
+            let label_type = label.label_type.as_deref().unwrap_or("user");
+            let label_kind = if label_type == "system" {
+                "container"
+            } else {
+                "tag"
+            };
+
+            LabelWriteRow {
+                id: label.id.clone(),
+                account_id: account_id.to_string(),
+                name: label.name.clone(),
+                label_type: label_type.to_string(),
+                label_kind: label_kind.to_string(),
+                color_bg,
+                color_fg,
+                sort_order: None,
+                imap_folder_path: None,
+                imap_special_use: None,
+                parent_label_id: None,
+                right_read: None,
+                right_add: None,
+                right_remove: None,
+                right_set_seen: None,
+                right_set_keywords: None,
+                right_create_child: None,
+                right_rename: None,
+                right_delete: None,
+                right_submit: None,
+                is_subscribed: None,
+            }
+        })
+        .collect();
+
+    upsert_labels(&tx, &rows)?;
+    tx.commit().map_err(|e| format!("commit labels: {e}"))?;
     Ok(())
 }
 
