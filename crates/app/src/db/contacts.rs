@@ -1,6 +1,10 @@
 use rusqlite::{Connection, OptionalExtension, params};
 
 use rtsk::db::{build_fts_query, make_like_pattern};
+use rtsk::db::queries_extra::{
+    GroupSettingsEntry, delete_group_sync, load_group_member_emails_sync,
+    load_groups_for_settings_sync, save_group_sync,
+};
 
 use super::connection::Db;
 
@@ -387,13 +391,24 @@ impl Db {
 
     /// Load contact groups for the settings management list.
     pub async fn get_groups_for_settings(&self, filter: String) -> Result<Vec<GroupEntry>, String> {
-        self.with_conn(move |conn| load_groups_filtered(conn, &filter))
-            .await
+        self.with_conn(move |conn| {
+            Ok(load_groups_for_settings_sync(conn, &filter)?
+                .into_iter()
+                .map(|row| GroupEntry {
+                    id: row.id,
+                    name: row.name,
+                    member_count: row.member_count,
+                    created_at: row.created_at,
+                    updated_at: row.updated_at,
+                })
+                .collect())
+        })
+        .await
     }
 
     /// Get member emails for a group.
     pub async fn get_group_member_emails(&self, group_id: String) -> Result<Vec<String>, String> {
-        self.with_conn(move |conn| load_group_member_emails(conn, &group_id))
+        self.with_conn(move |conn| load_group_member_emails_sync(conn, &group_id))
             .await
     }
 
@@ -413,36 +428,31 @@ impl Db {
             .await
     }
 
-    /// Delete a contact by ID.
-    pub async fn delete_contact(&self, contact_id: String) -> Result<(), String> {
-        self.with_write_conn(move |conn| {
-            conn.execute("DELETE FROM contacts WHERE id = ?1", params![contact_id])
-                .map_err(|e| e.to_string())?;
-            Ok(())
-        })
-        .await
-    }
-
     /// Insert or update a contact group.
     pub async fn save_group(
         &self,
         group: GroupEntry,
         member_emails: Vec<String>,
     ) -> Result<(), String> {
-        self.with_write_conn(move |conn| save_group_inner(conn, &group, &member_emails))
-            .await
+        self.with_write_conn(move |conn| {
+            save_group_sync(
+                conn,
+                &GroupSettingsEntry {
+                    id: group.id,
+                    name: group.name,
+                    member_count: group.member_count,
+                    created_at: group.created_at,
+                    updated_at: group.updated_at,
+                },
+                &member_emails,
+            )
+        })
+        .await
     }
 
     /// Delete a contact group by ID.
     pub async fn delete_group(&self, group_id: String) -> Result<(), String> {
-        self.with_write_conn(move |conn| {
-            conn.execute(
-                "DELETE FROM contact_groups WHERE id = ?1",
-                params![group_id],
-            )
-            .map_err(|e| e.to_string())?;
-            Ok(())
-        })
+        self.with_write_conn(move |conn| delete_group_sync(conn, &group_id))
         .await
     }
 }
@@ -518,63 +528,6 @@ fn load_contacts_filtered(conn: &Connection, filter: &str) -> Result<Vec<Contact
         })
         .map_err(|e| e.to_string())?;
 
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
-}
-
-fn load_groups_filtered(conn: &Connection, filter: &str) -> Result<Vec<GroupEntry>, String> {
-    let trimmed = filter.trim();
-    let escaped = trimmed.replace('%', r"\%").replace('_', r"\_");
-    let pattern = format!("%{escaped}%");
-
-    let sql = if trimmed.is_empty() {
-        "SELECT g.id, g.name, g.created_at, g.updated_at,
-                (SELECT COUNT(*) FROM contact_group_members m
-                 WHERE m.group_id = g.id) AS member_count
-         FROM contact_groups g
-         ORDER BY g.updated_at DESC
-         LIMIT 100"
-    } else {
-        "SELECT g.id, g.name, g.created_at, g.updated_at,
-                (SELECT COUNT(*) FROM contact_group_members m
-                 WHERE m.group_id = g.id) AS member_count
-         FROM contact_groups g
-         WHERE g.name LIKE ?1 ESCAPE '\\'
-         ORDER BY g.updated_at DESC
-         LIMIT 100"
-    };
-
-    let db_params: &[&dyn rusqlite::types::ToSql] =
-        if trimmed.is_empty() { &[] } else { &[&pattern] };
-
-    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(db_params, |row| {
-            Ok(GroupEntry {
-                id: row.get("id")?,
-                name: row.get("name")?,
-                member_count: row.get("member_count")?,
-                created_at: row.get("created_at")?,
-                updated_at: row.get("updated_at")?,
-            })
-        })
-        .map_err(|e| e.to_string())?;
-
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
-}
-
-fn load_group_member_emails(conn: &Connection, group_id: &str) -> Result<Vec<String>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT member_value FROM contact_group_members
-             WHERE group_id = ?1 AND member_type = 'email'
-             ORDER BY member_value ASC",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![group_id], |row| row.get::<_, String>(0))
-        .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
 }
@@ -675,43 +628,5 @@ fn save_contact_inner(conn: &Connection, entry: &ContactEntry) -> Result<(), Str
         ],
     )
     .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-fn save_group_inner(
-    conn: &Connection,
-    group: &GroupEntry,
-    member_emails: &[String],
-) -> Result<(), String> {
-    let now = chrono::Utc::now().timestamp();
-    conn.execute(
-        "INSERT INTO contact_groups (id, name, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?3)
-         ON CONFLICT(id) DO UPDATE SET
-             name = excluded.name,
-             updated_at = excluded.updated_at",
-        params![group.id, group.name, now],
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Replace all members
-    conn.execute(
-        "DELETE FROM contact_group_members WHERE group_id = ?1",
-        params![group.id],
-    )
-    .map_err(|e| e.to_string())?;
-
-    let mut stmt = conn
-        .prepare(
-            "INSERT INTO contact_group_members
-             (group_id, member_type, member_value)
-             VALUES (?1, 'email', ?2)",
-        )
-        .map_err(|e| e.to_string())?;
-
-    for email in member_emails {
-        stmt.execute(params![group.id, email])
-            .map_err(|e| e.to_string())?;
-    }
     Ok(())
 }
