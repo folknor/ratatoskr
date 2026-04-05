@@ -1,16 +1,14 @@
-// NOTE: Pinned searches are local UI state — they exist only in the app's
-// writable connection and are not synced to any provider. The raw SQL here
-// is intentional: these tables are created by the app crate (see
-// `db/connection.rs`) and the data never leaves the local device. Moving
-// them to core would create a dependency on a table that core doesn't own.
-// Reviewed 2026-03-21.
-
-use rusqlite::params;
+use rtsk::db::pinned_searches::{
+    DbPinnedSearch, db_create_or_update_pinned_search, db_delete_all_pinned_searches,
+    db_delete_pinned_search, db_expire_stale_pinned_searches, db_get_pinned_search_thread_ids,
+    db_get_recent_search_queries, db_get_threads_by_ids, db_list_pinned_searches,
+    db_update_pinned_search,
+};
+use rtsk::db::queries_extra::db_insert_smart_folder;
+use rtsk::db::types::DbThread;
 
 use super::connection::Db;
 use super::types::Thread;
-
-// ── Pinned search type ───────────────────────────────────────
 
 /// A pinned search with its stored thread snapshot.
 #[derive(Debug, Clone)]
@@ -24,101 +22,47 @@ pub struct PinnedSearch {
     pub thread_ids: Option<Vec<(String, String)>>,
 }
 
-// ── Pinned search CRUD ───────────────────────────────────────
+fn db_pinned_search_to_app(ps: DbPinnedSearch) -> PinnedSearch {
+    PinnedSearch {
+        id: ps.id,
+        query: ps.query,
+        created_at: ps.created_at,
+        updated_at: ps.updated_at,
+        scope_account_id: ps.scope_account_id,
+        thread_ids: ps.thread_ids,
+    }
+}
 
-pub(crate) fn ensure_pinned_search_schema(conn: &rusqlite::Connection) -> Result<(), String> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS pinned_searches (
-             id INTEGER PRIMARY KEY AUTOINCREMENT,
-             query TEXT NOT NULL,
-             created_at INTEGER NOT NULL,
-             updated_at INTEGER NOT NULL,
-             scope_account_id TEXT
-         );
-         CREATE UNIQUE INDEX IF NOT EXISTS idx_pinned_searches_query
-             ON pinned_searches(query);
-         CREATE TABLE IF NOT EXISTS pinned_search_threads (
-             pinned_search_id INTEGER NOT NULL
-                 REFERENCES pinned_searches(id) ON DELETE CASCADE,
-             thread_id TEXT NOT NULL,
-             account_id TEXT NOT NULL,
-             PRIMARY KEY (pinned_search_id, thread_id, account_id)
-         );",
-    )
-    .map_err(|e| format!("create pinned search schema: {e}"))
+fn db_thread_to_app_thread(t: DbThread) -> Thread {
+    Thread {
+        id: t.id,
+        account_id: t.account_id,
+        subject: t.subject,
+        snippet: t.snippet,
+        last_message_at: t.last_message_at,
+        message_count: t.message_count,
+        is_read: t.is_read,
+        is_starred: t.is_starred,
+        is_pinned: t.is_pinned,
+        is_muted: t.is_muted,
+        has_attachments: t.has_attachments,
+        from_name: t.from_name,
+        from_address: t.from_address,
+        is_local_draft: false,
+    }
 }
 
 impl Db {
-    /// Creates a pinned search, or updates the existing one if
-    /// `query` already exists. Returns the pinned search ID.
     pub async fn create_or_update_pinned_search(
         &self,
         query: String,
         thread_ids: Vec<(String, String)>,
         scope_account_id: Option<String>,
     ) -> Result<i64, String> {
-        self.with_write_conn(move |conn| {
-            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-            let now = chrono::Utc::now().timestamp();
-
-            let existing_id: Option<i64> = tx
-                .query_row(
-                    "SELECT id FROM pinned_searches WHERE query = ?1",
-                    params![query],
-                    |row| row.get(0),
-                )
-                .ok();
-
-            let pinned_id = if let Some(id) = existing_id {
-                tx.execute(
-                    "UPDATE pinned_searches
-                     SET updated_at = ?1, scope_account_id = ?2
-                     WHERE id = ?3",
-                    params![now, scope_account_id, id],
-                )
-                .map_err(|e| e.to_string())?;
-                id
-            } else {
-                tx.execute(
-                    "INSERT INTO pinned_searches (query, created_at, updated_at, scope_account_id)
-                     VALUES (?1, ?2, ?2, ?3)",
-                    params![query, now, scope_account_id],
-                )
-                .map_err(|e| e.to_string())?;
-                tx.last_insert_rowid()
-            };
-
-            // Replace thread snapshot
-            tx.execute(
-                "DELETE FROM pinned_search_threads WHERE pinned_search_id = ?1",
-                params![pinned_id],
-            )
-            .map_err(|e| e.to_string())?;
-
-            {
-                let mut stmt = tx
-                    .prepare(
-                        "INSERT INTO pinned_search_threads
-                            (pinned_search_id, thread_id, account_id)
-                         VALUES (?1, ?2, ?3)",
-                    )
-                    .map_err(|e| e.to_string())?;
-
-                for (thread_id, account_id) in &thread_ids {
-                    stmt.execute(params![pinned_id, thread_id, account_id])
-                        .map_err(|e| e.to_string())?;
-                }
-            }
-
-            tx.commit().map_err(|e| e.to_string())?;
-            Ok(pinned_id)
-        })
-        .await
+        let db = self.write_db_state();
+        db_create_or_update_pinned_search(&db, query, thread_ids, scope_account_id).await
     }
 
-    /// Updates a pinned search's query string and thread snapshot.
-    /// If the new query conflicts with another pinned search, the
-    /// conflicting row is deleted (merge behavior).
     pub async fn update_pinned_search(
         &self,
         id: i64,
@@ -126,278 +70,63 @@ impl Db {
         thread_ids: Vec<(String, String)>,
         scope_account_id: Option<String>,
     ) -> Result<(), String> {
-        self.with_write_conn(move |conn| {
-            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-            let now = chrono::Utc::now().timestamp();
-
-            // Check for a different pinned search with this query
-            let conflict_id: Option<i64> = tx
-                .query_row(
-                    "SELECT id FROM pinned_searches WHERE query = ?1 AND id != ?2",
-                    params![query, id],
-                    |row| row.get(0),
-                )
-                .ok();
-            if let Some(cid) = conflict_id {
-                tx.execute("DELETE FROM pinned_searches WHERE id = ?1", params![cid])
-                    .map_err(|e| e.to_string())?;
-            }
-
-            tx.execute(
-                "UPDATE pinned_searches
-                 SET query = ?1, updated_at = ?2, scope_account_id = ?3
-                 WHERE id = ?4",
-                params![query, now, scope_account_id, id],
-            )
-            .map_err(|e| e.to_string())?;
-
-            tx.execute(
-                "DELETE FROM pinned_search_threads WHERE pinned_search_id = ?1",
-                params![id],
-            )
-            .map_err(|e| e.to_string())?;
-
-            {
-                let mut stmt = tx
-                    .prepare(
-                        "INSERT INTO pinned_search_threads
-                            (pinned_search_id, thread_id, account_id)
-                         VALUES (?1, ?2, ?3)",
-                    )
-                    .map_err(|e| e.to_string())?;
-
-                for (thread_id, account_id) in &thread_ids {
-                    stmt.execute(params![id, thread_id, account_id])
-                        .map_err(|e| e.to_string())?;
-                }
-            }
-
-            tx.commit().map_err(|e| e.to_string())?;
-            Ok(())
-        })
-        .await
+        let db = self.write_db_state();
+        db_update_pinned_search(&db, id, query, thread_ids, scope_account_id).await
     }
 
-    /// Deletes a pinned search. CASCADE handles thread cleanup.
     pub async fn delete_pinned_search(&self, id: i64) -> Result<(), String> {
-        self.with_write_conn(move |conn| {
-            conn.execute("DELETE FROM pinned_searches WHERE id = ?1", params![id])
-                .map_err(|e| e.to_string())?;
-            Ok(())
-        })
-        .await
+        let db = self.write_db_state();
+        db_delete_pinned_search(&db, id).await
     }
 
-    /// Returns all pinned searches ordered by most recently updated.
     pub async fn list_pinned_searches(&self) -> Result<Vec<PinnedSearch>, String> {
-        self.with_conn(|conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, query, created_at, updated_at, scope_account_id
-                     FROM pinned_searches
-                     ORDER BY updated_at DESC",
-                )
-                .map_err(|e| e.to_string())?;
-
-            stmt.query_map([], |row| {
-                Ok(PinnedSearch {
-                    id: row.get("id")?,
-                    query: row.get("query")?,
-                    created_at: row.get("created_at")?,
-                    updated_at: row.get("updated_at")?,
-                    scope_account_id: row.get("scope_account_id")?,
-                    thread_ids: None,
-                })
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
-        })
-        .await
+        let db = self.read_db_state();
+        Ok(db_list_pinned_searches(&db)
+            .await?
+            .into_iter()
+            .map(db_pinned_search_to_app)
+            .collect())
     }
 
-    /// Loads the thread ID snapshot for a specific pinned search.
     pub async fn get_pinned_search_thread_ids(
         &self,
         pinned_search_id: i64,
     ) -> Result<Vec<(String, String)>, String> {
-        self.with_conn(move |conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT thread_id, account_id
-                     FROM pinned_search_threads
-                     WHERE pinned_search_id = ?1",
-                )
-                .map_err(|e| e.to_string())?;
-
-            stmt.query_map(params![pinned_search_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
-        })
-        .await
+        let db = self.read_db_state();
+        db_get_pinned_search_thread_ids(&db, pinned_search_id).await
     }
 
-    /// Fetches threads by (thread_id, account_id) pairs with current
-    /// metadata. Threads that no longer exist are silently omitted.
     pub async fn get_threads_by_ids(
         &self,
         ids: Vec<(String, String)>,
     ) -> Result<Vec<Thread>, String> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        self.with_conn(move |conn| {
-            let chunk_size = 400; // 2 params per ID, stay under 999
-            let mut results = Vec::with_capacity(ids.len());
-
-            for chunk in ids.chunks(chunk_size) {
-                let placeholders: Vec<String> = chunk
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| {
-                        let p1 = i * 2 + 1;
-                        let p2 = i * 2 + 2;
-                        format!("(?{p1}, ?{p2})")
-                    })
-                    .collect();
-                let values_clause = placeholders.join(", ");
-
-                let sql = format!(
-                    "WITH target_ids(tid, aid) AS (VALUES {values_clause})
-                     SELECT t.*, m.from_name, m.from_address
-                     FROM target_ids ti
-                     JOIN threads t ON t.id = ti.tid
-                         AND t.account_id = ti.aid
-                     LEFT JOIN messages m
-                         ON m.account_id = t.account_id
-                         AND m.thread_id = t.id
-                         AND m.date = (
-                             SELECT MAX(m2.date) FROM messages m2
-                             WHERE m2.account_id = t.account_id
-                               AND m2.thread_id = t.id
-                         )
-                     GROUP BY t.account_id, t.id
-                     ORDER BY t.last_message_at DESC"
-                );
-
-                let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-
-                let param_values: Vec<Box<dyn rusqlite::types::ToSql>> = chunk
-                    .iter()
-                    .flat_map(|(tid, aid)| {
-                        vec![
-                            Box::new(tid.clone()) as Box<dyn rusqlite::types::ToSql>,
-                            Box::new(aid.clone()) as Box<dyn rusqlite::types::ToSql>,
-                        ]
-                    })
-                    .collect();
-
-                let param_refs: Vec<&dyn rusqlite::types::ToSql> = param_values
-                    .iter()
-                    .map(std::convert::AsRef::as_ref)
-                    .collect();
-
-                let rows = stmt
-                    .query_map(param_refs.as_slice(), row_to_thread)
-                    .map_err(|e| e.to_string())?;
-
-                for row in rows {
-                    results.push(row.map_err(|e| e.to_string())?);
-                }
-            }
-
-            Ok(results)
-        })
-        .await
+        let db = self.read_db_state();
+        Ok(db_get_threads_by_ids(&db, ids)
+            .await?
+            .into_iter()
+            .map(db_thread_to_app_thread)
+            .collect())
     }
 
-    /// Returns the most recent search queries (up to `limit`) for search history.
-    /// Uses the pinned_searches table which already tracks all executed searches.
     pub async fn get_recent_search_queries(&self, limit: usize) -> Result<Vec<String>, String> {
-        self.with_conn(move |conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT query FROM pinned_searches
-                     ORDER BY updated_at DESC
-                     LIMIT ?1",
-                )
-                .map_err(|e| e.to_string())?;
-
-            #[allow(clippy::cast_possible_wrap)]
-            stmt.query_map(params![limit as i64], |row| row.get(0))
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<String>, _>>()
-                .map_err(|e| e.to_string())
-        })
-        .await
+        let db = self.read_db_state();
+        db_get_recent_search_queries(&db, limit).await
     }
 
-    /// Deletes all pinned searches. Used for the "Clear all" action.
     pub async fn delete_all_pinned_searches(&self) -> Result<u64, String> {
-        self.with_write_conn(move |conn| {
-            let deleted = conn
-                .execute("DELETE FROM pinned_searches", [])
-                .map_err(|e| e.to_string())?;
-            #[allow(clippy::cast_sign_loss)]
-            Ok(deleted as u64)
-        })
-        .await
+        let db = self.write_db_state();
+        db_delete_all_pinned_searches(&db).await
     }
 
-    /// Creates a smart folder with the given name and query.
-    /// Returns the generated smart folder ID.
     pub async fn create_smart_folder(&self, name: String, query: String) -> Result<i64, String> {
-        self.with_write_conn(move |conn| {
-            let id = uuid::Uuid::new_v4().to_string();
-            conn.execute(
-                "INSERT INTO smart_folders (id, name, query, created_at)
-                 VALUES (?1, ?2, ?3, unixepoch())",
-                params![id, name, query],
-            )
-            .map_err(|e| e.to_string())?;
-            Ok(conn.last_insert_rowid())
-        })
-        .await
+        let db = self.write_db_state();
+        let id = uuid::Uuid::new_v4().to_string();
+        db_insert_smart_folder(&db, id, name, query, None, None, None).await?;
+        Ok(0)
     }
 
-    /// Removes pinned searches older than `max_age_secs` that haven't
-    /// been accessed (updated_at == created_at).
     pub async fn expire_stale_pinned_searches(&self, max_age_secs: i64) -> Result<u64, String> {
-        self.with_write_conn(move |conn| {
-            let cutoff = chrono::Utc::now().timestamp() - max_age_secs;
-            let deleted = conn
-                .execute(
-                    "DELETE FROM pinned_searches
-                     WHERE updated_at < ?1
-                       AND updated_at = created_at",
-                    params![cutoff],
-                )
-                .map_err(|e| e.to_string())?;
-            #[allow(clippy::cast_sign_loss)]
-            Ok(deleted as u64)
-        })
-        .await
+        let db = self.write_db_state();
+        db_expire_stale_pinned_searches(&db, max_age_secs).await
     }
-}
-
-fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
-    Ok(Thread {
-        id: row.get("id")?,
-        account_id: row.get("account_id")?,
-        subject: row.get("subject")?,
-        snippet: row.get("snippet")?,
-        last_message_at: row.get("last_message_at")?,
-        message_count: row.get("message_count")?,
-        is_read: row.get::<_, i64>("is_read")? != 0,
-        is_starred: row.get::<_, i64>("is_starred")? != 0,
-        is_pinned: row.get::<_, i64>("is_pinned")? != 0,
-        is_muted: row.get::<_, i64>("is_muted")? != 0,
-        has_attachments: row.get::<_, i64>("has_attachments")? != 0,
-        from_name: row.get("from_name")?,
-        from_address: row.get("from_address")?,
-        is_local_draft: false,
-    })
 }

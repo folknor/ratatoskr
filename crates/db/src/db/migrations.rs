@@ -12,7 +12,8 @@ struct Migration {
 // delete it and re-seed (run_all will detect stale DBs and error).
 //
 // Future migrations go here as version 2, 3, etc.
-static MIGRATIONS: &[Migration] = &[Migration {
+static MIGRATIONS: &[Migration] = &[
+Migration {
     version: 100,
     description: "Initial schema (collapsed from v1-v80)",
     sql: r#"
@@ -1078,7 +1079,29 @@ CREATE TABLE IF NOT EXISTS pending_operations (
 CREATE INDEX IF NOT EXISTS idx_pending_ops_status ON pending_operations(status, next_retry_at);
 CREATE INDEX IF NOT EXISTS idx_pending_ops_resource ON pending_operations(account_id, resource_id);
 
-    "#,
+"#,
+},
+Migration {
+    version: 101,
+    description: "Add pinned search storage tables",
+    sql: r#"
+CREATE TABLE IF NOT EXISTS pinned_searches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    query TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    scope_account_id TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pinned_searches_query
+    ON pinned_searches(query);
+CREATE TABLE IF NOT EXISTS pinned_search_threads (
+    pinned_search_id INTEGER NOT NULL
+        REFERENCES pinned_searches(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    PRIMARY KEY (pinned_search_id, thread_id, account_id)
+);
+"#,
 }];
 
 /// Split SQL into individual statements, respecting BEGIN...END blocks

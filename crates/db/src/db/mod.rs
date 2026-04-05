@@ -2,6 +2,7 @@ pub mod from_row;
 mod from_row_impls;
 pub mod lookups;
 pub mod migrations;
+pub mod pinned_searches;
 pub mod queries;
 pub mod sql_fragments;
 pub mod types;
