@@ -296,7 +296,7 @@ pub fn get_ui_bootstrap_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use crate::db::Connection;
+    use crate::db::{Connection, params};
 
     use super::{
         get_settings_bootstrap_snapshot, get_settings_secrets_snapshot, get_ui_bootstrap_snapshot,

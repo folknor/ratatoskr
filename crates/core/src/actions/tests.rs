@@ -3,11 +3,9 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use rusqlite::params;
-
 use super::context::ActionContext;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
-use crate::db::DbState;
+use crate::db::{DbState, params};
 
 // ── Test helpers ────────────────────────────────────────────────────
 

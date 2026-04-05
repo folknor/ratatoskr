@@ -5825,7 +5825,6 @@ dependencies = [
  "regex",
  "reqwest",
  "resvg 0.47.0",
- "rusqlite",
  "search",
  "seen",
  "serde",
