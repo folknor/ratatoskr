@@ -88,6 +88,16 @@ pub async fn db_get_account_by_email(
     .await
 }
 
+pub fn get_active_account_ids_sync(conn: &rusqlite::Connection) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id FROM accounts WHERE is_active = 1 ORDER BY email ASC")
+        .map_err(|e| e.to_string())?;
+    stmt.query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
 pub async fn db_delete_account(db: &DbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM accounts WHERE id = ?1", params![id])

@@ -55,7 +55,8 @@ use rtsk::db::queries_extra::navigation::{
     NavigationState, get_navigation_state, get_shared_mailbox_navigation,
 };
 use rtsk::db::queries_extra::{
-    get_public_folder_items, get_threads_for_shared_mailbox, get_threads_scoped,
+    db_update_account_sort_order, get_active_account_ids_sync, get_public_folder_items,
+    get_threads_for_shared_mailbox, get_threads_scoped,
 };
 use rtsk::db::types::{AccountScope, DbThread};
 use rtsk::generation::{GenerationCounter, GenerationToken, Nav, PopOut, Search, ThreadDetail};
@@ -2167,17 +2168,8 @@ impl App {
         let db = Arc::clone(&self.db);
         Task::perform(
             async move {
-                db.with_write_conn(move |conn| {
-                    let mut stmt = conn
-                        .prepare("UPDATE accounts SET sort_order = ?1 WHERE id = ?2")
-                        .map_err(|e| e.to_string())?;
-                    for (account_id, sort_order) in &orders {
-                        stmt.execute(rusqlite::params![sort_order, account_id])
-                            .map_err(|e| e.to_string())?;
-                    }
-                    Ok(())
-                })
-                .await
+                let db_state = db.write_db_state();
+                db_update_account_sort_order(&db_state, orders).await
             },
             Message::AccountUpdated,
         )
@@ -2728,15 +2720,7 @@ async fn load_threads_for_bundle_view(
         let account_ids: Vec<String> = match &scope {
             AccountScope::Single(id) => vec![id.clone()],
             AccountScope::Multiple(ids) => ids.clone(),
-            AccountScope::All => {
-                let mut stmt = conn
-                    .prepare("SELECT id FROM accounts WHERE is_active = 1 ORDER BY email ASC")
-                    .map_err(|e| e.to_string())?;
-                stmt.query_map([], |row| row.get::<_, String>(0))
-                    .map_err(|e| e.to_string())?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| e.to_string())?
-            }
+            AccountScope::All => get_active_account_ids_sync(conn)?,
         };
 
         let mut threads = Vec::new();
