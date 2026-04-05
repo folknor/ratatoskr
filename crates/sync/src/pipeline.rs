@@ -5,6 +5,10 @@ use rusqlite::Connection;
 use crate::threading::ThreadGroup;
 
 use crate::types::MessageMeta;
+use db::db::queries_extra::{
+    ThreadAggregate, query_user_emails, reassign_messages_and_repair_threads,
+    replace_thread_labels, upsert_thread_aggregate,
+};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -41,7 +45,7 @@ pub fn store_threads(
             .unchecked_transaction()
             .map_err(|e| format!("begin thread tx: {e}"))?;
 
-        let user_emails = super::persistence::query_user_emails(&tx)?;
+        let user_emails = query_user_emails(&tx)?;
 
         for group in batch {
             if skipped_thread_ids.contains(&group.thread_id) {
@@ -81,229 +85,23 @@ pub fn store_threads(
             let is_starred = messages.iter().any(|m| m.is_starred);
             let has_attachments = messages.iter().any(|m| m.has_attachments);
 
-            // Upsert the real thread
-            tx.execute(
-                "INSERT OR REPLACE INTO threads \
-                 (id, account_id, subject, snippet, last_message_at, message_count, \
-                  is_read, is_starred, is_important, has_attachments) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9)",
-                rusqlite::params![
-                    group.thread_id,
-                    account_id,
-                    first.subject,
-                    last.snippet,
-                    last.date,
-                    i64::try_from(messages.len()).unwrap_or(i64::MAX),
-                    is_read,
-                    is_starred,
-                    has_attachments,
-                ],
-            )
-            .map_err(|e| format!("upsert thread: {e}"))?;
-
-            // Set thread labels (delete old, insert new)
-            tx.execute(
-                "DELETE FROM thread_labels WHERE account_id = ?1 AND thread_id = ?2",
-                rusqlite::params![account_id, group.thread_id],
-            )
-            .map_err(|e| format!("delete thread labels: {e}"))?;
-
-            for label_id in &all_label_ids {
-                tx.execute(
-                    "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) \
-                     VALUES (?1, ?2, ?3)",
-                    rusqlite::params![account_id, group.thread_id, label_id],
-                )
-                .map_err(|e| format!("insert thread label: {e}"))?;
-            }
-
-            // Collect old thread IDs for messages being reassigned so we can
-            // clean up orphaned thread_participants after the UPDATE.
             let message_ids: Vec<&str> = messages.iter().map(|m| m.id.as_str()).collect();
-            let mut old_thread_ids: HashSet<String> = HashSet::new();
-            for chunk in message_ids.chunks(100) {
-                let placeholders: String = chunk
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| format!("?{}", i + 2))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-
-                let sql = format!(
-                    "SELECT DISTINCT thread_id FROM messages \
-                     WHERE account_id = ?1 AND id IN ({placeholders})"
-                );
-
-                let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-                params.push(Box::new(account_id.to_string()));
-                for id in chunk {
-                    params.push(Box::new(id.to_string()));
-                }
-                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                    params.iter().map(AsRef::as_ref).collect();
-
-                let mut stmt = tx
-                    .prepare(&sql)
-                    .map_err(|e| format!("prepare old thread query: {e}"))?;
-                let rows = stmt
-                    .query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))
-                    .map_err(|e| format!("query old thread ids: {e}"))?;
-                for tid in rows.flatten() {
-                    if tid != group.thread_id {
-                        old_thread_ids.insert(tid);
-                    }
-                }
-            }
-
-            // Batch-update message thread IDs
-            for chunk in message_ids.chunks(100) {
-                let placeholders: String = chunk
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| format!("?{}", i + 3))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-
-                let sql = format!(
-                    "UPDATE messages SET thread_id = ?1 \
-                     WHERE account_id = ?2 AND id IN ({placeholders})"
-                );
-
-                let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-                params.push(Box::new(group.thread_id.clone()));
-                params.push(Box::new(account_id.to_string()));
-                for id in chunk {
-                    params.push(Box::new(id.to_string()));
-                }
-                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                    params.iter().map(AsRef::as_ref).collect();
-
-                tx.execute(&sql, param_refs.as_slice())
-                    .map_err(|e| format!("update message thread_ids: {e}"))?;
-            }
-
-            // Clean up thread_participants for old threads that lost messages
-            // to re-threading. Threads with 0 remaining messages get their
-            // participants (and thread/label rows) deleted outright; threads
-            // that still have messages get participants recomputed.
-            for old_tid in &old_thread_ids {
-                let remaining: i64 = tx
-                    .query_row(
-                        "SELECT COUNT(*) FROM messages \
-                         WHERE thread_id = ?1 AND account_id = ?2",
-                        rusqlite::params![old_tid, account_id],
-                        |row| row.get(0),
-                    )
-                    .map_err(|e| format!("count remaining in old thread: {e}"))?;
-
-                if remaining == 0 {
-                    tx.execute(
-                        "DELETE FROM thread_participants \
-                         WHERE thread_id = ?1 AND account_id = ?2",
-                        rusqlite::params![old_tid, account_id],
-                    )
-                    .map_err(|e| format!("delete orphan thread participants: {e}"))?;
-                    tx.execute(
-                        "DELETE FROM thread_labels \
-                         WHERE thread_id = ?1 AND account_id = ?2",
-                        rusqlite::params![old_tid, account_id],
-                    )
-                    .map_err(|e| format!("delete orphan thread labels: {e}"))?;
-                    tx.execute(
-                        "DELETE FROM threads WHERE id = ?1 AND account_id = ?2",
-                        rusqlite::params![old_tid, account_id],
-                    )
-                    .map_err(|e| format!("delete orphan thread: {e}"))?;
-                } else {
-                    // Recompute participants from remaining messages
-                    tx.execute(
-                        "DELETE FROM thread_participants \
-                         WHERE account_id = ?1 AND thread_id = ?2",
-                        rusqlite::params![account_id, old_tid],
-                    )
-                    .map_err(|e| format!("clear old thread participants: {e}"))?;
-
-                    let mut addr_stmt = tx
-                        .prepare(
-                            "SELECT from_address, to_addresses, cc_addresses, bcc_addresses \
-                             FROM messages WHERE account_id = ?1 AND thread_id = ?2",
-                        )
-                        .map_err(|e| format!("prepare old thread addr query: {e}"))?;
-                    let rows: Vec<(
-                        Option<String>,
-                        Option<String>,
-                        Option<String>,
-                        Option<String>,
-                    )> = addr_stmt
-                        .query_map(rusqlite::params![account_id, old_tid], |row| {
-                            Ok((
-                                row.get::<_, Option<String>>(0)?,
-                                row.get::<_, Option<String>>(1)?,
-                                row.get::<_, Option<String>>(2)?,
-                                row.get::<_, Option<String>>(3)?,
-                            ))
-                        })
-                        .map_err(|e| format!("query old thread addr: {e}"))?
-                        .filter_map(Result::ok)
-                        .collect();
-                    for (from, to, cc, bcc) in &rows {
-                        super::persistence::upsert_thread_participants(
-                            &tx,
-                            account_id,
-                            old_tid,
-                            from.as_deref(),
-                            to.as_deref(),
-                            cc.as_deref(),
-                            bcc.as_deref(),
-                        )?;
-                    }
-                }
-            }
-
-            // Populate thread_participants from the messages' address fields.
-            // IMAP messages were inserted earlier with placeholder thread IDs;
-            // now that JWZ assigned final IDs, we can read the address fields
-            // from the DB and populate participants for the real thread ID.
-            {
-                let mut addr_stmt = tx
-                    .prepare(
-                        "SELECT from_address, to_addresses, cc_addresses, bcc_addresses \
-                         FROM messages WHERE account_id = ?1 AND thread_id = ?2",
-                    )
-                    .map_err(|e| format!("prepare addr query: {e}"))?;
-                let rows: Vec<(
-                    Option<String>,
-                    Option<String>,
-                    Option<String>,
-                    Option<String>,
-                )> = addr_stmt
-                    .query_map(rusqlite::params![account_id, group.thread_id], |row| {
-                        Ok((
-                            row.get::<_, Option<String>>(0)?,
-                            row.get::<_, Option<String>>(1)?,
-                            row.get::<_, Option<String>>(2)?,
-                            row.get::<_, Option<String>>(3)?,
-                        ))
-                    })
-                    .map_err(|e| format!("query addr: {e}"))?
-                    .filter_map(Result::ok)
-                    .collect();
-                for (from, to, cc, bcc) in &rows {
-                    super::persistence::upsert_thread_participants(
-                        &tx,
-                        account_id,
-                        &group.thread_id,
-                        from.as_deref(),
-                        to.as_deref(),
-                        cc.as_deref(),
-                        bcc.as_deref(),
-                    )?;
-                }
-            }
-            super::persistence::maybe_update_chat_state(
+            let aggregate = ThreadAggregate {
+                subject: first.subject.clone(),
+                snippet: last.snippet.clone(),
+                last_date: last.date,
+                message_count: i64::try_from(messages.len()).unwrap_or(i64::MAX),
+                is_read,
+                is_starred,
+                has_attachments,
+            };
+            upsert_thread_aggregate(&tx, account_id, &group.thread_id, &aggregate, Some(false), None)?;
+            replace_thread_labels(&tx, account_id, &group.thread_id, all_label_ids.iter().map(String::as_str))?;
+            reassign_messages_and_repair_threads(
                 &tx,
                 account_id,
                 &group.thread_id,
+                &message_ids,
                 &user_emails,
             )?;
 

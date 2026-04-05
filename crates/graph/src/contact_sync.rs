@@ -3,6 +3,9 @@ use std::collections::HashSet;
 use rusqlite::params;
 
 use db::db::DbState;
+use db::db::queries_extra::{
+    ContactWriteRow, delete_contact_by_email_and_source_sync, upsert_contact_sync,
+};
 use sync::state as sync_state;
 
 use super::client::GraphClient;
@@ -295,31 +298,22 @@ fn persist_synced_contacts(
         for email in &emails {
             let local_id = format!("graph-{account_id}-{email}");
 
-            conn.execute(
-                "INSERT INTO contacts (id, email, display_name, source, account_id, server_id) \
-                 VALUES (?1, ?2, ?3, 'graph', ?4, ?5) \
-                 ON CONFLICT(email) DO UPDATE SET \
-                   display_name = CASE \
-                     WHEN contacts.source = 'user' THEN contacts.display_name \
-                     WHEN contacts.display_name_overridden = 1 THEN contacts.display_name \
-                     ELSE COALESCE(excluded.display_name, contacts.display_name) \
-                   END, \
-                   source = CASE \
-                     WHEN contacts.source = 'user' THEN 'user' \
-                     ELSE 'graph' \
-                   END, \
-                   account_id = COALESCE(excluded.account_id, contacts.account_id), \
-                   server_id = COALESCE(excluded.server_id, contacts.server_id), \
-                   updated_at = unixepoch()",
-                params![
-                    local_id,
-                    email,
-                    contact.display_name,
-                    account_id,
-                    contact.id
-                ],
-            )
-            .map_err(|e| format!("upsert synced contact: {e}"))?;
+            upsert_contact_sync(
+                conn,
+                &ContactWriteRow {
+                    id: local_id,
+                    email: email.clone(),
+                    display_name: contact.display_name.clone(),
+                    email2: None,
+                    phone: None,
+                    company: None,
+                    notes: None,
+                    avatar_url: None,
+                    source: "graph".to_string(),
+                    account_id: account_id.to_string(),
+                    server_id: Some(contact.id.clone()),
+                },
+            )?;
 
             conn.execute(
                 "INSERT OR REPLACE INTO graph_contact_map \
@@ -376,11 +370,7 @@ fn delete_synced_contact(
             .map_err(|e| format!("count remaining mappings: {e}"))?;
 
         if remaining == 0 {
-            conn.execute(
-                "DELETE FROM contacts WHERE email = ?1 AND source = 'graph'",
-                params![email],
-            )
-            .map_err(|e| format!("delete orphaned contact: {e}"))?;
+            delete_contact_by_email_and_source_sync(conn, email, "graph")?;
         }
     }
 

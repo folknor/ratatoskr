@@ -17,6 +17,9 @@
 use rusqlite::params;
 
 use db::db::DbState;
+use db::db::queries_extra::{
+    ContactWriteRow, delete_contact_by_server_id_and_source_sync, upsert_contact_sync,
+};
 use sync::state as sync_state;
 
 use super::client::JmapClient;
@@ -510,54 +513,22 @@ fn persist_jmap_contact(
         .as_deref()
         .unwrap_or(contact.email.as_str());
 
-    conn.execute(
-        "INSERT INTO contacts (id, email, display_name, email2, phone, company, notes,
-                               source, account_id, server_id) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'jmap', ?8, ?9) \
-         ON CONFLICT(email) DO UPDATE SET \
-           display_name = CASE \
-             WHEN contacts.source = 'user' THEN contacts.display_name \
-             WHEN contacts.display_name_overridden = 1 THEN contacts.display_name \
-             ELSE COALESCE(excluded.display_name, contacts.display_name) \
-           END, \
-           email2 = CASE \
-             WHEN contacts.source = 'user' THEN contacts.email2 \
-             ELSE COALESCE(excluded.email2, contacts.email2) \
-           END, \
-           phone = CASE \
-             WHEN contacts.source = 'user' THEN contacts.phone \
-             ELSE COALESCE(excluded.phone, contacts.phone) \
-           END, \
-           company = CASE \
-             WHEN contacts.source = 'user' THEN contacts.company \
-             ELSE COALESCE(excluded.company, contacts.company) \
-           END, \
-           notes = CASE \
-             WHEN contacts.source = 'user' THEN contacts.notes \
-             ELSE COALESCE(excluded.notes, contacts.notes) \
-           END, \
-           source = CASE \
-             WHEN contacts.source = 'user' THEN 'user' \
-             ELSE 'jmap' \
-           END, \
-           account_id = COALESCE(excluded.account_id, contacts.account_id), \
-           server_id = COALESCE(excluded.server_id, contacts.server_id), \
-           updated_at = unixepoch()",
-        params![
-            local_id,
-            contact.email,
-            display_name,
-            contact.email2,
-            contact.phone,
-            contact.company,
-            contact.notes,
-            account_id,
-            contact.server_id,
-        ],
+    upsert_contact_sync(
+        conn,
+        &ContactWriteRow {
+            id: local_id,
+            email: contact.email.clone(),
+            display_name: Some(display_name.to_string()),
+            email2: contact.email2.clone(),
+            phone: contact.phone.clone(),
+            company: contact.company.clone(),
+            notes: contact.notes.clone(),
+            avatar_url: None,
+            source: "jmap".to_string(),
+            account_id: account_id.to_string(),
+            server_id: Some(contact.server_id.clone()),
+        },
     )
-    .map_err(|e| format!("upsert jmap contact: {e}"))?;
-
-    Ok(())
 }
 
 /// Delete a JMAP contact that was destroyed on the server.
@@ -569,11 +540,5 @@ fn delete_jmap_contact(
     account_id: &str,
     server_id: &str,
 ) -> Result<(), String> {
-    conn.execute(
-        "DELETE FROM contacts \
-         WHERE server_id = ?1 AND account_id = ?2 AND source = 'jmap'",
-        params![server_id, account_id],
-    )
-    .map_err(|e| format!("delete jmap contact: {e}"))?;
-    Ok(())
+    delete_contact_by_server_id_and_source_sync(conn, account_id, server_id, "jmap")
 }

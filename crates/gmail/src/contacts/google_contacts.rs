@@ -3,6 +3,9 @@ use std::collections::HashSet;
 use rusqlite::params;
 
 use db::db::DbState;
+use db::db::queries_extra::{
+    ContactWriteRow, delete_contact_by_email_and_source_sync, upsert_contact_sync,
+};
 use sync::state as sync_state;
 
 use super::super::client::GmailClient;
@@ -243,47 +246,22 @@ fn persist_google_contacts(
             .and_then(|o| o.name.as_deref())
             .filter(|v| !v.is_empty());
 
-        conn.execute(
-            "INSERT INTO contacts (id, email, display_name, avatar_url, phone, company,
-                                   source, account_id, server_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'google', ?7, ?8) \
-             ON CONFLICT(email) DO UPDATE SET \
-               display_name = CASE \
-                 WHEN contacts.source = 'user' THEN contacts.display_name \
-                 WHEN contacts.display_name_overridden = 1 THEN contacts.display_name \
-                 ELSE COALESCE(excluded.display_name, contacts.display_name) \
-               END, \
-               avatar_url = CASE \
-                 WHEN contacts.source = 'user' THEN contacts.avatar_url \
-                 ELSE COALESCE(excluded.avatar_url, contacts.avatar_url) \
-               END, \
-               phone = CASE \
-                 WHEN contacts.source = 'user' THEN contacts.phone \
-                 ELSE COALESCE(excluded.phone, contacts.phone) \
-               END, \
-               company = CASE \
-                 WHEN contacts.source = 'user' THEN contacts.company \
-                 ELSE COALESCE(excluded.company, contacts.company) \
-               END, \
-               source = CASE \
-                 WHEN contacts.source = 'user' THEN 'user' \
-                 ELSE 'google' \
-               END, \
-               account_id = COALESCE(excluded.account_id, contacts.account_id), \
-               server_id = COALESCE(excluded.server_id, contacts.server_id), \
-               updated_at = unixepoch()",
-            params![
-                local_id,
-                email,
-                display_name,
+        upsert_contact_sync(
+            conn,
+            &ContactWriteRow {
+                id: local_id,
+                email: email.clone(),
+                display_name: Some(display_name),
+                email2: None,
+                phone: phone.map(str::to_string),
+                company: company.map(str::to_string),
+                notes: None,
                 avatar_url,
-                phone,
-                company,
-                account_id,
-                resource_name
-            ],
-        )
-        .map_err(|e| format!("upsert google contact: {e}"))?;
+                source: "google".to_string(),
+                account_id: account_id.to_string(),
+                server_id: Some(resource_name.clone()),
+            },
+        )?;
 
         conn.execute(
             "INSERT OR REPLACE INTO google_contact_map \
@@ -340,11 +318,7 @@ fn delete_google_contact(
             .unwrap_or(0);
 
         if remaining == 0 && graph_remaining == 0 {
-            conn.execute(
-                "DELETE FROM contacts WHERE email = ?1 AND source = 'google'",
-                params![email],
-            )
-            .map_err(|e| format!("delete orphaned google contact: {e}"))?;
+            delete_contact_by_email_and_source_sync(conn, email, "google")?;
         }
     }
 

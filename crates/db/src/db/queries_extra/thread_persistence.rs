@@ -506,6 +506,191 @@ pub fn replace_thread_labels<'a>(
     Ok(())
 }
 
+pub fn reassign_messages_and_repair_threads(
+    tx: &Transaction,
+    account_id: &str,
+    new_thread_id: &str,
+    message_ids: &[&str],
+    user_emails: &[String],
+) -> Result<(), String> {
+    if message_ids.is_empty() {
+        return Ok(());
+    }
+
+    let old_thread_ids = query_old_thread_ids_for_messages(tx, account_id, new_thread_id, message_ids)?;
+    update_message_thread_ids(tx, account_id, new_thread_id, message_ids)?;
+
+    for old_tid in &old_thread_ids {
+        repair_thread_after_message_reassignment(tx, account_id, old_tid, user_emails)?;
+    }
+
+    rebuild_thread_participants(tx, account_id, new_thread_id)?;
+    maybe_update_chat_state(tx, account_id, new_thread_id, user_emails)?;
+    Ok(())
+}
+
+fn query_old_thread_ids_for_messages(
+    tx: &Transaction,
+    account_id: &str,
+    new_thread_id: &str,
+    message_ids: &[&str],
+) -> Result<HashSet<String>, String> {
+    let mut old_thread_ids = HashSet::new();
+
+    for chunk in message_ids.chunks(100) {
+        let placeholders = chunk
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("?{}", i + 2))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let sql = format!(
+            "SELECT DISTINCT thread_id FROM messages \
+             WHERE account_id = ?1 AND id IN ({placeholders})"
+        );
+
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::with_capacity(1 + chunk.len());
+        params.push(Box::new(account_id.to_string()));
+        for id in chunk {
+            params.push(Box::new((*id).to_string()));
+        }
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| &**p).collect();
+
+        let mut stmt = tx
+            .prepare(&sql)
+            .map_err(|e| format!("prepare old thread query: {e}"))?;
+        let rows = stmt
+            .query_map(param_refs.as_slice(), |row| row.get::<_, String>(0))
+            .map_err(|e| format!("query old thread ids: {e}"))?;
+        for tid in rows.flatten() {
+            if tid != new_thread_id {
+                old_thread_ids.insert(tid);
+            }
+        }
+    }
+
+    Ok(old_thread_ids)
+}
+
+fn update_message_thread_ids(
+    tx: &Transaction,
+    account_id: &str,
+    new_thread_id: &str,
+    message_ids: &[&str],
+) -> Result<(), String> {
+    for chunk in message_ids.chunks(100) {
+        let placeholders = chunk
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("?{}", i + 3))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let sql = format!(
+            "UPDATE messages SET thread_id = ?1 \
+             WHERE account_id = ?2 AND id IN ({placeholders})"
+        );
+
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::with_capacity(2 + chunk.len());
+        params.push(Box::new(new_thread_id.to_string()));
+        params.push(Box::new(account_id.to_string()));
+        for id in chunk {
+            params.push(Box::new((*id).to_string()));
+        }
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| &**p).collect();
+
+        tx.execute(&sql, param_refs.as_slice())
+            .map_err(|e| format!("update message thread_ids: {e}"))?;
+    }
+
+    Ok(())
+}
+
+fn repair_thread_after_message_reassignment(
+    tx: &Transaction,
+    account_id: &str,
+    thread_id: &str,
+    user_emails: &[String],
+) -> Result<(), String> {
+    let remaining: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND account_id = ?2",
+            rusqlite::params![thread_id, account_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("count remaining in old thread: {e}"))?;
+
+    if remaining == 0 {
+        tx.execute(
+            "DELETE FROM thread_participants WHERE thread_id = ?1 AND account_id = ?2",
+            rusqlite::params![thread_id, account_id],
+        )
+        .map_err(|e| format!("delete orphan thread participants: {e}"))?;
+        tx.execute(
+            "DELETE FROM thread_labels WHERE thread_id = ?1 AND account_id = ?2",
+            rusqlite::params![thread_id, account_id],
+        )
+        .map_err(|e| format!("delete orphan thread labels: {e}"))?;
+        tx.execute(
+            "DELETE FROM threads WHERE id = ?1 AND account_id = ?2",
+            rusqlite::params![thread_id, account_id],
+        )
+        .map_err(|e| format!("delete orphan thread: {e}"))?;
+        return Ok(());
+    }
+
+    rebuild_thread_participants(tx, account_id, thread_id)?;
+    maybe_update_chat_state(tx, account_id, thread_id, user_emails)?;
+    Ok(())
+}
+
+fn rebuild_thread_participants(
+    tx: &Transaction,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<(), String> {
+    tx.execute(
+        "DELETE FROM thread_participants WHERE account_id = ?1 AND thread_id = ?2",
+        rusqlite::params![account_id, thread_id],
+    )
+    .map_err(|e| format!("clear thread participants: {e}"))?;
+
+    let mut addr_stmt = tx
+        .prepare(
+            "SELECT from_address, to_addresses, cc_addresses, bcc_addresses \
+             FROM messages WHERE account_id = ?1 AND thread_id = ?2",
+        )
+        .map_err(|e| format!("prepare addr query: {e}"))?;
+    let rows: Vec<(Option<String>, Option<String>, Option<String>, Option<String>)> = addr_stmt
+        .query_map(rusqlite::params![account_id, thread_id], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })
+        .map_err(|e| format!("query addr: {e}"))?
+        .filter_map(Result::ok)
+        .collect();
+    drop(addr_stmt);
+
+    for (from, to, cc, bcc) in &rows {
+        upsert_thread_participants(
+            tx,
+            account_id,
+            thread_id,
+            from.as_deref(),
+            to.as_deref(),
+            cc.as_deref(),
+            bcc.as_deref(),
+        )?;
+    }
+
+    Ok(())
+}
+
 fn parse_address_list(raw: &str) -> Vec<(Option<String>, String)> {
     if raw.trim().is_empty() {
         return Vec::new();
