@@ -42,7 +42,7 @@ pub fn set_attachments_collapsed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::migrations;
+    use super::super::migrations;
 
     fn setup_db() -> Connection {
         let conn = Connection::open_in_memory().expect("open in-memory db");

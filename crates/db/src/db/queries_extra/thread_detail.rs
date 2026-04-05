@@ -8,9 +8,9 @@ pub type BodyMap = HashMap<String, (Option<String>, Option<String>)>;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
-use crate::db::queries_extra::thread_ui_state::get_attachments_collapsed;
-use crate::label_colors::resolve_label_color;
-use crate::provider::folder_roles::SYSTEM_FOLDER_ROLES;
+use super::thread_ui_state::get_attachments_collapsed;
+use label_colors::resolve_label_color;
+use super::super::folder_roles::SYSTEM_FOLDER_ROLES;
 
 // ── Return types ────────────────────────────────────────────
 

@@ -1,8 +1,8 @@
 use rusqlite::{Connection, params};
 
-use super::from_row::FromRow;
+use super::from_row::{FromRow, query_as};
 use super::sql_fragments::LATEST_MESSAGE_SUBQUERY;
-use super::types::ThreadInfoRow;
+use super::types::{DbLabel, ThreadInfoRow};
 
 /// Read a single value from the `settings` table, returning `Ok(None)` when
 /// the key does not exist.
@@ -33,6 +33,15 @@ pub fn persist_refreshed_token(
     )
     .map_err(|e| format!("Failed to persist refreshed token: {e}"))?;
     Ok(())
+}
+
+/// Get all labels for an account, ordered by sort_order then name.
+pub fn get_labels(conn: &Connection, account_id: &str) -> Result<Vec<DbLabel>, String> {
+    query_as::<DbLabel>(
+        conn,
+        "SELECT * FROM labels WHERE account_id = ?1 ORDER BY sort_order ASC, name ASC",
+        &[&account_id],
+    )
 }
 
 pub fn load_recent_rule_bundled_threads(

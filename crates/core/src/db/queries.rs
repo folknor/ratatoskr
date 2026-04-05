@@ -311,13 +311,7 @@ pub async fn get_messages_for_thread(
     Ok(messages)
 }
 
-pub fn get_labels(conn: &Connection, account_id: &str) -> Result<Vec<DbLabel>, String> {
-    query_as::<DbLabel>(
-        conn,
-        "SELECT * FROM labels WHERE account_id = ?1 ORDER BY sort_order ASC, name ASC",
-        &[&account_id],
-    )
-}
+pub use db::db::queries::get_labels;
 
 pub use db::db::queries::get_setting;
 

@@ -12,6 +12,8 @@ workspace = true
 
 [dependencies]
 chrono.workspace = true
+flate2 = "1"
+label-colors = { path = "../label-colors" }
 lol_html = "2"
 serde.workspace = true
 serde_json.workspace = true
