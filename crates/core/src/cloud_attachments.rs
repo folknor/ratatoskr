@@ -2,10 +2,12 @@ use std::sync::LazyLock;
 
 use base64::Engine as _;
 use regex::{Regex, RegexSet};
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::db::DbState;
+
+// Re-export the storage type from db.
+pub use crate::db::queries_extra::cloud_attachments::CloudAttachment;
 use crate::graph::client::GraphClient;
 
 /// Maximum attachment size (in bytes) before suggesting cloud upload.
@@ -173,172 +175,78 @@ impl UploadStatus {
     }
 }
 
-/// A row from the `cloud_attachments` table.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CloudAttachment {
-    pub id: i64,
-    pub message_id: Option<String>,
-    pub account_id: String,
-    pub direction: String,
-    pub provider: String,
-    pub cloud_url: Option<String>,
-    pub file_name: Option<String>,
-    pub file_size: Option<i64>,
-    pub mime_type: Option<String>,
-    pub drive_item_id: Option<String>,
-    pub upload_session_url: Option<String>,
-    pub upload_status: String,
-    pub bytes_uploaded: i64,
-    pub retry_count: i32,
-    pub created_at: i64,
-}
+// CloudAttachment struct is now defined in and re-exported from db.
 
-fn row_to_cloud_attachment(row: &rusqlite::Row<'_>) -> Result<CloudAttachment, rusqlite::Error> {
-    Ok(CloudAttachment {
-        id: row.get("id")?,
-        message_id: row.get("message_id")?,
-        account_id: row.get("account_id")?,
-        direction: row.get("direction")?,
-        provider: row.get("provider")?,
-        cloud_url: row.get("cloud_url")?,
-        file_name: row.get("file_name")?,
-        file_size: row.get("file_size")?,
-        mime_type: row.get("mime_type")?,
-        drive_item_id: row.get("drive_item_id")?,
-        upload_session_url: row.get("upload_session_url")?,
-        upload_status: row.get("upload_status")?,
-        bytes_uploaded: row.get("bytes_uploaded")?,
-        retry_count: row.get("retry_count")?,
-        created_at: row.get("created_at")?,
-    })
-}
+// row_to_cloud_attachment moved to db.
 
 /// Get all pending uploads for an account (status = 'pending').
 pub fn get_pending_uploads(
-    conn: &Connection,
+    conn: &crate::db::Connection,
     account_id: &str,
-) -> Result<Vec<CloudAttachment>, rusqlite::Error> {
-    let mut stmt = conn.prepare_cached(
-        "SELECT * FROM cloud_attachments
-         WHERE account_id = ?1 AND direction = 'outgoing' AND upload_status = 'pending'
-         ORDER BY created_at ASC",
-    )?;
-    let rows = stmt.query_map(rusqlite::params![account_id], row_to_cloud_attachment)?;
-    rows.collect()
+) -> Result<Vec<CloudAttachment>, String> {
+    crate::db::queries_extra::cloud_attachments::get_pending_uploads_sync(conn, account_id)
 }
 
-/// Transition an upload to a new status, optionally updating bytes_uploaded.
 pub fn update_upload_status(
-    conn: &Connection,
+    conn: &crate::db::Connection,
     id: i64,
     status: UploadStatus,
     bytes_uploaded: Option<i64>,
-) -> Result<(), rusqlite::Error> {
-    if let Some(bytes) = bytes_uploaded {
-        conn.execute(
-            "UPDATE cloud_attachments SET upload_status = ?1, bytes_uploaded = ?2 WHERE id = ?3",
-            rusqlite::params![status.as_str(), bytes, id],
-        )?;
-    } else {
-        conn.execute(
-            "UPDATE cloud_attachments SET upload_status = ?1 WHERE id = ?2",
-            rusqlite::params![status.as_str(), id],
-        )?;
-    }
-    Ok(())
+) -> Result<(), String> {
+    crate::db::queries_extra::cloud_attachments::update_upload_status_sync(
+        conn,
+        id,
+        status.as_str(),
+        bytes_uploaded,
+    )
 }
 
-/// Mark an upload as failed, incrementing retry_count. If `retry` is true the
-/// status is reset to `pending` so it will be picked up again; otherwise it
-/// stays `failed`.
-pub fn mark_upload_failed(conn: &Connection, id: i64, retry: bool) -> Result<(), rusqlite::Error> {
+pub fn mark_upload_failed(conn: &crate::db::Connection, id: i64, retry: bool) -> Result<(), String> {
     let new_status = if retry {
         UploadStatus::Pending.as_str()
     } else {
         UploadStatus::Failed.as_str()
     };
-    conn.execute(
-        "UPDATE cloud_attachments
-         SET upload_status = ?1, retry_count = retry_count + 1
-         WHERE id = ?2",
-        rusqlite::params![new_status, id],
-    )?;
-    Ok(())
+    crate::db::queries_extra::cloud_attachments::mark_upload_failed_sync(conn, id, new_status)
 }
 
-/// On app restart: reset any rows stuck in `uploading` back to `pending` so
-/// they will be retried. Returns the number of rows reset.
-pub fn reset_interrupted_uploads(conn: &Connection) -> Result<usize, rusqlite::Error> {
-    let count = conn.execute(
-        "UPDATE cloud_attachments SET upload_status = 'pending' WHERE upload_status = 'uploading'",
-        [],
-    )?;
-    Ok(count)
+pub fn reset_interrupted_uploads(conn: &crate::db::Connection) -> Result<usize, String> {
+    crate::db::queries_extra::cloud_attachments::reset_interrupted_uploads_sync(conn)
 }
 
-/// Create a new outgoing cloud attachment entry. Returns the row ID.
 pub fn create_outgoing_upload(
-    conn: &Connection,
+    conn: &crate::db::Connection,
     account_id: &str,
     file_name: &str,
     file_size: i64,
     mime_type: &str,
     provider: &str,
-) -> Result<i64, rusqlite::Error> {
-    conn.execute(
-        "INSERT INTO cloud_attachments
-            (account_id, direction, provider, file_name, file_size, mime_type, upload_status)
-         VALUES (?1, 'outgoing', ?2, ?3, ?4, ?5, 'pending')",
-        rusqlite::params![account_id, provider, file_name, file_size, mime_type],
-    )?;
-    Ok(conn.last_insert_rowid())
+) -> Result<i64, String> {
+    crate::db::queries_extra::cloud_attachments::create_outgoing_upload_sync(
+        conn, account_id, provider, file_name, file_size, mime_type,
+    )
 }
 
-/// Get uploads that have permanently failed (retry_count >= max_retries).
 pub fn get_permanently_failed(
-    conn: &Connection,
+    conn: &crate::db::Connection,
     max_retries: i32,
-) -> Result<Vec<CloudAttachment>, rusqlite::Error> {
-    let mut stmt = conn.prepare_cached(
-        "SELECT * FROM cloud_attachments
-         WHERE upload_status = 'failed' AND retry_count >= ?1
-         ORDER BY created_at ASC",
-    )?;
-    let rows = stmt.query_map(rusqlite::params![max_retries], row_to_cloud_attachment)?;
-    rows.collect()
+) -> Result<Vec<CloudAttachment>, String> {
+    crate::db::queries_extra::cloud_attachments::get_permanently_failed_sync(conn, max_retries)
 }
 
-/// Inserts detected incoming cloud links into the `cloud_attachments` table.
-///
-/// Each link is stored with `direction = 'incoming'` and
-/// `upload_status = 'complete'` (the file already exists at the remote URL).
 pub fn insert_incoming_cloud_links(
-    conn: &Connection,
+    conn: &crate::db::Connection,
     message_id: &str,
     account_id: &str,
     links: &[CloudLink],
-) -> Result<usize, rusqlite::Error> {
-    if links.is_empty() {
-        return Ok(0);
-    }
-
-    let mut stmt = conn.prepare_cached(
-        "INSERT OR IGNORE INTO cloud_attachments
-            (message_id, account_id, direction, provider, cloud_url, upload_status)
-         VALUES (?1, ?2, 'incoming', ?3, ?4, 'complete')",
-    )?;
-
-    let mut count: usize = 0;
-    for link in links {
-        count += stmt.execute(rusqlite::params![
-            message_id,
-            account_id,
-            link.provider.as_str(),
-            link.url,
-        ])?;
-    }
-
-    Ok(count)
+) -> Result<usize, String> {
+    let link_pairs: Vec<(String, String)> = links
+        .iter()
+        .map(|l| (l.provider.as_str().to_string(), l.url.clone()))
+        .collect();
+    crate::db::queries_extra::cloud_attachments::insert_incoming_cloud_links_sync(
+        conn, message_id, account_id, &link_pairs,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -473,24 +381,17 @@ pub fn extract_gdrive_file_id(url: &str) -> Option<String> {
 
 /// Update the metadata columns of a `cloud_attachments` row.
 pub fn update_cloud_attachment_metadata(
-    conn: &Connection,
+    conn: &crate::db::Connection,
     id: i64,
     metadata: &CloudMetadata,
-) -> Result<(), rusqlite::Error> {
-    conn.execute(
-        "UPDATE cloud_attachments
-         SET file_name = COALESCE(?1, file_name),
-             file_size = COALESCE(?2, file_size),
-             mime_type = COALESCE(?3, mime_type)
-         WHERE id = ?4",
-        rusqlite::params![
-            metadata.file_name,
-            metadata.file_size,
-            metadata.mime_type,
-            id
-        ],
-    )?;
-    Ok(())
+) -> Result<(), String> {
+    crate::db::queries_extra::cloud_attachments::update_cloud_attachment_metadata_sync(
+        conn,
+        id,
+        metadata.file_name.as_deref(),
+        metadata.file_size,
+        metadata.mime_type.as_deref(),
+    )
 }
 
 #[cfg(test)]
