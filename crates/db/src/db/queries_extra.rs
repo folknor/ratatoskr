@@ -4,9 +4,10 @@ use rusqlite::Connection;
 pub use super::queries::load_recent_rule_bundled_threads;
 
 mod accounts_crud;
+pub mod auto_responses;
 pub mod contact_carddav;
 pub mod contact_search;
-mod email_actions;
+pub mod email_actions;
 mod account_delete;
 mod accounts_messages;
 mod ai_state;
@@ -23,10 +24,11 @@ pub mod mdn;
 pub mod message_queries;
 mod misc;
 pub mod scoped_queries;
-mod send_identity;
+pub mod send_identity;
 mod tasks;
 
 pub use accounts_crud::*;
+pub use auto_responses::*;
 pub use contact_carddav::*;
 pub use contact_search::*;
 pub use email_actions::*;

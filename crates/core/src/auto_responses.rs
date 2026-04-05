@@ -5,7 +5,6 @@
 //! - Gmail: `GET/PUT /users/me/settings/vacation`
 //! - JMAP: `VacationResponse/get` / `VacationResponse/set` (RFC 8621 §7)
 
-use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use crate::db::DbState;
@@ -75,31 +74,20 @@ pub async fn db_get_auto_response(
     account_id: String,
 ) -> Result<Option<AutoResponseConfig>, String> {
     db.with_conn(move |conn| {
-        conn.query_row(
-            "SELECT enabled, start_date, end_date, internal_message_html, \
-             external_message_html, external_audience \
-             FROM auto_responses WHERE account_id = ?1",
-            params![account_id],
-            |row| {
-                Ok(AutoResponseConfig {
-                    enabled: row.get::<_, i32>(0)? != 0,
-                    start_date: row.get(1)?,
-                    end_date: row.get(2)?,
-                    start_date_tz: None,
-                    end_date_tz: None,
-                    internal_message_html: row.get(3)?,
-                    external_message_html: row.get(4)?,
-                    external_audience: ExternalAudience::parse(
-                        &row.get::<_, String>(5).unwrap_or_default(),
-                    ),
-                })
-            },
-        )
-        .map(Some)
-        .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(None),
-            _ => Err(format!("get auto_response: {e}")),
-        })
+        let row = crate::db::queries_extra::auto_responses::get_auto_response_sync(
+            conn,
+            &account_id,
+        )?;
+        Ok(row.map(|r| AutoResponseConfig {
+            enabled: r.enabled,
+            start_date: r.start_date,
+            end_date: r.end_date,
+            start_date_tz: None,
+            end_date_tz: None,
+            internal_message_html: r.internal_message_html,
+            external_message_html: r.external_message_html,
+            external_audience: ExternalAudience::parse(&r.external_audience),
+        }))
     })
     .await
 }
@@ -111,42 +99,23 @@ pub async fn db_upsert_auto_response(
     config: AutoResponseConfig,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
-        conn.execute(
-            "INSERT INTO auto_responses \
-             (account_id, enabled, start_date, end_date, \
-              internal_message_html, external_message_html, \
-              external_audience, last_synced_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, unixepoch()) \
-             ON CONFLICT(account_id) DO UPDATE SET \
-               enabled = ?2, start_date = ?3, end_date = ?4, \
-               internal_message_html = ?5, external_message_html = ?6, \
-               external_audience = ?7, last_synced_at = unixepoch()",
-            params![
-                account_id,
-                config.enabled as i32,
-                config.start_date,
-                config.end_date,
-                config.internal_message_html,
-                config.external_message_html,
-                config.external_audience.as_str(),
-            ],
+        crate::db::queries_extra::auto_responses::upsert_auto_response_sync(
+            conn,
+            &account_id,
+            config.enabled,
+            config.start_date.as_deref(),
+            config.end_date.as_deref(),
+            config.internal_message_html.as_deref(),
+            config.external_message_html.as_deref(),
+            config.external_audience.as_str(),
         )
-        .map_err(|e| format!("upsert auto_response: {e}"))?;
-        Ok(())
     })
     .await
 }
 
-/// Check whether any account has an active auto-response (`enabled = 1`).
-/// Uses a raw `Connection` so callers can run this on the read-only
-/// connection without needing `DbState`.
+/// Check whether any account has an active auto-response.
 pub fn any_auto_response_active(conn: &rusqlite::Connection) -> Result<bool, String> {
-    conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM auto_responses WHERE enabled = 1)",
-        [],
-        |row| row.get::<_, bool>(0),
-    )
-    .map_err(|e| format!("any_auto_response_active: {e}"))
+    crate::db::queries_extra::auto_responses::any_auto_response_active_sync(conn)
 }
 
 // ── Helpers ───────────────────────────────────────────
