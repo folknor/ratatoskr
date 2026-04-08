@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::RngExt;
 use std::collections::HashSet;
 
 /// A generated person with display name and email.
@@ -842,7 +842,7 @@ pub static I18N_LOCALES: &[LocaleData] = &[
 
 // ── People pool generation ──────────────────────────────────
 
-pub fn gen_latin_person(rng: &mut impl Rng) -> (String, String) {
+pub fn gen_latin_person(rng: &mut impl RngExt) -> (String, String) {
     let first = FIRST_NAMES[rng.random_range(0..FIRST_NAMES.len())];
     let last = LAST_NAMES[rng.random_range(0..LAST_NAMES.len())];
     let domain = DOMAINS[rng.random_range(0..DOMAINS.len())];
@@ -854,7 +854,7 @@ pub fn gen_latin_person(rng: &mut impl Rng) -> (String, String) {
     (format!("{first} {last}"), email)
 }
 
-pub fn gen_i18n_person(rng: &mut impl Rng, locale: &LocaleData) -> (String, String) {
+pub fn gen_i18n_person(rng: &mut impl RngExt, locale: &LocaleData) -> (String, String) {
     let idx = rng.random_range(0..locale.first_names.len());
     let last_idx = rng.random_range(0..locale.last_names.len());
     let domain = locale.domains[rng.random_range(0..locale.domains.len())];
@@ -876,7 +876,7 @@ pub struct PeoplePools {
     pub combined: Vec<Person>,
 }
 
-pub fn generate_pools(rng: &mut impl Rng) -> PeoplePools {
+pub fn generate_pools(rng: &mut impl RngExt) -> PeoplePools {
     let mut seen_emails = HashSet::new();
 
     // Latin pool (~200 unique people)

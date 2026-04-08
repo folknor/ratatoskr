@@ -1,5 +1,5 @@
 use crate::people::{self, LocaleData};
-use rand::Rng;
+use rand::RngExt;
 
 // ── Shared data pools ───────────────────────────────────────
 
@@ -610,7 +610,7 @@ pub trait RngMut {
     fn fill_bytes(&mut self, dest: &mut [u8]);
 }
 
-impl<R: Rng> RngMut for R {
+impl<R: RngExt> RngMut for R {
     fn gen_range_usize(&mut self, range: std::ops::Range<usize>) -> usize {
         self.random_range(range)
     }
@@ -692,7 +692,7 @@ pub fn fill_template(template: &str, rng: &mut dyn RngMut, locale: Option<&Local
         .replace("{recipient}", pick(rng, first_names))
 }
 
-pub fn generate_subject(rng: &mut impl Rng, cat: Category, locale: Option<&LocaleData>) -> String {
+pub fn generate_subject(rng: &mut impl RngExt, cat: Category, locale: Option<&LocaleData>) -> String {
     let templates = if let Some(loc) = locale {
         i18n_subject_templates(loc.key, cat)
     } else {
@@ -702,7 +702,7 @@ pub fn generate_subject(rng: &mut impl Rng, cat: Category, locale: Option<&Local
     fill_template(template, rng, locale)
 }
 
-pub fn generate_body(rng: &mut impl Rng, cat: Category, locale: Option<&LocaleData>) -> String {
+pub fn generate_body(rng: &mut impl RngExt, cat: Category, locale: Option<&LocaleData>) -> String {
     let templates = if let Some(loc) = locale {
         i18n_body_templates(loc.key, cat)
     } else {

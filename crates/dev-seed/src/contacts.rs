@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::RngExt;
 use rusqlite::Connection;
 
 use crate::people::Person;
@@ -6,7 +6,7 @@ use crate::people::Person;
 /// Upsert a sender into contacts and seen_addresses.
 pub fn upsert_contact(
     conn: &Connection,
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
     email: &str,
     display_name: &str,
     account_id: &str,
@@ -42,7 +42,7 @@ pub fn upsert_contact(
 /// Insert VIP senders from the people pool.
 pub fn seed_vips(
     conn: &Connection,
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
     people: &[Person],
     accounts: &[crate::accounts::Account],
 ) -> Result<(), String> {

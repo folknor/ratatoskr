@@ -10,11 +10,11 @@ pub mod threads;
 pub use config::Config;
 
 use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use std::path::Path;
 
 /// Generate a deterministic UUID v4 from the seeded RNG.
-pub fn next_uuid(rng: &mut impl Rng) -> String {
+pub fn next_uuid(rng: &mut impl RngExt) -> String {
     let mut bytes = [0u8; 16];
     rng.fill(&mut bytes);
     // Set version 4 and variant bits per RFC 4122
@@ -33,7 +33,7 @@ pub fn next_uuid(rng: &mut impl Rng) -> String {
 }
 
 /// Generate a deterministic Message-ID header.
-pub fn next_message_id(rng: &mut impl Rng) -> String {
+pub fn next_message_id(rng: &mut impl RngExt) -> String {
     let mut bytes = [0u8; 8];
     rng.fill(&mut bytes);
     let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();

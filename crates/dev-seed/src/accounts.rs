@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::RngExt;
 use rusqlite::Connection;
 
 #[derive(Clone, Copy)]
@@ -283,7 +283,7 @@ pub struct Account {
 
 pub fn seed_accounts(
     conn: &Connection,
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
     num_accounts: u32,
 ) -> Result<Vec<Account>, String> {
     let count = (num_accounts as usize).min(ACCOUNT_PRESETS.len());

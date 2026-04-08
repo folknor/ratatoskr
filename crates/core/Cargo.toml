@@ -43,11 +43,11 @@ async-imap = { version = "0.11", default-features = false, features = ["runtime-
 tokio-native-tls = "0.3"
 native-tls = "0.2"
 mail-parser = "0.11"
-lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
+lettre = { version = "0.11.21", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
 socket2 = "0.6"
 tantivy = { version = "0.26.0", default-features = false, features = ["mmap", "stemmer", "stopwords", "lz4-compression"] }
 flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
-getrandom = { version = "0.2", features = ["std"] }
+getrandom = { version = "0.4.2", features = ["std"] }
 urlencoding = "2"
 uuid = { version = "1", features = ["v4"] }
 jmap-client = { path = "/home/folk/Programs/jmap-client", default-features = false, features = ["tls-native", "websockets", "mail", "calendars", "contacts"] }

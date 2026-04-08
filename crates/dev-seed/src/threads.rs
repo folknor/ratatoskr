@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use rand::Rng;
+use rand::RngExt;
 use rusqlite::Connection;
 
 use crate::accounts::Account;
@@ -92,7 +92,7 @@ static ATTACHMENT_POOL: &[AttachmentInfo] = &[
 ];
 
 /// Weighted random selection.
-fn weighted_choice<T: Copy>(rng: &mut impl Rng, items: &[T], weights: &[f64]) -> T {
+fn weighted_choice<T: Copy>(rng: &mut impl RngExt, items: &[T], weights: &[f64]) -> T {
     let total: f64 = weights.iter().sum();
     let mut r: f64 = rng.random::<f64>() * total;
     for (item, weight) in items.iter().zip(weights.iter()) {
@@ -120,7 +120,7 @@ pub struct SeedStats {
 #[allow(clippy::too_many_lines)]
 pub fn generate_threads(
     conn: &Connection,
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
     accounts: &[Account],
     pools: &PeoplePools,
     locale_mode: &str,

@@ -108,7 +108,7 @@ pub fn encrypt_value(key: &[u8; 32], plaintext: &str) -> Result<String, String> 
         Aes256Gcm::new_from_slice(key).map_err(|e| format!("Invalid encryption key: {e}"))?;
 
     let mut nonce_bytes = [0u8; 12];
-    getrandom::getrandom(&mut nonce_bytes).map_err(|e| format!("RNG failed: {e}"))?;
+    getrandom::fill(&mut nonce_bytes).map_err(|e| format!("RNG failed: {e}"))?;
     let nonce = Nonce::from(nonce_bytes);
 
     let ciphertext = cipher.encrypt(&nonce, plaintext.as_bytes()).map_err(|e| {

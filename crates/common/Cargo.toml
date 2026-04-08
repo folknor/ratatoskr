@@ -38,7 +38,7 @@ css-inline = { version = "0.20", default-features = false }
 lol_html = "2"
 ammonia = "4"
 aes-gcm = "0.10"
-getrandom = { version = "0.2", features = ["std"] }
+getrandom = { version = "0.4.2", features = ["std"] }
 hotpath = { workspace = true, optional = true }
 
 [features]

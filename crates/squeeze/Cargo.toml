@@ -36,7 +36,7 @@ image = { version = "0.25", default-features = false, features = [
 mozjpeg-rs = "0.9"
 oxipng = { version = "10", default-features = false, features = ["parallel"] }
 lopdf = "0.40"
-zip = { version = "8", default-features = false, features = ["deflate"] }
+zip = { version = "8.5.1", default-features = false, features = ["deflate"] }
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
 hotpath = { workspace = true, optional = true }

@@ -32,7 +32,7 @@ fn canonical_folder_id(path: &str, special_use: Option<&str>) -> String {
 /// Generate a short random hex string for pseudo-IDs.
 fn random_hex8() -> String {
     let mut buf = [0u8; 4];
-    if getrandom::getrandom(&mut buf).is_err() {
+    if getrandom::fill(&mut buf).is_err() {
         // Fallback: use timestamp-based value (extremely unlikely to reach here)
         return format!(
             "{:08x}",

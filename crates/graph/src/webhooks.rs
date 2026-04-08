@@ -344,7 +344,7 @@ pub async fn check_and_renew_subscriptions(
 /// Generate a cryptographically random 32-char hex string for `client_state`.
 fn generate_client_state() -> Result<String, String> {
     let mut buf = [0u8; CLIENT_STATE_BYTES];
-    getrandom::getrandom(&mut buf).map_err(|e| format!("RNG failed: {e}"))?;
+    getrandom::fill(&mut buf).map_err(|e| format!("RNG failed: {e}"))?;
     Ok(hex_encode(&buf))
 }
 

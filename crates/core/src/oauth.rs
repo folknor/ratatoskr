@@ -758,7 +758,7 @@ struct MicrosoftGraphMe {
 
 pub fn random_base64url(size: usize) -> Result<String, String> {
     let mut buf = vec![0u8; size];
-    getrandom::getrandom(&mut buf).map_err(|e| format!("Failed to generate random bytes: {e}"))?;
+    getrandom::fill(&mut buf).map_err(|e| format!("Failed to generate random bytes: {e}"))?;
     Ok(URL_SAFE_NO_PAD.encode(buf))
 }
 

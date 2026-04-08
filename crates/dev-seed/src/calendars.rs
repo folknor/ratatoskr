@@ -1,5 +1,5 @@
 use chrono::{Duration, Local, NaiveDate, TimeZone};
-use rand::Rng;
+use rand::RngExt;
 use rusqlite::{Connection, params};
 
 use crate::accounts::Account;
@@ -36,7 +36,7 @@ struct SeededEvent {
 
 pub fn seed_calendars(
     conn: &Connection,
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
     accounts: &[Account],
 ) -> Result<(), String> {
     let today = Local::now().date_naive();
@@ -65,7 +65,7 @@ pub fn seed_calendars(
     Ok(())
 }
 
-fn secondary_calendar_for_account(rng: &mut impl Rng, account: &Account) -> Option<SeededCalendar> {
+fn secondary_calendar_for_account(rng: &mut impl RngExt, account: &Account) -> Option<SeededCalendar> {
     let (name, color) = match account.account_name.as_str() {
         "Personal" => ("Travel", "#00acc1"),
         "Work" => ("Team", "#7e57c2"),
@@ -87,7 +87,7 @@ fn secondary_calendar_for_account(rng: &mut impl Rng, account: &Account) -> Opti
 
 fn seed_primary_events(
     conn: &Connection,
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
     account: &Account,
     calendar: &SeededCalendar,
     today: NaiveDate,
@@ -180,7 +180,7 @@ fn seed_primary_events(
 
 fn seed_secondary_events(
     conn: &Connection,
-    rng: &mut impl Rng,
+    rng: &mut impl RngExt,
     account: &Account,
     calendar: &SeededCalendar,
     today: NaiveDate,
