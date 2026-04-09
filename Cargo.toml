@@ -86,7 +86,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Async runtime
-tokio = { version = "1" }
+tokio = { version = "1.51.1" }
 
 # Database
 rusqlite = { version = "0.39" }

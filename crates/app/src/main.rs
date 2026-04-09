@@ -926,6 +926,10 @@ impl App {
             Message::ExecuteParameterized(id, args) => self.handle_execute_parameterized(id, args),
             Message::NavigateTo(target) => self.handle_navigate_to(target),
             Message::Escape => {
+                if self.calendar.active_popover.is_some() {
+                    self.calendar.active_popover = None;
+                    return Task::none();
+                }
                 if !matches!(
                     self.calendar.workflow,
                     crate::ui::calendar::CalendarWorkflow::Idle
@@ -1711,11 +1715,9 @@ impl App {
         event.title = title;
         event.description = description;
 
-        // Set the account_id from the current email context.
-        let account_id = self.sidebar.accounts.first().map(|a| a.id.clone());
-        if let Some(ref id) = account_id {
-            event.account_id = Some(id.clone());
-        }
+        // Set the account_id from the message's actual account.
+        let account_id = Some(msg.account_id.clone());
+        event.account_id = account_id.clone();
 
         // Pre-assign calendar when unambiguous for this account.
         if event.calendar_id.is_none() {

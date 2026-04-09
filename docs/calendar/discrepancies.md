@@ -95,28 +95,3 @@ Audit date: 2026-03-30
 38. **Recurrence expansion only handles basic RRULE subset.** FREQ, INTERVAL, COUNT, UNTIL supported. Richer semantics (BYDAY, BYMONTH, EXDATE, etc.) not handled.
 
 39. **Month-view "+X more" just selects the date.** Does not open a day-event popover/list as the spec describes.
-
----
-
-## Resolved
-
-31 items from previous audit (2026-03-22) confirmed resolved (6 downgraded above):
-
-- Full DB schema (migration v63+v65) with all fields surfaced in types
-- FK constraints + CASCADE on attendees/reminders delete paths
-- Availability + Visibility fields (schema, types, editor UI)
-- Recurrence expansion (basic subset — see #38 for limitations)
-- Default view setting read from DB at boot
-- View switcher in sidebar header row (D/WW/W/M buttons)
-- Ctrl+1 for Mail, separate Switch to Calendar/Mail commands
-- Weekend columns narrower in week view
-- Event detail popover (compact) + expand-to-modal (two-panel with mini day view)
-- Organizer display, attendees with RSVP icons, reminders display
-- Recurrence icon + human-readable format in detail views
-- Calendar selector, timezone picker, availability/visibility selectors in editor
-- Unsaved changes prompt on editor close (partial — see #37)
-- Pop-out calendar window with one-window limit
-- "Create event from email" button on expanded messages
-- Calendar sidebar with color dots and visibility toggles
-- Event dots on mini-month days
-- Clickable agenda items in right sidebar

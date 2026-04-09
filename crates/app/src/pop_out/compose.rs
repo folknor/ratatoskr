@@ -1357,6 +1357,7 @@ fn compose_header<'a>(
                 .style(theme::TextClass::Tertiary.style())
         )
         .width(COMPOSE_LABEL_WIDTH)
+        .align_x(Alignment::End)
         .align_y(Alignment::Center),
         subject_input,
     ]
@@ -1405,6 +1406,7 @@ fn build_from_row<'a>(
             .style(theme::TextClass::Tertiary.style()),
     )
     .width(COMPOSE_LABEL_WIDTH)
+    .align_x(Alignment::End)
     .align_y(Alignment::Center);
 
     let mut from_row = row![from_label, from_picker]
@@ -1525,6 +1527,7 @@ fn build_recipient_row_inner<'a>(
                 .style(theme::TextClass::Tertiary.style())
         )
         .width(COMPOSE_LABEL_WIDTH)
+        .align_x(Alignment::End)
         .align_y(Alignment::Center),
         field,
     ]

@@ -1689,23 +1689,27 @@ fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMessage> {
             let cal_id = cal.id.clone();
             let is_visible = cal.is_visible;
 
-            // Color dot + name + checkbox
+            // Color dot + name + checkbox — entire row is click target
             let color_dot = text("\u{25CF}")
                 .size(TEXT_SM)
                 .color(parse_hex_color(&cal.color));
 
             let name = text(&cal.display_name).size(TEXT_XS).style(text::base);
 
-            let toggle = checkbox(is_visible)
-                .on_toggle(move |checked| {
-                    CalendarMessage::ToggleCalendarVisibility(cal_id.clone(), checked)
-                })
-                .size(12)
-                .spacing(0);
+            let toggle = checkbox(is_visible).size(12).spacing(0);
 
-            let cal_row = row![toggle, color_dot, name]
-                .spacing(SPACE_XXS)
-                .align_y(Alignment::Center);
+            let cal_row = button(
+                row![toggle, color_dot, name]
+                    .spacing(SPACE_XXS)
+                    .align_y(Alignment::Center),
+            )
+            .on_press(CalendarMessage::ToggleCalendarVisibility(
+                cal_id.clone(),
+                !is_visible,
+            ))
+            .padding([SPACE_XXXS, SPACE_XS])
+            .style(theme::ButtonClass::Ghost.style())
+            .width(Length::Fill);
 
             calendar_list_col = calendar_list_col.push(cal_row);
         }

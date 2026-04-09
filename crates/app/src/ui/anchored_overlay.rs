@@ -349,6 +349,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, Renderer>
                 shell.capture_event();
             } else if let Some(on_dismiss) = &self.on_dismiss {
                 shell.publish(on_dismiss.clone());
+                shell.capture_event();
             }
         } else if matches!(event, Event::Mouse(_) | Event::Touch(_))
             && cursor.is_over(layout.bounds())

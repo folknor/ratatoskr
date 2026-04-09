@@ -42,6 +42,7 @@ pub fn modal_overlay<'a, Message: Clone + 'a>(
                     .style(theme::ContainerClass::ModalBackdrop.style()),
             )
             .on_press(blocker_msg)
+            .interaction(mouse::Interaction::default())
             .into();
 
             let centered: Element<'a, Message> = container(content)

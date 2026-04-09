@@ -525,7 +525,12 @@ fn message_view_body<'a>(
         }
     };
 
-    container(body_content)
+    let body_inset = container(body_content)
+        .padding(PAD_CONTENT)
+        .width(Length::Fill)
+        .style(theme::ContainerClass::EmailBody.style());
+
+    container(body_inset)
         .padding(PAD_CONTENT)
         .width(Length::Fill)
         .into()

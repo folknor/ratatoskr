@@ -5,7 +5,7 @@
 
 use chrono::{Datelike, NaiveDate, Weekday};
 use iced::widget::{button, column, container, row, text};
-use iced::{Alignment, Element, Length, Padding, Theme};
+use iced::{Alignment, Color, Element, Length, Padding, Theme};
 
 use super::layout::*;
 use super::theme;
@@ -432,17 +432,19 @@ pub fn mini_month<'a, M: 'a + Clone>(
             let has_events = dates_with_events.contains(&date);
             let label = text(num_str).size(TEXT_XS).style(text_style).font(font);
 
-            // Stack date number + optional event dot.
-            let cell_content: Element<'_, M> = if has_events && in_month {
-                let dot = container(text("\u{2022}").size(4.0).style(text::primary))
-                    .align_x(Alignment::Center);
-                column![label, dot]
-                    .spacing(0)
-                    .align_x(Alignment::Center)
-                    .into()
+            // Always reserve space for the event dot so it doesn't shift the
+            // date number when present.
+            let dot_style: fn(&Theme) -> text::Style = if has_events && in_month {
+                text::primary
             } else {
-                label.into()
+                |_| text::Style { color: Some(Color::TRANSPARENT) }
             };
+            let dot = container(text("\u{2022}").size(4.0).style(dot_style))
+                .align_x(Alignment::Center);
+            let cell_content: Element<'_, M> = column![label, dot]
+                .spacing(0)
+                .align_x(Alignment::Center)
+                .into();
 
             let cell_container = if is_selected {
                 container(cell_content)

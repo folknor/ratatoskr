@@ -2,17 +2,9 @@
 
 ## Remaining Work
 
-- [x] ~~**Avatar in main window account selector**~~ — Fixed: the selector now renders full account avatars in both the trigger and dropdown, using the account color as the avatar background when available.
-
-- [x] ~~**Investigate dev-seed labels**~~ — Fixed: sidebar had two sections both titled "LABELS" sharing the same toggle. Provider folders now render as "FOLDERS" with own toggle; tags render as "LABELS" with own toggle.
-
-- [ ] **Expand dev-seed** - The dev-seed script needs to create pinned searches, Smart Folders, contact groups, VIP contacts. Also verify that attachments are actual files. Needs to create actual signatures for contacts, both HTML and simple ones. Needs to create more emails with links and other non-text content. Needs to create fake shared accounts and mailboxes.
+- [ ] **Expand dev-seed** - The dev-seed script needs to create Smart Folders, contact groups, VIP contacts. Also attachments should be actual files. Needs to create actual signatures for contacts, both HTML and simple ones. Needs to create more emails with links and other non-text content. Needs to create fake shared accounts and mailboxes.
 
 - [ ] **dev-seed calendars** - Obvious.
-
-- [ ] **Divide up sidebar** - The top part with the Compose button, account selector, and calendar button should not scroll along with the rest of the content, but be stickied to the top like the Settings button is stickied to the bottom.
-
-- [x] ~~**Mail list mouse clicks**~~ — Fixed: clicking or double-clicking the already-open thread no longer reloads the reading pane and cause flashing.
 
 - [ ] **Settings row help icon** - Add support for a help (?) icon with a tooltip for settings rows. Should anchor to the right side of the label, hugging the label. First candidate: Message Dates.
 
@@ -34,7 +26,7 @@
 
 - [ ] **Compose window "pop ups"** - There's a popup when you Discard, and to Insert Link. These are not actually modals at the moment; they render at the bottom of the compose window.
 
-- [ ] **Compose window labels** - The From/To/CC/Bcc/Subject labels should be right-aligned, so that they float near their relative inputs.
+- [x] **Compose window labels** - The From/To/CC/Bcc/Subject labels should be right-aligned, so that they float near their relative inputs.
 
 - [ ] **Attachment saving** - Should remember last folder. Ideally last folder per thread ID.
 
@@ -46,13 +38,13 @@
 
 - [ ] **Attachments in the reading pane** - They're not interactive? What's supposed to happen when they are clicked? See spec. Same thing in the pop out message window: not interactive there either.
 
-- [ ] **Email body background override setting** — This needs to apply to the pop out window as well, and we need an inset rounded+bordered area in the pop-out viewing window just like in the reading pane.
+- [x] **Email body background override setting** — This needs to apply to the pop out window as well, and we need an inset rounded+bordered area in the pop-out viewing window just like in the reading pane.
 
 - [ ] **Compose window close** - Closing the compose window doesn't currently ask the user whether they want to discard the draft. Should wire that in same as the Discard button.
 
-- [ ] **Settings window dropdown rows** - The inlined dropdowns inside settings rows currently have their own background color hover effect, but this is not necessary because the entire settings row has a background hover effect.
+- [x] **Settings window dropdown rows** - The inlined dropdowns inside settings rows currently have their own background color hover effect, but this is not necessary because the entire settings row has a background hover effect.
 
-- [ ] **Settings window dropdown closing** - The dropdown opens when the settings row is clicked, which is nice - but clicking the settings row again doesn't close it. It closes + reopens it with 1 click.
+- [x] **Settings window dropdown closing** - The dropdown opens when the settings row is clicked, which is nice - but clicking the settings row again doesn't close it. It closes + reopens it with 1 click.
 
 - [ ] **Settings window row hover** - Currently the hover effect for the settings row doesn't use the same border radius as the bottom/top settings rows, which means hovering those looks a bit weird.
 
@@ -68,7 +60,7 @@
 
 - [ ] **Focus trapping for modals and sheets** — iced does not natively support focus trapping. Modal and Sheet surfaces should trap Tab/Shift-Tab focus within their content, but currently focus can escape to widgets behind the blocker. If iced adds focus trapping support, `modal_overlay()` (see `docs/ui/overlay-standardization-plan.md`) is the single place to wire it in. Until then, this is a known contract gap.
 
-- [ ] **Remove remaining legacy `category` terminology** — The glossary is now descriptive only, but there is still some legacy provider-oriented naming left in code/docs that should be cleaned up where it does not represent a true provider-native term. The main remaining item is `crates/graph/src/category_sync.rs` (the function inside is already `graph_label_sync`), plus any stray bundling comments/docs that still say “categorization” when they mean bundles/classification.
+- [x] **Remove remaining legacy `category` terminology** — The glossary is now descriptive only, but there is still some legacy provider-oriented naming left in code/docs that should be cleaned up where it does not represent a true provider-native term. The main remaining item is `crates/graph/src/category_sync.rs` (the function inside is already `graph_label_sync`), plus any stray bundling comments/docs that still say “categorization” when they mean bundles/classification.
 
 - [ ] **Calendar event detail popover → AnchoredOverlay** — `calendar::popover_stack()` is the only anchored surface still using a hand-rolled `stack![]` instead of the `AnchoredOverlay` primitive. Target behavior: anchor near the clicked event pill using `anchor_point`. Requires capturing click coordinates in `CalendarPopover::EventDetail` (not currently stored). See `docs/ui/overlay-standardization-plan.md` deferred work.
 
@@ -78,9 +70,9 @@
 
 - [ ] **Calendar move semantics for existing events** — The calendar picker is disabled for `EditingEvent` because moving an event between calendars requires provider-specific support (some providers need delete+create). When provider calendar-move APIs are implemented, re-enable the picker for existing events and update `account_id` ownership logic in the `CalendarSelected` handler accordingly.
 
-- [ ] **`create_event_from_email` account derivation** — Currently uses `sidebar.accounts.first()` for account prefill (`main.rs`). This is the last surviving sidebar-accounts reference in the calendar flow. Should derive account from the email message's actual account rather than assuming the first sidebar account is correct.
+- [x] **`create_event_from_email` account derivation** — Currently uses `sidebar.accounts.first()` for account prefill (`main.rs`). This is the last surviving sidebar-accounts reference in the calendar flow. Should derive account from the email message's actual account rather than assuming the first sidebar account is correct.
 
-- [ ] **Label pills in reading pane** — Pills should not show on each message, only at the top. Labels are per-thread, not per-message, at least in the UI.
+- [x] **Label pills in reading pane** — Pills should not show on each message, only at the top. Labels are per-thread, not per-message, at least in the UI.
 
 - [ ] **Link click handling (email content)** — Should open in system browser. Nothing happens.
 
@@ -107,7 +99,7 @@
 - [ ] **Autocomplete: context menu Cut/Copy/Paste** — Token context menu has Delete, Expand group, Move-to-field only. Missing clipboard operations.
 - [ ] **Autocomplete: bulk-paste "Save as group"** — Banner renders but save action is not wired.
 - [ ] **Autocomplete: richer dropdown rendering** — Currently plain text "Name <email>". Spec calls for two-column layout (name + email), group icon, member count display.
-- [ ] **Autocomplete: group token "(N)" suffix** — `member_count` stored on Token but chip label is just the group name.
+- [x] **Autocomplete: group token "(N)" suffix** — `member_count` stored on Token but chip label is just the group name.
 - [ ] **Autocomplete: search debounce** — Search dispatches immediately on every keystroke. Spec calls for 10-20ms debounce to coalesce rapid typing.
 - [ ] **Autocomplete: paste dedup** — `dedup_parsed()` exists but is never called. Also no dedup against existing tokens in the field.
 - [ ] **Autocomplete: reuse beyond compose** — Widget only used in compose. Calendar attendee picker and group editor could reuse it.
@@ -117,17 +109,11 @@
 
 - [ ] **Action service: native provider batching** *(Deferred — low ROI until bulk ops are common)* — `batch_execute` dispatches per-thread `MailOperation` sequentially within each account. Provider reuse per account already eliminated client construction overhead — remaining cost is network latency (one round-trip per thread). Native batching (Gmail batch API, Graph `/$batch`, JMAP `Email/set`, IMAP multi-UID STORE) would reduce 50 round-trips to 1-3 for bulk operations. `PartialEq` on `MailOperation` enables grouping identical operations; the executor contract already specifies regrouping semantics. Implementation deferred until bulk operations on 50+ threads become a real user workflow.
 
-- [x] ~~**Typed IDs: CommandArgs fields**~~ — Extracted `FolderId`/`TagId` to `crates/types/` micro-crate. `cmdk` now uses typed IDs directly; dispatch passes them through without manual wrapping.
-- [x] ~~**Typed IDs: sidebar.selected_label**~~ — Replaced with `selection: SidebarSelection` enum (`Inbox | Folder(SystemFolder) | Bundle(Bundle) | FeatureView(FeatureView) | SmartFolder | ProviderFolder(FolderId) | Tag(TagId)`). `NavigationTarget` collapsed to `Sidebar(SidebarSelection) | Search | PinnedSearch | Chat`. Deleted `view_type_from_label()` and `view_type_from_target()`. Per-use-case helpers instead of generic bridge.
-- [x] ~~**Palette NavigateToLabel untyped at boundary**~~ — Split `CommandArgs::NavigateToLabel` into `NavigateToFolder(FolderId)` / `NavigateToTag(TagId)`. Encoded `label_kind` in palette option ID as `"account_id:f|t:label_id"`.
-- [x] ~~**Potential tag duplication in navigation state**~~ — Confirmed: `build_account_labels()` was returning tags alongside containers when single-account scoped, duplicating `build_all_account_tags()`. Fixed by filtering `label_kind != "tag"` in `build_account_labels()` — tags now come exclusively from the cross-account builder.
-- [x] ~~**`App.navigation_target` is vestigial**~~ — Replaced with `active_chat: Option<String>`. `reset_view_state()` no longer takes a parameter. `NavigationTarget` enum retained for `Message::NavigateTo` dispatch only.
 - [ ] **First-launch modal not dismissible** — In zero-accounts state, cancel doesn't close the wizard. Spec says it should dismiss over an unusable empty app. Intentional safety measure or bug — decide and document.
-- [x] ~~**Default scope is first account, not All Accounts**~~ — `handle_accounts_loaded()` now sets `ViewScope::AllAccounts` instead of scoping to the first account.
+
 - [ ] **App-specific-password help not clickable** — Discovery types carry `help_url` but UI shows plain text "Check {domain} for setup instructions" — no clickable link to provider app-password pages.
 - [ ] **Deleted-account compose/pop-out cleanup** — Account deletion doesn't close compose windows or message-view pop-outs for the deleted account, and doesn't block sending from a deleted identity.
 - [ ] **Sync-task cancellation on account deletion** — Delete flow removes DB data but doesn't cancel in-flight sync tasks. Stale sync completions could write to deleted account state.
-- [x] ~~**Search scope respects ViewScope**~~ — SQL fallback takes `AccountScope` directly, and the Tantivy path is post-filtered by scope in `execute_search()`, so search results now respect the current `ViewScope`.
 
 - [ ] **Scroll virtualization** — Thread list renders all cards in `column![]` inside `scrollable`. Needs iced-level virtual scrolling for large mailboxes.
 
@@ -169,12 +155,12 @@ Views, editor, pop-out, sidebar all partially implemented. **39 discrepancies re
 Event popover (quick-glance card):
 - [ ] Position is wrong — currently right-aligned in the calendar view, should anchor near the clicked event pill
 - [ ] Styling needs work (visual polish pass)
-- [ ] Escape doesn't close it
+- [x] Escape doesn't close it
 - [ ] Clicking a different event pill while the popover is open just closes the popover instead of closing and immediately opening the new event's popover
 
 Event detail modal:
 - [ ] Needs significant visual and layout work
-- [ ] Escape doesn't close it
+- [x] Escape doesn't close it
 
 Event editor modal:
 - [ ] Does not adhere to the editor spec at all — needs a full implementation pass
@@ -188,9 +174,9 @@ Week view:
 - [ ] All-day events are not laid out properly at the top of the day columns
 
 Calendar sidebar:
-- [ ] Clicking a calendar name doesn't toggle visibility — have to click the checkbox directly. The entire row should be a click target.
-- [ ] Calendar rows need a hover effect
-- [ ] Mini month view: the "has event" dot under each day pushes the date number upward instead of being laid out without affecting the date position
+- [x] Clicking a calendar name doesn't toggle visibility — have to click the checkbox directly. The entire row should be a click target.
+- [x] Calendar rows need a hover effect
+- [x] Mini month view: the "has event" dot under each day pushes the date number upward instead of being laid out without affecting the date position
 
 ### Generic OAuth — `docs/generic-oauth/problem-statement.md`
 

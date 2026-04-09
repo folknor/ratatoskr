@@ -188,14 +188,24 @@ pub fn token_input_field<'a, M: Clone + 'a>(
 
 // ── Layout helpers ──────────────────────────────────────
 
+/// Build the display label for a token chip. Group tokens with a known member
+/// count get a " (N)" suffix.
+fn chip_display_label(token: &Token) -> String {
+    match (token.is_group, token.member_count) {
+        (true, Some(n)) => format!("{} ({n})", token.label),
+        _ => token.label.clone(),
+    }
+}
+
 /// Estimate token chip width from label text.
 ///
 /// Uses character count (not byte count) for correct non-ASCII width.
 /// Group tokens include space for the people icon prefix.
 fn estimate_token_width(token: &Token) -> f32 {
     let avg_char_width = TEXT_MD * TOKEN_AVG_CHAR_WIDTH_FACTOR;
+    let display = chip_display_label(token);
     #[allow(clippy::cast_precision_loss)]
-    let text_width = token.label.chars().count() as f32 * avg_char_width;
+    let text_width = display.chars().count() as f32 * avg_char_width;
     let icon_width = if token.is_group {
         TOKEN_GROUP_ICON_SIZE + SPACE_XXS
     } else {
@@ -408,10 +418,10 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                 0.0
             };
 
-            // Chip label
+            // Chip label (with "(N)" suffix for group tokens)
             renderer.fill_text(
                 iced::advanced::text::Text {
-                    content: token.label.clone(),
+                    content: chip_display_label(token),
                     bounds: Size::new(
                         abs.width - PAD_TOKEN.left - PAD_TOKEN.right - label_x_offset,
                         abs.height,

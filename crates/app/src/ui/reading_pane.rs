@@ -690,7 +690,6 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
                 first_message_date,
                 &pane.search_highlight_terms,
                 cached_html,
-                &pane.thread_labels,
                 &pane.inline_images,
                 ReadingPaneMessage::ToggleMessageExpanded,
                 ReadingPaneMessage::PopOut,
