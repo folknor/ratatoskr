@@ -28,9 +28,7 @@ impl App {
                 Task::none()
             }
             AddAccountEvent::Cancelled => {
-                if !self.no_accounts {
-                    self.add_account_wizard = None;
-                }
+                self.add_account_wizard = None;
                 Task::none()
             }
         }

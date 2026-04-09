@@ -30,7 +30,7 @@
 
 - [ ] **Attachment saving** - Should remember last folder. Ideally last folder per thread ID.
 
-- [ ] **Reading pane** - There's too much vertical spacing between the top part and the first reply/all/forward action line. Needs a tighter fit; vertical space doesn't come cheap on a laptop.
+- [x] **Reading pane** - There's too much vertical spacing between the top part and the first reply/all/forward action line. Needs a tighter fit; vertical space doesn't come cheap on a laptop.
 
 - [ ] **Collapse individual expanded messages** — Chevron-down button in expanded message header should be a chevron-up to collapse. Also, the button needs a new place to live. Probably a very long, thin button that stretches across the entire horizontal space at the top of the message frame. This needs to be unified with the Attachments panel collapsing, which is currently taking up too much vertical space; also too much padding above the Attachments section.
 
@@ -84,7 +84,7 @@
 
 - [ ] **Pop out message viewer body rendering toggle buttons** - The current pills for selecting Plain/Simple/Original/Source have zero effect, and the "Source" button just shows a generic "error" about message bodies being in a separate database. Even with dev-seed.
 
-- [ ] **Pop out message viewer dropdown menu** - It seems to be constrained to the width of the window, which doesn't work because it's all the way on the right side. It needs room to show its contents. Either it needs to be able to render outside the window, or it needs to grow left.
+- [x] **Pop out message viewer dropdown menu** - It seems to be constrained to the width of the window, which doesn't work because it's all the way on the right side. It needs room to show its contents. Either it needs to be able to render outside the window, or it needs to grow left.
 
 - [ ] **Pop out message viewer paddings/margin** - This needs to be unified. Currently for example the date/time stamp on the right side of the subject hugs the right window edge much closer than the dropdown action button above it. And also I'm not sure the subject and datetime are baseline aligned - it seems the subject floats a bit higher up. Could be wrong about that, haven't measured pixels.
 
@@ -95,13 +95,13 @@
 - [ ] **Star icon: need filled variant** — Lucide only has outline icons. The star toggle in the reading pane needs a filled star (golden) for the active state and an outline star for inactive. Currently uses Unicode ★ as a stopgap, which causes size mismatch and visual jank. Options: (1) add a second icon font with filled variants, (2) use an SVG/image icon, (3) custom widget that draws a filled star path. The button should also not change background color on toggle — just the icon fill.
 
 - [ ] **Autocomplete: cross-field drag-and-drop** — Drag detection works but drop cancels. Context menu "Move to" is the workaround. Needs ghost token rendering and target field hit-testing.
-- [ ] **Autocomplete: email validation before tokenization** — Enter/Tab/comma/semicolon tokenize any non-empty text. Should validate plausible email format before creating a token.
+- [x] **Autocomplete: email validation before tokenization** — Enter/Tab/comma/semicolon tokenize any non-empty text. Should validate plausible email format before creating a token.
 - [ ] **Autocomplete: context menu Cut/Copy/Paste** — Token context menu has Delete, Expand group, Move-to-field only. Missing clipboard operations.
 - [ ] **Autocomplete: bulk-paste "Save as group"** — Banner renders but save action is not wired.
 - [ ] **Autocomplete: richer dropdown rendering** — Currently plain text "Name <email>". Spec calls for two-column layout (name + email), group icon, member count display.
 - [x] **Autocomplete: group token "(N)" suffix** — `member_count` stored on Token but chip label is just the group name.
 - [ ] **Autocomplete: search debounce** — Search dispatches immediately on every keystroke. Spec calls for 10-20ms debounce to coalesce rapid typing.
-- [ ] **Autocomplete: paste dedup** — `dedup_parsed()` exists but is never called. Also no dedup against existing tokens in the field.
+- [x] **Autocomplete: paste dedup** — `dedup_parsed()` exists but is never called. Also no dedup against existing tokens in the field.
 - [ ] **Autocomplete: reuse beyond compose** — Widget only used in compose. Calendar attendee picker and group editor could reuse it.
 - [ ] **Contact pills on recipients** — Per `docs/pop-out-windows/problem-statement.md`: recipients in To/Cc fields should appear as plain text but become contact pills on hover, revealing an inline edit button for quick contact editing. Applies to: reading pane message headers, pop-out message view, compose window recipient display. Currently recipients are plain text everywhere with no hover interaction. Needs: (1) a contact pill widget that blends with background at rest and reveals pill styling + edit button on hover, (2) display name resolution from the contact system (name → email fallback chain), (3) wiring to the existing `EditContact` flow that opens the settings contact editor.
 
@@ -109,7 +109,7 @@
 
 - [ ] **Action service: native provider batching** *(Deferred — low ROI until bulk ops are common)* — `batch_execute` dispatches per-thread `MailOperation` sequentially within each account. Provider reuse per account already eliminated client construction overhead — remaining cost is network latency (one round-trip per thread). Native batching (Gmail batch API, Graph `/$batch`, JMAP `Email/set`, IMAP multi-UID STORE) would reduce 50 round-trips to 1-3 for bulk operations. `PartialEq` on `MailOperation` enables grouping identical operations; the executor contract already specifies regrouping semantics. Implementation deferred until bulk operations on 50+ threads become a real user workflow.
 
-- [ ] **First-launch modal not dismissible** — In zero-accounts state, cancel doesn't close the wizard. Spec says it should dismiss over an unusable empty app. Intentional safety measure or bug — decide and document.
+- [x] **First-launch modal not dismissible** — In zero-accounts state, cancel doesn't close the wizard. Spec says it should dismiss over an unusable empty app. Intentional safety measure or bug — decide and document.
 
 - [ ] **App-specific-password help not clickable** — Discovery types carry `help_url` but UI shows plain text "Check {domain} for setup instructions" — no clickable link to provider app-password pages.
 - [ ] **Deleted-account compose/pop-out cleanup** — Account deletion doesn't close compose windows or message-view pop-outs for the deleted account, and doesn't block sending from a deleted identity.

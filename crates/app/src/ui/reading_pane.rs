@@ -520,7 +520,10 @@ fn command_toolbar<'a>(
     .align_y(Alignment::Center);
 
     container(toolbar)
-        .padding(PAD_CONTENT)
+        .padding(Padding {
+            top: SPACE_XXS,
+            ..PAD_CONTENT
+        })
         .width(Length::Fill)
         .into()
 }
@@ -653,7 +656,10 @@ fn thread_header<'a>(
         ]
         .spacing(SPACE_XXS),
     )
-    .padding(PAD_CONTENT)
+    .padding(Padding {
+        bottom: SPACE_XXS,
+        ..PAD_CONTENT
+    })
     .into()
 }
 

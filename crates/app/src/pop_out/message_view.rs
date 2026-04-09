@@ -420,6 +420,7 @@ fn overflow_context_menu<'a>(open: bool, window_id: iced::window::Id) -> Element
 
     crate::ui::anchored_overlay::anchored_overlay(trigger)
         .popup(menu)
+        .popup_width(SIDEBAR_MIN_WIDTH)
         .position(crate::ui::anchored_overlay::AnchorPosition::BelowRight)
         .on_dismiss(Message::PopOut(
             window_id,

@@ -1179,7 +1179,7 @@ fn handle_token_input_message(
         }
         TokenInputMessage::TokenizeText(text) => {
             let trimmed = text.trim();
-            if !trimmed.is_empty() {
+            if !trimmed.is_empty() && token_input::is_plausible_email(trimmed) {
                 let id = value.next_token_id();
                 let label = trimmed.to_string();
                 value.tokens.push(token_input::Token {
@@ -1190,8 +1190,10 @@ fn handle_token_input_message(
                     group_id: None,
                     member_count: None,
                 });
+                value.text.clear();
             }
-            value.text.clear();
+            // If not a plausible email, leave the text in the field so the
+            // user can correct it rather than silently discarding input.
         }
         TokenInputMessage::SelectToken(id) => *selected = Some(id),
         TokenInputMessage::DeselectTokens => *selected = None,
@@ -1215,7 +1217,15 @@ fn handle_token_input_message(
         | TokenInputMessage::DragStarted(_) => {}
         TokenInputMessage::Paste(content) => {
             // Use RFC 5322 parser for proper name + email extraction
-            let parsed = crate::ui::token_input_parse::parse_pasted_addresses(&content);
+            let mut parsed = crate::ui::token_input_parse::parse_pasted_addresses(&content);
+            // Dedup within the pasted batch, then against existing tokens
+            crate::ui::token_input_parse::dedup_parsed(&mut parsed);
+            let existing: std::collections::HashSet<String> = value
+                .tokens
+                .iter()
+                .map(|t| t.email.to_lowercase())
+                .collect();
+            parsed.retain(|addr| !existing.contains(&addr.email.to_lowercase()));
             for addr in parsed {
                 let label = addr
                     .display_name
