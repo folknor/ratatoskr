@@ -16,7 +16,7 @@
 
 - [ ] **Settings slide-in/over panel** - Clicking anywhere on the background of this panel currently closes it for some reason. Only the (1) back button, (2) selecting a different Settings section, or (3) closing the Settings should dismiss the slide-in. Possibly Esc should hotkey to it as well. Currently Esc closes the settings completely, but perhaps it should close a slide-in, if open, first.
 
-- [ ] **Settings/People: Contacts list** - Group/account pills need to lay out horizontally first, then vertically.
+- [x] **Settings/People: Contacts list** - Group/account pills need to lay out horizontally first, then vertically.
 
 - [ ] **Settings/Accounts: Edit Account** - This section needs rework.
 
@@ -40,7 +40,7 @@
 
 - [x] **Email body background override setting** — This needs to apply to the pop out window as well, and we need an inset rounded+bordered area in the pop-out viewing window just like in the reading pane.
 
-- [ ] **Compose window close** - Closing the compose window doesn't currently ask the user whether they want to discard the draft. Should wire that in same as the Discard button.
+- [x] **Compose window close** - Closing the compose window doesn't currently ask the user whether they want to discard the draft. Should wire that in same as the Discard button.
 
 - [x] **Settings window dropdown rows** - The inlined dropdowns inside settings rows currently have their own background color hover effect, but this is not necessary because the entire settings row has a background hover effect.
 
@@ -54,7 +54,7 @@
 
 - [ ] **Standardized popup/dropdown/modal** - Currently setting dropdowns, various modal dialogs (the Settings slide-in, Add Account modal, etc) use various methods to dim/control/disable/dismiss. We need standardized controls for all this. For example the Add Account modal currently dims the background (rest of the window), but it doesn't prevent interaction with any controls - even controls that are actually directly below it can still be interacted with. We need the same treatment as the Settings slide-in that does in fact disable things behind it. See `docs/ui/overlay-standardization-plan.md` for the implementation plan.
 
-- [ ] **Compose window close should prompt for unsaved changes** — Clicking the window X on a compose pop-out silently saves the draft and closes. It should show the discard confirmation modal if the message has been edited, giving the user the choice to discard or keep editing. Currently `handle_window_close()` in `main.rs` skips the prompt entirely.
+- [x] **Compose window close should prompt for unsaved changes** — Clicking the window X on a compose pop-out silently saves the draft and closes. It should show the discard confirmation modal if the message has been edited, giving the user the choice to discard or keep editing. Currently `handle_window_close()` in `main.rs` skips the prompt entirely.
 
 - [ ] **Cursor bleed-through on blocking overlays** — When a Sheet or Modal is active, hovering over the blocker area may still show pointer/hand cursors from widgets in the base layer underneath. The `mouse_area` blocker sets `.interaction(mouse::Interaction::default())` but iced's `stack!` may composite `mouse_interaction` from all layers. May be pre-existing. Investigate whether iced's stack respects the topmost layer's cursor or falls through.
 
@@ -86,7 +86,7 @@
 
 - [x] **Pop out message viewer dropdown menu** - It seems to be constrained to the width of the window, which doesn't work because it's all the way on the right side. It needs room to show its contents. Either it needs to be able to render outside the window, or it needs to grow left.
 
-- [ ] **Pop out message viewer paddings/margin** - This needs to be unified. Currently for example the date/time stamp on the right side of the subject hugs the right window edge much closer than the dropdown action button above it. And also I'm not sure the subject and datetime are baseline aligned - it seems the subject floats a bit higher up. Could be wrong about that, haven't measured pixels.
+- [x] **Pop out message viewer paddings/margin** - This needs to be unified. Currently for example the date/time stamp on the right side of the subject hugs the right window edge much closer than the dropdown action button above it. And also I'm not sure the subject and datetime are baseline aligned - it seems the subject floats a bit higher up. Could be wrong about that, haven't measured pixels.
 
 - [ ] **Message box / toast notification system** — Generic modal message box and/or toast notification infrastructure for the app. Needed for: compose draft save failure on close (currently silently aborts the close with no user feedback), action service retry exhaustion warnings, and any future error/confirmation flows. Should support at least: transient toasts (auto-dismiss), persistent error banners, and modal confirmation dialogs.
 
@@ -111,7 +111,7 @@
 
 - [x] **First-launch modal not dismissible** — In zero-accounts state, cancel doesn't close the wizard. Spec says it should dismiss over an unusable empty app. Intentional safety measure or bug — decide and document.
 
-- [ ] **App-specific-password help not clickable** — Discovery types carry `help_url` but UI shows plain text "Check {domain} for setup instructions" — no clickable link to provider app-password pages.
+- [x] **App-specific-password help not clickable** — Discovery types carry `help_url` but UI shows plain text "Check {domain} for setup instructions" — no clickable link to provider app-password pages.
 - [x] **Deleted-account compose/pop-out cleanup** — Account deletion doesn't close compose windows or message-view pop-outs for the deleted account, and doesn't block sending from a deleted identity.
 - [ ] **Sync-task cancellation on account deletion** — Delete flow removes DB data but doesn't cancel in-flight sync tasks. Stale sync completions could write to deleted account state.
 

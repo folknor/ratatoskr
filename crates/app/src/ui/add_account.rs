@@ -745,12 +745,20 @@ impl AddAccountWizard {
 
             AuthMethod::OAuth2Unsupported { provider_domain } => {
                 self.resolved_auth_method = "password".to_string();
+                let help_url = option.help_url.clone();
                 self.prefill_auth_from_option(option);
                 self.step = AddAccountStep::PasswordAuth;
-                self.error = Some(format!(
-                    "This provider requires an app-specific password. \
-                     Check {provider_domain} for setup instructions."
-                ));
+                self.error = Some(if let Some(url) = help_url {
+                    format!(
+                        "This provider requires an app-specific password. \
+                         See: {url}"
+                    )
+                } else {
+                    format!(
+                        "This provider requires an app-specific password. \
+                         Check {provider_domain} for setup instructions."
+                    )
+                });
                 (Task::none(), None)
             }
         }

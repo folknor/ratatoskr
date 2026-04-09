@@ -1563,24 +1563,23 @@ fn contact_card(contact: &crate::db::ContactEntry) -> Element<'_, SettingsMessag
         );
     }
 
-    // Group pills — styled badges
-    if !contact.groups.is_empty() {
-        let mut pill_row = row![].spacing(SPACE_XXS);
-        for group_name in &contact.groups {
-            let pill = container(text(group_name).size(TEXT_XS).style(text::primary))
-                .padding(iced::Padding {
-                    top: 1.0,
-                    right: 6.0,
-                    bottom: 1.0,
-                    left: 6.0,
-                })
-                .style(theme::ContainerClass::Badge.style());
-            pill_row = pill_row.push(pill);
-        }
-        left_col = left_col.push(pill_row);
+    // Group + account source pills — horizontal row
+    let mut pill_row = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
+    let mut has_pills = false;
+
+    for group_name in &contact.groups {
+        let pill = container(text(group_name).size(TEXT_XS).style(text::primary))
+            .padding(iced::Padding {
+                top: 1.0,
+                right: 6.0,
+                bottom: 1.0,
+                left: 6.0,
+            })
+            .style(theme::ContainerClass::Badge.style());
+        pill_row = pill_row.push(pill);
+        has_pills = true;
     }
 
-    // Account source pill
     if let Some(ref source) = contact.source {
         let source_label = match source.as_str() {
             "google" => "Google",
@@ -1598,7 +1597,12 @@ fn contact_card(contact: &crate::db::ContactEntry) -> Element<'_, SettingsMessag
                 left: 6.0,
             })
             .style(theme::ContainerClass::Badge.style());
-        left_col = left_col.push(source_pill);
+        pill_row = pill_row.push(source_pill);
+        has_pills = true;
+    }
+
+    if has_pills {
+        left_col = left_col.push(pill_row);
     }
 
     let mut right_col = column![].spacing(SPACE_XXXS).align_x(Alignment::End);

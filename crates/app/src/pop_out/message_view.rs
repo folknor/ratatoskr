@@ -308,11 +308,18 @@ fn message_view_header<'a>(
             .size(TEXT_HEADING)
             .style(text::base)
             .width(Length::Fill),
-        text(date_str)
-            .size(TEXT_SM)
-            .style(theme::TextClass::Tertiary.style()),
+        container(
+            text(date_str)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .padding(Padding {
+            right: PAD_ICON_BTN.right,
+            ..Padding::ZERO
+        })
+        .align_y(Alignment::Center),
     ]
-    .align_y(Alignment::End);
+    .align_y(Alignment::Center);
 
     header_fields = header_fields.push(subject_row);
 

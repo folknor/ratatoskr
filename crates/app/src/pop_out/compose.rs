@@ -589,7 +589,7 @@ impl ComposeState {
 
     /// Returns true if the compose body has user content beyond the
     /// initial quoted text / signature.
-    fn has_user_content(&self) -> bool {
+    pub fn has_user_content(&self) -> bool {
         // Simple heuristic: non-empty flattened text
         let body_text = self.body.document.flattened_text();
         let trimmed = body_text.trim();

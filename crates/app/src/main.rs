@@ -2610,12 +2610,14 @@ impl App {
             return Task::batch(tasks);
         }
 
-        if matches!(
-            self.pop_out_windows.get(&id),
-            Some(PopOutWindow::Compose(_))
-        ) {
+        if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&id) {
+            if state.has_user_content() && !state.discard_confirm_open {
+                // Show discard confirmation instead of closing silently
+                state.discard_confirm_open = true;
+                return Task::none();
+            }
+            // Either no content or user already confirmed — save and close
             if !self.save_compose_draft_sync(id) {
-                // Save failed — keep the window open so the user doesn't lose work
                 log::warn!("Compose draft save failed, aborting window close");
                 return Task::none();
             }
