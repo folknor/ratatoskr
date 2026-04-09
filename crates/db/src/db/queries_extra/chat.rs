@@ -104,9 +104,10 @@ pub fn get_chat_contacts_sync(conn: &Connection) -> Result<Vec<DbChatContactSumm
         .prepare(
             "SELECT cc.email, cc.display_name, cc.latest_message_at, \
                     cc.latest_message_preview, cc.unread_count, cc.sort_order, \
-                    cpc.file_path \
+                    (SELECT file_path FROM contact_photo_cache \
+                     WHERE email = cc.email \
+                     ORDER BY last_accessed_at DESC LIMIT 1) AS file_path \
              FROM chat_contacts cc \
-             LEFT JOIN contact_photo_cache cpc ON cpc.email = cc.email \
              ORDER BY cc.sort_order ASC",
         )
         .map_err(|e| e.to_string())?;

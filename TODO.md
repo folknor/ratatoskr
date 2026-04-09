@@ -112,7 +112,7 @@
 - [x] **First-launch modal not dismissible** — In zero-accounts state, cancel doesn't close the wizard. Spec says it should dismiss over an unusable empty app. Intentional safety measure or bug — decide and document.
 
 - [ ] **App-specific-password help not clickable** — Discovery types carry `help_url` but UI shows plain text "Check {domain} for setup instructions" — no clickable link to provider app-password pages.
-- [ ] **Deleted-account compose/pop-out cleanup** — Account deletion doesn't close compose windows or message-view pop-outs for the deleted account, and doesn't block sending from a deleted identity.
+- [x] **Deleted-account compose/pop-out cleanup** — Account deletion doesn't close compose windows or message-view pop-outs for the deleted account, and doesn't block sending from a deleted identity.
 - [ ] **Sync-task cancellation on account deletion** — Delete flow removes DB data but doesn't cancel in-flight sync tasks. Stale sync completions could write to deleted account state.
 
 - [ ] **Scroll virtualization** — Thread list renders all cards in `column![]` inside `scrollable`. Needs iced-level virtual scrolling for large mailboxes.
@@ -168,7 +168,7 @@ Event editor modal:
 - [ ] Discarding changes doesn't work (but doesn't save changes either, so no data loss)
 
 Month view:
-- [ ] Days that have room for more event pills only show 2 and then "+N more" — should fill available space before collapsing
+- [x] Days that have room for more event pills only show 2 and then "+N more" — should fill available space before collapsing
 
 Week view:
 - [ ] All-day events are not laid out properly at the top of the day columns
@@ -272,7 +272,7 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 ## Security / Bug Findings (unfixed)
 
-- [ ] **`contact_photo_cache` join duplicates chat sidebar entries** — Keyed by `(email, account_id)`, so contacts with photos from multiple accounts produce duplicate rows.
+- [x] **`contact_photo_cache` join duplicates chat sidebar entries** — Keyed by `(email, account_id)`, so contacts with photos from multiple accounts produce duplicate rows.
 - [ ] **Microsoft ID token not signature-verified** — JWT payload is base64-decoded and trusted for email/name claims without verifying the signature. Token comes over TLS from Microsoft, but a MITM or compromised endpoint could inject arbitrary identity claims.
 
 ## Remaining Enhancements (other)

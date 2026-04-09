@@ -144,7 +144,8 @@ pub fn month_view<'a, M: 'a + Clone>(
     on_date_click: impl Fn(NaiveDate) -> M + 'a,
     on_event_click: impl Fn(&str) -> M + 'a,
 ) -> Element<'a, M> {
-    let max_events_per_cell = max_visible_events();
+    let max_no_overflow = max_events_without_overflow();
+    let max_with_overflow = max_events_with_overflow();
 
     // Header row: week# label + day-of-week labels.
     let header = day_of_week_header_with_week_num(data.week_start);
@@ -174,7 +175,13 @@ pub fn month_view<'a, M: 'a + Clone>(
 
         let mut week_row = row![week_label].spacing(SPACE_0);
         for day in week {
-            let cell = day_cell(day, max_events_per_cell, &on_date_click, &on_event_click);
+            let event_count = day.events.len();
+            let max_events = if event_count <= max_no_overflow {
+                max_no_overflow
+            } else {
+                max_with_overflow
+            };
+            let cell = day_cell(day, max_events, &on_date_click, &on_event_click);
             week_row = week_row.push(cell);
         }
         grid = grid.push(week_row.height(Length::Fill));
@@ -476,15 +483,18 @@ pub fn mini_month<'a, M: 'a + Clone>(
 
 // ── Helpers ─────────────────────────────────────────────
 
-/// How many events can fit in a single day cell, leaving room for the date
-/// number and a potential "+N more" row.
-fn max_visible_events() -> usize {
-    // Cell height minus date row (~20px) minus "+N more" row (~16px),
-    // divided by event row height.
-    let available = CALENDAR_CELL_MIN_HEIGHT - CALENDAR_EVENT_HEIGHT - CALENDAR_EVENT_HEIGHT;
+/// How many events can fit in a single day cell without a "+N more" row
+/// (date row occupies one event-height slot).
+fn max_events_without_overflow() -> usize {
+    let available = CALENDAR_CELL_MIN_HEIGHT - CALENDAR_EVENT_HEIGHT;
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let count = (available / CALENDAR_EVENT_HEIGHT).floor() as usize;
     count.max(1)
+}
+
+/// How many events to show when there IS a "+N more" row (one fewer slot).
+fn max_events_with_overflow() -> usize {
+    max_events_without_overflow().saturating_sub(1).max(1)
 }
 
 /// Rewind a date to the previous (or same) occurrence of `target` weekday.

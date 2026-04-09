@@ -2046,6 +2046,26 @@ impl App {
     }
 
     fn handle_delete_account(&mut self, account_id: String) -> Task<Message> {
+        // Close compose and message-view pop-outs belonging to the deleted account.
+        let windows_to_close: Vec<iced::window::Id> = self
+            .pop_out_windows
+            .iter()
+            .filter(|(_, w)| match w {
+                PopOutWindow::Compose(state) => state
+                    .from_account
+                    .as_ref()
+                    .is_some_and(|a| a.id == account_id),
+                PopOutWindow::MessageView(state) => state.account_id == account_id,
+                PopOutWindow::Calendar => false,
+            })
+            .map(|(&id, _)| id)
+            .collect();
+        let mut close_tasks: Vec<Task<Message>> = Vec::new();
+        for win_id in windows_to_close {
+            self.pop_out_windows.remove(&win_id);
+            close_tasks.push(iced::window::close(win_id));
+        }
+
         // If the deleted account is referenced by the current scope, revert to All Accounts
         let scope_references_account = match &self.sidebar.selected_scope {
             ViewScope::Account(id) => *id == account_id,
@@ -2067,7 +2087,7 @@ impl App {
         let search = self.search_state.clone();
         let app_data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set").clone();
 
-        Task::perform(
+        let delete_task = Task::perform(
             async move {
                 // Phase 1: gather cleanup data + ref-checks + delete account row
                 // (synchronous, inside one write-connection call so CASCADE hasn't
@@ -2152,7 +2172,10 @@ impl App {
                 Ok(())
             },
             Message::AccountDeleted,
-        )
+        );
+
+        close_tasks.push(delete_task);
+        Task::batch(close_tasks)
     }
 
     fn handle_save_account_changes(
