@@ -378,6 +378,7 @@ pub async fn lookup_bimi(
         }
         Err(e) => {
             warn!("BIMI DNS lookup failed for {domain}: {e}");
+            cache_negative(&domain, conn);
             return None;
         }
     };

@@ -1484,8 +1484,27 @@ fn event_editor_card<'a>(
         .padding(PAD_BUTTON)
         .style(theme::ButtonClass::Ghost.style());
 
+    let mut action_row = row![save_btn, cancel_btn].spacing(SPACE_XS);
+
+    // Delete button for existing events (not for new event creation).
+    if !is_creating {
+        if let Some(ref id) = event.id {
+            action_row = action_row.push(Space::new().width(Length::Fill));
+            action_row = action_row.push(
+                button(text("Delete").size(TEXT_SM).style(text::danger))
+                    .on_press(CalendarMessage::ConfirmDeleteEvent {
+                        event_id: id.clone(),
+                        title: event.title.clone(),
+                        account_id: event.account_id.clone(),
+                    })
+                    .padding(PAD_BUTTON)
+                    .style(theme::ButtonClass::Ghost.style()),
+            );
+        }
+    }
+
     content = content.push(Space::new().height(SPACE_XS));
-    content = content.push(row![save_btn, cancel_btn].spacing(SPACE_XS));
+    content = content.push(action_row);
 
     let scrollable_content = scrollable(content).height(Length::Shrink);
 

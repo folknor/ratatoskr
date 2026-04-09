@@ -98,7 +98,7 @@
 - [x] **Autocomplete: email validation before tokenization** — Enter/Tab/comma/semicolon tokenize any non-empty text. Should validate plausible email format before creating a token.
 - [ ] **Autocomplete: context menu Cut/Copy/Paste** — Token context menu has Delete, Expand group, Move-to-field only. Missing clipboard operations.
 - [ ] **Autocomplete: bulk-paste "Save as group"** — Banner renders but save action is not wired.
-- [ ] **Autocomplete: richer dropdown rendering** — Currently plain text "Name <email>". Spec calls for two-column layout (name + email), group icon, member count display.
+- [x] **Autocomplete: richer dropdown rendering** — Currently plain text "Name <email>". Spec calls for two-column layout (name + email), group icon, member count display.
 - [x] **Autocomplete: group token "(N)" suffix** — `member_count` stored on Token but chip label is just the group name.
 - [ ] **Autocomplete: search debounce** — Search dispatches immediately on every keystroke. Spec calls for 10-20ms debounce to coalesce rapid typing.
 - [x] **Autocomplete: paste dedup** — `dedup_parsed()` exists but is never called. Also no dedup against existing tokens in the field.
@@ -164,7 +164,7 @@ Event detail modal:
 
 Event editor modal:
 - [ ] Does not adhere to the editor spec at all — needs a full implementation pass
-- [ ] Deleting an event from the editor doesn't work
+- [x] Deleting an event from the editor doesn't work
 - [ ] Discarding changes doesn't work (but doesn't save changes either, so no data loss)
 
 Month view:
@@ -243,7 +243,7 @@ Backend complete (Gmail + JMAP sync). Exchange fetch permanently blocked (no pub
 
 Backend complete (DNS + SVG + cache).
 
-- [ ] **BIMI cache** — Is this actually working? I dont think we cache for example if we get no response. We should cache that as well, and not re-ping every time. Caches should persist across sessions as well so we dont re-ping BIMI for every email every time we start the app.
+- [x] **BIMI cache** — Is this actually working? I dont think we cache for example if we get no response. We should cache that as well, and not re-ping every time. Caches should persist across sessions as well so we dont re-ping BIMI for every email every time we start the app.
 
 ### Auto-Responses — `docs/auto-responses/problem-statement.md`
 

@@ -1897,19 +1897,45 @@ fn autocomplete_dropdown<'a>(
     for (idx, entry) in state.autocomplete.results.iter().enumerate() {
         let is_highlighted = state.autocomplete.highlighted == Some(idx);
 
-        let display = if let Some(ref name) = entry.display_name {
-            format!("{name} <{}>", entry.email)
-        } else {
-            entry.email.clone()
-        };
-
         let row_style = if is_highlighted {
             theme::ButtonClass::Primary.style()
         } else {
             theme::ButtonClass::Ghost.style()
         };
 
-        let row_btn = button(text(display).size(TEXT_SM))
+        // Two-line layout: name on top, email below. Group entries show icon + member count.
+        let content: Element<'_, Message> = if entry.is_group {
+            let member_suffix = entry
+                .member_count
+                .map(|n| format!(" ({n})"))
+                .unwrap_or_default();
+            let name = entry
+                .display_name
+                .as_deref()
+                .unwrap_or(&entry.email);
+            row![
+                icon::users().size(ICON_SM).style(text::secondary),
+                text(format!("{name}{member_suffix}"))
+                    .size(TEXT_SM)
+                    .style(text::base),
+            ]
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center)
+            .into()
+        } else if let Some(ref name) = entry.display_name {
+            column![
+                text(name).size(TEXT_SM).style(text::base),
+                text(&entry.email)
+                    .size(TEXT_XS)
+                    .style(theme::TextClass::Tertiary.style()),
+            ]
+            .spacing(SPACE_XXXS)
+            .into()
+        } else {
+            text(&entry.email).size(TEXT_SM).style(text::base).into()
+        };
+
+        let row_btn = button(content)
             .on_press(Message::PopOut(
                 window_id,
                 PopOutMessage::Compose(ComposeMessage::AutocompleteSelect(idx)),
