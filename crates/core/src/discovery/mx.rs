@@ -19,8 +19,8 @@ pub async fn lookup(domain: &str, email: &str) -> (Vec<ProtocolOption>, Option<S
 }
 
 async fn lookup_inner(domain: &str, email: &str) -> (Vec<ProtocolOption>, Option<String>) {
-    let resolver = match TokioResolver::builder_tokio() {
-        Ok(builder) => builder.build(),
+    let resolver = match TokioResolver::builder_tokio().and_then(hickory_resolver::ResolverBuilder::build) {
+        Ok(r) => r,
         Err(e) => {
             log::debug!("MX resolver creation failed: {e}");
             return (Vec::new(), None);
@@ -37,8 +37,15 @@ async fn lookup_inner(domain: &str, email: &str) -> (Vec<ProtocolOption>, Option
 
     // Sort by preference (lower = higher priority)
     let mut exchanges: Vec<String> = mx_records
+        .answers()
         .iter()
-        .map(|mx| mx.exchange().to_utf8().trim_end_matches('.').to_string())
+        .filter_map(|rec| {
+            if let hickory_resolver::proto::rr::RData::MX(mx) = &rec.data {
+                Some(mx.exchange.to_utf8().trim_end_matches('.').to_string())
+            } else {
+                None
+            }
+        })
         .collect();
     exchanges.sort();
     exchanges.dedup();

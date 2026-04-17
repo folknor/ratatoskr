@@ -118,10 +118,10 @@ pub fn render_cached_html<'a, M: Clone + 'a>(
                 .into()
         }
         CachedHtmlBody::Blocks(blocks) => {
-            let on_link = std::rc::Rc::new(on_link_click);
+            let on_link: std::rc::Rc<dyn Fn(String) -> M + 'a> = std::rc::Rc::new(on_link_click);
             let mut col = column![].spacing(SPACE_XS).width(Length::Fill);
             for block in blocks {
-                col = col.push(render_block_ref(block, on_link.clone(), inline_images));
+                col = col.push(render_block_ref(block, std::rc::Rc::clone(&on_link), inline_images));
             }
             col.into()
         }
@@ -155,10 +155,10 @@ pub fn render_html<'a, M: Clone + 'a>(
             .into();
     }
 
-    let on_link = std::rc::Rc::new(on_link_click);
+    let on_link: std::rc::Rc<dyn Fn(String) -> M + 'a> = std::rc::Rc::new(on_link_click);
     let mut col = column![].spacing(SPACE_XS).width(Length::Fill);
     for block in blocks {
-        col = col.push(render_block(block, on_link.clone(), inline_images));
+        col = col.push(render_block(block, std::rc::Rc::clone(&on_link), inline_images));
     }
     col.into()
 }
@@ -223,7 +223,7 @@ fn render_spans<'a, M: Clone + 'a>(
             }
             InlineSpan::Link { display, href } => {
                 let url = href.clone();
-                let on_click = on_link_click.clone();
+                let on_click = std::rc::Rc::clone(on_link_click);
                 elements.push(
                     button(
                         text(display.clone())
@@ -244,6 +244,7 @@ fn render_spans<'a, M: Clone + 'a>(
 
 /// Render a block by reference (for cached rendering). Clones the owned
 /// strings inside the block — this is cheap compared to re-parsing HTML.
+#[allow(clippy::needless_pass_by_value)]
 fn render_block_ref<'a, M: Clone + 'a>(
     block: &Block,
     on_link_click: std::rc::Rc<dyn Fn(String) -> M + 'a>,
@@ -303,6 +304,7 @@ fn render_block_ref<'a, M: Clone + 'a>(
     }
 }
 
+#[allow(clippy::needless_pass_by_value)]
 pub(super) fn render_block<'a, M: Clone + 'a>(
     block: Block,
     on_link_click: std::rc::Rc<dyn Fn(String) -> M + 'a>,

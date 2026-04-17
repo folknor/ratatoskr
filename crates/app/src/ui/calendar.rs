@@ -129,6 +129,7 @@ pub enum CalendarPopover {
 ///
 /// Presentation cache, not workflow state. Written exclusively by
 /// `CalendarState::sync_surfaces()`, derived from `CalendarWorkflow`.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum CalendarModal {
     /// Full event detail modal (two-panel: 70% detail + 30% day view).

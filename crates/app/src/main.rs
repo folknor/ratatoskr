@@ -90,13 +90,14 @@ static DEFAULT_SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
 /// How long to wait for the second chord of a sequence.
 const CHORD_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1000);
 
+#[allow(clippy::unwrap_in_result)]
 fn main() -> iced::Result {
     env_logger::init();
     log::info!("Ratatoskr starting");
     #[cfg(feature = "hotpath")]
     let _hotpath = hotpath::HotpathGuardBuilder::new("ratatoskr::main")
-        .percentiles(&[50, 95, 99])
-        .with_functions_limit(0)
+        .percentiles(&[50.0, 95.0, 99.0])
+        .functions_limit(0)
         .build();
 
     #[cfg(feature = "dev-seed")]

@@ -426,6 +426,18 @@ mod tests {
     use super::*;
     use crate::document::{Block, DocPosition, Document};
 
+    fn single_block_doc(text: &str) -> Document {
+        Document::from_blocks(vec![Block::paragraph(text)])
+    }
+
+    fn multi_block_doc() -> Document {
+        Document::from_blocks(vec![
+            Block::paragraph("hello"),
+            Block::paragraph("world"),
+            Block::paragraph("foo"),
+        ])
+    }
+
     // ── Key mapping tests ────────────────────────────────
 
     mod key_mapping {
@@ -731,18 +743,6 @@ mod tests {
 
     mod cursor_movement {
         use super::*;
-
-        fn single_block_doc(text: &str) -> Document {
-            Document::from_blocks(vec![Block::paragraph(text)])
-        }
-
-        fn multi_block_doc() -> Document {
-            Document::from_blocks(vec![
-                Block::paragraph("hello"),
-                Block::paragraph("world"),
-                Block::paragraph("foo"),
-            ])
-        }
 
         // move_left
 

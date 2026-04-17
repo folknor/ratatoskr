@@ -257,8 +257,7 @@ async fn dispatch_write_back(
             );
             let field_mask = update_fields.join(",");
             let url = format!(
-                "https://people.googleapis.com/v1/{}:updateContact?updatePersonFields={}",
-                server_id, field_mask,
+                "https://people.googleapis.com/v1/{server_id}:updateContact?updatePersonFields={field_mask}",
             );
             let _resp: serde_json::Value = client
                 .patch_absolute(&url, &body, &ctx.db)
@@ -314,10 +313,7 @@ async fn dispatch_delete(
                 gmail::client::GmailClient::from_account(&ctx.db, account_id, ctx.encryption_key)
                     .await
                     .map_err(ActionError::remote)?;
-            let url = format!(
-                "https://people.googleapis.com/v1/{}:deleteContact",
-                server_id,
-            );
+            let url = format!("https://people.googleapis.com/v1/{server_id}:deleteContact");
             client
                 .delete_absolute(&url, &ctx.db)
                 .await

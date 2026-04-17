@@ -807,7 +807,7 @@ mod tests {
     /// Helper: get flattened text of a block.
     fn block_text(doc: &Document, idx: usize) -> String {
         doc.block(idx)
-            .map_or_else(String::new, |b| b.flattened_text())
+            .map_or_else(String::new, Block::flattened_text)
     }
 
     // ── Insert text ─────────────────────────────────────

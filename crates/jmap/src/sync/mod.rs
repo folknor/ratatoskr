@@ -168,7 +168,7 @@ pub async fn jmap_initial_sync(
     // Phase 4: Contacts sync
     match super::contacts_sync::jmap_contacts_initial_sync(client, account_id, db).await {
         Ok(count) => {
-            log::info!("[JMAP] Initial contacts sync: {count} contacts for account {account_id}")
+            log::info!("[JMAP] Initial contacts sync: {count} contacts for account {account_id}");
         }
         Err(e) => log::warn!("[JMAP] Contacts initial sync failed for account {account_id}: {e}"),
     }

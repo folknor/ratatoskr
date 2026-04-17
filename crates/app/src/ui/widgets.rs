@@ -1165,7 +1165,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     let on_link = std::rc::Rc::new(on_link_click);
     let body_inner: Element<'_, M> = if msg.body_html.is_some() {
         // Use pre-parsed HTML cache when available to avoid re-parsing on every view.
-        let link_cb = on_link.clone();
+        let link_cb = std::rc::Rc::clone(&on_link);
         let rendered = if let Some(cached) = cached_html {
             super::html_render::render_cached_html(
                 cached,
@@ -1174,7 +1174,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
                 inline_images,
             )
         } else if let Some(html) = msg.body_html.as_deref() {
-            let link_cb2 = on_link.clone();
+            let link_cb2 = std::rc::Rc::clone(&on_link);
             super::html_render::render_html(
                 html,
                 msg.body_text.as_deref(),

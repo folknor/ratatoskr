@@ -38,6 +38,7 @@ impl App {
     }
 
     /// Handle events from the chat timeline component.
+    #[allow(clippy::needless_pass_by_value)]
     pub(crate) fn handle_chat_timeline_event(&mut self, event: ChatTimelineEvent) -> Task<Message> {
         match event {
             ChatTimelineEvent::LoadOlderRequested => {

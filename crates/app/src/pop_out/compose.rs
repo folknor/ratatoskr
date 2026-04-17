@@ -436,11 +436,10 @@ impl ComposeState {
             .map(EditorState::from_html)
             .unwrap_or_else(EditorState::new);
 
-        #[allow(clippy::cast_sign_loss)]
         let signature_separator_index = draft
             .signature_separator_index
             .filter(|&i| i >= 0)
-            .map(|i| i as usize);
+            .and_then(|i| usize::try_from(i).ok());
 
         Self {
             to,

@@ -552,7 +552,7 @@ pub fn get_shared_mailbox_email_sync(
     )
     .optional()
     .map_err(|e| format!("shared mailbox email: {e}"))
-    .map(|opt| opt.flatten())
+    .map(Option::flatten)
 }
 
 // ── Pinned public folder queries ───────────────────────────

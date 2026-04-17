@@ -22,7 +22,7 @@ impl Db {
 
     pub fn get_send_identity_emails_sync(&self) -> Result<Vec<String>, String> {
         self.with_conn_sync(|conn| {
-            rtsk::send_identity::get_all_send_identity_emails(conn).map_err(|e| e.to_string())
+            rtsk::send_identity::get_all_send_identity_emails(conn)
         })
     }
 

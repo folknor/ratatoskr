@@ -321,6 +321,7 @@ pub async fn validate_sieve_script(
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

@@ -196,6 +196,7 @@ pub fn delete_account_orchestrate_sync(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use rusqlite::{Connection, params};

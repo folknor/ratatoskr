@@ -25,7 +25,7 @@ rusqlite.workspace = true
 tokio = { workspace = true, features = ["time"] }
 log = "0.4"
 urlencoding = "2"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1.23.1", features = ["v4"] }
 hotpath = { workspace = true, optional = true }
 
 [features]

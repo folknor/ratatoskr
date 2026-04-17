@@ -9,6 +9,7 @@ impl App {
     ///
     /// Sidebar-backed targets update `sidebar.selection` directly.
     /// Chat targets set `active_chat`.
+    #[allow(clippy::needless_pass_by_value)]
     pub(crate) fn handle_navigate_to(&mut self, target: NavigationTarget) -> Task<Message> {
         match target {
             NavigationTarget::Chat { ref email } => {

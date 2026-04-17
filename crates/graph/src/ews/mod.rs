@@ -108,6 +108,7 @@ pub(crate) fn decode_replica_list(base64_data: &str) -> Result<Vec<String>, Stri
 // ── Tests ───────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

@@ -363,6 +363,7 @@ pub fn new_jmap_state(encryption_key: [u8; 32]) -> JmapState {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

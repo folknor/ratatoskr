@@ -309,6 +309,7 @@ fn parse_date_string(s: &str) -> Option<i64> {
 // ── Tests ───────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
 

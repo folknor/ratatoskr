@@ -271,7 +271,7 @@ pub async fn db_get_recent_search_queries(
             )
             .map_err(|e| e.to_string())?;
 
-        stmt.query_map(params![limit as i64], |row| row.get(0))
+        stmt.query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |row| row.get(0))
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<String>, _>>()
             .map_err(|e| e.to_string())

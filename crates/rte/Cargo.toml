@@ -14,7 +14,7 @@ hotpath = ["dep:hotpath", "hotpath/hotpath"]
 hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]
 
 [dependencies]
-bitflags = "2"
+bitflags = "2.11.1"
 html5ever = "0.39"
 markup5ever = "0.39"
 hotpath = { workspace = true, optional = true }

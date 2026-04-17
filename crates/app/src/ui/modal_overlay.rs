@@ -27,6 +27,7 @@ pub enum ModalSurface {
 /// events when `on_press` is set. The message is published but should be a
 /// no-op in the caller's update loop — `modal_overlay` does not own dismiss
 /// behavior.
+#[allow(clippy::needless_pass_by_value)]
 pub fn modal_overlay<'a, Message: Clone + 'a>(
     base: impl Into<Element<'a, Message>>,
     content: impl Into<Element<'a, Message>>,

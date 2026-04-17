@@ -755,6 +755,7 @@ pub async fn discover_myrights(session: &mut ImapSession, folder: &str) -> Resul
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

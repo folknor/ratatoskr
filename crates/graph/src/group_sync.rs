@@ -519,7 +519,7 @@ mod tests {
     fn extract_email_skips_empty_mail() {
         let member = GraphGroupMember {
             display_name: None,
-            mail: Some("".to_string()),
+            mail: Some(String::new()),
             user_principal_name: Some("user@contoso.com".to_string()),
         };
         let result = extract_member_email(&member).expect("should fall back to UPN");

@@ -135,7 +135,7 @@ pub fn get_chat_timeline_sync(
     limit: usize,
     before: Option<(i64, String)>,
 ) -> Result<Vec<DbChatMessage>, String> {
-    let limit_i64 = limit as i64;
+    let limit_i64 = i64::try_from(limit).unwrap_or(i64::MAX);
     let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
         if let Some((before_ts, before_id)) = before {
             (

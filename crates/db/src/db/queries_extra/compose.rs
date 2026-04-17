@@ -555,7 +555,7 @@ pub async fn db_save_local_draft(
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
 pub fn db_save_local_draft_sync(
     conn: &crate::db::Connection,
     id: String,

@@ -295,7 +295,7 @@ impl App {
                     match result {
                         Ok(()) => log::info!("[JMAP Push] Started for {email_log}"),
                         Err(ref e) => {
-                            log::warn!("[JMAP Push] Failed to start for {email_log}: {e}")
+                            log::warn!("[JMAP Push] Failed to start for {email_log}: {e}");
                         }
                     }
                     Message::Noop

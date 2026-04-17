@@ -460,11 +460,11 @@ impl Settings {
             SettingsMessage::ToggleAiWritingStyle(v) => self.ai_writing_style = v,
             SettingsMessage::ToggleAiAutoArchiveUpdates(v) => self.ai_auto_archive_updates = v,
             SettingsMessage::ToggleAiAutoArchivePromotions(v) => {
-                self.ai_auto_archive_promotions = v
+                self.ai_auto_archive_promotions = v;
             }
             SettingsMessage::ToggleAiAutoArchiveSocial(v) => self.ai_auto_archive_social = v,
             SettingsMessage::ToggleAiAutoArchiveNewsletters(v) => {
-                self.ai_auto_archive_newsletters = v
+                self.ai_auto_archive_newsletters = v;
             }
             SettingsMessage::AiApiKeyChanged(v) => self.ai_api_key.set_text(v),
             SettingsMessage::OllamaUrlChanged(v) => self.ai_ollama_url.set_text(v),

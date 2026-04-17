@@ -249,6 +249,7 @@ impl App {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     fn dispatch_resolved_search(&mut self, resolved: ResolvedSearch) -> Task<Message> {
         self.apply_search_folder_restore(resolved.completion.folder_restore);
 
@@ -758,6 +759,7 @@ impl App {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub(crate) fn handle_pinned_search_persisted(
         &mut self,
         completion: SearchCompletionBehavior,

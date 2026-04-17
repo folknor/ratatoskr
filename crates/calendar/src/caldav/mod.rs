@@ -506,6 +506,7 @@ async fn fetch_caldav_event_by_href(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::xml::extract_tag_value;
     use quick_xml::escape::unescape;

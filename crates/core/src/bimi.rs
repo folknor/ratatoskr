@@ -115,7 +115,8 @@ fn organizational_domain(domain: &str) -> Option<&str> {
 async fn lookup_bimi_dns(domain: &str) -> Result<Option<BimiRecord>, String> {
     let resolver = TokioResolver::builder_tokio()
         .map_err(|e| format!("create DNS resolver: {e}"))?
-        .build();
+        .build()
+        .map_err(|e| format!("build DNS resolver: {e}"))?;
 
     // Try exact domain first
     let qname = format!("default._bimi.{domain}");
@@ -142,10 +143,12 @@ async fn lookup_bimi_dns(domain: &str) -> Result<Option<BimiRecord>, String> {
 async fn query_bimi_txt(resolver: &TokioResolver, qname: &str) -> Option<BimiRecord> {
     match resolver.txt_lookup(qname).await {
         Ok(response) => {
-            for record in response.iter() {
-                let txt: String = record.to_string();
-                if let Some(parsed) = parse_bimi_record(&txt) {
-                    return Some(parsed);
+            for record in response.answers() {
+                if let hickory_resolver::proto::rr::RData::TXT(txt_data) = &record.data {
+                    let txt = txt_data.to_string();
+                    if let Some(parsed) = parse_bimi_record(&txt) {
+                        return Some(parsed);
+                    }
                 }
             }
             None

@@ -63,6 +63,7 @@ fn compute_dpi(pixels: u32, mm: u32) -> Option<f32> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
