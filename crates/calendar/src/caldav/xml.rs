@@ -224,7 +224,6 @@ pub(super) fn normalize_url_for_compare(url: &str) -> String {
 
 fn extract_element_text(element: &str) -> Option<String> {
     let mut reader = Reader::from_str(element);
-    reader.config_mut().trim_text(true);
     let mut depth = 0usize;
     let mut text = String::new();
 
@@ -257,7 +256,8 @@ fn extract_element_text(element: &str) -> Option<String> {
         }
     }
 
-    if text.is_empty() { None } else { Some(text) }
+    let trimmed = text.trim();
+    if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
 }
 
 pub(super) fn join_url_path(base: &str, segment: &str) -> Result<String, String> {

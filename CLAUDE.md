@@ -2,7 +2,17 @@
 
 **Subagents must always be launched in the foreground** (never use `run_in_background: true`) so the user can approve tool requests.
 
-Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
+**Never use the auto-memory system on this project.** Do not read, write, or update memories. Do not suggest saving things to memory. Durable context belongs in CLAUDE.md or the relevant docs, not in per-session memory files.
+
+Pure Rust desktop email client targeting enterprise users currently locked into Outlook/Microsoft 365. Three non-negotiable constraints shape the project:
+
+1. **Exchange + Calendar** - no free client at scale supports both.
+2. **Extreme volume** - users process hundreds of emails/day; cached mailboxes hit 150+ GB uncapped.
+3. **Deep local search** - 5+ years of history, searchable instantly.
+
+Performance, storage efficiency (zstd compression, efficient DB), search speed, and deduplication (e.g. inline image dedup in the attachment store) are hard requirements, not nice-to-haves.
+
+Cargo workspace (19 crates). Key crates:
 
 - **`rtsk`** (`crates/core/`) - Top-level facade: re-exports all subsystem crates, plus owns accounts, oauth, discovery, email actions, DB queries, cloud attachments.
 - **`app`** (`crates/app/`) - iced UI app. Elm architecture (boot/update/view). All UI conventions are in `UI.md` at the repo root - **read UI.md before any UI work.**
@@ -17,12 +27,17 @@ Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 
 ## Commands
 
-- `cargo check --workspace` - check all crates
-- `cargo check -p rtsk` - check core only
-- `cargo check -p app` - check app only
+Use `brokkr` (not `cargo`) for check/test. It runs a gremlins scan (banned Unicode), then clippy, then tests - clippy denies warnings project-wide, so a clippy failure short-circuits before tests run. By default output is filtered to changed files and capped at 20 diagnostics per phase.
+
+- `brokkr check` - gremlins + clippy + all tests (changed-files scope)
+- `brokkr check --all` - show every diagnostic, no cap, no scope filter
+- `brokkr check --fix-gremlins` - rewrite banned Unicode in tracked files (em/en dash -> `-`, smart quotes -> straight, NBSP -> space, zero-width/bidi deleted) before checking
+- `brokkr check -p <crate>` - scope to one package (e.g. `-p rtsk`, `-p app`, `-p squeeze`)
+- `brokkr check -- --test <file>` - forward args to `cargo test` (args after the second `--` go to the test binary)
+- `brokkr test -p <crate> <NAME>` - release-mode focused single-test runner (`--include-ignored --nocapture --test-threads=1`). Works for both unit and integration tests. `-p` is required in this workspace (no default package). `-N` repeats for flake hunting. Gated off for litehtml/sluggrs.
 - `cargo run -p app` - run the iced app (requires a seeded DB, see `crates/app/seed-db.py`)
-- `cargo check -p squeeze` - check squeeze only
-- `cargo test -p squeeze` - run squeeze tests
+
+Fall back to raw `cargo check`/`cargo test` only when you need to bypass clippy gating for a targeted run.
 
 ## Dev-Seed
 
@@ -41,6 +56,8 @@ Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 **Thread detail** (`core/src/db/queries_extra/thread_detail.rs`) - `get_thread_detail()` returns messages (with ownership detection, collapsed summaries, body text from body store), labels (with resolved colors), attachments (with message context), and attachment collapse state for a single thread.
 
 ## Gotchas that will break your code
+
+**Never run squeeze against `fixtures/5.pdf`.** It's a 220MB PDF that pegs all CPU cores and freezes the user's machine. When testing squeeze on the PDF fixtures, exclude 5.pdf explicitly - use 2.pdf, 3.pdf, 9.pdf, or 14.pdf instead.
 
 **Multiple content stores** (`crates/stores/`): Message bodies live outside the main `messages` table in `bodies.db` (compressed), and inline multipart images have their own attachment database. Use `BodyStoreState` / `InlineImageStoreState` rather than assuming message content is in the main SQLite database. The attachment file cache is also in this crate.
 
@@ -132,6 +149,7 @@ Without `--anchor`, stdin goes directly to the session - the sessions are alread
 
 - Don't commit pure markdown changes on their own. Bundle them with the code change they relate to, or skip them. Unless the markdown update is substantive.
 - Has Cargo.lock changed? Commit it.
+- Never `git push` unless the user explicitly asks. Stop after the commit.
 
 ## Encryption
 
