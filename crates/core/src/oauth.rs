@@ -420,7 +420,7 @@ pub async fn await_oauth_callback(
 
     let (mut stream, _) = tokio::time::timeout(Duration::from_secs(300), listener.accept())
         .await
-        .map_err(|_| "OAuth timed out — please try again".to_string())?
+        .map_err(|_| "OAuth timed out - please try again".to_string())?
         .map_err(|e| format!("Failed to accept OAuth connection: {e}"))?;
 
     const MAX_REQUEST_SIZE: usize = 16384;
@@ -447,7 +447,7 @@ pub async fn await_oauth_callback(
     let (code, returned_state) = parse_auth_code_and_state(&request)?;
 
     if returned_state != state {
-        return Err("OAuth state mismatch — possible CSRF attack".to_string());
+        return Err("OAuth state mismatch - possible CSRF attack".to_string());
     }
 
     let html = oauth_success_html();

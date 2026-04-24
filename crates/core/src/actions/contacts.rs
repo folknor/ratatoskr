@@ -1,4 +1,4 @@
-//! Contact write-back — save and delete through providers.
+//! Contact write-back - save and delete through providers.
 //!
 //! JMAP, Google, and Graph are fully wired. CardDAV is a stub that returns
 //! `LocalOnly` until vCard generation + PUT is implemented.
@@ -35,7 +35,7 @@ pub struct ContactSaveInput {
 
 /// Save a contact locally, then dispatch write-back to the provider.
 ///
-/// Display name is local-only — only phone, company, notes are pushed.
+/// Display name is local-only - only phone, company, notes are pushed.
 /// Returns `Success` if local + provider both succeeded, `LocalOnly` if
 /// local succeeded but provider failed/stubbed, `Failed` if local failed.
 pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> ActionOutcome {
@@ -88,7 +88,7 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
 
     // Need both account_id and server_id for provider dispatch
     let (Some(account_id), Some(server_id)) = (&input.account_id, &input.server_id) else {
-        // Synced contact without account/server identity — can't dispatch.
+        // Synced contact without account/server identity - can't dispatch.
         // Return LocalOnly, not Success: the local save succeeded but provider
         // write-back was impossible due to missing identity.
         let msg = format!(
@@ -172,7 +172,7 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
                 Ok(()) => {}
                 Err(e) => {
                     // Provider-first: don't delete locally if provider fails.
-                    // CardDAV is still a stub — local-only until PUT is wired.
+                    // CardDAV is still a stub - local-only until PUT is wired.
                     if matches!(source_str, "jmap" | "google" | "graph") {
                         let outcome = ActionOutcome::Failed { error: e };
                         mlog.emit(&outcome);
@@ -209,7 +209,7 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
 
 /// Dispatch contact write-back to the appropriate provider.
 ///
-/// Takes (account_id, server_id) directly from ContactSaveInput — no
+/// Takes (account_id, server_id) directly from ContactSaveInput - no
 /// email-based server-info lookup, eliminating cross-account ambiguity.
 async fn dispatch_write_back(
     ctx: &ActionContext,
@@ -233,7 +233,7 @@ async fn dispatch_write_back(
             .map_err(ActionError::remote)
         }
         "google" => {
-            // Build the update field mask — early return if nothing to update
+            // Build the update field mask - early return if nothing to update
             let mut update_fields = Vec::new();
             if phone.is_some() {
                 update_fields.push("phoneNumbers");

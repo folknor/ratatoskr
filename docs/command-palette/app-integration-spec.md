@@ -4,7 +4,7 @@ Implementation specification for wiring the command palette into the iced app's 
 
 **Preconditions:** Slices 1-3 are complete. The `cmdk` crate provides `CommandRegistry`, `BindingTable`, `CommandContext`, `CommandInputResolver` trait, `InputSchema`/`ParamDef`/`InputMode`, and `search_options()`. All 55 commands are registered with fuzzy search, availability predicates, toggle labels, input schemas, and keybinding resolution. This spec is primarily `crates/app/` work, with one required addition to the command palette crate: `CommandArgs` (placed there for type-level guarantees and compile-time exhaustive matching in the dispatch layer). It also adds `AppOpenPalette` to the `CommandId` enum.
 
-**App architecture prerequisites:** Several parts of this spec reference app-state accessors and component boundaries (`reading_pane.focused_message_id()`, `thread_list.selected_thread`, per-panel `Component` implementations) that may not exist in their final form yet. Where this spec references these, it is defining the target interface the app should expose — not assuming it already exists. Some of this work is app-state normalization that must happen alongside or slightly ahead of command integration.
+**App architecture prerequisites:** Several parts of this spec reference app-state accessors and component boundaries (`reading_pane.focused_message_id()`, `thread_list.selected_thread`, per-panel `Component` implementations) that may not exist in their final form yet. Where this spec references these, it is defining the target interface the app should expose - not assuming it already exists. Some of this work is app-state normalization that must happen alongside or slightly ahead of command integration.
 
 ## Table of Contents
 
@@ -25,7 +25,7 @@ Four pieces of infrastructure that all three integration paths depend on. These 
 
 **File:** `crates/cmdk/src/args.rs` (new), re-exported from `crates/cmdk/src/lib.rs`
 
-The typed execution payload for parameterized commands. One variant per command or command family. Non-parameterized commands execute with `CommandId` alone — no `CommandArgs` needed.
+The typed execution payload for parameterized commands. One variant per command or command family. Non-parameterized commands execute with `CommandId` alone - no `CommandArgs` needed.
 
 ```rust
 /// Typed execution payload for parameterized commands.
@@ -35,15 +35,15 @@ The typed execution payload for parameterized commands. One variant per command 
 /// appropriate handler in `update()`.
 #[derive(Debug, Clone)]
 pub enum CommandArgs {
-    /// EmailMoveToFolder — folder_id from ListPicker selection
+    /// EmailMoveToFolder - folder_id from ListPicker selection
     MoveToFolder { folder_id: String },
-    /// EmailAddLabel — label_id from ListPicker selection
+    /// EmailAddLabel - label_id from ListPicker selection
     AddLabel { label_id: String },
-    /// EmailRemoveLabel — label_id from ListPicker selection
+    /// EmailRemoveLabel - label_id from ListPicker selection
     RemoveLabel { label_id: String },
-    /// EmailSnooze — unix timestamp from DateTime picker
+    /// EmailSnooze - unix timestamp from DateTime picker
     Snooze { until: i64 },
-    /// NavigateToLabel — label_id from ListPicker selection.
+    /// NavigateToLabel - label_id from ListPicker selection.
     /// Includes account_id because cross-account navigation needs
     /// to know which account the label belongs to.
     NavigateToLabel { label_id: String, account_id: String },
@@ -59,7 +59,7 @@ pub enum CommandArgs {
 
 **File:** `crates/app/src/command_dispatch.rs` (new)
 
-A function that snapshots the current `App` model state into a `CommandContext`. Called on every registry query (palette keystroke, keyboard event, UI surface render). Must be cheap — it reads fields, does not allocate except for `selected_thread_ids`.
+A function that snapshots the current `App` model state into a `CommandContext`. Called on every registry query (palette keystroke, keyboard event, UI surface render). Must be cheap - it reads fields, does not allocate except for `selected_thread_ids`.
 
 ```rust
 use cmdk::{
@@ -122,27 +122,27 @@ struct App {
 
 | `CommandContext` field | Source |
 |---|---|
-| `selected_thread_ids` | `thread_list.selected_thread` (single selection for now; multi-select is future) — wrapped in `vec![id.clone()]` or `vec![]` |
+| `selected_thread_ids` | `thread_list.selected_thread` (single selection for now; multi-select is future) - wrapped in `vec![id.clone()]` or `vec![]` |
 | `active_message_id` | `reading_pane.focused_message_id()` (new accessor on `ReadingPane`) |
-| `current_view` | Derived from sidebar selection state (inbox/starred/sent/etc.) — needs a `ViewType` enum mapping function |
+| `current_view` | Derived from sidebar selection state (inbox/starred/sent/etc.) - needs a `ViewType` enum mapping function |
 | `current_label_id` | `sidebar.selected_label.clone()` |
 | `active_account_id` | `sidebar.accounts.get(sidebar.selected_account?).map(|a| a.id.clone())` |
-| `provider_kind` | `sidebar.accounts.get(sidebar.selected_account?).map(|a| a.provider_kind())` — needs a mapping from account DB type to `ProviderKind` |
+| `provider_kind` | `sidebar.accounts.get(sidebar.selected_account?).map(|a| a.provider_kind())` - needs a mapping from account DB type to `ProviderKind` |
 | `thread_is_read` etc. | From the selected thread's flags in `thread_list.threads[selected_idx]` |
 | `is_online` | New field on `App`, initially `true`, updated by a network check subscription (future) |
 | `composer_is_open` | New field on `App`, toggled when compose is opened/closed |
 | `focused_region` | New field on `App`, updated on panel click/focus events |
 
-**`ViewType` mapping.** The sidebar currently tracks selection via `selected_account` index and `selected_label` ID. **The app should own an explicit `current_view: ViewType` field** on `App` rather than deriving view type heuristically from scattered sidebar fields. Heuristic derivation (e.g., "no label selected + account selected → Inbox") is fragile and will break as more navigation surfaces are added (search results, pinned searches, calendar mode). The `current_view` field should be set explicitly by navigation actions — clicking a sidebar item, executing a `NavigateTo` command, activating a search, etc. This is an app-state normalization that should happen as part of this integration work, not deferred.
+**`ViewType` mapping.** The sidebar currently tracks selection via `selected_account` index and `selected_label` ID. **The app should own an explicit `current_view: ViewType` field** on `App` rather than deriving view type heuristically from scattered sidebar fields. Heuristic derivation (e.g., "no label selected + account selected → Inbox") is fragile and will break as more navigation surfaces are added (search results, pinned searches, calendar mode). The `current_view` field should be set explicitly by navigation actions - clicking a sidebar item, executing a `NavigateTo` command, activating a search, etc. This is an app-state normalization that should happen as part of this integration work, not deferred.
 
 The `ViewType` values:
-- `ViewType::Inbox`, `Starred`, `Sent`, `Drafts`, `Snoozed`, `Trash`, `Spam`, `AllMail` — universal folders
-- `ViewType::Label` — a user label/folder selected
-- `ViewType::SmartFolder` — a smart folder selected
-- `ViewType::Search` — active search results
-- `ViewType::PinnedSearch` — a pinned search active
-- `ViewType::Settings` — settings open
-- `ViewType::Tasks`, `Attachments` — palette-first destinations
+- `ViewType::Inbox`, `Starred`, `Sent`, `Drafts`, `Snoozed`, `Trash`, `Spam`, `AllMail` - universal folders
+- `ViewType::Label` - a user label/folder selected
+- `ViewType::SmartFolder` - a smart folder selected
+- `ViewType::Search` - active search results
+- `ViewType::PinnedSearch` - a pinned search active
+- `ViewType::Settings` - settings open
+- `ViewType::Tasks`, `Attachments` - palette-first destinations
 
 ### 1.3 `CommandId` → `Message` Dispatch
 
@@ -196,7 +196,7 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
             Some(Message::ThreadList(ThreadListMessage::SelectFromHere))
         }
 
-        // Parameterized commands — these open the palette's stage 2,
+        // Parameterized commands - these open the palette's stage 2,
         // not dispatched directly. Handled via dispatch_parameterized.
         CommandId::EmailMoveToFolder
         | CommandId::EmailAddLabel
@@ -438,14 +438,14 @@ impl CommandInputResolver for AppInputResolver {
         _prior_selections: &[String],
         _ctx: &CommandContext,
     ) -> Result<(), String> {
-        // Validation is lenient for now — accept any non-empty value.
+        // Validation is lenient for now - accept any non-empty value.
         // Tighten per-command as real email actions are wired up.
         Ok(())
     }
 }
 ```
 
-**Option resolution methods.** Each queries the DB via `db.conn()` (the `Arc<Mutex<Connection>>` pattern from CLAUDE.md). **Resolution must be async** — even though result sets are small (tens to low hundreds of items), the palette is a high-frequency UI path and mutex contention could cause jank. The palette's `Confirm` handler dispatches a `Task::perform` wrapping the resolver call, and the result arrives via `OptionsLoaded`. Each resolver call is tagged with a generation counter (`option_load_generation: u64` on `PaletteState`) to discard stale results if the user switches commands or types quickly between resolver calls.
+**Option resolution methods.** Each queries the DB via `db.conn()` (the `Arc<Mutex<Connection>>` pattern from CLAUDE.md). **Resolution must be async** - even though result sets are small (tens to low hundreds of items), the palette is a high-frequency UI path and mutex contention could cause jank. The palette's `Confirm` handler dispatches a `Task::perform` wrapping the resolver call, and the result arrives via `OptionsLoaded`. Each resolver call is tagged with a generation counter (`option_load_generation: u64` on `PaletteState`) to discard stale results if the user switches commands or types quickly between resolver calls.
 
 ```rust
 impl AppInputResolver {
@@ -456,7 +456,7 @@ impl AppInputResolver {
         let account_id = ctx.active_account_id.as_deref()
             .ok_or_else(|| "no active account".to_string())?;
         // Query labels/folders for this account, excluding system labels
-        // (INBOX, SENT, TRASH, etc. — those have dedicated nav commands).
+        // (INBOX, SENT, TRASH, etc. - those have dedicated nav commands).
         // Build OptionItem with path segments for hierarchical folders.
         // Implementation queries the labels table via Db.
         self.db.get_user_folders_for_palette(account_id)
@@ -488,7 +488,7 @@ impl AppInputResolver {
 |---|---|---|
 | `get_user_folders_for_palette(&self, account_id: &str) -> Result<Vec<OptionItem>, String>` | Flat list of user-visible folders/labels with `path` segments for hierarchy | Excludes system labels (INBOX, SENT, etc.). For Gmail, splits `/`-delimited labels into path segments. For Exchange/JMAP/IMAP, walks the folder hierarchy. |
 | `get_user_labels_for_palette(&self, account_id: &str) -> Result<Vec<OptionItem>, String>` | All user labels for the account | Same as folders but may include non-folder labels (Gmail labels that aren't folders). |
-| `get_thread_labels_for_palette(&self, account_id: &str, thread_id: &str) -> Result<Vec<OptionItem>, String>` | Labels currently applied to the thread | For "Remove Label" — only shows what can be removed. |
+| `get_thread_labels_for_palette(&self, account_id: &str, thread_id: &str) -> Result<Vec<OptionItem>, String>` | Labels currently applied to the thread | For "Remove Label" - only shows what can be removed. |
 
 These methods query the existing `labels` table in `ratatoskr.db` and return `OptionItem` structs. The `OptionItem.id` is the label's provider-side ID (e.g., Gmail label ID, Exchange folder ID). The `OptionItem.path` is built from the label's name, splitting Gmail `/`-separated labels or following Exchange parent_id chains.
 
@@ -620,7 +620,7 @@ pub enum PaletteMessage {
     /// Arrow key navigation within the results list.
     SelectNext,
     SelectPrev,
-    /// Enter pressed — confirm the currently highlighted item.
+    /// Enter pressed - confirm the currently highlighted item.
     Confirm,
     /// Stage 2: option list loaded from resolver.
     OptionsLoaded(CommandId, Result<Vec<OptionItem>, String>),
@@ -629,9 +629,9 @@ pub enum PaletteMessage {
 /// Events emitted upward to the App.
 #[derive(Debug, Clone)]
 pub enum PaletteEvent {
-    /// A direct command was selected — dispatch it.
+    /// A direct command was selected - dispatch it.
     ExecuteCommand(CommandId),
-    /// A parameterized command completed stage 2 — dispatch with args.
+    /// A parameterized command completed stage 2 - dispatch with args.
     ExecuteParameterized(CommandId, CommandArgs),
     /// Palette was dismissed without executing anything.
     Dismissed,
@@ -717,14 +717,14 @@ fn build_args(
 
 **File:** `crates/app/src/ui/palette.rs`
 
-The palette renders as an overlay centered horizontally, near the top of the window (vertically offset ~20% from top). It does NOT live inside the normal layout flow — it floats above everything.
+The palette renders as an overlay centered horizontally, near the top of the window (vertically offset ~20% from top). It does NOT live inside the normal layout flow - it floats above everything.
 
 **Widget tree:**
 
 ```
-container (centered overlay backdrop — full window, semi-transparent)
+container (centered overlay backdrop - full window, semi-transparent)
   └── mouse_area (captures clicks on backdrop → Close)
-      └── container (palette card — fixed width 600px, max-height 400px)
+      └── container (palette card - fixed width 600px, max-height 400px)
           ├── text_input (search field, id="palette-input")
           │     placeholder: stage 1 → "Type a command..."
           │                  stage 2 → "Search {param_label}..."
@@ -741,12 +741,12 @@ container (centered overlay backdrop — full window, semi-transparent)
 mouse_area (on_press → select + confirm)
   └── container (row height 36px, background highlight if selected)
       └── row
-          ├── container (category badge — dimmed text, fixed width)
+          ├── container (category badge - dimmed text, fixed width)
           │     text(match.category).size(TEXT_SM).style(text_muted)
-          ├── container (label — fills remaining space)
+          ├── container (label - fills remaining space)
           │     text(match.label).size(TEXT_MD)
           │     // If !match.available: style(text_disabled)
-          └── container (keybinding hint — right-aligned, fixed width)
+          └── container (keybinding hint - right-aligned, fixed width)
                 text(match.keybinding.unwrap_or_default())
                   .size(TEXT_SM).style(text_muted)
                 // Rendered in a subtle badge/pill style
@@ -758,10 +758,10 @@ mouse_area (on_press → select + confirm)
 mouse_area (on_press → select + confirm)
   └── container (row height 36px, background highlight if selected)
       └── row
-          ├── container (label — fills remaining space)
+          ├── container (label - fills remaining space)
           │     text(option.item.label).size(TEXT_MD)
           │     // If option.item.disabled: style(text_disabled)
-          └── container (path breadcrumb — right-aligned, dimmed)
+          └── container (path breadcrumb - right-aligned, dimmed)
                 text(path_display(&option.item.path))
                   .size(TEXT_SM).style(text_muted)
 ```
@@ -797,7 +797,7 @@ fn view(&self) -> Element<'_, Message> {
 }
 ```
 
-**Important:** Per UI.md, `iced::widget::stack` does not block events on lower layers. The `mouse_area` backdrop between the main layout and the palette widget is essential — it captures all clicks that miss the palette, preventing interaction with the mail UI underneath. The `on_press` handler sends `PaletteMessage::Close`.
+**Important:** Per UI.md, `iced::widget::stack` does not block events on lower layers. The `mouse_area` backdrop between the main layout and the palette widget is essential - it captures all clicks that miss the palette, preventing interaction with the mail UI underneath. The `on_press` handler sends `PaletteMessage::Close`.
 
 ### 2.5 Focus Management
 
@@ -910,7 +910,7 @@ pub enum KeyEventMessage {
         /// Whether the event was already handled by a widget (e.g., text_input).
         status: iced::event::Status,
     },
-    /// Pending chord timed out — cancel the sequence.
+    /// Pending chord timed out - cancel the sequence.
     PendingChordTimeout,
 }
 ```
@@ -999,7 +999,7 @@ fn handle_key_pressed(
         ) {
             return self.update(Message::ExecuteCommand(id));
         }
-        // Second chord didn't match any sequence — discard
+        // Second chord didn't match any sequence - discard
         return Task::none();
     }
 
@@ -1277,7 +1277,7 @@ Six independently shippable slices with a clear dependency graph. Each slice pro
 
 **What's built:**
 1. `CommandArgs` enum in `crates/cmdk/src/args.rs`
-2. `command_dispatch.rs` — `build_context()`, `dispatch_command()`, `dispatch_parameterized()`
+2. `command_dispatch.rs` - `build_context()`, `dispatch_command()`, `dispatch_parameterized()`
 3. `CommandRegistry` and `BindingTable` initialization in `boot()`
 4. `KeyEventMessage`, `iced_key_to_chord()`, `iced_named_to_cp()`
 5. Keyboard event subscription in `App::subscription()`
@@ -1285,7 +1285,7 @@ Six independently shippable slices with a clear dependency graph. Each slice pro
 7. Pending chord state + timeout
 8. New `Message` variants: `ExecuteCommand`, `KeyEvent`, `NavigateTo`, `EmailAction`, `Escape`
 9. Handlers for `NavigateTo` and `EmailAction` in `update()` (delegate to existing sidebar/thread logic)
-10. `AppOpenPalette` command ID (binding only — palette UI is next slice)
+10. `AppOpenPalette` command ID (binding only - palette UI is next slice)
 
 **Files changed:**
 - `crates/cmdk/src/args.rs` (new)
@@ -1302,7 +1302,7 @@ Six independently shippable slices with a clear dependency graph. Each slice pro
 
 **Acceptance criteria:** Pressing `e` on a selected thread triggers archive. `g then i` navigates to inbox. `Ctrl+Shift+E` toggles sidebar. All 55 commands' keybindings work. Pending chord indicator shows `"g..."` after pressing `g`. Timeout clears it after 1 second.
 
-### Slice 6b: Palette Overlay UI (Stage 1 — Command Search)
+### Slice 6b: Palette Overlay UI (Stage 1 - Command Search)
 
 **Goal:** `Ctrl+K` opens a floating palette. User types, sees fuzzy-matched commands, selects one, and it executes. Parameterized commands are listed but cannot be executed yet (stage 2 is next slice).
 
@@ -1315,8 +1315,8 @@ Six independently shippable slices with a clear dependency graph. Each slice pro
 6. Keyboard navigation within palette (arrows, Enter, Escape)
 7. Style constants and theme functions for palette
 8. `QueryChanged` handler calling `registry.query()`
-9. `Confirm` handler for `InputMode::Direct` commands — emits `ExecuteCommand`
-10. `Confirm` for `InputMode::Parameterized` — shows "Not yet available" toast or placeholder
+9. `Confirm` handler for `InputMode::Direct` commands - emits `ExecuteCommand`
+10. `Confirm` for `InputMode::Parameterized` - shows "Not yet available" toast or placeholder
 
 **Files changed:**
 - `crates/app/src/ui/palette.rs` (new)
@@ -1329,7 +1329,7 @@ Six independently shippable slices with a clear dependency graph. Each slice pro
 
 **Acceptance criteria:** `Ctrl+K` opens palette. Typing "arch" shows "Archive" as top result. Arrow keys navigate. Enter on "Archive" archives the selected thread and closes the palette. Escape closes. Clicking backdrop closes. Category badges and keybinding hints visible. Unavailable commands shown greyed out.
 
-### Slice 6c: Palette Stage 2 — Parameterized Commands
+### Slice 6c: Palette Stage 2 - Parameterized Commands
 
 **Goal:** Selecting a parameterized command (Move to Folder, Add Label, Remove Label) transitions to stage 2 with a searchable option list. Snooze (DateTime) shows a basic date/time input.
 
@@ -1338,7 +1338,7 @@ Six independently shippable slices with a clear dependency graph. Each slice pro
 2. `PaletteStage::OptionPick` state and transitions
 3. `OptionsLoaded` message and async resolver call
 4. Option list rendering with label + path breadcrumbs
-5. `build_args()` function — stage 2 selection → `CommandArgs`
+5. `build_args()` function - stage 2 selection → `CommandArgs`
 6. `dispatch_parameterized()` wiring
 7. `Db` methods: `get_user_folders_for_palette()`, `get_user_labels_for_palette()`, `get_thread_labels_for_palette()`
 8. Cross-account option resolution (account name in path)
@@ -1386,7 +1386,7 @@ Six independently shippable slices with a clear dependency graph. Each slice pro
 2. New settings key in the app's settings DB for keybinding overrides
 3. Load overrides in `boot()` via `binding_table.load_overrides()`
 4. Save overrides on change (when a settings UI for keybindings is eventually built)
-5. `UsageTracker` persistence — save/load usage counts to settings DB
+5. `UsageTracker` persistence - save/load usage counts to settings DB
 
 **Files changed:**
 - `crates/app/src/main.rs` (load overrides in boot, save on close)
@@ -1414,14 +1414,14 @@ Six independently shippable slices with a clear dependency graph. Each slice pro
 
 **Depends on:** Slice 6e (override persistence).
 
-**This slice is lower priority** — the default bindings work out of the box, and power users can wait for rebinding UI. It can be deferred past V1 if needed.
+**This slice is lower priority** - the default bindings work out of the box, and power users can wait for rebinding UI. It can be deferred past V1 if needed.
 
 ### Dependency Graph
 
 ```
 Slice 6a (keyboard dispatch + infrastructure)
-  ├── Slice 6b (palette UI — stage 1)
-  │     └── Slice 6c (palette — stage 2, parameterized)
+  ├── Slice 6b (palette UI - stage 1)
+  │     └── Slice 6c (palette - stage 2, parameterized)
   ├── Slice 6d (command-backed UI surfaces)  [parallel with 6b/6c]
   └── Slice 6e (override persistence)
         └── Slice 6f (keybinding management UI)
@@ -1460,23 +1460,23 @@ How patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md) and [
 ## Appendix A: File Inventory
 
 New files:
-- `crates/cmdk/src/args.rs` — `CommandArgs` enum
-- `crates/app/src/command_dispatch.rs` — context assembly, dispatch map, key conversion
-- `crates/app/src/command_resolver.rs` — `AppInputResolver` implementation
-- `crates/app/src/ui/palette.rs` — palette state, messages, view
+- `crates/cmdk/src/args.rs` - `CommandArgs` enum
+- `crates/app/src/command_dispatch.rs` - context assembly, dispatch map, key conversion
+- `crates/app/src/command_resolver.rs` - `AppInputResolver` implementation
+- `crates/app/src/ui/palette.rs` - palette state, messages, view
 
 Modified files:
-- `crates/cmdk/src/lib.rs` — re-export `CommandArgs`
-- `crates/cmdk/src/id.rs` — add `AppOpenPalette`
-- `crates/cmdk/src/registry.rs` — register `AppOpenPalette`
-- `crates/app/Cargo.toml` — add `cmdk` dependency
-- `crates/app/src/main.rs` — `App` fields, `Message` variants, `boot()`, `subscription()`, `update()`, `view()`
-- `crates/app/src/ui/mod.rs` — add `pub mod palette;`
-- `crates/app/src/ui/layout.rs` — palette sizing constants
-- `crates/app/src/ui/theme.rs` — palette style functions
-- `crates/app/src/ui/widgets.rs` — `command_button()` helper
-- `crates/app/src/ui/reading_pane.rs` — toolbar refactor to command buttons
-- `crates/app/src/db.rs` — palette query methods
+- `crates/cmdk/src/lib.rs` - re-export `CommandArgs`
+- `crates/cmdk/src/id.rs` - add `AppOpenPalette`
+- `crates/cmdk/src/registry.rs` - register `AppOpenPalette`
+- `crates/app/Cargo.toml` - add `cmdk` dependency
+- `crates/app/src/main.rs` - `App` fields, `Message` variants, `boot()`, `subscription()`, `update()`, `view()`
+- `crates/app/src/ui/mod.rs` - add `pub mod palette;`
+- `crates/app/src/ui/layout.rs` - palette sizing constants
+- `crates/app/src/ui/theme.rs` - palette style functions
+- `crates/app/src/ui/widgets.rs` - `command_button()` helper
+- `crates/app/src/ui/reading_pane.rs` - toolbar refactor to command buttons
+- `crates/app/src/db.rs` - palette query methods
 
 ## Appendix B: Message Enum After Integration
 

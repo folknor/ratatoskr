@@ -2,7 +2,7 @@
 //!
 //! Provides functions to build compose documents with optional signatures and
 //! quoted content (replies/forwards). Works purely with HTML strings and
-//! `Document` types — no database or app crate dependency.
+//! `Document` types - no database or app crate dependency.
 
 use std::sync::Arc;
 
@@ -104,7 +104,7 @@ fn is_blank_html(html: &str) -> bool {
     }
     let doc = from_html(html);
     doc.blocks.iter().all(|b| {
-        // Image blocks are never blank — they represent visible content.
+        // Image blocks are never blank - they represent visible content.
         if matches!(b.as_ref(), Block::Image { .. }) {
             return false;
         }
@@ -463,7 +463,7 @@ mod tests {
 
     #[test]
     fn replace_signature_none_to_new() {
-        // Simulate a document with no signature — old_separator_index points
+        // Simulate a document with no signature - old_separator_index points
         // to where the attribution starts, old_end_index == old_separator_index
         // (empty range to remove).
         let mut doc = Document::from_blocks(vec![

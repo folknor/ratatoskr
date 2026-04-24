@@ -4,53 +4,53 @@
 
 Pure Rust desktop email client. Cargo workspace (19 crates). Key crates:
 
-- **`rtsk`** (`crates/core/`) — Top-level facade: re-exports all subsystem crates, plus owns accounts, oauth, discovery, email actions, DB queries, cloud attachments.
-- **`app`** (`crates/app/`) — iced UI app. Elm architecture (boot/update/view). All UI conventions are in `UI.md` at the repo root — **read UI.md before any UI work.**
-- **`squeeze`** (`crates/squeeze/`) — Attachment compression (CLI + library). Images (mozjpeg-rs + oxipng), PDFs (lopdf), OOXML/ODF.
-- **`store`** (`crates/stores/`) — Content stores: email body store (compressed), inline image store, attachment file cache.
-- **`sync`** (`crates/sync/`) — Sync pipeline, threading (JWZ), bundling (AI inbox classification), filters, smart labels.
-- **`provider`** (`crates/common/`) — Shared provider helpers, encryption (AES-256-GCM), email parsing, HTML sanitization.
-- **`label-colors`** (`crates/label-colors/`) — Label color resolution + Exchange preset color palette.
-- **`types`** (`crates/types/`) — Lightweight shared types (`FolderId`, `TagId`, `SidebarSelection`). Minimal deps (serde only).
-- **`dev-seed`** (`crates/dev-seed/`) — Deterministic test database generator. See dev-seed section below.
-- **Providers**: `gmail`, `jmap`, `graph`, `imap` — each in `crates/{name}/`.
+- **`rtsk`** (`crates/core/`) - Top-level facade: re-exports all subsystem crates, plus owns accounts, oauth, discovery, email actions, DB queries, cloud attachments.
+- **`app`** (`crates/app/`) - iced UI app. Elm architecture (boot/update/view). All UI conventions are in `UI.md` at the repo root - **read UI.md before any UI work.**
+- **`squeeze`** (`crates/squeeze/`) - Attachment compression (CLI + library). Images (mozjpeg-rs + oxipng), PDFs (lopdf), OOXML/ODF.
+- **`store`** (`crates/stores/`) - Content stores: email body store (compressed), inline image store, attachment file cache.
+- **`sync`** (`crates/sync/`) - Sync pipeline, threading (JWZ), bundling (AI inbox classification), filters, smart labels.
+- **`provider`** (`crates/common/`) - Shared provider helpers, encryption (AES-256-GCM), email parsing, HTML sanitization.
+- **`label-colors`** (`crates/label-colors/`) - Label color resolution + Exchange preset color palette.
+- **`types`** (`crates/types/`) - Lightweight shared types (`FolderId`, `TagId`, `SidebarSelection`). Minimal deps (serde only).
+- **`dev-seed`** (`crates/dev-seed/`) - Deterministic test database generator. See dev-seed section below.
+- **Providers**: `gmail`, `jmap`, `graph`, `imap` - each in `crates/{name}/`.
 
 ## Commands
 
-- `cargo check --workspace` — check all crates
-- `cargo check -p rtsk` — check core only
-- `cargo check -p app` — check app only
-- `cargo run -p app` — run the iced app (requires a seeded DB, see `crates/app/seed-db.py`)
-- `cargo check -p squeeze` — check squeeze only
-- `cargo test -p squeeze` — run squeeze tests
+- `cargo check --workspace` - check all crates
+- `cargo check -p rtsk` - check core only
+- `cargo check -p app` - check app only
+- `cargo run -p app` - run the iced app (requires a seeded DB, see `crates/app/seed-db.py`)
+- `cargo check -p squeeze` - check squeeze only
+- `cargo test -p squeeze` - run squeeze tests
 
 ## Dev-Seed
 
-`crates/dev-seed/` generates a deterministic test database from scratch. Config lives in `dev-seed.toml` at the repo root (thread count, account count, locale, RNG seed). When the app is built with `--features dev-seed`, it **wipes the entire dev data directory and re-seeds on every launch** — there is no persistence between runs. Schema comes from `crates/db/src/db/migrations.rs` (a single v100 migration). Dev-seed does not use DB migrations for schema changes — just update the CREATE TABLE in migrations.rs and re-run.
+`crates/dev-seed/` generates a deterministic test database from scratch. Config lives in `dev-seed.toml` at the repo root (thread count, account count, locale, RNG seed). When the app is built with `--features dev-seed`, it **wipes the entire dev data directory and re-seeds on every launch** - there is no persistence between runs. Schema comes from `crates/db/src/db/migrations.rs` (a single v100 migration). Dev-seed does not use DB migrations for schema changes - just update the CREATE TABLE in migrations.rs and re-run.
 
 ## Crate Architecture
 
-**`ProgressReporter` trait** (`rtsk::progress`) — All event emission goes through `&dyn ProgressReporter`. The iced app will provide its own implementation.
+**`ProgressReporter` trait** (`rtsk::progress`) - All event emission goes through `&dyn ProgressReporter`. The iced app will provide its own implementation.
 
-**State types are `Clone`** — `DbState`, `BodyStoreState`, `InlineImageStoreState`, `SearchState`, `AppCryptoState` all wrap `Arc<Mutex<Connection>>` or similar and implement `Clone`. Both `DbState` and `BodyStoreState` expose `pub fn conn(&self) -> Arc<Mutex<Connection>>` for synchronous access.
+**State types are `Clone`** - `DbState`, `BodyStoreState`, `InlineImageStoreState`, `SearchState`, `AppCryptoState` all wrap `Arc<Mutex<Connection>>` or similar and implement `Clone`. Both `DbState` and `BodyStoreState` expose `pub fn conn(&self) -> Arc<Mutex<Connection>>` for synchronous access.
 
-**Scoped queries** (`core/src/db/queries_extra/scoped_queries.rs`) — Cross-account query infrastructure. `ViewScope` enum (`AllAccounts`/`Account`/`SharedMailbox`/`PublicFolder`) in `core/src/scope.rs` is the sidebar's single source of truth. Personal-account queries use `AccountScope` internally and filter `shared_mailbox_id IS NULL`. Shared mailbox and public folder scopes route to dedicated query functions. Predicate-based virtual folder queries for Starred/Snoozed use boolean flags on `threads`, not label joins. Draft counts include `local_drafts` table.
+**Scoped queries** (`core/src/db/queries_extra/scoped_queries.rs`) - Cross-account query infrastructure. `ViewScope` enum (`AllAccounts`/`Account`/`SharedMailbox`/`PublicFolder`) in `core/src/scope.rs` is the sidebar's single source of truth. Personal-account queries use `AccountScope` internally and filter `shared_mailbox_id IS NULL`. Shared mailbox and public folder scopes route to dedicated query functions. Predicate-based virtual folder queries for Starred/Snoozed use boolean flags on `threads`, not label joins. Draft counts include `local_drafts` table.
 
-**Navigation state** (`core/src/db/queries_extra/navigation.rs`) — `get_navigation_state()` returns the full sidebar state in one call: universal folders (Inbox, Starred, Snoozed, Sent, Drafts, Trash) with unread counts, smart folders, and per-account labels when scoped. Smart folder and per-label unread counts are scaffolded (return 0).
+**Navigation state** (`core/src/db/queries_extra/navigation.rs`) - `get_navigation_state()` returns the full sidebar state in one call: universal folders (Inbox, Starred, Snoozed, Sent, Drafts, Trash) with unread counts, smart folders, and per-account labels when scoped. Smart folder and per-label unread counts are scaffolded (return 0).
 
-**Thread detail** (`core/src/db/queries_extra/thread_detail.rs`) — `get_thread_detail()` returns messages (with ownership detection, collapsed summaries, body text from body store), labels (with resolved colors), attachments (with message context), and attachment collapse state for a single thread.
+**Thread detail** (`core/src/db/queries_extra/thread_detail.rs`) - `get_thread_detail()` returns messages (with ownership detection, collapsed summaries, body text from body store), labels (with resolved colors), attachments (with message context), and attachment collapse state for a single thread.
 
 ## Gotchas that will break your code
 
 **Multiple content stores** (`crates/stores/`): Message bodies live outside the main `messages` table in `bodies.db` (compressed), and inline multipart images have their own attachment database. Use `BodyStoreState` / `InlineImageStoreState` rather than assuming message content is in the main SQLite database. The attachment file cache is also in this crate.
 
-**Four email providers**: `gmail_api`, `jmap`, `graph` (Microsoft), `imap`. All unified behind the `ProviderOps` trait (`common/src/ops.rs`). Folder-accepting methods use `&FolderId`, tag-accepting methods use `&TagId` (`common/src/typed_ids.rs`). Typed IDs flow from `MailActionIntent` through `MailOperation` to the provider — no raw string boundaries in the action pipeline.
+**Four email providers**: `gmail_api`, `jmap`, `graph` (Microsoft), `imap`. All unified behind the `ProviderOps` trait (`common/src/ops.rs`). Folder-accepting methods use `&FolderId`, tag-accepting methods use `&TagId` (`common/src/typed_ids.rs`). Typed IDs flow from `MailActionIntent` through `MailOperation` to the provider - no raw string boundaries in the action pipeline.
 
 **Action pipeline**: `MailActionIntent → resolve_intent() → build_execution_plan() → batch_execute() → handle_action_completed()`. All 12 action types flow through one path. `MailOperation` (core) is the canonical execution type. `CompletionBehavior` (app) drives toast, auto-advance, and undo via exhaustive match. See `docs/architecture.md` § "Adding a New Email Action" for the checklist.
 
-**Generation counters use branded tokens**: `GenerationCounter<T>` / `GenerationToken<T>` in `core/src/generation.rs`. `next()` is the only way to get a token (bumps and returns). `#[must_use]` on `next()` — use `let _ = counter.next()` for invalidation-only bumps. Phantom type brands prevent cross-counter comparison. See `docs/architecture.md` for the full pattern.
+**Generation counters use branded tokens**: `GenerationCounter<T>` / `GenerationToken<T>` in `core/src/generation.rs`. `next()` is the only way to get a token (bumps and returns). `#[must_use]` on `next()` - use `let _ = counter.next()` for invalidation-only bumps. Phantom type brands prevent cross-counter comparison. See `docs/architecture.md` for the full pattern.
 
-**Core crate boundary**: Business logic belongs in `rtsk`. The app crate calls core functions directly (no command wrappers needed — the Tauri app shell has been removed). When adding new core functionality, add it to `crates/core/src/`.
+**Core crate boundary**: Business logic belongs in `rtsk`. The app crate calls core functions directly (no command wrappers needed - the Tauri app shell has been removed). When adding new core functionality, add it to `crates/core/src/`.
 
 **iced is depended on in 3 places**: `crates/app/Cargo.toml` (full iced umbrella), `crates/rte/Cargo.toml` (iced umbrella, optional behind `widget` feature), and `crates/iced-drop/Cargo.toml` (iced_core + iced_widget + iced_runtime individually). All three must point to the same iced source. When switching between the git URL and local path, update all three.
 
@@ -63,16 +63,16 @@ These are non-obvious behaviors of the `jmap-client` crate that will matter if t
 - **`mb.total_emails()`** returns `usize` directly, not `Option<usize>`.
 - **`take_id()` / `take_list()`** require `let mut` on the response object.
 - **Filter type inference**: Rust can't infer the generic for `Some(filter.into())` in `email_query()`. Bind to an explicit type: `let filter: core::query::Filter<email::query::Filter> = ...;`
-- **`download(blob_id)`** takes only the blob ID — NOT `(account_id, blob_id, name)`.
+- **`download(blob_id)`** takes only the blob ID - NOT `(account_id, blob_id, name)`.
 - **`email_submission_create(email_id, identity_id)`** needs an identity ID, not account ID. Fetch identities via builder pattern.
 - **`changes.created()/updated()/destroyed()`** return `&[String]`, not `&[&str]`. Use `.map(String::as_str)` not `.copied()`.
 - **`fetch_text_body_values(true)`** is accessed via `get_req.arguments().fetch_text_body_values(true)`, not directly on the get request.
-- **`mailbox_changes(since_state, 0)`** — max_changes of 0 is invalid per JMAP spec. Use 500.
+- **`mailbox_changes(since_state, 0)`** - max_changes of 0 is invalid per JMAP spec. Use 500.
 
 ## Lint rules
 
 **Rust (edition 2024, strict clippy)**:
-- `unwrap_used`: denied — use `?` or handle errors
+- `unwrap_used`: denied - use `?` or handle errors
 - `await_holding_lock`: denied
 - `too_many_arguments`: 7 max
 - `too_many_lines`: 100 max
@@ -80,20 +80,20 @@ These are non-obvious behaviors of the `jmap-client` crate that will matter if t
 
 ## Multi-Agent Orchestration
 
-**Do NOT use worktree isolation for parallel agents.** Worktrees create merge conflicts that silently drop agent work. Instead, launch agents in the same tree with strict file ownership — zero overlap.
+**Do NOT use worktree isolation for parallel agents.** Worktrees create merge conflicts that silently drop agent work. Instead, launch agents in the same tree with strict file ownership - zero overlap.
 
-**Why no worktrees:** Worktrees let agents work on diverged snapshots. When merging back, `git checkout --ours/--theirs` drops code, conflict markers get missed, and features end up "existing but not wired" — types/functions created but never connected to message dispatch, views, or call sites. This happened repeatedly in a 114-commit session and was only caught by a rigorous 3-pass audit.
+**Why no worktrees:** Worktrees let agents work on diverged snapshots. When merging back, `git checkout --ours/--theirs` drops code, conflict markers get missed, and features end up "existing but not wired" - types/functions created but never connected to message dispatch, views, or call sites. This happened repeatedly in a 114-commit session and was only caught by a rigorous 3-pass audit.
 
 **Agent coordination rules:**
 - Each agent gets exclusive ownership of specific files. No two agents touch the same file.
-- `main.rs` is shared — agents may ONLY add Message enum variants and one-line dispatch arms. All handler logic goes in `handlers/*.rs`.
+- `main.rs` is shared - agents may ONLY add Message enum variants and one-line dispatch arms. All handler logic goes in `handlers/*.rs`.
 - Agents must read their handler file FIRST (it already has extracted methods). Do not replace existing code with placeholders.
 - Agents must NOT run `cargo check/build/test`. The orchestrator validates between agents.
 - Include `UI.md` and `CLAUDE.md` in every agent's required reading.
 
-**Verification standard — "implemented" means wired:**
+**Verification standard - "implemented" means wired:**
 - A feature is NOT implemented unless the user can reach it through current Message dispatch → handler → view wiring.
-- Types that exist but are never constructed, methods that exist but are never called, message variants with no dispatch arm — these are dead code, not implementations.
+- Types that exist but are never constructed, methods that exist but are never called, message variants with no dispatch arm - these are dead code, not implementations.
 - After agents complete, verify wiring by checking: (1) Message variant exists, (2) dispatch arm in update() calls handler, (3) handler performs the work, (4) view renders the result or side effect is observable.
 
 **Audit protocol:**
@@ -114,14 +114,14 @@ These are non-obvious behaviors of the `jmap-client` crate that will matter if t
 
 Four archetypes are configured: `security`, `bugs`, `perf`, `arch`. The `sweep` group fans out to all four in parallel.
 
-Instructions are piped via stdin. The agents fetch code themselves — just tell them what to look at:
+Instructions are piped via stdin. The agents fetch code themselves - just tell them what to look at:
 
 ```bash
 echo "check the new sync logic" | review bugs
 echo "review this change" | review arch,perf
 ```
 
-Without `--anchor`, stdin goes directly to the session — the sessions are already onboarded with project context and their review focus. Use `--anchor` for the first review in a session or to re-anchor a stale session. When using `--anchor`, reinforce the session's identity in your piped instructions:
+Without `--anchor`, stdin goes directly to the session - the sessions are already onboarded with project context and their review focus. Use `--anchor` for the first review in a session or to re-anchor a stale session. When using `--anchor`, reinforce the session's identity in your piped instructions:
 
 - **security**: "Remember: you're our security auditor for ratatoskr."
 - **bugs**: "Remember: you're our QA engineer embedded on ratatoskr."

@@ -43,7 +43,7 @@ impl SystemFonts {
     /// Query the desktop environment for configured fonts.
     ///
     /// Returns `SystemFonts::default()` (all `None`) if detection fails or the
-    /// platform is unsupported. This is intentional — callers should always have
+    /// platform is unsupported. This is intentional - callers should always have
     /// a bundled fallback font.
     pub async fn detect() -> Self {
         #[cfg(target_os = "linux")]
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn parse_ambiguous_style_as_family() {
-        // "Bold 12" — "Bold" could be a font family name; we don't strip
+        // "Bold 12" - "Bold" could be a font family name; we don't strip
         // it because that would leave an empty family.
         let font = parse_font_description("Bold 12").expect("should parse");
         assert_eq!(font.family, "Bold");

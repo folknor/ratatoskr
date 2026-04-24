@@ -135,7 +135,7 @@ pub enum ComposeMessage {
     AutocompleteNavigate(i32),
     /// Dismiss the autocomplete dropdown.
     AutocompleteDismiss,
-    /// Formatting toolbar actions — emit ToggleInlineStyle to the rich text editor.
+    /// Formatting toolbar actions - emit ToggleInlineStyle to the rich text editor.
     FormatBold,
     FormatItalic,
     FormatUnderline,
@@ -146,7 +146,7 @@ pub enum ComposeMessage {
     /// Open the link insertion dialog.
     FormatLink,
     // ── Attachments ──
-    /// User clicked the attach button — opens file picker.
+    /// User clicked the attach button - opens file picker.
     AttachFiles,
     /// File picker returned selected files (read asynchronously).
     FilesSelected(Vec<ComposeAttachment>),
@@ -192,7 +192,7 @@ pub enum ComposeMessage {
     },
     /// Mouse moved while dragging.
     DragMove(Point),
-    /// Mouse released — drop the token.
+    /// Mouse released - drop the token.
     DragEnd(Point),
     /// Cancel the drag.
     DragCancel,
@@ -354,10 +354,10 @@ pub struct ComposeState {
     pub draft_id: String,
     pub draft_dirty: bool,
 
-    // Send in progress — disables Send button, shows "Sending..." status
+    // Send in progress - disables Send button, shows "Sending..." status
     pub sending: bool,
 
-    // Draft ID for the send path — set on first send attempt, reused on retry
+    // Draft ID for the send path - set on first send attempt, reused on retry
     // so that failed retries update the existing draft row instead of creating
     // a new one.
     pub send_draft_id: Option<String>,
@@ -495,7 +495,7 @@ impl ComposeState {
         // Set subject
         state.subject = mode.prefixed_subject();
 
-        // Add To recipient (not for Forward — forward starts with empty To)
+        // Add To recipient (not for Forward - forward starts with empty To)
         if !matches!(state.mode, ComposeMode::Forward { .. }) {
             if let Some(email) = to_email {
                 let label = to_name.filter(|n| !n.is_empty()).unwrap_or(email);
@@ -779,7 +779,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             state.draft_dirty = true;
         }
         ComposeMessage::ContextMenuExpandGroup { .. } => {
-            // Group expansion requires DB access — handled by pop_out.rs
+            // Group expansion requires DB access - handled by pop_out.rs
             state.context_menu = None;
         }
         ComposeMessage::GroupExpanded {
@@ -841,7 +841,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         }
         ComposeMessage::DragEnd(_pos) => {
             // Drop detection would require knowing field bounds at runtime.
-            // For now, just cancel — the context menu "Move to" is the
+            // For now, just cancel - the context menu "Move to" is the
             // primary cross-field move mechanism. Full visual DnD with
             // hit-testing requires storing field bounds from the view pass.
             state.drag = None;
@@ -881,7 +881,7 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         ComposeMessage::BulkPasteDismiss => {
             state.bulk_paste_banner = None;
         }
-        // Formatting toolbar — emit ToggleInlineStyle to the rich text editor
+        // Formatting toolbar - emit ToggleInlineStyle to the rich text editor
         ComposeMessage::FormatBold => {
             state
                 .body
@@ -1208,7 +1208,7 @@ fn handle_token_input_message(
         TokenInputMessage::ArrowSelectToken(_) => {}
         TokenInputMessage::ArrowToText => {}
         // Autocomplete keyboard events are handled at the compose level,
-        // not here — they should never reach this function.
+        // not here - they should never reach this function.
         TokenInputMessage::AutocompleteDown
         | TokenInputMessage::AutocompleteUp
         | TokenInputMessage::AutocompleteAccept
@@ -1597,7 +1597,7 @@ fn compose_footer<'a>(
     window_id: iced::window::Id,
     state: &'a ComposeState,
 ) -> Element<'a, Message> {
-    // Discard button — shows confirmation if there's user content
+    // Discard button - shows confirmation if there's user content
     let discard_msg = if state.has_user_content() {
         ComposeMessage::ToggleDiscardConfirm
     } else {

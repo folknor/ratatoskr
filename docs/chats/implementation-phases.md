@@ -8,7 +8,7 @@ Revised after review agent sweep. Each phase is deployable independently.
 
 ### 1a. `thread_participants` table
 
-The existing `to_addresses`/`cc_addresses`/`bcc_addresses` TEXT fields on `messages` are comma-separated strings — useful for display and reply-all, but not queryable for participant-level operations. Add a normalized projection alongside them (not replacing them):
+The existing `to_addresses`/`cc_addresses`/`bcc_addresses` TEXT fields on `messages` are comma-separated strings - useful for display and reply-all, but not queryable for participant-level operations. Add a normalized projection alongside them (not replacing them):
 
 ```sql
 CREATE TABLE thread_participants (
@@ -24,16 +24,16 @@ CREATE INDEX idx_thread_participants_email
 
 Populated during sync: when `upsert_messages` runs, parse `from_address`, `to_addresses`, `cc_addresses` and INSERT OR IGNORE into `thread_participants`. All 4 providers go through the same message persistence path, so one insertion point covers all.
 
-Backfill migration: one-time pass parsing existing `messages` rows. This is the expensive part — parse every message's address fields. Run outside the migration transaction (post-migration fixup) to avoid holding the DB lock.
+Backfill migration: one-time pass parsing existing `messages` rows. This is the expensive part - parse every message's address fields. Run outside the migration transaction (post-migration fixup) to avoid holding the DB lock.
 
 This table enables:
-- **1:1 detection:** `SELECT COUNT(DISTINCT email) FROM thread_participants WHERE account_id = ? AND thread_id = ?` — if exactly 2, it's a two-party thread
-- **Per-contact thread discovery:** `SELECT thread_id FROM thread_participants WHERE email = ? AND account_id = ?` — find all threads involving a contact
+- **1:1 detection:** `SELECT COUNT(DISTINCT email) FROM thread_participants WHERE account_id = ? AND thread_id = ?` - if exactly 2, it's a two-party thread
+- **Per-contact thread discovery:** `SELECT thread_id FROM thread_participants WHERE email = ? AND account_id = ?` - find all threads involving a contact
 - **Chat timeline construction:** resolve eligible thread IDs first, then load messages from those threads using existing indexes
 
 ### 1b. `chat_contacts` table
 
-Keyed by normalized email — no `account_id`. Chat designation is a global, cross-account decision ("I want to chat-view Alice" regardless of which account I email her from). This matches the problem statement's design: "The Chats section is not affected by scope."
+Keyed by normalized email - no `account_id`. Chat designation is a global, cross-account decision ("I want to chat-view Alice" regardless of which account I email her from). This matches the problem statement's design: "The Chats section is not affected by scope."
 
 ```sql
 CREATE TABLE chat_contacts (
@@ -43,7 +43,7 @@ CREATE TABLE chat_contacts (
 );
 ```
 
-No CASCADE FK needed — email is not tied to an account. Cleanup on contact undesignation is explicit (remove the row).
+No CASCADE FK needed - email is not tied to an account. Cleanup on contact undesignation is explicit (remove the row).
 
 If Alice has multiple email addresses, each address is a separate `chat_contacts` row. The contact system's deduplication (via `contacts` table or `seen_addresses`) can group them in the UI, but the underlying query is per-email.
 
@@ -93,7 +93,7 @@ get_chat_timeline(email: &str, limit: usize, before: Option<i64>) -> Vec<ChatMes
 
 **View architecture:**
 
-The chat timeline is NOT a mode within ReadingPane — it's a distinct top-level content view. When a chat contact is selected, the thread list + reading pane layout is replaced by a single chat timeline panel (similar to how Calendar replaces the mail layout).
+The chat timeline is NOT a mode within ReadingPane - it's a distinct top-level content view. When a chat contact is selected, the thread list + reading pane layout is replaced by a single chat timeline panel (similar to how Calendar replaces the mail layout).
 
 New `ChatTimeline` component:
 - Messages as bubbles: sent (right-aligned, accent color), received (left-aligned, surface color)
@@ -109,7 +109,7 @@ New `ChatTimeline` component:
 - User's own signatures (match against `signatures` table for sent messages)
 - Quoted reply blocks (`On <date>, <person> wrote:` + `>` prefixed lines)
 
-Build stripping as a reusable module in `common` — it's useful beyond chats.
+Build stripping as a reusable module in `common` - it's useful beyond chats.
 
 **Body loading:**
 - Messages in the timeline need body text from `bodies.db` via `BodyStoreState`
@@ -117,7 +117,7 @@ Build stripping as a reusable module in `common` — it's useful beyond chats.
 
 **Navigation integration:**
 - New `NavigationTarget::Chat { email: String }` variant
-- Chat selection sets an `active_chat: Option<String>` on App (not a ViewScope variant — chats are cross-scope)
+- Chat selection sets an `active_chat: Option<String>` on App (not a ViewScope variant - chats are cross-scope)
 - `reset_view_state()` clears `active_chat`
 - Thread detail loading is skipped when `active_chat` is set
 
@@ -132,14 +132,14 @@ Build stripping as a reusable module in `common` — it's useful beyond chats.
 **Sidebar section:**
 - "CHATS" header, collapsible, hidden when no chat contacts designated
 - Each entry: avatar/initials, contact name (from contacts table or seen_addresses), message preview, relative timestamp, unread bold
-- Ordered by `sort_order` (designated order for v1 — defer drag-and-drop reorder to Phase 6)
+- Ordered by `sort_order` (designated order for v1 - defer drag-and-drop reorder to Phase 6)
 - Click → loads chat timeline, replacing thread list + reading pane
 
-**Not affected by scope** — same list regardless of selected account.
+**Not affected by scope** - same list regardless of selected account.
 
 **Unread tracking:**
 - Per-contact unread count: count of unread messages in `is_chat_thread = 1` threads for that contact
-- Opening a chat marks messages read — batch operation across all qualifying threads
+- Opening a chat marks messages read - batch operation across all qualifying threads
 - Mark-read dispatches through action service (`mark_read` per thread) to keep provider in sync
 - Rate-limit or batch the provider dispatch to avoid hammering the API for prolific contacts
 
@@ -158,7 +158,7 @@ Build stripping as a reusable module in `common` — it's useful beyond chats.
 
 **Compose widget:**
 - Simple text input at bottom of timeline
-- No subject line — reuses latest thread's subject. New conversation: "Hello, {first_name}" (or LLM-generated if configured)
+- No subject line - reuses latest thread's subject. New conversation: "Hello, {first_name}" (or LLM-generated if configured)
 - Enter to send, Shift+Enter for newline (setting to invert)
 - Input expands upward (overlay, not push) up to ~6 lines, then internal scroll
 - Signature auto-appended but hidden in sender's chat view
@@ -195,14 +195,14 @@ Build stripping as a reusable module in `common` — it's useful beyond chats.
 - Apply as stripping layer 4 (between HTML markers and heuristic patterns)
 
 **Heuristic patterns (layer 5):**
-- Valediction phrases ("Best regards", "Sincerely", etc.) — configurable, language-aware
+- Valediction phrases ("Best regards", "Sincerely", etc.) - configurable, language-aware
 - "Sent from my iPhone/Android" boilerplate
 - Separator lines (dashes, underscores)
 
 **Confidence and graceful degradation:**
 - Low confidence → show full message with subtle "show clean" toggle
 - Never strip aggressively on first message from new contact
-- Collapse, don't delete — zero information loss
+- Collapse, don't delete - zero information loss
 
 **Verification:** Signatures stripped reliably after accumulating messages. New contacts degrade gracefully.
 
@@ -221,8 +221,8 @@ Build stripping as a reusable module in `common` — it's useful beyond chats.
 
 ## Risks
 
-- **Signature stripping reliability** — mitigated by per-contact learning and collapse-not-delete
-- **`thread_participants` backfill performance** — parsing all existing messages' address fields. Mitigate: run as post-migration fixup, not inside transaction
-- **Chat timeline query performance** — resolved by querying via thread IDs (from `thread_participants` + `is_chat_thread`), then loading messages per-thread using existing indexes
-- **Compose latency expectations** — Enter-to-send feels instant but email goes through SMTP. Need clear sending → sent transition
-- **Inbox exclusion cross-cutting** — every thread query needs `is_chat_thread = 0`. Follow the `shared_mailbox_id IS NULL` pattern established in contract #10
+- **Signature stripping reliability** - mitigated by per-contact learning and collapse-not-delete
+- **`thread_participants` backfill performance** - parsing all existing messages' address fields. Mitigate: run as post-migration fixup, not inside transaction
+- **Chat timeline query performance** - resolved by querying via thread IDs (from `thread_participants` + `is_chat_thread`), then loading messages per-thread using existing indexes
+- **Compose latency expectations** - Enter-to-send feels instant but email goes through SMTP. Need clear sending → sent transition
+- **Inbox exclusion cross-cutting** - every thread query needs `is_chat_thread = 0`. Follow the `shared_mailbox_id IS NULL` pattern established in contract #10

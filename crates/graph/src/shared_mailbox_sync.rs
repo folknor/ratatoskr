@@ -47,7 +47,7 @@ pub async fn sync_shared_mailbox(
         progress,
     };
 
-    // Check if we have any delta tokens for this mailbox — if not, run initial sync.
+    // Check if we have any delta tokens for this mailbox - if not, run initial sync.
     let tokens = sync_state::load_shared_mailbox_delta_tokens(db, account_id, mailbox_id).await?;
 
     let now = chrono::Utc::now().timestamp();
@@ -106,7 +106,7 @@ pub async fn sync_shared_mailbox(
 
 /// Sync all enabled shared mailboxes for an account.
 ///
-/// Each mailbox syncs independently — one failure does not block others.
+/// Each mailbox syncs independently - one failure does not block others.
 /// Returns a list of `(mailbox_id, result)` pairs for the caller to log/report.
 pub async fn sync_all_shared_mailboxes(
     primary_client: &GraphClient,

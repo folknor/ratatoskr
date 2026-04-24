@@ -2,15 +2,15 @@
 
 ## Overview
 
-A significant portion of enterprise email is conversational — short, rapid,
+A significant portion of enterprise email is conversational - short, rapid,
 informal exchanges between two people that read like chat messages but render as
 full emails with headers, signatures, legal disclaimers, and quoted reply
 chains. The friction between the conversational intent and the formal
 presentation is a major reason people switch to Teams, Slack, or other chat
-tools for quick 1:1 communication — then lose the archival, searchability, and
+tools for quick 1:1 communication - then lose the archival, searchability, and
 universal reachability that email provides.
 
-Chats is a UI mode — not a protocol or a sync change. The underlying messages
+Chats is a UI mode - not a protocol or a sync change. The underlying messages
 are standard emails, sent and received through the user's existing accounts.
 What changes is how they are presented. When a contact is designated as a "chat
 contact," all direct 1:1 correspondence with that person renders as a chat
@@ -50,15 +50,15 @@ conversation history in every message.
 When people move these conversations to Teams or Slack, they gain conversational
 UI but lose:
 
-- **Universal reachability** — the other person needs to be on the same
+- **Universal reachability** - the other person needs to be on the same
   platform
-- **Archival** — chat history retention policies are often shorter than email;
+- **Archival** - chat history retention policies are often shorter than email;
   messages may be deleted, edited, or lost when someone leaves the organization
-- **Search** — email search is mature, local, and fast; chat search is often
+- **Search** - email search is mature, local, and fast; chat search is often
   cloud-dependent and limited
-- **Formality gradient** — in chat tools, everything feels informal; there's no
+- **Formality gradient** - in chat tools, everything feels informal; there's no
   way to shift register when the conversation turns serious
-- **Cross-organization communication** — email works with anyone who has an
+- **Cross-organization communication** - email works with anyone who has an
   email address
 
 ### Email clients don't distinguish conversational exchange from formal email
@@ -73,7 +73,7 @@ different from a group discussion or a newsletter.
 ### Explicit opt-in per contact
 
 Chats is not automatic. The user explicitly designates specific contacts as
-"chat contacts." This is a deliberate choice — typically for close colleagues,
+"chat contacts." This is a deliberate choice - typically for close colleagues,
 direct reports, or frequent collaborators where the communication pattern is
 already conversational.
 
@@ -81,7 +81,7 @@ This avoids the problem of trying to automatically detect "chatty" threads
 (which would be fragile and surprising) and gives the user full control over
 which conversations get the lightweight treatment.
 
-The contact system is already built — provider sync (Graph, Google People API,
+The contact system is already built - provider sync (Graph, Google People API,
 CardDAV), auto-collected seen addresses, contact groups, photo caching, and
 FTS5 search are all implemented (see `docs/contacts/problem-statement.md`).
 Chat contact designation layers on top of this existing infrastructure as a
@@ -91,13 +91,13 @@ boolean flag or separate table, not a new contact concept.
 
 The underlying emails are unchanged. Chat view is purely a rendering decision:
 
-- Messages render as **bubbles** in a timeline — sent messages on one side,
+- Messages render as **bubbles** in a timeline - sent messages on one side,
   received on the other
 - **Signatures are stripped** from the display (the full message remains
   accessible)
-- **Subject lines are de-emphasized or hidden** — in a chat context, the
+- **Subject lines are de-emphasized or hidden** - in a chat context, the
   subject is noise
-- **Quoted reply chains are collapsed** — the timeline already shows the history
+- **Quoted reply chains are collapsed** - the timeline already shows the history
 - **Newest messages are at the bottom**, scrolled to the latest
 - **Attachments render inline** where possible (images, PDFs) rather than as a
   list
@@ -116,7 +116,7 @@ The sidebar has four sections (see `docs/sidebar/problem-statement.md`):
 
 Chats adds a **new section** between pinned searches (section 1) and
 universal folders (section 2), making five sections total. The existing
-section numbering used across other docs (sections 2–4) is unaffected —
+section numbering used across other docs (sections 2-4) is unaffected -
 Chats is inserted above them.
 
 ```
@@ -142,7 +142,7 @@ Starred
 Each chat contact entry shows:
 
 - The contact's name (and avatar when available from the contact system's
-  photo cache — during implementation, investigate whether the 50MB cache
+  photo cache - during implementation, investigate whether the 50MB cache
   cap is configurable and sane for users with many chat contacts)
 - A preview of the latest message (signature-stripped)
 - Unread state indicated by bold text (consistent with the thread list)
@@ -156,7 +156,7 @@ navigation items like folders and smart folders.
 
 The Chats section is **not affected by scope**. Like pinned searches, smart
 folders, and labels, it is always the same regardless of which account is
-selected. A chat contact may correspond across multiple accounts — the chat
+selected. A chat contact may correspond across multiple accounts - the chat
 view aggregates this naturally (though threads themselves are always
 single-account, per Ratatoskr's threading model).
 
@@ -167,7 +167,7 @@ section cluttering the sidebar).
 ### Conversation grouping
 
 Ratatoskr's threading engine (JWZ algorithm in `crates/sync/`) already groups
-messages into threads. Threads are always single-account — a thread belongs to
+messages into threads. Threads are always single-account - a thread belongs to
 one account.
 
 For chat view, the interesting question is how to group threads into a single
@@ -176,7 +176,7 @@ person over months, each with a different subject line. Chat view should
 present these as **one continuous conversation** (or at least a recent-first
 stream), not as separate thread items.
 
-This means the chat timeline is not a thread view — it's a **per-contact
+This means the chat timeline is not a thread view - it's a **per-contact
 message stream**, pulling messages from all threads between the user and that
 contact. Thread boundaries become less important; chronological ordering of
 individual messages becomes primary.
@@ -188,13 +188,13 @@ A thread is either a chat or it isn't. If every message
 in a thread has exactly two participants (the user and the chat contact),
 it's a chat thread and appears in the chat timeline. If any message in the
 thread has a third party (CC, additional To), the entire thread is not a
-chat — it appears in the thread list as normal email. No partial inclusion,
+chat - it appears in the thread list as normal email. No partial inclusion,
 no fork points, no automagic.
 
 ### What about multi-account contacts?
 
 A user might email the same person from different accounts (work and personal).
-The contact system handles deduplication by email address — if Alice has
+The contact system handles deduplication by email address - if Alice has
 alice@work.com and alice@personal.com, and the user has synced contacts or
 seen-address records linking both addresses, they are the same contact.
 
@@ -221,7 +221,7 @@ should reflect the chat context:
   generates a subject: `"Hello, {contact_first_name}"` (i18n-aware,
   localized string). If the user has configured an LLM, it generates the
   subject from the message body instead.
-- Normal signature insertion — the recipient sees a standard email, so the
+- Normal signature insertion - the recipient sees a standard email, so the
   user's configured signature is appended as usual (see
   `docs/signatures/implementation-spec.md`). The signature is hidden in
   the sender's own chat view via the same stripping logic.
@@ -255,7 +255,7 @@ signature detection.
 
 A layered approach, from most to least confident:
 
-1. **HTML client markers** (~100% confidence when present) — major email
+1. **HTML client markers** (~100% confidence when present) - major email
    clients tag their own signatures with identifiable HTML structures.
    Since we already parse HTML in `common`, these are free:
 
@@ -268,26 +268,26 @@ A layered approach, from most to least confident:
    | Thunderbird | `<div class="moz-cite-prefix">`, `<blockquote type="cite">` |
    | Apple Mail | `<blockquote type="cite">` |
 
-2. **Standard delimiter** — `-- \n` (RFC 3676). 100% reliable when present,
-   but rare in practice — only Thunderbird/Mutt-era clients insert it.
+2. **Standard delimiter** - `-- \n` (RFC 3676). 100% reliable when present,
+   but rare in practice - only Thunderbird/Mutt-era clients insert it.
 
-3. **User's own signatures** — the user's configured signatures (stored in
+3. **User's own signatures** - the user's configured signatures (stored in
    the `signatures` table) can be matched against their own sent messages
    with 100% confidence. See "Relationship to the signatures subsystem"
    below.
 
-4. **Per-sender learned pattern** — extract the common trailing block across
+4. **Per-sender learned pattern** - extract the common trailing block across
    multiple messages from the same sender. This is novel to our chat contact
-   use case — no existing library does this because they operate on single
+   use case - no existing library does this because they operate on single
    messages without sender history. High confidence after a few messages.
 
-5. **Heuristic patterns** — valediction phrases ("Best regards",
+5. **Heuristic patterns** - valediction phrases ("Best regards",
    "Sincerely", etc.), "Sent from my iPhone" boilerplate, lines of
    dashes/underscores as separators. Well-understood, used by the
    `email_reply_parser` family of libraries (GitHub, Zapier, et al.).
-   Moderate confidence — language-dependent and not universal.
+   Moderate confidence - language-dependent and not universal.
 
-6. **Quote removal** — strip `On <date>, <person> wrote:` quoted blocks
+6. **Quote removal** - strip `On <date>, <person> wrote:` quoted blocks
    and `>` prefixed lines. The chat timeline already provides the
    conversation context, so quoted reply chains are pure noise.
 
@@ -295,30 +295,30 @@ A layered approach, from most to least confident:
 
 The open-source landscape for signature stripping is limited:
 
-- **mailgun/talon** (Python) — the most ambitious attempt. Offers both
+- **mailgun/talon** (Python) - the most ambitious attempt. Offers both
   heuristic and ML (SVM classifier) modes. Claims 90% accuracy;
   independently measured at ~25-30%. Unmaintained since 2016.
 - **github/email_reply_parser** (Ruby, with ports to Python, PHP, and
-  **Rust**) — pure regex/heuristic. Good for quote detection, basic for
+  **Rust**) - pure regex/heuristic. Good for quote detection, basic for
   signatures. The Rust port (`email_reply_parser` crate, v0.1.2) exists
   but is minimal.
-- **Carvalho & Cohen (CMU, 2004)** — foundational academic work. Line-level
+- **Carvalho & Cohen (CMU, 2004)** - foundational academic work. Line-level
   classification using features like email/URL/phone patterns, sender name
   presence, punctuation ratio, and line position. Achieved 99.37% accuracy
   with windowed sequence models. The feature set is relevant if we ever
   want an ML layer.
 
 No existing library combines HTML marker detection with per-sender learning.
-Our layered approach — HTML markers first, then per-sender patterns, then
-heuristics — should significantly outperform any single technique.
+Our layered approach - HTML markers first, then per-sender patterns, then
+heuristics - should significantly outperform any single technique.
 
 ### Graceful degradation
 
 When confidence is low (new contact, unusual message format):
 
-- **Collapse, don't delete** — show the message body clean, but provide a
+- **Collapse, don't delete** - show the message body clean, but provide a
   subtle "show full message" affordance. Zero information loss.
-- **Learn over time** — confidence improves as more messages from the contact
+- **Learn over time** - confidence improves as more messages from the contact
   are processed.
 - **Never strip aggressively on the first message** from a new chat contact.
   Wait until a pattern is established.
@@ -326,7 +326,7 @@ When confidence is low (new contact, unusual message format):
 ### Relationship to the signatures subsystem
 
 Ratatoskr already has a signatures system for compose (`docs/signatures/`).
-Signature stripping for chat view is a **separate concern** — the compose
+Signature stripping for chat view is a **separate concern** - the compose
 signatures system manages the user's own outgoing signatures, while chat
 stripping removes incoming signatures from display. These are different
 codepaths with different data sources and different reliability requirements.
@@ -337,45 +337,45 @@ high-confidence stripping source for sent messages (layer 3 above).
 
 ### What Chats is NOT
 
-- **Not a chat protocol** — no XMPP, no Matrix, no proprietary messaging. These
+- **Not a chat protocol** - no XMPP, no Matrix, no proprietary messaging. These
   are emails.
-- **Not presence/typing indicators** — there is no real-time channel. The other
+- **Not presence/typing indicators** - there is no real-time channel. The other
   person is using regular email. (Though if both parties use Ratatoskr, presence
   could be explored as a future extension.)
-- **Not group chat** — this is 1:1 only. Group email dynamics are different
+- **Not group chat** - this is 1:1 only. Group email dynamics are different
   enough that forcing them into a chat view would be awkward. (Could be explored
   later.)
 
 ### What makes this feasible
 
-- **No server changes** — purely a client-side rendering decision
-- **No protocol extensions** — standard IMAP/JMAP/Graph, standard MIME messages
-- **No cooperation required** — the recipient doesn't need to do anything
+- **No server changes** - purely a client-side rendering decision
+- **No protocol extensions** - standard IMAP/JMAP/Graph, standard MIME messages
+- **No cooperation required** - the recipient doesn't need to do anything
   different
-- **Threading engine already exists** — JWZ threading in `crates/sync/` already
+- **Threading engine already exists** - JWZ threading in `crates/sync/` already
   groups messages into threads
-- **Body store exists** — message content is already parsed and stored in
+- **Body store exists** - message content is already parsed and stored in
   `bodies.db` (compressed) via `BodyStoreState`
-- **Contact system exists** — contact sync, deduplication, seen addresses, photo
+- **Contact system exists** - contact sync, deduplication, seen addresses, photo
   cache, and FTS5 search are all implemented
-- **Threads are single-account** — no cross-account thread complexity; the
+- **Threads are single-account** - no cross-account thread complexity; the
   multi-account aspect is handled at the contact level, not the thread level
 
 ### What makes this hard
 
-- **Signature stripping reliability** — the core technical risk. Mitigated by
+- **Signature stripping reliability** - the core technical risk. Mitigated by
   per-contact learning and collapse-not-delete.
-- **Conversation grouping across threads** — presenting multiple threads with
+- **Conversation grouping across threads** - presenting multiple threads with
   the same contact as a single chat stream requires a query model that operates
   at the message level rather than the thread level, which is different from how
   the rest of the app works. A long-running chat contact could have thousands of
-  messages across years of correspondence — the timeline will need pagination
+  messages across years of correspondence - the timeline will need pagination
   or virtual scrolling.
-- **1:1 detection** — reliably determining that a thread has exactly two
+- **1:1 detection** - reliably determining that a thread has exactly two
   participants (the user and the contact) requires checking all message headers
   in the thread, not just the latest. If any message has a third party, the
   entire thread exits chat view.
-- **Compose UX expectations** — users will expect chat-level responsiveness
+- **Compose UX expectations** - users will expect chat-level responsiveness
   (Enter to send). But email is not instant, and sent messages go through SMTP.
   The latency gap between expectation and reality needs to be managed.
 
@@ -384,15 +384,15 @@ high-confidence stripping source for sent messages (layer 3 above).
 1. ~~**Thread boundaries in chat view**~~ **Resolved.** Date separators
    between messages on different days, same as chat apps. When the subject
    line changes, the new subject is shown in subtle small text directly
-   above the first bubble with that subject — not a full separator, just
+   above the first bubble with that subject - not a full separator, just
    enough to signal a topic change.
 
 2. ~~**New message from chat contact in inbox**~~ **Resolved.** A 1:1 thread
    with a chat contact is a chat, not an email. It does not appear in the
-   Inbox thread list — it only appears in the Chats section.
+   Inbox thread list - it only appears in the Chats section.
 
 3. ~~**Chat contact designation UX**~~ **Resolved.** Chat designation is a
-   toggle in the contact management UI — it's an explicit contact-level
+   toggle in the contact management UI - it's an explicit contact-level
    setting, not a thread-level action.
 
 4. ~~**Search integration**~~ **Resolved: not needed.** The Chats sidebar
@@ -404,7 +404,7 @@ high-confidence stripping source for sent messages (layer 3 above).
    chat contacts can be revisited then.
 
 6. ~~**Chat threads and search/Inbox interaction**~~ **Resolved.** Chat
-   threads are excluded from the Inbox thread list view only — they are
+   threads are excluded from the Inbox thread list view only - they are
    still normal emails in the database. They appear in search results like
    any other thread. Opening a chat marks all messages read. Un-designating
    a chat contact returns all their threads to the normal thread list view
@@ -414,17 +414,17 @@ high-confidence stripping source for sent messages (layer 3 above).
 
 Detailed implementation specs will be written per phase. Rough ordering:
 
-1. **Data model + chat contact designation** — schema for marking contacts as
+1. **Data model + chat contact designation** - schema for marking contacts as
    chat contacts, core queries for fetching chat timelines (per-contact message
    streams across threads)
-2. **Chat timeline view** — the bubble-based rendering of 1:1 message streams,
+2. **Chat timeline view** - the bubble-based rendering of 1:1 message streams,
    including basic signature stripping and quote removal
-3. **Sidebar integration** — the Chats section in the sidebar (between pinned
+3. **Sidebar integration** - the Chats section in the sidebar (between pinned
    searches and universal folders) with contact list, previews, and unread
    counts
-4. **Chat compose** — the lightweight inline compose experience, including
+4. **Chat compose** - the lightweight inline compose experience, including
    emoji shortcode translation
-5. **Signature stripping refinement** — per-sender learning, confidence scoring,
+5. **Signature stripping refinement** - per-sender learning, confidence scoring,
    and the collapse/expand UX
-6. **Polish** — conversation grouping heuristics, mixed-mode handling, date
+6. **Polish** - conversation grouping heuristics, mixed-mode handling, date
    separators, settings and preferences

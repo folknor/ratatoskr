@@ -78,7 +78,7 @@ pub fn compress_archive(
         let is_image_entry = is_compressible_image(&name, prefixes);
 
         // Guard against zip bombs: cap actual decompressed bytes via take().
-        // We don't trust the declared size — attackers control that field.
+        // We don't trust the declared size - attackers control that field.
         let mut content = Vec::new();
         entry
             .by_ref()
@@ -110,7 +110,7 @@ pub fn compress_archive(
                     continue;
                 }
                 Ok(None) | Err(_) => {
-                    // Not worth compressing or failed — write original.
+                    // Not worth compressing or failed - write original.
                 }
             }
         }

@@ -26,17 +26,17 @@ pub struct ImapPublicFolder {
 /// Parsed IMAP ACL rights for a folder (RFC 4314).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImapFolderRights {
-    /// `r` — read messages
+    /// `r` - read messages
     pub can_read: bool,
-    /// `w` — write flags (other than \Seen and \Deleted)
+    /// `w` - write flags (other than \Seen and \Deleted)
     pub can_write: bool,
-    /// `i` — insert/append messages
+    /// `i` - insert/append messages
     pub can_insert: bool,
-    /// `d` or `t` — delete messages
+    /// `d` or `t` - delete messages
     pub can_delete: bool,
-    /// `k` or `c` — create subfolders
+    /// `k` or `c` - create subfolders
     pub can_create: bool,
-    /// `a` — administer (change ACLs)
+    /// `a` - administer (change ACLs)
     pub can_administer: bool,
 }
 
@@ -222,7 +222,7 @@ pub async fn sync_imap_public_folder(
 /// Upsert discovered IMAP folders into the `public_folders` table.
 ///
 /// Uses the decoded folder path as `folder_id` since IMAP folders don't have
-/// opaque IDs like EWS — the path IS the identifier.
+/// opaque IDs like EWS - the path IS the identifier.
 async fn persist_discovered_folders(
     db: &DbState,
     account_id: &str,
@@ -266,10 +266,10 @@ async fn persist_discovered_folders(
                 folder_class,
                 f.unseen, // unread_count
                 f.exists, // total_count
-                0,        // can_create_items — unknown until MYRIGHTS
-                0,        // can_modify — unknown until MYRIGHTS
-                0,        // can_delete — unknown until MYRIGHTS
-                1i32,     // can_read — assume readable (we listed it)
+                0,        // can_create_items - unknown until MYRIGHTS
+                0,        // can_modify - unknown until MYRIGHTS
+                0,        // can_delete - unknown until MYRIGHTS
+                1i32,     // can_read - assume readable (we listed it)
             ])
             .map_err(|e| format!("upsert public folder {}: {e}", f.path))?;
         }
@@ -388,7 +388,7 @@ async fn upsert_public_folder_items(
             // Use message_id as item_id; fall back to UID-based ID
             let item_id = msg.message_id.as_deref().unwrap_or("").to_string();
             if item_id.is_empty() {
-                // Skip messages without a Message-ID — we need a stable identifier
+                // Skip messages without a Message-ID - we need a stable identifier
                 continue;
             }
 

@@ -313,7 +313,7 @@ impl CardDavClient {
     /// Get the addressbook URL or return an error.
     fn require_addressbook_url(&self) -> Result<String, String> {
         self.addressbook_url.clone().ok_or_else(|| {
-            "No addressbook URL — call discover() or set_addressbook_url() first".to_string()
+            "No addressbook URL - call discover() or set_addressbook_url() first".to_string()
         })
     }
 }

@@ -12,7 +12,7 @@ use crate::progress::NoopProgressReporter;
 /// Local DB mutation for add-label: validate label exists and is a tag, then
 /// insert into `thread_labels` (idempotent).
 ///
-/// Container labels (folders) are rejected — they use move operations, not add/remove.
+/// Container labels (folders) are rejected - they use move operations, not add/remove.
 pub(crate) async fn add_label_local(
     ctx: &ActionContext,
     account_id: &str,
@@ -155,7 +155,7 @@ pub(crate) async fn add_label_with_provider(
 /// Local DB mutation for remove-label: validate label exists and is a tag, then
 /// delete from `thread_labels` (idempotent).
 ///
-/// Container labels (folders) are rejected — they use move operations, not add/remove.
+/// Container labels (folders) are rejected - they use move operations, not add/remove.
 pub(crate) async fn remove_label_local(
     ctx: &ActionContext,
     account_id: &str,

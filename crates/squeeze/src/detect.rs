@@ -202,7 +202,7 @@ fn detect_from_magic(data: &[u8]) -> Format {
     }
 
     // SVG: starts with <svg or <?xml (with svg element inside).
-    // Only check for the <svg prefix — <?xml is too ambiguous.
+    // Only check for the <svg prefix - <?xml is too ambiguous.
     if data.len() >= 4 && &data[..4] == b"<svg" {
         return Format::Svg;
     }
@@ -214,7 +214,7 @@ fn detect_from_magic(data: &[u8]) -> Format {
         }
     }
 
-    // ZIP-based (PK\x03\x04) — could be OOXML or ODF, but without MIME we
+    // ZIP-based (PK\x03\x04) - could be OOXML or ODF, but without MIME we
     // can't distinguish. Return Unsupported and let the caller provide a MIME type.
     if data[0] == 0x50 && data[1] == 0x4B && data[2] == 0x03 && data[3] == 0x04 {
         // We could try to peek inside the ZIP for content types, but that's

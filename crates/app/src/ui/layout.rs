@@ -4,73 +4,73 @@ use iced::Padding;
 // Values: 0, 2, 4, 8, 12, 16, 24, 32, 48, 64
 // Every padding/spacing in the app must use one of these.
 
-/// 0px — No space
+/// 0px - No space
 pub const SPACE_0: f32 = 0.0;
-/// 2px — Hairline: badge padding, dot offsets
+/// 2px - Hairline: badge padding, dot offsets
 pub const SPACE_XXXS: f32 = 2.0;
-/// 4px — Related elements: icon+text gap
+/// 4px - Related elements: icon+text gap
 pub const SPACE_XXS: f32 = 4.0;
-/// 8px — Standard element gap, compact lists
+/// 8px - Standard element gap, compact lists
 pub const SPACE_XS: f32 = 8.0;
-/// 12px — Comfortable list items, card sections
+/// 12px - Comfortable list items, card sections
 pub const SPACE_SM: f32 = 12.0;
-/// 16px — Panel padding, section separators
+/// 16px - Panel padding, section separators
 pub const SPACE_MD: f32 = 16.0;
-/// 24px — Major sections within a panel
+/// 24px - Major sections within a panel
 pub const SPACE_LG: f32 = 24.0;
-/// 32px — Panel margins, generous padding
+/// 32px - Panel margins, generous padding
 pub const SPACE_XL: f32 = 32.0;
-/// 48px — Large layout gaps
+/// 48px - Large layout gaps
 pub const SPACE_XXL: f32 = 48.0;
-/// 64px — Page-level spacing
+/// 64px - Page-level spacing
 pub const SPACE_XXXL: f32 = 64.0;
 
 // ── Type scale ─────────────────────────────────────────
 // Every text .size() call must reference one of these.
 
-/// 10px — Badges, section headers, tertiary metadata
+/// 10px - Badges, section headers, tertiary metadata
 pub const TEXT_XS: f32 = 10.0;
-/// 11px — Snippets, timestamps, captions
+/// 11px - Snippets, timestamps, captions
 pub const TEXT_SM: f32 = 11.0;
-/// 12px — Body text, nav items, labels
+/// 12px - Body text, nav items, labels
 pub const TEXT_MD: f32 = 12.0;
-/// 13px — Emphasized body, compose button
+/// 13px - Emphasized body, compose button
 pub const TEXT_LG: f32 = 13.0;
-/// 14px — Icons at standard size
+/// 14px - Icons at standard size
 pub const TEXT_XL: f32 = 14.0;
-/// 16px — Empty state titles, section titles
+/// 16px - Empty state titles, section titles
 pub const TEXT_TITLE: f32 = 16.0;
-/// 18px — Page titles, thread subject
+/// 18px - Page titles, thread subject
 pub const TEXT_HEADING: f32 = 18.0;
 
 // ── Icon sizes ─────────────────────────────────────────
 // Every icon .size() call must reference one of these.
 
-/// 10px — Inline indicators (chevrons in section headers, attachment clips)
+/// 10px - Inline indicators (chevrons in section headers, attachment clips)
 pub const ICON_XS: f32 = 10.0;
-/// 11px — Compact UI icons (chevron in dropdown trigger)
+/// 11px - Compact UI icons (chevron in dropdown trigger)
 pub const ICON_SM: f32 = 11.0;
-/// 12px — Standard small icons (action bar, settings, nav)
+/// 12px - Standard small icons (action bar, settings, nav)
 pub const ICON_MD: f32 = 12.0;
-/// 13px — Compose button icon
+/// 13px - Compose button icon
 pub const ICON_LG: f32 = 13.0;
-/// 14px — Dropdown items, reply buttons, leading slot icons
+/// 14px - Dropdown items, reply buttons, leading slot icons
 pub const ICON_XL: f32 = 14.0;
-/// 28px — Mode switcher hero icon
+/// 28px - Mode switcher hero icon
 pub const ICON_HERO: f32 = 28.0;
 
 // ── Avatar sizes ───────────────────────────────────────
 // Every avatar_circle() call must reference one of these.
 
-/// 20px — Dropdown menu items
+/// 20px - Dropdown menu items
 pub const AVATAR_DROPDOWN_ITEM: f32 = 20.0;
-/// 24px — Dropdown trigger, compact inline
+/// 24px - Dropdown trigger, compact inline
 pub const AVATAR_DROPDOWN_TRIGGER: f32 = 24.0;
-/// 28px — Thread list cards
+/// 28px - Thread list cards
 pub const AVATAR_THREAD_CARD: f32 = 28.0;
-/// 32px — Message cards in reading pane
+/// 32px - Message cards in reading pane
 pub const AVATAR_MESSAGE_CARD: f32 = 32.0;
-/// 56px — Contact sidebar hero
+/// 56px - Contact sidebar hero
 pub const AVATAR_CONTACT_HERO: f32 = 56.0;
 
 // ── Leading slot widths ────────────────────────────────
@@ -90,11 +90,11 @@ pub const DOT_SIZE: f32 = 8.0;
 // ── Border radii ───────────────────────────────────────
 // Every border::rounded() or radius value must use one of these.
 
-/// 4px — Buttons, nav items, input fields
+/// 4px - Buttons, nav items, input fields
 pub const RADIUS_SM: f32 = 4.0;
-/// 6px — Elevated containers
+/// 6px - Elevated containers
 pub const RADIUS_MD: f32 = 6.0;
-/// 8px — Cards, floating menus, badges, primary button
+/// 8px - Cards, floating menus, badges, primary button
 pub const RADIUS_LG: f32 = 8.0;
 
 // ── Item heights ────────────────────────────────────────
@@ -277,7 +277,7 @@ pub const PAD_SETTINGS_ROW: Padding = Padding {
     left: 16.0,
 };
 
-/// Select trigger padding (vertical only — sits inside a padded row).
+/// Select trigger padding (vertical only - sits inside a padded row).
 pub const PAD_SELECT_TRIGGER: Padding = Padding {
     top: 4.0,
     right: 0.0,

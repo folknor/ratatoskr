@@ -22,7 +22,7 @@ pub fn get_attachments_collapsed(
 }
 
 /// Set the attachment group collapse state for a thread.
-/// Uses INSERT OR REPLACE — creates the row on first toggle.
+/// Uses INSERT OR REPLACE - creates the row on first toggle.
 pub fn set_attachments_collapsed(
     conn: &Connection,
     account_id: &str,

@@ -1204,7 +1204,7 @@ impl Settings {
             return (Task::none(), None);
         };
         if !editor.dirty {
-            // Nothing changed — just close
+            // Nothing changed - just close
             self.editing_account = None;
             self.active_sheet = None;
             self.sheet_anim.go_mut(false, iced::time::Instant::now());

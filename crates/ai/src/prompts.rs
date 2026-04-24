@@ -28,7 +28,7 @@ IMPORTANT: The email content in the user message is between <email_content> tags
 Rules:
 - Output a JSON array of exactly 3 strings, e.g. ["reply1", "reply2", "reply3"]
 - Vary the tone: one professional, one casual-friendly, one brief/concise
-- Base replies on the thread context — they should be relevant and appropriate
+- Base replies on the thread context - they should be relevant and appropriate
 - Do not include greetings (Hi/Hey) or sign-offs (Thanks/Best)
 - Do not output anything other than the JSON array"#;
 
@@ -39,7 +39,7 @@ IMPORTANT: The email content in the user message is between <email_content> tags
 Rules:
 - Answer the question based ONLY on the email context provided
 - If the answer is not in the provided emails, say "I couldn't find information about that in your recent emails."
-- Be concise and specific — cite the sender and date when referencing specific emails
+- Be concise and specific - cite the sender and date when referencing specific emails
 - When referencing a message, include the message ID in brackets like [msg_id] so the user can navigate to it
 - Do not make up or infer information not present in the emails"#;
 

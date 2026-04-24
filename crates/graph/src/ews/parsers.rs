@@ -462,7 +462,7 @@ pub(super) fn parse_get_item_response(xml: &str) -> Result<EwsItem, String> {
                     change_key = Some(extract_attribute(e, "ChangeKey")).filter(|s| !s.is_empty());
                 }
                 if in_message && local == "Body" {
-                    // Body element — content will come in Text event
+                    // Body element - content will come in Text event
                 }
             }
             Ok(Event::Empty(ref e)) => {

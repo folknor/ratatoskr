@@ -25,7 +25,7 @@ Built with LLMs. See [LLM.md](LLM.md).
 ## Features
 
 **Email**
-- Four providers behind a unified interface — Gmail API, Microsoft Graph (Exchange/Outlook), JMAP, IMAP
+- Four providers behind a unified interface - Gmail API, Microsoft Graph (Exchange/Outlook), JMAP, IMAP
 - Smart threading (JWZ algorithm) with cross-account views
 - Full-text search powered by [tantivy](https://github.com/quickwit-oss/tantivy)
 - Smart folders with a query language (date ranges, labels, senders)
@@ -34,7 +34,7 @@ Built with LLMs. See [LLM.md](LLM.md).
 
 **Compose**
 - Rich text editor with formatting
-- Attachment compression — images (mozjpeg, oxipng), PDFs (lopdf), Office documents
+- Attachment compression - images (mozjpeg, oxipng), PDFs (lopdf), Office documents
 - Cloud attachments via OneDrive and Google Drive
 
 **Calendar & Contacts**
@@ -43,7 +43,7 @@ Built with LLMs. See [LLM.md](LLM.md).
 - Contact import
 
 **Privacy & Security**
-- Local-first — all data stays on disk in SQLite + compressed content stores
+- Local-first - all data stays on disk in SQLite + compressed content stores
 - AES-256-GCM credential encryption
 - AMP email stripping, URL tracking removal
 - BIMI brand indicator verification

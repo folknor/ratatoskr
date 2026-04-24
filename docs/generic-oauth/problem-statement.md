@@ -2,7 +2,7 @@
 
 ## The Problem
 
-No desktop email client supports custom OAuth2/OIDC providers. Every client hardcodes flows for Google, Microsoft, and sometimes Apple — but if you're running Dovecot + Postfix behind Keycloak, Authentik, Authelia, or any other OIDC provider, you're stuck with app passwords.
+No desktop email client supports custom OAuth2/OIDC providers. Every client hardcodes flows for Google, Microsoft, and sometimes Apple - but if you're running Dovecot + Postfix behind Keycloak, Authentik, Authelia, or any other OIDC provider, you're stuck with app passwords.
 
 This forces organizations into one of two bad choices:
 
@@ -13,7 +13,7 @@ Almost every modern mail server supports OAuth2 authentication via SASL OAUTHBEA
 
 ## Why This Matters
 
-On-prem email is not a niche. Universities, hospitals, government agencies, defense contractors, and privacy-conscious companies all run their own mail infrastructure. Many have invested heavily in SSO (Keycloak, Authentik, Okta, Azure AD on-prem, ADFS) and require 2FA across all services. Email is often the last holdout — the one service where users still type a password because their client can't do anything else.
+On-prem email is not a niche. Universities, hospitals, government agencies, defense contractors, and privacy-conscious companies all run their own mail infrastructure. Many have invested heavily in SSO (Keycloak, Authentik, Okta, Azure AD on-prem, ADFS) and require 2FA across all services. Email is often the last holdout - the one service where users still type a password because their client can't do anything else.
 
 Ratatoskr would be the first desktop email client to close this gap.
 
@@ -49,9 +49,9 @@ This is a single GET request that gives us everything we need to drive the exist
 
 Two entry points:
 
-**A. Issuer URL entry** — User provides their OIDC issuer URL (e.g., `https://auth.example.com/realms/corp`). We run discovery, populate everything, and the user just authenticates. Minimal friction for IT-managed deployments where users know their SSO URL.
+**A. Issuer URL entry** - User provides their OIDC issuer URL (e.g., `https://auth.example.com/realms/corp`). We run discovery, populate everything, and the user just authenticates. Minimal friction for IT-managed deployments where users know their SSO URL.
 
-**B. Email-based discovery** — User enters their email. We try:
+**B. Email-based discovery** - User enters their email. We try:
 1. Hardcoded registry (existing behavior for Gmail, Microsoft, etc.)
 2. Mozilla autoconfig / SRV records (existing discovery)
 3. **New**: WebFinger or `.well-known/openid-configuration` on the email domain
@@ -63,11 +63,11 @@ For on-prem deployments, IT can publish a Mozilla autoconfig XML that includes t
 
 This is the hardest UX problem. Unlike Google/Microsoft where we ship a client ID, custom OIDC providers require the client to be registered. Options:
 
-**A. Pre-registered client ID** — The IT admin registers Ratatoskr as a client in their IdP and gives the user a client ID (and optionally secret). We provide documentation and a recommended configuration (redirect URI: `http://localhost:17248/callback`, grant type: authorization code, PKCE enabled). This is the most common pattern for desktop apps against corporate SSO.
+**A. Pre-registered client ID** - The IT admin registers Ratatoskr as a client in their IdP and gives the user a client ID (and optionally secret). We provide documentation and a recommended configuration (redirect URI: `http://localhost:17248/callback`, grant type: authorization code, PKCE enabled). This is the most common pattern for desktop apps against corporate SSO.
 
-**B. RFC 7591 Dynamic Client Registration** — If the OIDC provider supports it, we can register automatically. Check `registration_endpoint` in the discovery document. This is elegant but not universally supported.
+**B. RFC 7591 Dynamic Client Registration** - If the OIDC provider supports it, we can register automatically. Check `registration_endpoint` in the discovery document. This is elegant but not universally supported.
 
-**C. Public client with PKCE only** — Some providers allow public clients (no client secret) with PKCE. This is the OAuth2 for Native Apps recommendation (RFC 8252). We should try this first and only prompt for client ID/secret if needed.
+**C. Public client with PKCE only** - Some providers allow public clients (no client secret) with PKCE. This is the OAuth2 for Native Apps recommendation (RFC 8252). We should try this first and only prompt for client ID/secret if needed.
 
 Realistically, we should support all three in priority order: try dynamic registration, fall back to public client, fall back to manual client ID entry.
 
@@ -83,8 +83,8 @@ The OIDC provider handles authentication, but we still need IMAP/SMTP server add
 
 The OAuth2 access token from the IdP needs to be accepted by Dovecot/Postfix. This is a server-side configuration concern, but we need to be aware of the token format:
 
-- **XOAUTH2**: `user={email}\x01auth=Bearer {access_token}\x01\x01` — already implemented
-- **OAUTHBEARER** (RFC 7628): More modern, slightly different format — worth adding as SASL mechanism detection from IMAP CAPABILITY response
+- **XOAUTH2**: `user={email}\x01auth=Bearer {access_token}\x01\x01` - already implemented
+- **OAUTHBEARER** (RFC 7628): More modern, slightly different format - worth adding as SASL mechanism detection from IMAP CAPABILITY response
 
 We should check the IMAP server's CAPABILITY response for `AUTH=XOAUTH2` vs `AUTH=OAUTHBEARER` and use the appropriate mechanism.
 
@@ -99,18 +99,18 @@ For generic providers, start with `openid email profile` and allow the user (or 
 Most of this already works. One consideration for on-prem: refresh token rotation policies vary wildly. Some providers issue single-use refresh tokens. Our existing refresh logic handles this (we store the new refresh token from each exchange), but we should be careful about:
 
 - Retry behavior on refresh failure (don't burn a single-use refresh token on a transient network error)
-- Grace period before refresh (already 5 minutes — reasonable)
+- Grace period before refresh (already 5 minutes - reasonable)
 - Re-authentication flow when refresh tokens expire entirely
 
 ## Standards Reference
 
-- **RFC 8252** — OAuth 2.0 for Native Apps (our overall model)
-- **RFC 7636** — PKCE (already implemented)
-- **RFC 7628** — SASL OAUTHBEARER (need to add alongside XOAUTH2)
-- **RFC 7591** — Dynamic Client Registration (nice to have)
-- **OpenID Connect Discovery 1.0** — `.well-known/openid-configuration`
-- **RFC 7033** — WebFinger (for email-based discovery)
-- **Mozilla Autoconfig** — ISP database / autoconfig XML (already integrated)
+- **RFC 8252** - OAuth 2.0 for Native Apps (our overall model)
+- **RFC 7636** - PKCE (already implemented)
+- **RFC 7628** - SASL OAUTHBEARER (need to add alongside XOAUTH2)
+- **RFC 7591** - Dynamic Client Registration (nice to have)
+- **OpenID Connect Discovery 1.0** - `.well-known/openid-configuration`
+- **RFC 7033** - WebFinger (for email-based discovery)
+- **Mozilla Autoconfig** - ISP database / autoconfig XML (already integrated)
 
 ## Open Questions
 

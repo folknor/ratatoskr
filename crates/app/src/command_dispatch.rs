@@ -7,7 +7,7 @@ use crate::Message;
 
 // ── Supporting enums ────────────────────────────────────
 
-/// Navigation targets — sidebar-backed destinations wrap `SidebarSelection`,
+/// Navigation targets - sidebar-backed destinations wrap `SidebarSelection`,
 /// non-sidebar destinations (search, chat) have their own variants.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NavigationTarget {
@@ -342,7 +342,7 @@ fn nav_msg(selection: SidebarSelection) -> Message {
 
 pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
     match id {
-        // Navigation — direct
+        // Navigation - direct
         CommandId::NavNext => dispatch_nav_next(app),
         CommandId::NavPrev => dispatch_nav_prev(app),
         CommandId::NavOpen => dispatch_nav_open(app),
@@ -353,7 +353,7 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
             crate::ui::reading_pane::ReadingPaneMessage::PrevMessage,
         )),
 
-        // Navigation — folder/view targets
+        // Navigation - folder/view targets
         CommandId::NavGoInbox => Some(nav_msg(SidebarSelection::Inbox)),
         CommandId::NavGoStarred => Some(nav_msg(SidebarSelection::Folder(
             types::SystemFolder::Starred,
@@ -407,7 +407,7 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
             crate::ui::thread_list::ThreadListMessage::SelectFromHere,
         )),
 
-        // Parameterized — handled by dispatch_parameterized, not here
+        // Parameterized - handled by dispatch_parameterized, not here
         CommandId::EmailMoveToFolder
         | CommandId::EmailAddLabel
         | CommandId::EmailRemoveLabel

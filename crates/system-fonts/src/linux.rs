@@ -14,7 +14,7 @@ const KEY_DOCUMENT_FONT: &str = "document-font-name";
 
 /// Read a single setting from xdg-desktop-portal.
 ///
-/// The portal returns `Variant(Variant(String))` — a doubly-wrapped variant.
+/// The portal returns `Variant(Variant(String))` - a doubly-wrapped variant.
 /// We unwrap both layers to get the inner string.
 async fn read_setting(
     proxy: &zbus::proxy::Proxy<'_>,

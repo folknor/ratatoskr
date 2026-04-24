@@ -6,9 +6,9 @@ Implementation plan for unifying the search backend per `docs/search/problem-sta
 
 The unified search pipeline is implemented (Slices 1-4 complete). Entry point: `crates/core/src/search_pipeline.rs`.
 
-- **Tantivy** (`crates/search/src/lib.rs`) — full-text ranked search. Cross-account (multi-account filter via `BooleanQuery`). Returns message-level results with `group_by_thread()` helper.
-- **Smart folder SQL** (`crates/smart-folder/src/`) — operator-based SQL queries. Cross-account via `AccountScope`. Returns thread-level results. Supports all operators below.
-- **Unified pipeline** (`crates/core/src/search_pipeline.rs`) — routes queries through SQL, Tantivy, or both based on parsed content.
+- **Tantivy** (`crates/search/src/lib.rs`) - full-text ranked search. Cross-account (multi-account filter via `BooleanQuery`). Returns message-level results with `group_by_thread()` helper.
+- **Smart folder SQL** (`crates/smart-folder/src/`) - operator-based SQL queries. Cross-account via `AccountScope`. Returns thread-level results. Supports all operators below.
+- **Unified pipeline** (`crates/core/src/search_pipeline.rs`) - routes queries through SQL, Tantivy, or both based on parsed content.
 
 ## Target State
 
@@ -171,17 +171,17 @@ The `__LAST_7_DAYS__` / `__LAST_30_DAYS__` / `__TODAY__` token system in `crates
 ### New clause builders
 
 **`account:` operator:**
-- Match by account `display_name` or `email` (not a `name` column — that doesn't exist). The `DbAccount` struct has `display_name: Option<String>` and `email: String`. The SQL: `JOIN accounts a ON m.account_id = a.id WHERE (a.display_name LIKE ? OR a.email LIKE ?)`
+- Match by account `display_name` or `email` (not a `name` column - that doesn't exist). The `DbAccount` struct has `display_name: Option<String>` and `email: String`. The SQL: `JOIN accounts a ON m.account_id = a.id WHERE (a.display_name LIKE ? OR a.email LIKE ?)`
 - OR semantics for multiple: `(a.display_name LIKE ?1 OR a.email LIKE ?1) OR (a.display_name LIKE ?2 OR a.email LIKE ?2)`
 - Resolve matched account IDs early, then use ID-based filtering downstream (more efficient than repeated joins). When `account:` operators are present, they override any scope parameter.
 
 **`folder:` operator:**
 - Match by folder/mailbox name or path: `EXISTS (SELECT 1 FROM thread_labels tl JOIN labels l ON tl.label_id = l.id AND tl.account_id = l.account_id WHERE tl.thread_id = t.id AND l.name LIKE ?)`
-- For hierarchical paths (`folder:"Projects/Q2"`): IMAP folders have `imap_folder_path` on `DbLabel` which stores the full path. Gmail labels encode hierarchy as `/`-separated names (e.g., "Projects/Q2" is the literal label name). Exchange/JMAP folders need a normalization strategy — the current `DbLabel` has no generic `path` column. **Resolution: option (b)** — add a normalized `folder_path` column populated by all providers during sync. This is the cleaner approach: the SQL builder matches against one column regardless of provider, and the sync layer owns the normalization. Requires a migration and sync-side changes in each provider crate, but avoids per-provider branching in the query layer. The sidebar spec (`docs/sidebar/problem-statement.md`) also needs hierarchy support for `NavigationFolder` — the same `folder_path` column serves both needs.
+- For hierarchical paths (`folder:"Projects/Q2"`): IMAP folders have `imap_folder_path` on `DbLabel` which stores the full path. Gmail labels encode hierarchy as `/`-separated names (e.g., "Projects/Q2" is the literal label name). Exchange/JMAP folders need a normalization strategy - the current `DbLabel` has no generic `path` column. **Resolution: option (b)** - add a normalized `folder_path` column populated by all providers during sync. This is the cleaner approach: the SQL builder matches against one column regardless of provider, and the sync layer owns the normalization. Requires a migration and sync-side changes in each provider crate, but avoids per-provider branching in the query layer. The sidebar spec (`docs/sidebar/problem-statement.md`) also needs hierarchy support for `NavigationFolder` - the same `folder_path` column serves both needs.
 - OR semantics for multiple folder values.
 
 **`in:` operator (universal folder shorthands):**
-- Map shorthands to provider-agnostic predicates. The `labels` table has no generic `role` column — system folders are identified via `SYSTEM_FOLDER_ROLES` in `crates/common/src/folder_roles.rs`, which maps well-known `label_id` values (e.g., `"INBOX"`, `"SENT"`, `"DRAFT"`, `"TRASH"`, `"SPAM"`) across providers. The SQL builder should match against these label IDs, not a role column:
+- Map shorthands to provider-agnostic predicates. The `labels` table has no generic `role` column - system folders are identified via `SYSTEM_FOLDER_ROLES` in `crates/common/src/folder_roles.rs`, which maps well-known `label_id` values (e.g., `"INBOX"`, `"SENT"`, `"DRAFT"`, `"TRASH"`, `"SPAM"`) across providers. The SQL builder should match against these label IDs, not a role column:
 
 | Shorthand | Predicate |
 |-----------|-----------|
@@ -200,7 +200,7 @@ The `__LAST_7_DAYS__` / `__LAST_30_DAYS__` / `__TODAY__` token system in `crates
 
 **`has:contact` operator:**
 - `EXISTS (SELECT 1 FROM contacts WHERE email = m.from_address)` for sender
-- Optionally also check recipient addresses — TBD whether `has:contact` means "sender is a contact" or "any participant is a contact"
+- Optionally also check recipient addresses - TBD whether `has:contact` means "sender is a contact" or "any participant is a contact"
 
 **`type:` / attachment MIME filtering:**
 - `EXISTS (SELECT 1 FROM attachments WHERE message_id = m.id AND mime_type LIKE ?)`
@@ -246,9 +246,9 @@ The SQL builder already returns `Vec<DbThread>` (thread-level). This is correct 
 
 ### SearchParams changes
 
-The existing `SearchParams` struct is an internal detail — the unified API takes a raw query string. But Tantivy still needs parameters internally:
+The existing `SearchParams` struct is an internal detail - the unified API takes a raw query string. But Tantivy still needs parameters internally:
 
-- Change `account_id: String` to `account_ids: Option<Vec<String>>` — `None` means all accounts
+- Change `account_id: String` to `account_ids: Option<Vec<String>>` - `None` means all accounts
 - In `search_with_filters`, replace the single `TermQuery` on account_id with:
   - `None` → no account filter (search all)
   - `Some(ids)` → `BooleanQuery` with `Should` clauses for each account ID
@@ -303,7 +303,7 @@ pub fn search(
 }
 ```
 
-No `scope` parameter — search is always cross-account. Account narrowing is done via `account:` operators in the query string, resolved to account IDs during parsing.
+No `scope` parameter - search is always cross-account. Account narrowing is done via `account:` operators in the query string, resolved to account IDs during parsing.
 
 ### Path 1: SQL only (operators, no free text)
 
@@ -329,7 +329,7 @@ No `scope` parameter — search is always cross-account. Account narrowing is do
 5. Enrich with thread metadata from SQL results (already fetched in step 1)
 6. Return sorted by rank descending
 
-The intersection is done in application code — collect SQL thread IDs into a `HashSet`, filter Tantivy results against it. This is simple and fast for typical result sizes.
+The intersection is done in application code - collect SQL thread IDs into a `HashSet`, filter Tantivy results against it. This is simple and fast for typical result sizes.
 
 ### Account scope resolution
 
@@ -341,11 +341,11 @@ Search is always cross-account. Account narrowing is controlled entirely by `acc
 
 ## Slice 5: App Integration
 
-The app is a pure iced GUI (`crates/app/`) — there is no Tauri layer and no command wrappers. The iced app calls the unified search function from `crates/core/` (or `crates/search/`) directly, just like any other core function.
+The app is a pure iced GUI (`crates/app/`) - there is no Tauri layer and no command wrappers. The iced app calls the unified search function from `crates/core/` (or `crates/search/`) directly, just like any other core function.
 
-No `scope` parameter — search is always cross-account per the search problem statement. Users narrow via `account:` operators. The `DbState` and `SearchState` types are `Clone` (they wrap `Arc<Mutex<...>>`), so the app passes them into the search call. For blocking work, `DbState::conn()` provides synchronous access to the connection.
+No `scope` parameter - search is always cross-account per the search problem statement. Users narrow via `account:` operators. The `DbState` and `SearchState` types are `Clone` (they wrap `Arc<Mutex<...>>`), so the app passes them into the search call. For blocking work, `DbState::conn()` provides synchronous access to the connection.
 
-The wiring itself is straightforward — call the unified search function from the app's update/message handler. However, making search feel correct during incremental typing requires generational load tracking (see Ecosystem Patterns below): a monotonically increasing counter that tags each search dispatch and silently drops stale results. Without this, rapid typing produces flickering or wrong results. This is not optional polish — it is a correctness requirement for the search UX.
+The wiring itself is straightforward - call the unified search function from the app's update/message handler. However, making search feel correct during incremental typing requires generational load tracking (see Ecosystem Patterns below): a monotonically increasing counter that tags each search dispatch and silently drops stale results. Without this, rapid typing produces flickering or wrong results. This is not optional polish - it is a correctness requirement for the search UX.
 
 ## Slice 6: Smart Folder Migration
 
@@ -356,14 +356,14 @@ Smart folders become thin wrappers around the search pipeline.
 Current: `execute_smart_folder_query` → parse → build SQL → execute SQL → `Vec<DbThread>`
 New: `execute_smart_folder_query` → call `unified::search(folder.query, ...)` → convert back to `Vec<DbThread>`
 
-**Important:** The unified search pipeline returns `Vec<SearchResult>`, but the smart folder API must continue returning `Vec<DbThread>` — the sidebar navigation, thread list, and unread count code all depend on this type. The adapter is straightforward: `SearchResult` contains `thread_id` and `account_id`, which can be used to fetch full `DbThread` records, or the SQL-only path (operators without free text, which covers most smart folders) can return `DbThread` directly without going through `SearchResult` at all. Only smart folders with free text in their query string need the `SearchResult` → `DbThread` conversion.
+**Important:** The unified search pipeline returns `Vec<SearchResult>`, but the smart folder API must continue returning `Vec<DbThread>` - the sidebar navigation, thread list, and unread count code all depend on this type. The adapter is straightforward: `SearchResult` contains `thread_id` and `account_id`, which can be used to fetch full `DbThread` records, or the SQL-only path (operators without free text, which covers most smart folders) can return `DbThread` directly without going through `SearchResult` at all. Only smart folders with free text in their query string need the `SearchResult` → `DbThread` conversion.
 
 **Long-term note:** The `SearchResult` vs `DbThread` distinction is a real seam in the domain model. Currently `DbThread` is the thread-list projection and `SearchResult` is the search projection, but they carry largely overlapping data. As more surfaces consume search results (pinned searches, smart folders, the thread list itself), the core query layer should eventually define a unified thread-presentation type rather than maintaining two parallel projections with ad hoc adapters between them.
 
 This means smart folders automatically get:
 - Tantivy ranking (if the query has free text)
 - All new operators
-- Cross-account support (smart folders always run cross-account, independent of sidebar scope — see `docs/sidebar/problem-statement.md`)
+- Cross-account support (smart folders always run cross-account, independent of sidebar scope - see `docs/sidebar/problem-statement.md`)
 - Contact expansion
 
 ### Token migration
@@ -380,7 +380,7 @@ Add as a DB migration. Keep `resolve_query_tokens` as a fallback for one release
 
 ### Unread counts
 
-`count_smart_folder_unread` can reuse the SQL-only path of the unified pipeline (smart folder queries for unread counts don't need ranking — they just need a count of matching unread threads).
+`count_smart_folder_unread` can reuse the SQL-only path of the unified pipeline (smart folder queries for unread counts don't need ranking - they just need a count of matching unread threads).
 
 ## Prerequisites / Schema Changes
 
@@ -390,7 +390,7 @@ Add as a DB migration. Keep `resolve_query_tokens` as a fallback for one release
 
 ### Labels table: system folder identification
 
-The `labels` table has no generic `role` column. System folders are identified by well-known `label_id` values (`"INBOX"`, `"SENT"`, `"DRAFT"`, `"TRASH"`, `"SPAM"`, etc.) defined in `SYSTEM_FOLDER_ROLES` (`crates/common/src/folder_roles.rs`). The `in:` operator's SQL builder matches against these IDs via `thread_labels.label_id`, not a role column. The `labels` table also has `label_type`, `imap_folder_path`, and `imap_special_use` for provider-specific metadata — these are used by the `folder:` operator for path matching. No migration needed for `in:` support.
+The `labels` table has no generic `role` column. System folders are identified by well-known `label_id` values (`"INBOX"`, `"SENT"`, `"DRAFT"`, `"TRASH"`, `"SPAM"`, etc.) defined in `SYSTEM_FOLDER_ROLES` (`crates/common/src/folder_roles.rs`). The `in:` operator's SQL builder matches against these IDs via `thread_labels.label_id`, not a role column. The `labels` table also has `label_type`, `imap_folder_path`, and `imap_special_use` for provider-specific metadata - these are used by the `folder:` operator for path matching. No migration needed for `in:` support.
 
 ## Dependency Graph
 
@@ -398,7 +398,7 @@ The `labels` table has no generic `role` column. System folders are identified b
 Slice 1 (parser) ✅
   └── Slice 2 (SQL builder) ✅
         └── Slice 4 (unified pipeline) ✅
-              ├── Slice 5 (app integration — trivial wiring)
+              ├── Slice 5 (app integration - trivial wiring)
               └── Slice 6 (smart folder migration)
 
 Slice 3 (Tantivy cross-account) ✅

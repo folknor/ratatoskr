@@ -10,15 +10,15 @@ migration.
 
 Five separate implementation paths exist today:
 
-1. **`iced::widget::tooltip`** — used by calendar pop-out button, emoji picker
-2. **`AnchoredOverlay`** (`ui/anchored_overlay.rs`) — custom iced overlay widget
+1. **`iced::widget::tooltip`** - used by calendar pop-out button, emoji picker
+2. **`AnchoredOverlay`** (`ui/anchored_overlay.rs`) - custom iced overlay widget
    for dropdowns, context menus, compose autocomplete
-3. **Hand-rolled `stack![]` + blocker** — modal composition in `main.rs`
+3. **Hand-rolled `stack![]` + blocker** - modal composition in `main.rs`
    (add-account, palette), `calendar.rs` (full event, editor, delete confirm),
    `compose.rs` (discard, link dialog)
-4. **Hand-rolled sheet** — settings slide-in panel in `settings/tabs.rs`
+4. **Hand-rolled sheet** - settings slide-in panel in `settings/tabs.rs`
    (animated offset + blocker `mouse_area`)
-5. **Calendar `popover_stack`** — one-off stack-based popover for event detail
+5. **Calendar `popover_stack`** - one-off stack-based popover for event detail
    quick-glance, separate from `AnchoredOverlay`
 
 Every `stack![]` + blocker site re-implements the same pattern: base,
@@ -31,11 +31,11 @@ only).
 
 ### Three primitives
 
-1. **`iced::widget::tooltip`** — keep as-is for simple hover tooltips
-2. **`AnchoredOverlay`** — keep as-is for anchored surfaces (dropdowns, context
+1. **`iced::widget::tooltip`** - keep as-is for simple hover tooltips
+2. **`AnchoredOverlay`** - keep as-is for anchored surfaces (dropdowns, context
    menus, popovers). Already well-factored with `AnchorPosition` and
    `anchor_point` support.
-3. **`modal_overlay()`** — new helper that replaces all hand-rolled
+3. **`modal_overlay()`** - new helper that replaces all hand-rolled
    `stack![]` + blocker composition for blocking surfaces (modals and sheets).
 
 ### Why not more primitives
@@ -43,7 +43,7 @@ only).
 - Tooltips are native iced and work fine. No reason to wrap them.
 - Anchored surfaces all go through `AnchoredOverlay` already. The calendar
   event detail popover (`popover_stack`) is the only anchored surface that
-  doesn't — it should migrate to `AnchoredOverlay` (see deferred work).
+  doesn't - it should migrate to `AnchoredOverlay` (see deferred work).
 - Every blocking surface (modal, sheet, palette) uses the same stack+blocker
   pattern. The variation between them is small enough to parameterize.
 
@@ -83,13 +83,13 @@ pub fn modal_overlay<'a, Message: Clone + 'a>(
 
 The surface type determines all behavior:
 
-- **`Modal`** — inserts a `mouse_area` blocker styled with `ModalBackdrop`
+- **`Modal`** - inserts a `mouse_area` blocker styled with `ModalBackdrop`
   (dimmed, semi-transparent). The blocker consumes all clicks but does not
   dismiss. Content is centered. `modal_overlay()` is a layering and
-  event-blocking primitive, not a complete modal-layout system — callers
+  event-blocking primitive, not a complete modal-layout system - callers
   that need custom positioning (e.g., palette top offset) apply it to the
   content element before passing it in.
-- **`Sheet`** — inserts an unstyled `mouse_area` blocker that consumes all
+- **`Sheet`** - inserts an unstyled `mouse_area` blocker that consumes all
   clicks. Content is positioned with left padding based on `offset`. The
   sheet is opaque and covers the full area.
 
@@ -97,12 +97,12 @@ Neither surface type dismisses on blocker click. Modals dismiss via Escape
 or an explicit button. Sheets dismiss via an explicit close button only.
 
 **What `modal_overlay()` does NOT own:**
-- Dismiss wiring — the caller wires Escape handling in `update()` and
+- Dismiss wiring - the caller wires Escape handling in `update()` and
   provides close buttons in the content. `modal_overlay()` only handles
   layout and event blocking.
-- Animation — the caller computes the offset for `Sheet` (e.g., from
+- Animation - the caller computes the offset for `Sheet` (e.g., from
   `sheet_anim`) and passes it in. `modal_overlay()` applies it.
-- Focus trapping — iced does not natively support focus trapping. This is
+- Focus trapping - iced does not natively support focus trapping. This is
   a known gap between the behavioral contract (the glossary says Modal and
   Sheet trap focus) and what iced can enforce.
 
@@ -116,14 +116,14 @@ or an explicit button. Sheets dismiss via an explicit close button only.
 
 ### What `modal_overlay()` does NOT replace
 
-- `AnchoredOverlay` — different iced mechanism entirely.
-- `calendar::popover_stack()` — despite the name, this is an anchored
+- `AnchoredOverlay` - different iced mechanism entirely.
+- `calendar::popover_stack()` - despite the name, this is an anchored
   surface, not a modal. It does not dim or block background interaction.
   See deferred work section.
 
 ### `view_first_launch_modal()`
 
-The first-launch add-account view (`main.rs:2447`) has no base element —
+The first-launch add-account view (`main.rs:2447`) has no base element -
 it IS the entire screen (a centered card on a styled background). Because
 `modal_overlay()` takes `base: Element`, this case doesn't fit the API.
 It stays as-is: a centered container with no stack composition needed.
@@ -139,25 +139,25 @@ It stays as-is: a centered container with no stack composition needed.
 | Modal | `modal_overlay()` | Dimmed, non-dismissing | Escape, explicit button | Centered |
 | Sheet | `modal_overlay()` | Invisible, non-dismissing | Explicit close only | `Sheet { offset }` |
 
-## Migration — Completed
+## Migration - Completed
 
 All five migration phases have been implemented. The `modal_overlay()`
 primitive in `crates/app/src/ui/modal_overlay.rs` now handles all blocking
 overlay composition. Hand-rolled `stack![] + mouse_area` blocker patterns
 have been removed from:
 
-- `calendar.rs` — `modal_stack()` deleted, replaced with `modal_overlay()`
+- `calendar.rs` - `modal_stack()` deleted, replaced with `modal_overlay()`
   using `CalendarMessage::Noop` as blocker event sink. **Bug fix:** calendar
   modals no longer dismiss on backdrop click.
-- `compose.rs` — `compose_modal_stack()` deleted, replaced with
+- `compose.rs` - `compose_modal_stack()` deleted, replaced with
   `modal_overlay()`.
-- `main.rs` — add-account modal and palette inline stacks replaced with
+- `main.rs` - add-account modal and palette inline stacks replaced with
   `modal_overlay()`. `PaletteBackdrop` unified into `ModalBackdrop`.
   **Product behavior change:** palette no longer dismisses on backdrop click.
-- `settings/tabs.rs` — sheet inline stack replaced with
+- `settings/tabs.rs` - sheet inline stack replaced with
   `modal_overlay(ModalSurface::Sheet { offset })`.
 
-**`view_first_launch_modal()`** remains as-is — it has no base element to
+**`view_first_launch_modal()`** remains as-is - it has no base element to
 overlay on (it IS the entire screen).
 
 **Note on `blocker_msg` parameter:** iced's `mouse_area` only captures
@@ -167,10 +167,10 @@ no-op in the caller's update loop.
 
 ### Remaining hand-rolled `stack![]` patterns (verified acceptable)
 
-- `calendar.rs:popover_stack()` — deferred anchored surface (see below)
-- `calendar_time_grid.rs` — layout stacking, not overlay
-- `widgets.rs` — tooltip stack
-- `main.rs` — chord indicator (non-blocking, no mouse_area)
+- `calendar.rs:popover_stack()` - deferred anchored surface (see below)
+- `calendar_time_grid.rs` - layout stacking, not overlay
+- `widgets.rs` - tooltip stack
+- `main.rs` - chord indicator (non-blocking, no mouse_area)
 
 ## Deferred Work
 
@@ -184,7 +184,7 @@ The target behavior is anchored near the clicked event, using
 `AnchoredOverlay` with click coordinates. This requires capturing the
 click position in `CalendarPopover::EventDetail` (not currently stored)
 and wiring it through to `anchor_point`. The popover and modal states are
-mutually exclusive — only one surface is open at a time — so this is not
+mutually exclusive - only one surface is open at a time - so this is not
 a stacking concern.
 
 Deferred because it's independent of the `modal_overlay()` extraction and

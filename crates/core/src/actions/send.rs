@@ -9,19 +9,19 @@ use common::types::ProviderCtx;
 /// Send an email: build MIME, persist draft, dispatch to provider.
 ///
 /// On success, the provider-assigned sent message ID is stored in
-/// `local_drafts.remote_draft_id` via `mark_draft_sent()` — the caller
+/// `local_drafts.remote_draft_id` via `mark_draft_sent()` - the caller
 /// does not need it. Returns plain `ActionOutcome::Success`.
 ///
 /// On any failure (MIME build, DB, or provider), returns `Failed` and
 /// marks the draft as `'failed'` if it was persisted. `LocalOnly` is
-/// not used for send — the desired outcome is delivery, not local
+/// not used for send - the desired outcome is delivery, not local
 /// persistence.
 pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutcome {
     let mut mlog = MutationLog::begin("send_email", &request.account_id, &request.draft_id);
 
     // 1. Build MIME + persist draft in one spawn_blocking call.
     //    MIME build is CPU-bound (large attachments); draft persist is DB I/O.
-    //    Both are sync — combine them to avoid two spawn_blocking round-trips.
+    //    Both are sync - combine them to avoid two spawn_blocking round-trips.
     //
     //    Both `db_save_local_draft` and `mark_draft_sending` are async helpers
     //    that take `&DbState`. Inside spawn_blocking we already hold the Mutex

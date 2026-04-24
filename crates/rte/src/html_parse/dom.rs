@@ -1,7 +1,7 @@
 //! Internal DOM types and html5ever `TreeSink` implementation.
 //!
 //! This module builds a simple in-memory DOM tree from an HTML fragment.
-//! It is pure html5ever plumbing — no document-model knowledge.
+//! It is pure html5ever plumbing - no document-model knowledge.
 
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -118,7 +118,7 @@ impl TreeSink for Sink {
     fn elem_name<'a>(&'a self, target: &'a Handle) -> Self::ElemName<'a> {
         // Safety: we only call this on element handles, which live as long as
         // the sink. However the borrow checker doesn't know that, so we use
-        // a small unsafe to extend the lifetime — the QualName is heap-allocated
+        // a small unsafe to extend the lifetime - the QualName is heap-allocated
         // inside the Rc<RefCell<Node>> which outlives the borrow.
         //
         // This is the standard pattern for html5ever TreeSink impls that use

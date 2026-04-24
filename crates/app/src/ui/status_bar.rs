@@ -30,7 +30,7 @@ pub struct AccountWarning {
 
 #[derive(Debug, Clone)]
 pub enum WarningKind {
-    /// OAuth token expired or refresh failed. Clickable — opens re-auth.
+    /// OAuth token expired or refresh failed. Clickable - opens re-auth.
     TokenExpiry,
     /// Persistent connection failure. Not clickable (no recovery action).
     ConnectionFailure { message: String },
@@ -159,7 +159,7 @@ pub struct IcedProgressReporter {
 impl rtsk::progress::ProgressReporter for IcedProgressReporter {
     fn emit_json(&self, event_name: &str, json: serde_json::Value) {
         let event = SyncEvent::from_json(event_name, &json);
-        // Best-effort send — drop on failure (receiver closed).
+        // Best-effort send - drop on failure (receiver closed).
         let _ = self.sender.send(event);
     }
 }

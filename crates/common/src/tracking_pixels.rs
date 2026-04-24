@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 pub enum TrackingPixelReason {
     /// `width`/`height` HTML attributes are 0 or 1 (e.g., `<img width="1" height="1">`)
     TinyDimensions,
-    /// Inline CSS sets dimensions to 0–1 px, `display:none`, or `visibility:hidden`
+    /// Inline CSS sets dimensions to 0-1 px, `display:none`, or `visibility:hidden`
     HiddenByStyle,
     /// The image URL matches a known tracking-pixel domain or path pattern
     KnownTracker,
@@ -20,7 +20,7 @@ pub struct TrackingPixelResult {
 }
 
 // ---------------------------------------------------------------------------
-// Regex patterns – compiled once via LazyLock
+// Regex patterns - compiled once via LazyLock
 // ---------------------------------------------------------------------------
 
 /// Matches `<img …>` tags (case-insensitive, non-greedy).
@@ -157,7 +157,7 @@ fn has_hidden_style(tag_body: &str) -> bool {
 /// Scan an HTML string for `<img>` tags that look like tracking pixels.
 ///
 /// Returns one [`TrackingPixelResult`] per detected pixel. A single `<img>` tag
-/// can only produce one result — the first matching reason wins (known-tracker
+/// can only produce one result - the first matching reason wins (known-tracker
 /// is checked first so the reason is as specific as possible).
 pub fn detect_tracking_pixels_in_html(html: &str) -> Vec<TrackingPixelResult> {
     let mut results: Vec<TrackingPixelResult> = Vec::new();
@@ -165,7 +165,7 @@ pub fn detect_tracking_pixels_in_html(html: &str) -> Vec<TrackingPixelResult> {
     for img_match in IMG_TAG_RE.find_iter(html) {
         let tag = img_match.as_str();
 
-        // Extract src – skip tags without one.
+        // Extract src - skip tags without one.
         let Some(src_caps) = SRC_RE.captures(tag) else {
             continue;
         };
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn ignores_single_small_dimension() {
-        // Only width=1 but height is normal — not a tracking pixel
+        // Only width=1 but height is normal - not a tracking pixel
         let html = r#"<img src="https://example.com/spacer.gif" width="1" height="20">"#;
         let results = detect_tracking_pixels_in_html(html);
         assert!(results.is_empty());

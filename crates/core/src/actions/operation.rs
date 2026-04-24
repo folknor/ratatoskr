@@ -1,6 +1,6 @@
-//! Pure mail operation — the canonical "what to do" type.
+//! Pure mail operation - the canonical "what to do" type.
 //!
-//! Owned by core. Contains only execution semantics — no UI metadata,
+//! Owned by core. Contains only execution semantics - no UI metadata,
 //! no undo provenance, no completion behavior. The app layer resolves
 //! user intent into a `MailOperation` before dispatching to core.
 

@@ -344,7 +344,7 @@ pub async fn lookup_bimi(
         }
     }
     // If no Authentication-Results header is available, we still attempt the
-    // lookup — some callers may have pre-verified DMARC externally.
+    // lookup - some callers may have pre-verified DMARC externally.
 
     // 3. Try BIMI-Indicator shortcut
     if let Some(indicator) = bimi_indicator {
@@ -855,7 +855,7 @@ mod tests {
         // Access a.com to make it most-recently-used
         let _ = cache.get("a.com");
 
-        // Insert c.com — should evict b.com (oldest), not a.com
+        // Insert c.com - should evict b.com (oldest), not a.com
         cache.insert("c.com".to_string(), None);
 
         assert!(cache.get("a.com").is_some());

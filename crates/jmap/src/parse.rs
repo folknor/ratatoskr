@@ -216,7 +216,7 @@ fn extract_header_text(hv: Option<&HeaderValue>) -> Option<String> {
 
 /// Extract body text or HTML from the email's bodyValues.
 ///
-/// When extracting HTML, skips any `text/x-amp-html` parts — AMP emails contain
+/// When extracting HTML, skips any `text/x-amp-html` parts - AMP emails contain
 /// tracking-heavy interactive content. Falls through to subsequent parts so the
 /// caller gets `text/html` if available.
 fn extract_body_value(email: &Email, html: bool) -> Option<String> {
@@ -227,7 +227,7 @@ fn extract_body_value(email: &Email, html: bool) -> Option<String> {
     };
 
     for part in parts {
-        // Skip AMP body parts — prefer regular text/html
+        // Skip AMP body parts - prefer regular text/html
         if html
             && let Some(ct) = part.content_type()
             && common::email_parsing::is_amp_content_type(ct)

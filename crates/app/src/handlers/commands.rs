@@ -91,7 +91,7 @@ impl App {
     }
 
     /// Get a clone of the action context, or `None` if the action service
-    /// is not initialized (degraded mode — stores failed at boot).
+    /// is not initialized (degraded mode - stores failed at boot).
     pub(crate) fn action_ctx(&self) -> Option<rtsk::actions::ActionContext> {
         self.action_ctx.as_ref().cloned()
     }
@@ -100,7 +100,7 @@ impl App {
         &mut self,
         intent: crate::action_resolve::MailActionIntent,
     ) -> Task<Message> {
-        // Public folder items are not real threads — actions don't apply.
+        // Public folder items are not real threads - actions don't apply.
         if matches!(self.sidebar.selected_scope, ViewScope::PublicFolder { .. }) {
             return Task::none();
         }
@@ -290,7 +290,7 @@ impl App {
             return Task::none();
         }
 
-        // Show toast — all text policy centralized in format_outcome_toast (C3/D3)
+        // Show toast - all text policy centralized in format_outcome_toast (C3/D3)
         let toast = ar::format_outcome_toast(behavior, outcomes);
         if !toast.is_empty() {
             self.status_bar.show_confirmation(toast);

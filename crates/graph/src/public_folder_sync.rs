@@ -1,6 +1,6 @@
 //! Offline sync for pinned public folders via EWS.
 //!
-//! Public folders have no delta tokens — all sync is timestamp-based polling.
+//! Public folders have no delta tokens - all sync is timestamp-based polling.
 //! Deletion detection is expensive (full ID scan) and throttled to once per hour.
 
 use crate::ews::{EwsClient, EwsFolder, EwsHeaders, EwsItem};
@@ -71,7 +71,7 @@ async fn fetch_all_items(
 }
 
 /// Fetch just item IDs from a folder (for deletion detection).
-/// Reuses `find_items` — every `EwsItem` already includes `item_id`.
+/// Reuses `find_items` - every `EwsItem` already includes `item_id`.
 async fn fetch_all_item_ids(
     ews: &EwsClient,
     access_token: &str,
@@ -362,7 +362,7 @@ pub async fn sync_pinned_public_folder(
     // Upsert into DB
     let (new_items, updated_items) = upsert_items(db, account_id, folder_id, items).await?;
 
-    // Deletion detection — throttled to once per hour
+    // Deletion detection - throttled to once per hour
     let mut deleted_items = 0usize;
     let should_scan = match last_full_scan {
         Some(scan_ts) => (now - scan_ts) >= DELETION_SCAN_INTERVAL_SECS,
@@ -394,7 +394,7 @@ pub async fn sync_pinned_public_folder(
 
 /// Sync all pinned public folders for an account.
 ///
-/// Each folder syncs independently — one failure does not block others.
+/// Each folder syncs independently - one failure does not block others.
 /// Returns `(folder_id, result)` pairs.
 pub async fn sync_all_pinned_folders(
     ews: &EwsClient,
@@ -467,7 +467,7 @@ pub async fn pin_public_folder(
     .await
 }
 
-/// Unpin a public folder — removes pin, local items, and sync state.
+/// Unpin a public folder - removes pin, local items, and sync state.
 pub async fn unpin_public_folder(
     db: &DbState,
     account_id: &str,
@@ -821,7 +821,7 @@ mod tests {
         )
         .expect("add sync state");
 
-        // Unpin — should remove pin, items, and sync state
+        // Unpin - should remove pin, items, and sync state
         conn.execute(
             "DELETE FROM public_folder_pins WHERE account_id = 'acc1' AND folder_id = 'f1'",
             [],

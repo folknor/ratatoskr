@@ -361,9 +361,9 @@ pub fn current_platform() -> Platform {
 pub enum ResolveResult {
     /// No binding matches this chord.
     NoMatch,
-    /// Single-chord binding matched — execute this command.
+    /// Single-chord binding matched - execute this command.
     Command(CommandId),
-    /// This chord starts one or more sequences — caller should wait for the
+    /// This chord starts one or more sequences - caller should wait for the
     /// second chord (with a timeout) and then call `resolve_sequence`.
     Pending,
 }
@@ -421,7 +421,7 @@ impl BindingTable {
 
     /// Resolve a single chord press.
     ///
-    /// Returns `Pending` if this chord starts one or more sequences — the
+    /// Returns `Pending` if this chord starts one or more sequences - the
     /// caller should wait for the second chord (with a timeout) then call
     /// `resolve_sequence`. Returns `Command` for single-chord bindings.
     pub fn resolve_chord(&self, chord: &Chord) -> ResolveResult {
@@ -513,7 +513,7 @@ impl BindingTable {
     /// maps are written; an empty map deletes the file.
     pub fn save_overrides(&self, path: &Path) -> Result<(), String> {
         if self.overrides.is_empty() {
-            // Nothing to persist — remove stale file if present.
+            // Nothing to persist - remove stale file if present.
             if path.exists() {
                 std::fs::remove_file(path)
                     .map_err(|e| format!("remove {}: {e}", path.display()))?;
@@ -561,7 +561,7 @@ impl BindingTable {
         let mut overrides = HashMap::new();
         for (key, value) in wrapper.overrides {
             let Some(id) = CommandId::parse(&key) else {
-                continue; // unknown command — skip
+                continue; // unknown command - skip
             };
             match value {
                 None => {
@@ -571,7 +571,7 @@ impl BindingTable {
                     if let Ok(kb) = KeyBinding::parse(binding_str) {
                         overrides.insert(id, Some(kb));
                     }
-                    // unparseable binding — skip
+                    // unparseable binding - skip
                 }
             }
         }
@@ -914,7 +914,7 @@ mod tests {
     #[test]
     fn conflict_single_vs_sequence_first() {
         let table = make_table();
-        // 'g' starts sequences — binding a single chord to 'g' conflicts
+        // 'g' starts sequences - binding a single chord to 'g' conflicts
         let conflict = table.check_conflict(CommandId::NavNext, &KeyBinding::key('g'));
         assert!(
             conflict.is_some(),
@@ -925,7 +925,7 @@ mod tests {
     #[test]
     fn conflict_sequence_vs_single() {
         let table = make_table();
-        // 'e' is EmailArchive — a sequence starting with 'e' conflicts
+        // 'e' is EmailArchive - a sequence starting with 'e' conflicts
         let conflict = table.check_conflict(CommandId::NavNext, &KeyBinding::seq('e', 'x'));
         assert_eq!(conflict, Some(CommandId::EmailArchive));
     }

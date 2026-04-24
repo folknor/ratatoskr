@@ -6,7 +6,7 @@ Audit date: 2026-03-30
 
 ## Functional blockers
 
-1. ~~**Command palette rejects non-Gmail label operations.**~~ ✅ Fixed — `is_folder_based_provider()` gate removed from `command_resolver.rs`. All providers can now use Add Label / Remove Label from the command palette.
+1. ~~**Command palette rejects non-Gmail label operations.**~~ ✅ Fixed - `is_folder_based_provider()` gate removed from `command_resolver.rs`. All providers can now use Add Label / Remove Label from the command palette.
 
 2. **Palette queries use legacy type filtering, not label_kind.** `get_user_folders_for_palette()`, `get_user_labels_for_palette()`, `get_thread_labels_for_palette()`, and `get_all_labels_cross_account()` query by provider type and visibility, not by unified container/tag semantics.
 
@@ -20,13 +20,13 @@ Audit date: 2026-03-30
 
 ## Unimplemented features
 
-6. **Cross-account label creation** — No action or UI to create a new label.
-7. **User-initiated label deletion** — No UI in the sidebar labels section.
-8. **`label:` search operator** — Not verified in smart folder query parser.
+6. **Cross-account label creation** - No action or UI to create a new label.
+7. **User-initiated label deletion** - No UI in the sidebar labels section.
+8. **`label:` search operator** - Not verified in smart folder query parser.
 
 ## Stale docs
 
-9. **`problem-statement.md` references `apply_category()`/`remove_category()`** — Removed in Phase 6. Lines ~222 and ~284 are stale.
+9. **`problem-statement.md` references `apply_category()`/`remove_category()`** - Removed in Phase 6. Lines ~222 and ~284 are stale.
 10. **`generate-test-db.py`** still creates a `categories` table and different-shaped `label_color_overrides` table.
 
 ## Resolved

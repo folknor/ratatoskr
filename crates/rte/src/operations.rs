@@ -473,7 +473,7 @@ fn apply_delete_range(
     assert!(start <= end, "DeleteRange: start > end");
 
     // Sentinel: start == end with deleted content means "reconstruct"
-    // (this is the inverse of a delete — both single-block and cross-block).
+    // (this is the inverse of a delete - both single-block and cross-block).
     if start == end && !deleted.blocks.is_empty() {
         return apply_restore_deleted(doc, start, deleted);
     }
@@ -1286,7 +1286,7 @@ mod tests {
     fn insert_text_into_bold_undo_redo_preserves_style() {
         // Insert plain text into a bold run. The text inherits bold on apply.
         // Undo (via invert_with_doc) should capture the bold runs, so redo
-        // (restore) splices bold runs back — not plain text.
+        // (restore) splices bold runs back - not plain text.
         let mut doc = Document::from_blocks(vec![Block::Paragraph {
             runs: vec![StyledRun::styled("hello", InlineStyle::BOLD)],
         }]);

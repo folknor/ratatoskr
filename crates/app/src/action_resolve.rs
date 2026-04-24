@@ -2,7 +2,7 @@
 //!
 //! This module is the single point where user intent is collapsed into
 //! a concrete, unambiguous mail operation. Toggle directions, source
-//! folders, and spam direction are resolved here — not scattered across
+//! folders, and spam direction are resolved here - not scattered across
 //! dispatch code.
 //!
 //! Toggle intents that require per-thread state are represented as
@@ -33,7 +33,7 @@ pub enum MailActionIntent {
 // ── UI Context ──────────────────────────────────────────
 
 /// UI state captured at resolution time. This is the contract between
-/// the UI layer and action resolution — everything the resolver needs
+/// the UI layer and action resolution - everything the resolver needs
 /// to collapse ambiguity.
 #[derive(Debug, Clone)]
 pub struct UiContext {
@@ -44,7 +44,7 @@ pub struct UiContext {
 // ── Compensation ────────────────────────────────────────
 
 /// Undo/recovery metadata captured at resolution time.
-/// Never sent to core — lives in app crate only.
+/// Never sent to core - lives in app crate only.
 ///
 /// Only carries data that is NOT already in the `MailOperation`.
 /// MoveToFolder source is in the operation (needed for local mutation).
@@ -56,7 +56,7 @@ pub enum CompensationContext {
     /// from the operation: reverse a label add/remove, invert a toggle, etc.
     None,
     /// Source folder for undo-trash. trash_local doesn't need this for
-    /// execution — it adds the TRASH label regardless. But undo needs to
+    /// execution - it adds the TRASH label regardless. But undo needs to
     /// know where the thread came from to move it back.
     SourceFolder(Option<FolderId>),
 }
@@ -87,18 +87,18 @@ pub enum ToggleField {
 
 // ── Resolve outcome ─────────────────────────────────────
 
-/// Result of resolving a user intent. Three distinct states — no overloaded
+/// Result of resolving a user intent. Three distinct states - no overloaded
 /// `Option` or implicit valid combinations.
 #[derive(Debug, Clone)]
 pub enum ResolveOutcome {
-    /// Fully resolved — same operation for all targets.
+    /// Fully resolved - same operation for all targets.
     Resolved(ResolvedIntent),
-    /// Toggle — requires per-thread state to resolve direction.
+    /// Toggle - requires per-thread state to resolve direction.
     PerThreadToggle {
         field: ToggleField,
         compensation: CompensationContext,
     },
-    /// Fire-and-forget — no core operation (e.g., Unsubscribe).
+    /// Fire-and-forget - no core operation (e.g., Unsubscribe).
     NoOp,
 }
 
@@ -135,7 +135,7 @@ pub enum OptimisticMutation {
 // ── Completion behavior ─────────────────────────────────
 
 /// How the UI should handle an action's completion.
-/// Derived from `MailOperation` via exhaustive match — compiler forces
+/// Derived from `MailOperation` via exhaustive match - compiler forces
 /// a decision for every variant.
 #[derive(Debug, Clone)]
 pub struct CompletionBehavior {
@@ -165,7 +165,7 @@ pub enum UndoBehavior {
 
 /// Derive completion behavior from a mail operation (exhaustive match).
 /// Lives in the app crate because view effects, toast text, and undo
-/// policy are UI concerns — core's MailOperation should not know about them.
+/// policy are UI concerns - core's MailOperation should not know about them.
 ///
 /// All operations in a plan share the same behavior class even when
 /// concrete values differ (e.g., SetStarred { to: true } and
@@ -250,7 +250,7 @@ pub fn completion_behavior(op: &MailOperation) -> CompletionBehavior {
 // ── Undo payload ────────────────────────────────────────
 
 /// Mail-domain undo compensation data. Lives in app crate.
-/// No `description()` method — description is set at push time on `UndoEntry` (C3).
+/// No `description()` method - description is set at push time on `UndoEntry` (C3).
 #[derive(Debug, Clone)]
 pub enum MailUndoPayload {
     Archive {
@@ -309,7 +309,7 @@ pub enum MailUndoPayload {
 }
 
 /// Compute a direction-aware undo description from undo payloads.
-/// More informative than just success_label — e.g., "Starred" vs "Unstarred"
+/// More informative than just success_label - e.g., "Starred" vs "Unstarred"
 /// instead of generic "Star toggled".
 pub fn undo_description(payloads: &[MailUndoPayload]) -> String {
     if payloads.is_empty() {
@@ -356,7 +356,7 @@ pub fn undo_description(payloads: &[MailUndoPayload]) -> String {
 // ── Toast formatting ────────────────────────────────────
 
 /// Generate user-facing toast text from completion behavior + outcomes.
-/// All string policy centralized here — the completion handler delegates
+/// All string policy centralized here - the completion handler delegates
 /// entirely to this function.
 pub fn format_outcome_toast(behavior: &CompletionBehavior, outcomes: &[ActionOutcome]) -> String {
     let total = outcomes.len();
@@ -566,10 +566,10 @@ fn build_standard_undo_payloads(
 /// Built from a `ResolveOutcome` + selected threads.
 #[derive(Debug, Clone)]
 pub struct ActionExecutionPlan {
-    /// Per-target operations — always a flat vec, even for uniform actions.
+    /// Per-target operations - always a flat vec, even for uniform actions.
     /// `operations[i]` corresponds to `outcomes[i]` after execution.
     pub operations: Vec<(String, String, MailOperation)>,
-    /// Completion behavior — set at construction, read by completion handler (C1).
+    /// Completion behavior - set at construction, read by completion handler (C1).
     pub behavior: CompletionBehavior,
     /// Compensation context from resolution (Trash source folder).
     pub compensation: CompensationContext,
@@ -658,7 +658,7 @@ pub fn resolve_intent(intent: MailActionIntent, ctx: &UiContext) -> ResolveOutco
 ///
 /// For `Resolved`: every thread gets the same operation.
 /// For `PerThreadToggle`: reads per-thread state, computes per-thread
-/// operations, records typed optimistic mutations, then flips UI — in
+/// operations, records typed optimistic mutations, then flips UI - in
 /// that strict order per thread.
 ///
 /// Returns `None` only for `NoOp` (fire-and-forget intents like Unsubscribe).
@@ -697,7 +697,7 @@ pub fn build_execution_plan(
                     .find(|t| t.account_id == *account_id && t.id == *thread_id);
 
                 if let Some(t) = thread {
-                    // I2: strict ordering — read prior, compute op, record mutation, flip UI
+                    // I2: strict ordering - read prior, compute op, record mutation, flip UI
                     let previous = read_toggle_field(field, t);
                     let new_value = !previous;
                     operations.push((
@@ -713,7 +713,7 @@ pub fn build_execution_plan(
                     ));
                     write_toggle_field(field, t, new_value);
                 } else {
-                    // Thread not in list (concurrent removal). Skip entirely —
+                    // Thread not in list (concurrent removal). Skip entirely -
                     // don't fabricate an operation or mutation. operations and
                     // optimistic stay aligned (both skip this thread).
                     log::debug!(

@@ -126,7 +126,7 @@ impl Component for ChatTimeline {
                     col = col.push(Space::new().height(CHAT_GROUP_SPACING - CHAT_BUBBLE_SPACING));
                 }
             } else {
-                // First message — add date separator
+                // First message - add date separator
                 col = col.push(date_separator(msg.date));
                 col = col.push(Space::new().height(CHAT_DATE_SEPARATOR_SPACING));
             }

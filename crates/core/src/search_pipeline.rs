@@ -169,13 +169,13 @@ fn search_combined(
     let thread_map: HashMap<String, &DbThread> =
         sql_threads.iter().map(|t| (t.id.clone(), t)).collect();
 
-    // Step 2: Tantivy searches free text (no account filter — SQL handles it
+    // Step 2: Tantivy searches free text (no account filter - SQL handles it
     // via intersection, and account: values are display names, not IDs).
     let mut params = build_tantivy_params(parsed);
     params.account_ids = None;
     let tantivy_results = search_state.search_with_filters(&params)?;
 
-    // Step 3: Intersect — keep only Tantivy hits in the SQL candidate set.
+    // Step 3: Intersect - keep only Tantivy hits in the SQL candidate set.
     let filtered: Vec<TantivyResult> = tantivy_results
         .into_iter()
         .filter(|r| candidate_ids.contains(&r.thread_id))

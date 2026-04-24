@@ -61,7 +61,7 @@ impl WindowState {
         state
     }
 
-    /// Save to disk. Errors are silently ignored — window state is
+    /// Save to disk. Errors are silently ignored - window state is
     /// best-effort, not critical.
     pub fn save(&self, data_dir: &std::path::Path) {
         let path = Self::path(data_dir);

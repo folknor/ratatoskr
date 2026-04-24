@@ -1,4 +1,4 @@
-// Emoji picker widget — a searchable, categorized emoji grid with skin tone
+// Emoji picker widget - a searchable, categorized emoji grid with skin tone
 // support and recent-emoji persistence. The caller owns visibility state and
 // positioning; this module provides the state struct and view function.
 //

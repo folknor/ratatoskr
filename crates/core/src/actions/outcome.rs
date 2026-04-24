@@ -3,7 +3,7 @@
 pub enum ActionOutcome {
     /// Local and remote both succeeded (or local-only-by-design succeeded).
     Success,
-    /// The action was a no-op — state didn't change (e.g., archiving a thread
+    /// The action was a no-op - state didn't change (e.g., archiving a thread
     /// already not in inbox). Provider dispatch and undo token skipped.
     NoOp,
     /// Local succeeded, remote dispatch failed or was skipped.
@@ -12,7 +12,7 @@ pub enum ActionOutcome {
     /// `retryable` is a policy flag set per action class at the call site
     /// (email actions = true, contacts/calendar = false). The pending-ops
     /// worker (Phase 3.4) should also check `reason.is_retryable()` before
-    /// actually enqueuing — a Permanent error shouldn't be retried even if
+    /// actually enqueuing - a Permanent error shouldn't be retried even if
     /// the action class says "generally retry this action."
     LocalOnly {
         reason: ActionError,
@@ -45,7 +45,7 @@ impl ActionOutcome {
 /// Structured error from an action service operation.
 ///
 /// Provides machine-readable categorization and user-facing messages.
-/// `user_message()` is an intermediate step — messages still incorporate
+/// `user_message()` is an intermediate step - messages still incorporate
 /// internal wording from provider errors. The structure enables future
 /// refinement per-variant without changing the API.
 #[derive(Debug, Clone)]
@@ -69,13 +69,13 @@ pub enum ActionError {
 /// Used by Phase 3.4 to decide whether to enqueue a pending op.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoteFailureKind {
-    /// Network error, timeout, 5xx — worth retrying.
+    /// Network error, timeout, 5xx - worth retrying.
     Transient,
-    /// 4xx, permission denied, invalid request — won't succeed on retry.
+    /// 4xx, permission denied, invalid request - won't succeed on retry.
     Permanent,
     /// Provider write-back not yet implemented (stub).
     NotImplemented,
-    /// Unknown completion — provider error couldn't be classified.
+    /// Unknown completion - provider error couldn't be classified.
     Unknown,
 }
 
@@ -140,7 +140,7 @@ impl ActionError {
 
     /// User-facing summary for toast/status display.
     ///
-    /// This is an intermediate step — messages still incorporate internal
+    /// This is an intermediate step - messages still incorporate internal
     /// wording. The structure enables future refinement per-variant.
     pub fn user_message(&self) -> String {
         match self {

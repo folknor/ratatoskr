@@ -10,7 +10,7 @@ Phase 1 (backend) is fully implemented. Phase 2 (UI) is partially implemented. P
 
 1. **No sidebar CHATS section.** Central to the feature. Core API `get_chat_contacts()` exists but is never called from the app. No sidebar rendering, no designation UI, no entry point for users to see or access chats.
 
-2. **Chat timeline does not render message bodies.** `ChatMessage` carries only metadata (subject/date/sender). UI uses subject as placeholder bubble text with a TODO. The spec calls for stripped bodies, quote collapsing, and "show full message" — none implemented.
+2. **Chat timeline does not render message bodies.** `ChatMessage` carries only metadata (subject/date/sender). UI uses subject as placeholder bubble text with a TODO. The spec calls for stripped bodies, quote collapsing, and "show full message" - none implemented.
 
 3. **Entering a chat does not mark it read.** `enter_chat_view()` loads the timeline only. `ChatReadMarked` handler is inert (`Task::none()`). No local or remote mark-read helpers.
 

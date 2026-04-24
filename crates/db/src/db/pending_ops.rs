@@ -44,7 +44,7 @@ const BACKOFF_DEFAULT: &[i64] = &[60, 300, 900, 3600];
 /// Silent divergence is the #1 user-visible bug, so retry sooner.
 const BACKOFF_FOLDER: &[i64] = &[30, 120, 300, 900, 3600];
 
-/// Light backoff for flag-level actions (star, read) — sync reconciles these.
+/// Light backoff for flag-level actions (star, read) - sync reconciles these.
 const BACKOFF_FLAG: &[i64] = &[60, 300, 900];
 
 /// Look up the backoff schedule for an operation type.
@@ -172,7 +172,7 @@ pub async fn db_pending_ops_delete(db: &DbState, id: String) -> Result<(), Strin
 
 /// Cancel pending ops for a specific resource and operation type.
 /// Used by undo to prevent retried actions from re-executing after undo.
-/// Catches both 'pending' and 'executing' status — but cannot stop an
+/// Catches both 'pending' and 'executing' status - but cannot stop an
 /// already in-flight provider call.
 pub async fn db_pending_ops_cancel_for_resource(
     db: &DbState,
@@ -212,7 +212,7 @@ pub async fn db_pending_ops_increment_retry(db: &DbState, id: String) -> Result<
             .map_err(|e| format!("mark failed: {e}"))?;
             log::warn!(
                 "[pending_ops] Exhausted retries for {operation_type} (op {id}): \
-                 {new_count}/{max_retries} — left for sync reconciliation"
+                 {new_count}/{max_retries} - left for sync reconciliation"
             );
             return Ok(());
         }
@@ -487,7 +487,7 @@ fn compact_queue(conn: &Connection, account_id: Option<&str>) -> Result<i64, Str
             }
         }
 
-        // 3. Collapse sequential moveToFolder — keep only the latest
+        // 3. Collapse sequential moveToFolder - keep only the latest
         let move_ops: Vec<&&PendingOperation> = resource_ops
             .iter()
             .filter(|o| o.operation_type == "moveToFolder")

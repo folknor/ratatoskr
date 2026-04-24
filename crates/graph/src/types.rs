@@ -215,8 +215,8 @@ pub(crate) const REACTIONS_GUID: &str = "{41F28F13-83F4-4114-A584-EEDB5A6B0BFF}"
 
 /// `$expand` clause to fetch Exchange reaction extended properties alongside messages.
 ///
-/// - `OwnerReactionType` — the authenticated user's reaction emoji (string)
-/// - `ReactionsCount` — total number of reactions on the message (integer)
+/// - `OwnerReactionType` - the authenticated user's reaction emoji (string)
+/// - `ReactionsCount` - total number of reactions on the message (integer)
 pub(crate) const REACTIONS_EXPAND: &str = "\
 singleValueExtendedProperties(\
 $filter=id eq 'String {41F28F13-83F4-4114-A584-EEDB5A6B0BFF} Name OwnerReactionType' \

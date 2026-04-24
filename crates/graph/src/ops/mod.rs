@@ -32,7 +32,7 @@ use self::send::{create_draft_impl, send_via_draft};
 /// Microsoft Graph allows max 20 requests per `/$batch` call.
 const BATCH_CHUNK_SIZE: usize = 20;
 
-/// MAPI property tag for `PidTagDeferredSendTime` — tells Exchange to hold
+/// MAPI property tag for `PidTagDeferredSendTime` - tells Exchange to hold
 /// the message server-side until the specified UTC time before sending.
 const PID_TAG_DEFERRED_SEND_TIME: &str = "SystemTime 0x3FEF";
 
@@ -153,7 +153,7 @@ impl ProviderOps for GraphOps {
         thread_id: &str,
         folder_id: &FolderId,
     ) -> Result<(), ProviderError> {
-        // folder_id could be a label_id — resolve to opaque Graph folder ID
+        // folder_id could be a label_id - resolve to opaque Graph folder ID
         let folder_id_str = folder_id.as_str();
         let folder_map = require_folder_map(&self.client).await?;
         let target = folder_map
@@ -233,7 +233,7 @@ impl ProviderOps for GraphOps {
         raw_base64url: &str,
         thread_id: Option<&str>,
     ) -> Result<String, ProviderError> {
-        // Graph has no draft mutation — delete and recreate
+        // Graph has no draft mutation - delete and recreate
         let enc_id = urlencoding::encode(draft_id);
         let me = self.me();
         self.client
@@ -500,7 +500,7 @@ impl GraphOps {
         )
         .await?;
 
-        // Send the draft — Exchange will hold it until the deferred time
+        // Send the draft - Exchange will hold it until the deferred time
         let enc_draft_id = urlencoding::encode(&draft_id);
         let me = self.me();
         self.client
@@ -564,7 +564,7 @@ impl GraphOps {
     ///
     /// Sets `from` to the shared mailbox address and sends via
     /// `POST /users/{shared_mailbox}/messages/{id}/send`. The delegate's
-    /// identity is invisible to the recipient — the message appears to come
+    /// identity is invisible to the recipient - the message appears to come
     /// directly from the shared mailbox.
     ///
     /// Requires `Mail.Send.Shared` OAuth scope and "Send As" permission

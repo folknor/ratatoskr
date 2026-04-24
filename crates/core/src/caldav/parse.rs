@@ -8,11 +8,11 @@ use calcard::icalendar::{
 pub struct ParsedVEvent {
     /// UID of the event (globally unique identifier).
     pub uid: Option<String>,
-    /// SUMMARY — event title.
+    /// SUMMARY - event title.
     pub summary: Option<String>,
-    /// DESCRIPTION — event body.
+    /// DESCRIPTION - event body.
     pub description: Option<String>,
-    /// LOCATION — where the event takes place.
+    /// LOCATION - where the event takes place.
     pub location: Option<String>,
     /// DTSTART as a Unix timestamp.
     pub start_time: Option<i64>,
@@ -28,7 +28,7 @@ pub struct ParsedVEvent {
     pub organizer_name: Option<String>,
     /// Parsed attendees.
     pub attendees: Vec<ParsedAttendee>,
-    /// RRULE as raw text (for display/storage — not expanded here).
+    /// RRULE as raw text (for display/storage - not expanded here).
     pub rrule: Option<String>,
     /// VALARM reminders extracted as minutes-before values.
     pub reminders: Vec<ParsedReminder>,
@@ -39,7 +39,7 @@ pub struct ParsedVEvent {
 pub struct ParsedAttendee {
     /// Email address (stripped of mailto: prefix).
     pub email: String,
-    /// CN parameter — display name.
+    /// CN parameter - display name.
     pub name: Option<String>,
     /// PARTSTAT parameter (ACCEPTED, DECLINED, TENTATIVE, NEEDS-ACTION).
     pub partstat: Option<String>,

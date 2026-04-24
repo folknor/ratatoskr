@@ -57,7 +57,7 @@ impl SendDelegation {
 pub enum ScheduledStatus {
     /// Waiting to be picked up by the scheduler.
     Pending,
-    /// Handed off to server (Exchange/JMAP) — server will deliver at the
+    /// Handed off to server (Exchange/JMAP) - server will deliver at the
     /// scheduled time.
     Delegated,
     /// Local timer is actively sending the message right now.
@@ -66,7 +66,7 @@ pub enum ScheduledStatus {
     Sent,
     /// Send attempt failed (see `error_message` column).
     Failed,
-    /// Overdue by more than 24 hours — requires user review.
+    /// Overdue by more than 24 hours - requires user review.
     NeedsReview,
     /// User cancelled before send.
     Cancelled,
@@ -113,9 +113,9 @@ pub struct OverdueAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OverdueResolution {
-    /// Overdue by less than 24 hours — send immediately.
+    /// Overdue by less than 24 hours - send immediately.
     SendNow,
-    /// Overdue by more than 24 hours — flag for user review.
+    /// Overdue by more than 24 hours - flag for user review.
     NeedsReview,
 }
 

@@ -248,7 +248,7 @@ pub async fn raw_fetch_diagnostic(
         .map_err(|e| format!("SELECT read: {e}"))?;
     output.push_str(&format!("S: {}", String::from_utf8_lossy(&buf[..n])));
 
-    // UID FETCH — just get UID and FLAGS first (small response)
+    // UID FETCH - just get UID and FLAGS first (small response)
     let fetch_cmd = format!("a3 UID FETCH {uid_range} (UID FLAGS)\r\n");
     stream
         .write_all(fetch_cmd.as_bytes())
@@ -296,7 +296,7 @@ async fn raw_connect_starttls(config: &ImapConfig) -> Result<ImapStream, String>
     let mut tcp = tokio::time::timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(addr))
         .await
         .map_err(|_| format!(
-            "TCP connect to {}:{} timed out after {}s — check your server settings or network connection",
+            "TCP connect to {}:{} timed out after {}s - check your server settings or network connection",
             config.host, config.port, TCP_CONNECT_TIMEOUT.as_secs()
         ))?
         .map_err(|e| format!("TCP: {e}"))?;
@@ -309,7 +309,7 @@ async fn raw_connect_starttls(config: &ImapConfig) -> Result<ImapStream, String>
     let n = tokio::time::timeout(IMAP_CMD_TIMEOUT, tcp.read(&mut tmp))
         .await
         .map_err(|_| format!(
-            "STARTTLS response timed out after {}s — check your server settings or network connection",
+            "STARTTLS response timed out after {}s - check your server settings or network connection",
             IMAP_CMD_TIMEOUT.as_secs()
         ))?
         .map_err(|e| format!("STARTTLS resp: {e}"))?;
@@ -322,7 +322,7 @@ async fn raw_connect_starttls(config: &ImapConfig) -> Result<ImapStream, String>
     let tls = tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, tc.connect(&config.host, tcp))
         .await
         .map_err(|_| format!(
-            "TLS handshake timed out after {}s — check your server settings or network connection",
+            "TLS handshake timed out after {}s - check your server settings or network connection",
             TLS_HANDSHAKE_TIMEOUT.as_secs()
         ))?
         .map_err(|e| format!("TLS: {e}"))?;
@@ -503,7 +503,7 @@ fn extract_flags_from_fetch(line: &str) -> String {
 
 /// Extract INTERNALDATE from FETCH response.
 /// Format: INTERNALDATE "16-Feb-2026 12:00:00 +0000"
-/// Returns None if not present — mail-parser will use the Date header instead.
+/// Returns None if not present - mail-parser will use the Date header instead.
 fn extract_internal_date(line: &str) -> Option<i64> {
     let idx = line.find("INTERNALDATE \"")?;
     let after = &line[idx + 14..];

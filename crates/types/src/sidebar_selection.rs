@@ -3,7 +3,7 @@ use crate::{FolderId, TagId};
 /// What the sidebar is currently showing / the user has selected.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum SidebarSelection {
-    /// Inbox — the default view when nothing else is selected.
+    /// Inbox - the default view when nothing else is selected.
     Inbox,
     /// A well-known system folder.
     Folder(SystemFolder),
@@ -117,7 +117,7 @@ impl SidebarSelection {
     }
 
     /// Source folder for trash/move undo. Only meaningful for folder-type
-    /// selections — returns `None` for smart folders, tags, bundles, feature views.
+    /// selections - returns `None` for smart folders, tags, bundles, feature views.
     pub fn source_folder_for_undo(&self) -> Option<FolderId> {
         match self {
             Self::Inbox => Some(FolderId::from("INBOX")),

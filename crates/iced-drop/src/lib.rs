@@ -5,11 +5,11 @@
 //!
 //! # Public API
 //!
-//! - [`droppable()`] — wraps any element to make it draggable
-//! - [`zones_on_point()`] — produces a [`Task`] that finds drop zones containing a point
-//! - [`find_zones()`] — produces a [`Task`] that finds drop zones matching a custom filter
-//! - [`Droppable`] — the drag-and-drop widget wrapper
-//! - [`DroppableState`] — internal widget state (useful for custom [`Operation`]s)
+//! - [`droppable()`] - wraps any element to make it draggable
+//! - [`zones_on_point()`] - produces a [`Task`] that finds drop zones containing a point
+//! - [`find_zones()`] - produces a [`Task`] that finds drop zones matching a custom filter
+//! - [`Droppable`] - the drag-and-drop widget wrapper
+//! - [`DroppableState`] - internal widget state (useful for custom [`Operation`]s)
 
 pub mod widget;
 

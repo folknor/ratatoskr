@@ -124,7 +124,7 @@ fn get_header(headers: &[GmailHeader], name: &str) -> Option<String> {
 
 /// Recursively extract a body part matching the given MIME type.
 ///
-/// Skips `text/x-amp-html` parts — AMP emails contain tracking-heavy
+/// Skips `text/x-amp-html` parts - AMP emails contain tracking-heavy
 /// interactive content that should never be selected as the body.
 fn extract_body(part: &GmailPayload, mime_type: &str) -> Option<String> {
     if !common::email_parsing::is_amp_content_type(&part.mime_type)

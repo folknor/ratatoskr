@@ -22,7 +22,7 @@ pub enum FolderKind {
     SmartFolder,
     /// A provider label/folder specific to one account (container semantics).
     AccountLabel,
-    /// A tag-type label — Exchange category, IMAP keyword, JMAP keyword,
+    /// A tag-type label - Exchange category, IMAP keyword, JMAP keyword,
     /// or Gmail user label (tag semantics, shown in section 4).
     AccountTag,
 }
@@ -149,7 +149,7 @@ pub fn get_navigation_state(
 /// works across all providers).
 ///
 /// Note: SNOOZED is not in `SYSTEM_FOLDER_ROLES` because it has no provider
-/// mapping — it's a purely local feature. We define it inline here.
+/// mapping - it's a purely local feature. We define it inline here.
 const SIDEBAR_UNIVERSAL_FOLDERS: &[(&str, &str)] = &[
     ("INBOX", "Inbox"),
     ("STARRED", "Starred"),
@@ -205,7 +205,7 @@ fn build_universal_folders(
 
 /// Smart folders from the database.
 ///
-/// Smart folders always appear regardless of the current scope — only the
+/// Smart folders always appear regardless of the current scope - only the
 /// sidebar *listing* is unscoped.  Query *execution* (when the user clicks
 /// a smart folder) still respects `AccountScope`.
 fn build_smart_folders(
@@ -268,7 +268,7 @@ fn build_account_labels(
         .into_iter()
         .filter(|label| !system_ids.contains(&label.id.as_str()))
         .filter(|label| label.visible)
-        // Only container-type labels here — tags come from
+        // Only container-type labels here - tags come from
         // build_all_account_tags() to avoid duplication.
         .filter(|label| label.label_kind != "tag")
         .map(|label| {
@@ -277,7 +277,7 @@ fn build_account_labels(
             let rights = rights_from_label(&label);
 
             // If parent is a system folder (INBOX, SENT, etc.), treat as
-            // root — system folders are rendered in the universal section,
+            // root - system folders are rendered in the universal section,
             // not in the label tree. Without this, children of system
             // folders become orphans in the tree and get promoted to
             // depth-0 by the orphan recovery path.
@@ -538,7 +538,7 @@ pub fn get_shared_mailboxes_sync(conn: &Connection) -> Result<Vec<SharedMailboxR
 /// Look up the email address for a shared mailbox.
 ///
 /// Used by pop-out compose to determine the sender identity for shared
-/// mailbox contexts — not a sidebar boot query.
+/// mailbox contexts - not a sidebar boot query.
 pub fn get_shared_mailbox_email_sync(
     conn: &Connection,
     account_id: &str,

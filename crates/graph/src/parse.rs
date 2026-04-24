@@ -41,7 +41,7 @@ common::impl_message_addresses!(ParsedGraphMessage);
 ///
 /// Graph-specific parsing:
 /// - Body comes as a string (`body.content`), not MIME parts
-/// - Threading uses `conversationId` (provisional — see plan Open Question 3)
+/// - Threading uses `conversationId` (provisional - see plan Open Question 3)
 /// - Headers must be explicitly requested via `$select=internetMessageHeaders`
 /// - Labels derived from folder + categories + read/starred flags
 pub fn parse_graph_message(
@@ -50,7 +50,7 @@ pub fn parse_graph_message(
 ) -> Result<ParsedGraphMessage, String> {
     let id = msg.id.clone();
 
-    // Thread ID: use conversationId (provisional — see plan Open Question 3)
+    // Thread ID: use conversationId (provisional - see plan Open Question 3)
     let thread_id = msg
         .conversation_id
         .clone()

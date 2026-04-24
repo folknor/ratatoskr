@@ -17,7 +17,7 @@ pub struct CommandDescriptor {
     pub keywords: &'static [&'static str],
     /// Whether this command's effects can be reversed via undo.
     pub is_undoable: bool,
-    /// Longer label for the command palette (e.g. "Delete — Move to Trash").
+    /// Longer label for the command palette (e.g. "Delete - Move to Trash").
     /// Falls back to `label` if `None`.
     pub palette_label: Option<&'static str>,
     /// Full description for help system. Supports markdown.
@@ -35,7 +35,7 @@ impl CommandDescriptor {
         self.label
     }
 
-    /// Label for the command palette — longer/more descriptive than `label`.
+    /// Label for the command palette - longer/more descriptive than `label`.
     pub fn resolved_palette_label(&self, ctx: &CommandContext) -> &'static str {
         if let Some(is_active) = self.is_active
             && let Some(active_label) = self.active_label

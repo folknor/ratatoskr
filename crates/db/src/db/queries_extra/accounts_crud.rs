@@ -45,7 +45,7 @@ pub struct UpdateAccountParams {
     pub caldav_password: Option<String>,
 }
 
-/// Synchronous account creation — callable from any `&Connection`.
+/// Synchronous account creation - callable from any `&Connection`.
 ///
 /// This is the single source of truth for the INSERT statement. Both
 /// the async `db_create_account` (via `DbState`) and the app crate's
@@ -125,7 +125,7 @@ pub fn create_account_sync(
     Ok(id)
 }
 
-/// Synchronous duplicate-email check — callable from any `&Connection`.
+/// Synchronous duplicate-email check - callable from any `&Connection`.
 pub fn account_exists_by_email_sync(conn: &Connection, email: &str) -> Result<bool, String> {
     let count: i64 = conn
         .query_row(
@@ -146,7 +146,7 @@ pub async fn db_create_account(
         .await
 }
 
-/// Synchronous account update — callable from any `&Connection`.
+/// Synchronous account update - callable from any `&Connection`.
 ///
 /// This is the single source of truth for the update logic. Both the async
 /// `db_update_account` (via `DbState`) and the app crate's
@@ -246,7 +246,7 @@ pub async fn db_update_account_sort_order(
     .await
 }
 
-/// Parameters for re-authentication — updating an existing account's
+/// Parameters for re-authentication - updating an existing account's
 /// credentials without changing its identity or provider.
 #[derive(Debug, Clone)]
 pub struct ReauthAccountParams {

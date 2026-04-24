@@ -1,7 +1,7 @@
 //! Microsoft Graph change notification subscriptions.
 //!
 //! Manages subscription CRUD lifecycle for near-real-time change notifications.
-//! This is the management layer only — the HTTP listener that receives
+//! This is the management layer only - the HTTP listener that receives
 //! notifications will be wired up separately.
 //!
 //! Graph subscriptions require a public HTTPS endpoint for notifications.
@@ -227,7 +227,7 @@ pub async fn delete_subscription(
 ) -> Result<(), String> {
     let path = format!("/subscriptions/{subscription_id}");
 
-    // Best-effort delete on the server — the subscription may have already
+    // Best-effort delete on the server - the subscription may have already
     // expired, in which case Graph returns 404. Either way, clean up locally.
     let server_result = client.delete(&path, db).await;
     if let Err(ref e) = server_result {
@@ -292,7 +292,7 @@ pub async fn check_and_renew_subscriptions(
         let minutes_remaining = (expiry_unix - now) / 60;
 
         if minutes_remaining < 0 {
-            // Already expired — clean up local record
+            // Already expired - clean up local record
             log::info!(
                 "[Graph webhooks] Subscription {} expired, removing local record",
                 sub.id

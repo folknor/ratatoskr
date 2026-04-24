@@ -117,7 +117,7 @@ pub async fn db_find_contact_id_by_email(
 /// Upsert a contact with all mutable fields.
 ///
 /// Used by the contact action service. The app-crate `save_contact_inner`
-/// has equivalent SQL — this is the core-accessible version.
+/// has equivalent SQL - this is the core-accessible version.
 pub fn db_upsert_contact_full(
     conn: &Connection,
     id: &str,

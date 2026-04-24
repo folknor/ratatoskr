@@ -1,7 +1,7 @@
 //! Token input widget for chip/tag input with inline tokens.
 //!
 //! Used in compose recipient fields (To/Cc/Bcc), calendar attendee fields,
-//! and the contact group editor. The widget is context-agnostic — all
+//! and the contact group editor. The widget is context-agnostic - all
 //! compose-specific behavior (autocomplete dropdown, Bcc suggestions,
 //! cross-field drag) lives in the parent view, not here.
 //!
@@ -54,7 +54,7 @@ pub enum RecipientField {
 }
 
 /// Persistent state owned by the caller (lives in the compose model).
-/// Passed as data to the widget constructor — the widget does not own this.
+/// Passed as data to the widget constructor - the widget does not own this.
 pub struct TokenInputValue {
     /// Current tokens in this field.
     pub tokens: Vec<Token>,
@@ -97,7 +97,7 @@ pub enum TokenInputMessage {
     TokenizeText(String),
     /// A token was clicked (selected).
     SelectToken(TokenId),
-    /// Click in empty area — deselect any token.
+    /// Click in empty area - deselect any token.
     DeselectTokens,
     /// Focus was gained by this field.
     Focused,
@@ -107,11 +107,11 @@ pub enum TokenInputMessage {
     Paste(String),
     /// Backspace was pressed at the start of the text input.
     BackspaceAtStart,
-    /// Right-click on a token — emit position for context menu.
+    /// Right-click on a token - emit position for context menu.
     TokenContextMenu(TokenId, Point),
     /// Arrow key navigated to select a token by index.
     ArrowSelectToken(TokenId),
-    /// Arrow right from last token — deselect and focus text.
+    /// Arrow right from last token - deselect and focus text.
     ArrowToText,
     /// A drag was initiated on a token (exceeded 4px threshold).
     DragStarted(TokenId),
@@ -120,9 +120,9 @@ pub enum TokenInputMessage {
     AutocompleteDown,
     /// Arrow up when autocomplete dropdown is visible.
     AutocompleteUp,
-    /// Enter/Tab when autocomplete dropdown is visible — accept selection.
+    /// Enter/Tab when autocomplete dropdown is visible - accept selection.
     AutocompleteAccept,
-    /// Escape when autocomplete dropdown is visible — dismiss dropdown.
+    /// Escape when autocomplete dropdown is visible - dismiss dropdown.
     AutocompleteDismissKey,
 }
 
@@ -161,11 +161,11 @@ struct TokenInputWidget<'a, M> {
 /// wrapping flow layout followed by a text input area.
 ///
 /// # Arguments
-/// * `tokens` — current tokens (from the model)
-/// * `text` — current input text (from the model)
-/// * `placeholder` — placeholder text when empty
-/// * `selected_token` — which token is selected (for backspace-delete flow)
-/// * `on_message` — callback converting `TokenInputMessage` to the caller's
+/// * `tokens` - current tokens (from the model)
+/// * `text` - current input text (from the model)
+/// * `placeholder` - placeholder text when empty
+/// * `selected_token` - which token is selected (for backspace-delete flow)
+/// * `on_message` - callback converting `TokenInputMessage` to the caller's
 ///   message type
 pub fn token_input_field<'a, M: Clone + 'a>(
     tokens: &'a [Token],
@@ -617,7 +617,7 @@ fn handle_left_click<M: Clone>(
             }
         }
 
-        // Clicked in field, not on token — focus
+        // Clicked in field, not on token - focus
         if !state.is_focused {
             state.is_focused = true;
             shell.publish((widget.on_message)(TokenInputMessage::Focused));
@@ -627,7 +627,7 @@ fn handle_left_click<M: Clone>(
         return;
     }
 
-    // Clicked outside — blur
+    // Clicked outside - blur
     if state.is_focused {
         state.is_focused = false;
         shell.publish((widget.on_message)(TokenInputMessage::Blurred));
@@ -912,7 +912,7 @@ impl<'a, M: Clone + 'a> From<TokenInputWidget<'a, M>> for Element<'a, M> {
 
 // ── Helper: email validation ────────────────────────────
 
-/// Minimal validation — catches obvious typos, not RFC 5321.
+/// Minimal validation - catches obvious typos, not RFC 5321.
 pub fn is_plausible_email(text: &str) -> bool {
     let trimmed = text.trim();
     if trimmed.is_empty() {

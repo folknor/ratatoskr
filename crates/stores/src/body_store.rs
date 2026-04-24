@@ -21,7 +21,7 @@ pub struct MessageBody {
     pub body_text: Option<String>,
 }
 
-/// Zlib compression level — 3 gives a good ratio/speed trade-off.
+/// Zlib compression level - 3 gives a good ratio/speed trade-off.
 const ZLIB_LEVEL: u32 = 3;
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
@@ -124,7 +124,7 @@ impl BodyStoreState {
         log::debug!("Storing body for message_id={message_id}");
         let conn = Arc::clone(&self.conn);
         tokio::task::spawn_blocking(move || {
-            // Compress outside the lock — CPU-intensive work.
+            // Compress outside the lock - CPU-intensive work.
             let html_blob = body_html.as_deref().map(compress).transpose()?;
             let text_blob = body_text.as_deref().map(compress).transpose()?;
 
@@ -148,7 +148,7 @@ impl BodyStoreState {
     pub async fn put_batch(&self, bodies: Vec<MessageBody>) -> Result<(), String> {
         let conn = Arc::clone(&self.conn);
         tokio::task::spawn_blocking(move || {
-            // Compress all bodies outside the lock — CPU-intensive work.
+            // Compress all bodies outside the lock - CPU-intensive work.
             let compressed: Vec<(String, Option<Vec<u8>>, Option<Vec<u8>>)> = bodies
                 .iter()
                 .map(|body| {
@@ -209,7 +209,7 @@ impl BodyStoreState {
                 })
                 .ok()
             };
-            // Lock released — decompress outside the lock.
+            // Lock released - decompress outside the lock.
 
             match blobs {
                 Some((html_blob, text_blob)) => {
@@ -237,7 +237,7 @@ impl BodyStoreState {
 
         let conn = Arc::clone(&self.conn);
         tokio::task::spawn_blocking(move || {
-            // Lock only for the DB reads — collect compressed blobs.
+            // Lock only for the DB reads - collect compressed blobs.
             let compressed_rows: Vec<(String, Option<Vec<u8>>, Option<Vec<u8>>)> = {
                 let conn = conn
                     .lock()
@@ -278,7 +278,7 @@ impl BodyStoreState {
 
                 Ok::<_, String>(rows_out)
             }?;
-            // Lock released — decompress outside the lock.
+            // Lock released - decompress outside the lock.
 
             let mut results = Vec::with_capacity(compressed_rows.len());
             for (mid, html_blob, text_blob) in compressed_rows {

@@ -16,11 +16,11 @@ pub use crate::db::queries_extra::{
 /// Build a `multipart/report; report-type=disposition-notification` message
 /// (RFC 8098) and return the raw MIME bytes ready to send.
 ///
-/// * `original_from`       – the address that asked for the receipt (goes in `To:`)
-/// * `original_message_id` – the `Message-ID` of the original message
-/// * `recipient_email`     – our email address (the one confirming reading)
-/// * `recipient_name`      – display name for our `From:` header
-/// * `is_manual`           – `true` → `manual-action/MDN-sent-manually`,
+/// * `original_from`       - the address that asked for the receipt (goes in `To:`)
+/// * `original_message_id` - the `Message-ID` of the original message
+/// * `recipient_email`     - our email address (the one confirming reading)
+/// * `recipient_name`      - display name for our `From:` header
+/// * `is_manual`           - `true` → `manual-action/MDN-sent-manually`,
 ///                           `false` → `automatic-action/MDN-sent-automatically`
 pub fn build_mdn_message(
     original_from: &str,
@@ -119,7 +119,7 @@ pub async fn mark_mdn_sent_jmap(
 
 /// Set the `$MDNSent` keyword on an IMAP message via `UID STORE +FLAGS`.
 ///
-/// Checks PERMANENTFLAGS first — if the server does not support custom
+/// Checks PERMANENTFLAGS first - if the server does not support custom
 /// keywords (`\*` not in PERMANENTFLAGS), this is a silent no-op.
 /// The caller should always also call [`mark_mdn_sent_local`] to ensure
 /// local tracking regardless of server support.
@@ -137,7 +137,7 @@ pub async fn mark_mdn_sent_imap(
 /// Returns `true` if the server reports the keyword is present.
 ///
 /// If the search fails (e.g. server doesn't support custom keywords),
-/// returns `false` — the caller should fall back to the local DB check.
+/// returns `false` - the caller should fall back to the local DB check.
 pub async fn is_mdn_sent_imap(
     session: &mut crate::imap::connection::ImapSession,
     folder: &str,
@@ -162,7 +162,7 @@ pub async fn is_mdn_sent_imap(
 }
 
 /// For Graph (Microsoft), `isReadReceiptRequested` is read-only on the API
-/// side — there is no server-side keyword to set. We only track MDN sent
+/// side - there is no server-side keyword to set. We only track MDN sent
 /// status locally via [`mark_mdn_sent_local`].
 ///
 

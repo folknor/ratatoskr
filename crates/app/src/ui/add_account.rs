@@ -1,4 +1,4 @@
-//! Add Account wizard — multi-step state machine and views.
+//! Add Account wizard - multi-step state machine and views.
 //!
 //! Phases 2-3 of the accounts implementation spec. The wizard handles
 //! first-launch onboarding and subsequent account additions.
@@ -608,7 +608,7 @@ impl AddAccountWizard {
 
         let task = Task::perform(
             async move {
-                // Duplicate check — run synchronously inside spawn_blocking
+                // Duplicate check - run synchronously inside spawn_blocking
                 let email_for_dup = email.clone();
                 let dup = db
                     .with_conn(move |conn| account_exists_by_email_sync(conn, &email_for_dup))
@@ -987,7 +987,7 @@ impl AddAccountWizard {
 
         match provider {
             ManualProvider::Gmail | ManualProvider::Microsoft365 => {
-                // OAuth providers — look up OAuth config from the registry
+                // OAuth providers - look up OAuth config from the registry
                 let provider_id = match provider {
                     ManualProvider::Gmail => "google",
                     ManualProvider::Microsoft365 => "microsoft",
@@ -1048,7 +1048,7 @@ impl AddAccountWizard {
             return (Task::none(), None);
         }
 
-        // Wire credential validation — test IMAP connection
+        // Wire credential validation - test IMAP connection
         self.step = AddAccountStep::Validating;
         self.error = None;
         let generation = self.generation.next();
@@ -1178,7 +1178,7 @@ impl AddAccountWizard {
     }
 
     fn handle_back(&mut self) {
-        // In re-auth mode, Back is equivalent to Cancel — there's no
+        // In re-auth mode, Back is equivalent to Cancel - there's no
         // previous step to go back to.
         if self.reauth_account_id.is_some() {
             return;
@@ -1868,7 +1868,7 @@ impl AddAccountWizard {
             &self.auth_state.username,
             AddAccountMessage::UsernameChanged,
         ));
-        // INTENTIONAL: Password field is plaintext — no .secure(true).
+        // INTENTIONAL: Password field is plaintext - no .secure(true).
         // This is a deliberate product decision per problem-statement.md.
         // Users need to see what they type for app-specific passwords.
         col = col.push(labeled_input(

@@ -309,10 +309,10 @@ pub async fn graph_sync_calendar_events(
 
     // Build the initial URL
     let initial_url = if let Some(link) = delta_link {
-        // Incremental delta sync — use the stored delta link directly
+        // Incremental delta sync - use the stored delta link directly
         link.to_string()
     } else {
-        // Full sync — use calendarView with delta for the date range
+        // Full sync - use calendarView with delta for the date range
         let time_min = chrono::Utc::now() - chrono::Duration::days(90);
         let time_max = chrono::Utc::now() + chrono::Duration::days(365);
         let start = time_min.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
@@ -500,7 +500,7 @@ fn parse_graph_datetime(
         if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(&dt.date_time) {
             return Ok(parsed.timestamp());
         }
-        // Graph usually returns "2024-01-15T10:00:00.0000000" — no offset.
+        // Graph usually returns "2024-01-15T10:00:00.0000000" - no offset.
         // Parse as NaiveDateTime and apply the time zone.
         // Truncate fractional seconds for parsing.
         let clean = if let Some(dot_pos) = dt.date_time.find('.') {
@@ -513,7 +513,7 @@ fn parse_graph_datetime(
 
         // If the time zone is "UTC" or similar, use UTC directly.
         // For named time zones (e.g. "Pacific Standard Time"), we'd need a
-        // full IANA/Windows zone mapping. For now, treat as UTC — the calendar
+        // full IANA/Windows zone mapping. For now, treat as UTC - the calendar
         // crate stores timestamps and the UI shows local time.
         if dt.time_zone == "UTC" || dt.time_zone.is_empty() {
             Ok(naive.and_utc().timestamp())

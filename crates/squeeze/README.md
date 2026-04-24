@@ -84,7 +84,7 @@ use std::path::Path;
 
 let config = Config::email_default();
 
-// From a file path (preferred for images/archives — reads headers only):
+// From a file path (preferred for images/archives - reads headers only):
 let format = detect::detect_from_extension("pdf", &[]);
 let est = estimate_file(Path::new("report.pdf"), format, &config)?;
 
@@ -92,12 +92,12 @@ let est = estimate_file(Path::new("report.pdf"), format, &config)?;
 let format = detect::detect("image/jpeg", &file_bytes);
 let est = estimate(&file_bytes, format, &config)?;
 
-// est.expected_bytes  — conservative upper bound on compressed size
-// est.floor_bytes     — non-compressible content (the hard minimum)
-// est.worth_trying    — false if compression can't meaningfully help
+// est.expected_bytes  - conservative upper bound on compressed size
+// est.floor_bytes     - non-compressible content (the hard minimum)
+// est.worth_trying    - false if compression can't meaningfully help
 ```
 
-The estimate is deliberately conservative — it over-predicts output size by 1-5x so that "won't fit" is a reliable signal. If `floor_bytes` exceeds the provider limit, no amount of compression will make the file small enough.
+The estimate is deliberately conservative - it over-predicts output size by 1-5x so that "won't fit" is a reliable signal. If `floor_bytes` exceeds the provider limit, no amount of compression will make the file small enough.
 
 #### Typical integration: running total per email
 
@@ -110,7 +110,7 @@ let provider_limit = limits::GMAIL_YAHOO; // 18 MB
 
 let mut total_estimated: u64 = 0;
 
-// User drops an attachment — estimate is fast, header-only for images/archives:
+// User drops an attachment - estimate is fast, header-only for images/archives:
 fn on_attachment_added(path: &Path, mime_type: &str) {
     let format = detect::detect(mime_type, &[]);
     let est = estimate_file(path, format, &config).unwrap();
@@ -118,15 +118,15 @@ fn on_attachment_added(path: &Path, mime_type: &str) {
     total_estimated += est.expected_bytes;
 
     if est.floor_bytes as usize > provider_limit {
-        // This single file can never fit — warn immediately.
+        // This single file can never fit - warn immediately.
         // "This 220 MB PDF has 156 MB of non-image content and
         //  cannot be compressed below the 18 MB limit."
     } else if total_estimated as usize > provider_limit {
-        // Combined attachments exceed limit — warn.
+        // Combined attachments exceed limit - warn.
         // "Total attachments (~X MB) exceed the 18 MB limit.
         //  Remove an attachment or reduce quality."
     } else {
-        // Looks good — compress in background.
+        // Looks good - compress in background.
         // Re-check total after compression completes
         // (actual size will be smaller than estimate).
     }
@@ -196,4 +196,4 @@ squeeze = { path = "../../squeeze", optional = true }
 compress-attachments = ["squeeze"]
 ```
 
-The orchestration layer (running totals, provider limits, UI warnings) belongs in rtsk. Squeeze is a per-file tool — it doesn't know about "the email" or how many attachments there are.
+The orchestration layer (running totals, provider limits, UI warnings) belongs in rtsk. Squeeze is a per-file tool - it doesn't know about "the email" or how many attachments there are.

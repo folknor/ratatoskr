@@ -12,9 +12,9 @@ use crate::{CompressOutput, CompressResult};
 /// The type of image encoding in a PDF stream.
 #[derive(Debug, Clone, Copy)]
 enum ImageFilter {
-    /// DCTDecode — stream bytes are a raw JPEG.
+    /// DCTDecode - stream bytes are a raw JPEG.
     Dct,
-    /// FlateDecode — stream bytes are zlib-compressed raw pixels.
+    /// FlateDecode - stream bytes are zlib-compressed raw pixels.
     Flat,
 }
 
@@ -214,7 +214,7 @@ fn try_recompress_flat(doc: &mut Document, id: ObjectId, info: &ImageInfo, confi
 
     // Skip images with predictors (e.g. PNG predictors prepend a filter byte
     // per row). After zlib decompression, the bytes aren't raw interleaved
-    // pixels — treating them as such produces silently corrupted JPEGs.
+    // pixels - treating them as such produces silently corrupted JPEGs.
     {
         let Some(Object::Stream(stream)) = doc.objects.get(&id) else {
             return;
@@ -461,7 +461,7 @@ fn collect_referenced_ids(doc: &Document) -> HashSet<ObjectId> {
         stack.push(id);
     }
 
-    // Iterative traversal — avoids stack overflow on deep object chains.
+    // Iterative traversal - avoids stack overflow on deep object chains.
     while let Some(id) = stack.pop() {
         if !visited.insert(id) {
             continue;

@@ -247,7 +247,7 @@ fn find_special_folder(
     Ok(None)
 }
 
-/// Connect, run an IMAP session body, then logout — mirroring the
+/// Connect, run an IMAP session body, then logout - mirroring the
 /// `with_imap_session!` macro from `commands.rs`.
 macro_rules! with_session {
     ($config:expr, $session:ident => $body:expr) => {{

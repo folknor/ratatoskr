@@ -1,18 +1,18 @@
 # Tracking Pixel / Read Receipt Blocking
 
-**Tier**: 1 — Blocks switching from Outlook
-**Status**: ⚠️ **Mostly done** — Remote image blocking is fully implemented: blocked by default, per-sender allowlist (`image_allowlist` table), "load images" / "always load from sender" buttons. `sanitize_html_body_with_image_policy()` strips remote `<img src="http(s)://...">` unless sender is allowlisted, preserves `cid:`/`data:` URIs (2026-03-22). AMP HTML blocking implemented: `strip_amp_elements()` removes 14 `amp-*` elements and `amp4email` attribute (2026-03-22). MDN infrastructure is in place: `Disposition-Notification-To` header is detected during sync across all four providers and persisted as `mdn_requested` on messages (`crates/core/src/mdn.rs` has policy resolution logic); `read_receipt_policy` table exists with per-account/per-sender scoping; default policy is `never` (suppress silently). HTML sanitization pipeline is implemented: `sanitize_html_body()` in `crates/common/src/html_sanitizer.rs` runs the three-stage `css-inline` + `lol_html` + `ammonia` pipeline. Tracking pixel detection implemented. URL cleaning implemented. Link tracking indicator functions exported: `is_known_tracker()` and `has_tracking_params()` (2026-03-22). **Remaining**: UI for read receipt prompts and policy management, UI integration of link tracking indicators (backend functions ready).
+**Tier**: 1 - Blocks switching from Outlook
+**Status**: ⚠️ **Mostly done** - Remote image blocking is fully implemented: blocked by default, per-sender allowlist (`image_allowlist` table), "load images" / "always load from sender" buttons. `sanitize_html_body_with_image_policy()` strips remote `<img src="http(s)://...">` unless sender is allowlisted, preserves `cid:`/`data:` URIs (2026-03-22). AMP HTML blocking implemented: `strip_amp_elements()` removes 14 `amp-*` elements and `amp4email` attribute (2026-03-22). MDN infrastructure is in place: `Disposition-Notification-To` header is detected during sync across all four providers and persisted as `mdn_requested` on messages (`crates/core/src/mdn.rs` has policy resolution logic); `read_receipt_policy` table exists with per-account/per-sender scoping; default policy is `never` (suppress silently). HTML sanitization pipeline is implemented: `sanitize_html_body()` in `crates/common/src/html_sanitizer.rs` runs the three-stage `css-inline` + `lol_html` + `ammonia` pipeline. Tracking pixel detection implemented. URL cleaning implemented. Link tracking indicator functions exported: `is_known_tracker()` and `has_tracking_params()` (2026-03-22). **Remaining**: UI for read receipt prompts and policy management, UI integration of link tracking indicators (backend functions ready).
 
 ---
 
 - **What**: Block remote image loading by default (defeats tracking pixels), suppress MDN (Message Disposition Notification) headers
-- **Scope**: Client-side only — identical implementation across all providers
+- **Scope**: Client-side only - identical implementation across all providers
 
 ## Pain points
 
 - Blocking remote images breaks legitimate email layouts: newsletters, marketing emails, and even some corporate templates rely on remote images for logos, banners, formatting. Need a "load images for this message" toggle and a per-sender/per-domain allowlist.
 - Read receipts (`Disposition-Notification-To` header): some corporate environments expect read receipts. Blocking them entirely may violate workplace expectations. Need a per-account or per-sender policy (auto-send, ask, never).
-- Tracking pixels are invisible 1x1 images — but some "tracking" is done via uniquely-parameterized URLs on visible images. Blocking all remote images is the only reliable defense, but it's heavy-handed.
+- Tracking pixels are invisible 1x1 images - but some "tracking" is done via uniquely-parameterized URLs on visible images. Blocking all remote images is the only reliable defense, but it's heavy-handed.
 - AMP for Email: some senders use AMP emails that phone home. Treat AMP content as remote content and block by default.
 - HTML email `<link>` tags and CSS `@import`: remote CSS is another tracking vector. Block external stylesheets, inline only.
 
@@ -22,7 +22,7 @@ Default-block remote images in HTML render, strip/suppress `Disposition-Notifica
 
 ## Research
 
-### 1. HTML email rendering in iced — the core challenge
+### 1. HTML email rendering in iced - the core challenge
 
 Ratatoskr is a native iced app (no webview). This is the single most architecturally significant decision for the application because it determines how *all* email bodies are displayed.
 
@@ -43,7 +43,7 @@ All four render to either pixel buffers (litehtml, Blitz) or GPU shader textures
 
 **litehtml as primary renderer, CEF as optional fallback.** Rationale:
 
-- Email HTML is overwhelmingly table-based layout with inline CSS. litehtml handles this well — it was designed for exactly this class of content. HTTP fetching, image loading, link navigation, and CSS `@import` resolution are already built into the iced integration.
+- Email HTML is overwhelmingly table-based layout with inline CSS. litehtml handles this well - it was designed for exactly this class of content. HTTP fetching, image loading, link navigation, and CSS `@import` resolution are already built into the iced integration.
 - No JavaScript is needed for email rendering. AMP content is blocked (see section 6). This eliminates Servo and CEF's primary advantage.
 - litehtml is the only backend available as a pure crates.io dependency, which avoids git-dep build fragility.
 - Blitz is architecturally superior (pure Rust, Stylo for CSS resolution) but is pre-alpha and a git dependency. Worth revisiting when it reaches crates.io and beta stability, likely mid-to-late 2026. Its use of Stylo (MPL 2.0 licensed via `stylo_taffy`) needs license review.
@@ -53,7 +53,7 @@ All four render to either pixel buffers (litehtml, Blitz) or GPU shader textures
 
 - **Himalaya/Pimalaya** (Rust CLI/TUI email): renders `text/plain` only; no HTML rendering.
 - **Delta Chat** (Rust core + platform UIs): delegates HTML rendering to the platform webview (Android WebView, iOS WKWebView, desktop Electron). The Rust core provides sanitized HTML; rendering is not done in Rust.
-- **Thunderbird**: uses Gecko (Firefox engine) for HTML rendering — not applicable to a pure-Rust stack.
+- **Thunderbird**: uses Gecko (Firefox engine) for HTML rendering - not applicable to a pure-Rust stack.
 
 No shipping Rust email client renders HTML email in pure Rust today. This is greenfield work.
 
@@ -62,12 +62,12 @@ No shipping Rust email client renders HTML email in pure Rust today. This is gre
 Regardless of backend, the rendering pipeline should be:
 
 1. **Retrieve** raw HTML body from `bodies.db` (decompress)
-2. **Sanitize** (see section 2) — strip dangerous elements, rewrite/block URLs
+2. **Sanitize** (see section 2) - strip dangerous elements, rewrite/block URLs
 3. **Inject** tracking-blocking rules (remove `<img>` with remote `src`, strip `<link>` and `@import`, etc.) unless the sender is in the `image_allowlist`
 4. **Pass** sanitized HTML to the rendering backend
 5. **On user action** ("Load images"), re-render with remote images permitted for that message or persist to allowlist for that sender
 
-This pipeline runs entirely in the `common` and `core` crates before any UI code touches the content. The sanitization function (`sanitize_html_body()` in `crates/common/src/html_sanitizer.rs`) and tracking pixel detection (`detect_tracking_pixels_in_html()` in `crates/common/src/tracking_pixels.rs`) are called from `core`, which re-exports them. The rendering backend receives pre-sanitized HTML and never makes network requests on its own — all image fetching goes through a controlled local proxy or fetch layer (see section 3).
+This pipeline runs entirely in the `common` and `core` crates before any UI code touches the content. The sanitization function (`sanitize_html_body()` in `crates/common/src/html_sanitizer.rs`) and tracking pixel detection (`detect_tracking_pixels_in_html()` in `crates/common/src/tracking_pixels.rs`) are called from `core`, which re-exports them. The rendering backend receives pre-sanitized HTML and never makes network requests on its own - all image fetching goes through a controlled local proxy or fetch layer (see section 3).
 
 ### 2. HTML sanitization crates
 
@@ -81,9 +81,9 @@ This pipeline runs entirely in the `common` and `core` crates before any UI code
 
 Whitelist-based sanitizer. Builds a DOM via html5ever, traverses it replacing disallowed nodes, serializes back. Sanitizes sample text in ~88 microseconds. Configurable: allowed tags, attributes, URL schemes, CSS properties. Can strip all `<img>`, `<link>`, `<style>`, `<script>` tags, and filter `style` attributes to remove `background-image: url(...)` references.
 
-**Strengths for email**: Battle-tested, fast, correct HTML5 parsing. Can be configured to strip all remote resource references (images, stylesheets, fonts) while preserving layout structure (tables, divs, spans with inline color/sizing). The whitelist approach is inherently safe — anything not explicitly allowed is removed.
+**Strengths for email**: Battle-tested, fast, correct HTML5 parsing. Can be configured to strip all remote resource references (images, stylesheets, fonts) while preserving layout structure (tables, divs, spans with inline color/sizing). The whitelist approach is inherently safe - anything not explicitly allowed is removed.
 
-**Limitations**: Operates on a full DOM (not streaming). For email bodies this is fine (they are small), but it means the entire HTML must be in memory. Does not understand CSS `@import` or `url()` inside `<style>` blocks — those require separate CSS sanitization.
+**Limitations**: Operates on a full DOM (not streaming). For email bodies this is fine (they are small), but it means the entire HTML must be in memory. Does not understand CSS `@import` or `url()` inside `<style>` blocks - those require separate CSS sanitization.
 
 #### lol_html
 
@@ -91,11 +91,11 @@ Whitelist-based sanitizer. Builds a DOM via html5ever, traverses it replacing di
 - **Maintainer**: Cloudflare
 - **License**: BSD-3-Clause
 
-Streaming HTML rewriter with CSS-selector-based API. Designed for Cloudflare Workers to modify HTML on-the-fly with minimal buffering. Does not build a DOM — operates on a token stream, which makes it extremely memory-efficient and fast on large documents.
+Streaming HTML rewriter with CSS-selector-based API. Designed for Cloudflare Workers to modify HTML on-the-fly with minimal buffering. Does not build a DOM - operates on a token stream, which makes it extremely memory-efficient and fast on large documents.
 
 **Strengths for email**: Can surgically rewrite specific elements using CSS selectors. For example: `img[src^="http"]` to remove remote images, `link[rel="stylesheet"]` to strip external CSS, `a[href]` to rewrite tracking URLs. Streaming means it handles even pathologically large HTML emails without memory pressure.
 
-**Limitations**: Not a sanitizer — it is a rewriter. It does not validate or whitelist; it transforms. Must be used *in addition to* a sanitizer (ammonia), not instead of one. Cannot inspect the full DOM structure (no "remove this element if its computed style makes it 1x1 pixel"). The CSS selector API is powerful but cannot express semantic rules like "remove all invisible images."
+**Limitations**: Not a sanitizer - it is a rewriter. It does not validate or whitelist; it transforms. Must be used *in addition to* a sanitizer (ammonia), not instead of one. Cannot inspect the full DOM structure (no "remove this element if its computed style makes it 1x1 pixel"). The CSS selector API is powerful but cannot express semantic rules like "remove all invisible images."
 
 #### html5ever + markup5ever
 
@@ -158,7 +158,7 @@ When the user clicks "Load images," fetch each remote image URL using `reqwest` 
 
 When a message arrives during sync, immediately fetch all remote images through a privacy proxy or directly, regardless of whether the user opens the message. Cache locally. When the user opens the message, serve from cache.
 
-Apple Mail implements this via a dual-relay proxy to hide the user's IP. Without infrastructure, we can approximate this by fetching on sync (hides *when* the user read it) but the sender still sees the fetch (knows delivery happened). This partially defeats tracking — the sender cannot distinguish "opened" from "received."
+Apple Mail implements this via a dual-relay proxy to hide the user's IP. Without infrastructure, we can approximate this by fetching on sync (hides *when* the user read it) but the sender still sees the fetch (knows delivery happened). This partially defeats tracking - the sender cannot distinguish "opened" from "received."
 
 **Pros**: Defeats open-time tracking. **Cons**: Bandwidth cost (fetching images for emails you never read), storage cost, does not hide IP without a proxy. Could be offered as an opt-in "enhanced privacy" mode.
 
@@ -191,7 +191,7 @@ Known tracking parameters to strip: `utm_source`, `utm_medium`, `utm_campaign`, 
 
 #### How MDNs work
 
-MDNs are defined in [RFC 8098](https://www.rfc-editor.org/rfc/rfc8098.html) (obsoletes RFC 3798). A sender requests a read receipt by including a `Disposition-Notification-To` header in the message. When the recipient's MUA opens the message, it *may* generate an MDN — a new MIME message of type `multipart/report; report-type=disposition-notification` — and send it back to the address in that header.
+MDNs are defined in [RFC 8098](https://www.rfc-editor.org/rfc/rfc8098.html) (obsoletes RFC 3798). A sender requests a read receipt by including a `Disposition-Notification-To` header in the message. When the recipient's MUA opens the message, it *may* generate an MDN - a new MIME message of type `multipart/report; report-type=disposition-notification` - and send it back to the address in that header.
 
 Key points from the RFC:
 - **MDN sending is always optional.** The RFC explicitly states that MUAs may silently ignore MDN requests to preserve user privacy. "Manual sending of MDNs must be the default."
@@ -203,7 +203,7 @@ Key points from the RFC:
 The `mail-parser` crate (Stalwart Labs, the same author as our JMAP server) does **not** have a dedicated `HeaderName` variant for `Disposition-Notification-To`. It falls into the `Other(String)` catch-all. Detection requires:
 
 ```rust
-// Pseudocode — check for MDN request in parsed message
+// Pseudocode - check for MDN request in parsed message
 let has_mdn_request = message.headers().iter().any(|h| {
     matches!(h.name(), HeaderName::Other(name) if name.eq_ignore_ascii_case("disposition-notification-to"))
 });
@@ -213,7 +213,7 @@ This is reliable but means we cannot use typed accessors. The header value is a 
 
 #### Suppression implementation
 
-Suppression is client-side only — we simply never generate or send the MDN message. The implementation:
+Suppression is client-side only - we simply never generate or send the MDN message. The implementation:
 
 1. **Parse**: When displaying a message, check for `Disposition-Notification-To` header
 2. **Check policy**: Look up the read-receipt policy for this account/sender (see section 5)
@@ -225,7 +225,7 @@ Suppression is client-side only — we simply never generate or send the MDN mes
 
 #### MDN generation
 
-When the user approves sending an MDN, we must generate a `multipart/report` message per RFC 8098 and send it via the appropriate provider. The [`mail-builder`](https://crates.io/crates/mail-builder) crate (also Stalwart Labs) can construct MIME messages, though it has no MDN-specific API — we would construct the disposition notification body part manually. The format is straightforward:
+When the user approves sending an MDN, we must generate a `multipart/report` message per RFC 8098 and send it via the appropriate provider. The [`mail-builder`](https://crates.io/crates/mail-builder) crate (also Stalwart Labs) can construct MIME messages, though it has no MDN-specific API - we would construct the disposition notification body part manually. The format is straightforward:
 
 ```
 Content-Type: multipart/report; report-type=disposition-notification
@@ -380,18 +380,18 @@ The tracking domain list should be a shipped resource file (like ad-blocker filt
 
 #### Key differentiators for Ratatoskr
 
-1. **Per-sender read receipt policy** — no mainstream client offers this granularity. Corporate users need "always send to my boss, never send to marketing" rules.
-2. **Defense-in-depth sanitization** — the `css-inline` + `lol_html` + `ammonia` pipeline is more thorough than any single-pass approach. Most clients either block images (Thunderbird) or proxy them (Apple Mail) but do not sanitize CSS tracking vectors.
-3. **Link tracking transparency** — no client currently tells users when a link goes through a tracking redirect. This is a meaningful privacy UX improvement.
-4. **No server-side dependency** — Apple Mail and Fastmail rely on their own proxy infrastructure. Our approach works entirely offline / client-side, which matters for enterprise users on restricted networks.
+1. **Per-sender read receipt policy** - no mainstream client offers this granularity. Corporate users need "always send to my boss, never send to marketing" rules.
+2. **Defense-in-depth sanitization** - the `css-inline` + `lol_html` + `ammonia` pipeline is more thorough than any single-pass approach. Most clients either block images (Thunderbird) or proxy them (Apple Mail) but do not sanitize CSS tracking vectors.
+3. **Link tracking transparency** - no client currently tells users when a link goes through a tracking redirect. This is a meaningful privacy UX improvement.
+4. **No server-side dependency** - Apple Mail and Fastmail rely on their own proxy infrastructure. Our approach works entirely offline / client-side, which matters for enterprise users on restricted networks.
 
 ### 9. Implementation priority
 
-1. ✅ **Sanitization pipeline** (`css-inline` + `lol_html` + `ammonia`) — implemented in `crates/common/src/html_sanitizer.rs` as `sanitize_html_body()` (re-exported via `rtsk::provider::html_sanitizer`). Three-stage pipeline: CSS inlining, streaming removal of `<script>`/`<iframe>`/`<form>`/event handlers/`javascript:` URLs/`@import` in inline styles via `lol_html`, then whitelist sanitization via `ammonia` (allowed tags, attributes, URL schemes, `noopener noreferrer` on links).
-2. **Remote image blocking** — already implemented in the DB layer (`image_allowlist`, `block_remote_images` setting, queries in `crates/core/src/db/queries_extra/allowlists.rs`). Wire into the sanitization pipeline: strip remote `<img src>` unless sender is allowlisted.
-3. ✅ **MDN suppression** — `Disposition-Notification-To` header is detected during sync across all four providers (gmail, graph, jmap, imap parse modules) and persisted as `mdn_requested` on messages. Policy resolution logic is implemented in `crates/core/src/mdn.rs` with most-specific-wins lookup (sender > domain > account > global). `read_receipt_policy` DB table exists. Default policy: suppress silently.
-4. **Read receipt policy UI** — settings screen for per-account/per-sender policies. Banner in reading pane when MDN is requested.
-5. **AMP blocking** — trivial: skip `text/x-amp-html` MIME parts during body selection. Can be done in the existing body-parsing path.
-6. ✅ **Tracking pixel detection** — implemented in `crates/common/src/tracking_pixels.rs` as `detect_tracking_pixels_in_html()`. Detects 1x1 dimension images, images hidden by CSS style, and known tracker domains/paths. **Remaining**: visual indicators in the rendered email UI.
-7. ✅ **URL cleaning** — implemented in `crates/core/src/url_cleaning.rs`. Strips known tracking query parameters (UTM, Facebook, Google, Mailchimp, HubSpot, etc.) and known tracking redirect domains. **Remaining**: integration into the sanitization pipeline and rendered link UI.
-8. **Image proxy** (Strategy C) — lowest priority. The MVP works without it. Add when users request IP-hiding or tracking-param stripping.
+1. ✅ **Sanitization pipeline** (`css-inline` + `lol_html` + `ammonia`) - implemented in `crates/common/src/html_sanitizer.rs` as `sanitize_html_body()` (re-exported via `rtsk::provider::html_sanitizer`). Three-stage pipeline: CSS inlining, streaming removal of `<script>`/`<iframe>`/`<form>`/event handlers/`javascript:` URLs/`@import` in inline styles via `lol_html`, then whitelist sanitization via `ammonia` (allowed tags, attributes, URL schemes, `noopener noreferrer` on links).
+2. **Remote image blocking** - already implemented in the DB layer (`image_allowlist`, `block_remote_images` setting, queries in `crates/core/src/db/queries_extra/allowlists.rs`). Wire into the sanitization pipeline: strip remote `<img src>` unless sender is allowlisted.
+3. ✅ **MDN suppression** - `Disposition-Notification-To` header is detected during sync across all four providers (gmail, graph, jmap, imap parse modules) and persisted as `mdn_requested` on messages. Policy resolution logic is implemented in `crates/core/src/mdn.rs` with most-specific-wins lookup (sender > domain > account > global). `read_receipt_policy` DB table exists. Default policy: suppress silently.
+4. **Read receipt policy UI** - settings screen for per-account/per-sender policies. Banner in reading pane when MDN is requested.
+5. **AMP blocking** - trivial: skip `text/x-amp-html` MIME parts during body selection. Can be done in the existing body-parsing path.
+6. ✅ **Tracking pixel detection** - implemented in `crates/common/src/tracking_pixels.rs` as `detect_tracking_pixels_in_html()`. Detects 1x1 dimension images, images hidden by CSS style, and known tracker domains/paths. **Remaining**: visual indicators in the rendered email UI.
+7. ✅ **URL cleaning** - implemented in `crates/core/src/url_cleaning.rs`. Strips known tracking query parameters (UTM, Facebook, Google, Mailchimp, HubSpot, etc.) and known tracking redirect domains. **Remaining**: integration into the sanitization pipeline and rendered link UI.
+8. **Image proxy** (Strategy C) - lowest priority. The MVP works without it. Add when users request IP-hiding or tracking-param stripping.

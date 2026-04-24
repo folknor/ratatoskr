@@ -167,8 +167,8 @@ async fn soap_get_user_settings(
 /// Discover public folder routing information for a user.
 ///
 /// Makes an Autodiscover SOAP `GetUserSettings` request to retrieve:
-/// - `PublicFolderInformation` — the hierarchy mailbox SMTP address
-/// - `InternalRpcClientServer` — the mailbox server (used as X-PublicFolderMailbox)
+/// - `PublicFolderInformation` - the hierarchy mailbox SMTP address
+/// - `InternalRpcClientServer` - the mailbox server (used as X-PublicFolderMailbox)
 pub async fn discover_public_folder_routing(
     http_client: &reqwest::Client,
     access_token: &str,

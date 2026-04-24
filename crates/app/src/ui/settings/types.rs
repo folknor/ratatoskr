@@ -92,10 +92,10 @@ pub enum SettingsMessage {
     OllamaModelChanged(String),
     SaveAiSettings,
     // Editable list
-    ListGripPress(String, usize), // grip pressed — start potential drag
+    ListGripPress(String, usize), // grip pressed - start potential drag
     ListDragMove(String, Point),  // cursor moved while grip held
-    ListDragEnd(String),          // grip released — end drag
-    ListRowClick(String, usize),  // row clicked (not grip) — toggle
+    ListDragEnd(String),          // grip released - end drag
+    ListRowClick(String, usize),  // row clicked (not grip) - toggle
     ListRemove(String, usize),    // (list_id, item index)
     ListAdd(String),              // (list_id)
     ListToggle(String, usize, bool), // (list_id, item index, new value)
@@ -136,10 +136,10 @@ pub enum SettingsMessage {
     DeleteAccountConfirmed(String),
     DeleteAccountCancelled,
     // Signatures
-    SignatureEdit(String),            // signature_id — open editor sheet
-    SignatureCreate(String),          // account_id — open editor for new sig
-    SignatureDelete(String),          // signature_id — request delete (shows confirm)
-    SignatureDeleteConfirmed(String), // signature_id — confirmed delete
+    SignatureEdit(String),            // signature_id - open editor sheet
+    SignatureCreate(String),          // account_id - open editor for new sig
+    SignatureDelete(String),          // signature_id - request delete (shows confirm)
+    SignatureDeleteConfirmed(String), // signature_id - confirmed delete
     SignatureDeleteCancelled,         // cancel pending delete
     SignatureEditorNameChanged(String),
     SignatureEditorBodyChanged(String),
@@ -213,7 +213,7 @@ pub enum SettingsEvent {
     Closed,
     /// Preferences were explicitly saved via SavePreferences.
     PreferencesCommitted,
-    /// Preferences were explicitly cancelled — committed state restored.
+    /// Preferences were explicitly cancelled - committed state restored.
     PreferencesDiscarded,
     DateDisplayChanged(DateDisplay),
     OpenAddAccountWizard,
@@ -257,7 +257,7 @@ pub enum SettingsEvent {
 }
 
 /// Settings pages that slide in from the right, covering the settings content.
-/// One level deep — no stacking.
+/// One level deep - no stacking.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettingsSheetPage {
     CreateFilter,
@@ -569,7 +569,7 @@ pub enum ImportStep {
     VcfPreview,
     /// Import is running.
     Importing,
-    /// Import complete — show summary.
+    /// Import complete - show summary.
     Summary,
 }
 
@@ -627,7 +627,7 @@ impl ImportWizardState {
 pub struct Settings {
     pub active_tab: Tab,
     pub open_select: Option<SelectField>,
-    // General — preferences shadow pattern
+    // General - preferences shadow pattern
     /// The committed (persisted) preferences. Updated only on explicit save.
     pub committed_preferences: PreferencesState,
     /// The editing shadow. `Some` when settings panel is open. All preference

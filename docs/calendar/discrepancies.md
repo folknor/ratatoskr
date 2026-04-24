@@ -8,11 +8,11 @@ Audit date: 2026-03-30
 
 ### High
 
-1. ~~**New event creation appears broken.**~~ ✅ Fixed — editor now has a `pick_list` calendar selector dropdown populated from `state.calendars`. `EventField::CalendarId` updates the draft. Phase C of contract #11 will enforce blocking save when no calendar is selected.
+1. ~~**New event creation appears broken.**~~ ✅ Fixed - editor now has a `pick_list` calendar selector dropdown populated from `state.calendars`. `EventField::CalendarId` updates the draft. Phase C of contract #11 will enforce blocking save when no calendar is selected.
 
-2. ~~**Calendar visibility toggles are mostly cosmetic.**~~ ✅ Fixed — event-loading query now filters by `is_visible = 1`. Side effect of `EventSaved` reuse on toggle still exists but is cosmetic.
+2. ~~**Calendar visibility toggles are mostly cosmetic.**~~ ✅ Fixed - event-loading query now filters by `is_visible = 1`. Side effect of `EventSaved` reuse on toggle still exists but is cosmetic.
 
-3. ~~**Calendar sync never triggered from the app.**~~ ✅ Fixed — `sync_calendars()` wired to SyncTick alongside email sync, pending ops, and GAL refresh. 60s timeout per account. The sync backend exists (`calendar_sync_account_impl()`, provider-specific sync in Graph/Gmail/CalDAV) but the iced app never calls it. Calendar data only appears if seeded externally. The read path works, the sync path works, but they are not connected.
+3. ~~**Calendar sync never triggered from the app.**~~ ✅ Fixed - `sync_calendars()` wired to SyncTick alongside email sync, pending ops, and GAL refresh. 60s timeout per account. The sync backend exists (`calendar_sync_account_impl()`, provider-specific sync in Graph/Gmail/CalDAV) but the iced app never calls it. Calendar data only appears if seeded externally. The read path works, the sync path works, but they are not connected.
 
 4. **Graph API timezone handling silently treats everything as UTC.** `parse_graph_datetime()` has "Best-effort: treat as UTC" for all non-UTC timezone names. Microsoft Graph returns Windows timezone names ("Pacific Standard Time") which are silently misinterpreted. Events will be off by hours for non-UTC users.
 
@@ -22,19 +22,19 @@ Audit date: 2026-03-30
 
 7. **No runtime reminder/notification system.** Reminders are synced and stored in `calendar_reminders`, displayed in event detail views. But no timer, scheduler, or notification fires reminders at the specified time. The app never alerts users about upcoming events.
 
-### Medium — Interactions requiring custom iced widgets
+### Medium - Interactions requiring custom iced widgets
 
 8. **No drag-to-select time range.** Requires custom widget with mouse tracking. Spec acknowledges this as "the hardest to implement well in iced."
 
-9. **No event drag-to-move.** Same — requires custom widget with hit testing and visual feedback.
+9. **No event drag-to-move.** Same - requires custom widget with hit testing and visual feedback.
 
-10. **No event edge resize.** Same — requires custom drag handlers with edge detection.
+10. **No event edge resize.** Same - requires custom drag handlers with edge detection.
 
 11. **No scroll-to-now / working-hours snap.** Blocked on iced fork lacking `scrollable::scroll_to()` API.
 
 12. **Multi-day events not spanning as horizontal bars.** Still render as per-day chips. Continuous spanning requires a fundamentally different layout pass.
 
-### Medium — Event detail / editor gaps
+### Medium - Event detail / editor gaps
 
 13. **Event detail "popover" not anchored to clicked event.** It's a generic right-aligned overlay, not positioned relative to the event. No context-sensitive RSVP actions, no "Add to my calendar," always offers Edit/Delete regardless of permissions.
 
@@ -50,9 +50,9 @@ Audit date: 2026-03-30
 
 19. **No recurring event edit/delete prompts.** "This / this and following / all" UI not implemented. Requires recurrence instance identity tracking and provider API support.
 
-20. **Double-click to create not wired from UI.** `DoubleClickSlot` message variant exists and is handled but never emitted — iced doesn't expose double-click events on buttons.
+20. **Double-click to create not wired from UI.** `DoubleClickSlot` message variant exists and is handled but never emitted - iced doesn't expose double-click events on buttons.
 
-### Medium — Provider integration gaps
+### Medium - Provider integration gaps
 
 21. **RSVP action buttons not wired.** RSVP status is displayed. Action buttons (Accept/Decline/Tentative) require provider API calls to send responses.
 
@@ -64,7 +64,7 @@ Audit date: 2026-03-30
 
 25. **No calendar indicator on thread cards.** Depends on meeting invite detection.
 
-### Medium — Other gaps
+### Medium - Other gaps
 
 26. **No shared calendar detection or permission-aware UI.** Graph API fetches `canEdit` but never uses it. No read-only mode for calendars where user lacks edit permission.
 
@@ -80,7 +80,7 @@ Audit date: 2026-03-30
 
 32. **Pop-out bring-to-foreground not implemented.** One-pop-out limit enforced. No badge on mode toggle, no `window::focus()` / `window::raise()` API in iced.
 
-33. **Mail scroll position not restorable after calendar switch.** Calendar state preserved. Mail selected-thread preserved. Scroll position cannot be restored — iced fork lacks `scroll_to()`.
+33. **Mail scroll position not restorable after calendar switch.** Calendar state preserved. Mail selected-thread preserved. Scroll position cannot be restored - iced fork lacks `scroll_to()`.
 
 ### Previously marked resolved but not fully correct
 
@@ -88,7 +88,7 @@ Audit date: 2026-03-30
 
 35. **ISO week number click does not switch to week view.** Only selects that row's first date. Spec says it should navigate to week view.
 
-36. ~~**`SELECT *` still exists in calendar code.**~~ ✅ Fixed — replaced with explicit 15-column list.
+36. ~~**`SELECT *` still exists in calendar code.**~~ ✅ Fixed - replaced with explicit 15-column list.
 
 37. **Unsaved-change detection incomplete.** Only checks title, description, location. Changes to time, all-day, timezone, recurrence, availability, visibility, or calendar assignment discarded without prompt.
 

@@ -737,7 +737,7 @@ async fn process_folder_delta(
     }
 
     if delta.new_uids.is_empty() {
-        // No new UIDs — check for flag changes.
+        // No new UIDs - check for flag changes.
         if let (Some(cached_modseq), Some(server_modseq)) = (saved.modseq, delta.highest_modseq) {
             // CONDSTORE path: modseq changed → use CHANGEDSINCE for efficient diff.
             if server_modseq > cached_modseq {
@@ -1119,7 +1119,7 @@ pub async fn run_deletion_detection(
             Ok(_) => {} // No deletions or throttled
             Err(e) => {
                 log::warn!("[sync] Deletion detection failed for {}: {e}", folder.path);
-                // Connection may be broken — try to reconnect and retry the failed folder
+                // Connection may be broken - try to reconnect and retry the failed folder
                 if is_connection_error(&e) {
                     log::info!("[sync] Reconnecting for remaining deletion checks...");
                     match connect(config).await {

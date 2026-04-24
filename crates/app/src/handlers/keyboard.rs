@@ -123,7 +123,7 @@ impl App {
                 }
                 return Task::none();
             }
-            // Second chord didn't match any sequence — re-process as fresh first chord
+            // Second chord didn't match any sequence - re-process as fresh first chord
             return self.try_resolve_single_chord(chord);
         }
 

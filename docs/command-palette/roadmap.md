@@ -15,33 +15,33 @@ Phased implementation plan for the command palette backend. Each slice builds on
 
 **Files:** `crates/cmdk/src/` (`id.rs`, `context.rs`, `descriptor.rs`, `registry.rs`)
 
-## Slice 2: Parameterized Commands — Input Schema & Resolver Trait ✅
+## Slice 2: Parameterized Commands - Input Schema & Resolver Trait ✅
 
 **Status: Complete (infrastructure scaffolding)**
 
-This slice adds the typed input model and resolver trait. The four parameterized commands gain schema metadata but the resolver stub returns empty results — real option resolution (querying DbState) is future work. The execution contract (`CommandArgs`, dispatch endpoint) is deferred to avoid defining a payload without a consumer.
+This slice adds the typed input model and resolver trait. The four parameterized commands gain schema metadata but the resolver stub returns empty results - real option resolution (querying DbState) is future work. The execution contract (`CommandArgs`, dispatch endpoint) is deferred to avoid defining a payload without a consumer.
 
 ### What was built
 
 **Command palette crate (`crates/cmdk/src/`):**
-- `input.rs` — `EnumOption` (value/label separation), `ParamDef` (ListPicker, DateTime, Enum, Text), `InputSchema` (Single, Sequence), `InputMode` (Direct, Parameterized) — all `Copy`, zero-allocation
-- `input.rs` — `OptionItem` (flat, allocating runtime data from DB), `OptionMatch` (scored), `search_options()` with nucleo-matcher (searches label + path + keywords)
-- `resolver.rs` — `CommandInputResolver` trait with sequence-aware `prior_selections: &[String]` on both `get_options()` and `validate_option()`
-- `descriptor.rs` — `input_schema: Option<InputSchema>` on `CommandDescriptor`, `input_mode: InputMode` on `CommandMatch`
+- `input.rs` - `EnumOption` (value/label separation), `ParamDef` (ListPicker, DateTime, Enum, Text), `InputSchema` (Single, Sequence), `InputMode` (Direct, Parameterized) - all `Copy`, zero-allocation
+- `input.rs` - `OptionItem` (flat, allocating runtime data from DB), `OptionMatch` (scored), `search_options()` with nucleo-matcher (searches label + path + keywords)
+- `resolver.rs` - `CommandInputResolver` trait with sequence-aware `prior_selections: &[String]` on both `get_options()` and `validate_option()`
+- `descriptor.rs` - `input_schema: Option<InputSchema>` on `CommandDescriptor`, `input_mode: InputMode` on `CommandMatch`
 - Four commands registered as parameterized: `EmailMoveToFolder`, `EmailAddLabel`, `EmailRemoveLabel`, `EmailSnooze`
 - 9 new tests (7 for search_options, 2 for input_mode)
 
 ### Design decisions made during implementation
 
-- **`CommandArgs` deferred** — introducing the execution payload without a dispatch endpoint would leave the hardest contract implicit
-- **`prior_selections: &[String]`** on both trait methods — enables sequence-aware resolution and cross-field validation from day one, no breaking change when multi-step commands arrive
-- **`EnumOption { value, label }`** instead of raw `&[&str]` — separates machine identifier from display text, no localization hazard
-- **`search_options()` includes `path` in search text** — ancestor names are searchable ("q2" finds "Projects / Q2 / Reviews") without the resolver duplicating ancestors into keywords
-- **`get_options()` only for ListPicker steps** — DateTime/Text/Enum are UI-only input steps; the schema carries all info the UI needs
+- **`CommandArgs` deferred** - introducing the execution payload without a dispatch endpoint would leave the hardest contract implicit
+- **`prior_selections: &[String]`** on both trait methods - enables sequence-aware resolution and cross-field validation from day one, no breaking change when multi-step commands arrive
+- **`EnumOption { value, label }`** instead of raw `&[&str]` - separates machine identifier from display text, no localization hazard
+- **`search_options()` includes `path` in search text** - ancestor names are searchable ("q2" finds "Projects / Q2 / Reviews") without the resolver duplicating ancestors into keywords
+- **`get_options()` only for ListPicker steps** - DateTime/Text/Enum are UI-only input steps; the schema carries all info the UI needs
 
 ### What remains (future slices)
 
-- **`CommandArgs` enum and the execution endpoint that consumes it** — this is now the most critical missing piece. The typed execution contract is what makes the command system real rather than just searchable metadata. The problem statement (§ Parameterized command execution contract) defines the full payload shape. Without this, the palette can find commands but cannot execute parameterized ones.
+- **`CommandArgs` enum and the execution endpoint that consumes it** - this is now the most critical missing piece. The typed execution contract is what makes the command system real rather than just searchable metadata. The problem statement (§ Parameterized command execution contract) defines the full payload shape. Without this, the palette can find commands but cannot execute parameterized ones.
 - **Real `CommandInputResolver` implementation** in the app crate, querying `DbState` for folders, labels, accounts, templates
 - UI changes to honor `input_mode`
 
@@ -84,7 +84,7 @@ App layer (crates/app/, iced Elm architecture):
 
 **Status: Complete (backend-only groundwork)**
 
-This slice is backend-only — no user-visible behavior changes until slice 6 wires keybinding resolution into the iced event loop.
+This slice is backend-only - no user-visible behavior changes until slice 6 wires keybinding resolution into the iced event loop.
 
 ### What was built
 
@@ -93,7 +93,7 @@ This slice is backend-only — no user-visible behavior changes until slice 6 wi
 - Const constructors: `KeyBinding::key('j')`, `::named(Escape)`, `::cmd_or_ctrl('a')`, `::cmd_or_ctrl_shift('e')`, `::seq('g', 'i')`
 - Parse/display with canonical string format (`"CmdOrCtrl+Shift+E"`, `"g then i"`) and platform-resolved display (`"Ctrl"` on Linux, `"Cmd"` on Mac)
 - Custom serde `Serialize`/`Deserialize` using canonical string format
-- `BindingTable` — defaults + overrides (`Option<KeyBinding>` for explicit unbind) + O(1) reverse index + sequence-aware resolution (`resolve_chord`/`resolve_sequence` with `Pending` state) + conflict detection (chord vs chord, chord vs sequence first, sequence vs single) + primitive mutations (`set_override`, `unbind`, `remove_override`, `reset_all`)
+- `BindingTable` - defaults + overrides (`Option<KeyBinding>` for explicit unbind) + O(1) reverse index + sequence-aware resolution (`resolve_chord`/`resolve_sequence` with `Pending` state) + conflict detection (chord vs chord, chord vs sequence first, sequence vs single) + primitive mutations (`set_override`, `unbind`, `remove_override`, `reset_all`)
 - 27 tests (parse/display, serde, resolution, overrides, conflicts, display binding)
 
 **Changes to existing types:**
@@ -110,9 +110,9 @@ This slice is backend-only — no user-visible behavior changes until slice 6 wi
 
 - **Backend-only**: No binding management API exposed yet, no override persistence. The keybinding model is ready but not yet wired into the iced event loop.
 - **`CmdOrCtrl` abstraction**: A single modifier that resolves per-platform at display time. Storage/wire format is always `"CmdOrCtrl"`, never platform-specific.
-- **Sequences modeled properly**: `KeyBinding::Sequence(Chord, Chord)` with two-level resolution (`Pending` -> `resolve_sequence`). Not removed — the UI layer handles timeout/pending state.
+- **Sequences modeled properly**: `KeyBinding::Sequence(Chord, Chord)` with two-level resolution (`Pending` -> `resolve_sequence`). Not removed - the UI layer handles timeout/pending state.
 - **`Option<KeyBinding>` overrides**: `None` = explicitly unbound (prevents default fallback when a conflict forced unbinding). Absent = use default.
-- **Primitive mutations only**: Core provides `set_override` (rejects conflicts), `unbind`, `remove_override`. No `force_override` — the app layer decides conflict resolution policy.
+- **Primitive mutations only**: Core provides `set_override` (rejects conflicts), `unbind`, `remove_override`. No `force_override` - the app layer decides conflict resolution policy.
 - **Conflict rules**: single vs single, single vs sequence-first, sequence-first vs single, duplicate sequence. Different sequences sharing a first chord is allowed (they coexist via the pending state).
 
 ### What remains (slice 6)
@@ -136,7 +136,7 @@ Move beyond pure fuzzy score to context-aware ranking.
 - Exact/alias hits: "delete" matches "Move to Trash" via alias, ranks at top
 - Empty-query ordering: replace alphabetical with recency-weighted default order
 
-**Practical dependency on dispatch integration:** Recency tracking requires that command execution is recorded. Until keyboard, palette, and menu dispatch all route through the command system (slice 6), recency data will be partial — only commands invoked through whichever surface is integrated first will be tracked. The ranking infrastructure can be built in parallel with slice 1, but **recency becomes accurate only after slice 6 completes dispatch unification.**
+**Practical dependency on dispatch integration:** Recency tracking requires that command execution is recorded. Until keyboard, palette, and menu dispatch all route through the command system (slice 6), recency data will be partial - only commands invoked through whichever surface is integrated first will be tracked. The ranking infrastructure can be built in parallel with slice 1, but **recency becomes accurate only after slice 6 completes dispatch unification.**
 
 The non-recency ranking signals (context boost, enabled-over-disabled, alias hits) are useful immediately and don't depend on dispatch integration.
 
@@ -158,7 +158,7 @@ Wire undo support into the command dispatch layer.
 2. Maintains the stack
 3. Executes compensation when "Undo" is invoked
 
-The registry contains an `Undo` command ID so it appears in the palette and can be bound to a key (Ctrl+Z). But the registry does not own the stack or execute compensations — it dispatches to the app layer like any other command. The app's undo handler pops the stack and runs the reversal.
+The registry contains an `Undo` command ID so it appears in the palette and can be bound to a key (Ctrl+Z). But the registry does not own the stack or execute compensations - it dispatches to the app layer like any other command. The app's undo handler pops the stack and runs the reversal.
 
 **Scope:** Archive, trash, move, star, pin, mute, mark-read, add/remove label are undoable. Send, permanent delete, compose are not.
 
@@ -170,21 +170,21 @@ Wire the command palette into the iced app's Elm architecture. The command palet
 
 **Three integration paths (not one):**
 
-1. **Palette UI** — Build a palette overlay widget (text_input + scrollable results list). On keystroke, call `CommandRegistry::query()` and render `CommandMatch` results. On selection, map the `CommandId` to a `Message` variant and feed it into `update()`.
+1. **Palette UI** - Build a palette overlay widget (text_input + scrollable results list). On keystroke, call `CommandRegistry::query()` and render `CommandMatch` results. On selection, map the `CommandId` to a `Message` variant and feed it into `update()`.
 
-2. **Keyboard dispatch** — Subscribe to iced keyboard events. On keypress, call `BindingTable::resolve_chord()` / `resolve_sequence()` from slice 3 to get a `CommandId`. Map it to a `Message` variant and dispatch through `update()`. This replaces any ad-hoc key handling. Keyboard dispatch is a direct key-to-command lookup, not a search operation.
+2. **Keyboard dispatch** - Subscribe to iced keyboard events. On keypress, call `BindingTable::resolve_chord()` / `resolve_sequence()` from slice 3 to get a `CommandId`. Map it to a `Message` variant and dispatch through `update()`. This replaces any ad-hoc key handling. Keyboard dispatch is a direct key-to-command lookup, not a search operation.
 
-3. **Context menus / toolbars** — Any other UI surface that triggers commands (right-click menus, toolbar buttons) queries the registry for command metadata (label, icon, availability, keybinding hint) and invokes by `CommandId`. This uses `CommandRegistry::query()` with an empty query or a direct `get()`, not the fuzzy search path.
+3. **Context menus / toolbars** - Any other UI surface that triggers commands (right-click menus, toolbar buttons) queries the registry for command metadata (label, icon, availability, keybinding hint) and invokes by `CommandId`. This uses `CommandRegistry::query()` with an empty query or a direct `get()`, not the fuzzy search path.
 
 **What needs to be built in `crates/app/`:**
 
-- **`CommandContext` assembly** — A function that snapshots current app model state (selected threads, current view, active account, thread flags, online status, focused region) into a `CommandContext` struct for each registry query. This is a thin adapter over the app's model fields.
-- **`CommandInputResolver` implementation** — A concrete resolver that queries `DbState` for folders, labels, accounts, and templates to populate ListPicker options.
-- **`CommandId -> Message` dispatch map** — A single function mapping command IDs to iced `Message` variants. The registry tells the app *what* to run; `update()` knows *how* to run it.
-- **Palette overlay widget** — Text input with filtered results, keyboard navigation (arrow keys, Enter, Escape), availability-aware rendering. Built with iced primitives (text_input, scrollable, column, container).
-- **Keyboard event subscription** — An iced subscription that captures key events, runs them through `BindingTable` resolution, and emits the corresponding `Message`.
-- **Binding management** — Functions for set/reset/unbind exposed through a settings UI. Override persistence to app settings.
-- **Pending chord indicator** — When a two-chord sequence's first chord matches, show a transient indicator (e.g., "g..." in the status bar) with a timeout before clearing.
+- **`CommandContext` assembly** - A function that snapshots current app model state (selected threads, current view, active account, thread flags, online status, focused region) into a `CommandContext` struct for each registry query. This is a thin adapter over the app's model fields.
+- **`CommandInputResolver` implementation** - A concrete resolver that queries `DbState` for folders, labels, accounts, and templates to populate ListPicker options.
+- **`CommandId -> Message` dispatch map** - A single function mapping command IDs to iced `Message` variants. The registry tells the app *what* to run; `update()` knows *how* to run it.
+- **Palette overlay widget** - Text input with filtered results, keyboard navigation (arrow keys, Enter, Escape), availability-aware rendering. Built with iced primitives (text_input, scrollable, column, container).
+- **Keyboard event subscription** - An iced subscription that captures key events, runs them through `BindingTable` resolution, and emits the corresponding `Message`.
+- **Binding management** - Functions for set/reset/unbind exposed through a settings UI. Override persistence to app settings.
+- **Pending chord indicator** - When a two-chord sequence's first chord matches, show a transient indicator (e.g., "g..." in the status bar) with a timeout before clearing.
 
 **Migration strategy:** Incremental. Start with the palette UI (lowest risk, most visible payoff). Then keyboard dispatch. Then context menus.
 

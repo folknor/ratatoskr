@@ -9,7 +9,7 @@ use crate::error::SqueezeError;
 use crate::{CompressOutput, CompressResult};
 
 /// Maximum pixels (width × height) we'll decode.
-/// 100 megapixels — an RGB8 image at this size is ~300 MB.
+/// 100 megapixels - an RGB8 image at this size is ~300 MB.
 pub(crate) const MAX_IMAGE_PIXELS: u64 = 100_000_000;
 
 /// Map our `Format` enum to `image::ImageFormat` for decoding.
@@ -35,7 +35,7 @@ pub fn compress_image(
         SqueezeError::ImageDecode(format!("unsupported image format: {format:?}"))
     })?;
 
-    // For PNG, try lossless optimization first via oxipng — no decode needed.
+    // For PNG, try lossless optimization first via oxipng - no decode needed.
     if format == Format::Png && !config.png_to_jpeg {
         return compress_png_lossless(input, config);
     }

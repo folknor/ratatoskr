@@ -246,7 +246,7 @@ pub enum ButtonClass {
     Dropdown { selected: bool },
     /// Thread card with selection and starred state.
     ThreadCard { selected: bool, starred: bool },
-    /// Invisible button — no background in any state.
+    /// Invisible button - no background in any state.
     Ghost,
     /// Icon-only button on a weakest-background surface.
     BareIcon,
@@ -329,7 +329,7 @@ pub enum ContainerClass {
     Badge,
     /// Message card with rounded border.
     MessageCard,
-    /// Email body inset — always white for rendering fidelity.
+    /// Email body inset - always white for rendering fidelity.
     EmailBody,
     /// Action bar (no radius).
     ActionBar,
@@ -371,9 +371,9 @@ pub enum ContainerClass {
     TimeGridNowLine,
     /// Floating chord indicator badge (bottom-right).
     ChordIndicator,
-    /// Chat bubble — sent by user (accent background).
+    /// Chat bubble - sent by user (accent background).
     ChatBubbleSent,
-    /// Chat bubble — received from contact (surface background).
+    /// Chat bubble - received from contact (surface background).
     ChatBubbleReceived,
 }
 
@@ -1682,7 +1682,7 @@ pub fn mix(a: Color, b: Color, t: f32) -> Color {
 
 pub fn hex_to_color(hex: &str) -> Color {
     let hex = hex.trim_start_matches('#');
-    // Guard against short/malformed hex strings — fall back to mid-gray
+    // Guard against short/malformed hex strings - fall back to mid-gray
     // rather than panicking on slice bounds.
     if hex.len() < 6 {
         return Color::from_rgb8(128, 128, 128);

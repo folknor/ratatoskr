@@ -149,7 +149,7 @@ pub(super) async fn sync_signatures(ctx: &SyncCtx<'_>) -> Result<(), String> {
             SigSyncAction::PullFromServer | SigSyncAction::ConflictServerWins => {
                 if matches!(action, SigSyncAction::ConflictServerWins) {
                     log::warn!(
-                        "Signature conflict for {server_id} — both local and server changed. \
+                        "Signature conflict for {server_id} - both local and server changed. \
                          Preferring server version."
                     );
                 }
@@ -216,7 +216,7 @@ fn determine_sync_action(
     server_hash_now: &str,
 ) -> SigSyncAction {
     let Some(loc) = local else {
-        // No local row yet — if server has content, pull it
+        // No local row yet - if server has content, pull it
         if server_html.is_empty() {
             return SigSyncAction::NoOp;
         }

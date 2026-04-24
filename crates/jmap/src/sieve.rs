@@ -303,7 +303,7 @@ pub async fn validate_sieve_script(
             // like a SetError (which is what SieveScriptValidateResponse wraps).
             let msg = e.to_string();
             if msg.contains("serverFail") || msg.contains("connection") {
-                // Likely a transport error — propagate.
+                // Likely a transport error - propagate.
                 Err(format!("SieveScript/validate: {msg}"))
             } else {
                 // Validation failure reported by the server.

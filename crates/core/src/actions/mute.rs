@@ -3,7 +3,7 @@ use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use crate::db::queries::set_thread_muted;
 
-/// Set mute state on a single thread. Local-only by design — no provider
+/// Set mute state on a single thread. Local-only by design - no provider
 /// has a native mute equivalent.
 pub async fn mute(
     ctx: &ActionContext,

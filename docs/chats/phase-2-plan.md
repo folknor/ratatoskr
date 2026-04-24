@@ -4,15 +4,15 @@ Revised after arch review.
 
 ## Overview
 
-Phase 2 adds the bubble-based timeline view that appears when a chat contact is selected. This is the core visual experience — everything else (sidebar integration in Phase 3, compose in Phase 4) builds on it.
+Phase 2 adds the bubble-based timeline view that appears when a chat contact is selected. This is the core visual experience - everything else (sidebar integration in Phase 3, compose in Phase 4) builds on it.
 
-No sidebar changes yet — this phase is activated by calling `get_chat_timeline()` from Phase 1 and rendering the result. Phase 3 adds the sidebar trigger.
+No sidebar changes yet - this phase is activated by calling `get_chat_timeline()` from Phase 1 and rendering the result. Phase 3 adds the sidebar trigger.
 
 ## Layout Architecture
 
 ### Chat as a mail route, not a loose flag
 
-Calendar uses `AppMode::Calendar` which replaces the entire layout including sidebar. Chat is different — the sidebar stays (it will hold the CHATS section in Phase 3). Chat view is a **mail route** — a subview within `AppMode::Mail`.
+Calendar uses `AppMode::Calendar` which replaces the entire layout including sidebar. Chat is different - the sidebar stays (it will hold the CHATS section in Phase 3). Chat view is a **mail route** - a subview within `AppMode::Mail`.
 
 Use `NavigationTarget::Chat { email: String }` (already planned in the Phase 1 overview) to enter chat view. When the navigation target is `Chat`, the mail layout renders sidebar + chat timeline (instead of sidebar + thread list + reading pane).
 
@@ -42,7 +42,7 @@ if is_chat {
 
 ## Generation Counter
 
-New branded counter for chat timeline loads — don't reuse `Nav` (a navigation bump while chat is loading would discard chat results):
+New branded counter for chat timeline loads - don't reuse `Nav` (a navigation bump while chat is loading would discard chat results):
 
 ```rust
 // In generation.rs
@@ -66,14 +66,14 @@ pub struct ChatTimeline {
     pub loading: bool,
     /// The contact email this timeline is showing.
     pub contact_email: String,
-    /// Scroll position — auto-scroll to bottom on initial load.
+    /// Scroll position - auto-scroll to bottom on initial load.
     pub scroll_id: scrollable::Id,
     /// Per-message expansion state (for "show full message").
     pub expanded: HashSet<String>,
 }
 ```
 
-Created fresh on each `enter_chat_view`. The `expanded` set doesn't persist across exits — acceptable for Phase 2.
+Created fresh on each `enter_chat_view`. The `expanded` set doesn't persist across exits - acceptable for Phase 2.
 
 ### Messages
 
@@ -81,7 +81,7 @@ Created fresh on each `enter_chat_view`. The `expanded` set doesn't persist acro
 pub enum ChatTimelineMessage {
     /// User clicked "show full message" on a bubble.
     ToggleExpand(String),
-    /// User scrolled to top — load older messages.
+    /// User scrolled to top - load older messages.
     LoadOlder,
 }
 
@@ -91,7 +91,7 @@ pub enum ChatTimelineEvent {
 }
 ```
 
-Timeline data loading is handled in `handlers/chat.rs`, not in the component — the component only renders and emits events.
+Timeline data loading is handled in `handlers/chat.rs`, not in the component - the component only renders and emits events.
 
 ### View
 
@@ -154,7 +154,7 @@ Each `ChatMessage` renders as:
 - **Alignment:** sent (`is_from_user = true`) → right-aligned via `Length::FillPortion` spacer, received → left-aligned
 - **Background:** sent → `ChatBubbleSent`, received → `ChatBubbleReceived`
 - **Content:** body text (signature-stripped). If expanded, show full body.
-- **Max width:** `CHAT_BUBBLE_MAX_WIDTH` — bubble doesn't span full width
+- **Max width:** `CHAT_BUBBLE_MAX_WIDTH` - bubble doesn't span full width
 - **Timestamp:** below bubble, `TEXT_XS`, muted, time-only for today, date+time for older
 
 ### Date Separators
@@ -218,7 +218,7 @@ Messages from Phase 1's `get_chat_timeline()` have metadata but no body text. Bo
 ### Strategy
 
 1. `enter_chat_view` calls `get_chat_timeline(email, 50, None)`
-2. For the loaded batch, call `BodyStoreState::get_body(message_id)` — batch into a single `with_conn` call if possible
+2. For the loaded batch, call `BodyStoreState::get_body(message_id)` - batch into a single `with_conn` call if possible
 3. Apply `strip_signature` + `collapse_quotes` to each body
 4. Store stripped bodies on `ChatMessage` (add `body_text: Option<String>` field)
 
@@ -267,7 +267,7 @@ impl App {
 
     pub(crate) fn exit_chat_view(&mut self) {
         self.navigation_target = None;
-        // Don't call reset_view_state — just clear the target.
+        // Don't call reset_view_state - just clear the target.
         // The next navigation action will set its own target.
     }
 }
@@ -295,7 +295,7 @@ fn mark_chat_read(&mut self, email: &str) -> Task<Message> {
 }
 ```
 
-`mark_chat_read_local`: single transaction — `UPDATE messages SET is_read = 1`, re-aggregate `threads.is_read`, update `chat_contacts.unread_count = 0`.
+`mark_chat_read_local`: single transaction - `UPDATE messages SET is_read = 1`, re-aggregate `threads.is_read`, update `chat_contacts.unread_count = 0`.
 
 `mark_chat_read_remote`: resolve affected threads, create provider, batch `provider.mark_read()` per thread. Enqueue pending ops for failures. No undo.
 
@@ -305,7 +305,7 @@ fn mark_chat_read(&mut self, email: &str) -> Task<Message> {
 
 **Older messages prepended:** This is genuinely hard in iced. The content height changes but the scroll offset doesn't auto-adjust.
 
-**Phase 2 approach (simple):** Show a "Load older" button at the top of the timeline. Clicking it loads and prepends older messages, then the viewport stays where it is (the user is at the top, new content appears above their viewport — they scroll up to see it). No auto-scroll-position maintenance needed.
+**Phase 2 approach (simple):** Show a "Load older" button at the top of the timeline. Clicking it loads and prepends older messages, then the viewport stays where it is (the user is at the top, new content appears above their viewport - they scroll up to see it). No auto-scroll-position maintenance needed.
 
 **Phase 6 approach (polished):** Investigate iced's `scroll_to` with `AbsoluteOffset` to maintain position relative to an anchor message. Defer this complexity.
 
@@ -315,21 +315,21 @@ While the timeline loads, `chat_timeline.loading = true`. The component renders 
 
 ## Files to Create
 
-- `crates/app/src/ui/chat_timeline.rs` — Component: state, messages, view
-- `crates/app/src/handlers/chat.rs` — enter/exit, load, mark-read, older-load
-- `crates/common/src/signature_strip.rs` — `strip_signature` + `collapse_quotes`
+- `crates/app/src/ui/chat_timeline.rs` - Component: state, messages, view
+- `crates/app/src/handlers/chat.rs` - enter/exit, load, mark-read, older-load
+- `crates/common/src/signature_strip.rs` - `strip_signature` + `collapse_quotes`
 
 ## Files to Modify
 
-- `crates/app/src/main.rs` — `Message::Chat` variant, `chat_timeline` field, `chat_generation` field, view layout branching (minimal — delegates to handler)
-- `crates/app/src/command_dispatch.rs` — `NavigationTarget::Chat { email }` variant
-- `crates/app/src/ui/mod.rs` — register `chat_timeline` module
-- `crates/app/src/handlers/mod.rs` — register `chat` module
-- `crates/app/src/ui/layout.rs` — chat-specific constants
-- `crates/app/src/ui/theme.rs` — `ChatBubbleSent`, `ChatBubbleReceived` variants
-- `crates/core/src/generation.rs` — `Chat` brand tag
-- `crates/core/src/chat.rs` — `mark_chat_read_local`, `mark_chat_read_remote`, update `get_chat_timeline` for tuple cursor
-- `crates/common/src/lib.rs` — register `signature_strip` module
+- `crates/app/src/main.rs` - `Message::Chat` variant, `chat_timeline` field, `chat_generation` field, view layout branching (minimal - delegates to handler)
+- `crates/app/src/command_dispatch.rs` - `NavigationTarget::Chat { email }` variant
+- `crates/app/src/ui/mod.rs` - register `chat_timeline` module
+- `crates/app/src/handlers/mod.rs` - register `chat` module
+- `crates/app/src/ui/layout.rs` - chat-specific constants
+- `crates/app/src/ui/theme.rs` - `ChatBubbleSent`, `ChatBubbleReceived` variants
+- `crates/core/src/generation.rs` - `Chat` brand tag
+- `crates/core/src/chat.rs` - `mark_chat_read_local`, `mark_chat_read_remote`, update `get_chat_timeline` for tuple cursor
+- `crates/common/src/lib.rs` - register `signature_strip` module
 
 ## Verification
 
@@ -344,4 +344,4 @@ While the timeline loads, `chat_timeline.loading = true`. The component renders 
 9. "Show full message" expands bubble to show original unstripped content
 10. Navigate away (click folder) → returns to normal mail layout
 11. Entering chat marks unread messages read (local immediately, provider async)
-12. Chat timeline uses `GenerationCounter<Chat>` — nav bumps don't discard chat loads
+12. Chat timeline uses `GenerationCounter<Chat>` - nav bumps don't discard chat loads

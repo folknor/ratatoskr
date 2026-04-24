@@ -338,7 +338,7 @@ impl ProviderOps for JmapOps {
     ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
 
-        // Keywords use kw: prefix — set the keyword flag on all thread messages
+        // Keywords use kw: prefix - set the keyword flag on all thread messages
         if let Some(keyword) = tag_id.as_str().strip_prefix("kw:") {
             let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
             let client = self.client.inner();
@@ -392,7 +392,7 @@ impl ProviderOps for JmapOps {
     ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
 
-        // Keywords use kw: prefix — remove the keyword flag from all thread messages
+        // Keywords use kw: prefix - remove the keyword flag from all thread messages
         if let Some(keyword) = tag_id.as_str().strip_prefix("kw:") {
             let email_ids = query_thread_email_ids(&self.client, thread_id).await?;
             let client = self.client.inner();
@@ -549,7 +549,7 @@ impl ProviderOps for JmapOps {
         _thread_id: Option<&str>,
     ) -> Result<String, ProviderError> {
         self.client.ensure_valid_token().await?;
-        // JMAP has no draft mutation — delete old, create new
+        // JMAP has no draft mutation - delete old, create new
         let client = self.client.inner();
         client
             .email_destroy(draft_id)
@@ -723,7 +723,7 @@ impl ProviderOps for JmapOps {
 }
 
 // ---------------------------------------------------------------------------
-// JMAP Sharing — mailbox subscription management
+// JMAP Sharing - mailbox subscription management
 // ---------------------------------------------------------------------------
 
 impl JmapOps {
@@ -788,7 +788,7 @@ impl JmapOps {
 }
 
 // ---------------------------------------------------------------------------
-// JMAP FUTURERELEASE — Scheduled send via EmailSubmission
+// JMAP FUTURERELEASE - Scheduled send via EmailSubmission
 // ---------------------------------------------------------------------------
 //
 // RFC 4865 FUTURERELEASE uses the SMTP MAIL FROM parameter `HOLDUNTIL` to
@@ -808,12 +808,12 @@ impl JmapOps {
 ///
 /// # Arguments
 ///
-/// * `client`       – Authenticated JMAP client.
-/// * `email_id`     – ID of an already-imported `Email` object on the server.
-/// * `identity_id`  – Identity to send from (see `get_first_identity_id`).
-/// * `sender_email` – RFC 5321 MAIL FROM address (used in the envelope).
-/// * `recipients`   – RFC 5321 RCPT TO addresses (used in the envelope).
-/// * `send_at`      – Desired delivery time (UTC).  Must be in the future.
+/// * `client`       - Authenticated JMAP client.
+/// * `email_id`     - ID of an already-imported `Email` object on the server.
+/// * `identity_id`  - Identity to send from (see `get_first_identity_id`).
+/// * `sender_email` - RFC 5321 MAIL FROM address (used in the envelope).
+/// * `recipients`   - RFC 5321 RCPT TO addresses (used in the envelope).
+/// * `send_at`      - Desired delivery time (UTC).  Must be in the future.
 ///
 /// # Returns
 ///
@@ -848,7 +848,7 @@ pub async fn schedule_send_jmap(
         }
     }
     // If submission_capabilities is None the server didn't advertise the
-    // submission capability at all — we still attempt the call and let the
+    // submission capability at all - we still attempt the call and let the
     // server reject it if it doesn't support FUTURERELEASE.
 
     // --- Build the envelope with HOLDUNTIL ---------------------------------

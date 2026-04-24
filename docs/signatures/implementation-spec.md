@@ -4,16 +4,16 @@ Detailed implementation spec for email signature management, editing, and
 compose insertion. Covers four phases: data model + CRUD, management UI in
 Settings, compose insertion behavior, and account-switching replacement.
 
-**Depends on:** The rich text editor subsystem (see `docs/editor/architecture.md`; currently targeting `crates/rte/`, though the final crate location may differ) — the signature editor IS the rich text editor. The editor must be at Phase 3 (HTML round-trip) before Phase 2 of this spec can start. This spec references editor types by logical name (`Document`, `Block`, `EditorAction`) rather than hard-coding import paths, so the crate location is not a blocking decision.
+**Depends on:** The rich text editor subsystem (see `docs/editor/architecture.md`; currently targeting `crates/rte/`, though the final crate location may differ) - the signature editor IS the rich text editor. The editor must be at Phase 3 (HTML round-trip) before Phase 2 of this spec can start. This spec references editor types by logical name (`Document`, `Block`, `EditorAction`) rather than hard-coding import paths, so the crate location is not a blocking decision.
 
 **References:**
-- `docs/editor/architecture.md` — Document model, Block tree, StyledRun, HTML
+- `docs/editor/architecture.md` - Document model, Block tree, StyledRun, HTML
   serialization
-- `docs/pop-out-windows/problem-statement.md` § Signature — insertion behavior
-- `docs/roadmap/signatures.md` — roaming signature research, provider sync
-- `docs/accounts/problem-statement.md` — per-account settings, account card
+- `docs/pop-out-windows/problem-statement.md` § Signature - insertion behavior
+- `docs/roadmap/signatures.md` - roaming signature research, provider sync
+- `docs/accounts/problem-statement.md` - per-account settings, account card
   editor
-- `docs/implementation-plan.md` — Tier 3, depends on editor
+- `docs/implementation-plan.md` - Tier 3, depends on editor
 
 ---
 
@@ -67,13 +67,13 @@ pub struct DbSignature {
 
 All basic CRUD exists:
 
-- `db_get_signatures_for_account(db, account_id)` — list all for an account
-- `db_get_default_signature(db, account_id)` — get the default (is_default = 1)
-- `db_insert_signature(db, account_id, name, body_html, is_default)` — insert,
+- `db_get_signatures_for_account(db, account_id)` - list all for an account
+- `db_get_default_signature(db, account_id)` - get the default (is_default = 1)
+- `db_insert_signature(db, account_id, name, body_html, is_default)` - insert,
   clearing old default if needed (transactional)
-- `db_update_signature(db, id, name, body_html, is_default)` — update with
+- `db_update_signature(db, id, name, body_html, is_default)` - update with
   optional fields, clearing old default if needed (transactional)
-- `db_delete_signature(db, id)` — delete
+- `db_delete_signature(db, id)` - delete
 
 ### Provider sync
 
@@ -87,11 +87,11 @@ All basic CRUD exists:
 
 ### Related tables
 
-- `send_as_aliases` has a `signature_id TEXT` FK — per-alias signature
+- `send_as_aliases` has a `signature_id TEXT` FK - per-alias signature
   assignment
-- `local_drafts` has a `signature_id TEXT` — tracks which signature was used in
+- `local_drafts` has a `signature_id TEXT` - tracks which signature was used in
   a draft
-- `scheduled_emails` has a `signature_id TEXT` — tracks which signature was used
+- `scheduled_emails` has a `signature_id TEXT` - tracks which signature was used
   in a scheduled send
 
 ### Settings UI
@@ -262,7 +262,7 @@ pub signatures: Vec<DbSignature>,
 pub signatures_loaded: bool,
 ```
 
-Load is triggered by `SelectTab(Tab::Composing)` — a `Task::perform` calls
+Load is triggered by `SelectTab(Tab::Composing)` - a `Task::perform` calls
 `db_get_all_signatures` and returns them via a new
 `SettingsMessage::SignaturesLoaded(Result<Vec<DbSignature>, String>)`.
 
@@ -281,12 +281,12 @@ Signatures
 
 Each row shows:
 
-- **Grip handle** (≡) — for drag reordering (same as existing `editable_list`)
-- **Name** — the signature name (TEXT_LG, text::base)
-- **Default badge** — if `is_default = 1`, show a "Default" chip/badge
+- **Grip handle** (≡) - for drag reordering (same as existing `editable_list`)
+- **Name** - the signature name (TEXT_LG, text::base)
+- **Default badge** - if `is_default = 1`, show a "Default" chip/badge
   (TEXT_SM, muted). If `is_reply_default = 1`, show "Reply default".
-- **Remove button** (✕) — deletes the signature with confirmation
-- **Click** — opens the signature editor overlay (slide-in from right)
+- **Remove button** (✕) - deletes the signature with confirmation
+- **Click** - opens the signature editor overlay (slide-in from right)
 
 The "Add Signature" button at the bottom opens the editor overlay with an empty
 signature.
@@ -311,7 +311,7 @@ SignatureSetReplyDefault(String, String),
 
 ### 2.2 Signature editor overlay
 
-Clicking a signature row (or "Add Signature") opens a slide-in overlay — the
+Clicking a signature row (or "Add Signature") opens a slide-in overlay - the
 same pattern as `SettingsOverlay::CreateFilter`. The overlay contains the
 signature editor.
 
@@ -382,7 +382,7 @@ pub struct SignatureEditorState {
 └──────────────────────────────────────────────────────────┘
 ```
 
-- **Name field:** `text_input` with the signature name. Required — cannot save
+- **Name field:** `text_input` with the signature name. Required - cannot save
   with an empty name.
 - **Default checkboxes:** Two toggles. "Default for new messages" maps to
   `is_default`. "Default for replies & forwards" maps to `is_reply_default`.
@@ -390,7 +390,7 @@ pub struct SignatureEditorState {
   default from other signatures for the same account (handled transactionally
   in the CRUD layer).
 - **Formatting toolbar:** A horizontal row of format buttons. This is
-  identical to the compose window's toolbar — same buttons, same messages,
+  identical to the compose window's toolbar - same buttons, same messages,
   same layout. The toolbar is built in the app crate (not in the editor
   crate), sending messages that the editor interprets.
 - **Editor surface:** The `RichTextEditor` widget from
@@ -440,7 +440,7 @@ exercises the editor's full HTML round-trip:
 
 The editor's `html_parse` module handles the signature's HTML subset: basic
 formatting tags (`<strong>`, `<em>`, `<u>`, `<s>`, `<a>`), block elements
-(`<p>`, `<h1>`–`<h3>`, `<ul>`, `<ol>`, `<li>`, `<blockquote>`, `<hr>`), and
+(`<p>`, `<h1>`-`<h3>`, `<ul>`, `<ol>`, `<li>`, `<blockquote>`, `<hr>`), and
 inline images (`<img>` with `inline-image:` or `https:` src).
 
 For server-synced signatures (Gmail, JMAP), the imported HTML may contain
@@ -448,7 +448,7 @@ provider-specific markup (Gmail's `<div dir="ltr">`, Outlook's `MsoNormal`
 classes). The editor's parser handles this gracefully: unknown block elements
 become paragraphs, unknown inline elements pass through content. The HTML that
 gets saved back is the editor's clean output, not a round-trip of the
-provider's original markup. This is acceptable — the signature content is
+provider's original markup. This is acceptable - the signature content is
 preserved, only the markup changes.
 
 ### 2.3 Per-account default signature in Account Settings
@@ -460,7 +460,7 @@ This is a `widgets::select` showing all signatures for the account plus "None".
 Selecting a signature calls `db_update_signature` to set `is_default = 1` on
 the chosen signature (and clear the old default).
 
-This provides a second path to assign defaults — the first is the checkbox in the signature editor itself. Both paths are equivalent surfaces over the same state (`is_default` / `is_reply_default` columns on the `signatures` table) and use the same underlying CRUD operations. They must not diverge.
+This provides a second path to assign defaults - the first is the checkbox in the signature editor itself. Both paths are equivalent surfaces over the same state (`is_default` / `is_reply_default` columns on the `signatures` table) and use the same underlying CRUD operations. They must not diverge.
 
 **Dependency:** This section requires the account settings implementation (`docs/accounts/implementation-spec.md`) to be real enough to supply the account editor slide-in with account grouping and a dropdown insertion point. The signature management UI (Phase 2's list grouped by account) also depends on account metadata being accessible. If account settings ships first, the default-signature dropdown is a small addition. If signatures ship first, the dropdown is deferred until the account editor exists.
 
@@ -496,7 +496,7 @@ Block M+1:  BlockQuote containing quoted content
 
 The signature separator is a `Block::HorizontalRule`. In HTML serialization, it becomes `<hr>`. When the editor serializes the full document for sending, the `<hr>` naturally appears between the user's content and the signature.
 
-**This is a deliberate outgoing markup choice.** An `<hr>` is a stronger visual separator than a simple divider line, and it will be visible in the recipient's mail client. This matches the convention used by Outlook, Thunderbird, and Apple Mail for signature separation. If user feedback indicates the `<hr>` is too heavy, it can be replaced with a styled `<div>` border or a lighter visual treatment — but for V1, `<hr>` is the simplest correct choice because it has universal mail-client support and clear semantic meaning.
+**This is a deliberate outgoing markup choice.** An `<hr>` is a stronger visual separator than a simple divider line, and it will be visible in the recipient's mail client. This matches the convention used by Outlook, Thunderbird, and Apple Mail for signature separation. If user feedback indicates the `<hr>` is too heavy, it can be replaced with a styled `<div>` border or a lighter visual treatment - but for V1, `<hr>` is the simplest correct choice because it has universal mail-client support and clear semantic meaning.
 
 For RFC 3676 compliance in the `text/plain` alternative, the plain-text
 serializer emits `-- \n` (dash dash space newline) before the signature's
@@ -512,7 +512,7 @@ When serializing to HTML for send, the signature blocks are wrapped in:
 </div>
 ```
 
-This wrapper is NOT part of the editor's document model — it is added during HTML serialization for outgoing email only. Its primary purpose is **interoperability**: other email clients can identify and strip the signature on reply, and web-based clients can style or collapse it. The `data-signature-id` attribute also enables Ratatoskr to identify its own signatures when re-parsing sent messages.
+This wrapper is NOT part of the editor's document model - it is added during HTML serialization for outgoing email only. Its primary purpose is **interoperability**: other email clients can identify and strip the signature on reply, and web-based clients can style or collapse it. The `data-signature-id` attribute also enables Ratatoskr to identify its own signatures when re-parsing sent messages.
 
 Draft restoration does NOT depend on this wrapper. Drafts persist the editor `Document` plus `ComposeDocumentState` metadata (including `signature_separator_index` and `active_signature_id`), so the signature region is known structurally without reparsing HTML.
 
@@ -530,7 +530,7 @@ pub struct ComposeDocumentState {
     ///
     /// V1 region model: the signature region is "everything from this index
     /// to the attribution line (or end of document)." This is pragmatic but
-    /// fragile — if block insertions/deletions shift indices, this must be
+    /// fragile - if block insertions/deletions shift indices, this must be
     /// updated. A stronger approach (e.g., region markers or block-level
     /// metadata) can replace this if signatures and quoted content become
     /// more structurally complex.
@@ -558,18 +558,18 @@ signature.
 
 1. Resolve signature via `db_resolve_signature_for_compose(account_id, from_email, false)`
 2. If a signature is returned:
-   a. Create an empty paragraph (block 0 — cursor position)
+   a. Create an empty paragraph (block 0 - cursor position)
    b. Add `Block::HorizontalRule` as separator
    c. Parse signature `body_html` → `Document`, append its blocks
 3. Set `signature_separator_index = Some(1)` (after the initial paragraph)
-4. Place cursor at `DocPosition::new(0, 0)` — the user types above the
+4. Place cursor at `DocPosition::new(0, 0)` - the user types above the
    signature
 
 #### Reply / Reply All
 
 1. Resolve signature via `db_resolve_signature_for_compose(account_id, from_email, true)`
 2. Build the document:
-   a. Empty paragraph (block 0 — cursor position)
+   a. Empty paragraph (block 0 - cursor position)
    b. If signature resolved:
       - `Block::HorizontalRule` (separator)
       - Signature blocks
@@ -580,7 +580,7 @@ signature.
 3. Set `signature_separator_index` accordingly
 4. Place cursor at `DocPosition::new(0, 0)`
 
-The attribution line and quoted content are below the signature — this is
+The attribution line and quoted content are below the signature - this is
 the standard top-posting layout.
 
 #### Forward
@@ -732,7 +732,7 @@ fn replace_signature(
     let sig_start = match self.signature_separator_index {
         Some(idx) => idx,
         None => {
-            // No existing signature — just insert at the end
+            // No existing signature - just insert at the end
             // (before attribution/quoted content if present)
             self.insert_signature(new_signature);
             return;
@@ -798,7 +798,7 @@ Goal: ensure the signature is correctly serialized in outgoing email.
 
 The compose document is serialized via `html_serialize::to_html()`. The
 signature blocks serialize naturally as HTML. No special handling is needed in
-the editor's serializer — the signature IS part of the document.
+the editor's serializer - the signature IS part of the document.
 
 However, the send path should wrap the signature region in an identifying div.
 This happens AFTER the editor serializes the full document to HTML:
@@ -820,7 +820,7 @@ and wraps everything from there to the end of the signature in:
 ```
 
 If the document was modified such that the `<hr>` no longer exists (user
-deleted it), the signature wrapper is omitted. This is fine — the signature
+deleted it), the signature wrapper is omitted. This is fine - the signature
 content is still part of the body; it just won't be identified as a signature
 by other clients.
 
@@ -890,9 +890,9 @@ stack [content_area, blocker, overlay_panel]
       container (editor surface)
         RichTextEditor widget
       row
-        [conditional] button ("Delete") — danger style
+        [conditional] button ("Delete") - danger style
         Space (fill)
-        button ("Save") — primary style
+        button ("Save") - primary style
 ```
 
 ### Compose window signature region
@@ -902,7 +902,7 @@ column (compose document blocks)
   ... user content blocks ...
   horizontal_rule (signature separator)
   ... signature blocks (rendered by the editor) ...
-  paragraph (attribution line — italic)
+  paragraph (attribution line - italic)
   blockquote (quoted content)
 ```
 

@@ -592,7 +592,7 @@ pub async fn disable_shared_mailbox_sync_with_error(
 
 /// Get all shared mailbox IDs for an account (enabled and disabled).
 ///
-/// Used to detect revoked access — compare against currently-available
+/// Used to detect revoked access - compare against currently-available
 /// shared accounts to find entries that should be disabled.
 pub async fn get_all_shared_mailbox_ids(
     db: &DbState,

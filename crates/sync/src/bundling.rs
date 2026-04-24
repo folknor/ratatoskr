@@ -14,7 +14,7 @@ pub struct BundlingInput {
     pub list_unsubscribe: Option<String>,
 }
 
-/// Thread bundle — AI inbox classification (Primary, Updates, etc.).
+/// Thread bundle - AI inbox classification (Primary, Updates, etc.).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ThreadBundle {
     Primary,
@@ -519,7 +519,7 @@ mod tests {
 
     #[test]
     fn email_with_multiple_at_signs() {
-        // lastIndexOf('@') in TS / rfind('@') in Rust — takes last @
+        // lastIndexOf('@') in TS / rfind('@') in Rust - takes last @
         let input = make_input(vec![], Some("noreply@weird@discord.com"), None);
         assert_eq!(bundle_by_rules(&input), ThreadBundle::Social);
     }

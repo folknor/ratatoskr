@@ -3,8 +3,8 @@
 > **Superseded by [Labels Unification](../labels-unification/problem-statement.md).**
 > Categories are now unified into the labels system as `label_kind = 'tag'` entries. Exchange categories, IMAP keywords, and JMAP keywords all sync to the `labels` table. See the labels unification spec for the current design. This roadmap doc is retained for historical context.
 
-**Tier**: 1 — Blocks switching from Outlook
-**Status**: ✅ **Backend complete** — Unified into labels system (Phases 1-5 of labels unification). — All provider backends implemented. Exchange Graph master category list sync (`crates/graph/src/category_sync.rs`), Gmail label-to-category sync with hex colors (`crates/gmail/src/sync/labels.rs`), JMAP keyword-to-category mapping (`crates/jmap/src/sync/mailbox.rs`, `crates/jmap/src/sync/storage.rs`), IMAP PERMANENTFLAGS detection (`crates/imap/src/client/`, `crates/imap/src/raw.rs`). Unified color model using Exchange's 25 presets as canonical palette with nearest-match mapping (`crates/label-colors/src/category_colors.rs`). `ProviderOps` trait has `apply_category`/`remove_category` mutation methods (`crates/common/src/ops.rs`), implemented in each provider crate (`crates/graph/src/ops/mod.rs`, `crates/gmail/src/ops.rs`, `crates/jmap/src/ops.rs`, `crates/imap/src/ops.rs`). `message_categories` join table populated during sync for all three API providers (Graph, Gmail, JMAP). `categories` table with full schema in `crates/db/src/db/migrations.rs` (display_name, color_preset, color_bg, color_fg, provider_id, sync_state). **Still missing**: category picker UI, user-initiated apply/remove from UI, IMAP keyword write-back for categories.
+**Tier**: 1 - Blocks switching from Outlook
+**Status**: ✅ **Backend complete** - Unified into labels system (Phases 1-5 of labels unification). - All provider backends implemented. Exchange Graph master category list sync (`crates/graph/src/category_sync.rs`), Gmail label-to-category sync with hex colors (`crates/gmail/src/sync/labels.rs`), JMAP keyword-to-category mapping (`crates/jmap/src/sync/mailbox.rs`, `crates/jmap/src/sync/storage.rs`), IMAP PERMANENTFLAGS detection (`crates/imap/src/client/`, `crates/imap/src/raw.rs`). Unified color model using Exchange's 25 presets as canonical palette with nearest-match mapping (`crates/label-colors/src/category_colors.rs`). `ProviderOps` trait has `apply_category`/`remove_category` mutation methods (`crates/common/src/ops.rs`), implemented in each provider crate (`crates/graph/src/ops/mod.rs`, `crates/gmail/src/ops.rs`, `crates/jmap/src/ops.rs`, `crates/imap/src/ops.rs`). `message_categories` join table populated during sync for all three API providers (Graph, Gmail, JMAP). `categories` table with full schema in `crates/db/src/db/migrations.rs` (display_name, color_preset, color_bg, color_fg, provider_id, sync_state). **Still missing**: category picker UI, user-initiated apply/remove from UI, IMAP keyword write-back for categories.
 
 ---
 
@@ -15,10 +15,10 @@
 
 | Provider | Native support | Behavior |
 |---|---|---|
-| Exchange (Graph) | Full — `categories` on messages, master list via `/me/outlook/masterCategories` | Sync master list + per-message categories bidirectionally |
-| Gmail API | Labels function as both folders and categories. Color supported. | Map Gmail labels to categories where label is not a system/folder label. Imperfect — Gmail's model conflates the two concepts. |
-| JMAP | `keywords` on emails — arbitrary string keys, boolean values. No color. | Use keywords as category names, store colors locally. |
-| IMAP | `FLAGS`/keywords — server support varies wildly, many servers limit to system flags only | Local-only categories with IMAP flag sync as best-effort. |
+| Exchange (Graph) | Full - `categories` on messages, master list via `/me/outlook/masterCategories` | Sync master list + per-message categories bidirectionally |
+| Gmail API | Labels function as both folders and categories. Color supported. | Map Gmail labels to categories where label is not a system/folder label. Imperfect - Gmail's model conflates the two concepts. |
+| JMAP | `keywords` on emails - arbitrary string keys, boolean values. No color. | Use keywords as category names, store colors locally. |
+| IMAP | `FLAGS`/keywords - server support varies wildly, many servers limit to system flags only | Local-only categories with IMAP flag sync as best-effort. |
 
 ## Pain points
 
@@ -50,15 +50,15 @@ Exchange has the most complete category implementation of any provider. Categori
 **Endpoint**: `GET /me/outlook/masterCategories` (or `/users/{id}/outlook/masterCategories` for shared/delegated)
 
 Returns `outlookCategory` objects with two fields:
-- `displayName` (String) — unique per user, **immutable after creation** (read-only)
-- `color` (categoryColor enum) — one of 25 preset constants plus `None`
+- `displayName` (String) - unique per user, **immutable after creation** (read-only)
+- `color` (categoryColor enum) - one of 25 preset constants plus `None`
 
 Each category also has an opaque `id` (GUID). New accounts get 6 default categories ("Red category", "Orange category", etc.).
 
 **CRUD**:
-- **Create**: `POST /me/outlook/masterCategories` with `{ "displayName": "...", "color": "preset9" }`. Returns 201 with the new category including its `id`. `displayName` must be unique — duplicates return a conflict error.
-- **Update**: `PATCH /me/outlook/masterCategories/{id}` — **can only change `color`**. Cannot rename. This is a significant constraint: to "rename" a category, you must delete the old one, create a new one, and re-apply it to all affected messages.
-- **Delete**: `DELETE /me/outlook/masterCategories/{id}`. Does not remove the category string from messages — messages retain the `displayName` in their `categories` array even after the master list entry is deleted. This creates orphaned category references.
+- **Create**: `POST /me/outlook/masterCategories` with `{ "displayName": "...", "color": "preset9" }`. Returns 201 with the new category including its `id`. `displayName` must be unique - duplicates return a conflict error.
+- **Update**: `PATCH /me/outlook/masterCategories/{id}` - **can only change `color`**. Cannot rename. This is a significant constraint: to "rename" a category, you must delete the old one, create a new one, and re-apply it to all affected messages.
+- **Delete**: `DELETE /me/outlook/masterCategories/{id}`. Does not remove the category string from messages - messages retain the `displayName` in their `categories` array even after the master list entry is deleted. This creates orphaned category references.
 
 **Permissions**: `MailboxSettings.Read` for list/get, `MailboxSettings.ReadWrite` for create/update/delete.
 
@@ -86,9 +86,9 @@ Colors are abstract constants (`preset0` through `preset24`), not hex values. Th
 
 #### Per-Message Categories
 
-The `categories` field on a message is a `String[]` — an array of `displayName` strings (not IDs). This is a critical design detail:
+The `categories` field on a message is a `String[]` - an array of `displayName` strings (not IDs). This is a critical design detail:
 
-- **Applying**: `PATCH /me/messages/{id}` with `{ "categories": ["Red category", "Project expenses"] }`. This is a **full replacement** — you must include the complete desired list, not just additions.
+- **Applying**: `PATCH /me/messages/{id}` with `{ "categories": ["Red category", "Project expenses"] }`. This is a **full replacement** - you must include the complete desired list, not just additions.
 - **Removing**: Same PATCH with the category omitted from the array.
 - **Gotcha**: Categories on messages are matched by string name, not by master list ID. If a user renames a category in Outlook (which Outlook does by delete + recreate behind the scenes), existing messages retain the old name string.
 
@@ -98,7 +98,7 @@ Access a shared mailbox's categories via `/users/{shared-mailbox-id}/outlook/mas
 
 #### Delta Sync
 
-Graph's message delta endpoint (`GET /me/mailFolders/{id}/messages/delta`) returns messages with changed properties, including `categories`. You can use `$select=categories` to minimize payload. There is **no dedicated delta endpoint for the master category list itself** — you must poll it in full.
+Graph's message delta endpoint (`GET /me/mailFolders/{id}/messages/delta`) returns messages with changed properties, including `categories`. You can use `$select=categories` to minimize payload. There is **no dedicated delta endpoint for the master category list itself** - you must poll it in full.
 
 #### Real-World Gotchas
 
@@ -110,7 +110,7 @@ Graph's message delta endpoint (`GET /me/mailFolders/{id}/messages/delta`) retur
 
 ### 2. Gmail Label-as-Category Mapping
 
-Gmail has no concept of "categories" separate from labels. Everything — system folders, user folders, user categories, and the tab categories — is a label. This is the core mapping challenge.
+Gmail has no concept of "categories" separate from labels. Everything - system folders, user folders, user categories, and the tab categories - is a label. This is the core mapping challenge.
 
 #### Distinguishing Category-Labels from Folder-Labels
 
@@ -124,7 +124,7 @@ There is **no API field** that marks a label as "used as a category" vs "used as
 
 4. **Nesting**: Gmail uses `/` in label names to indicate hierarchy (e.g., `"Work/Projects/Active"`). Nested labels are structurally folder-like. A label with no `/` and `messageListVisibility: "show"` is more likely a category.
 
-**Practical heuristic**: Treat a user label as a "category" if it has `messageListVisibility: "show"` and is not nested (no `/` in name). Treat nested labels as folders. This is imperfect — some users create flat labels as folders and nested labels as categories — but it's the best available signal. Thunderbird does not attempt this distinction at all and shows all labels uniformly.
+**Practical heuristic**: Treat a user label as a "category" if it has `messageListVisibility: "show"` and is not nested (no `/` in name). Treat nested labels as folders. This is imperfect - some users create flat labels as folders and nested labels as categories - but it's the best available signal. Thunderbird does not attempt this distinction at all and shows all labels uniformly.
 
 #### The `CATEGORY_*` System Labels
 
@@ -135,17 +135,17 @@ Gmail has five system labels: `CATEGORY_PERSONAL`, `CATEGORY_SOCIAL`, `CATEGORY_
 #### Gmail Label Colors
 
 The `color` object on a label has two fields:
-- `textColor` — hex string like `"#000000"`
-- `backgroundColor` — hex string like `"#fb4c2f"`
+- `textColor` - hex string like `"#000000"`
+- `backgroundColor` - hex string like `"#fb4c2f"`
 
-Both must be set together from a **restricted palette of ~92 predefined hex values**. You cannot use arbitrary hex colors — the API rejects values not in the palette. Unlike Exchange's 25 named presets, Gmail offers ~92 color values that must be used as (textColor, backgroundColor) pairs.
+Both must be set together from a **restricted palette of ~92 predefined hex values**. You cannot use arbitrary hex colors - the API rejects values not in the palette. Unlike Exchange's 25 named presets, Gmail offers ~92 color values that must be used as (textColor, backgroundColor) pairs.
 
 #### Label CRUD
 
-- `GET /gmail/v1/users/me/labels` — list all labels
-- `POST /gmail/v1/users/me/labels` — create with name, visibility, and optional color
-- `PATCH /gmail/v1/users/me/labels/{id}` — update name, visibility, color (unlike Exchange, **renaming is supported**)
-- `DELETE /gmail/v1/users/me/labels/{id}` — removes the label and **also removes it from all messages**
+- `GET /gmail/v1/users/me/labels` - list all labels
+- `POST /gmail/v1/users/me/labels` - create with name, visibility, and optional color
+- `PATCH /gmail/v1/users/me/labels/{id}` - update name, visibility, color (unlike Exchange, **renaming is supported**)
+- `DELETE /gmail/v1/users/me/labels/{id}` - removes the label and **also removes it from all messages**
 
 **Applying labels to messages**: `POST /gmail/v1/users/me/messages/{id}/modify` with `addLabelIds`/`removeLabelIds`. This is additive/subtractive, unlike Exchange's full-replacement PATCH.
 
@@ -159,7 +159,7 @@ JMAP's keyword system (RFC 8621) is the thinnest abstraction of the four provide
 
 #### How Keywords Work
 
-Keywords on an Email object are a `String[Boolean]` map — keys are keyword strings, values are always `true`. A keyword is "set" by being present in the map and "unset" by being absent. There is no "master keyword list" concept.
+Keywords on an Email object are a `String[Boolean]` map - keys are keyword strings, values are always `true`. A keyword is "set" by being present in the map and "unset" by being absent. There is no "master keyword list" concept.
 
 IANA-registered keywords with semantic meaning: `$seen`, `$flagged`, `$draft`, `$answered`, `$forwarded`, `$phishing`, `$junk`, `$notjunk`.
 
@@ -171,7 +171,7 @@ The `jmap-client` crate provides `.keyword("name", true/false)` on the Email upd
 
 #### Limits
 
-RFC 8621 defines a `tooManyKeywords` error but does not mandate a specific numeric limit — it is server-dependent. Stalwart has no documented keyword count limit.
+RFC 8621 defines a `tooManyKeywords` error but does not mandate a specific numeric limit - it is server-dependent. Stalwart has no documented keyword count limit.
 
 #### Color Storage Problem
 
@@ -192,7 +192,7 @@ JMAP has **no color concept for keywords**. Options:
 System flags (`\Seen`, `\Answered`, etc.) are universally supported. Keywords (arbitrary strings without `\` prefix) vary by server.
 
 The `PERMANENTFLAGS` response code in `SELECT` tells the client what flags can be stored:
-1. **Contains `\*`**: Server allows arbitrary custom keywords — best case
+1. **Contains `\*`**: Server allows arbitrary custom keywords - best case
 2. **Lists specific keywords**: Server supports those keywords only
 3. **Missing entirely**: Client should assume all flags can be changed (per RFC)
 
@@ -200,9 +200,9 @@ The `PERMANENTFLAGS` response code in `SELECT` tells the client what flags can b
 
 | Server | Custom Keywords | Limits | Notes |
 |--------|----------------|--------|-------|
-| **Dovecot** (Maildir) | Yes, with `\*` | **26 per mailbox** — keywords a-z stored in Maildir filenames | Most common self-hosted server |
+| **Dovecot** (Maildir) | Yes, with `\*` | **26 per mailbox** - keywords a-z stored in Maildir filenames | Most common self-hosted server |
 | **Dovecot** (dbox/sdbox/mdbox) | Yes | No hard limit | Better for keyword-heavy use |
-| **Exchange/Outlook.com** (IMAP) | Limited | Categories **not exposed** as IMAP keywords — only via Graph API | |
+| **Exchange/Outlook.com** (IMAP) | Limited | Categories **not exposed** as IMAP keywords - only via Graph API | |
 | **Gmail** (IMAP) | Via `X-GM-LABELS` | Proprietary GIMAP extension, not standard keywords | |
 | **Yahoo** | No | Only system flags | |
 | **iCloud** | Limited | Supports `\*` but behavior inconsistent | |
@@ -243,7 +243,7 @@ Microsoft does not publish official hex values. These are approximations from Ou
 
 **Option A: Exchange presets as the canonical palette.** Map every category color to one of the 25 presets. Perfect Exchange round-trip. Gmail users lose precise color choices when viewed in Ratatoskr.
 
-- Pros: Perfect Exchange fidelity (the provider that matters most for enterprise users). 25 colors is plenty — Outlook itself only offers these.
+- Pros: Perfect Exchange fidelity (the provider that matters most for enterprise users). 25 colors is plenty - Outlook itself only offers these.
 - Cons: Gmail's ~92 colors get quantized down.
 
 **Option B: Arbitrary hex colors internally, with nearest-match mapping.** Store colors as `(bg_hex, fg_hex)`. Map to Exchange presets on write (nearest perceptual match using CIE Delta E). Map to Gmail palette on write.
@@ -260,7 +260,7 @@ Microsoft does not publish official hex values. These are approximations from Ou
 
 #### How Thunderbird Handles This
 
-Thunderbird's tag system: tags have user-configurable colors stored **locally** in `prefs.js`. Colors do **not** sync — they are per-installation only. No integration with Exchange categories or Gmail label colors. If you use Thunderbird on two machines, you get the same keywords but potentially different colors. We should do better by syncing colors to Exchange/Gmail where the API supports it.
+Thunderbird's tag system: tags have user-configurable colors stored **locally** in `prefs.js`. Colors do **not** sync - they are per-installation only. No integration with Exchange categories or Gmail label colors. If you use Thunderbird on two machines, you get the same keywords but potentially different colors. We should do better by syncing colors to Exchange/Gmail where the API supports it.
 
 ---
 
@@ -304,7 +304,7 @@ Same name, different colors across accounts: show both with their respective col
 
 #### Color Manipulation
 
-**[`palette`](https://crates.io/crates/palette)** v0.7.6 — 408K monthly downloads. Full color space library with perceptual distance calculations. **Useful only if** we go with Option B/C (nearest-match mapping). For Option A (Exchange presets as canonical), a 25-entry const array is all we need.
+**[`palette`](https://crates.io/crates/palette)** v0.7.6 - 408K monthly downloads. Full color space library with perceptual distance calculations. **Useful only if** we go with Option B/C (nearest-match mapping). For Option A (Exchange presets as canonical), a 25-entry const array is all we need.
 
 #### Provider Client Crates
 

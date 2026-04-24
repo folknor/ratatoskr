@@ -48,7 +48,7 @@ The `idx_pinned_searches_query` unique index enforces deduplication at the datab
 
 **Migration:** Add a migration function to `Db::open()` that creates these tables if they don't exist. Use `CREATE TABLE IF NOT EXISTS` for forward compatibility with existing databases.
 
-**Foreign keys:** `pinned_search_threads.pinned_search_id` cascades on delete, so dismissing a pinned search automatically cleans up its thread snapshot. The `thread_id` and `account_id` columns are NOT foreign keys to the `threads` table because threads may be deleted by sync while the pinned search persists — the query simply returns fewer results.
+**Foreign keys:** `pinned_search_threads.pinned_search_id` cascades on delete, so dismissing a pinned search automatically cleans up its thread snapshot. The `thread_id` and `account_id` columns are NOT foreign keys to the `threads` table because threads may be deleted by sync while the pinned search persists - the query simply returns fewer results.
 
 ### 1.2 Core Types
 
@@ -62,7 +62,7 @@ pub struct PinnedSearch {
     pub query: String,
     pub created_at: i64,
     pub updated_at: i64,
-    /// Thread IDs in the snapshot. Not loaded eagerly — populated
+    /// Thread IDs in the snapshot. Not loaded eagerly - populated
     /// only when the pinned search is selected.
     pub thread_ids: Vec<(String, String)>,  // (thread_id, account_id)
 }
@@ -451,7 +451,7 @@ impl Db {
 
 The `Db::open()` function currently sets `PRAGMA query_only = ON`, which prevents writes. Pinned searches require writes.
 
-**Cross-cutting architecture note:** This is not just a pinned-search concern. Multiple features need local-state writes: pinned searches, attachment collapse state (`thread_ui_state`), window session restore, keybinding overrides, and usage tracking. The writable-connection decision should be made as a broader app DB architecture choice, not driven by this spec alone. This spec assumes the solution exists and uses it — it does not own the decision.
+**Cross-cutting architecture note:** This is not just a pinned-search concern. Multiple features need local-state writes: pinned searches, attachment collapse state (`thread_ui_state`), window session restore, keybinding overrides, and usage tracking. The writable-connection decision should be made as a broader app DB architecture choice, not driven by this spec alone. This spec assumes the solution exists and uses it - it does not own the decision.
 
 **Recommended approach (for whatever feature drives the decision first):** A separate writable connection for local app state, keeping `query_only` on the main connection for synced data safety:
 
@@ -506,7 +506,7 @@ struct App {
 }
 ```
 
-The `PreSearchView` captures what to restore when the user presses Escape. This restores by re-navigating to an explicit navigation target rather than replaying cached thread state — an improvement over the search app integration spec's `pre_search_threads` clone approach (which that spec labels as a V1 shortcut). Both specs should converge on this navigation-target-based restoration model.
+The `PreSearchView` captures what to restore when the user presses Escape. This restores by re-navigating to an explicit navigation target rather than replaying cached thread state - an improvement over the search app integration spec's `pre_search_threads` clone approach (which that spec labels as a V1 shortcut). Both specs should converge on this navigation-target-based restoration model.
 
 ```rust
 /// Captures the sidebar state before a pinned search was activated,
@@ -520,7 +520,7 @@ pub struct PreSearchView {
 }
 ```
 
-**Alignment note:** The search app integration spec (`docs/search/app-integration-spec.md`) currently uses `pre_search_threads: Option<Vec<Thread>>` (clone the thread list, restore on Escape). This spec uses navigation-state restoration instead, which is more robust. The search integration spec should adopt this approach — re-navigate to the saved `PreSearchView` target rather than replaying stale cached threads.
+**Alignment note:** The search app integration spec (`docs/search/app-integration-spec.md`) currently uses `pre_search_threads: Option<Vec<Thread>>` (clone the thread list, restore on Escape). This spec uses navigation-state restoration instead, which is more robust. The search integration spec should adopt this approach - re-navigate to the saved `PreSearchView` target rather than replaying stale cached threads.
 
 ### 1.6 Message Variants
 
@@ -611,7 +611,7 @@ pub struct Sidebar {
 }
 ```
 
-**Ownership model:** `App` is the source of truth for `pinned_searches` and `active_pinned_search`. The sidebar does not own separate copies — it holds references to the App-owned data. In practice, since iced's Elm architecture passes data into `view()` functions, the sidebar's `view()` receives pinned search data as parameters from the parent rather than maintaining internal duplicates. The `Sidebar` struct's `pinned_searches` and `active_pinned_search` fields are written by `App` before each `view()` call — they are downstream mirrors, not independent state. If the sidebar component pattern requires internal fields, they should be documented as "set by parent, not independently mutated."
+**Ownership model:** `App` is the source of truth for `pinned_searches` and `active_pinned_search`. The sidebar does not own separate copies - it holds references to the App-owned data. In practice, since iced's Elm architecture passes data into `view()` functions, the sidebar's `view()` receives pinned search data as parameters from the parent rather than maintaining internal duplicates. The `Sidebar` struct's `pinned_searches` and `active_pinned_search` fields are written by `App` before each `view()` call - they are downstream mirrors, not independent state. If the sidebar component pattern requires internal fields, they should be documented as "set by parent, not independently mutated."
 
 #### View function
 
@@ -974,10 +974,10 @@ struct App {
 
 The distinction between `active_pinned_search` and `editing_pinned_search`:
 
-- `active_pinned_search` — which pinned search is highlighted in the sidebar and whose threads are displayed. Set when clicking a pinned search or when a new search creates one.
-- `editing_pinned_search` — which pinned search should be updated (rather than a new one created) when the user executes a search. Set when a pinned search is selected or when a new search is created. Cleared when the user navigates away.
+- `active_pinned_search` - which pinned search is highlighted in the sidebar and whose threads are displayed. Set when clicking a pinned search or when a new search creates one.
+- `editing_pinned_search` - which pinned search should be updated (rather than a new one created) when the user executes a search. Set when a pinned search is selected or when a new search is created. Cleared when the user navigates away.
 
-They are usually the same value, but `active_pinned_search` can be `Some(id)` while `editing_pinned_search` is `None` (the user clicked a folder after viewing a pinned search — the pinned search is still highlighted briefly until the new view loads, but further searches should create new entries).
+They are usually the same value, but `active_pinned_search` can be `Some(id)` while `editing_pinned_search` is `None` (the user clicked a folder after viewing a pinned search - the pinned search is still highlighted briefly until the new view loads, but further searches should create new entries).
 
 ### 2.2 State Transitions
 
@@ -1243,11 +1243,11 @@ When the user clicks a pinned search that is already active and presses Enter (r
 
 ### 2.7 Thread List Rendering
 
-When a pinned search is selected, the thread list renders identically to a folder view. The threads are fetched via `get_threads_by_ids` and set with `self.thread_list.set_threads(threads)`. The existing `thread_card` widget in `widgets.rs` renders each thread — no special handling needed.
+When a pinned search is selected, the thread list renders identically to a folder view. The threads are fetched via `get_threads_by_ids` and set with `self.thread_list.set_threads(threads)`. The existing `thread_card` widget in `widgets.rs` renders each thread - no special handling needed.
 
 Thread cards show live metadata (read/unread, starred, snippet, date) because `get_threads_by_ids` fetches current state from the `threads` table. The pinned search only determines *which* threads appear, not *how* they look.
 
-No unread badges appear on pinned search entries in the sidebar. This is implicit — the `pinned_search_card` function simply doesn't include a badge.
+No unread badges appear on pinned search entries in the sidebar. This is implicit - the `pinned_search_card` function simply doesn't include a badge.
 
 ---
 
@@ -1426,7 +1426,7 @@ Message::PinnedSearchesExpired(Ok(count)) => {
     }
 }
 Message::PinnedSearchesExpired(Err(e)) => {
-    // Non-fatal — log and continue
+    // Non-fatal - log and continue
     self.status = format!("Expiry warning: {e}");
     Task::none()
 }
@@ -1576,7 +1576,7 @@ Add to `crates/app/src/ui/layout.rs` if needed:
 
 ```rust
 /// Pinned search card internal padding (reuses PAD_NAV_ITEM).
-/// No new constant needed — the existing PAD_NAV_ITEM
+/// No new constant needed - the existing PAD_NAV_ITEM
 /// (top: 4, right: 8, bottom: 4, left: 8) is appropriate.
 ```
 
@@ -1601,4 +1601,4 @@ This spec assumes the search app integration (slices 5-6) provides:
 2. A search bar component that can be pre-filled with a query string and supports an Escape handler.
 3. The unified `search()` function in core that returns ranked results.
 
-Phase 1 can be partially implemented without the search integration — the sidebar rendering, CRUD, and click-to-view flow work with manually seeded pinned searches. Phase 2 requires the search integration to be complete for automatic creation and edit-in-place behavior.
+Phase 1 can be partially implemented without the search integration - the sidebar rendering, CRUD, and click-to-view flow work with manually seeded pinned searches. Phase 2 requires the search integration to be complete for automatic creation and edit-in-place behavior.

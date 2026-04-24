@@ -1,7 +1,7 @@
 //! JMAP calendar sync using CalendarEvent/get, /changes, and /set.
 //!
 //! Leverages JMAP's native state-tracking (`/changes` method) for clean
-//! incremental sync — no ctag/etag complexity like CalDAV.
+//! incremental sync - no ctag/etag complexity like CalDAV.
 
 use std::collections::HashMap;
 
@@ -116,7 +116,7 @@ pub async fn sync_all_events(
         .map(|c| (c.remote_id.as_str(), c.local_id.as_str()))
         .collect();
 
-    // Fetch ALL events (no filter) — the server returns them all with state
+    // Fetch ALL events (no filter) - the server returns them all with state
     let inner = client.inner();
     let mut request = inner.build();
     let req_account_id = request.default_account_id().to_string();
@@ -170,7 +170,7 @@ pub async fn sync_events_delta(
 
     let Some(mut since_state) = load_calendar_sync_state(db, account_id, "CalendarEvent").await?
     else {
-        log::warn!("[JMAP] No CalendarEvent state for account {account_id} — running initial sync");
+        log::warn!("[JMAP] No CalendarEvent state for account {account_id} - running initial sync");
         return sync_all_events(client, account_id, calendars, db).await;
     };
 
@@ -728,7 +728,7 @@ fn parse_local_date(s: &str) -> i64 {
 /// Unix timestamp.
 ///
 /// Tries RFC 3339 first (includes offset). Falls back to parsing as a naive
-/// datetime treated as UTC — JMAP servers typically include the timezone in
+/// datetime treated as UTC - JMAP servers typically include the timezone in
 /// the `timeZone` property but the `start` value itself is local. Without
 /// chrono-tz we cannot resolve IANA names, so we treat naive times as UTC.
 /// This is acceptable because delta-sync will correct any drift.
@@ -738,7 +738,7 @@ fn parse_local_datetime(s: &str, _tz_name: &str) -> i64 {
         return dt.timestamp();
     }
 
-    // Parse as naive local datetime — treat as UTC
+    // Parse as naive local datetime - treat as UTC
     chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
         .map(|n| n.and_utc().timestamp())
         .unwrap_or(0)
@@ -914,7 +914,7 @@ struct ReminderRow {
 
 /// Extract reminder rows from a JMAP CalendarEvent's alerts.
 fn extract_reminder_rows(event: &CalendarEvent<Get>) -> Vec<ReminderRow> {
-    // alerts returns Field<&Map> — Omitted/Null = no alerts, Value = has alerts
+    // alerts returns Field<&Map> - Omitted/Null = no alerts, Value = has alerts
     let jmap_client::core::field::Field::Value(alerts) = event.alerts() else {
         return Vec::new();
     };

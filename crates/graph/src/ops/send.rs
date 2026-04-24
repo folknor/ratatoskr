@@ -15,7 +15,7 @@ pub(super) async fn send_via_draft(
 ) -> Result<String, String> {
     log::info!("[Graph] Sending email for account {}", ctx.account_id);
     let draft_id = create_draft_impl(client, ctx, raw_base64url, thread_id).await?;
-    // Send the draft — no response body (202 Accepted)
+    // Send the draft - no response body (202 Accepted)
     let enc_draft_id = urlencoding::encode(&draft_id);
     let me = client.api_path_prefix();
     client

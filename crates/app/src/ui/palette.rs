@@ -643,7 +643,7 @@ pub fn chord_indicator<'a, M: 'a>(chord_display: &str) -> Element<'a, M> {
 
 /// Build snooze preset options as `OptionItem`s for the DateTime picker.
 ///
-/// These are hardcoded presets — a proper date/time picker is deferred.
+/// These are hardcoded presets - a proper date/time picker is deferred.
 fn snooze_preset_options() -> Vec<OptionItem> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -676,7 +676,7 @@ fn snooze_option(label: &str, until: i64) -> OptionItem {
 /// Compute unix timestamp for tomorrow at 9:00 AM local time.
 fn next_morning_9am(now_secs: i64) -> i64 {
     // Approximate: add 1 day then round to 9am.
-    // This is intentionally simple — real timezone handling is deferred.
+    // This is intentionally simple - real timezone handling is deferred.
     let day_secs: i64 = 86400;
     let tomorrow_start = (now_secs / day_secs + 1) * day_secs;
     tomorrow_start + 9 * 3600

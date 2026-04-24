@@ -33,7 +33,7 @@ fn next_account_color(conn: &Connection) -> String {
             return (*bg).to_string();
         }
     }
-    // All used — return the first preset
+    // All used - return the first preset
     presets
         .first()
         .map_or("#3498db".to_string(), |(_, bg, _)| (*bg).to_string())

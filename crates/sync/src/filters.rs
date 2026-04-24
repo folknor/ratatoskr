@@ -142,7 +142,7 @@ pub fn compute_filter_actions(actions: &FilterActions) -> FilterResult {
 }
 
 /// Evaluate all filters against messages and return per-thread actions.
-/// Pure computation — does not touch DB or providers.
+/// Pure computation - does not touch DB or providers.
 pub fn evaluate_filters(
     filters: &[(FilterCriteria, FilterActions)],
     messages: &[FilterableMessage],

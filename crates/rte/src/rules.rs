@@ -5,7 +5,7 @@
 //! function dispatches to per-action resolvers.
 //!
 //! This is where most of the editor's user-facing behavior lives. Getting these
-//! rules right is more important than getting the data structures right — users
+//! rules right is more important than getting the data structures right - users
 //! notice when Enter doesn't do what they expect.
 
 use crate::document::{
@@ -40,7 +40,7 @@ pub enum EditAction {
 /// running normalization afterward.
 ///
 /// For `ToggleInlineStyle` at a collapsed caret, returns an empty `Vec` to signal
-/// "toggle pending style" — the caller (editor state) handles pending style.
+/// "toggle pending style" - the caller (editor state) handles pending style.
 pub fn resolve(
     doc: &Document,
     selection: DocSelection,
@@ -128,7 +128,7 @@ fn resolve_insert(
 ///
 /// - If the cursor is strictly inside a run, use that run's style.
 /// - If the cursor is at a run boundary, use the style of the run to the left
-///   (the "preceding character" heuristic — standard across all editors).
+///   (the "preceding character" heuristic - standard across all editors).
 /// - Link boundary exclusivity: if the cursor is at the start or end of a link run,
 ///   do NOT inherit the link's style. Only typing strictly inside a link extends it.
 ///   (This function only returns InlineStyle, not link info, so link exclusivity is
@@ -147,7 +147,7 @@ fn resolve_style_at(doc: &Document, pos: DocPosition) -> InlineStyle {
 
     // Find which run the cursor is in.
     let Some((run_idx, offset_in_run)) = block.resolve_offset(pos.offset) else {
-        // Past end — use last run's style.
+        // Past end - use last run's style.
         return runs.last().map_or(InlineStyle::empty(), |r| r.style);
     };
 
@@ -161,7 +161,7 @@ fn resolve_style_at(doc: &Document, pos: DocPosition) -> InlineStyle {
         // end (i.e., the cursor is right after the link), don't inherit the link style.
         // For InlineStyle (non-link formatting), always inherit from the left.
         if prev_run.link.is_some() {
-            // At the end of a link — use the current run's style (the one after the link).
+            // At the end of a link - use the current run's style (the one after the link).
             return run.style;
         }
         return prev_run.style;
@@ -171,13 +171,13 @@ fn resolve_style_at(doc: &Document, pos: DocPosition) -> InlineStyle {
     // don't inherit the link's style bits. But we already handled offset_in_run == 0
     // above (either run_idx == 0 or we used the previous run). So if we're here with
     // offset_in_run == 0 and run_idx == 0, we're at the very start of the block.
-    // If this first run is a link, the cursor is at the link boundary — don't inherit link.
+    // If this first run is a link, the cursor is at the link boundary - don't inherit link.
     // For InlineStyle bits (bold/italic/etc), still inherit them.
 
     run.style
 }
 
-/// Get the style of the run at a given position — the style that `InsertText`
+/// Get the style of the run at a given position - the style that `InsertText`
 /// will inherit when inserting at this offset.
 ///
 /// This mirrors the logic in `insert_text_into_runs` (operations.rs): the text
@@ -205,7 +205,7 @@ fn run_style_at(doc: &Document, pos: DocPosition) -> InlineStyle {
         char_pos += run_len;
     }
 
-    // Past the end — last run's style.
+    // Past the end - last run's style.
     runs.last().map_or(InlineStyle::empty(), |r| r.style)
 }
 
@@ -231,7 +231,7 @@ fn resolve_delete_backward(doc: &Document, selection: DocSelection) -> Vec<EditO
         return vec![];
     }
 
-    // Rule 3: at offset 0 of a non-first block — handle image blocks.
+    // Rule 3: at offset 0 of a non-first block - handle image blocks.
     if pos.offset == 0 {
         // If the previous block is an image, delete (remove) it instead of merging.
         if let Some(prev) = doc.block(pos.block_index - 1)
@@ -343,7 +343,7 @@ fn resolve_delete_forward(doc: &Document, selection: DocSelection) -> Vec<EditOp
         return vec![];
     }
 
-    // Rule 3: at the end of a non-last block — handle image blocks.
+    // Rule 3: at the end of a non-last block - handle image blocks.
     if at_block_end {
         // If the next block is an image, delete (remove) it instead of merging.
         let next_idx = pos.block_index + 1;
@@ -476,7 +476,7 @@ fn build_deleted_content(doc: &Document, start: DocPosition, end: DocPosition) -
                 let tail_runs = extract_deleted_runs(runs, start.offset, start_block.char_len());
                 blocks.push(Block::Paragraph { runs: tail_runs });
             } else {
-                // Non-inline block (Image, HR, BlockQuote) — capture whole block.
+                // Non-inline block (Image, HR, BlockQuote) - capture whole block.
                 blocks.push(start_block.clone());
             }
         }
@@ -494,7 +494,7 @@ fn build_deleted_content(doc: &Document, start: DocPosition, end: DocPosition) -
                 let head_runs = extract_deleted_runs(runs, 0, end.offset);
                 blocks.push(Block::Paragraph { runs: head_runs });
             } else {
-                // Non-inline block — capture whole block.
+                // Non-inline block - capture whole block.
                 blocks.push(end_block.clone());
             }
         }
@@ -531,7 +531,7 @@ fn resolve_split_block(doc: &Document, selection: DocSelection) -> Vec<EditOp> {
         return ops;
     };
 
-    // Rule: Image blocks are atomic — Enter inserts a new paragraph after.
+    // Rule: Image blocks are atomic - Enter inserts a new paragraph after.
     if matches!(block, Block::Image { .. }) {
         ops.push(EditOp::InsertBlock {
             index: split_pos.block_index + 1,
@@ -1383,7 +1383,7 @@ mod tests {
             ],
         }]);
         // At offset 5 (right after the link "click").
-        // Should NOT inherit link style — use the plain run's style.
+        // Should NOT inherit link style - use the plain run's style.
         let style = resolve_style_at(&doc, DocPosition::new(0, 5));
         assert_eq!(style, InlineStyle::empty());
     }

@@ -48,7 +48,7 @@ impl Db {
 
     /// Check whether an account uses folder-based semantics (Exchange/IMAP/JMAP)
     /// as opposed to tag-based (Gmail). Folder-based providers don't support
-    /// Add Label / Remove Label — only Move to Folder.
+    /// Add Label / Remove Label - only Move to Folder.
     pub fn is_folder_based_provider(&self, account_id: &str) -> Result<bool, String> {
         self.with_conn_sync(|conn| rtsk::command_palette_queries::is_folder_based_provider(conn, account_id))
     }

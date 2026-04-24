@@ -8,7 +8,7 @@ use xxhash_rust::xxh3::xxh3_64;
 use store::inline_image_store::{InlineImage, InlineImageStoreState};
 
 // ---------------------------------------------------------------------------
-// Regex patterns – compiled once via LazyLock
+// Regex patterns - compiled once via LazyLock
 // ---------------------------------------------------------------------------
 
 /// Matches `<img …>` tags (case-insensitive, non-greedy).
@@ -40,7 +40,7 @@ pub struct ProcessedSignatureImages {
 /// content hashes for deduplication, and rewrite the `src` attributes to use
 /// `inline-image:<content_hash>` references that the rendering layer resolves.
 ///
-/// `cid:` references are left untouched — they require MIME context that is not
+/// `cid:` references are left untouched - they require MIME context that is not
 /// available during signature import.
 ///
 /// This is a **synchronous** extraction step. Call
@@ -69,7 +69,7 @@ pub fn process_signature_images(html: &str) -> ProcessedSignatureImages {
         let mime_type = data_caps.get(1).map_or("", |m| m.as_str());
         let b64_payload = data_caps.get(2).map_or("", |m| m.as_str());
 
-        // Decode base64 payload — skip this image on failure.
+        // Decode base64 payload - skip this image on failure.
         let Ok(data) = BASE64.decode(b64_payload) else {
             return tag.to_string();
         };

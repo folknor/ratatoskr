@@ -1,6 +1,6 @@
 use db::db::types::AccountScope;
 
-/// What the user is currently viewing — drives query routing and UI context.
+/// What the user is currently viewing - drives query routing and UI context.
 ///
 /// This is a UI-scoping concept, not a database type. The translation from
 /// `ViewScope` to `AccountScope` (for personal-account variants) happens in the

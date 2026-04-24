@@ -1,6 +1,6 @@
 //! Rich text editor for email composition in iced.
 //!
-//! Built from scratch — no existing rich text editor exists for iced. Design
+//! Built from scratch - no existing rich text editor exists for iced. Design
 //! informed by deep study of ProseMirror, Slate.js, Quill, and fleather.
 //!
 //! # Crate structure

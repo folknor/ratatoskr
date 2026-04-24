@@ -201,7 +201,7 @@ pub(crate) async fn graph_delta_sync(
     let mut tokens = load_delta_tokens(client, ctx.db, ctx.account_id).await?;
     if tokens.is_empty() {
         log::error!(
-            "[Graph] No delta tokens for account {} — run initial sync first",
+            "[Graph] No delta tokens for account {} - run initial sync first",
             ctx.account_id
         );
         return Err("GRAPH_NO_DELTA_STATE".to_string());
@@ -403,7 +403,7 @@ async fn sync_folder_delta(
             save_delta_token(sctx.client, sctx.db, sctx.account_id, folder_id, new_delta).await?;
             break;
         } else {
-            // No next or delta link — shouldn't happen, but break to avoid infinite loop
+            // No next or delta link - shouldn't happen, but break to avoid infinite loop
             log::warn!("Graph delta response for folder {folder_id} has no nextLink or deltaLink");
             break;
         }

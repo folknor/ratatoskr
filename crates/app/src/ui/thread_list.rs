@@ -113,13 +113,13 @@ pub enum ThreadListEvent {
     ThreadSelected(usize),
     /// The search query text changed (propagated to App for debounce).
     SearchQueryChanged(String),
-    /// The user pressed Enter — execute search immediately.
+    /// The user pressed Enter - execute search immediately.
     SearchExecute,
     /// Thread deselected.
     ThreadDeselected,
     /// User clicked "All" to widen search scope.
     WidenSearchScope,
-    /// Multi-selection changed — App may want to update action availability.
+    /// Multi-selection changed - App may want to update action availability.
     MultiSelectionChanged(usize),
     /// Auto-advance selected a new thread after action.
     AutoAdvance {
@@ -146,9 +146,9 @@ pub enum ThreadListEvent {
 /// What the thread list is currently displaying.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ThreadListMode {
-    /// Browsing a folder or label — threads loaded from scoped DB query.
+    /// Browsing a folder or label - threads loaded from scoped DB query.
     Folder,
-    /// Displaying search results — threads came from the unified search pipeline.
+    /// Displaying search results - threads came from the unified search pipeline.
     Search,
 }
 
@@ -171,7 +171,7 @@ pub struct ThreadList {
     pub auto_advance_direction: AutoAdvanceDirection,
     /// Typeahead suggestion state.
     pub typeahead: TypeaheadState,
-    /// BIMI logo LRU cache — shared with App for cross-component access.
+    /// BIMI logo LRU cache - shared with App for cross-component access.
     pub bimi_cache: Arc<rtsk::bimi::BimiLruCache>,
 }
 
@@ -195,7 +195,7 @@ impl ThreadList {
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn set_threads(&mut self, threads: Vec<Thread>) {
         self.threads = threads;
-        // Clear multi-selection when thread list changes — stale indices.
+        // Clear multi-selection when thread list changes - stale indices.
         self.selected_threads.clear();
         self.last_selected_anchor = None;
     }

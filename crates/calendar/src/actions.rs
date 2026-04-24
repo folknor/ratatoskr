@@ -1,4 +1,4 @@
-//! Calendar event write path — create, update, delete through providers.
+//! Calendar event write path - create, update, delete through providers.
 //!
 //! These action functions live in the `calendar` crate (not `core::actions`)
 //! because the calendar provider write APIs use typed clients (`GmailClient`,
@@ -346,7 +346,7 @@ fn lookup_event_meta(
 /// Create a calendar event: local-first (instant feedback), then provider dispatch.
 ///
 /// Returns `Success` if both local and provider succeeded.
-/// Returns `LocalOnly` if local succeeded but provider failed — the event is
+/// Returns `LocalOnly` if local succeeded but provider failed - the event is
 /// visible locally with `remote_event_id = NULL`, no automatic retry.
 /// Returns `Failed` if local insert failed.
 pub async fn create_calendar_event(
@@ -459,7 +459,7 @@ pub async fn update_calendar_event(
 ) -> ActionOutcome {
     let mut mlog = MutationLog::begin("update_calendar_event", "", event_id);
 
-    // 1. Look up event metadata — use the event's own account_id, not the caller's
+    // 1. Look up event metadata - use the event's own account_id, not the caller's
     let db = ctx.db.clone();
     let eid = event_id.to_string();
     let meta_result = tokio::task::spawn_blocking(move || {
@@ -494,7 +494,7 @@ pub async fn update_calendar_event(
         mlog.set_remote_id(rid);
     }
 
-    // 2. If no remote_event_id, this is a local-only event — update locally
+    // 2. If no remote_event_id, this is a local-only event - update locally
     let Some(ref remote_event_id) = meta.remote_event_id else {
         let db = ctx.db.clone();
         let eid = event_id.to_string();
@@ -532,7 +532,7 @@ pub async fn update_calendar_event(
         return outcome;
     };
 
-    // 3. Synced event — provider-first (use event's own account_id)
+    // 3. Synced event - provider-first (use event's own account_id)
     let provider =
         match create_calendar_provider(&ctx.db, &meta.account_id, ctx.encryption_key).await {
             Ok(p) => p,
@@ -612,7 +612,7 @@ pub async fn delete_calendar_event(
 ) -> ActionOutcome {
     let mut mlog = MutationLog::begin("delete_calendar_event", "", event_id);
 
-    // 1. Look up event metadata — use the event's own account_id
+    // 1. Look up event metadata - use the event's own account_id
     let db = ctx.db.clone();
     let eid = event_id.to_string();
     let meta_result = tokio::task::spawn_blocking(move || {
@@ -668,7 +668,7 @@ pub async fn delete_calendar_event(
         return outcome;
     };
 
-    // 3. Synced event — provider-first (use event's own account_id)
+    // 3. Synced event - provider-first (use event's own account_id)
     let provider =
         match create_calendar_provider(&ctx.db, &meta.account_id, ctx.encryption_key).await {
             Ok(p) => p,
@@ -700,7 +700,7 @@ pub async fn delete_calendar_event(
         return outcome;
     }
 
-    // 4. Provider succeeded — delete locally
+    // 4. Provider succeeded - delete locally
     let db = ctx.db.clone();
     let eid = event_id.to_string();
     let local_result = tokio::task::spawn_blocking(move || {

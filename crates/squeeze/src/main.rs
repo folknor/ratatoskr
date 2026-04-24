@@ -29,7 +29,7 @@ struct Cli {
     #[arg(long)]
     dry_run: bool,
 
-    /// Fast estimate only — predict output size without compressing.
+    /// Fast estimate only - predict output size without compressing.
     #[arg(long)]
     estimate: bool,
 
@@ -76,7 +76,7 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    // Fast estimate mode — reads only headers/metadata, never loads the whole file.
+    // Fast estimate mode - reads only headers/metadata, never loads the whole file.
     if cli.estimate {
         match squeeze::estimate::estimate_file(&cli.file, format, &config) {
             Ok(est) => {
@@ -94,7 +94,7 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    // Full compression — load the entire file.
+    // Full compression - load the entire file.
     let input = match fs::read(&cli.file) {
         Ok(data) => data,
         Err(e) => {

@@ -1,8 +1,8 @@
 //! Paragraph caching, draw logic, block-level rendering.
 //!
 //! Provides:
-//! - [`build_spans_for_block`] — converts a [`Block`]'s [`StyledRun`]s to iced [`Span`]s
-//! - [`ParagraphCache`] — stores pre-built paragraphs per block with dirty flags
+//! - [`build_spans_for_block`] - converts a [`Block`]'s [`StyledRun`]s to iced [`Span`]s
+//! - [`ParagraphCache`] - stores pre-built paragraphs per block with dirty flags
 //! - Drawing helpers for horizontal rules, blockquote borders, and list markers
 
 use crate::document::{Block, HeadingLevel, InlineStyle, StyledRun};
@@ -138,7 +138,7 @@ pub fn font_for_style(base_font: Font, style: InlineStyle) -> Font {
 
 /// Convert a single [`StyledRun`] to an iced [`Span`].
 ///
-/// The `Link` type parameter is `String` — the href of the link, if any.
+/// The `Link` type parameter is `String` - the href of the link, if any.
 /// `base_font` is the editor's configured body font. `font_size` is the
 /// size for this block (e.g. heading size or body size).
 /// `link_color` is the color to use for linked spans.
@@ -196,7 +196,7 @@ pub fn build_spans_for_block<'a>(
 
 /// Build spans for a block, handling container blocks by recursively
 /// collecting styled spans from their children. Unlike [`build_spans_for_block`],
-/// this never returns empty for valid blocks — container blocks (List,
+/// this never returns empty for valid blocks - container blocks (List,
 /// BlockQuote) produce spans that preserve inline formatting and links.
 pub fn build_spans_for_any_block(
     block: &Block,
@@ -451,7 +451,7 @@ impl<P: Paragraph<Font = Font>> ParagraphCache<P> {
     ///
     /// `available_width` is the width available for text layout.
     /// `blocks` is the slice of blocks from the document (must match the
-    /// cache length — call [`resize`] first).
+    /// cache length - call [`resize`] first).
     /// `base_font` is the editor's configured body font.
     /// `text_color` and `link_color` are the colors for normal and linked text.
     ///

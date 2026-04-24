@@ -35,7 +35,7 @@ pub struct JmapClient {
 /// Cached mailbox list with fetch timestamp for TTL-based invalidation.
 type MailboxCache = Option<(Vec<MailboxListEntry>, std::time::Instant)>;
 
-/// Mailbox cache TTL — 60 seconds matches Graph's folder_map_age threshold.
+/// Mailbox cache TTL - 60 seconds matches Graph's folder_map_age threshold.
 const MAILBOX_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
 
 impl JmapClient {
@@ -89,11 +89,11 @@ impl JmapClient {
             return Ok(());
         }
 
-        // Token is expiring — acquire per-account lock
+        // Token is expiring - acquire per-account lock
         let lock = get_refresh_lock(&self.account_id);
         let _guard = lock.lock().await;
 
-        // Double-check after acquiring lock — another task may have refreshed
+        // Double-check after acquiring lock - another task may have refreshed
         let aid = self.account_id.clone();
         let (
             fresh_access,
@@ -127,7 +127,7 @@ impl JmapClient {
             .await?;
 
         if fresh_expires.unwrap_or_default() - chrono::Utc::now().timestamp() >= 300 {
-            // Another task refreshed — rebuild client with the fresh token
+            // Another task refreshed - rebuild client with the fresh token
             let access_token = decrypt_if_needed(&key, fresh_access)?
                 .filter(|v| !v.is_empty())
                 .ok_or_else(|| {
@@ -193,7 +193,7 @@ impl JmapClient {
 
         *self.inner.write().expect("JMAP client lock poisoned") = Arc::new(client);
 
-        // Invalidate mailbox cache — session may have changed
+        // Invalidate mailbox cache - session may have changed
         *self.mailbox_cache.write().await = None;
 
         Ok(())
@@ -211,7 +211,7 @@ impl JmapClient {
             }
         }
 
-        // Cache miss or stale — fetch from server
+        // Cache miss or stale - fetch from server
         let list = super::helpers::fetch_mailbox_list_from_server(self).await?;
         *self.mailbox_cache.write().await = Some((list.clone(), std::time::Instant::now()));
         Ok(list)
@@ -347,7 +347,7 @@ fn read_jmap_credentials(
 }
 
 // ---------------------------------------------------------------------------
-// JmapState — global JMAP client registry
+// JmapState - global JMAP client registry
 // ---------------------------------------------------------------------------
 
 /// State holding all JMAP clients and the encryption key.

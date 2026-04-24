@@ -9,7 +9,7 @@ use crate::people::{I18N_LOCALES, PeoplePools, Person};
 use crate::templates::{self, CATEGORIES, CATEGORY_WEIGHTS, Category};
 
 /// Fixed reference timestamp for deterministic output.
-/// 2026-03-15 12:00:00 UTC — arbitrary but stable across runs.
+/// 2026-03-15 12:00:00 UTC - arbitrary but stable across runs.
 const FIXED_NOW: i64 = 1_773_768_000;
 
 struct AttachmentInfo {

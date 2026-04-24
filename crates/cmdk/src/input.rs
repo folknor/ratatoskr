@@ -80,7 +80,7 @@ impl ParamDef {
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum InputMode {
-    /// No parameters needed — execute immediately with `CommandId` alone.
+    /// No parameters needed - execute immediately with `CommandId` alone.
     Direct,
     /// Requires parameter resolution before execution.
     Parameterized { schema: InputSchema },
@@ -88,7 +88,7 @@ pub enum InputMode {
 
 /// A single option returned by the resolver for a `ListPicker` step.
 ///
-/// This is runtime data fetched from the DB — it allocates. The registry's
+/// This is runtime data fetched from the DB - it allocates. The registry's
 /// static types (`ParamDef`, `InputSchema`, `InputMode`) are `Copy` and
 /// zero-allocation. Different layers, different allocation profiles.
 #[derive(Debug, Clone, Serialize)]

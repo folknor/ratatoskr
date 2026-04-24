@@ -42,7 +42,7 @@ pub fn normalize(doc: &mut Document) {
 
 /// Normalize only the blocks at the given dirty indices.
 ///
-/// This is the fast path — most edits only dirty 1–2 blocks. Indices that are
+/// This is the fast path - most edits only dirty 1-2 blocks. Indices that are
 /// out of bounds are silently skipped.
 pub fn normalize_blocks(doc: &mut Document, dirty: &[usize]) {
     // Ensure at least one block (document-level invariant).
@@ -300,7 +300,7 @@ mod tests {
         normalize(&mut doc);
 
         let runs = doc.blocks[0].runs().expect("should have runs");
-        // "hello" (bold) + " world" (plain) — different styles, won't merge.
+        // "hello" (bold) + " world" (plain) - different styles, won't merge.
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0].text, "hello");
         assert_eq!(runs[0].style, InlineStyle::BOLD);
@@ -492,7 +492,7 @@ mod tests {
             })],
         };
 
-        // Pass the same index many times — the safety valve should prevent
+        // Pass the same index many times - the safety valve should prevent
         // unbounded iteration.
         let dirty: Vec<usize> = vec![0; 1000];
         normalize_blocks(&mut doc, &dirty);

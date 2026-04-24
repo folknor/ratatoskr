@@ -42,9 +42,9 @@ Problem statement open question #6: `selected_account` is in-memory state, reset
 Spec 1A transitional note: `selected_label: Option<String>` is semantically muddy (universal folders, smart folders, and account labels share one field). Deferred to a future `NavigationTarget` enum.
 - Spec: `docs/sidebar/implementation-spec.md` section 1A
 
-### Labels section shows tags from all accounts (new — 2026-03-22)
+### Labels section shows tags from all accounts (new - 2026-03-22)
 
-The sidebar now has a "LABELS" section (section 4) that shows tag-type labels from all accounts, always visible regardless of account scope. This was added as part of the labels unification work. The existing "labels" section (section 2, provider folders) is unchanged — it only appears in single-account view. See `docs/labels-unification/problem-statement.md` for the full spec.
+The sidebar now has a "LABELS" section (section 4) that shows tag-type labels from all accounts, always visible regardless of account scope. This was added as part of the labels unification work. The existing "labels" section (section 2, provider folders) is unchanged - it only appears in single-account view. See `docs/labels-unification/problem-statement.md` for the full spec.
 
 ### Mixed drafts list view
 

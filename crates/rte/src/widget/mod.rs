@@ -346,7 +346,7 @@ impl<Message> RichTextEditor<'_, Message> {
         shell: &mut Shell<'_, Message>,
     ) {
         if position.y < bounds.y {
-            // Cursor is above the viewport — scroll up.
+            // Cursor is above the viewport - scroll up.
             let overshoot = bounds.y - position.y;
             let scroll_amount = (overshoot * DRAG_SCROLL_SPEED).min(DRAG_SCROLL_MAX);
             widget_state.scroll_offset = (widget_state.scroll_offset - scroll_amount).max(0.0);
@@ -358,7 +358,7 @@ impl<Message> RichTextEditor<'_, Message> {
             shell.request_redraw();
             shell.capture_event();
         } else if position.y > bounds.y + bounds.height {
-            // Cursor is below the viewport — scroll down.
+            // Cursor is below the viewport - scroll down.
             let overshoot = position.y - (bounds.y + bounds.height);
             let scroll_amount = (overshoot * DRAG_SCROLL_SPEED).min(DRAG_SCROLL_MAX);
             let viewport_height = bounds.height - self.padding.top - self.padding.bottom;
@@ -1134,7 +1134,7 @@ fn compute_selection_rects(
         let sel_end_in_line = end_offset.min(line_end);
 
         let x_start = if sel_start_in_line <= line_start {
-            // Selection starts at or before this line — use left edge.
+            // Selection starts at or before this line - use left edge.
             para_origin_x
         } else {
             let within_line = sel_start_in_line.saturating_sub(line_start);
@@ -1145,7 +1145,7 @@ fn compute_selection_rects(
         };
 
         let x_end = if sel_end_in_line >= line_end {
-            // Selection extends to or past the end of this line — use right edge.
+            // Selection extends to or past the end of this line - use right edge.
             // This covers both middle lines (where line_end is the next line's
             // start) and the last line when end_offset >= the block's char count
             // (or is usize::MAX, as used by BlockSelectionKind::First).
@@ -1198,11 +1198,11 @@ fn ensure_cursor_visible(
 ) {
     let max_scroll = (total_content_height - viewport_height).max(0.0);
 
-    // Cursor is above the viewport — scroll up.
+    // Cursor is above the viewport - scroll up.
     if cursor_y < *scroll_offset {
         *scroll_offset = cursor_y;
     }
-    // Cursor bottom is below the viewport — scroll down.
+    // Cursor bottom is below the viewport - scroll down.
     if cursor_y + cursor_height > *scroll_offset + viewport_height {
         *scroll_offset = cursor_y + cursor_height - viewport_height;
     }
@@ -1267,7 +1267,7 @@ fn hit_test_content_point(
 
     // For inline blocks, hit-test the single paragraph.
     let Some(paragraph) = entry.paragraph() else {
-        // No paragraph (e.g. HorizontalRule) — place cursor at start of block.
+        // No paragraph (e.g. HorizontalRule) - place cursor at start of block.
         return crate::document::DocPosition::new(block_index, 0);
     };
 

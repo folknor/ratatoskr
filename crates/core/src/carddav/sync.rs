@@ -172,7 +172,7 @@ pub async fn sync_carddav_contacts(
 // ---------------------------------------------------------------------------
 // Persistence helpers
 // ---------------------------------------------------------------------------
-// CTag / ETag / persist / delete — delegated to db
+// CTag / ETag / persist / delete - delegated to db
 // ---------------------------------------------------------------------------
 
 async fn load_ctag(db: &DbState, account_id: &str) -> Result<Option<String>, String> {

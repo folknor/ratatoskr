@@ -107,7 +107,7 @@ pub async fn generate_smart_replies(
         log::info!("AI smart_replies cache hit for thread {thread_id}");
         return Ok(replies);
     }
-    // Corrupted cache entry (if any) — fall through and regenerate
+    // Corrupted cache entry (if any) - fall through and regenerate
 
     let formatted: String = messages
         .iter()
@@ -239,7 +239,7 @@ pub async fn classify_by_smart_labels(
 ) -> Result<Vec<(String, Vec<String>)>, AiError> {
     let label_defs: String = label_rules
         .iter()
-        .map(|(id, desc)| format!("LABEL_ID:{id} — {desc}"))
+        .map(|(id, desc)| format!("LABEL_ID:{id} - {desc}"))
         .collect::<Vec<_>>()
         .join("\n");
 

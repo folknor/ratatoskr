@@ -146,12 +146,12 @@ pub struct DeltaCheckResult {
     /// does not support CONDSTORE or didn't return it for this mailbox.
     pub highest_modseq: Option<u64>,
     /// True when CONDSTORE is available and the server's HIGHESTMODSEQ matches
-    /// the cached value — meaning no flag or metadata changes occurred.
+    /// the cached value - meaning no flag or metadata changes occurred.
     pub modseq_unchanged: bool,
     /// True when the server's HIGHESTMODSEQ is *lower* than our cached value
     /// while UIDVALIDITY is unchanged. This indicates a mod-sequence counter
     /// reset (server migration, mailbox repair, etc.) and requires a full
-    /// flag resync — otherwise CHANGEDSINCE with the stale cached value would
+    /// flag resync - otherwise CHANGEDSINCE with the stale cached value would
     /// return no results, silently missing all updates.
     pub modseq_reset: bool,
     /// Whether PERMANENTFLAGS for this folder includes `\*` (arbitrary keywords).

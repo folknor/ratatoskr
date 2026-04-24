@@ -9,7 +9,7 @@ pub use message_view::{MessageViewMessage, MessageViewState, RenderingMode};
 pub enum PopOutWindow {
     MessageView(Box<MessageViewState>),
     Compose(Box<ComposeState>),
-    /// Calendar pop-out — full calendar UI in a separate window.
+    /// Calendar pop-out - full calendar UI in a separate window.
     Calendar,
 }
 

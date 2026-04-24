@@ -1,7 +1,7 @@
 //! Session state persistence for pop-out windows.
 //!
 //! Saves the full window session (main window + pop-outs) to `session.json`
-//! on app close, and restores it on launch. Best-effort — if a message was
+//! on app close, and restores it on launch. Best-effort - if a message was
 //! deleted, the window opens with an error banner.
 
 use crate::window_state::WindowState;

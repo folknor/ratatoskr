@@ -24,7 +24,7 @@ pub struct Estimate {
 
 /// Average bytes per pixel for mozjpeg (progressive + trellis) output.
 /// Empirically measured across phone photos, scans, and screenshots:
-///   q80: 0.065–0.174 bpp (mean ~0.10)
+///   q80: 0.065-0.174 bpp (mean ~0.10)
 ///   q75: ~0.08 bpp
 /// We use a conservative upper bound (2-3x the mean) so the estimate
 /// over-predicts rather than under-predicts. This means "won't fit" is
@@ -34,7 +34,7 @@ const JPEG_BYTES_PER_PIXEL_Q75: f64 = 0.25;
 
 /// Estimate compressed size from an in-memory buffer.
 ///
-/// Reads only headers and metadata — sub-millisecond even on very large files.
+/// Reads only headers and metadata - sub-millisecond even on very large files.
 /// The estimate is deliberately conservative (tends to over-estimate output size)
 /// so that `worth_trying: false` is a reliable signal.
 pub fn estimate(input: &[u8], format: Format, config: &Config) -> Result<Estimate, SqueezeError> {
@@ -163,7 +163,7 @@ fn estimate_image(
             JPEG_BYTES_PER_PIXEL_Q75
         };
         let pixel_estimate = (target_pixels as f64 * bpp) as u64;
-        // Never estimate larger than original — compressor returns Unchanged in that case.
+        // Never estimate larger than original - compressor returns Unchanged in that case.
         pixel_estimate.min(original_size)
     } else if format == Format::Png {
         // PNG lossless: oxipng typically saves 10-30%. Be conservative.
@@ -186,7 +186,7 @@ fn estimate_image(
     Ok(Estimate {
         original_size,
         expected_bytes,
-        // Images are fully compressible — no hard floor.
+        // Images are fully compressible - no hard floor.
         floor_bytes: 0,
         worth_trying: expected_bytes < original_size * 90 / 100,
         reason: None,
@@ -445,7 +445,7 @@ fn is_likely_image_entry(name: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Estimate SVG from any reader. Streams in 64 KB chunks scanning for
-/// `data:image/` patterns — never loads the whole file into memory.
+/// `data:image/` patterns - never loads the whole file into memory.
 fn estimate_svg_reader<R: Read + Seek>(
     reader: &mut R,
     original_size: u64,
@@ -540,7 +540,7 @@ fn find_quote_distance<R: Read + Seek>(
         }
     }
 
-    // Quote not in local buffer — keep reading.
+    // Quote not in local buffer - keep reading.
     let mut distance = local_buf.len() as u64;
     let mut small_buf = [0u8; 8192];
     loop {

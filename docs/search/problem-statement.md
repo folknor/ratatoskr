@@ -2,9 +2,9 @@
 
 ## Overview
 
-Search is the primary way enterprise users find email. Users processing 200+ messages/day don't browse folders — they search. Ratatoskr's search must feel instant, support structured operators for power users, and produce ranked results for everyone else. There is one search bar, one query language, and one API surface.
+Search is the primary way enterprise users find email. Users processing 200+ messages/day don't browse folders - they search. Ratatoskr's search must feel instant, support structured operators for power users, and produce ranked results for everyone else. There is one search bar, one query language, and one API surface.
 
-This document covers the search UX, the query language, and the unification of the two existing search backends into a single pipeline. All search is local — Ratatoskr syncs the full mailbox locally (with compression and inline image deduplication), so there is no need for provider-side search delegation.
+This document covers the search UX, the query language, and the unification of the two existing search backends into a single pipeline. All search is local - Ratatoskr syncs the full mailbox locally (with compression and inline image deduplication), so there is no need for provider-side search delegation.
 
 ## Current State
 
@@ -20,14 +20,14 @@ This document covers the search UX, the query language, and the unification of t
 **Smart folder SQL engine** (structured queries):
 - Parses operator syntax: `from:`, `to:`, `subject:`, `has:attachment`, `is:unread`, `is:starred`, `is:snoozed`, `is:pinned`, `is:muted`, `is:important`, `before:`, `after:`, `label:`
 - Builds parameterized SQL with LIKE clauses
-- No ranking — results sorted by pinned + date only
+- No ranking - results sorted by pinned + date only
 - Free-text falls back to LIKE on subject + from + snippet (no tokenization, no stemming, no ranking)
 - Supports cross-account queries via AccountScope
 
 ### What's Wrong
 
 - **No unified query path.** A user can't type `from:alice meeting notes` and get ranked results filtered by sender. Tantivy handles `meeting notes` with ranking but can't filter by `from:`. The smart folder engine handles `from:alice` but does LIKE matching on the free text with no ranking.
-- **Smart folder creation is over-engineered.** There's a settings UI for building smart folder queries through form fields. This is backwards — the natural flow is: search for something, get results, save the search. The form-based editor is a worse version of the query syntax.
+- **Smart folder creation is over-engineered.** There's a settings UI for building smart folder queries through form fields. This is backwards - the natural flow is: search for something, get results, save the search. The form-based editor is a worse version of the query syntax.
 - **Two APIs for the same thing.** The frontend calls either `search_messages` (Tantivy) or `execute_smart_folder_query` (SQL) depending on context. The UI shouldn't need to know which engine to use.
 - **Cross-account gap.** Tantivy is single-account. Smart folders support cross-account. A unified search must work across all accounts.
 
@@ -69,7 +69,7 @@ The query language is the smart folder syntax, extended. Users type into one sea
 |----------|---------|---------|
 | `from:` | Sender name or address | `from:alice`, `from:"Alice Smith"` |
 | `to:` | Recipient address | `to:bob@example.com` |
-| ~~`subject:`~~ | *(removed — free text already searches subject via Tantivy with natural ranking; see below)* | |
+| ~~`subject:`~~ | *(removed - free text already searches subject via Tantivy with natural ranking; see below)* | |
 | `account:` | Limit to a specific account | `account:FooCorp`, `account:"Work Gmail"` |
 | `label:` | Label/folder membership | `label:Clients` |
 | `folder:` | Folder path (Exchange/IMAP/JMAP hierarchy) | `folder:Projects`, `folder:"Projects/Q2"` |
@@ -119,26 +119,26 @@ The `has:` shorthands are syntactic sugar that expand to `type:` expressions dur
 
 Shorthand expansion happens at parse time, before the query hits either search engine. The parser maintains a mapping of `has:` names to `type:` expansions. This means:
 
-- New `has:` shorthands can be added by updating the mapping — no engine changes
-- Smart folders can use either `has:pdf` or `type:application/pdf` — they're equivalent after parsing
+- New `has:` shorthands can be added by updating the mapping - no engine changes
+- Smart folders can use either `has:pdf` or `type:application/pdf` - they're equivalent after parsing
 - The search bar could display the expanded form on hover/focus for transparency, but stores the shorthand in saved queries for readability
 
 ##### Scoping operators: `account:`, `folder:`, `label:`, `in:`
 
 These four operators control *where* to search. They compose naturally:
 
-- `meeting notes` — search all accounts, all folders
-- `account:FooCorp meeting notes` — search only Foo Corp's account
-- `account:FooCorp folder:Projects meeting notes` — search only Foo Corp's Projects folder
-- `folder:Inbox is:unread` — search Inbox across all accounts that have one
-- `in:sent from:me report` — search Sent folder across all accounts
-- `label:Clients` — threads tagged with "Clients" label (Gmail/tags model)
+- `meeting notes` - search all accounts, all folders
+- `account:FooCorp meeting notes` - search only Foo Corp's account
+- `account:FooCorp folder:Projects meeting notes` - search only Foo Corp's Projects folder
+- `folder:Inbox is:unread` - search Inbox across all accounts that have one
+- `in:sent from:me report` - search Sent folder across all accounts
+- `label:Clients` - threads tagged with "Clients" label (Gmail/tags model)
 
 The distinction between `folder:`, `label:`, and `in:`:
 
-- **`in:`** — universal folder shorthands only (inbox, sent, drafts, trash, spam, starred, snoozed). These map to provider-agnostic predicates. Works cross-account.
-- **`folder:`** — provider-specific folder paths (Exchange folders, IMAP hierarchy, JMAP mailboxes). Supports `/`-separated paths for nested folders: `folder:"Projects/Q2/Reviews"`. A message lives in exactly one folder.
-- **`label:`** — provider-specific labels/tags (Gmail labels). A message can have multiple labels. On providers that only have folders (Exchange, IMAP), `label:` and `folder:` are equivalent.
+- **`in:`** - universal folder shorthands only (inbox, sent, drafts, trash, spam, starred, snoozed). These map to provider-agnostic predicates. Works cross-account.
+- **`folder:`** - provider-specific folder paths (Exchange folders, IMAP hierarchy, JMAP mailboxes). Supports `/`-separated paths for nested folders: `folder:"Projects/Q2/Reviews"`. A message lives in exactly one folder.
+- **`label:`** - provider-specific labels/tags (Gmail labels). A message can have multiple labels. On providers that only have folders (Exchange, IMAP), `label:` and `folder:` are equivalent.
 
 When `account:` is omitted, `folder:` and `label:` match across all accounts that have a folder/label with that name. If the name is ambiguous (same folder name on multiple accounts), all matching accounts are included. Use `account:` to disambiguate.
 
@@ -151,9 +151,9 @@ Right-clicking a folder or label in the sidebar and choosing "Search here" (a co
 - Right-click "Inbox" universal folder (scoped to Foo Corp) → search bar prefills `account:FooCorp in:inbox `
 - Right-click "Inbox" universal folder (All Accounts scope) → search bar prefills `in:inbox `
 
-The trailing space is intentional — the cursor is positioned after the operators so the user can immediately type their search terms. The prefilled operators are editable; the user can remove or modify them.
+The trailing space is intentional - the cursor is positioned after the operators so the user can immediately type their search terms. The prefilled operators are editable; the user can remove or modify them.
 
-This interaction is the primary way users discover scope operators — they right-click, see the generated query, and learn the syntax by example.
+This interaction is the primary way users discover scope operators - they right-click, see the generated query, and learn the syntax by example.
 
 Free text is everything else: `from:alice meeting notes` → operator `from:alice` + free text `meeting notes`.
 
@@ -189,14 +189,14 @@ When the user types an operator followed by a value (`from:ali`), a popup appear
 
 - **↑/↓** navigate the popup, **Enter** selects
 - Selecting a contact replaces the typed value with the resolved identifier: `from:ali` → `from:asmith@corp.com`
-- **Last option is always "keep as text"** — uses the raw input for LIKE matching. This is the fallback for searching by partial strings that don't match a contact.
+- **Last option is always "keep as text"** - uses the raw input for LIKE matching. This is the fallback for searching by partial strings that don't match a contact.
 - **Escape** dismisses the popup and keeps the raw text
 - If the user keeps typing and hits **space** or types another operator, the popup dismisses and the raw text is used as-is
-- The popup updates live as the user types — each keystroke re-queries the data source
+- The popup updates live as the user types - each keystroke re-queries the data source
 
 **Contact resolution for `from:` and `to:`:**
 
-The typeahead hits `contacts_fts` (the existing FTS5 index on contact email + display_name). When a contact is selected, the search uses their email address — this means `from:smith` can find emails from `a.s@corp.com` if the user has a contact named "Alice Smith" with that address, even though neither the message's from_address nor from_name contain "smith."
+The typeahead hits `contacts_fts` (the existing FTS5 index on contact email + display_name). When a contact is selected, the search uses their email address - this means `from:smith` can find emails from `a.s@corp.com` if the user has a contact named "Alice Smith" with that address, even though neither the message's from_address nor from_name contain "smith."
 
 When the user skips the typeahead (keeps raw text or types too fast), the SQL builder falls back to LIKE matching against `from_address` and `from_name` directly, plus a contact expansion subquery: any contact matching the raw text contributes their email addresses to the filter. This way `from:smith` finds contact-matched results even without explicit typeahead selection.
 
@@ -227,7 +227,7 @@ When the user types `before:` or `after:`, a popup appears with common presets a
 - **↑/↓** navigate, **Enter** selects
 - Selecting a preset inserts a relative offset: `after:-7` (7 days ago), `after:-30`, `after:-90`, etc.
 - "Pick a date" opens a calendar widget. Selecting a specific date inserts an absolute value: `after:2026/03/11`.
-- Typing either format directly skips the popup — power users don't need the picker.
+- Typing either format directly skips the popup - power users don't need the picker.
 
 **Relative offsets vs absolute dates:**
 
@@ -244,17 +244,17 @@ When the user types `before:` or `after:`, a popup appears with common presets a
 | `after:202603` | After March 1, 2026 |
 | `after:20260311` | After March 11, 2026 |
 
-Absolute dates accept any reasonable separator or none: `2026/03/11`, `2026-03-11`, `2026 03 11`, `20260311` are all equivalent. The date parser greedily consumes subsequent tokens that look like date parts (bare digits, separators), so spaces don't need quoting — `after:2026 03 11 from:alice` parses correctly because the date parser grabs `2026`, `03`, `11` and the main lexer resumes at `from:`.
+Absolute dates accept any reasonable separator or none: `2026/03/11`, `2026-03-11`, `2026 03 11`, `20260311` are all equivalent. The date parser greedily consumes subsequent tokens that look like date parts (bare digits, separators), so spaces don't need quoting - `after:2026 03 11 from:alice` parses correctly because the date parser grabs `2026`, `03`, `11` and the main lexer resumes at `from:`.
 
-Relative offsets resolve at query time. A smart folder with `after:-7` always shows the last week's email. A smart folder with `after:2026/03/11` is frozen to that date. For ad-hoc search, the distinction is invisible — both resolve identically.
+Relative offsets resolve at query time. A smart folder with `after:-7` always shows the last week's email. A smart folder with `after:2026/03/11` is frozen to that date. For ad-hoc search, the distinction is invisible - both resolve identically.
 
 The existing date token system (`__LAST_7_DAYS__`, `__TODAY__`, etc.) in the smart folder engine is an internal implementation detail. The user-facing syntax is always the offset format. The parser translates `after:-7` to the appropriate absolute date before the query hits the engines.
 
 #### Why No `subject:` Operator
 
-`subject:` was removed because free text already searches subject lines via Tantivy, which naturally ranks subject matches higher than body-only matches. The only value `subject:` would add is *excluding* body hits — a rare need that doesn't justify the parsing ambiguity it creates.
+`subject:` was removed because free text already searches subject lines via Tantivy, which naturally ranks subject matches higher than body-only matches. The only value `subject:` would add is *excluding* body hits - a rare need that doesn't justify the parsing ambiguity it creates.
 
-The ambiguity: `subject:hallo frank from:frank` — does the subject end at `hallo` (single token) or `hallo frank` (greedy until next operator)? Every answer is surprising to some users. Quoting (`subject:"hallo frank"`) solves it but nobody remembers to quote. Dropping the operator entirely sidesteps the problem — `hallo frank from:frank` just works, with Tantivy ranking subject matches appropriately.
+The ambiguity: `subject:hallo frank from:frank` - does the subject end at `hallo` (single token) or `hallo frank` (greedy until next operator)? Every answer is surprising to some users. Quoting (`subject:"hallo frank"`) solves it but nobody remembers to quote. Dropping the operator entirely sidesteps the problem - `hallo frank from:frank` just works, with Tantivy ranking subject matches appropriately.
 
 If user feedback shows a genuine need for subject-exclusive filtering, it can be re-added with mandatory quoting for multi-word values.
 
@@ -280,7 +280,7 @@ This matches natural language. "Emails from Alice and Bob" means from either. "E
 
 **Free text is always AND with everything.** `from:alice meeting notes` → from alice AND free text matches "meeting notes".
 
-**No negation in V1.** There's no `NOT` or `-` prefix. Revisit if users request it — the most likely need is `-from:noreply` or `-label:Newsletters` to exclude noise.
+**No negation in V1.** There's no `NOT` or `-` prefix. Revisit if users request it - the most likely need is `-from:noreply` or `-label:Newsletters` to exclude noise.
 
 #### What We Don't Need (Yet)
 
@@ -307,7 +307,7 @@ A smart folder is a persisted query string. Nothing more.
 3. Results update live
 4. User saves again via palette → "Update Smart Folder" (overwrites the query)
 
-**No form-based editor.** The query syntax *is* the editor. If the syntax is good enough to type, it's good enough to edit. A visual query builder is a crutch for a bad syntax — we should make the syntax good instead.
+**No form-based editor.** The query syntax *is* the editor. If the syntax is good enough to type, it's good enough to edit. A visual query builder is a crutch for a bad syntax - we should make the syntax good instead.
 
 The existing smart folder settings UI should be removed. Smart folder management (rename, delete, reorder) moves to the command palette.
 
@@ -323,7 +323,7 @@ The existing internal token system (`__LAST_7_DAYS__`, etc.) is replaced by the 
 
 ### Search Bar Placement
 
-The search bar lives above the thread list, inline with the thread list panel. It is always visible — not hidden behind a button or shortcut. Pressing `/` focuses it from anywhere in the app.
+The search bar lives above the thread list, inline with the thread list panel. It is always visible - not hidden behind a button or shortcut. Pressing `/` focuses it from anywhere in the app.
 
 ```
 ┌──────────────┬────────────────────────┬──────────────────────┐
@@ -343,7 +343,7 @@ The search bar lives above the thread list, inline with the thread list panel. I
 
 3. **Search is always cross-account.** Regardless of the sidebar's current scope, search spans all accounts by default. Users narrow via `account:` operators. The sidebar scope controls browsing (which folder's threads are shown); search is for finding across everything. The "Search here" right-click on sidebar items prefills scope operators for discoverability.
 
-4. **Operators autocomplete.** When the user types `from:` or `is:`, the search bar offers completions (contact names for `from:`, flag names for `is:`, date presets for `before:`/`after:`). See § Operator Typeahead for full spec. This lands in Phase 4 — the query language works without autocomplete, but typeahead is part of the V1 product.
+4. **Operators autocomplete.** When the user types `from:` or `is:`, the search bar offers completions (contact names for `from:`, flag names for `is:`, date presets for `before:`/`after:`). See § Operator Typeahead for full spec. This lands in Phase 4 - the query language works without autocomplete, but typeahead is part of the V1 product.
 
 5. **Clearing search returns to the folder view.** Pressing Escape or clearing the search bar restores the previous thread list (inbox, label, whatever was active before searching).
 
@@ -355,7 +355,7 @@ When a smart folder is selected in the sidebar:
 - The thread list shows the smart folder's results
 - The search bar shows the smart folder's query string (editable)
 - The user can modify the query to refine results
-- Modified query is not auto-saved — it's ephemeral until explicitly saved
+- Modified query is not auto-saved - it's ephemeral until explicitly saved
 
 This means the search bar does double duty: it's both the search input and the smart folder query display. The query string is the universal representation.
 
@@ -378,7 +378,7 @@ The UI calls one search function:
 search(query: String) -> Vec<SearchResult>
 ```
 
-No scope parameter — search is always cross-account. Users narrow via `account:` operators in the query string.
+No scope parameter - search is always cross-account. Users narrow via `account:` operators in the query string.
 
 The backend:
 1. Parses the query string (operators + free text)
@@ -407,7 +407,7 @@ SearchResult {
 
 #### Thread card mapping
 
-Search results reuse the same thread card component as the folder view. The fields above always come from the **latest message in the thread**, not the best-ranked matching message. This means a search result card looks identical to how that thread appears in the inbox — same sender, same snippet, same date. The search ranking determines the *order* of results, not the *content* of each card.
+Search results reuse the same thread card component as the folder view. The fields above always come from the **latest message in the thread**, not the best-ranked matching message. This means a search result card looks identical to how that thread appears in the inbox - same sender, same snippet, same date. The search ranking determines the *order* of results, not the *content* of each card.
 
 The matching context is visible in the reading pane: when the user selects a search result, the reading pane opens the thread with matching messages highlighted (expanded by default, matching terms highlighted in the body). This separates "why did this thread match?" (reading pane) from "what is this thread?" (thread card).
 
@@ -415,7 +415,7 @@ The matching context is visible in the reading pane: when the user selects a sea
 
 ### Phase 1: Unify the Query Parser
 
-Redesign the query parser and unify both search engines behind a single `search()` function. The current smart folder parser (`core/src/smart_folder/parser.rs`) only supports single-value `from`, `to`, `subject`, `has:attachment`, basic `is:` flags, absolute `before`/`after`, and `label`. It does not support `account:`, `folder:`, `in:`, `type:`, `has:` shorthands beyond `attachment`, `is:tagged`, repeated operators with OR semantics, relative date offsets, or compact/greedy date formats. This is a parser redesign, not a small extension — see `docs/search/implementation-spec.md` Slice 1 for the full scope.
+Redesign the query parser and unify both search engines behind a single `search()` function. The current smart folder parser (`core/src/smart_folder/parser.rs`) only supports single-value `from`, `to`, `subject`, `has:attachment`, basic `is:` flags, absolute `before`/`after`, and `label`. It does not support `account:`, `folder:`, `in:`, `type:`, `has:` shorthands beyond `attachment`, `is:tagged`, repeated operators with OR semantics, relative date offsets, or compact/greedy date formats. This is a parser redesign, not a small extension - see `docs/search/implementation-spec.md` Slice 1 for the full scope.
 
 - Redesign `ParsedQuery` with `Vec<String>` fields for OR-capable operators, new operator types, and `has:` expansion
 - New date parser supporting relative offsets (`-7`), compact dates (`20260311`), and greedy multi-token consumption
@@ -447,22 +447,22 @@ Redesign the query parser and unify both search engines behind a single `search(
 
 1. **Pipeline architecture**: Resolved. Three paths based on query content:
 
-   - **Operators only, no free text** → SQL only, date-sorted. No Tantivy involvement — there's nothing to rank.
-   - **Free text only, no operators** → Tantivy only, relevance-ranked. No SQL involvement — Tantivy searches the full index.
+   - **Operators only, no free text** → SQL only, date-sorted. No Tantivy involvement - there's nothing to rank.
+   - **Free text only, no operators** → Tantivy only, relevance-ranked. No SQL involvement - Tantivy searches the full index.
    - **Both operators and free text** → SQL narrows candidates via relational filters (labels, folders, accounts, flags, contacts), then Tantivy scores the candidate set by free-text relevance. Result sets are intersected in application code.
 
-   This is the only sane architecture because operators like `label:`, `folder:`, `account:`, `has:contact` require relational joins that Tantivy cannot do. They'd be post-filters regardless. SQL eliminates the bulk of the corpus first — `account:FooCorp folder:Inbox is:unread` might narrow 200K messages to 50, and Tantivy scoring 50 documents is trivial. For the broad free-text-only case, Tantivy searches the full index directly, which is what it's built for.
+   This is the only sane architecture because operators like `label:`, `folder:`, `account:`, `has:contact` require relational joins that Tantivy cannot do. They'd be post-filters regardless. SQL eliminates the bulk of the corpus first - `account:FooCorp folder:Inbox is:unread` might narrow 200K messages to 50, and Tantivy scoring 50 documents is trivial. For the broad free-text-only case, Tantivy searches the full index directly, which is what it's built for.
 
 3. **Search scope vs sidebar scope**: Resolved. Search is always cross-account by default, independent of the sidebar's scope. Users narrow via `account:` and `folder:` operators. The "Search here" right-click action on sidebar items prefills scope operators for discoverability. This matches the mental model: scope is for browsing, search is for finding.
 
-4. **Provider-side search**: Not needed. Ratatoskr syncs everything locally — even 300GB mailboxes. Between body compression and multipart inline image deduplication, local storage is significantly more efficient than what providers keep server-side. Since the full corpus is always local, Tantivy searches against complete data. There is no "not yet synced" gap to fill with provider API search.
+4. **Provider-side search**: Not needed. Ratatoskr syncs everything locally - even 300GB mailboxes. Between body compression and multipart inline image deduplication, local storage is significantly more efficient than what providers keep server-side. Since the full corpus is always local, Tantivy searches against complete data. There is no "not yet synced" gap to fill with provider API search.
 
 5. **Body text indexing**: Resolved. Ratatoskr syncs the full mailbox locally, so body text is always available for indexing. The Tantivy index is rebuilt from the body store, which contains every message. No on-demand fetching needed.
 
 ## Dependencies
 
 - **Tantivy cross-account**: The current SearchParams takes a single account_id. This needs to accept AccountScope (All, Single, Multiple) to match the smart folder engine's capability.
-- **Parser redesign**: The current smart folder parser handles a subset of the target operator syntax. It needs a redesign to support all new operators, OR semantics, relative dates, and `has:` expansion — see Phase 1 and `docs/search/implementation-spec.md` Slice 1.
+- **Parser redesign**: The current smart folder parser handles a subset of the target operator syntax. It needs a redesign to support all new operators, OR semantics, relative dates, and `has:` expansion - see Phase 1 and `docs/search/implementation-spec.md` Slice 1.
 - **Command palette**: "Save as Smart Folder" and smart folder management commands need to be registered. The command palette infrastructure (Slices 1-2) already supports this pattern.
 - **Thread list component**: Search results must render using the same thread card component as folder views. This is a UI concern for the iced prototype, not a backend issue.
 

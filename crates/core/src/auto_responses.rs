@@ -35,7 +35,7 @@ pub struct AutoResponseConfig {
 pub enum ExternalAudience {
     None,
     ContactsOnly,
-    /// Gmail `restrictToDomain = true` — replies only to same-domain senders.
+    /// Gmail `restrictToDomain = true` - replies only to same-domain senders.
     DomainOnly,
     All,
 }
@@ -124,7 +124,7 @@ pub fn any_auto_response_active(conn: &crate::db::Connection) -> Result<bool, St
 /// into proper RFC 3339 so that `chrono::DateTime::parse_from_rfc3339` works
 /// on the stored value when pushing to other providers.
 fn normalize_dotnet_datetime(s: &str) -> String {
-    // Already valid RFC 3339 — return as-is.
+    // Already valid RFC 3339 - return as-is.
     if chrono::DateTime::parse_from_rfc3339(s).is_ok() {
         return s.to_string();
     }

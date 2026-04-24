@@ -92,7 +92,7 @@ pub fn parse_message(
     let bcc_addresses = format_address_list(message.bcc());
     let reply_to = format_address_list(message.reply_to());
 
-    // Body — skip AMP parts (text/x-amp-html) which contain tracking-heavy content.
+    // Body - skip AMP parts (text/x-amp-html) which contain tracking-heavy content.
     // mail-parser already classifies these as TextOther (not TextHtml), so body_html()
     // won't return them, but we guard against future parser changes.
     let body_text = message.body_text(0).map(|s| s.to_string());
@@ -145,7 +145,7 @@ pub fn parse_message(
         section_map,
     );
 
-    // Attachments — deduplicated by xxh3 content hash to collapse identical inline
+    // Attachments - deduplicated by xxh3 content hash to collapse identical inline
     // parts that appear under different MIME sections (e.g. multipart/related + mixed).
     let attachments: Vec<ImapAttachment> = {
         let all: Vec<(u64, ImapAttachment)> = message
@@ -270,7 +270,7 @@ pub fn build_imap_section_map(
                     walk(parts, child_idx as usize, &section, map);
                 }
             } else {
-                // Leaf part — use the section path as-is
+                // Leaf part - use the section path as-is
                 let section = if prefix.is_empty() {
                     // Non-multipart message: the body is section "1"
                     "1".to_string()

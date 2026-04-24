@@ -13,7 +13,7 @@ use sync::state as sync_state;
 /// Bootstrap a delta token for a folder by paging through the delta endpoint
 /// until the server returns a `@odata.deltaLink` (no more `nextLink`).
 ///
-/// Uses `$select=id` to minimize payload — we already have the messages from
+/// Uses `$select=id` to minimize payload - we already have the messages from
 /// the initial fetch.
 pub(super) async fn bootstrap_delta_token(
     client: &GraphClient,
@@ -91,7 +91,7 @@ pub(super) async fn load_delta_tokens(
 /// Bootstrap a delta token for a folder using `$deltatoken=latest`.
 ///
 /// This asks the server for a fresh delta token without fetching any existing
-/// messages. Ideal for newly discovered folders during delta sync — we'll
+/// messages. Ideal for newly discovered folders during delta sync - we'll
 /// pick up new messages starting from the next cycle.
 pub(super) async fn bootstrap_delta_token_latest(
     client: &GraphClient,

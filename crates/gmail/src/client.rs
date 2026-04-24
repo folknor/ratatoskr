@@ -18,7 +18,7 @@ const RETRY_CONFIG: RetryConfig = RetryConfig {
 
 /// Per-account Gmail API client.
 ///
-/// Internally reference-counted — cloning is cheap (Arc increment).
+/// Internally reference-counted - cloning is cheap (Arc increment).
 /// All API methods take `&self`, supporting concurrent use.
 #[derive(Clone)]
 pub struct GmailClient {
@@ -182,7 +182,7 @@ impl GmailClient {
     }
 
     /// Make an authenticated DELETE request to an absolute URL.
-    /// Returns `()` — no response body expected.
+    /// Returns `()` - no response body expected.
     pub async fn delete_absolute(&self, url: &str, db: &DbState) -> Result<(), String> {
         let access_token = self.ensure_valid_token(db).await?;
         let response = self
@@ -202,7 +202,7 @@ impl GmailClient {
     }
 
     /// Make an authenticated DELETE request to the Gmail API.
-    /// Returns `()` — no response body expected.
+    /// Returns `()` - no response body expected.
     pub async fn delete(&self, path: &str, db: &DbState) -> Result<(), String> {
         let url = format!("{GMAIL_API_BASE}{path}");
         let access_token = self.ensure_valid_token(db).await?;
@@ -344,7 +344,7 @@ impl GmailClient {
 
     /// Perform the actual token refresh, with mutex to coalesce concurrent refreshes.
     async fn do_refresh(&self, db: &DbState) -> Result<String, String> {
-        // Acquire refresh lock — only one refresh at a time
+        // Acquire refresh lock - only one refresh at a time
         let _guard = self.inner.refresh_lock.lock().await;
 
         // Double-check: another task might have already refreshed
@@ -430,7 +430,7 @@ fn read_account_tokens(
         .3
         .filter(|s| !s.is_empty())
         .map(|s| crypto::decrypt_or_raw(key, &s))
-        .ok_or_else(|| "Account missing OAuth credentials — reauthorize to fix".to_string())?;
+        .ok_or_else(|| "Account missing OAuth credentials - reauthorize to fix".to_string())?;
 
     let client_secret = row
         .4

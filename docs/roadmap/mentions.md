@@ -1,7 +1,7 @@
 # @Mentions
 
-**Tier**: 2 — Keeps users from going back
-**Status**: ⚠️ **Rethink needed** — Phase 1 backend (DB table, `is_mentioned` sync, HTML correlation, send mention metadata) was implemented but is unnecessary. @mentions in email are fundamentally a compose-time feature: insert `@Name` text in the body and add the person to To/CC. The Exchange mention metadata (`mentionsPreview`, `mentions` collection, beta API) is a nice-to-have highlight on the recipient side but not worth the complexity. All Phase 1 backend code should be removed. The only work needed is compose @-autocomplete (Phase 2).
+**Tier**: 2 - Keeps users from going back
+**Status**: ⚠️ **Rethink needed** - Phase 1 backend (DB table, `is_mentioned` sync, HTML correlation, send mention metadata) was implemented but is unnecessary. @mentions in email are fundamentally a compose-time feature: insert `@Name` text in the body and add the person to To/CC. The Exchange mention metadata (`mentionsPreview`, `mentions` collection, beta API) is a nice-to-have highlight on the recipient side but not worth the complexity. All Phase 1 backend code should be removed. The only work needed is compose @-autocomplete (Phase 2).
 
 ---
 
@@ -12,7 +12,7 @@
 
 | Provider | Native support | Behavior |
 |---|---|---|
-| Exchange (Graph) | Full — `mentions` collection on message | Sync mention metadata, auto-flag mentioned user's copy |
+| Exchange (Graph) | Full - `mentions` collection on message | Sync mention metadata, auto-flag mentioned user's copy |
 | Gmail API | Nothing | Local-only: detect @-patterns in body, no server-side flagging |
 | JMAP | Nothing | Local-only |
 | IMAP | Nothing | Local-only |
@@ -21,12 +21,12 @@
 
 - Display: Exchange stores mentions as structured metadata separate from the body HTML. The body contains the display text ("@John Smith") but the `mentions` collection has the resolved email/user ID. Need to correlate the two for highlighting.
 - Compose: need @-autocomplete that triggers on `@` character in the compose editor, searches unified contacts, and inserts both the display text and the mention metadata (for Exchange accounts).
-- Non-Exchange accounts: can still insert "@John Smith" text in the body (it's just text), but there's no server-side flagging. The recipient's client won't auto-flag it. Acceptable degradation — the visual cue in the body is still useful.
-- Parsing incoming @mentions from non-Exchange senders: some people manually type "@Name" in emails. No metadata to parse — could attempt heuristic matching against contacts, but likely not worth the false positives.
+- Non-Exchange accounts: can still insert "@John Smith" text in the body (it's just text), but there's no server-side flagging. The recipient's client won't auto-flag it. Acceptable degradation - the visual cue in the body is still useful.
+- Parsing incoming @mentions from non-Exchange senders: some people manually type "@Name" in emails. No metadata to parse - could attempt heuristic matching against contacts, but likely not worth the false positives.
 
 ## Work
 
-@-autocomplete in compose: user types `@`, contact picker appears, selecting a contact inserts `@Display Name` in the body and adds them to To/CC if not already a recipient. Same behavior across all providers. The Exchange mention metadata (beta API `mentions` array) is not worth the complexity — skip it.
+@-autocomplete in compose: user types `@`, contact picker appears, selecting a contact inserts `@Display Name` in the body and adds them to To/CC if not already a recipient. Same behavior across all providers. The Exchange mention metadata (beta API `mentions` array) is not worth the complexity - skip it.
 
 **Dead code to remove:** `crates/core/src/mentions.rs`, `crates/graph/src/mentions.rs`, `is_mentioned` column, `mentions` table (migration v40), `mentionsPreview` sync in `crates/graph/src/parse.rs`, mention metadata in `crates/graph/src/ops/send.rs`.
 
@@ -39,13 +39,13 @@
 
 ---
 
-### 1. Exchange Graph API Mentions — Data Model
+### 1. Exchange Graph API Mentions - Data Model
 
 #### API availability: beta only
 
 The `mention` resource type and all associated APIs exist **exclusively in the Graph API `/beta` endpoint**. The v1.0 `message` resource has no `mentionsPreview` property, no `mentions` navigation property, and no mention-related filter capabilities. The v1.0 message JSON schema simply does not include mentions at all.
 
-This is a significant constraint. Microsoft's `/beta` APIs carry an explicit warning: "APIs under the `/beta` version in Microsoft Graph are subject to change. Use of these APIs in production applications is not supported." Mentions have been in beta since at least 2016 (the Graph docs example timestamps show July 2016) — over nine years without promotion to v1.0. This suggests Microsoft may consider the feature stable enough to maintain but not important enough to stabilize.
+This is a significant constraint. Microsoft's `/beta` APIs carry an explicit warning: "APIs under the `/beta` version in Microsoft Graph are subject to change. Use of these APIs in production applications is not supported." Mentions have been in beta since at least 2016 (the Graph docs example timestamps show July 2016) - over nine years without promotion to v1.0. This suggests Microsoft may consider the feature stable enough to maintain but not important enough to stabilize.
 
 **Architecture implication**: We must use the beta endpoint (`https://graph.microsoft.com/beta/`) for all mention operations. The rest of our Graph integration can use v1.0. Need to maintain beta-awareness in the reqwest call layer and accept the risk of breaking changes.
 
@@ -91,7 +91,7 @@ On the message resource (beta only):
 }
 ```
 
-`mentionsPreview.isMentioned` is a `Boolean` indicating whether the signed-in user (the mailbox owner) is mentioned in this message. This is the "was I @mentioned?" flag. The server sets it automatically. It is **not** a general-purpose "does this message contain any mentions" indicator — it is scoped to the authenticated user.
+`mentionsPreview.isMentioned` is a `Boolean` indicating whether the signed-in user (the mailbox owner) is mentioned in this message. This is the "was I @mentioned?" flag. The server sets it automatically. It is **not** a general-purpose "does this message contain any mentions" indicator - it is scoped to the authenticated user.
 
 Returned by default on `GET /me/messages` (no `$expand` needed). Read-only.
 
@@ -101,21 +101,21 @@ Returned by default on `GET /me/messages` (no `$expand` needed). Read-only.
 
 #### Reading mentions on existing messages
 
-**Get mentions for a specific message** — expand the `mentions` navigation property:
+**Get mentions for a specific message** - expand the `mentions` navigation property:
 ```
 GET /beta/me/messages/{id}?$expand=mentions
 ```
 
 The `mentions` property is NOT returned by default. Must use `$expand`. Returns the full mention array with all fields.
 
-**Filter messages where I am mentioned** — use `$filter` on `mentionsPreview`:
+**Filter messages where I am mentioned** - use `$filter` on `mentionsPreview`:
 ```
 GET /beta/me/messages?$filter=mentionsPreview/isMentioned eq true&$select=subject,sender,receivedDateTime,mentionsPreview
 ```
 
 This is an efficient server-side filter. No need to fetch all messages and check locally.
 
-**Gotcha**: `$filter` on `mentionsPreview/isMentioned` is only available in the beta endpoint. Cannot combine with arbitrary `$orderby` — the docs warn about `InefficientFilter` errors when filter/orderby properties conflict.
+**Gotcha**: `$filter` on `mentionsPreview/isMentioned` is only available in the beta endpoint. Cannot combine with arbitrary `$orderby` - the docs warn about `InefficientFilter` errors when filter/orderby properties conflict.
 
 #### Creating mentions when sending
 
@@ -169,7 +169,7 @@ From the Graph API documentation, the HTML body for a message with mentions look
 ```
 
 Key findings:
-- **Mentions are `<a href="mailto:...">` tags** in the Graph API response. Not `<span>` elements, not custom data attributes — just standard `mailto:` links with the display text prefixed by `@`.
+- **Mentions are `<a href="mailto:...">` tags** in the Graph API response. Not `<span>` elements, not custom data attributes - just standard `mailto:` links with the display text prefixed by `@`.
 - **The display text** is `@{DisplayName}` (e.g., "@Dana Swope").
 - **The href** is `mailto:{email}` (e.g., "mailto:danas@contoso.com").
 - **No custom classes, IDs, or data attributes** are visible in the Graph API examples.
@@ -211,7 +211,7 @@ When a user is @mentioned in a message sent via Exchange:
 
 ---
 
-### 5. Rich Text Editing in iced — Compose Experience
+### 5. Rich Text Editing in iced - Compose Experience
 
 #### Current state of iced text editing
 
@@ -252,7 +252,7 @@ For Gmail API, JMAP, and IMAP accounts, there is no server-side mention support.
 | Receive: server flags | `mentionsPreview.isMentioned` set by server | Nothing |
 | Receive: filter | `$filter=mentionsPreview/isMentioned eq true` | Not possible server-side |
 
-**Recommendation**: Still do @-autocomplete for non-Exchange accounts (helps users pick the right contact). On the display side, do NOT attempt to heuristically detect mentions in received messages for non-Exchange accounts — the false positive rate is too high.
+**Recommendation**: Still do @-autocomplete for non-Exchange accounts (helps users pick the right contact). On the display side, do NOT attempt to heuristically detect mentions in received messages for non-Exchange accounts - the false positive rate is too high.
 
 ---
 
@@ -290,7 +290,7 @@ This denormalized boolean enables the "Messages mentioning me" filter view witho
 #### Sync strategy
 
 During Exchange message sync (beta endpoint):
-1. `GET /beta/me/messages?$select=...,mentionsPreview` — extract `isMentioned` and store in `messages.is_mentioned`
+1. `GET /beta/me/messages?$select=...,mentionsPreview` - extract `isMentioned` and store in `messages.is_mentioned`
 2. For messages where `is_mentioned = true` (or on demand when viewing), fetch full mention details: `GET /beta/me/messages/{id}?$expand=mentions`
 3. Upsert mention records into the `mentions` table
 
@@ -298,7 +298,7 @@ During Exchange message sync (beta endpoint):
 
 ---
 
-### 8. What Outlook Does — Reference UX
+### 8. What Outlook Does - Reference UX
 
 **Compose**: User types `@` in the body, autocomplete dropdown shows contacts, selecting inserts a highlighted `@Name` and auto-adds the person to To: if not already a recipient.
 
@@ -310,16 +310,16 @@ During Exchange message sync (beta endpoint):
 
 ### 9. Implementation Plan
 
-**Phase 1: Display (read-only)** — ❌ **Remove.** Implemented but unnecessary. @mentions in email are a compose-time feature (insert text + add to recipients), not a display-time feature. The Exchange beta API mention metadata adds complexity for minimal user value. Code to remove: `crates/core/src/mentions.rs`, `crates/graph/src/mentions.rs`, `is_mentioned` column + `mentions` table (migration v40), `mentionsPreview` extraction in `crates/graph/src/parse.rs`, mention metadata in `crates/graph/src/ops/send.rs`.
+**Phase 1: Display (read-only)** - ❌ **Remove.** Implemented but unnecessary. @mentions in email are a compose-time feature (insert text + add to recipients), not a display-time feature. The Exchange beta API mention metadata adds complexity for minimal user value. Code to remove: `crates/core/src/mentions.rs`, `crates/graph/src/mentions.rs`, `is_mentioned` column + `mentions` table (migration v40), `mentionsPreview` extraction in `crates/graph/src/parse.rs`, mention metadata in `crates/graph/src/ops/send.rs`.
 
-**Phase 2: Compose** — This is the only phase that matters.
+**Phase 2: Compose** - This is the only phase that matters.
 1. Implement @-autocomplete trigger detection in the compose `text_editor`
 2. Show floating contact picker overlay, querying FTS5 contacts
 3. On selection, insert `@Display Name` text in the body
 4. Auto-add mentioned person to To: if not already a recipient
 5. On send, convert `@Display Name` to `<a href="mailto:email">@Display Name</a>` in HTML body (cosmetic, works across all providers)
 
-**Phase 3: Polish** — ❌ **Remove.** Mention deletion, count badge, and forward handling were all tied to the Exchange beta API metadata. Not needed.
+**Phase 3: Polish** - ❌ **Remove.** Mention deletion, count badge, and forward handling were all tied to the Exchange beta API metadata. Not needed.
 
 ---
 

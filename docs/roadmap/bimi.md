@@ -1,16 +1,16 @@
 # BIMI (Brand Indicators for Message Identification)
 
-**Tier**: 3 — Differentiators and polish
-**Status**: ✅ **Phase 1 complete** — DNS lookup, SVG fetch/validation/rasterization, DB caching, LRU, cache warming all implemented in `crates/core/src/bimi.rs`
+**Tier**: 3 - Differentiators and polish
+**Status**: ✅ **Phase 1 complete** - DNS lookup, SVG fetch/validation/rasterization, DB caching, LRU, cache warming all implemented in `crates/core/src/bimi.rs`
 
 ---
 
 - **What**: Verified sender brand logos displayed next to messages from authenticated domains
-- **Scope**: Client-side only — DNS lookup + header check, works identically across all providers
+- **Scope**: Client-side only - DNS lookup + header check, works identically across all providers
 
 ## Pain points
 
-- Performance: every unique sender domain requires a DNS TXT lookup + potential SVG fetch. At hundreds of emails/day with diverse senders, this is a lot of lookups. Need aggressive caching per domain (logos don't change often — cache for days/weeks).
+- Performance: every unique sender domain requires a DNS TXT lookup + potential SVG fetch. At hundreds of emails/day with diverse senders, this is a lot of lookups. Need aggressive caching per domain (logos don't change often - cache for days/weeks).
 - Validation: BIMI requires DMARC pass. Must check `Authentication-Results` header for DMARC status. If the header is missing or DMARC failed, don't display the logo (it's unverified).
 - SVG rendering: BIMI logos are SVG Tiny PS (a restricted SVG profile). Need an SVG renderer that handles this subset. Full SVG renderers may work, but the spec is specific about what's allowed.
 - VMC (Verified Mark Certificate): full BIMI validation requires checking a VMC certificate (X.509 with the logo embedded). This is the "verified" part. Without VMC checking, you can still display the logo but can't claim it's verified. VMC checking is complex (certificate chain validation, embedded logo comparison). Start without VMC, add later.
@@ -43,8 +43,8 @@ default._bimi.example.com. IN TXT "v=BIMI1; l=https://example.com/logo.svg; a=ht
 
 Tags:
 - **`v=BIMI1`** (required, must be first)
-- **`l=`** (required) — HTTPS URI to SVG Tiny PS logo. Empty = explicit opt-out
-- **`a=`** (optional) — HTTPS URI to VMC/CMC evidence document (PEM). Empty = no certificate
+- **`l=`** (required) - HTTPS URI to SVG Tiny PS logo. Empty = explicit opt-out
+- **`a=`** (optional) - HTTPS URI to VMC/CMC evidence document (PEM). Empty = no certificate
 - Fallback: if no record at `{selector}._bimi.{from-domain}`, try organizational domain
 
 #### BIMI-Selector Header
@@ -60,9 +60,9 @@ Senders specify non-default selector via `BIMI-Selector: v=BIMI1; s=marketing`, 
   - **`BIMI-Location`**: `v=BIMI1; l=<svg-uri>`
   - **`BIMI-Indicator`**: Base64-encoded SVG content (ready for display)
 
-**Critical for implementation**: If the receiving server already did BIMI validation, `BIMI-Indicator` is present — skip DNS lookups, just decode. For IMAP servers that don't strip BIMI headers, an attacker could inject fakes. Trust model:
+**Critical for implementation**: If the receiving server already did BIMI validation, `BIMI-Indicator` is present - skip DNS lookups, just decode. For IMAP servers that don't strip BIMI headers, an attacker could inject fakes. Trust model:
 - Gmail API / JMAP (Fastmail) / Graph (Outlook): headers trustworthy
-- Generic IMAP: headers NOT trustworthy — do own validation or ignore pre-existing
+- Generic IMAP: headers NOT trustworthy - do own validation or ignore pre-existing
 
 #### Full Validation Chain (for generic IMAP)
 
@@ -90,7 +90,7 @@ De facto standard DNS resolver in Rust. Pure Rust, fully async (tokio), supports
 #### dns-lookup
 
 - **Downloads**: ~18.8M total
-- Thin libc wrapper. Synchronous only. **Cannot do TXT record lookups** — only A/AAAA. Not viable.
+- Thin libc wrapper. Synchronous only. **Cannot do TXT record lookups** - only A/AAAA. Not viable.
 
 #### c-ares-resolver
 
@@ -115,7 +115,7 @@ Security-focused SVG subset. **Forbidden**: scripts, hyperlinks, foreignObject, 
 - **Last updated**: February 2026
 - **Dependencies**: `usvg` (parsing), `tiny-skia` (rasterizer)
 
-Only serious SVG renderer in Rust. Pure Rust, no system deps. Targets SVG 1.1 Full. Does not explicitly support SVG Tiny 1.2 as a profile, but SVG Tiny PS is a strict subset of SVG 1.1 — any valid BIMI logo renders correctly.
+Only serious SVG renderer in Rust. Pure Rust, no system deps. Targets SVG 1.1 Full. Does not explicitly support SVG Tiny 1.2 as a profile, but SVG Tiny PS is a strict subset of SVG 1.1 - any valid BIMI logo renders correctly.
 
 **Security**: Already strips scripts, ignores event handlers. Fuzz-tested with ~1600 regression tests. However, will follow external references. Pre-validate SVG before passing to resvg: check `baseProfile`, reject external URI references, enforce 32KB limit.
 
@@ -138,7 +138,7 @@ Format (RFC 8601): `authserv-id; method=result (comment) property=value; ...`
 
 For BIMI, need `dmarc=pass` from trusted authserv-id.
 
-**No Rust crate exists for parsing `Authentication-Results`.** Neither `mail-parser` nor `mailparse` provide structured parsing — raw string only.
+**No Rust crate exists for parsing `Authentication-Results`.** Neither `mail-parser` nor `mailparse` provide structured parsing - raw string only.
 
 For BIMI's narrow needs, simple string matching suffices. A full RFC 8601 parser (using `nom` or `winnow`) is optional hardening.
 
@@ -182,7 +182,7 @@ Both embed SVG in the certificate's logotype extension (OID 1.3.6.1.5.5.7.1.12, 
 1. **DNS cache** (automatic via hickory-resolver TTL caching)
 2. **BIMI result cache** (per-domain, 24-48h): has BIMI / no BIMI / logo URI
 3. **SVG/bitmap cache** (per-logo URI): rasterized bitmap, invalidate when URI changes
-4. **Negative cache** (24-48h): domains without BIMI — highest-impact layer, prevents wasted lookups for the majority of domains
+4. **Negative cache** (24-48h): domains without BIMI - highest-impact layer, prevents wasted lookups for the majority of domains
 
 #### Storage
 
@@ -243,8 +243,8 @@ For Gmail, JMAP (Fastmail): decode base64 SVG from header, rasterize, cache by d
 | | resvg + usvg | iced Svg widget |
 |---|---|---|
 | Downloads | resvg 10.7M, usvg 11.7M | (part of iced) |
-| Pre-rasterize | Yes — Pixmap to Handle | No — per-frame |
-| Validation hook | Yes — inspect tree | No |
+| Pre-rasterize | Yes - Pixmap to Handle | No - per-frame |
+| Validation hook | Yes - inspect tree | No |
 | **Verdict** | **Use this** | Less control |
 
 #### Certificate Validation (Phase 2)
@@ -261,16 +261,16 @@ For Gmail, JMAP (Fastmail): decode base64 SVG from header, rasterize, cache by d
 
 ### Implementation Plan
 
-**Phase 1 (ship with iced MVP)**: ✅ Done — `crates/core/src/bimi.rs`, migration v38 (`crates/db/src/db/migrations.rs`)
-- ✅ Parse `Authentication-Results` for `dmarc=pass` — `dmarc_passed()` string check
-- ✅ Check `BIMI-Indicator` header first — `decode_bimi_indicator()` base64 decode shortcut
-- ✅ DNS lookup via hickory-resolver — `lookup_bimi_dns()` with org-domain fallback
-- ✅ SVG fetch via reqwest — `fetch_and_validate_svg()` with HTTPS-only, 32KB limit
-- ✅ SVG Tiny PS validation — `validate_svg()` checks baseProfile, rejects external refs
-- ✅ Render with resvg to 128x128 PNG — `rasterize_svg_to_png()` using usvg + tiny-skia
+**Phase 1 (ship with iced MVP)**: ✅ Done - `crates/core/src/bimi.rs`, migration v38 (`crates/db/src/db/migrations.rs`)
+- ✅ Parse `Authentication-Results` for `dmarc=pass` - `dmarc_passed()` string check
+- ✅ Check `BIMI-Indicator` header first - `decode_bimi_indicator()` base64 decode shortcut
+- ✅ DNS lookup via hickory-resolver - `lookup_bimi_dns()` with org-domain fallback
+- ✅ SVG fetch via reqwest - `fetch_and_validate_svg()` with HTTPS-only, 32KB limit
+- ✅ SVG Tiny PS validation - `validate_svg()` checks baseProfile, rejects external refs
+- ✅ Render with resvg to 128x128 PNG - `rasterize_svg_to_png()` using usvg + tiny-skia
 - ✅ SQLite `bimi_cache` table + filesystem PNG cache with 7d positive / 24h negative TTL
-- ✅ In-memory LRU (500 entries) — `BimiLruCache` avoids DB/FS on every render
-- ✅ Cache warming — `warm_bimi_cache()` scans recent sender domains, concurrent DNS+fetch
+- ✅ In-memory LRU (500 entries) - `BimiLruCache` avoids DB/FS on every render
+- ✅ Cache warming - `warm_bimi_cache()` scans recent sender domains, concurrent DNS+fetch
 
 **Phase 2 (post-launch)**:
 - VMC/CMC validation using x509-parser + rustls-webpki

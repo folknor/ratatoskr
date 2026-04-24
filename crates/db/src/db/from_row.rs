@@ -9,11 +9,11 @@ pub trait FromRow: Sized {
 ///
 /// Each field uses one of these forms (separated by commas):
 ///
-/// - `field_name` — reads column `"field_name"`
-/// - `field_name as "col"` — reads column `"col"` into `field_name`
-/// - `bool field_name` — reads column `"field_name"` as `i64`, converts `!= 0`
-/// - `bool field_name as "col"` — reads column `"col"` as `i64`, converts `!= 0`
-/// - `val field_name = expr` — uses the literal expression
+/// - `field_name` - reads column `"field_name"`
+/// - `field_name as "col"` - reads column `"col"` into `field_name`
+/// - `bool field_name` - reads column `"field_name"` as `i64`, converts `!= 0`
+/// - `bool field_name as "col"` - reads column `"col"` as `i64`, converts `!= 0`
+/// - `val field_name = expr` - uses the literal expression
 ///
 /// # Example
 ///
@@ -118,7 +118,7 @@ macro_rules! impl_from_row_munch {
         }
     };
 
-    // ── Base case — emit the struct literal ─────────────────
+    // ── Base case - emit the struct literal ─────────────────
     ($sn:ident; $r:ident; [$($out:tt)*]; ) => {
         Ok($sn {
             $($out)*

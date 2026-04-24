@@ -15,7 +15,7 @@ Audit date: 2026-03-22
 ## Remaining
 
 ### `begin_sync_generation` and `prune_stale_sync` never called
-Generational tracking methods exist on StatusBar but the sync dispatch does not call them. Low priority — sync progress display works without them. These are for cleaning up stale progress entries when a sync cycle is interrupted.
+Generational tracking methods exist on StatusBar but the sync dispatch does not call them. Low priority - sync progress display works without them. These are for cleaning up stale progress entries when a sync cycle is interrupted.
 
 ## Not a discrepancy
 

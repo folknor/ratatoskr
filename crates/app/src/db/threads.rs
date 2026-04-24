@@ -180,7 +180,7 @@ pub async fn persist_attachments_collapsed(
         .await
 }
 
-// ── Per-message queries — delegated to core ─────────────
+// ── Per-message queries - delegated to core ─────────────
 //
 // These thin wrappers call core's `message_queries` module and convert
 // the results into app display types. Raw SQL formerly lived here but

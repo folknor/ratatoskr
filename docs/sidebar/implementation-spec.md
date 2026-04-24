@@ -54,11 +54,11 @@ Phased implementation spec for the sidebar described in `docs/sidebar/problem-st
 
 ## Phase 1A: Live Data Wiring
 
-**Goal:** Replace all hardcoded placeholder data in the sidebar with live data from `get_navigation_state()`. No new backend features — just wiring what already exists.
+**Goal:** Replace all hardcoded placeholder data in the sidebar with live data from `get_navigation_state()`. No new backend features - just wiring what already exists.
 
 **Depends on:** Nothing.
 
-**Transitional note:** This phase replaces ad hoc sidebar data with `NavigationState`, but it still uses `selected_label: Option<String>` as a flat destination marker for universal folders, smart folders, and labels alike. That is semantically muddy — a starred view, a smart folder, and a Gmail label are very different navigation targets sharing one `Option<String>`. This is acceptable as a transitional step because the current sidebar already works this way, and refactoring the navigation model is a larger change. However, the app should eventually grow an explicit `NavigationTarget` enum (as proposed in the command palette app-integration spec) that distinguishes between folder types, smart folders, pinned searches, and search results. Phase 1A intentionally does not attempt that refactor — it wires live data into the existing state shape.
+**Transitional note:** This phase replaces ad hoc sidebar data with `NavigationState`, but it still uses `selected_label: Option<String>` as a flat destination marker for universal folders, smart folders, and labels alike. That is semantically muddy - a starred view, a smart folder, and a Gmail label are very different navigation targets sharing one `Option<String>`. This is acceptable as a transitional step because the current sidebar already works this way, and refactoring the navigation model is a larger change. However, the app should eventually grow an explicit `NavigationTarget` enum (as proposed in the command palette app-integration spec) that distinguishes between folder types, smart folders, pinned searches, and search results. Phase 1A intentionally does not attempt that refactor - it wires live data into the existing state shape.
 
 ### 1A.1 New Message Variant
 
@@ -311,7 +311,7 @@ This replaces the current `load_threads(db, account_id, label_id)` pattern with 
 
 ### 1A.8 Sidebar `view()` Adjustment
 
-The `view()` function's conditional label section uses an explicit scope check, not the presence of data in `nav_state`. The product rule is: labels appear only when scoped to a single account. That rule should be enforced in the app, not inferred from backend data — if the backend ever returned account-label-like data in an unexpected context, the UI should not drift.
+The `view()` function's conditional label section uses an explicit scope check, not the presence of data in `nav_state`. The product rule is: labels appear only when scoped to a single account. That rule should be enforced in the app, not inferred from backend data - if the backend ever returned account-label-like data in an unexpected context, the UI should not drift.
 
 ```rust
 fn view(&self) -> Element<'_, SidebarMessage> {
@@ -534,7 +534,7 @@ This is a single query regardless of label count (batched GROUP BY), so it scale
 
 This is the largest piece of work and the biggest ecosystem gap.
 
-**Blast radius warning:** This phase is not just sidebar work. Adding `parent_label_id` to the `labels` table is a schema change that touches sync logic across three provider crates (Graph, JMAP, IMAP), label loading paths, and migration behavior. The sidebar is the motivating use case, but the change is cross-provider data-model evolution. Plan accordingly — the DB migration and provider sync changes should be reviewed and tested independently of the sidebar UI work.
+**Blast radius warning:** This phase is not just sidebar work. Adding `parent_label_id` to the `labels` table is a schema change that touches sync logic across three provider crates (Graph, JMAP, IMAP), label loading paths, and migration behavior. The sidebar is the motivating use case, but the change is cross-provider data-model evolution. Plan accordingly - the DB migration and provider sync changes should be reviewed and tested independently of the sidebar UI work.
 
 **Gmail stays flat.** Gmail labels are semantically flat tags, not hierarchical folders, even though Gmail's UI visually nests labels whose names contain `/` separators. This spec does not retrofit Gmail labels into a parent/child hierarchy. Gmail's `parent_label_id` is always `NULL`. The tree renderer only activates for providers where `parent_id` data actually exists (Exchange, JMAP, IMAP). If the product decision changes in the future, Gmail visual nesting can be derived from name splitting without schema changes.
 
@@ -937,7 +937,7 @@ Each provider's sync logic must populate `parent_label_id` when upserting labels
 
 Full lifecycle is in `docs/search/pinned-searches.md`. This section covers only the sidebar rendering integration.
 
-**Important distinction:** Pinned searches are not navigation items and must not inherit sidebar action semantics. They are ephemeral working contexts — visually distinct from folders/labels, not subject to Phase 2 action stripping (dismiss is their own lifecycle, not an "action on email"), and not affected by scope changes. The rendering must reinforce this: card-like containers with elevated background, not nav-button style items.
+**Important distinction:** Pinned searches are not navigation items and must not inherit sidebar action semantics. They are ephemeral working contexts - visually distinct from folders/labels, not subject to Phase 2 action stripping (dismiss is their own lifecycle, not an "action on email"), and not affected by scope changes. The rendering must reinforce this: card-like containers with elevated background, not nav-button style items.
 
 ### 1E.1 Types
 

@@ -108,9 +108,9 @@ pub fn analyze_cursor_context(query: &str, cursor_pos: usize) -> CursorContext {
 
         // If the partial value starts with a quote, allow spaces inside it.
         if let Some(after_open) = partial.strip_prefix('"') {
-            // Inside a quoted value — check if there's a closing quote before cursor.
+            // Inside a quoted value - check if there's a closing quote before cursor.
             if after_open.contains('"') {
-                // Closing quote found before cursor — not inside the operator anymore.
+                // Closing quote found before cursor - not inside the operator anymore.
                 continue;
             }
             // Still inside an open quote.
@@ -122,7 +122,7 @@ pub fn analyze_cursor_context(query: &str, cursor_pos: usize) -> CursorContext {
             };
         }
 
-        // Unquoted value — if there's whitespace in the partial, the cursor
+        // Unquoted value - if there's whitespace in the partial, the cursor
         // has moved past this operator's value into free text.
         if partial.contains(char::is_whitespace) {
             continue;

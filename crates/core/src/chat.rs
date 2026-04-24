@@ -78,7 +78,7 @@ pub async fn get_chat_contacts(db: &DbState) -> Result<Vec<ChatContactSummary>, 
     .await
 }
 
-/// Get the chat timeline for a contact — paginated message stream.
+/// Get the chat timeline for a contact - paginated message stream.
 ///
 /// Returns messages across all accounts and threads, ordered chronologically
 /// (oldest first). Use `before` timestamp for pagination.

@@ -203,7 +203,7 @@ pub async fn connect(config: &ImapConfig) -> Result<ImapSession, String> {
     tokio::time::timeout(OVERALL_CONNECT_TIMEOUT, connect_inner(config))
         .await
         .map_err(|_| format!(
-            "IMAP connection to {}:{} timed out after {}s — check your server settings or network connection",
+            "IMAP connection to {}:{} timed out after {}s - check your server settings or network connection",
             config.host, config.port, OVERALL_CONNECT_TIMEOUT.as_secs()
         ))?
 }
@@ -219,7 +219,7 @@ async fn connect_inner(config: &ImapConfig) -> Result<ImapSession, String> {
     tokio::time::timeout(AUTH_TIMEOUT, authenticate(client, config))
         .await
         .map_err(|_| format!(
-            "IMAP authentication timed out after {}s — check your server settings or network connection",
+            "IMAP authentication timed out after {}s - check your server settings or network connection",
             AUTH_TIMEOUT.as_secs()
         ))?
 }
@@ -235,7 +235,7 @@ pub(crate) async fn connect_stream(config: &ImapConfig) -> Result<ImapStream, St
             let tcp = tokio::time::timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(addr))
                 .await
                 .map_err(|_| format!(
-                    "TCP connect to {}:{} timed out after {}s — check your server settings or network connection",
+                    "TCP connect to {}:{} timed out after {}s - check your server settings or network connection",
                     config.host, config.port, TCP_CONNECT_TIMEOUT.as_secs()
                 ))?
                 .map_err(|e| format!("TCP connect to {}:{} failed: {e}", config.host, config.port))?;
@@ -243,7 +243,7 @@ pub(crate) async fn connect_stream(config: &ImapConfig) -> Result<ImapStream, St
             let tls = tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, tls_connector.connect(&config.host, tcp))
                 .await
                 .map_err(|_| format!(
-                    "TLS handshake with {} timed out after {}s — check your server settings or network connection",
+                    "TLS handshake with {} timed out after {}s - check your server settings or network connection",
                     config.host, TLS_HANDSHAKE_TIMEOUT.as_secs()
                 ))?
                 .map_err(|e| format!("TLS handshake with {} failed: {e}", config.host))?;
@@ -253,7 +253,7 @@ pub(crate) async fn connect_stream(config: &ImapConfig) -> Result<ImapStream, St
             let tcp = tokio::time::timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(addr))
                 .await
                 .map_err(|_| format!(
-                    "TCP connect to {}:{} timed out after {}s — check your server settings or network connection",
+                    "TCP connect to {}:{} timed out after {}s - check your server settings or network connection",
                     config.host, config.port, TCP_CONNECT_TIMEOUT.as_secs()
                 ))?
                 .map_err(|e| format!("TCP connect to {}:{} failed: {e}", config.host, config.port))?;
@@ -276,7 +276,7 @@ async fn connect_starttls(config: &ImapConfig) -> Result<ImapSession, String> {
     let mut tcp = tokio::time::timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(addr))
         .await
         .map_err(|_| format!(
-            "TCP connect to {}:{} timed out after {}s — check your server settings or network connection",
+            "TCP connect to {}:{} timed out after {}s - check your server settings or network connection",
             config.host, config.port, TCP_CONNECT_TIMEOUT.as_secs()
         ))?
         .map_err(|e| format!("TCP connect to {}:{} failed: {e}", config.host, config.port))?;
@@ -287,7 +287,7 @@ async fn connect_starttls(config: &ImapConfig) -> Result<ImapSession, String> {
     let n = tokio::time::timeout(IMAP_CMD_TIMEOUT, tcp.read(&mut buf))
         .await
         .map_err(|_| format!(
-            "Reading server greeting timed out after {}s — check your server settings or network connection",
+            "Reading server greeting timed out after {}s - check your server settings or network connection",
             IMAP_CMD_TIMEOUT.as_secs()
         ))?
         .map_err(|e| format!("Failed to read server greeting: {e}"))?;
@@ -305,7 +305,7 @@ async fn connect_starttls(config: &ImapConfig) -> Result<ImapSession, String> {
     let n = tokio::time::timeout(IMAP_CMD_TIMEOUT, tcp.read(&mut buf))
         .await
         .map_err(|_| format!(
-            "STARTTLS response timed out after {}s — check your server settings or network connection",
+            "STARTTLS response timed out after {}s - check your server settings or network connection",
             IMAP_CMD_TIMEOUT.as_secs()
         ))?
         .map_err(|e| format!("Failed to read STARTTLS response: {e}"))?;
@@ -320,7 +320,7 @@ async fn connect_starttls(config: &ImapConfig) -> Result<ImapSession, String> {
     let tls = tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, tls_connector.connect(&config.host, tcp))
         .await
         .map_err(|_| format!(
-            "TLS upgrade after STARTTLS timed out after {}s — check your server settings or network connection",
+            "TLS upgrade after STARTTLS timed out after {}s - check your server settings or network connection",
             TLS_HANDSHAKE_TIMEOUT.as_secs()
         ))?
         .map_err(|e| format!("TLS upgrade after STARTTLS failed: {e}"))?;
@@ -330,7 +330,7 @@ async fn connect_starttls(config: &ImapConfig) -> Result<ImapSession, String> {
     tokio::time::timeout(AUTH_TIMEOUT, authenticate(client, config))
         .await
         .map_err(|_| format!(
-            "IMAP authentication timed out after {}s — check your server settings or network connection",
+            "IMAP authentication timed out after {}s - check your server settings or network connection",
             AUTH_TIMEOUT.as_secs()
         ))?
 }
@@ -338,9 +338,9 @@ async fn connect_starttls(config: &ImapConfig) -> Result<ImapSession, String> {
 /// Authenticate with the IMAP server.
 ///
 /// Auth methods:
-/// - `"oauth2"` — XOAUTH2 (Google/Microsoft legacy)
-/// - `"oauthbearer"` — OAUTHBEARER RFC 7628 (modern on-prem OIDC)
-/// - anything else — LOGIN (password)
+/// - `"oauth2"` - XOAUTH2 (Google/Microsoft legacy)
+/// - `"oauthbearer"` - OAUTHBEARER RFC 7628 (modern on-prem OIDC)
+/// - anything else - LOGIN (password)
 async fn authenticate(
     client: Client<ImapStream>,
     config: &ImapConfig,
@@ -393,7 +393,7 @@ async fn authenticate(
 /// Negotiated CONDSTORE/QRESYNC capability state for a session.
 #[derive(Debug, Clone)]
 pub struct ImapCapabilities {
-    /// Server supports CONDSTORE (RFC 4551) — HIGHESTMODSEQ in SELECT and
+    /// Server supports CONDSTORE (RFC 4551) - HIGHESTMODSEQ in SELECT and
     /// CHANGEDSINCE modifier for UID FETCH.
     pub condstore: bool,
     /// Server supports QRESYNC (RFC 7162) and successfully responded to
@@ -435,7 +435,7 @@ pub async fn negotiate_condstore_qresync(
         });
     }
 
-    // Server advertises QRESYNC — try to ENABLE it and verify the ENABLED
+    // Server advertises QRESYNC - try to ENABLE it and verify the ENABLED
     // response.  QRESYNC implicitly enables CONDSTORE (RFC 7162 §3.2.3).
     let qresync_enabled = tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
         let tag = session
@@ -492,7 +492,7 @@ pub async fn negotiate_condstore_qresync(
     } else {
         log::warn!(
             "IMAP: server advertises QRESYNC in CAPABILITY but did not respond with \
-             ENABLED QRESYNC — likely iCloud or similar broken implementation. \
+             ENABLED QRESYNC - likely iCloud or similar broken implementation. \
              Falling back to CONDSTORE-only mode."
         );
         Ok(ImapCapabilities {

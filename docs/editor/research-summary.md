@@ -8,7 +8,7 @@ display rich text read-only. We build from scratch, stealing isolated pieces.
 
 ## Projects Surveyed
 
-### cosmic-edit — Code editor (COSMIC desktop)
+### cosmic-edit - Code editor (COSMIC desktop)
 
 **What it is:** Syntax-highlighting code editor. Custom `TextBox` widget
 implementing iced's `Widget` trait. Uses cosmic-text `Buffer`/`ViEditor` for text
@@ -20,11 +20,11 @@ Renders via `renderer.fill_raw()` for glyphs + pixel buffer for line numbers.
 
 **Relevance:** Reference for building custom iced widgets with keyboard/mouse/
 scrolling/IME. The rendering approach (pixel buffer + glyph fill) is
-over-engineered for our needs — we can use `Paragraph::with_spans` instead.
+over-engineered for our needs - we can use `Paragraph::with_spans` instead.
 
 **Steal nothing.** Too tightly coupled to cosmic-text's code-editor assumptions.
 
-### cedilla — Markdown editor (COSMIC desktop)
+### cedilla - Markdown editor (COSMIC desktop)
 
 **What it is:** Dual-pane markdown editor. Plain text editing on the left,
 rendered preview on the right via frostmark. Custom `TextEditor` widget (fork of
@@ -33,10 +33,10 @@ iced's) with line numbers and libcosmic integration.
 **Key patterns:**
 - **Patch-based undo/redo** (`src/app/core/history.rs`): Uses `dissimilar` crate
   to diff text snapshots, stores ~100-patch circular buffer. Avoids full-text
-  cloning. Alternative to our operation-based approach — simpler but less
+  cloning. Alternative to our operation-based approach - simpler but less
   granular.
 - **Markdown formatting helpers** (`src/app/core/utils/markdown.rs`):
-  `SelectionAction` enum with `format_selected_text()` — wraps/toggles markdown
+  `SelectionAction` enum with `format_selected_text()` - wraps/toggles markdown
   markers around selection. Smart cycling (bold on/off), list continuation on
   Enter. Pattern is directly applicable to our format toggle logic.
 
@@ -44,7 +44,7 @@ iced's) with line numbers and libcosmic integration.
 if ops get complex). Markdown formatting toggle logic as reference for our
 `ToggleInlineStyle`.
 
-### frostmark — HTML/Markdown renderer for iced
+### frostmark - HTML/Markdown renderer for iced
 
 **What it is:** Converts HTML (via html5ever) and Markdown (via comrak) into
 native iced widgets. Used by cedilla for its preview pane.
@@ -63,7 +63,7 @@ native iced widgets. Used by cedilla for its preview pane.
 `html_parse.rs` needs. The block/inline separation logic informs our DOM→Document
 conversion. Image callback pattern is relevant for Phase 5.
 
-### halloy — IRC client
+### halloy - IRC client
 
 **What it is:** Production IRC client with rich text display.
 
@@ -88,7 +88,7 @@ Fragment enum (Text|Channel|User|Url|Formatted|...)
 positions). Fragment→Span conversion pattern. Context menu integration. The
 spoiler implementation (color == background) is clever but irrelevant.
 
-### libcosmic — COSMIC widget toolkit
+### libcosmic - COSMIC widget toolkit
 
 **What it is:** Pop-OS's iced wrapper. Provides `TextInput` (single-line) with
 grapheme-aware cursor, DND, IME. Re-exports iced's `TextEditor` and optional
@@ -124,22 +124,22 @@ The bottom row is the gap. Every project either edits plain text or displays ric
 text. None combine both.
 
 **Note on viewing vs editing:** Rendering arbitrary incoming HTML emails is handled
-by `litehtml-rs` — a separate pure Rust pipeline (scraper → lightningcss → taffy
+by `litehtml-rs` - a separate pure Rust pipeline (scraper → lightningcss → taffy
 fork with table layout → cosmic-text → tiny-skia) that renders HTML to rasterized
 images in 3-23ms. The editor's `html_parse.rs` does not need to handle wild HTML;
 it only round-trips its own output (drafts, signatures, reply quotes). This
-dramatically simplifies the parser — no CSS engine, no table layout, no marketing
+dramatically simplifies the parser - no CSS engine, no table layout, no marketing
 email edge cases.
 
 ---
 
 ## JavaScript Editor Architectures
 
-Studied ProseMirror, Slate.js, and Quill — three fundamentally different
+Studied ProseMirror, Slate.js, and Quill - three fundamentally different
 approaches to the same problem. Source code in `research/prosemirror-*`,
 `research/slate`, `research/quill`.
 
-### ProseMirror — Schema + Transactions + Position Mapping
+### ProseMirror - Schema + Transactions + Position Mapping
 
 The most rigorous architecture. Four packages: model (document tree), transform
 (editing operations), state (editor state + plugins), view (DOM rendering).
@@ -159,10 +159,10 @@ compiler code.
 
 **Marks:** Sorted arrays by rank (defined by schema ordering). `addToSet()` and
 `removeFromSet()` maintain sort order and handle mutual exclusion. Adjacent text
-nodes with identical mark sets merge — this invariant is maintained everywhere.
+nodes with identical mark sets merge - this invariant is maintained everywhere.
 
 **Steps and StepMap:** Each edit is a `Step` (ReplaceStep, AddMarkStep, etc.)
-that produces a `StepMap` — an array of `[start, oldSize, newSize]` triples.
+that produces a `StepMap` - an array of `[start, oldSize, newSize]` triples.
 Positions are mapped through StepMaps to survive edits. The `Mapping` class
 chains multiple StepMaps with a `mirror` system linking each step to its inverse,
 enabling position recovery through undo.
@@ -196,11 +196,11 @@ browser-specific and irrelevant to our iced implementation.**
 - The Fitter algorithm (we have a simple block set, not arbitrary nesting)
 - The entire view layer (contentEditable, MutationObserver, DOM reconciliation)
 
-### Slate.js — Normalization + Paths + Simplicity
+### Slate.js - Normalization + Paths + Simplicity
 
 Simpler model, different philosophy. Documents are plain JSON objects.
 
-**Document model:** Three types — `Editor` (root), `Element` (has `children`),
+**Document model:** Three types - `Editor` (root), `Element` (has `children`),
 `Text` (has `text` string). No schema. Formatting is properties directly on text
 nodes (`{ text: "hello", bold: true }`), not separate mark objects. Elements have
 arbitrary properties (`{ type: "paragraph", children: [...] }`).
@@ -215,7 +215,7 @@ operation type.
 operation is trivially invertible (flip type, swap old/new). This makes undo
 clean.
 
-**Normalization** — the key innovation. After every operation, dirty paths are
+**Normalization** - the key innovation. After every operation, dirty paths are
 computed and each affected node is normalized. Built-in rules:
 1. Elements must have at least one child
 2. Inline/block consistency within a parent
@@ -230,7 +230,7 @@ ops at adjacent positions (typing, backspacing). Each group stores a selection
 bookmark. Undo applies inverse operations in reverse order. Max 100 entries.
 
 **Plugin model:** Functions that wrap editor methods (`withHistory(withReact(createEditor()))`).
-Simple but unstructured — no lifecycle, no formal state management.
+Simple but unstructured - no lifecycle, no formal state management.
 
 **What we take:**
 - Formalized normalization pass with dirty tracking (not just "merge same runs")
@@ -243,7 +243,7 @@ Simple but unstructured — no lifecycle, no formal state management.
 - Schema-less design (our block types are fixed, validation is cheap)
 - The React rendering layer
 
-### Quill — Delta Algebra
+### Quill - Delta Algebra
 
 Fundamentally different: documents are flat operation sequences, not trees.
 
@@ -253,7 +253,7 @@ with all three op types. Same data structure for state and transitions.
 
 **Block formatting hack:** Block-level formatting (headings, lists, quotes) is
 encoded as attributes on the trailing `\n` character of each line. This keeps the
-format flat but makes block operations awkward — inserting block embeds requires
+format flat but makes block operations awkward - inserting block embeds requires
 "implicit newline" bookkeeping.
 
 **Algebraic operations:** `compose(a, b)` = apply b after a. `transform(a, b)` =
@@ -266,7 +266,7 @@ tree (DOM-synced). `getDelta()` derives the flat form from the tree; `applyDelta
 mutates the tree from the flat form. The `Editor` class is a bidirectional sync
 engine between these representations.
 
-**Tables expose the limit:** Quill has two table implementations — one using
+**Tables expose the limit:** Quill has two table implementations - one using
 line-level formatting (fragile) and one embedding sub-deltas inside block embeds
 (essentially admitting the flat model can't handle 2D structure).
 
@@ -275,7 +275,7 @@ line-level formatting (fragile) and one embedding sub-deltas inside block embeds
 stack via OT.
 
 **What we take:**
-- The insight that email is "flat-ish" — paragraphs, headings, lists, inline
+- The insight that email is "flat-ish" - paragraphs, headings, lists, inline
   formatting. We don't need ProseMirror's full tree generality.
 - History batching by time window (complement our "consecutive same-type" rule)
 
@@ -284,7 +284,7 @@ stack via OT.
 - OT/collaboration primitives (not needed for single-user email compose)
 - The dual delta/blot representation
 
-### Fleather — Native Flutter Editor (No ContentEditable)
+### Fleather - Native Flutter Editor (No ContentEditable)
 
 The only reference project that solves the full stack on a declarative UI
 framework without a browser. Flutter's `RenderBox` + `TextPainter` is analogous
@@ -323,7 +323,7 @@ adjacent same-style runs. This split-apply-merge pattern is universal across all
 editors.
 
 **What we take:**
-- Heuristic rules as a formal system (`rules.rs`) — the most portable part
+- Heuristic rules as a formal system (`rules.rs`) - the most portable part
 - Cascading hit test pattern for rendering ↔ document mapping
 - Run splitting primitives (`split_at`, `isolate`)
 - Text input strategy: sync text/selection to platform, receive deltas back

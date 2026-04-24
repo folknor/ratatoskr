@@ -4,7 +4,7 @@
 //! Handles: paragraphs, links, lists, blockquotes, pre/code blocks, images
 //! (alt text), headings, horizontal rules, and basic tables.
 //!
-//! Includes a complexity heuristic for fallback detection — emails with deep
+//! Includes a complexity heuristic for fallback detection - emails with deep
 //! table nesting (layout tables) or heavy style blocks fall back to plain text.
 
 use std::collections::HashMap;
@@ -104,7 +104,7 @@ pub fn render_cached_html<'a, M: Clone + 'a>(
 ) -> Element<'a, M> {
     match cached {
         CachedHtmlBody::Complex => {
-            let display = fallback_text.unwrap_or("(complex HTML email — plain text unavailable)");
+            let display = fallback_text.unwrap_or("(complex HTML email - plain text unavailable)");
             text(display.to_string())
                 .size(TEXT_LG)
                 .style(text::secondary)
@@ -139,7 +139,7 @@ pub fn render_html<'a, M: Clone + 'a>(
     inline_images: &'a HashMap<String, Vec<u8>>,
 ) -> Element<'a, M> {
     if assess_complexity(html) == HtmlComplexity::Complex {
-        let display = fallback_text.unwrap_or("(complex HTML email — plain text unavailable)");
+        let display = fallback_text.unwrap_or("(complex HTML email - plain text unavailable)");
         return text(display.to_string())
             .size(TEXT_LG)
             .style(text::secondary)
@@ -243,7 +243,7 @@ fn render_spans<'a, M: Clone + 'a>(
 }
 
 /// Render a block by reference (for cached rendering). Clones the owned
-/// strings inside the block — this is cheap compared to re-parsing HTML.
+/// strings inside the block - this is cheap compared to re-parsing HTML.
 #[allow(clippy::needless_pass_by_value)]
 fn render_block_ref<'a, M: Clone + 'a>(
     block: &Block,
@@ -310,7 +310,7 @@ pub(super) fn render_block<'a, M: Clone + 'a>(
     on_link_click: std::rc::Rc<dyn Fn(String) -> M + 'a>,
     inline_images: &'a HashMap<String, Vec<u8>>,
 ) -> Element<'a, M> {
-    // Delegate to the by-ref version — the block is consumed but
+    // Delegate to the by-ref version - the block is consumed but
     // render_block_ref only clones the inner strings anyway.
     render_block_ref(&block, on_link_click, inline_images)
 }
@@ -333,7 +333,7 @@ fn render_cid_image<'a, M: 'a>(
             .style(text::secondary)
             .into()
     } else {
-        // No image data and no alt text — render nothing.
+        // No image data and no alt text - render nothing.
         Space::new().width(0).height(0).into()
     }
 }
@@ -440,7 +440,7 @@ impl<'a> HtmlParser<'a> {
             self.pos = tag_end;
             self.process_tag(tag_content, blocks);
         } else {
-            // Malformed — skip the '<'
+            // Malformed - skip the '<'
             self.pos += 1;
             self.current_text.push('<');
         }
@@ -536,7 +536,7 @@ impl<'a> HtmlParser<'a> {
                 let href = extract_attr(_full_tag, "href").unwrap_or_default();
                 self.current_link_href = Some(href);
             }
-            _ => {} // span, strong, b, em, i, etc. — inline, just consume text
+            _ => {} // span, strong, b, em, i, etc. - inline, just consume text
         }
     }
 
@@ -602,7 +602,7 @@ impl<'a> HtmlParser<'a> {
                         });
                     }
                 } else if !trimmed.is_empty() {
-                    // Orphaned </a> — treat text as plain.
+                    // Orphaned </a> - treat text as plain.
                     self.current_spans.push(InlineSpan::Text(trimmed));
                 }
             }
@@ -630,7 +630,7 @@ impl<'a> HtmlParser<'a> {
         self.flush_text_span();
         // Also close any unclosed link (treat as plain text).
         if let Some(_href) = self.current_link_href.take() {
-            // Link was never closed — the text was already flushed above.
+            // Link was never closed - the text was already flushed above.
         }
         std::mem::take(&mut self.current_spans)
     }
@@ -707,7 +707,7 @@ fn decode_entities(s: &str) -> String {
             }
         }
         if !found_semi {
-            // Not a valid entity — emit as literal
+            // Not a valid entity - emit as literal
             result.push('&');
             result.push_str(&entity);
             continue;

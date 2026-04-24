@@ -10,7 +10,7 @@ use common::types::{ProviderCtx, ProviderFolderMutation};
 /// Build a `ProviderCtx` from an `ActionContext` and account ID.
 ///
 /// Shared across all folder operations. Also usable by other action
-/// functions — existing ones can be refactored to use this in a cleanup pass.
+/// functions - existing ones can be refactored to use this in a cleanup pass.
 fn build_provider_ctx<'a>(ctx: &'a ActionContext, account_id: &'a str) -> ProviderCtx<'a> {
     ProviderCtx {
         account_id,
@@ -25,7 +25,7 @@ fn build_provider_ctx<'a>(ctx: &'a ActionContext, account_id: &'a str) -> Provid
 /// Create a folder on the provider, then insert it into the local `labels` table.
 ///
 /// Provider-first: the provider assigns the folder ID, path, and metadata.
-/// The local DB is updated best-effort — if it fails, the action still returns
+/// The local DB is updated best-effort - if it fails, the action still returns
 /// `Success` because the provider state is canonical and sync will reconcile.
 ///
 /// **Limitation:** `Success` after a local DB failure means the caller cannot
@@ -34,7 +34,7 @@ fn build_provider_ctx<'a>(ctx: &'a ActionContext, account_id: &'a str) -> Provid
 /// distinct outcome for "provider succeeded, local stale" so the caller can
 /// trigger an immediate sync or nav refresh.
 ///
-/// **IMAP:** Returns `Failed` — IMAP does not support folder creation via
+/// **IMAP:** Returns `Failed` - IMAP does not support folder creation via
 /// the current `ProviderOps` implementation. UI must gate this for IMAP accounts.
 ///
 /// Returns `(ActionOutcome, Option<ProviderFolderMutation>)` so the caller
@@ -49,7 +49,7 @@ pub async fn create_folder(
 ) -> (ActionOutcome, Option<ProviderFolderMutation>) {
     let mut mlog = MutationLog::begin("create_folder", account_id, "(pending)");
 
-    // 1. Provider dispatch first — we need the provider-assigned ID
+    // 1. Provider dispatch first - we need the provider-assigned ID
     let provider = match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
@@ -87,7 +87,7 @@ pub async fn create_folder(
     mlog.set_local_id(&mutation.id);
     mlog.set_remote_id(&mutation.id);
 
-    // 2. Local DB — insert the new folder into labels (best-effort)
+    // 2. Local DB - insert the new folder into labels (best-effort)
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let m = mutation.clone();
@@ -117,7 +117,7 @@ pub async fn create_folder(
     .and_then(|r| r);
 
     if let Err(e) = local_result {
-        // Provider succeeded but local DB failed — unusual but possible.
+        // Provider succeeded but local DB failed - unusual but possible.
         // The folder exists on the server; next sync will pick it up.
         log::warn!("create_folder local insert failed (provider succeeded): {e}");
     }
@@ -252,7 +252,7 @@ pub async fn delete_folder(
         return outcome;
     }
 
-    // Provider succeeded — remove local rows (best-effort)
+    // Provider succeeded - remove local rows (best-effort)
     let db = ctx.db.clone();
     let aid = account_id.to_string();
     let fid = folder_id.to_string();
@@ -261,7 +261,7 @@ pub async fn delete_folder(
         let conn = conn
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        // Delete thread_labels first — no FK cascade from labels to thread_labels.
+        // Delete thread_labels first - no FK cascade from labels to thread_labels.
         crate::db::queries_extra::action_helpers::delete_folder_sync(&conn, &aid, &fid)
             .map_err(ActionError::db)?;
         Ok(())

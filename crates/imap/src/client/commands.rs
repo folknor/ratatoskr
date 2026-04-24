@@ -33,7 +33,7 @@ pub async fn fetch_new_uids(
 }
 
 /// Search for all UIDs in a folder using `UID SEARCH ALL`.
-/// Returns real UIDs sorted ascending — avoids the sparse UID gap problem.
+/// Returns real UIDs sorted ascending - avoids the sparse UID gap problem.
 pub async fn search_all_uids(session: &mut ImapSession, folder: &str) -> Result<Vec<u32>, String> {
     tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
@@ -368,7 +368,7 @@ pub async fn fetch_changed_flags(
 /// of changes. This is the fallback for servers that don't support
 /// CONDSTORE (e.g. Exchange IMAP, Courier, hMailServer).
 ///
-/// The folder must NOT already be SELECTed — this function SELECTs it.
+/// The folder must NOT already be SELECTed - this function SELECTs it.
 pub async fn fetch_all_flags(
     session: &mut ImapSession,
     folder: &str,

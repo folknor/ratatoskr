@@ -1,4 +1,4 @@
-//! Sync dispatch — runs delta sync for a single account through the provider.
+//! Sync dispatch - runs delta sync for a single account through the provider.
 //!
 //! This is the read path (server → local DB), moved to core so the app crate
 //! doesn't need direct provider dependencies.

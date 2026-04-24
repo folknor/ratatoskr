@@ -6,7 +6,7 @@ use super::theme;
 /// Which kind of blocking surface to compose.
 pub enum ModalSurface {
     /// Dimmed backdrop (`ModalBackdrop`), centered content.
-    /// Dismiss via Escape or explicit button — not via backdrop click.
+    /// Dismiss via Escape or explicit button - not via backdrop click.
     Modal,
 
     /// Opaque sheet sliding from the right edge. Unstyled event blocker
@@ -25,7 +25,7 @@ pub enum ModalSurface {
 ///
 /// `blocker_msg` is required because iced's `mouse_area` only captures click
 /// events when `on_press` is set. The message is published but should be a
-/// no-op in the caller's update loop — `modal_overlay` does not own dismiss
+/// no-op in the caller's update loop - `modal_overlay` does not own dismiss
 /// behavior.
 #[allow(clippy::needless_pass_by_value)]
 pub fn modal_overlay<'a, Message: Clone + 'a>(

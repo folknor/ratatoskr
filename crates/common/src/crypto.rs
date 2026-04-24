@@ -141,7 +141,7 @@ pub fn is_encrypted(value: &str) -> bool {
 pub fn decrypt_or_raw(key: &[u8; 32], value: &str) -> String {
     if is_encrypted(value) {
         decrypt_value(key, value).unwrap_or_else(|e| {
-            log::warn!("Decryption failed for encrypted value — returning raw. Key may be corrupted or rotated: {e}");
+            log::warn!("Decryption failed for encrypted value - returning raw. Key may be corrupted or rotated: {e}");
             value.to_string()
         })
     } else {

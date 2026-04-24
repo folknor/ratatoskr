@@ -89,7 +89,7 @@ pub fn get_message_raw_source(
         .unwrap_or(false);
 
     if exists {
-        Ok("(raw source not available — message bodies are stored in the body store)".to_string())
+        Ok("(raw source not available - message bodies are stored in the body store)".to_string())
     } else {
         Err("Message not found".to_string())
     }

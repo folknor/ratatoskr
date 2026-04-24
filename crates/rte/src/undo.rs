@@ -170,7 +170,7 @@ fn can_merge(last_group: &UndoGroup, new_ops: &[EditOp], cursor_before: &DocSele
     }
 
     // The cursor_before of the new ops should match the cursor_after of the
-    // last group — this confirms the user hasn't jumped the cursor.
+    // last group - this confirms the user hasn't jumped the cursor.
     if *cursor_before != last_group.cursor_after {
         return false;
     }

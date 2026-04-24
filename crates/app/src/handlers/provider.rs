@@ -206,7 +206,7 @@ impl App {
             return Task::none();
         };
 
-        // Pass all accounts — calendar_sync_account returns Err for unsupported
+        // Pass all accounts - calendar_sync_account returns Err for unsupported
         // providers, which is logged as a warning. This avoids filtering out
         // IMAP/JMAP accounts that have calendar_provider = "caldav" set.
         let account_ids: Vec<String> = self.sidebar.accounts.iter().map(|a| a.id.clone()).collect();

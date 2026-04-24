@@ -4,8 +4,8 @@
 //   - The `Message` enum
 //   - The `App` struct definition
 //   - `boot()`, `title()`, `theme()`, `subscription()`
-//   - `update()` — which dispatches to handler methods
-//   - `view()` / `view_main_window()` — layout assembly
+//   - `update()` - which dispatches to handler methods
+//   - `view()` / `view_main_window()` - layout assembly
 //   - Component delegation (handle_sidebar, handle_thread_list, etc.)
 //   - Navigation/thread loading helpers
 //
@@ -108,7 +108,7 @@ fn main() -> iced::Result {
 
         let config = dev_seed::Config::load_or_default();
 
-        // Always regenerate — ephemeral dev database
+        // Always regenerate - ephemeral dev database
         if dev_dir.exists() {
             std::fs::remove_dir_all(&dev_dir).ok();
         }
@@ -221,12 +221,12 @@ pub enum Message {
     NavigateTo(NavigationTarget),
     Escape,
     EmailAction(MailActionIntent),
-    /// Action service completed — carries action kind, outcomes, rollback, thread IDs, and params.
+    /// Action service completed - carries action kind, outcomes, rollback, thread IDs, and params.
     ActionCompleted {
         plan: crate::action_resolve::ActionExecutionPlan,
         outcomes: Vec<rtsk::actions::ActionOutcome>,
     },
-    /// Send completed — carries compose window ID and outcome.
+    /// Send completed - carries compose window ID and outcome.
     /// Separate from ActionCompleted because send operates on a compose window,
     /// not a thread list selection.
     SendCompleted {
@@ -282,7 +282,7 @@ pub enum Message {
     SetAppMode(AppMode),
     SetCalendarView(CalendarView),
     CalendarToday,
-    /// Calendar sync completed — refresh in-memory calendar state.
+    /// Calendar sync completed - refresh in-memory calendar state.
     CalendarSyncComplete,
 
     // Account management
@@ -296,7 +296,7 @@ pub enum Message {
     PopOut(iced::window::Id, PopOutMessage),
     OpenMessageView(usize),
     ComposeDraftTick,
-    /// A local draft was loaded from DB — open it in a compose window.
+    /// A local draft was loaded from DB - open it in a compose window.
     LocalDraftLoaded(Result<Option<rtsk::db::types::DbLocalDraft>, String>),
 
     // Thread detail via core
@@ -334,7 +334,7 @@ pub enum Message {
     SharedMailboxesLoaded(Result<Vec<db::SharedMailbox>, String>),
     PinnedPublicFoldersLoaded(Result<Vec<db::PinnedPublicFolder>, String>),
 
-    // Snooze resurface — periodic check for due snoozed threads
+    // Snooze resurface - periodic check for due snoozed threads
     SnoozeTick,
     SnoozeResurfaceComplete(Result<usize, String>),
 
@@ -429,7 +429,7 @@ struct App {
     inline_image_store: Option<store::inline_image_store::InlineImageStoreState>,
     /// Encryption key for decrypting provider credentials (OAuth tokens, passwords).
     encryption_key: Option<[u8; 32]>,
-    /// Action service context — the authoritative write path for email mutations.
+    /// Action service context - the authoritative write path for email mutations.
     /// `None` if stores failed to initialize at boot (degraded mode).
     action_ctx: Option<rtsk::actions::ActionContext>,
 }
@@ -492,7 +492,7 @@ impl App {
             }
         };
 
-        // Initialize search state once — shared between the app and action service.
+        // Initialize search state once - shared between the app and action service.
         let search_state: Option<Arc<rtsk::search::SearchState>> =
             rtsk::search::SearchState::init(data_dir).map(Arc::new).ok();
 
@@ -587,7 +587,7 @@ impl App {
         };
 
         // Resurface orphaned 'queued' drafts from the old send path.
-        // These were never sent — transition to 'failed' so they're visible
+        // These were never sent - transition to 'failed' so they're visible
         // to future outbox UI rather than silently deleting user data.
         if let Err(e) = app
             .db
@@ -621,7 +621,7 @@ impl App {
                 async move { db_ref4.get_pinned_public_folders().await },
                 Message::PinnedPublicFoldersLoaded,
             ),
-            // Initial GAL cache population (deferred — provider clients
+            // Initial GAL cache population (deferred - provider clients
             // aren't available at boot; the first GalRefreshTick will
             // attempt the actual fetch once accounts are loaded)
             Task::done(Message::GalRefreshTick),
@@ -747,7 +747,7 @@ impl App {
             );
         }
 
-        // Periodic pinned search expiry — check every hour
+        // Periodic pinned search expiry - check every hour
         if !self.pinned_searches.is_empty() {
             subs.push(
                 iced::time::every(std::time::Duration::from_secs(3600))
@@ -755,21 +755,21 @@ impl App {
             );
         }
 
-        // Periodic sync — delta sync all accounts every 5 minutes
+        // Periodic sync - delta sync all accounts every 5 minutes
         if !self.sidebar.accounts.is_empty() && self.encryption_key.is_some() {
             subs.push(
                 iced::time::every(std::time::Duration::from_secs(300)).map(|_| Message::SyncTick),
             );
         }
 
-        // Snooze resurface — check every 60 seconds for due threads
+        // Snooze resurface - check every 60 seconds for due threads
         if self.action_ctx.is_some() {
             subs.push(
                 iced::time::every(std::time::Duration::from_secs(60)).map(|_| Message::SnoozeTick),
             );
         }
 
-        // GAL (organization directory) cache refresh — every hour
+        // GAL (organization directory) cache refresh - every hour
         subs.push(
             iced::time::every(std::time::Duration::from_secs(3600))
                 .map(|_| Message::GalRefreshTick),
@@ -1008,7 +1008,7 @@ impl App {
                         }
                     }
                     Ok(()) => {
-                        // Sync succeeded — clear any previous warning for this account
+                        // Sync succeeded - clear any previous warning for this account
                         self.status_bar.clear_warning(&account_id);
                     }
                 }
@@ -1024,7 +1024,7 @@ impl App {
             Message::SetReadingPanePosition(_pos) => Task::none(),
             Message::Palette(msg) => self.handle_palette(msg),
 
-            // Search — delegated to handlers/search.rs
+            // Search - delegated to handlers/search.rs
             Message::SearchQueryChanged(query) => self.handle_search_query_changed(query),
             Message::SearchExecute => self.handle_search_execute(),
             Message::SearchCompleted(result) => self.handle_search_completed(result),
@@ -1044,7 +1044,7 @@ impl App {
             }
             Message::SearchHistoryLoaded(Err(_)) => Task::none(),
 
-            // Pinned searches — delegated to handlers/search.rs
+            // Pinned searches - delegated to handlers/search.rs
             Message::PinnedSearchesLoaded(result) => self.handle_pinned_searches_loaded(result),
             Message::SelectPinnedSearch(id) => self.handle_select_pinned_search(id),
             Message::DismissPinnedSearch(id) => self.handle_dismiss_pinned_search(id),
@@ -1061,7 +1061,7 @@ impl App {
             Message::SaveAsSmartFolder(name) => self.handle_save_as_smart_folder(name),
             Message::SmartFolderSaved(result) => self.handle_smart_folder_saved(result),
 
-            // Calendar — delegated to handlers/calendar.rs
+            // Calendar - delegated to handlers/calendar.rs
             Message::Calendar(cal_msg) => self.handle_calendar(*cal_msg),
             Message::ToggleAppMode => {
                 // If calendar is popped out, focus the pop-out instead of toggling
@@ -1148,7 +1148,7 @@ impl App {
             }
             Message::SignatureOp(result) => self.handle_signature_op(result),
 
-            // Pop-out windows — delegated to handlers/pop_out.rs
+            // Pop-out windows - delegated to handlers/pop_out.rs
             Message::PopOut(window_id, pop_out_msg) => {
                 self.handle_pop_out_message(window_id, pop_out_msg)
             }
@@ -1221,7 +1221,7 @@ impl App {
                 let msgs = messages.clone();
                 self.handle_chat_older_loaded(msgs)
             }
-            Message::ChatOlderLoaded(_, Ok(_)) => Task::none(), // stale — different chat
+            Message::ChatOlderLoaded(_, Ok(_)) => Task::none(), // stale - different chat
             Message::ChatOlderLoaded(_, Err(e)) => {
                 log::error!("ChatOlderLoaded error: {e}");
                 Task::none()
@@ -1289,7 +1289,7 @@ impl App {
             }
             Message::GalRefreshTick => {
                 // Refresh GAL cache for all connected accounts.
-                // Currently a placeholder — the actual directory API calls
+                // Currently a placeholder - the actual directory API calls
                 // (Graph /users, Google Directory API) require provider
                 // clients. When the sync orchestrator provides account-level
                 // clients, this dispatches cache_gal_entries() per account.
@@ -1603,7 +1603,7 @@ impl App {
             ThreadListEvent::TypeaheadQuery { .. } => Task::none(),
             ThreadListEvent::TypeaheadSelected(idx) => self.handle_typeahead_select(idx),
             ThreadListEvent::MultiSelectionChanged(_count) => {
-                // Selection count changed — no action needed yet.
+                // Selection count changed - no action needed yet.
                 Task::none()
             }
             ThreadListEvent::AutoAdvance { new_index } => {
@@ -1969,7 +1969,7 @@ impl App {
             }
             SettingsEvent::PreferencesCommitted | SettingsEvent::PreferencesDiscarded => {
                 // Preferences have been committed or discarded within Settings.
-                // The live fields are already updated — no additional action needed.
+                // The live fields are already updated - no additional action needed.
                 Task::none()
             }
             SettingsEvent::DateDisplayChanged(display) => {
@@ -2112,7 +2112,7 @@ impl App {
                     log::warn!("Account deletion: body store unavailable, skipping cleanup");
                 }
 
-                // Inline image store — only delete hashes not shared with other accounts
+                // Inline image store - only delete hashes not shared with other accounts
                 if let Some(ref iis) = inline_image_store {
                     let to_delete: Vec<String> = plan
                         .data
@@ -2134,7 +2134,7 @@ impl App {
                     );
                 }
 
-                // Attachment file cache — only delete files not shared with other accounts
+                // Attachment file cache - only delete files not shared with other accounts
                 for (path, hash) in &plan.data.cached_files {
                     if plan.shared_cache_hashes.contains(hash) {
                         continue;
@@ -2230,7 +2230,7 @@ impl App {
                         load_shared_mailbox_navigation(db, aid, mid).await
                     }
                     ViewScope::PublicFolder { account_id, .. } => {
-                        // Public folders have no sub-navigation — return
+                        // Public folders have no sub-navigation - return
                         // an empty navigation state scoped to the parent account.
                         Ok(NavigationState {
                             scope: AccountScope::Single(account_id.clone()),
@@ -2330,7 +2330,7 @@ impl App {
 
         self.reading_pane.set_thread(thread);
 
-        // Public folder items aren't real threads — skip detail loading.
+        // Public folder items aren't real threads - skip detail loading.
         if matches!(self.sidebar.selected_scope, ViewScope::PublicFolder { .. }) {
             return Task::none();
         }
@@ -2617,14 +2617,14 @@ impl App {
                 state.discard_confirm_open = true;
                 return Task::none();
             }
-            // Either no content or user already confirmed — save and close
+            // Either no content or user already confirmed - save and close
             if !self.save_compose_draft_sync(id) {
                 log::warn!("Compose draft save failed, aborting window close");
                 return Task::none();
             }
         }
-        // Calendar pop-out closing — calendar becomes available in main window again.
-        // (No state change needed — mode toggle just works.)
+        // Calendar pop-out closing - calendar becomes available in main window again.
+        // (No state change needed - mode toggle just works.)
         self.pop_out_windows.remove(&id);
         iced::window::close(id)
     }

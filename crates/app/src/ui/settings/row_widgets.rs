@@ -304,7 +304,7 @@ pub(super) fn coming_soon_row<'a>(feature: &'a str) -> Element<'a, SettingsMessa
 }
 
 /// A row with a label on the left (50%) and an optional icon + slider on the right (50%).
-/// No hover effect — only direct slider interaction. The slider has a strong snap toward `default`.
+/// No hover effect - only direct slider interaction. The slider has a strong snap toward `default`.
 pub(super) fn slider_row<'a>(
     label: &'a str,
     icon: Option<iced::widget::Text<'a>>,
@@ -353,7 +353,7 @@ pub(super) fn slider_row<'a>(
 
 /// A group of mutually exclusive radio options, rendered as rows with hover effects.
 /// Each row has a radio circle on the left, label text a fixed distance away.
-/// Radio groups must always have their own `section()` — don't mix with other row types.
+/// Radio groups must always have their own `section()` - don't mix with other row types.
 pub(super) fn radio_group<'a, V>(
     options: &'a [(&'a str, V)],
     selected: Option<V>,
@@ -445,7 +445,7 @@ pub(super) fn editable_list<'a>(
             .align_y(Alignment::Center)
             .width(Length::FillPortion(1));
 
-        // ── Right half: optional toggle, menu, remove — all float right ──
+        // ── Right half: optional toggle, menu, remove - all float right ──
         let mut right_items: Vec<Element<'a, SettingsMessage>> = Vec::new();
         right_items.push(Space::new().width(Length::Fill).into());
 
@@ -521,7 +521,7 @@ pub(super) fn editable_list<'a>(
         col = col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
     }
 
-    // Add button — label centered
+    // Add button - label centered
     let add_id = id.clone();
     let add_btn = button(
         container(
@@ -566,15 +566,15 @@ pub(super) fn editable_list<'a>(
 /// The action type determines the trailing icon.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum ActionKind {
-    /// Opens an external URL — shows external_link icon.
+    /// Opens an external URL - shows external_link icon.
     Url,
-    /// In-app action or slide-in overlay — shows arrow_right icon.
+    /// In-app action or slide-in overlay - shows arrow_right icon.
     InApp,
 }
 
 /// A full-row button with optional leading icon, label + optional description,
 /// and a trailing icon indicating the action type. The entire row is the click
-/// target — no nested buttons. Follows the rule that section rows never contain buttons.
+/// target - no nested buttons. Follows the rule that section rows never contain buttons.
 pub(super) fn action_row<'a>(
     label: &'a str,
     description: Option<&'a str>,

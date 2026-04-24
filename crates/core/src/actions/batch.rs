@@ -1,4 +1,4 @@
-//! Batch action executor — groups targets by account, creates one provider
+//! Batch action executor - groups targets by account, creates one provider
 //! per account, dispatches with provider reuse. Parallel across accounts,
 //! sequential within each account.
 
@@ -23,7 +23,7 @@ const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 
 /// Execute operations across multiple threads.
 ///
-/// Each entry is `(account_id, thread_id, operation)` — per-target operations
+/// Each entry is `(account_id, thread_id, operation)` - per-target operations
 /// support mixed-value toggles and heterogeneous batches.
 ///
 /// Groups by account, creates one provider per account, dispatches sequentially
@@ -353,7 +353,7 @@ async fn op_local(
                 .map(|()| true)
         }
         MailOperation::SetPinned { to } => {
-            // Local-only action in degraded path — call the action directly
+            // Local-only action in degraded path - call the action directly
             let outcome = pin::pin(ctx, account_id, thread_id, *to).await;
             Ok(outcome.is_success())
         }

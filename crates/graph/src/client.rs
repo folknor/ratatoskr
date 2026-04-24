@@ -27,7 +27,7 @@ const RETRY_CONFIG: RetryConfig = RetryConfig {
 
 /// Per-account Microsoft Graph API client.
 ///
-/// Internally reference-counted — cloning is cheap (Arc increment).
+/// Internally reference-counted - cloning is cheap (Arc increment).
 /// All API methods take `&self`, supporting concurrent use.
 #[derive(Clone)]
 pub struct GraphClient {
@@ -116,7 +116,7 @@ impl GraphClient {
         // We need a separate ClientInner because folder_map/sync_cycle/category_lock
         // are per-mailbox, but we share the token state via Arc.
         // Since ClientInner isn't Arc-wrapped for individual fields, we clone
-        // the token state snapshot — the parent's ensure_valid_token/do_refresh
+        // the token state snapshot - the parent's ensure_valid_token/do_refresh
         // will keep the DB in sync, and the shared client will re-read on 401.
         //
         // The semaphore is shared because Graph rate limits are per-app per-user,
@@ -126,7 +126,7 @@ impl GraphClient {
                 http: self.inner.http.clone(),
                 account_id: self.inner.account_id.clone(),
                 mailbox_id: Some(mailbox_id),
-                // Token refresh works via DB — shared client gets fresh tokens
+                // Token refresh works via DB - shared client gets fresh tokens
                 // from the same account row, so copying the snapshot is fine.
                 token: RwLock::new(TokenState {
                     access_token: String::new(),
@@ -317,7 +317,7 @@ impl GraphClient {
     /// Upload a byte range to an absolute URL (for resumable upload sessions).
     ///
     /// Sends `PUT` with `Content-Range: bytes {start}-{end}/{total}` header.
-    /// The upload URL is pre-authenticated — no Bearer token needed.
+    /// The upload URL is pre-authenticated - no Bearer token needed.
     pub async fn put_bytes_range(
         &self,
         url: &str,
@@ -547,7 +547,7 @@ impl GraphClient {
             MS_TOKEN_ENDPOINT,
             &refresh_token,
             &self.inner.client_id,
-            None, // PKCE flow — no client secret
+            None, // PKCE flow - no client secret
         )
         .await?;
 
@@ -607,7 +607,7 @@ fn read_account_tokens(
         .3
         .filter(|s| !s.is_empty())
         .map(|s| crypto::decrypt_or_raw(key, &s))
-        .ok_or_else(|| "Account missing OAuth credentials — reauthorize to fix".to_string())?;
+        .ok_or_else(|| "Account missing OAuth credentials - reauthorize to fix".to_string())?;
 
     Ok((access_token, refresh_token, expires_at, client_id))
 }

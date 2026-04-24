@@ -33,7 +33,7 @@ pub enum SidebarMessage {
     ToggleMode,
     /// Right-click "Search here" on a label/folder.
     SearchHere(String),
-    /// Click a smart folder — execute its query via the unified search pipeline.
+    /// Click a smart folder - execute its query via the unified search pipeline.
     SelectSmartFolder {
         id: String,
         query: String,
@@ -58,11 +58,11 @@ pub enum SidebarEvent {
     PinnedSearchDismissed(i64),
     PinnedSearchRefreshed(i64),
     ModeToggled,
-    /// "Search here" — prefill search bar with a scope query prefix.
+    /// "Search here" - prefill search bar with a scope query prefix.
     SearchHere {
         query_prefix: String,
     },
-    /// Smart folder selected — execute its query via the unified search pipeline.
+    /// Smart folder selected - execute its query via the unified search pipeline.
     SmartFolderSelected {
         id: String,
         query: String,

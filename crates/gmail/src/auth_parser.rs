@@ -127,7 +127,7 @@ fn parse_verdict(header_value: &str, mechanism: &str) -> Option<AuthVerdict> {
     })
 }
 
-/// Parse multiple DKIM results — if any passes, use that one.
+/// Parse multiple DKIM results - if any passes, use that one.
 fn parse_dkim_verdicts(header_value: &str) -> AuthVerdict {
     let lower = header_value.to_lowercase();
     let mut verdicts = Vec::new();

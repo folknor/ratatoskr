@@ -26,7 +26,7 @@ pub fn parse_vcf(data: &[u8]) -> Result<Vec<ImportedContact>, ImportError> {
         match parse_single_vcard(block) {
             Ok(contact) => contacts.push(contact),
             Err(e) => {
-                // Log but continue — skip unparseable entries
+                // Log but continue - skip unparseable entries
                 eprintln!("Skipping unparseable vCard: {e}");
             }
         }

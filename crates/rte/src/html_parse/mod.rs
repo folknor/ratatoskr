@@ -1094,7 +1094,7 @@ mod tests {
     #[test]
     fn round_trip_list() {
         use crate::html_serialize::to_html;
-        // Parse a list, serialize it, parse again, serialize again — should be stable.
+        // Parse a list, serialize it, parse again, serialize again - should be stable.
         let html = "<ul><li>one</li><li>two</li></ul>";
         let doc = from_html(html);
         let output = to_html(&doc);
@@ -1238,7 +1238,7 @@ mod tests {
 
     #[test]
     fn image_inside_inline_wrapper_in_heading() {
-        // <img> wrapped in <a> inside a heading — must not be dropped.
+        // <img> wrapped in <a> inside a heading - must not be dropped.
         let doc = from_html(
             r#"<h1>before<a href="https://x.com"><img src="logo.png" alt="logo"></a>after</h1>"#,
         );

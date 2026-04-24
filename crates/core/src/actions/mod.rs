@@ -1,4 +1,4 @@
-//! Action service — the authoritative write path for email state mutations.
+//! Action service - the authoritative write path for email state mutations.
 //!
 //! Every mutating email action (archive, trash, star, label, etc.) flows
 //! through this module. It handles local DB mutation, provider dispatch,
@@ -47,7 +47,7 @@ pub use outcome::{ActionError, ActionOutcome, RemoteFailureKind};
 pub use permanent_delete::permanent_delete;
 pub use pin::pin;
 pub use send::{delete_draft, send_email};
-// create_provider is pub(crate) — only accessible within core, not to downstream crates.
+// create_provider is pub(crate) - only accessible within core, not to downstream crates.
 // The app must use action functions or sync_dispatch/jmap_push helpers.
 pub use snooze::{snooze, unsnooze};
 pub use spam::spam;

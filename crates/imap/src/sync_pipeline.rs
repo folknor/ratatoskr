@@ -220,7 +220,7 @@ pub(crate) async fn store_chunk(
     })
     .await?;
 
-    // 2-5. Fire-and-forget post-DB writes — all independent, run concurrently.
+    // 2-5. Fire-and-forget post-DB writes - all independent, run concurrently.
     let addr_data: Vec<ImapAddressData> = chunk
         .iter()
         .map(|c| ImapAddressData {
@@ -282,7 +282,7 @@ impl MessageAddresses for ImapAddressData {
 // ---------------------------------------------------------------------------
 
 /// Store bodies in the body store (compressed, separate DB).
-/// Fire-and-forget pattern — errors are logged but don't fail the sync.
+/// Fire-and-forget pattern - errors are logged but don't fail the sync.
 pub async fn store_bodies(body_store: &BodyStoreState, messages: &[ConvertedMessage]) {
     let bodies: Vec<store::body_store::MessageBody> = messages
         .iter()
@@ -536,8 +536,8 @@ pub struct FolderSyncState {
 
 /// Batch-update message flags from CONDSTORE CHANGEDSINCE results.
 ///
-/// Matches messages by `(account_id, imap_folder, imap_uid)` — the indexed
-/// columns — and updates `is_read` and `is_starred`. Also updates the parent
+/// Matches messages by `(account_id, imap_folder, imap_uid)` - the indexed
+/// columns - and updates `is_read` and `is_starred`. Also updates the parent
 /// thread's aggregate flags.
 pub fn apply_flag_changes(
     conn: &Connection,

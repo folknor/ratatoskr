@@ -1,7 +1,7 @@
 # Cloud Attachment Linking (OneDrive / Google Drive)
 
-**Tier**: 1 — Blocks switching from Outlook
-**Status**: ⚠️ **Partially implemented** — Google Drive upload (resumable chunked upload via Drive API v3, `drive.file` OAuth scope, sharing permissions with `anyone` or `domain` scoping, web view link retrieval) is implemented in the `gmail` crate (`crates/gmail/src/gdrive.rs`). OneDrive upload (resumable 320 KiB-aligned chunked upload via Graph API, `Ratatoskr Attachments` folder, `organization`-scoped sharing links, `referenceAttachment` creation via beta endpoint) is implemented in the `graph` crate (`crates/graph/src/onedrive.rs` and `crates/graph/src/ops.rs`). Cloud attachment orchestration logic lives in `crates/core/src/cloud_attachments.rs`. Raw reqwest is used for both providers (no SDK crate). `cloud_attachments` DB table exists (migration 39) with full CRUD. Incoming cloud link detection implemented (`detect_cloud_links()` with URL patterns for OneDrive, GDrive, Dropbox, Box — 12 tests). Metadata enrichment for OneDrive (`/shares/{encoded}/driveItem`) and GDrive (`/files/{id}`) implemented. JMAP/IMAP graceful degradation: `supports_cloud_upload()`, `large_attachment_warning()`, `LARGE_ATTACHMENT_THRESHOLD` (25 MB). **Remaining**: wiring `detect_cloud_links()` into sync pipeline, UI for cloud attachment compose flow, offline upload queue, cloud attachment cards in thread detail view.
+**Tier**: 1 - Blocks switching from Outlook
+**Status**: ⚠️ **Partially implemented** - Google Drive upload (resumable chunked upload via Drive API v3, `drive.file` OAuth scope, sharing permissions with `anyone` or `domain` scoping, web view link retrieval) is implemented in the `gmail` crate (`crates/gmail/src/gdrive.rs`). OneDrive upload (resumable 320 KiB-aligned chunked upload via Graph API, `Ratatoskr Attachments` folder, `organization`-scoped sharing links, `referenceAttachment` creation via beta endpoint) is implemented in the `graph` crate (`crates/graph/src/onedrive.rs` and `crates/graph/src/ops.rs`). Cloud attachment orchestration logic lives in `crates/core/src/cloud_attachments.rs`. Raw reqwest is used for both providers (no SDK crate). `cloud_attachments` DB table exists (migration 39) with full CRUD. Incoming cloud link detection implemented (`detect_cloud_links()` with URL patterns for OneDrive, GDrive, Dropbox, Box - 12 tests). Metadata enrichment for OneDrive (`/shares/{encoded}/driveItem`) and GDrive (`/files/{id}`) implemented. JMAP/IMAP graceful degradation: `supports_cloud_upload()`, `large_attachment_warning()`, `LARGE_ATTACHMENT_THRESHOLD` (25 MB). **Remaining**: wiring `detect_cloud_links()` into sync pipeline, UI for cloud attachment compose flow, offline upload queue, cloud attachment cards in thread detail view.
 
 ---
 
@@ -22,7 +22,7 @@
 - Permission management: uploading to OneDrive and sharing a link requires setting permissions (org-wide? specific recipients? anyone with link?). Defaulting wrong is either a security issue (too open) or a usability issue (recipient can't access).
 - Offline compose: user composes offline with a large attachment. Can't upload to OneDrive yet. Need to queue the upload and convert to link on send when connectivity returns.
 - JMAP/IMAP accounts: no cloud storage integration. Options are: (a) just send the large file if the server allows it, (b) warn the user about size limits, (c) offer a local integration with a third-party storage provider (complex, probably out of scope initially).
-- Mixed accounts in compose: user has an Exchange account and a Stalwart account. Compose defaults to Exchange sender — cloud linking works. They switch sender to Stalwart mid-compose — cloud linking no longer available. UI needs to handle this gracefully.
+- Mixed accounts in compose: user has an Exchange account and a Stalwart account. Compose defaults to Exchange sender - cloud linking works. They switch sender to Stalwart mid-compose - cloud linking no longer available. UI needs to handle this gracefully.
 
 ## Work
 
@@ -72,7 +72,7 @@ Two-phase process via upload sessions:
 
 1. **Create session**: `POST /me/drive/items/{parent-id}:/{filename}:/createUploadSession` with optional conflict behavior (`rename`, `replace`, `fail`). Returns an `uploadUrl` and `expirationDateTime`.
 
-2. **Upload fragments**: Sequential `PUT` requests to the `uploadUrl` with `Content-Range` headers. Fragment size **must be a multiple of 320 KiB** (327,680 bytes). Recommended fragment size: 5-10 MiB. Maximum per-request: 60 MiB. The `uploadUrl` is pre-authenticated — do **not** include the `Authorization` header on PUT requests.
+2. **Upload fragments**: Sequential `PUT` requests to the `uploadUrl` with `Content-Range` headers. Fragment size **must be a multiple of 320 KiB** (327,680 bytes). Recommended fragment size: 5-10 MiB. Maximum per-request: 60 MiB. The `uploadUrl` is pre-authenticated - do **not** include the `Authorization` header on PUT requests.
 
 3. **Completion**: Automatic when the last byte range is received (`deferCommit: false`, the default). Returns the completed `driveItem`. Sessions expire if no fragments are received within the `expirationDateTime` window; each successful fragment upload extends the expiration.
 
@@ -103,13 +103,13 @@ Two-phase process via upload sessions:
 | `organization` | Anyone in the tenant | OneDrive for Business / SharePoint only |
 | `users` | Specific people only | OneDrive for Business / SharePoint only |
 
-If `scope` is omitted, the organization default is used. For enterprise accounts this is typically `organization` — a safe default for Ratatoskr since most enterprise admins disable anonymous links anyway.
+If `scope` is omitted, the organization default is used. For enterprise accounts this is typically `organization` - a safe default for Ratatoskr since most enterprise admins disable anonymous links anyway.
 
 **Response**: A `Permission` resource with `link.webUrl` containing the shareable URL (e.g., `https://1drv.ms/...` or `https://contoso-my.sharepoint.com/...`).
 
 Links do not expire unless an organization policy enforces it. The `expirationDateTime` property is optional.
 
-**Required scopes**: Same as upload — `Files.ReadWrite`.
+**Required scopes**: Same as upload - `Files.ReadWrite`.
 
 #### Size thresholds
 
@@ -158,13 +158,13 @@ Three upload types, all via `POST https://www.googleapis.com/upload/drive/v3/fil
 }
 ```
 
-For email cloud attachments, the typical permission is `{ "role": "reader", "type": "anyone" }` — anyone with the link can view. For enterprise Google Workspace, `{ "role": "reader", "type": "domain", "domain": "company.com" }` restricts to the organization.
+For email cloud attachments, the typical permission is `{ "role": "reader", "type": "anyone" }` - anyone with the link can view. For enterprise Google Workspace, `{ "role": "reader", "type": "domain", "domain": "company.com" }` restricts to the organization.
 
 **Required scope**: `drive.file` or `drive` (same as for upload).
 
 #### Gmail's native behavior
 
-When a Gmail user attaches a file > 25 MB, Gmail web UI prompts to upload to Google Drive and insert a link. This is a **client-side behavior** — the Gmail API itself does not automatically convert large attachments to Drive links. To replicate this in Ratatoskr, we must handle it ourselves: detect the attachment size, upload to Drive via the Drive API, create a sharing permission, and insert the link into the message body.
+When a Gmail user attaches a file > 25 MB, Gmail web UI prompts to upload to Google Drive and insert a link. This is a **client-side behavior** - the Gmail API itself does not automatically convert large attachments to Drive links. To replicate this in Ratatoskr, we must handle it ourselves: detect the attachment size, upload to Drive via the Drive API, create a sharing permission, and insert the link into the message body.
 
 The Gmail API upload limit for inline attachments is 25 MB for the simple upload method and 35 MB total message size via the resumable upload method.
 
@@ -182,9 +182,9 @@ SharePoint document libraries use the **same Graph API `driveItem` surface** as 
 
 Upload, sharing links, and permissions work identically. A `driveItem` in SharePoint is the same resource type as in OneDrive.
 
-**For incoming mail**: SharePoint links in email bodies use domains like `{tenant}.sharepoint.com` (e.g., `contoso.sharepoint.com/sites/...`). These are the same patterns we need to detect for OneDrive for Business links — OneDrive for Business URLs use `{tenant}-my.sharepoint.com/personal/...`.
+**For incoming mail**: SharePoint links in email bodies use domains like `{tenant}.sharepoint.com` (e.g., `contoso.sharepoint.com/sites/...`). These are the same patterns we need to detect for OneDrive for Business links - OneDrive for Business URLs use `{tenant}-my.sharepoint.com/personal/...`.
 
-**For outgoing mail**: We only need to support uploading to the user's OneDrive (`/me/drive`). Supporting upload to arbitrary SharePoint document libraries would require site enumeration and selection UI — out of scope for initial implementation, but the API surface is identical if we add it later.
+**For outgoing mail**: We only need to support uploading to the user's OneDrive (`/me/drive`). Supporting upload to arbitrary SharePoint document libraries would require site enumeration and selection UI - out of scope for initial implementation, but the API surface is identical if we add it later.
 
 ---
 
@@ -223,7 +223,7 @@ Content-Type: application/json
 
 **Practical implications**:
 
-1. **Reading reference attachments**: We can detect them via v1.0 GET — they have `@odata.type: "#microsoft.graph.referenceAttachment"`. But v1.0 lacks `sourceUrl`, so we cannot retrieve the cloud file URL without using the beta endpoint.
+1. **Reading reference attachments**: We can detect them via v1.0 GET - they have `@odata.type: "#microsoft.graph.referenceAttachment"`. But v1.0 lacks `sourceUrl`, so we cannot retrieve the cloud file URL without using the beta endpoint.
 
 2. **Creating reference attachments**: Requires beta endpoint. This is how Outlook natively creates cloud attachments. We should use this when sending from Exchange accounts rather than inserting raw URLs into the message body. The recipient's Outlook will render them as proper attachment chips.
 
@@ -235,7 +235,7 @@ Content-Type: application/json
 
 ### Gmail Drive Attachment Behavior
 
-Gmail does not have an equivalent of `referenceAttachment`. When a user inserts a Google Drive link in Gmail web, the result is simply **an HTML link in the message body** — there is no special MIME part or metadata structure. Gmail's UI parses the message body to detect Drive links and renders them as attachment chips on the receiving end.
+Gmail does not have an equivalent of `referenceAttachment`. When a user inserts a Google Drive link in Gmail web, the result is simply **an HTML link in the message body** - there is no special MIME part or metadata structure. Gmail's UI parses the message body to detect Drive links and renders them as attachment chips on the receiving end.
 
 This means:
 
@@ -249,7 +249,7 @@ This means:
 
 ### JMAP Blob Upload
 
-JMAP (RFC 8620) has a built-in blob upload mechanism. The JMAP session object advertises `maxSizeUpload` — the maximum blob size the server accepts, in octets.
+JMAP (RFC 8620) has a built-in blob upload mechanism. The JMAP session object advertises `maxSizeUpload` - the maximum blob size the server accepts, in octets.
 
 **Stalwart configuration** (the primary JMAP server we target):
 
@@ -268,7 +268,7 @@ The JMAP `Session` resource reports `maxSizeUpload` in `urn:ietf:params:jmap:cor
 
 1. Check `maxSizeUpload` from the JMAP session (or fall back to a conservative 25 MB for IMAP).
 2. Warn the user if the attachment exceeds the limit.
-3. Do **not** offer "upload to cloud" for JMAP/IMAP accounts in v1 — there is no user-associated cloud storage to upload to. A future extension could integrate with user-configured Nextcloud, but that is out of scope.
+3. Do **not** offer "upload to cloud" for JMAP/IMAP accounts in v1 - there is no user-associated cloud storage to upload to. A future extension could integrate with user-configured Nextcloud, but that is out of scope.
 
 ---
 
@@ -289,10 +289,10 @@ Users receive emails containing cloud storage links from other people's clients.
 
 #### Implementation approach
 
-A `regex::RegexSet` compiled once at startup, matching against `href` attributes extracted from the HTML body by the existing `mail-parser` / HTML sanitizer pipeline. We are not scanning raw text — we scan parsed `<a>` tags only, which avoids false positives on partial URL matches in body text.
+A `regex::RegexSet` compiled once at startup, matching against `href` attributes extracted from the HTML body by the existing `mail-parser` / HTML sanitizer pipeline. We are not scanning raw text - we scan parsed `<a>` tags only, which avoids false positives on partial URL matches in body text.
 
 ```rust
-// Conceptual — compile once, match many
+// Conceptual - compile once, match many
 let cloud_link_patterns = RegexSet::new(&[
     r"https?://1drv\.ms/",
     r"https?://onedrive\.live\.com/",
@@ -318,7 +318,7 @@ When a cloud link is detected, we optionally fetch metadata to display a rich at
 
 **Fallback**: If no authenticated account is available or the API call fails, display the link text (or filename extracted from URL path) with a generic cloud icon. The user can still click to open in browser.
 
-**Important caveat about Outlook behavior**: As of 2024, Outlook on the web and new Outlook for Windows insert cloud attachments as **inline shared links in the HTML body** rather than as `referenceAttachment` objects. This means even for Exchange-sourced mail, link detection in the HTML body is necessary — we cannot rely solely on the Graph attachment API to find cloud attachments.
+**Important caveat about Outlook behavior**: As of 2024, Outlook on the web and new Outlook for Windows insert cloud attachments as **inline shared links in the HTML body** rather than as `referenceAttachment` objects. This means even for Exchange-sourced mail, link detection in the HTML body is necessary - we cannot rely solely on the Graph attachment API to find cloud attachments.
 
 ---
 
@@ -333,7 +333,7 @@ When a cloud link is detected, we optionally fetch metadata to display a rich at
 
 **Verdict**: Neither crate is a clear win. `graph-rs-sdk` is comprehensive but heavy, has build issues, and pulls in webview dependencies we do not want (Ratatoskr uses iced, not webview). `onedrive-api` is lighter but does not clearly cover the `createLink` endpoint we need for sharing.
 
-**Recommendation**: Use **raw reqwest** against the Graph API, same as our existing Exchange provider. We already have Graph API authentication, token refresh, and request infrastructure in the `graph` crate (`crates/graph/`). Adding OneDrive upload + sharing is a handful of endpoints — the overhead of an SDK crate is not justified. The upload session flow is ~100 lines of Rust (create session, loop uploading chunks, handle resume). The sharing link call is a single POST.
+**Recommendation**: Use **raw reqwest** against the Graph API, same as our existing Exchange provider. We already have Graph API authentication, token refresh, and request infrastructure in the `graph` crate (`crates/graph/`). Adding OneDrive upload + sharing is a handful of endpoints - the overhead of an SDK crate is not justified. The upload session flow is ~100 lines of Rust (create session, loop uploading chunks, handle resume). The sharing link call is a single POST.
 
 #### Google Drive
 
@@ -342,7 +342,7 @@ When a cloud link is detected, we optionally fetch metadata to display a rich at
 | [`google-drive3`](https://crates.io/crates/google-drive3) | 7.0.0+20251218 | 1.6M total, 352K recent | Yes (auto-generated) | Official Google-generated binding. Covers all Drive v3 endpoints. Part of the `google-apis-rs` project by Sebastian Thiel (Byron). Auto-generated from the API discovery document. |
 | [`google-drive`](https://crates.io/crates/google-drive) | 0.10.0 | 224K total, 770 recent | Low activity | Opinionated wrapper. Lower-level than google-drive3. |
 
-**`google-drive3` assessment**: This is the only crate worth considering. 1.6M downloads proves real-world usage. Auto-generated means API coverage is complete and stays current. The downside is typical of Google's generated SDKs — verbose API, large compile times, and the generated code can be awkward to use. It depends on `hyper` and `yup-oauth2` which may duplicate our existing OAuth infrastructure.
+**`google-drive3` assessment**: This is the only crate worth considering. 1.6M downloads proves real-world usage. Auto-generated means API coverage is complete and stays current. The downside is typical of Google's generated SDKs - verbose API, large compile times, and the generated code can be awkward to use. It depends on `hyper` and `yup-oauth2` which may duplicate our existing OAuth infrastructure.
 
 **Recommendation**: Evaluate `google-drive3` for the Drive upload + permission flow. If the dependency tree conflicts with our existing reqwest-based Gmail provider, fall back to raw reqwest against the Drive REST API (same pattern as OneDrive). The Drive API surface we need is small: `files.create` (upload), `permissions.create` (sharing), `files.get` (metadata for incoming link enrichment).
 
@@ -350,7 +350,7 @@ When a cloud link is detected, we optionally fetch metadata to display a rich at
 
 ### What Other Clients Do
 
-#### Thunderbird — FileLink
+#### Thunderbird - FileLink
 
 Thunderbird's cloud attachment system is called **FileLink**. It is a plugin architecture:
 
@@ -369,10 +369,10 @@ eM Client has the most mature cloud attachment implementation among third-party 
 - Creates a dedicated folder (`eM Client Attachments`) in the user's cloud storage.
 - Right-click any local attachment to "Upload to cloud storage" and convert to a link.
 - Supports password protection and expiration dates on download links.
-- Configurable via Settings > Mail > Attachments — user adds cloud providers with OAuth consent.
+- Configurable via Settings > Mail > Attachments - user adds cloud providers with OAuth consent.
 - Size threshold is configurable per provider.
 
-**Key takeaway**: eM Client's model of a dedicated attachments folder in cloud storage is a good UX pattern — it keeps uploaded attachments organized and easy to find/clean up. We should adopt this: create a `Ratatoskr Attachments` folder in OneDrive / Google Drive on first use.
+**Key takeaway**: eM Client's model of a dedicated attachments folder in cloud storage is a good UX pattern - it keeps uploaded attachments organized and easy to find/clean up. We should adopt this: create a `Ratatoskr Attachments` folder in OneDrive / Google Drive on first use.
 
 #### Mailspring
 
@@ -422,9 +422,9 @@ CREATE INDEX idx_cloud_attachments_status ON cloud_attachments(upload_status)
     WHERE upload_status IN ('pending', 'uploading');
 ```
 
-This table lives in the main `ratatoskr.db` (not in `bodies.db` — cloud attachment metadata is small and queried alongside message metadata).
+This table lives in the main `ratatoskr.db` (not in `bodies.db` - cloud attachment metadata is small and queried alongside message metadata).
 
-The `upload_session_url` is transient — it is only valid during an active upload session and should be cleared on app restart (sessions expire server-side anyway). On restart, any `uploading` status entries should be reset to `pending` for retry.
+The `upload_session_url` is transient - it is only valid during an active upload session and should be cleared on app restart (sessions expire server-side anyway). On restart, any `uploading` status entries should be reset to `pending` for retry.
 
 ---
 
@@ -475,23 +475,23 @@ When the user composes offline with a large attachment destined for cloud upload
 
 ### Recommendations
 
-#### Phase 1: OneDrive for Exchange accounts (highest value) — ✅ upload done
+#### Phase 1: OneDrive for Exchange accounts (highest value) - ✅ upload done
 
 ~~This is the Tier 1 blocker. Enterprise Outlook users constantly send and receive OneDrive/SharePoint links.~~
 
-1. **Outgoing**: ✅ Upload via Graph API resumable upload to `Ratatoskr Attachments` folder is implemented (`crates/graph/src/onedrive.rs`). Creates `organization`-scoped `view` sharing links via `createLink`. Creates `referenceAttachment` on draft messages via the beta endpoint (`crates/graph/src/ops.rs`). Uses raw reqwest against Graph API — no SDK crate.
+1. **Outgoing**: ✅ Upload via Graph API resumable upload to `Ratatoskr Attachments` folder is implemented (`crates/graph/src/onedrive.rs`). Creates `organization`-scoped `view` sharing links via `createLink`. Creates `referenceAttachment` on draft messages via the beta endpoint (`crates/graph/src/ops.rs`). Uses raw reqwest against Graph API - no SDK crate.
 
 2. **Incoming**: ❌ Not started. Detect OneDrive/SharePoint URLs in HTML body via regex. Fetch `driveItem` metadata via the Graph sharing API for enriched display. Fall back to link text + generic icon.
 
 3. **Threshold**: ❌ Not started. Default 10 MB, configurable per account. Prompt user on attach: "Upload to OneDrive and share as link?" with a "Always do this for files over X MB" checkbox.
 
-#### Phase 2: Google Drive for Gmail accounts — ✅ upload done
+#### Phase 2: Google Drive for Gmail accounts - ✅ upload done
 
-1. **Outgoing**: ✅ Upload via resumable chunked upload to Drive is implemented (`crates/gmail/src/gdrive.rs`). Creates sharing permissions with `anyone` or `domain` scoping. Retrieves web view link for insertion into message body. Uses raw reqwest — `google-drive3` crate was not needed. The `drive.file` OAuth scope has been added to the Google OAuth flow (`crates/core/src/oauth.rs`).
+1. **Outgoing**: ✅ Upload via resumable chunked upload to Drive is implemented (`crates/gmail/src/gdrive.rs`). Creates sharing permissions with `anyone` or `domain` scoping. Retrieves web view link for insertion into message body. Uses raw reqwest - `google-drive3` crate was not needed. The `drive.file` OAuth scope has been added to the Google OAuth flow (`crates/core/src/oauth.rs`).
 
 2. **Incoming**: ❌ Not started. Detect `drive.google.com` / `docs.google.com` URLs. Fetch file metadata via Drive API for enrichment.
 
-3. ~~**Scope**: Use `drive.file` — requires adding this scope to our existing Gmail OAuth flow.~~ ✅ Done.
+3. ~~**Scope**: Use `drive.file` - requires adding this scope to our existing Gmail OAuth flow.~~ ✅ Done.
 
 #### Phase 3: Incoming link detection for all providers
 

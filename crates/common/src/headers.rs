@@ -5,7 +5,7 @@
 /// If the header already exists or no `From:` address is found, returns the
 /// bytes unchanged.
 pub fn inject_read_receipt_header(raw: &[u8]) -> Vec<u8> {
-    // Don't add if already present — only check the header block (before
+    // Don't add if already present - only check the header block (before
     // the \r\n\r\n separator) to avoid false positives from body content.
     let raw_str = String::from_utf8_lossy(raw);
     let header_block = raw_str

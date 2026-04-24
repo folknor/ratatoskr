@@ -3,7 +3,7 @@ use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 
 /// Snooze a single thread: remove from inbox, set snooze timestamp.
-/// Local-only by design — no provider has a universal snooze equivalent.
+/// Local-only by design - no provider has a universal snooze equivalent.
 pub async fn snooze(
     ctx: &ActionContext,
     account_id: &str,

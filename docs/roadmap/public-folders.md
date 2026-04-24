@@ -1,7 +1,7 @@
 # Public Folders
 
-**Tier**: 1 — Blocks switching from Outlook
-**Status**: 🟡 **In progress** — EWS SOAP client implemented in `crates/graph/src/ews/` (FindFolder, GetFolder, FindItem, GetItem, CreateItem), PR_REPLICA_LIST decoder done, EffectiveRights parsing done. Autodiscover routing implemented in `crates/graph/src/autodiscover.rs`. Offline sync for pinned folders implemented in `crates/graph/src/public_folder_sync.rs`. IMAP NAMESPACE public folders implemented in `crates/imap/src/public_folders.rs`. DB schema in place (`crates/db/`). **Sidebar integration done (2026-03-22)**: `PinnedPublicFolder` type, `Db::get_pinned_public_folders()` query, "PUBLIC FOLDERS" section in sidebar with folder icon + unread count, loaded at boot. Remaining: thread loading on public folder selection, public folder browser (lazy-load tree for browsing/pinning), reply/post wiring.
+**Tier**: 1 - Blocks switching from Outlook
+**Status**: 🟡 **In progress** - EWS SOAP client implemented in `crates/graph/src/ews/` (FindFolder, GetFolder, FindItem, GetItem, CreateItem), PR_REPLICA_LIST decoder done, EffectiveRights parsing done. Autodiscover routing implemented in `crates/graph/src/autodiscover.rs`. Offline sync for pinned folders implemented in `crates/graph/src/public_folder_sync.rs`. IMAP NAMESPACE public folders implemented in `crates/imap/src/public_folders.rs`. DB schema in place (`crates/db/`). **Sidebar integration done (2026-03-22)**: `PinnedPublicFolder` type, `Db::get_pinned_public_folders()` query, "PUBLIC FOLDERS" section in sidebar with folder icon + unread count, loaded at boot. Remaining: thread loading on public folder selection, public folder browser (lazy-load tree for browsing/pinning), reply/post wiring.
 
 ---
 
@@ -20,11 +20,11 @@
 ## Pain points
 
 - **Graph API gaps**: public folder access via Graph is limited compared to EWS. Some operations (creating items in public folders, managing permissions) may require falling back to EWS, which Microsoft is also trying to deprecate. Moving target.
-- **Hierarchy depth**: public folder trees can be deeply nested — 10+ levels. Orgs use them as filing systems, knowledge bases, shared calendars, even discussion forums. The folder browser UI must handle deep hierarchies efficiently (lazy-load children, don't fetch the entire tree upfront).
+- **Hierarchy depth**: public folder trees can be deeply nested - 10+ levels. Orgs use them as filing systems, knowledge bases, shared calendars, even discussion forums. The folder browser UI must handle deep hierarchies efficiently (lazy-load children, don't fetch the entire tree upfront).
 - **Volume**: a public folder can contain tens of thousands of items. Same scale challenges as personal mailboxes, but multiplied by the number of public folders the user accesses.
 - **Mixed content types**: public folders can contain emails, calendar items, contacts, tasks, notes, and custom forms. For an email client, focus on mail-enabled public folders (which receive email) and email item folders. Ignore calendar/contact/task public folders initially.
 - **Permissions**: public folder permissions are a separate system from shared mailbox delegation. Roles include Owner, PublishingEditor, Editor, PublishingAuthor, Author, NonEditingAuthor, Reviewer, Contributor, None. The client must check and respect these per-folder.
-- **Favorites**: Outlook lets users "favorite" specific public folders so they appear in the sidebar. Need a similar mechanism — the full public folder tree is too large to display by default.
+- **Favorites**: Outlook lets users "favorite" specific public folders so they appear in the sidebar. Need a similar mechanism - the full public folder tree is too large to display by default.
 - **Offline sync**: do not sync public folders by default. Only sync favorited/pinned public folders, and even then with configurable depth. A full public folder sync could be enormous.
 - **Organizational inertia**: the reason these matter is that many enterprise customers have decades of institutional knowledge filed in public folders. "Where's the vendor agreement template?" "It's in Public Folders > Legal > Templates > Vendor." This is real workflow that can't be dismissed.
 
@@ -82,7 +82,7 @@ Three scenarios, in order of likelihood:
 2. **Microsoft adds public folder support to Graph or the Admin API** before October 2026 (low probability but possible under pressure).
 3. **EWS is actually blocked October 2026** (possible but would break every third-party client's public folder access simultaneously, triggering massive enterprise backlash).
 
-**Strategy**: Build EWS-based public folder support now. It works today and will work for at least the next 6+ months. If EWS is actually blocked, public folders become inaccessible to all non-Outlook clients simultaneously — this becomes Microsoft's problem, not ours. If they extend the deadline or add Graph support, we adapt.
+**Strategy**: Build EWS-based public folder support now. It works today and will work for at least the next 6+ months. If EWS is actually blocked, public folders become inaccessible to all non-Outlook clients simultaneously - this becomes Microsoft's problem, not ours. If they extend the deadline or add Graph support, we adapt.
 
 #### On-premises Exchange
 
@@ -119,12 +119,12 @@ EWS provides comprehensive public folder access. The relevant operations:
 
 #### Not supported for public folders
 
-- `SyncFolderHierarchy` — cannot use delta sync for the folder tree. Must use recursive `FindFolder`.
-- `SyncFolderItems` — cannot use delta sync for folder contents. Must use `FindItem` with date filters or change tracking.
-- `CopyFolder` — not supported in Exchange 2013+. Workaround: `CreateFolder` + `CopyItems`.
-- `EmptyFolder` — not supported in Exchange 2013+. Workaround: `FindItem` + `DeleteItem`.
+- `SyncFolderHierarchy` - cannot use delta sync for the folder tree. Must use recursive `FindFolder`.
+- `SyncFolderItems` - cannot use delta sync for folder contents. Must use `FindItem` with date filters or change tracking.
+- `CopyFolder` - not supported in Exchange 2013+. Workaround: `CreateFolder` + `CopyItems`.
+- `EmptyFolder` - not supported in Exchange 2013+. Workaround: `FindItem` + `DeleteItem`.
 
-The lack of `SyncFolderItems` is the most significant limitation. It means there's no efficient change-detection mechanism for public folder contents — the client must poll with `FindItem` and compare against local state.
+The lack of `SyncFolderItems` is the most significant limitation. It means there's no efficient change-detection mechanism for public folder contents - the client must poll with `FindItem` and compare against local state.
 
 ---
 
@@ -193,7 +193,7 @@ This is significantly more complex than personal mailbox access, which uses a si
 Thunderbird (Mozilla) has built a Rust EWS crate: [thunderbird/ews-rs](https://github.com/thunderbird/ews-rs). Key facts:
 
 - **License**: MPL 2.0 (compatible with our use).
-- **Architecture**: Built on `xml_struct` (custom derive macros) + `quick_xml`. Not serde-based — they found serde's data model doesn't map well to XML namespaces, which EWS requires.
+- **Architecture**: Built on `xml_struct` (custom derive macros) + `quick_xml`. Not serde-based - they found serde's data model doesn't map well to XML namespaces, which EWS requires.
 - **Maturity**: ~73 commits as of March 2026. Active development. Thunderbird 145 (November 2025) shipped native Exchange support using this crate.
 - **Scope**: Focuses on mail operations (the operations Thunderbird needs). Does not appear to cover public folder-specific operations.
 - **Issues**: Bug reports go to Mozilla's Bugzilla, not GitHub Issues.
@@ -218,7 +218,7 @@ Thunderbird (Mozilla) has built a Rust EWS crate: [thunderbird/ews-rs](https://g
 
 #### Authentication
 
-EWS in Exchange Online requires OAuth 2.0. Basic Auth is fully deprecated. Our existing OAuth flow for Graph can be reused — same Azure AD app registration, same tokens. The EWS endpoint (`https://outlook.office365.com/EWS/Exchange.asmx`) accepts the same OAuth bearer tokens. The required scope is `https://outlook.office365.com/EWS.AccessAsUser.All` (delegated) — this must be added to the app registration.
+EWS in Exchange Online requires OAuth 2.0. Basic Auth is fully deprecated. Our existing OAuth flow for Graph can be reused - same Azure AD app registration, same tokens. The EWS endpoint (`https://outlook.office365.com/EWS/Exchange.asmx`) accepts the same OAuth bearer tokens. The required scope is `https://outlook.office365.com/EWS.AccessAsUser.All` (delegated) - this must be added to the app registration.
 
 ---
 
@@ -310,9 +310,9 @@ Clients discover namespaces via NAMESPACE, then LIST folders under each prefix.
 
 #### Implementation in async-imap
 
-`async-imap` has no built-in NAMESPACE support. Same as IMAP ACL — use `Session::run_command_and_check_ok()` with raw command strings and custom response parsing. The NAMESPACE response format is simple (S-expression-like). ~50-80 lines of parsing code.
+`async-imap` has no built-in NAMESPACE support. Same as IMAP ACL - use `Session::run_command_and_check_ok()` with raw command strings and custom response parsing. The NAMESPACE response format is simple (S-expression-like). ~50-80 lines of parsing code.
 
-Once namespaces are discovered, folders under public/shared prefixes can be listed and accessed with standard IMAP LIST/SELECT/FETCH commands. The existing IMAP provider code should work with minimal changes — the difference is the folder path prefix, not the operations.
+Once namespaces are discovered, folders under public/shared prefixes can be listed and accessed with standard IMAP LIST/SELECT/FETCH commands. The existing IMAP provider code should work with minimal changes - the difference is the folder path prefix, not the operations.
 
 #### Practical value
 
@@ -333,7 +333,7 @@ struct PublicFolder {
     folder_class: String,               // "IPF.Note", "IPF.Contact", etc.
     total_count: u32,                   // Server-reported item count
     unread_count: u32,
-    content_mailbox_guid: Option<String>, // PR_REPLICA_LIST — which server has content
+    content_mailbox_guid: Option<String>, // PR_REPLICA_LIST - which server has content
     effective_rights: EffectiveRights,   // Cached from last fetch
     children_loaded: bool,              // Have we fetched children yet?
     last_hierarchy_sync: Option<i64>,   // Timestamp
@@ -363,10 +363,10 @@ struct PublicFolderPin {
 Public folders must be stored in separate tables from personal mailbox folders. They have different ID spaces, different sync mechanisms, different permission models, and different routing requirements. The personal mailbox uses Graph delta sync; public folders use EWS FindItem polling. Mixing them in the same folder table would create confusion.
 
 Recommended tables:
-- `public_folders` — hierarchy cache
-- `public_folder_items` — synced items from pinned folders
-- `public_folder_pins` — user's favorited folders + sync settings
-- `public_folder_sync_state` — per-folder sync cursors (last-seen item timestamp, since there's no delta token)
+- `public_folders` - hierarchy cache
+- `public_folder_items` - synced items from pinned folders
+- `public_folder_pins` - user's favorited folders + sync settings
+- `public_folder_sync_state` - per-folder sync cursors (last-seen item timestamp, since there's no delta token)
 
 #### IMAP shared namespace folders
 
@@ -384,7 +384,7 @@ Public folder trees can contain thousands of folders with millions of items acro
 
 1. **Initial sync**: `FindItem` with `DateTimeReceived >= (now - sync_depth_days)`, sorted descending. Page through results. Store items in `public_folder_items`.
 2. **Incremental sync**: `FindItem` with `DateTimeReceived >= last_sync_timestamp`. Compare returned items against local cache. Handle creates, updates (match by ItemId + ChangeKey), and deletes (items present locally but absent from server within the sync window).
-3. **Poll interval**: Longer than personal mailbox. Default 5-10 minutes for pinned folders. No push notifications — EWS streaming notifications work for personal mailboxes but are unreliable for public folders across content mailboxes.
+3. **Poll interval**: Longer than personal mailbox. Default 5-10 minutes for pinned folders. No push notifications - EWS streaming notifications work for personal mailboxes but are unreliable for public folders across content mailboxes.
 
 #### Hierarchy sync
 
@@ -413,7 +413,7 @@ Thunderbird 145 (November 2025) shipped native Exchange support via EWS built in
 
 Thunderbird's `ews-rs` crate (MPL 2.0) provides the EWS type system and XML serialization infrastructure. It focuses on the operations Thunderbird needs for personal mail. Public folder operations (FindFolder on `publicfoldersroot`, `PR_REPLICA_LIST` handling, content mailbox routing) would need to be added.
 
-**Relevance**: Thunderbird is in the same position as Ratatoskr — EWS-dependent for public folders, with no Graph alternative. Their approach is to build EWS support incrementally, starting with personal mail. Public folders are on their roadmap but not yet implemented.
+**Relevance**: Thunderbird is in the same position as Ratatoskr - EWS-dependent for public folders, with no Graph alternative. Their approach is to build EWS support incrementally, starting with personal mail. Public folders are on their roadmap but not yet implemented.
 
 ---
 
@@ -432,7 +432,7 @@ Thunderbird's `ews-rs` crate (MPL 2.0) provides the EWS type system and XML seri
 
 Microsoft pushes M365 Groups as the replacement for public folders. Migration tooling exists (`New-PublicFolderMigrationRequest`). But M365 Groups:
 
-- Are flat (no hierarchy) — public folders are deeply hierarchical.
+- Are flat (no hierarchy) - public folders are deeply hierarchical.
 - Have different permission models.
 - Don't support the "shared filing cabinet" metaphor that enterprises rely on.
 - Require per-group management overhead that admins resist at scale.
@@ -449,18 +449,18 @@ Public folders will exist in Exchange Online for years to come. Microsoft cannot
 
 | Area | Difficulty | Impact | Priority | Status |
 |---|---|---|---|---|
-| Minimal EWS client (quick-xml + reqwest) | Medium | Critical (enables everything) | P0 | ✅ Done — `crates/graph/src/ews/` (~1600 lines, 4 modules). FindFolder, GetFolder, FindItem, GetItem, CreateItem with full XML request/response parsing. |
-| EWS OAuth token acquisition (reuse existing flow) | Low | Critical | P0 | ✅ Done — reuses existing Graph OAuth bearer tokens. |
-| PR_REPLICA_LIST decoding | Medium | Medium (correctness) | P1 | ✅ Done — `decode_replica_list()` extracts content mailbox GUIDs from binary extended property. |
-| EffectiveRights permission checking | Low | High | P1 | ✅ Done — `EwsEffectiveRights` struct parsed from FindFolder/GetFolder responses. |
-| Autodiscover for public folder routing | Medium | Critical | P0 | ✅ Done — `crates/graph/src/autodiscover.rs` (~600 lines). `discover_public_folder_routing()` for hierarchy headers, `discover_content_mailbox()` for content routing, `construct_replica_smtp()` for GUID-to-SMTP. |
-| FindFolder hierarchy browsing (lazy-load) | Medium | Critical | P0 | 🟡 API ready — FindFolder operation implemented, `browse_public_folders()` in `crates/graph/src/public_folder_sync.rs`. DB caching via `public_folders` table. No lazy-load UI yet. |
-| FindItem for folder contents | Medium | Critical | P0 | ✅ Done — FindItem with paging implemented. `sync_pinned_public_folder()` and `sync_all_pinned_folders()` in `crates/graph/src/public_folder_sync.rs` handle sync loop with local storage in `public_folder_items` table. |
-| Pin/favorite folders to sidebar | Low | Critical for UX | P0 | ✅ Done — Backend: `pin_public_folder()` / `unpin_public_folder()`. Sidebar: "PUBLIC FOLDERS" section renders pinned folders with unread counts, loaded at boot (2026-03-22). |
-| Offline sync for pinned folders | Medium-High | High | P1 | ✅ Done — `crates/graph/src/public_folder_sync.rs` (~900 lines). Timestamp-based polling, deletion scan throttled to 1hr intervals, content routing cache in `public_folder_content_routing` table. |
-| Mail-enabled folder reply/forward | Medium | High | P1 | 🟡 API ready — CreateItem operation implemented. |
-| CreateItem (post to public folder) | Low | Medium | P2 | 🟡 API ready — CreateItem operation implemented. |
-| IMAP NAMESPACE discovery | Low | Low-Medium (self-hosted only) | P2 | ✅ Done — `crates/imap/src/public_folders.rs` (~800 lines). `discover_imap_public_folders()` uses NAMESPACE + LIST, `check_folder_rights()` uses MYRIGHTS (RFC 4314). |
-| IMAP shared namespace folder access | Low | Low-Medium | P2 | ✅ Done — `sync_imap_public_folder()` in `crates/imap/src/public_folders.rs`. Bridges to provider-agnostic `public_folders` DB table. |
+| Minimal EWS client (quick-xml + reqwest) | Medium | Critical (enables everything) | P0 | ✅ Done - `crates/graph/src/ews/` (~1600 lines, 4 modules). FindFolder, GetFolder, FindItem, GetItem, CreateItem with full XML request/response parsing. |
+| EWS OAuth token acquisition (reuse existing flow) | Low | Critical | P0 | ✅ Done - reuses existing Graph OAuth bearer tokens. |
+| PR_REPLICA_LIST decoding | Medium | Medium (correctness) | P1 | ✅ Done - `decode_replica_list()` extracts content mailbox GUIDs from binary extended property. |
+| EffectiveRights permission checking | Low | High | P1 | ✅ Done - `EwsEffectiveRights` struct parsed from FindFolder/GetFolder responses. |
+| Autodiscover for public folder routing | Medium | Critical | P0 | ✅ Done - `crates/graph/src/autodiscover.rs` (~600 lines). `discover_public_folder_routing()` for hierarchy headers, `discover_content_mailbox()` for content routing, `construct_replica_smtp()` for GUID-to-SMTP. |
+| FindFolder hierarchy browsing (lazy-load) | Medium | Critical | P0 | 🟡 API ready - FindFolder operation implemented, `browse_public_folders()` in `crates/graph/src/public_folder_sync.rs`. DB caching via `public_folders` table. No lazy-load UI yet. |
+| FindItem for folder contents | Medium | Critical | P0 | ✅ Done - FindItem with paging implemented. `sync_pinned_public_folder()` and `sync_all_pinned_folders()` in `crates/graph/src/public_folder_sync.rs` handle sync loop with local storage in `public_folder_items` table. |
+| Pin/favorite folders to sidebar | Low | Critical for UX | P0 | ✅ Done - Backend: `pin_public_folder()` / `unpin_public_folder()`. Sidebar: "PUBLIC FOLDERS" section renders pinned folders with unread counts, loaded at boot (2026-03-22). |
+| Offline sync for pinned folders | Medium-High | High | P1 | ✅ Done - `crates/graph/src/public_folder_sync.rs` (~900 lines). Timestamp-based polling, deletion scan throttled to 1hr intervals, content routing cache in `public_folder_content_routing` table. |
+| Mail-enabled folder reply/forward | Medium | High | P1 | 🟡 API ready - CreateItem operation implemented. |
+| CreateItem (post to public folder) | Low | Medium | P2 | 🟡 API ready - CreateItem operation implemented. |
+| IMAP NAMESPACE discovery | Low | Low-Medium (self-hosted only) | P2 | ✅ Done - `crates/imap/src/public_folders.rs` (~800 lines). `discover_imap_public_folders()` uses NAMESPACE + LIST, `check_folder_rights()` uses MYRIGHTS (RFC 4314). |
+| IMAP shared namespace folder access | Low | Low-Medium | P2 | ✅ Done - `sync_imap_public_folder()` in `crates/imap/src/public_folders.rs`. Bridges to provider-agnostic `public_folders` DB table. |
 
 The backend critical path is complete: EWS client, Autodiscover routing, FindFolder browsing, FindItem sync, pin/unpin, offline sync, and IMAP NAMESPACE support are all implemented across `crates/graph/` and `crates/imap/`. Sidebar pin rendering done (2026-03-22). The remaining work is: thread loading on public folder selection (App handler for `PublicFolderSelected`), public folder browser panel (lazy-load tree for browsing/pinning unpinned folders), and reply/post compose wiring.

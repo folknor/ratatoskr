@@ -18,7 +18,7 @@ static EVENT_HANDLER_RE: LazyLock<Regex> =
 /// Regex matching `data:` URIs with an allowed image MIME type.
 /// Allows `data:image/png`, `data:image/jpeg`, `data:image/gif`,
 /// `data:image/webp` (with optional parameters like `;base64`).
-/// SVG is intentionally excluded — it is active content that can contain
+/// SVG is intentionally excluded - it is active content that can contain
 /// `<script>`, event handlers, and external references.
 static DATA_IMAGE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^\s*data:image/(png|jpeg|gif|webp)\b").expect("DATA_IMAGE_RE")
@@ -114,7 +114,7 @@ fn strip_dangerous_elements(html: &str) -> String {
                 el.remove_attribute(name);
             }
 
-            // Restrict data: URIs — block phishing via data:text/html in
+            // Restrict data: URIs - block phishing via data:text/html in
             // links. Only <img src="data:image/..."> is allowed; all other
             // data: URIs on href/src are stripped.
             if (name.eq_ignore_ascii_case("href") || name.eq_ignore_ascii_case("src"))

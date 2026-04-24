@@ -39,35 +39,35 @@ Shown when one or more accounts are actively syncing.
 ⟳ Syncing 3 accounts... (alice@corp.com: 1,247 / 8,302)
 ```
 
-When multiple accounts sync simultaneously, the status bar shows a summary with the account count, and cycles through individual account progress on a short interval (~3 seconds). The cycling is automatic — the user does not need to interact. The currently displayed account's progress is shown in parentheses.
+When multiple accounts sync simultaneously, the status bar shows a summary with the account count, and cycles through individual account progress on a short interval (~3 seconds). The cycling is automatic - the user does not need to interact. The currently displayed account's progress is shown in parentheses.
 
-**Sync complete:** The progress message disappears. No "sync complete" confirmation — the absence of the spinner is the signal.
+**Sync complete:** The progress message disappears. No "sync complete" confirmation - the absence of the spinner is the signal.
 
 ### Warnings
 
-Persistent messages that remain until the underlying issue is resolved. Warnings take priority over sync progress — if both a warning and sync progress are active, the warning is shown.
+Persistent messages that remain until the underlying issue is resolved. Warnings take priority over sync progress - if both a warning and sync progress are active, the warning is shown.
 
 **Token expiry:**
 ```
-⚠ alice@corp.com needs re-authentication — click to sign in
+⚠ alice@corp.com needs re-authentication - click to sign in
 ```
 
 Clicking the warning opens the re-authentication flow (OAuth or password, depending on the account).
 
 **Connection failure:**
 ```
-⚠ alice@corp.com — connection failed (timeout)
+⚠ alice@corp.com - connection failed (timeout)
 ```
 
 **Multiple warnings:** If multiple accounts have issues, cycle through them on the same interval as sync progress, with a count prefix:
 
 ```
-⚠ 2 accounts need attention — alice@corp.com needs re-authentication
+⚠ 2 accounts need attention - alice@corp.com needs re-authentication
 ```
 
 ### Transient Confirmations
 
-Brief messages (~3 seconds) confirming completed actions. Lower priority than warnings and sync progress — they are shown only when nothing else is competing for the status bar.
+Brief messages (~3 seconds) confirming completed actions. Lower priority than warnings and sync progress - they are shown only when nothing else is competing for the status bar.
 
 Examples:
 - "Message moved to Trash"
@@ -80,11 +80,11 @@ These fade out automatically after the display duration.
 
 When multiple content types compete for the status bar:
 
-1. **Warnings** — always win, they indicate something is broken. Never preempted.
-2. **Sync progress** — the steady-state default when no warnings are active. May be briefly preempted by confirmations (see below).
-3. **Transient confirmations** — lowest priority, shown when nothing else is active.
+1. **Warnings** - always win, they indicate something is broken. Never preempted.
+2. **Sync progress** - the steady-state default when no warnings are active. May be briefly preempted by confirmations (see below).
+3. **Transient confirmations** - lowest priority, shown when nothing else is active.
 
-**Confirmation preemption rule:** If a transient confirmation arrives while sync progress is showing, the confirmation briefly interrupts the progress (~3 seconds), then progress resumes. This is an exception to the strict priority order — confirmations are lower priority than sync, but a brief interruption is acceptable because the user just performed an action and deserves immediate feedback. Warnings are never preempted by anything.
+**Confirmation preemption rule:** If a transient confirmation arrives while sync progress is showing, the confirmation briefly interrupts the progress (~3 seconds), then progress resumes. This is an exception to the strict priority order - confirmations are lower priority than sync, but a brief interruption is acceptable because the user just performed an action and deserves immediate feedback. Warnings are never preempted by anything.
 
 ## Interaction
 
@@ -92,7 +92,7 @@ The status bar is not interactive except for warning messages, which are clickab
 
 ## Visual Style
 
-Minimal — same background as the app chrome, slightly smaller text than the main UI. Warning messages use a warning color for the icon/text. Sync progress uses a muted/secondary text color. The bar should be visually quiet when everything is healthy.
+Minimal - same background as the app chrome, slightly smaller text than the main UI. Warning messages use a warning color for the icon/text. Sync progress uses a muted/secondary text color. The bar should be visually quiet when everything is healthy.
 
 ## Ecosystem Patterns
 

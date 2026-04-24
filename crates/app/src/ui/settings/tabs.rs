@@ -1218,7 +1218,7 @@ fn signature_row<'a>(sig: &'a SignatureEntry, global_index: usize) -> Element<'a
         );
     }
 
-    // Remove button — opens editor sheet with delete confirmation
+    // Remove button - opens editor sheet with delete confirmation
     let del_id = sig.id.clone();
     content = content.push(
         button(
@@ -1563,7 +1563,7 @@ fn contact_card(contact: &crate::db::ContactEntry) -> Element<'_, SettingsMessag
         );
     }
 
-    // Group + account source pills — horizontal row
+    // Group + account source pills - horizontal row
     let mut pill_row = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
     let mut has_pills = false;
 
@@ -1889,7 +1889,7 @@ fn contact_editor_buttons<'a>(
 
     btn_row = btn_row.push(Space::new().width(Length::Fill));
 
-    // Local contacts auto-save on field change — no Save button needed.
+    // Local contacts auto-save on field change - no Save button needed.
     // Synced contacts need an explicit Save button (enabled when dirty).
     let is_local = editor.source.as_deref().is_none_or(|s| s == "user");
     if is_local {

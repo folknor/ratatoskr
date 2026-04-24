@@ -2,11 +2,11 @@
 
 UI-only spec for the initial crates/app main layout work defined by `docs/main-layout/problem-statement.md`. All work is in `crates/app/`. No backend changes.
 
-**Scope note:** This document is a historical implementation plan for the early iced prototype. It captures the first concrete translation of the main-layout problem statement into widget-level code, and Phases 1, 2, and 4 are complete. However, the product surface has since grown significantly — the calendar, search, sidebar, pinned searches, pop-out windows, and command palette specs now define much richer behavior for the areas this document scaffolded.
+**Scope note:** This document is a historical implementation plan for the early iced prototype. It captures the first concrete translation of the main-layout problem statement into widget-level code, and Phases 1, 2, and 4 are complete. However, the product surface has since grown significantly - the calendar, search, sidebar, pinned searches, pop-out windows, and command palette specs now define much richer behavior for the areas this document scaffolded.
 
 **What remains reusable:** Widget-level layout translation (thread card structure, message card structure, attachment cards), app-shell state mechanics (stale async response handling, window-state persistence, panel auto-collapse, per-message expansion state), and the practical iced patterns throughout.
 
-**What is stale:** The app-local DB shim (`src/db.rs` queries) used here was a prototype expedient — the long-term data path should come from `crates/core/` query surfaces (e.g., `get_thread_detail()`). The right sidebar scaffolds (calendar placeholder, pinned items placeholder) are now defined by their own specs. Phase 3 interaction flow should be driven by the command palette integration, not built ad hoc. This document should not be treated as the current main-layout UI plan.
+**What is stale:** The app-local DB shim (`src/db.rs` queries) used here was a prototype expedient - the long-term data path should come from `crates/core/` query surfaces (e.g., `get_thread_detail()`). The right sidebar scaffolds (calendar placeholder, pinned items placeholder) are now defined by their own specs. Phase 3 interaction flow should be driven by the command palette integration, not built ad hoc. This document should not be treated as the current main-layout UI plan.
 
 ## Implementation Status
 
@@ -245,7 +245,7 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     // ...
     for (i, thread) in threads.iter().enumerate() {
-        // Empty label colors for now — backend integration later
+        // Empty label colors for now - backend integration later
         let label_colors: &[(Color,)] = &[];
         list = list.push(widgets::thread_card(thread, i, selected_thread == Some(i), label_colors));
     }
@@ -397,7 +397,7 @@ let layout = row![
 
 When `right_sidebar_open` is false, `right_sidebar::view` returns a zero-width Space, so no layout impact. When open, the reading pane (which is `Length::Fill`) shrinks by `RIGHT_SIDEBAR_WIDTH`.
 
-No divider between reading pane and right sidebar — the right sidebar has a fixed width and is not resizable.
+No divider between reading pane and right sidebar - the right sidebar has a fixed width and is not resizable.
 
 **Update handler for `ToggleRightSidebar`:**
 
@@ -430,9 +430,9 @@ Add `RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH` to `layout.rs`:
 pub const RIGHT_SIDEBAR_AUTO_COLLAPSE_WIDTH: f32 = 1200.0;
 ```
 
-Note: this only auto-collapses. It does not auto-expand when the window grows back above 1200px — the user must manually reopen. This avoids the sidebar popping in unexpectedly during resize.
+Note: this only auto-collapses. It does not auto-expand when the window grows back above 1200px - the user must manually reopen. This avoids the sidebar popping in unexpectedly during resize.
 
-**Remove contact_sidebar usage.** The current `main.rs` view does not render the contact sidebar inline (it was removed from the row layout already), but `contact_sidebar.rs` still exists. After creating `right_sidebar.rs`, remove or leave `contact_sidebar.rs` dead — it is no longer referenced.
+**Remove contact_sidebar usage.** The current `main.rs` view does not render the contact sidebar inline (it was removed from the row layout already), but `contact_sidebar.rs` still exists. After creating `right_sidebar.rs`, remove or leave `contact_sidebar.rs` dead - it is no longer referenced.
 
 **Update imports in `main.rs`:**
 
@@ -469,7 +469,7 @@ fn default_sidebar_width() -> f32 { 180.0 }  // SIDEBAR_WIDTH
 fn default_thread_list_width() -> f32 { 400.0 }  // THREAD_LIST_WIDTH
 ```
 
-The `#[serde(default = ...)]` annotations ensure backward compatibility — existing `window.json` files without these fields will deserialize cleanly with the default values.
+The `#[serde(default = ...)]` annotations ensure backward compatibility - existing `window.json` files without these fields will deserialize cleanly with the default values.
 
 **Update `Default` impl:**
 
@@ -672,7 +672,7 @@ pub enum Message {
     // ... existing ...
     /// thread_id is included so stale responses can be discarded.
     /// If the user clicks thread A then thread B quickly, the late
-    /// response for A arrives after B is selected — the handler
+    /// response for A arrives after B is selected - the handler
     /// checks thread_id against the currently selected thread and
     /// drops the response if they don't match.
     ThreadMessagesLoaded(String, Result<Vec<ThreadMessage>, String>),  // (thread_id, result)
@@ -756,7 +756,7 @@ In `ThreadMessagesLoaded` handler, compute `message_expanded` from collapse rule
 
 ```rust
 Message::ThreadMessagesLoaded(thread_id, Ok(messages)) => {
-    // Discard stale response — user may have selected a different thread
+    // Discard stale response - user may have selected a different thread
     let current_thread_id = self.selected_thread
         .and_then(|i| self.threads.get(i))
         .map(|t| t.id.as_str());
@@ -772,23 +772,23 @@ Message::ThreadMessagesLoaded(thread_id, Ok(messages)) => {
         let is_initial = i == len - 1;        // oldest = initial
         let is_unread = !msg.is_read;
 
-        // Rule 1: unread — always expanded
+        // Rule 1: unread - always expanded
         if is_unread {
             expanded[i] = true;
             continue;
         }
-        // Rule 2: most recent — always expanded
+        // Rule 2: most recent - always expanded
         if is_most_recent {
             expanded[i] = true;
             continue;
         }
-        // Rule 3: initial message — expanded (ownership check deferred)
+        // Rule 3: initial message - expanded (ownership check deferred)
         if is_initial {
             expanded[i] = true;
             continue;
         }
-        // Rule 4: user's own messages — collapsed (needs identity matching, deferred)
-        // Rule 5: everything else — collapsed
+        // Rule 4: user's own messages - collapsed (needs identity matching, deferred)
+        // Rule 5: everything else - collapsed
     }
 
     self.message_expanded = expanded;
@@ -797,7 +797,7 @@ Message::ThreadMessagesLoaded(thread_id, Ok(messages)) => {
 }
 ```
 
-**Intentionally approximate.** Rule 4 (own-message detection) requires identity matching from the backend (implementation spec Slice 2, Step 3). Rule 5's collapsed summaries should be quote/signature-stripped (implementation spec Slice 2, Step 4), but this prototype uses raw snippet truncation. Both will converge to the full spec when the backend `get_thread_detail()` function lands. The rule structure and UI components are in place — only the data source changes.
+**Intentionally approximate.** Rule 4 (own-message detection) requires identity matching from the backend (implementation spec Slice 2, Step 3). Rule 5's collapsed summaries should be quote/signature-stripped (implementation spec Slice 2, Step 4), but this prototype uses raw snippet truncation. Both will converge to the full spec when the backend `get_thread_detail()` function lands. The rule structure and UI components are in place - only the data source changes.
 
 ### 2.6 Reading Pane Redesign (`src/ui/reading_pane.rs`)
 
@@ -941,7 +941,7 @@ pub fn collapsed_message_row<'a>(
 button(style=collapsed_message_button).width(Fill).on_press(ToggleMessageExpanded(index))
   container(padding=[SPACE_XXS, SPACE_SM]).width(Fill)
     row(spacing=SPACE_XS, align_y=Center)
-      dash_slot: text("—").size(TEXT_SM).style(text_tertiary)
+      dash_slot: text("-").size(TEXT_SM).style(text_tertiary)
       sender_slot: text(sender).size(TEXT_SM).font(TEXT_SEMIBOLD)
       dot_slot: text("·").size(TEXT_SM).style(text_tertiary)
       date_slot: text(short_date).size(TEXT_SM).style(text_tertiary)
@@ -1087,7 +1087,7 @@ fn mime_to_type_label(mime: Option<&str>) -> &'static str {
 
 fn format_file_size(size: Option<i64>) -> String {
     match size {
-        None => "—".to_string(),
+        None => "-".to_string(),
         Some(b) if b < 1024 => format!("{b} B"),
         Some(b) if b < 1024 * 1024 => format!("{:.0} KB", b as f64 / 1024.0),
         Some(b) => format!("{:.1} MB", b as f64 / (1024.0 * 1024.0)),
@@ -1237,10 +1237,10 @@ Until then, all interaction is mouse-only: click to select threads, click to exp
 ### 4.1 Panel Width Persistence Verification
 
 Verify that panel widths round-trip correctly through `window.json`:
-- Drag sidebar divider, close app, reopen — sidebar width persists
-- Drag thread list divider, close app, reopen — thread list width persists
-- Toggle right sidebar, close app, reopen — right sidebar state persists
-- Delete `window.json`, reopen — defaults applied cleanly
+- Drag sidebar divider, close app, reopen - sidebar width persists
+- Drag thread list divider, close app, reopen - thread list width persists
+- Toggle right sidebar, close app, reopen - right sidebar state persists
+- Delete `window.json`, reopen - defaults applied cleanly
 
 ### 4.2 Attachment Collapse Cache
 
@@ -1278,7 +1278,7 @@ self.attachments_collapsed = self
     .unwrap_or(false);  // default expanded
 ```
 
-This is intentionally ephemeral (lost on app restart). The product spec requires per-thread persistence in SQLite (`thread_ui_state` table, backend implementation spec Slice 3). The in-memory HashMap is the interim implementation — it will be replaced by calls to `get_attachments_collapsed()` / `set_attachments_collapsed()` once the backend migration and functions land. The HashMap provides the correct UX within a session; persistence across sessions is blocked on backend work, not a design disagreement.
+This is intentionally ephemeral (lost on app restart). The product spec requires per-thread persistence in SQLite (`thread_ui_state` table, backend implementation spec Slice 3). The in-memory HashMap is the interim implementation - it will be replaced by calls to `get_attachments_collapsed()` / `set_attachments_collapsed()` once the backend migration and functions land. The HashMap provides the correct UX within a session; persistence across sessions is blocked on backend work, not a design disagreement.
 
 ### 4.3 Empty States
 
@@ -1298,7 +1298,7 @@ widgets::empty_placeholder("No conversations", "This folder is empty")
 
 **Thread card press feedback:** The button style already handles hover via `thread_card_button`. No additional press state needed.
 
-**Collapse/expand transition:** iced does not support animated height transitions natively. Collapse/expand is instant (toggle visibility). If animation is desired later, it requires a custom widget with `animation::spring` — out of scope for Phase 4.
+**Collapse/expand transition:** iced does not support animated height transitions natively. Collapse/expand is instant (toggle visibility). If animation is desired later, it requires a custom widget with `animation::spring` - out of scope for Phase 4.
 
 **Right sidebar slide-in:** The settings overlay already uses `OverlayAnim` for slide animation. The right sidebar is a layout panel (not an overlay), so instant toggle is appropriate.
 
@@ -1356,7 +1356,7 @@ Patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md) that appl
 | Resizable panels (sidebar, thread list) | shadcn-rs resizable panels | `auto_save_id` could replace manual persistence; min/max constraints more robust than `sanitize()` clamp |
 | Starred thread card golden tint | rustcast `tint()`/`with_alpha()` | Validates spec's existing `mix()` helper approach |
 | Stale thread detail responses | bloom generational tracking | Replace thread_id staleness check with `load_generation` counter for robustness (handles re-selecting same thread) |
-| Phase 3 keyboard shortcuts | raffi query routing + trebuchet Component trait + cedilla key bindings + feu raw keyboard | Component trait is highest-impact — prevents Message enum explosion |
+| Phase 3 keyboard shortcuts | raffi query routing + trebuchet Component trait + cedilla key bindings + feu raw keyboard | Component trait is highest-impact - prevents Message enum explosion |
 | Data table selection model | shadcn-rs data table | `selected_indices: HashSet`, `anchor_index` for shift-range, `active_index` for keyboard nav |
 | Attachment collapse toggle | bloom config shadow | HashMap cache is correct for interim; bloom pattern informs SQLite migration |
 

@@ -440,17 +440,17 @@ fn build_reaction_mime(
 ///
 /// # Arguments
 ///
-/// * `client` — Authenticated Gmail API client for the account.
-/// * `db` — Database state (needed for token refresh).
-/// * `from` — The sender address (the reacting user's email).
-/// * `to` — The address of the original message's sender.
-/// * `original_message_id` — RFC 2822 `Message-ID` of the message being reacted to
+/// * `client` - Authenticated Gmail API client for the account.
+/// * `db` - Database state (needed for token refresh).
+/// * `from` - The sender address (the reacting user's email).
+/// * `to` - The address of the original message's sender.
+/// * `original_message_id` - RFC 2822 `Message-ID` of the message being reacted to
 ///   (e.g. `<CAB...@mail.gmail.com>`).
-/// * `original_references` — The `References` header value from the original message,
+/// * `original_references` - The `References` header value from the original message,
 ///   or an empty string if none.
-/// * `original_subject` — The `Subject` of the original message (used for `Re:` prefix).
-/// * `thread_id` — Gmail thread ID to keep the reaction in the same thread.
-/// * `emoji` — The emoji character to react with (e.g. "👍").
+/// * `original_subject` - The `Subject` of the original message (used for `Re:` prefix).
+/// * `thread_id` - Gmail thread ID to keep the reaction in the same thread.
+/// * `emoji` - The emoji character to react with (e.g. "👍").
 pub async fn send_reaction(
     client: &GmailClient,
     db: &DbState,

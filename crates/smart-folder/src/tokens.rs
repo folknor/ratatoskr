@@ -3,9 +3,9 @@ use chrono::Local;
 /// Resolve dynamic date tokens in a query string to `YYYY/MM/DD` format.
 ///
 /// Supported tokens:
-/// - `__LAST_7_DAYS__`  — date 7 days ago
-/// - `__LAST_30_DAYS__` — date 30 days ago
-/// - `__TODAY__`        — today's date
+/// - `__LAST_7_DAYS__`  - date 7 days ago
+/// - `__LAST_30_DAYS__` - date 30 days ago
+/// - `__TODAY__`        - today's date
 pub fn resolve_query_tokens(query: &str) -> String {
     let now = Local::now().date_naive();
     let mut result = query.to_owned();

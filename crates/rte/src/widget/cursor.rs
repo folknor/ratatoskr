@@ -356,7 +356,7 @@ pub fn selection_block_ranges(selection: DocSelection) -> Vec<(usize, BlockSelec
 }
 
 /// Compute selection rectangles for a fully-selected block. The Widget calls
-/// this for `BlockSelectionKind::Full` blocks — the entire block width is
+/// this for `BlockSelectionKind::Full` blocks - the entire block width is
 /// highlighted.
 pub fn full_block_selection_rect(layout: &BlockLayout, editor_width: f32) -> SelectionRect {
     SelectionRect {
@@ -463,7 +463,7 @@ mod tests {
     #[test]
     fn hit_test_second_block_with_content_offset() {
         let layouts = sample_layouts();
-        // Click at (25.0, 30.0) — second block starts at y=20, has content_offset.x=10
+        // Click at (25.0, 30.0) - second block starts at y=20, has content_offset.x=10
         let result = hit_test(iced::Point::new(25.0, 30.0), &layouts);
         let (block_idx, local) = result.expect("hit_test returned None");
         assert_eq!(block_idx, 1);
@@ -474,7 +474,7 @@ mod tests {
     #[test]
     fn hit_test_third_block_with_y_content_offset() {
         let layouts = sample_layouts();
-        // Click at (10.0, 60.0) — third block at y=50, content_offset.y=5
+        // Click at (10.0, 60.0) - third block at y=50, content_offset.y=5
         let result = hit_test(iced::Point::new(10.0, 60.0), &layouts);
         let (block_idx, local) = result.expect("hit_test returned None");
         assert_eq!(block_idx, 2);

@@ -77,7 +77,7 @@ pub async fn caldav_test_connection_impl(
         Ok(calendars) => Ok(serde_json::json!({
             "success": true,
             "message": format!(
-                "Connected — found {} calendar{}",
+                "Connected - found {} calendar{}",
                 calendars.len(),
                 if calendars.len() == 1 { "" } else { "s" }
             )

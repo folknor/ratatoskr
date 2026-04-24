@@ -71,7 +71,7 @@ impl App {
                         Message::Settings(SettingsMessage::ContactSaved(Err(error.user_message())))
                     }
                     ActionOutcome::LocalOnly { reason, .. } => {
-                        // Local save succeeded — reload list so the contact appears.
+                        // Local save succeeded - reload list so the contact appears.
                         // The degraded state (provider not notified) is logged.
                         // When Settings UI gains a status area, surface reason.user_message().
                         log::warn!("Contact save local-only: {reason}");
@@ -97,12 +97,12 @@ impl App {
                 let outcome = rtsk::actions::contacts::delete_contact(&ctx, &id).await;
                 match outcome {
                     rtsk::actions::ActionOutcome::Failed { .. } => {
-                        // Provider-first delete failed (e.g. JMAP) — contact not
+                        // Provider-first delete failed (e.g. JMAP) - contact not
                         // deleted locally. Don't reload (nothing changed).
                         (outcome, None)
                     }
                     _ => {
-                        // Success or LocalOnly — contact deleted locally, reload list
+                        // Success or LocalOnly - contact deleted locally, reload list
                         let contacts = db.get_contacts_for_settings(filter).await.ok();
                         (outcome, contacts)
                     }
@@ -118,7 +118,7 @@ impl App {
                         ))
                     }
                     ActionOutcome::LocalOnly { reason, .. } => {
-                        // Local delete succeeded — reload list so the contact disappears.
+                        // Local delete succeeded - reload list so the contact disappears.
                         // The degraded state (provider not notified) is logged.
                         // When Settings UI gains a status area, surface reason.user_message().
                         log::warn!("Contact delete local-only: {reason}");

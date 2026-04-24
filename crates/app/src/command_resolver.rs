@@ -64,7 +64,7 @@ impl CommandInputResolver for AppInputResolver {
         _prior_selections: &[String],
         _ctx: &CommandContext,
     ) -> Result<(), String> {
-        // Lenient for now — accept any value.
+        // Lenient for now - accept any value.
         Ok(())
     }
 }

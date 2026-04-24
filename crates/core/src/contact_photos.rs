@@ -404,7 +404,7 @@ async fn sync_google_photos(
     let mut fetched = 0usize;
 
     for (email, photo_url) in &contacts_to_fetch {
-        // Use the Google photo URL as the etag — if the URL changes, we re-fetch
+        // Use the Google photo URL as the etag - if the URL changes, we re-fetch
         match fetch_google_contact_photo(http, photo_url, 128).await {
             Ok(Some(photo_data)) => {
                 match cache_photo(

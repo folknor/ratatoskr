@@ -1,4 +1,4 @@
-//! Thread detail data layer — everything needed for the conversation view.
+//! Thread detail data layer - everything needed for the conversation view.
 
 use std::collections::{HashMap, HashSet};
 
@@ -594,7 +594,7 @@ pub fn fetch_thread_bodies(
 
 /// Phase 3: Assemble the final [`ThreadDetail`] from DB data + bodies.
 ///
-/// Pure computation — no DB locks required. Attaches bodies to messages,
+/// Pure computation - no DB locks required. Attaches bodies to messages,
 /// detects message ownership, and generates collapsed summaries.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub fn assemble_thread_detail(

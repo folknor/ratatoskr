@@ -10,19 +10,19 @@ apply, and where the gaps are.
 
 1. [Accounts](#accounts)
 2. [Calendar](#calendar)
-3. [Command Palette — Problem Statement](#cmdk--problem-statement)
-4. [Command Palette — Roadmap](#cmdk--roadmap)
-5. [Contacts — Import Spec](#contacts--import-spec)
-6. [Contacts — Problem Statement](#contacts--problem-statement)
+3. [Command Palette - Problem Statement](#cmdk--problem-statement)
+4. [Command Palette - Roadmap](#cmdk--roadmap)
+5. [Contacts - Import Spec](#contacts--import-spec)
+6. [Contacts - Problem Statement](#contacts--problem-statement)
 7. [Iced Ecosystem Decisions](#iced-ecosystem-decisions)
-8. [Main Layout — Iced Implementation Spec](#main-layout--iced-implementation-spec)
-9. [Main Layout — Backend Implementation Spec](#main-layout--backend-implementation-spec)
-10. [Main Layout — Problem Statement](#main-layout--problem-statement)
+8. [Main Layout - Iced Implementation Spec](#main-layout--iced-implementation-spec)
+9. [Main Layout - Backend Implementation Spec](#main-layout--backend-implementation-spec)
+10. [Main Layout - Problem Statement](#main-layout--problem-statement)
 11. [Pop-Out Windows](#pop-out-windows)
 12. [Read Receipts](#read-receipts)
-13. [Search — Implementation Spec](#search--implementation-spec)
-14. [Search — Pinned Searches](#search--pinned-searches)
-15. [Search — Problem Statement](#search--problem-statement)
+13. [Search - Implementation Spec](#search--implementation-spec)
+14. [Search - Pinned Searches](#search--pinned-searches)
+15. [Search - Problem Statement](#search--problem-statement)
 16. [Sidebar](#sidebar)
 17. [Status Bar](#status-bar)
 
@@ -87,7 +87,7 @@ apply, and where the gaps are.
 
 ---
 
-## Command Palette — Problem Statement
+## Command Palette - Problem Statement
 
 **Doc**: `docs/cmdk/problem-statement.md`
 
@@ -112,7 +112,7 @@ apply, and where the gaps are.
 
 ---
 
-## Command Palette — Roadmap
+## Command Palette - Roadmap
 
 **Doc**: `docs/cmdk/roadmap.md`
 
@@ -135,7 +135,7 @@ apply, and where the gaps are.
 
 ---
 
-## Contacts — Import Spec
+## Contacts - Import Spec
 
 **Doc**: `docs/contacts/import-spec.md`
 
@@ -144,7 +144,7 @@ apply, and where the gaps are.
 | Requirement | Primary Source | How It Applies |
 |---|---|---|
 | Preview data table | shadcn-rs `data_table` | Column renderers, row iteration; adapt for dynamic columns (unknown at compile time) |
-| File selection | shadcn-rs/pikeru (`rfd`) | `rfd::AsyncFileDialog` with format filter — solved problem |
+| File selection | shadcn-rs/pikeru (`rfd`) | `rfd::AsyncFileDialog` with format filter - solved problem |
 | Multi-step wizard | raffi query routing | `ImportStep` enum state machine: FileSelect → SheetSelect → Preview → Importing → Summary |
 | Column mapping dropdowns | shadcn-rs/iced-plus props-builder | `ColumnRole` enum with iced `pick_list` per column header |
 | Import progress/cancel | bloom generational tracking + pikeru subscriptions | Tag import task with generation; stream row-by-row progress |
@@ -159,7 +159,7 @@ apply, and where the gaps are.
 
 ---
 
-## Contacts — Problem Statement
+## Contacts - Problem Statement
 
 **Doc**: `docs/contacts/problem-statement.md`
 
@@ -211,7 +211,7 @@ apply, and where the gaps are.
 
 ---
 
-## Main Layout — Iced Implementation Spec
+## Main Layout - Iced Implementation Spec
 
 **Doc**: `docs/main-layout/iced-implementation-spec.md`
 
@@ -222,7 +222,7 @@ apply, and where the gaps are.
 | Resizable panels (sidebar, thread list) | shadcn-rs resizable panels | `auto_save_id` could replace manual persistence; min/max constraints more robust than `sanitize()` clamp |
 | Starred thread card golden tint | rustcast `tint()`/`with_alpha()` | Validates spec's existing `mix()` helper approach |
 | Stale thread detail responses | bloom generational tracking | Replace thread_id staleness check with `load_generation` counter for robustness (handles re-selecting same thread) |
-| Phase 3 keyboard shortcuts | raffi query routing + trebuchet Component trait + cedilla key bindings + feu raw keyboard | Component trait is highest-impact — prevents Message enum explosion |
+| Phase 3 keyboard shortcuts | raffi query routing + trebuchet Component trait + cedilla key bindings + feu raw keyboard | Component trait is highest-impact - prevents Message enum explosion |
 | Data table selection model | shadcn-rs data table | `selected_indices: HashSet`, `anchor_index` for shift-range, `active_index` for keyboard nav |
 | Attachment collapse toggle | bloom config shadow | HashMap cache is correct for interim; bloom pattern informs SQLite migration |
 
@@ -233,7 +233,7 @@ apply, and where the gaps are.
 
 ---
 
-## Main Layout — Backend Implementation Spec
+## Main Layout - Backend Implementation Spec
 
 **Doc**: `docs/main-layout/implementation-spec.md`
 
@@ -251,7 +251,7 @@ No changes to the backend spec are warranted based on the survey.
 
 ---
 
-## Main Layout — Problem Statement
+## Main Layout - Problem Statement
 
 **Doc**: `docs/main-layout/problem-statement.md`
 
@@ -313,20 +313,20 @@ No changes to the backend spec are warranted based on the survey.
 
 **Doc**: `docs/read-receipts.md`
 
-Read receipts is a **protocol-layer feature**. The outgoing side (Phase 1) requires zero UI work — it's a header addition in the provider send path. Survey overlap is minimal.
+Read receipts is a **protocol-layer feature**. The outgoing side (Phase 1) requires zero UI work - it's a header addition in the provider send path. Survey overlap is minimal.
 
 | Requirement | Primary Source | Applicability |
 |---|---|---|
-| Async MDN send | pikeru/rustcast subscriptions | Low — generic async; real work is RFC 8098 |
-| Receipt policy settings UI | bloom config shadow | Medium — if/when settings panel is built |
-| Global policy storage | rustcast TOML config defaults | Low — single enum field |
-| Per-message receipt prompt | trebuchet Component trait | Medium — isolates prompt state from reading pane |
+| Async MDN send | pikeru/rustcast subscriptions | Low - generic async; real work is RFC 8098 |
+| Receipt policy settings UI | bloom config shadow | Medium - if/when settings panel is built |
+| Global policy storage | rustcast TOML config defaults | Low - single enum field |
+| Per-message receipt prompt | trebuchet Component trait | Medium - isolates prompt state from reading pane |
 
-**Bottom line**: The heavy lifting is RFC 8098 compliance, database schema, and provider integration — none of which the survey addresses.
+**Bottom line**: The heavy lifting is RFC 8098 compliance, database schema, and provider integration - none of which the survey addresses.
 
 ---
 
-## Search — Implementation Spec
+## Search - Implementation Spec
 
 **Doc**: `docs/search/implementation-spec.md`
 
@@ -344,7 +344,7 @@ Backend-only pipeline (parser, SQL builder, Tantivy, router, smart folders). Mos
 
 ---
 
-## Search — Pinned Searches
+## Search - Pinned Searches
 
 **Doc**: `docs/search/pinned-searches.md`
 
@@ -364,7 +364,7 @@ Backend-only pipeline (parser, SQL builder, Tantivy, router, smart folders). Mos
 
 ---
 
-## Search — Problem Statement
+## Search - Problem Statement
 
 **Doc**: `docs/search/problem-statement.md`
 
@@ -403,7 +403,7 @@ Backend-only pipeline (parser, SQL builder, Tantivy, router, smart folders). Mos
 
 ### Gaps
 
-- **Tree rendering for hierarchical folders** (Exchange/IMAP/JMAP): **Significant gap**. No surveyed project provides a collapsible tree view. shadcn-rs has a `tree-viewer` mentioned in features but not detailed in survey — needs further inspection.
+- **Tree rendering for hierarchical folders** (Exchange/IMAP/JMAP): **Significant gap**. No surveyed project provides a collapsible tree view. shadcn-rs has a `tree-viewer` mentioned in features but not detailed in survey - needs further inspection.
 
 ---
 

@@ -124,13 +124,13 @@ impl AiError {
             || lower.contains("too many requests")
             || lower.contains("resource exhausted")
         {
-            return Self::RateLimited("Rate limited — please try again shortly".to_string());
+            return Self::RateLimited("Rate limited - please try again shortly".to_string());
         }
         Self::NetworkError(format!("HTTP {status} {body}"))
     }
 }
 
-/// Trait for AI completion — allows testing with mock implementations.
+/// Trait for AI completion - allows testing with mock implementations.
 /// The app crate provides the real implementation that calls AI providers.
 #[async_trait::async_trait]
 pub trait AiCompleter: Send + Sync {
@@ -348,13 +348,13 @@ mod tests {
         let err = AiError::from_http(429, "Too Many Requests");
         assert_eq!(
             err,
-            AiError::RateLimited("Rate limited — please try again shortly".to_string())
+            AiError::RateLimited("Rate limited - please try again shortly".to_string())
         );
 
         let err = AiError::from_http(200, "resource exhausted");
         assert_eq!(
             err,
-            AiError::RateLimited("Rate limited — please try again shortly".to_string())
+            AiError::RateLimited("Rate limited - please try again shortly".to_string())
         );
     }
 

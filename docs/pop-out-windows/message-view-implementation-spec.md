@@ -1,11 +1,11 @@
 # Pop-Out Message View: Implementation Spec
 
-Phased implementation spec for the pop-out message view window. This is the simpler half of the pop-out windows feature — compose pop-out is a separate spec with heavier dependencies (editor, contacts autocomplete).
+Phased implementation spec for the pop-out message view window. This is the simpler half of the pop-out windows feature - compose pop-out is a separate spec with heavier dependencies (editor, contacts autocomplete).
 
 **Product spec:** `docs/pop-out-windows/problem-statement.md`
-**Tier:** 3 in `docs/implementation-plan.md` — mostly independent, no heavy blockers.
+**Tier:** 3 in `docs/implementation-plan.md` - mostly independent, no heavy blockers.
 
-**Shared infrastructure note:** Phase 1 of this spec establishes multi-window architecture that all pop-out windows will share — compose, message view, and eventually calendar. Implementers should understand that Phase 1 is shared platform work, not feature-local scaffolding. The window registry, daemon migration, per-window routing, and cascade-close behavior are foundational infrastructure reused by every future pop-out spec.
+**Shared infrastructure note:** Phase 1 of this spec establishes multi-window architecture that all pop-out windows will share - compose, message view, and eventually calendar. Implementers should understand that Phase 1 is shared platform work, not feature-local scaffolding. The window registry, daemon migration, per-window routing, and cascade-close behavior are foundational infrastructure reused by every future pop-out spec.
 
 ## Table of Contents
 
@@ -69,7 +69,7 @@ let mut app = iced::daemon(App::boot, App::update, App::view)
     .default_font(font::text());
 ```
 
-The `.window()` call is removed — the main window is opened explicitly in `boot()` via `iced::window::open()`.
+The `.window()` call is removed - the main window is opened explicitly in `boot()` via `iced::window::open()`.
 
 ### Window Registry
 
@@ -224,7 +224,7 @@ fn handle_window_close(&mut self, id: window::Id) -> Task<Message> {
         return Task::batch(tasks);
     }
 
-    // Pop-out window closed — just remove it from the registry
+    // Pop-out window closed - just remove it from the registry
     self.pop_out_windows.remove(&id);
     iced::window::close(id)
 }
@@ -302,7 +302,7 @@ iced::event::listen_with(|event, _status, window_id| {
 })
 ```
 
-Note: Escape on the main window should not close it — the close handler already distinguishes main from pop-out. However, Escape on the main window may have other meanings (dismiss command palette, deselect thread). The Escape subscription should only fire `WindowCloseRequested` for pop-out window IDs, not the main window:
+Note: Escape on the main window should not close it - the close handler already distinguishes main from pop-out. However, Escape on the main window may have other meanings (dismiss command palette, deselect thread). The Escape subscription should only fire `WindowCloseRequested` for pop-out window IDs, not the main window:
 
 ```rust
 iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
@@ -311,7 +311,7 @@ iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
 }) => {
     // Only close pop-out windows with Escape; main window Escape
     // is handled by the command palette / focus system.
-    // The window_id is provided by the subscription — we'll check
+    // The window_id is provided by the subscription - we'll check
     // in the handler whether it's a pop-out.
     Some(Message::EscapePressed(window_id))
 }
@@ -370,7 +370,7 @@ The expanded message card (in `widgets.rs`) needs to emit this on double-click. 
 
 Option 1 is cleaner. Wrap the message card in a `mouse_area` that detects double-click via `on_double_click` if available in the iced fork, or track via `on_press` with a timestamp. The implementation detail depends on whether the local iced fork has `on_double_click` on `mouse_area`.
 
-Fallback approach: Add a small "pop out" icon button on each expanded message card header that opens the pop-out on single click. This is more discoverable and avoids the double-click detection problem. **Recommendation: implement both** — the icon button as the primary affordance, double-click as the power-user shortcut.
+Fallback approach: Add a small "pop out" icon button on each expanded message card header that opens the pop-out on single click. This is more discoverable and avoids the double-click detection problem. **Recommendation: implement both** - the icon button as the primary affordance, double-click as the power-user shortcut.
 
 #### Pop-Out Icon Button
 
@@ -725,7 +725,7 @@ fn message_view_header<'a>(
 
 ### Body Rendering
 
-**Phased deviation from product spec:** The problem statement treats full rendered message body as core to the message-view window. Phase 2 delivers plain text only (using `body_text` or snippet fallback). Full HTML rendering (Simple HTML, Original HTML with remote-content controls) arrives in Phase 3. This is a deliberate phasing choice — the multi-window infrastructure and basic message display ship first, rendering fidelity follows. Phase 2 is functionally useful (users can reference message content) but visually incomplete.
+**Phased deviation from product spec:** The problem statement treats full rendered message body as core to the message-view window. Phase 2 delivers plain text only (using `body_text` or snippet fallback). Full HTML rendering (Simple HTML, Original HTML with remote-content controls) arrives in Phase 3. This is a deliberate phasing choice - the multi-window infrastructure and basic message display ship first, rendering fidelity follows. Phase 2 is functionally useful (users can reference message content) but visually incomplete.
 
 ```rust
 fn message_view_body<'a>(
@@ -765,7 +765,7 @@ fn message_view_body<'a>(
 
 ### Attachment List
 
-Single-message attachments — no deduplication needed (per the problem statement).
+Single-message attachments - no deduplication needed (per the problem statement).
 
 ```rust
 fn message_view_attachments<'a>(
@@ -1000,8 +1000,8 @@ fn handle_message_view_update(
 
 1. `MessageViewState` struct and `MessageViewMessage` enum.
 2. Pop-out icon button on expanded message cards in the reading pane.
-3. `open_message_view_window()` — opens window, inserts state, dispatches data loads.
-4. `view_message_window()` — header, body (plain text), attachments.
+3. `open_message_view_window()` - opens window, inserts state, dispatches data loads.
+4. `view_message_window()` - header, body (plain text), attachments.
 5. `Db::load_message_body()` and `Db::load_message_attachments()`.
 6. Update routing for `PopOutMessage::MessageView`.
 7. Layout constants for message view window sizing.
@@ -1069,7 +1069,7 @@ The default mode is a system-wide setting, stored in the user's settings. `Messa
 rendering_mode: app_settings.default_rendering_mode,
 ```
 
-The per-window override is not persisted — it reverts to the system default when the window is closed and reopened.
+The per-window override is not persisted - it reverts to the system default when the window is closed and reopened.
 
 ### Plain Text Mode
 
@@ -1077,9 +1077,9 @@ Renders `body_text` from the body store. If only HTML is available, strip tags (
 
 ### Simple HTML Mode
 
-Renders the sanitized HTML — this is the same pipeline the reading pane uses for message bodies. The HTML sanitizer (`provider` crate) strips scripts, remote content, heavy styling, and returns safe HTML. The iced rendering converts sanitized HTML to widget trees.
+Renders the sanitized HTML - this is the same pipeline the reading pane uses for message bodies. The HTML sanitizer (`provider` crate) strips scripts, remote content, heavy styling, and returns safe HTML. The iced rendering converts sanitized HTML to widget trees.
 
-**Implementation note:** The reading pane currently shows snippets, not rendered HTML. Full HTML rendering depends on the HTML-to-iced-widget pipeline (cedilla/frostmark pattern from the ecosystem survey). Until that pipeline exists, Simple HTML falls back to plain text with basic formatting hints. This is acceptable for the initial implementation — the rendering pipeline is a cross-cutting concern that benefits both the reading pane and pop-out views.
+**Implementation note:** The reading pane currently shows snippets, not rendered HTML. Full HTML rendering depends on the HTML-to-iced-widget pipeline (cedilla/frostmark pattern from the ecosystem survey). Until that pipeline exists, Simple HTML falls back to plain text with basic formatting hints. This is acceptable for the initial implementation - the rendering pipeline is a cross-cutting concern that benefits both the reading pane and pop-out views.
 
 ### Original HTML Mode
 
@@ -1124,7 +1124,7 @@ Add `LoadRemoteContent` to `MessageViewMessage` and a `remote_content_loaded: bo
 
 ### Source Mode
 
-Raw email source (headers + MIME body) in a monospaced font. Loaded lazily — the raw source is not fetched until the user switches to Source mode.
+Raw email source (headers + MIME body) in a monospaced font. Loaded lazily - the raw source is not fetched until the user switches to Source mode.
 
 ```rust
 fn load_raw_source(
@@ -1301,7 +1301,7 @@ MessageViewMessage::Archive => {
 
 ### Print
 
-OS print dialog integration. Platform-specific code with no iced precedent. Deferred to a later phase — for now, a no-op with a status message.
+OS print dialog integration. Platform-specific code with no iced precedent. Deferred to a later phase - for now, a no-op with a status message.
 
 ### Phase 4 Deliverables
 
@@ -1464,11 +1464,11 @@ Per the problem statement, restoration is best-effort. Specific failure and edge
 
 **Body/attachment load failure:** Network or DB error during async load. The window shows the header (from session data) but the body area shows a "Failed to load message body" error with a retry button.
 
-**Rendering mode:** Not persisted — restored windows reset to the system default rendering mode. Per-window rendering mode overrides are transient (problem statement: "not persisted").
+**Rendering mode:** Not persisted - restored windows reset to the system default rendering mode. Per-window rendering mode overrides are transient (problem statement: "not persisted").
 
 **Scroll offset:** Not restored. Restoring exact scroll position after async body load is unreliable (content may have changed, HTML layout differs). Windows open scrolled to top.
 
-**Reloading body and attachments:** Restored windows trigger the same async data loads as newly opened windows. The session entry provides the message_id and account_id needed to query the body store and attachments table. Body/attachment data is never cached in the session file — it is always loaded fresh from the database.
+**Reloading body and attachments:** Restored windows trigger the same async data loads as newly opened windows. The session entry provides the message_id and account_id needed to query the body store and attachments table. Body/attachment data is never cached in the session file - it is always loaded fresh from the database.
 
 ```rust
 /// Error state for a message view that failed to restore.
@@ -1575,7 +1575,7 @@ MessageViewMessage::SaveAs => {
 
 ### .eml Export
 
-RFC 5322 format — the full message with headers and MIME body. This is the raw message source, which may already be available from the body store or raw message cache.
+RFC 5322 format - the full message with headers and MIME body. This is the raw message source, which may already be available from the body store or raw message cache.
 
 ```rust
 async fn save_as_eml(
@@ -1610,7 +1610,7 @@ async fn save_as_txt(
     let mut output = String::new();
 
     // Header block
-    // (Would need to query header fields — for now, use what's available)
+    // (Would need to query header fields - for now, use what's available)
     if let Some(text) = body_text {
         output.push_str(&text);
     }
@@ -1735,7 +1735,7 @@ Phase 2: Message View Window (basic content)
     +---> Phase 6: Save As (.eml, .txt via rfd)
 ```
 
-Phases 3-6 are independent of each other and can be implemented in any order after Phase 2. Phase 1 is the foundation — it must be done first and is the riskiest (no precedent in the iced ecosystem for multi-window).
+Phases 3-6 are independent of each other and can be implemented in any order after Phase 2. Phase 1 is the foundation - it must be done first and is the riskiest (no precedent in the iced ecosystem for multi-window).
 
 ---
 
@@ -1743,11 +1743,11 @@ Phases 3-6 are independent of each other and can be implemented in any order aft
 
 ### Phase 1 Risks
 
-**`iced::daemon` behavioral differences.** The daemon does not exit when all windows close — the app must explicitly call `iced::exit()`. If this is missed, the process lingers. Mitigation: the main window close handler always calls `iced::exit()`.
+**`iced::daemon` behavioral differences.** The daemon does not exit when all windows close - the app must explicitly call `iced::exit()`. If this is missed, the process lingers. Mitigation: the main window close handler always calls `iced::exit()`.
 
-**Window ID stability.** `window::Id::unique()` generates IDs that are only valid for the current session. They cannot be persisted across sessions. Session restore creates new IDs. This is fine — the session entries identify windows by message ID, not window ID.
+**Window ID stability.** `window::Id::unique()` generates IDs that are only valid for the current session. They cannot be persisted across sessions. Session restore creates new IDs. This is fine - the session entries identify windows by message ID, not window ID.
 
-**Scale factor per window.** The `scale_factor` callback currently returns a single value. With `daemon`, it takes `(&App, window::Id)` — all windows share the same scale factor, which is the correct behavior (system DPI scaling applies uniformly).
+**Scale factor per window.** The `scale_factor` callback currently returns a single value. With `daemon`, it takes `(&App, window::Id)` - all windows share the same scale factor, which is the correct behavior (system DPI scaling applies uniformly).
 
 **Theme per window.** The `theme` callback takes `(&App, window::Id)`. All windows should use the same theme. No per-window theme overrides.
 
@@ -1757,7 +1757,7 @@ Phases 3-6 are independent of each other and can be implemented in any order aft
 
 ### Phase 3 Risks
 
-**HTML rendering pipeline.** Full HTML-to-widget rendering is a cross-cutting concern shared with the reading pane. Until it exists, Simple HTML and Original HTML modes fall back to plain text. This is acceptable — the rendering pipeline is not gated by this spec.
+**HTML rendering pipeline.** Full HTML-to-widget rendering is a cross-cutting concern shared with the reading pane. Until it exists, Simple HTML and Original HTML modes fall back to plain text. This is acceptable - the rendering pipeline is not gated by this spec.
 
 ### Phase 5 Risks
 
@@ -1767,7 +1767,7 @@ Phases 3-6 are independent of each other and can be implemented in any order aft
 
 ## Open Questions
 
-1. **Command palette in pop-out windows.** Should the command palette work within pop-out windows? If yes, the palette subscription and overlay must be per-window. If no, only the main window gets the palette. The command palette spec should decide this — for now, pop-out windows do not include the palette.
+1. **Command palette in pop-out windows.** Should the command palette work within pop-out windows? If yes, the palette subscription and overlay must be per-window. If no, only the main window gets the palette. The command palette spec should decide this - for now, pop-out windows do not include the palette.
 
 2. **Focus tracking across windows.** The `FocusedRegion` enum (from the command palette context) does not currently have a `PopOutMessageView` variant. If commands need to know which window type is focused, this enum needs extending.
 

@@ -8,17 +8,17 @@ This is a self-contained problem warranting its own crate (`crates/import/`).
 
 ## Supported Formats
 
-1. **CSV** — the most common export format from Excel and other tools
+1. **CSV** - the most common export format from Excel and other tools
    - Encoding detection: UTF-8, UTF-16 (with/without BOM), Windows-1252, Latin-1, and other locale-specific encodings
    - Delimiter detection: comma, semicolon, tab (European Excel uses semicolons)
    - Quoted fields, escaped quotes, mixed line endings
 
-2. **XLSX** — Excel's native format
+2. **XLSX** - Excel's native format
    - Consistently UTF-8 internally (OOXML)
    - Multi-sheet workbooks (user may need to select a sheet)
    - OOXML parsing infrastructure already exists in the squeeze crate
 
-3. **vCard (.vcf)** — standard contact interchange format
+3. **vCard (.vcf)** - standard contact interchange format
    - RFC 6350 (vCard 4.0) and RFC 2426 (vCard 3.0)
    - CardDAV vCard parsing already exists in `crates/core/src/carddav/parse.rs`
    - A single .vcf file can contain multiple contacts
@@ -27,7 +27,7 @@ This is a self-contained problem warranting its own crate (`crates/import/`).
 
 CSV and XLSX files have no standardized column headers. The importer must:
 
-1. **Auto-detect columns** — heuristic matching on common header names:
+1. **Auto-detect columns** - heuristic matching on common header names:
    - Email: "email", "e-mail", "email address", "mail", "e-post", etc.
    - Name: "name", "full name", "display name", "contact", "navn", etc.
    - First/Last: "first name", "last name", "given name", "surname", "fornavn", "etternavn", etc.
@@ -35,9 +35,9 @@ CSV and XLSX files have no standardized column headers. The importer must:
    - Company: "company", "organization", "org", "firma", etc.
    - Group: "group", "category", "list", "gruppe", etc.
 
-2. **Let the user correct the mapping** — auto-detection will be wrong sometimes. The user must be able to reassign columns before import.
+2. **Let the user correct the mapping** - auto-detection will be wrong sometimes. The user must be able to reassign columns before import.
 
-3. **Preview the result** — show what will be imported before committing, so the user can catch mapping errors.
+3. **Preview the result** - show what will be imported before committing, so the user can catch mapping errors.
 
 ## Import Flow
 
@@ -71,7 +71,7 @@ The importer displays a table preview of the first ~20 rows. Each column has a d
 └─────────────────────────────────────────────────────────────┘
 ```
 
-- Rows without a valid email in the mapped email column are skipped (with a count shown). The preview highlights problem rows — skipped rows are shown in a muted/strikethrough style with a reason indicator (no email, invalid email, etc.) rather than silently hidden. This lets the user catch mapping errors before importing: if most rows are skipped, the email column is probably mapped wrong.
+- Rows without a valid email in the mapped email column are skipped (with a count shown). The preview highlights problem rows - skipped rows are shown in a muted/strikethrough style with a reason indicator (no email, invalid email, etc.) rather than silently hidden. This lets the user catch mapping errors before importing: if most rows are skipped, the email column is probably mapped wrong.
 - An account selector determines where imported contacts are created (same options as contact creation: provider accounts + "Local")
 - If a "Group" column is mapped, contacts are automatically added to groups matching the group column value (groups are created if they don't exist). A single cell may contain multiple groups separated by semicolons, commas, or pipes (e.g., "Engineering; Project X"). The importer splits on these delimiters and trims whitespace. If the delimiter is ambiguous (e.g., a group name contains a comma), the preview table shows the parsed group names so the user can verify before importing.
 
@@ -79,26 +79,26 @@ The importer displays a table preview of the first ~20 rows. Each column has a d
 
 The import runs. A summary shows: N contacts imported, N groups created, N rows skipped, N duplicates (matched by email).
 
-**Duplicate handling:** If an imported email matches an existing contact, the default behavior is to skip the duplicate and report it in the summary. A toggle on the preview screen — "Update existing contacts with imported data" — changes this to a merge: imported fields overwrite existing fields where the imported value is non-empty, but existing fields not present in the import are preserved. The toggle defaults to off (skip). The summary distinguishes between skipped duplicates and updated contacts.
+**Duplicate handling:** If an imported email matches an existing contact, the default behavior is to skip the duplicate and report it in the summary. A toggle on the preview screen - "Update existing contacts with imported data" - changes this to a merge: imported fields overwrite existing fields where the imported value is non-empty, but existing fields not present in the import are preserved. The toggle defaults to off (skip). The summary distinguishes between skipped duplicates and updated contacts.
 
 ### vCard Import
 
-vCard files skip the column mapping step entirely — the format is structured. The flow is: file selection → preview (list of contacts to be imported) → account selector → import.
+vCard files skip the column mapping step entirely - the format is structured. The flow is: file selection → preview (list of contacts to be imported) → account selector → import.
 
 ## Data Cleaning
 
 The importer applies minimal automatic cleanup to imported values:
 
-- **Whitespace** — leading/trailing whitespace is trimmed from all fields
-- **Email normalization** — lowercased, whitespace stripped
-- **Phone numbers** — no formatting changes. Phone formats vary too widely by locale to normalize safely. Store as-is.
-- **Names** — no case correction. "ALICE SMITH" stays as-is; the user can fix it in the contact editor. Guessing at name capitalization is error-prone across cultures.
+- **Whitespace** - leading/trailing whitespace is trimmed from all fields
+- **Email normalization** - lowercased, whitespace stripped
+- **Phone numbers** - no formatting changes. Phone formats vary too widely by locale to normalize safely. Store as-is.
+- **Names** - no case correction. "ALICE SMITH" stays as-is; the user can fix it in the contact editor. Guessing at name capitalization is error-prone across cultures.
 
-The principle is: clean what is unambiguously wrong (stray whitespace, mixed-case emails) and leave everything else to the user. The importer is not a data cleaning tool — it is a data ingestion tool.
+The principle is: clean what is unambiguously wrong (stray whitespace, mixed-case emails) and leave everything else to the user. The importer is not a data cleaning tool - it is a data ingestion tool.
 
 ## Crate Design
 
-`crates/import/` — pure library crate, no UI. Responsibilities:
+`crates/import/` - pure library crate, no UI. Responsibilities:
 
 - File format detection and parsing
 - Encoding detection and conversion
@@ -118,7 +118,7 @@ How patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md) map t
 | Requirement | Primary Source | How It Applies |
 |---|---|---|
 | Preview data table | shadcn-rs `data_table` | Column renderers, row iteration; adapt for dynamic columns (unknown at compile time) |
-| File selection | shadcn-rs/pikeru (`rfd`) | `rfd::AsyncFileDialog` with format filter — solved problem |
+| File selection | shadcn-rs/pikeru (`rfd`) | `rfd::AsyncFileDialog` with format filter - solved problem |
 | Multi-step wizard | raffi query routing | `ImportStep` enum state machine: FileSelect → SheetSelect → Preview → Importing → Summary |
 | Column mapping dropdowns | shadcn-rs/iced-plus props-builder | `ColumnRole` enum with iced `pick_list` per column header |
 | Import progress/cancel | bloom generational tracking + pikeru subscriptions | Tag import task with generation; stream row-by-row progress |
@@ -127,6 +127,6 @@ How patterns from the [iced ecosystem survey](../iced-ecosystem-survey.md) map t
 
 ### Gaps
 
-- **Encoding detection** (UTF-8, UTF-16, Windows-1252): Library crate concern (`chardetng`, `encoding_rs`) — no iced involvement
+- **Encoding detection** (UTF-8, UTF-16, Windows-1252): Library crate concern (`chardetng`, `encoding_rs`) - no iced involvement
 - **vCard parsing**: Internal (existing CardDAV parser in `crates/core/src/carddav/parse.rs`)
-- **Duplicate handling**: Library crate concern — matching logic is entirely backend, no UI pattern needed
+- **Duplicate handling**: Library crate concern - matching logic is entirely backend, no UI pattern needed

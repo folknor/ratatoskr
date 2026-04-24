@@ -99,7 +99,7 @@ pub struct ReadingPane {
     /// Computed once when thread detail loads, not on every view cycle.
     deduped_attachments: Vec<(usize, usize)>,
     /// Pre-parsed HTML bodies, one per message. Avoids re-parsing HTML on every
-    /// view cycle — only rebuilt when thread detail loads.
+    /// view cycle - only rebuilt when thread detail loads.
     cached_html: Vec<Option<super::html_render::CachedHtmlBody>>,
     /// Pre-loaded inline images for CID resolution in HTML bodies.
     /// Maps Content-ID to image bytes.
@@ -438,7 +438,7 @@ fn thread_view_with_commands<'a>(
 ) -> Element<'a, Message> {
     let mut col = column![].spacing(0).width(Length::Fill);
 
-    // Thread header (subject, expand/collapse) — uses ReadingPaneMessage internally
+    // Thread header (subject, expand/collapse) - uses ReadingPaneMessage internally
     col = col.push(
         thread_header(
             thread_ref,
@@ -619,7 +619,7 @@ fn thread_header<'a>(
     .spacing(SPACE_XS)
     .align_y(Alignment::Center);
 
-    // Label pills — only show tag-type labels (not folder/container labels)
+    // Label pills - only show tag-type labels (not folder/container labels)
     for label in labels.iter().filter(|l| l.label_kind == "tag") {
         let bg = theme::hex_to_color(&label.color_bg);
         let fg = theme::hex_to_color(&label.color_fg);

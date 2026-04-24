@@ -213,14 +213,14 @@ pub fn count_badge<'a, M: 'a>(count: i64) -> Element<'a, M> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavSize {
-    /// Sidebar folder list — compact padding
+    /// Sidebar folder list - compact padding
     Compact,
-    /// Settings tabs — more spacious padding
+    /// Settings tabs - more spacious padding
     Regular,
 }
 
 /// Generic navigation button used in both the sidebar and settings.
-/// Accepts data only — builds its own two-slot (icon + label) structure.
+/// Accepts data only - builds its own two-slot (icon + label) structure.
 /// Generic over message type so settings can use it with SettingsMessage.
 pub fn nav_button<'a, M: Clone + 'a>(
     ico: Option<iced::widget::Text<'a>>,
@@ -407,7 +407,7 @@ pub fn collapsible_section<'a, M: Clone + 'a>(
 // and every menu item.
 
 /// Icon type for dropdown items. The dropdown builds the
-/// Element internally — callers never pass pre-built UI.
+/// Element internally - callers never pass pre-built UI.
 pub enum DropdownIcon<'a> {
     /// Renders an avatar circle from a name string.
     Avatar {
@@ -1093,7 +1093,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
         .padding(PAD_ICON_BTN)
         .style(theme::ButtonClass::Ghost.style());
 
-    // Sender name — clickable to open contact editing
+    // Sender name - clickable to open contact editing
     let sender_email_owned = msg.from_address.clone().unwrap_or_default();
     let sender_element: Element<'a, M> = button(
         text(sender_name)
@@ -1576,7 +1576,7 @@ pub fn emoji_picker<'a, M: 'a + Clone>(
         tab_row = tab_row.push(tab);
     }
 
-    // Emoji grid — build rows of EMOJI_GRID_COLUMNS items.
+    // Emoji grid - build rows of EMOJI_GRID_COLUMNS items.
     let mut grid_col = column![].spacing(SPACE_XXXS);
     let mut current_row = row![].spacing(SPACE_XXXS);
     let mut col_idx = 0;

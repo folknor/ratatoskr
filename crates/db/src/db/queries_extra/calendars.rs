@@ -1089,7 +1089,7 @@ fn expand_recurrence(event: &CalendarViewEvent, rrule_str: &str) -> Vec<Calendar
             "WEEKLY" => current_start + interval * 7 * 86400,
             "MONTHLY" => advance_months(current_start, interval),
             "YEARLY" => advance_months(current_start, interval * 12),
-            _ => break, // Unknown frequency — don't expand.
+            _ => break, // Unknown frequency - don't expand.
         };
 
         if next_start > window_end {

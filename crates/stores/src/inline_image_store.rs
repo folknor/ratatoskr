@@ -12,7 +12,7 @@ const MAX_INLINE_STORE_BYTES: u64 = 128 * 1024 * 1024;
 /// Separate SQLite database for small inline images (signatures, logos).
 ///
 /// Content-addressed by xxh3 hash. Identical blobs across messages share
-/// one row. No compression — images are already compressed (PNG, JPEG, GIF).
+/// one row. No compression - images are already compressed (PNG, JPEG, GIF).
 #[derive(Clone)]
 pub struct InlineImageStoreState {
     conn: Arc<Mutex<Connection>>,

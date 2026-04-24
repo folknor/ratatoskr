@@ -36,7 +36,7 @@ pub(crate) async fn detect() -> SystemFonts {
         return fonts;
     }
 
-    // lfMessageFont is the font used for message boxes and dialogs — the
+    // lfMessageFont is the font used for message boxes and dialogs - the
     // standard UI font on Windows.
     let logfont = &metrics.lfMessageFont;
     if let Some(family) = logfont_family_name(logfont) {

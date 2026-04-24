@@ -39,7 +39,7 @@ pub(super) async fn process_single_thread(
     db.with_conn(move |conn| store_thread_to_db(conn, &aid, &tid, &parsed_clone))
         .await?;
 
-    // Fire-and-forget post-DB writes — all independent, run concurrently.
+    // Fire-and-forget post-DB writes - all independent, run concurrently.
     tokio::join!(
         store_bodies(body_store, &parsed),
         store_inline_images(inline_images, &parsed),

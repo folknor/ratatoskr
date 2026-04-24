@@ -66,7 +66,7 @@ pub async fn fetch_graph_gal(
         // Follow pagination
         match resp["@odata.nextLink"].as_str() {
             Some(next) => {
-                // nextLink is an absolute URL — strip the Graph base to get the path
+                // nextLink is an absolute URL - strip the Graph base to get the path
                 url = next
                     .strip_prefix("https://graph.microsoft.com/v1.0")
                     .unwrap_or(next)

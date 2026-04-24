@@ -4,7 +4,7 @@
 //! over a persistent WebSocket connection. Falls back to polling when the
 //! server does not advertise WebSocket capability or after repeated failures.
 //!
-//! The push manager is standalone — it does not drive the sync loop directly.
+//! The push manager is standalone - it does not drive the sync loop directly.
 //! Instead it forwards `StateChange` events through a channel that the sync
 //! layer can consume to trigger immediate delta syncs.
 
@@ -75,7 +75,7 @@ struct WebSocketPushDisable {
     type_name: String,
 }
 
-/// Envelope for incoming WebSocket messages — we only care about StateChange.
+/// Envelope for incoming WebSocket messages - we only care about StateChange.
 #[derive(Debug, Deserialize)]
 struct IncomingMessage {
     #[serde(rename = "@type")]
@@ -255,7 +255,7 @@ async fn push_connection_loop(
         .await
         {
             Ok(new_push_state) => {
-                // Clean disconnect — update last push state
+                // Clean disconnect - update last push state
                 last_push_state = new_push_state.or(last_push_state);
                 consecutive_failures = 0;
                 save_consecutive_failures(db, account_id, 0).await;
@@ -422,7 +422,7 @@ async fn connect_and_listen(
                         return Ok(current_push_state);
                     }
                     Some(Ok(_)) => {
-                        // Binary, Pong, Frame — ignore
+                        // Binary, Pong, Frame - ignore
                     }
                     Some(Err(e)) => {
                         return Err(format!("WebSocket read error: {e}"));

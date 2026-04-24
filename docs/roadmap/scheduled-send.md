@@ -1,7 +1,7 @@
 # Scheduled Send
 
-**Tier**: 2 — Keeps users from going back
-**Status**: ✅ **Done** — Full implementation with server-native delegation. `crates/core/src/scheduled_send.rs`: delegation routing (`determine_send_delegation_for_account` routes Exchange/JMAP to server, Gmail/IMAP to local), overdue handling (auto-send if <24h, flag for review if >24h). DB schema and queries in `crates/db/` (migrations, types) and `crates/core/src/db/queries_extra/compose.rs`. Exchange deferred delivery via `PidTagDeferredSendTime` extended property (`schedule_send`, `cancel_scheduled_send`, `reschedule_send` in `crates/graph/src/ops/mod.rs`). JMAP FUTURERELEASE via `EmailSubmission` with `HOLDUNTIL` parameter (`schedule_send_jmap`, `cancel_scheduled_send_jmap` in `crates/jmap/src/ops.rs`). Gmail/IMAP use local timer.
+**Tier**: 2 - Keeps users from going back
+**Status**: ✅ **Done** - Full implementation with server-native delegation. `crates/core/src/scheduled_send.rs`: delegation routing (`determine_send_delegation_for_account` routes Exchange/JMAP to server, Gmail/IMAP to local), overdue handling (auto-send if <24h, flag for review if >24h). DB schema and queries in `crates/db/` (migrations, types) and `crates/core/src/db/queries_extra/compose.rs`. Exchange deferred delivery via `PidTagDeferredSendTime` extended property (`schedule_send`, `cancel_scheduled_send`, `reschedule_send` in `crates/graph/src/ops/mod.rs`). JMAP FUTURERELEASE via `EmailSubmission` with `HOLDUNTIL` parameter (`schedule_send_jmap`, `cancel_scheduled_send_jmap` in `crates/jmap/src/ops.rs`). Gmail/IMAP use local timer.
 
 ---
 
@@ -19,18 +19,18 @@
 ## Pain points
 
 - IMAP fallback: the client must keep the message and send it at the scheduled time. If the client is closed/offline at send time, the message doesn't go. Need to communicate this clearly ("this will only send if Ratatoskr is running at the scheduled time") or implement a send-on-next-wake queue.
-- Time zones: user schedules for "9 AM Monday" — whose Monday? Need explicit time zone handling in the schedule picker. Display in local time, store as UTC, convert to recipient's time zone for preview ("arrives ~9 AM EST for recipient").
+- Time zones: user schedules for "9 AM Monday" - whose Monday? Need explicit time zone handling in the schedule picker. Display in local time, store as UTC, convert to recipient's time zone for preview ("arrives ~9 AM EST for recipient").
 - Cancellation: for server-side scheduled send, need to support cancel/reschedule. For Exchange this means deleting the deferred message from Drafts. For local fallback, just remove from the local queue.
 - Scheduled view: need a "Scheduled" mailbox/view showing all pending scheduled messages across accounts, with ability to edit, reschedule, or cancel. This is a virtual folder, not a real server-side mailbox.
-- Multi-account: user has Exchange (server-side scheduling) and IMAP (local scheduling). The UI should be identical. But the reliability characteristics differ — worth a subtle indicator?
+- Multi-account: user has Exchange (server-side scheduling) and IMAP (local scheduling). The UI should be identical. But the reliability characteristics differ - worth a subtle indicator?
 
 ## Work
 
 - ✅ DB schema with delegation columns (`delegation`, `remote_message_id`, `remote_status`, `timezone`, `from_email`, `error_message`, `retry_count`)
-- ✅ Delegation routing — `determine_send_delegation_for_account` maps provider type to `SendDelegation` enum (`Local`/`Exchange`/`Jmap`)
-- ✅ Exchange deferred delivery — `schedule_send` sets `PidTagDeferredSendTime` (0x3FEF) extended property; `cancel_scheduled_send` deletes draft; `reschedule_send` PATCHes timestamp
-- ✅ JMAP FUTURERELEASE — `schedule_send_jmap` creates `EmailSubmission` with `HOLDUNTIL` parameter; `cancel_scheduled_send_jmap` sets `undoStatus` to `canceled`; checks `maxDelayedSend` capability
-- ✅ Overdue handling — `check_overdue_scheduled_emails` classifies locally-delegated overdue emails: `SendNow` if <24h, `NeedsReview` if >24h; `process_overdue_emails` applies resolutions
+- ✅ Delegation routing - `determine_send_delegation_for_account` maps provider type to `SendDelegation` enum (`Local`/`Exchange`/`Jmap`)
+- ✅ Exchange deferred delivery - `schedule_send` sets `PidTagDeferredSendTime` (0x3FEF) extended property; `cancel_scheduled_send` deletes draft; `reschedule_send` PATCHes timestamp
+- ✅ JMAP FUTURERELEASE - `schedule_send_jmap` creates `EmailSubmission` with `HOLDUNTIL` parameter; `cancel_scheduled_send_jmap` sets `undoStatus` to `canceled`; checks `maxDelayedSend` capability
+- ✅ Overdue handling - `check_overdue_scheduled_emails` classifies locally-delegated overdue emails: `SendNow` if <24h, `NeedsReview` if >24h; `process_overdue_emails` applies resolutions
 - ✅ Gmail/IMAP local scheduling (no server API available)
 - ⬚ Schedule picker UI (iced compose work)
 - ⬚ "Scheduled" virtual folder view
@@ -89,8 +89,8 @@ RFC 8621 supports scheduled send through the SMTP FUTURERELEASE extension (RFC 4
 **Server capability**: `urn:ietf:params:jmap:submission` advertises `maxDelayedSend` (seconds). If 0, delayed send is not supported. `submissionExtensions` lists supported SMTP extensions.
 
 **How it works**: Create an `EmailSubmission` with FUTURERELEASE parameters in the `envelope.mailFrom.parameters` field:
-- `HOLDFOR=<seconds>` — relative delay
-- `HOLDUNTIL=<RFC3339-UTC-datetime>` — absolute release time
+- `HOLDFOR=<seconds>` - relative delay
+- `HOLDUNTIL=<RFC3339-UTC-datetime>` - absolute release time
 
 **`sendAt` property**: `UTCDate`, immutable, server-set. The scheduled release time.
 
@@ -118,7 +118,7 @@ RFC 4865 defines FUTURERELEASE on SMTP submission ports (587). **Real-world adop
 - On each wake: query `scheduled_emails WHERE status = 'pending' AND scheduled_at <= now`, attempt send, update status
 - On new schedule or cancel: recompute next wake time
 
-**OS-level scheduling** (cron, systemd timers, Windows Task Scheduler) was considered and rejected — too complex to install/manage for a desktop app.
+**OS-level scheduling** (cron, systemd timers, Windows Task Scheduler) was considered and rejected - too complex to install/manage for a desktop app.
 
 **Hybrid approach for reliability**:
 1. In-process timer handles sending while the app is running

@@ -58,19 +58,19 @@ impl App {
                 };
                 self.open_compose_from_message_view(window_id, &mv_msg)
             }
-            // Save As — needs db access from App
+            // Save As - needs db access from App
             (
                 PopOutWindow::MessageView(_),
                 PopOutMessage::MessageView(MessageViewMessage::SaveAs),
             ) => self.handle_save_as(window_id),
-            // SetRenderingMode to Source — may need lazy load
+            // SetRenderingMode to Source - may need lazy load
             (
                 PopOutWindow::MessageView(_),
                 PopOutMessage::MessageView(MessageViewMessage::SetRenderingMode(
                     RenderingMode::Source,
                 )),
             ) => self.handle_set_source_mode(window_id),
-            // Archive — route through action service for DB + provider dispatch
+            // Archive - route through action service for DB + provider dispatch
             (
                 PopOutWindow::MessageView(_),
                 PopOutMessage::MessageView(MessageViewMessage::Archive),
@@ -80,7 +80,7 @@ impl App {
                     crate::action_resolve::MailActionIntent::Archive,
                 );
             }
-            // Delete — route through action service for DB + provider dispatch
+            // Delete - route through action service for DB + provider dispatch
             (
                 PopOutWindow::MessageView(_),
                 PopOutMessage::MessageView(MessageViewMessage::Delete),
@@ -102,11 +102,11 @@ impl App {
                 self.pop_out_windows.remove(&window_id);
                 iced::window::close(window_id)
             }
-            // Compose send — build MIME, queue for outbox, close window
+            // Compose send - build MIME, queue for outbox, close window
             (PopOutWindow::Compose(_), PopOutMessage::Compose(ComposeMessage::Send)) => {
                 self.handle_compose_send(window_id)
             }
-            // Compose from-account changed — swap signature for new account
+            // Compose from-account changed - swap signature for new account
             (
                 PopOutWindow::Compose(_),
                 PopOutMessage::Compose(ComposeMessage::FromAccountChanged(_)),
@@ -116,11 +116,11 @@ impl App {
                 };
                 self.handle_compose_from_account_changed(window_id, msg)
             }
-            // Compose attach files — launch async file picker
+            // Compose attach files - launch async file picker
             (PopOutWindow::Compose(_), PopOutMessage::Compose(ComposeMessage::AttachFiles)) => {
                 handle_compose_attach_files(window_id)
             }
-            // Compose expand group — needs DB access
+            // Compose expand group - needs DB access
             (
                 PopOutWindow::Compose(state),
                 PopOutMessage::Compose(ComposeMessage::ContextMenuExpandGroup { .. }),
@@ -191,7 +191,7 @@ fn handle_message_view_update(
         MessageViewMessage::BodyLoaded(generation, _)
             if !state.is_current_generation(generation) =>
         {
-            Task::none() // Stale load — ignore
+            Task::none() // Stale load - ignore
         }
         MessageViewMessage::BodyLoaded(_, Ok((body_text, body_html))) => {
             state.body_text = body_text;
@@ -210,7 +210,7 @@ fn handle_message_view_update(
         MessageViewMessage::AttachmentsLoaded(generation, _)
             if !state.is_current_generation(generation) =>
         {
-            Task::none() // Stale load — ignore
+            Task::none() // Stale load - ignore
         }
         MessageViewMessage::AttachmentsLoaded(_, Ok(attachments)) => {
             state.attachments = attachments;
@@ -285,7 +285,7 @@ fn handle_compose_attach_files(window_id: iced::window::Id) -> Task<Message> {
         },
         move |files| {
             if files.is_empty() {
-                // User cancelled — no-op
+                // User cancelled - no-op
                 Message::PopOut(
                     window_id,
                     PopOutMessage::Compose(ComposeMessage::FilesSelected(Vec::new())),
@@ -560,7 +560,7 @@ impl App {
         ])
     }
 
-    /// Handle switching to Source rendering mode — lazy-loads raw source if needed.
+    /// Handle switching to Source rendering mode - lazy-loads raw source if needed.
     fn handle_set_source_mode(&mut self, window_id: iced::window::Id) -> Task<Message> {
         let Some(PopOutWindow::MessageView(state)) = self.pop_out_windows.get_mut(&window_id)
         else {
@@ -865,7 +865,7 @@ impl DraftData {
 
 impl App {
     /// Returns true if at least one compose pop-out window exists.
-    /// Computed from `pop_out_windows` — no manual bookkeeping needed.
+    /// Computed from `pop_out_windows` - no manual bookkeeping needed.
     pub(crate) fn composer_is_open(&self) -> bool {
         self.pop_out_windows
             .values()

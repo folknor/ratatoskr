@@ -1,10 +1,10 @@
-//! Core email send pipeline — shared infrastructure for building and sending
+//! Core email send pipeline - shared infrastructure for building and sending
 //! RFC 2822 MIME messages.
 //!
 //! This module provides:
-//! - [`SendRequest`] — all data needed to send an email
-//! - [`build_mime_message`] — assembles a proper MIME message and returns raw bytes
-//! - Draft lifecycle helpers — `mark_draft_sending`, `mark_draft_sent`, `mark_draft_failed`
+//! - [`SendRequest`] - all data needed to send an email
+//! - [`build_mime_message`] - assembles a proper MIME message and returns raw bytes
+//! - Draft lifecycle helpers - `mark_draft_sending`, `mark_draft_sent`, `mark_draft_failed`
 //!
 //! Provider-specific send logic lives in each provider crate. This module
 //! produces the raw RFC 2822 bytes that providers consume (Gmail uploads raw

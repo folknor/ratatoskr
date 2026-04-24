@@ -1,6 +1,6 @@
 use display_info::DisplayInfo;
 
-/// Standard "reference" DPI — Windows/macOS baseline for 100% scaling.
+/// Standard "reference" DPI - Windows/macOS baseline for 100% scaling.
 const REFERENCE_DPI: f32 = 96.0;
 
 /// Below this physical DPI, don't apply any extra app scaling.
@@ -28,7 +28,7 @@ pub fn detect_default_scale() -> f32 {
         return 1.0;
     }
 
-    // Use the lowest DPI across all connected monitors — safest default
+    // Use the lowest DPI across all connected monitors - safest default
     // so nothing ends up oversized on the smaller-DPI screen.
     let min_dpi = displays
         .iter()

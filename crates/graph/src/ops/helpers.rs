@@ -14,7 +14,7 @@ pub(super) async fn require_folder_map(client: &GraphClient) -> Result<FolderMap
     client
         .folder_map()
         .await
-        .ok_or_else(|| "Folder map not initialized — run sync first".to_string())
+        .ok_or_else(|| "Folder map not initialized - run sync first".to_string())
 }
 
 pub(super) async fn get_folder_map(

@@ -129,43 +129,43 @@ pub static CATEGORY_WEIGHTS: &[f64] = &[0.35, 0.15, 0.10, 0.20, 0.20];
 fn subject_templates(cat: Category) -> &'static [&'static str] {
     match cat {
         Category::Work => &[
-            "Q{q} {year} planning — {team} priorities",
+            "Q{q} {year} planning - {team} priorities",
             "Re: Sprint retrospective notes",
             "Updated timeline for {project}",
             "{project}: deployment checklist",
             "Action items from {day}'s standup",
             "RFC: {topic} redesign proposal",
             "Heads up: {service} maintenance window {day}",
-            "Interview feedback — {candidate}",
+            "Interview feedback - {candidate}",
             "[{team}] Weekly sync agenda",
             "Re: Budget approval for {project}",
             "Performance review self-assessment reminder",
-            "New hire onboarding — {candidate} starting {day}",
+            "New hire onboarding - {candidate} starting {day}",
             "Incident postmortem: {service} outage",
             "Re: Migration plan for {service}",
             "Design review: {project} mockups v{v}",
-            "OKR check-in — are we on track?",
-            "Re: Vendor evaluation — {topic}",
+            "OKR check-in - are we on track?",
+            "Re: Vendor evaluation - {topic}",
             "Team offsite logistics ({month})",
             "1:1 agenda for {day}",
-            "FYI: Policy update — remote work",
+            "FYI: Policy update - remote work",
         ],
         Category::Newsletter => &[
-            "This Week in {topic} — Issue #{n}",
+            "This Week in {topic} - Issue #{n}",
             "{topic} Weekly Digest",
-            "The {topic} Newsletter — {month} {year}",
+            "The {topic} Newsletter - {month} {year}",
             "[{topic}] What's new this week",
             "Your {month} recap from {service}",
-            "\u{1f680} {service} Changelog — {month} {year}",
+            "\u{1f680} {service} Changelog - {month} {year}",
             "Developer digest: {topic} edition",
             "Industry roundup: {topic} trends",
         ],
         Category::Commerce => &[
             "Your order #{order} has shipped!",
-            "Order confirmation — #{order}",
+            "Order confirmation - #{order}",
             "Your receipt from {service}",
             "Subscription renewal: {service}",
-            "Payment received — Invoice #{n}",
+            "Payment received - Invoice #{n}",
             "Your {service} trial ends in 3 days",
             "Exclusive offer: {pct}% off {topic}",
             "Your monthly statement is ready",
@@ -176,10 +176,10 @@ fn subject_templates(cat: Category) -> &'static [&'static str] {
             "Happy birthday! \u{1f389}",
             "Re: Weekend plans",
             "Check out this article about {topic}",
-            "Moving update — new address",
+            "Moving update - new address",
             "Re: Book recommendation",
-            "Catching up — it's been a while!",
-            "Wedding invitation — save the date",
+            "Catching up - it's been a while!",
+            "Wedding invitation - save the date",
             "Re: Recipe you asked about",
         ],
         Category::Notification => &[
@@ -188,7 +188,7 @@ fn subject_templates(cat: Category) -> &'static [&'static str] {
             "[Jira] {project}-{n}: Status changed to In Review",
             "[Slack] New message in #{team}",
             "Security alert: New sign-in from {topic}",
-            "[CI] Build {status} — {project}@main",
+            "[CI] Build {status} - {project}@main",
             "Calendar: {topic} in 15 minutes",
             "[Sentry] New issue in {service}",
             "Figma: {candidate} commented on {project}",
@@ -203,7 +203,7 @@ fn body_templates(cat: Category) -> &'static [&'static str] {
     match cat {
         Category::Work => &[
             "<p>Hi team,</p>\n<p>Following up on our discussion from {day}. Here's where we stand:</p>\n<ul>\n<li>The {project} migration is {pct}% complete</li>\n<li>{candidate} is handling the {service} integration</li>\n<li>We need to finalize the {topic} spec by end of week</li>\n</ul>\n<p>Let me know if you have any blockers.</p>\n<p>Best,<br>{sender}</p>",
-            "<p>Hey {recipient},</p>\n<p>Just wanted to flag something — the {service} metrics are looking a bit off since {day}'s deploy. Nothing critical, but worth keeping an eye on.</p>\n<p>Dashboard link: <a href=\"https://example.com/monitoring\">{service} monitoring</a></p>\n<p>If it doesn't stabilize by tomorrow, let's roll back.</p>\n<p>— {sender}</p>",
+            "<p>Hey {recipient},</p>\n<p>Just wanted to flag something - the {service} metrics are looking a bit off since {day}'s deploy. Nothing critical, but worth keeping an eye on.</p>\n<p>Dashboard link: <a href=\"https://example.com/monitoring\">{service} monitoring</a></p>\n<p>If it doesn't stabilize by tomorrow, let's roll back.</p>\n<p>- {sender}</p>",
             "<p>All,</p>\n<p>Quick update on {project}:</p>\n<ol>\n<li><strong>Done:</strong> API endpoints, auth flow, basic UI</li>\n<li><strong>In progress:</strong> {topic} implementation ({pct}% done)</li>\n<li><strong>Blocked:</strong> Waiting on {candidate} for the {service} credentials</li>\n</ol>\n<p>ETA for beta: {day}. Let me know if priorities have shifted.</p>\n<p>Thanks,<br>{sender}</p>",
             "<p>Hi {recipient},</p>\n<p>Attaching the revised proposal for the {topic} work. Key changes from v{v}:</p>\n<ul>\n<li>Reduced scope to focus on {service} first</li>\n<li>Updated cost estimates ({pct}% lower than original)</li>\n<li>Added phased rollout plan</li>\n</ul>\n<p>Would love your feedback before I share with the wider team. If email is easier, just <a href=\"mailto:feedback@example.com\">reply with notes</a>.</p>\n<p>Cheers,<br>{sender}</p>",
         ],
@@ -214,12 +214,12 @@ fn body_templates(cat: Category) -> &'static [&'static str] {
             "<div style=\"max-width:600px;margin:0 auto;\">\n<h2>Order Confirmed \u{2713}</h2>\n<p>Thanks for your purchase! Here's your order summary:</p>\n<table style=\"width:100%;border-collapse:collapse;\">\n<tr><td style=\"padding:8px;border-bottom:1px solid #eee;\">{topic}</td><td style=\"text-align:right;\">$49.99</td></tr>\n<tr><td style=\"padding:8px;border-bottom:1px solid #eee;\">Shipping</td><td style=\"text-align:right;\">Free</td></tr>\n<tr><td style=\"padding:8px;font-weight:bold;\">Total</td><td style=\"text-align:right;font-weight:bold;\">$49.99</td></tr>\n</table>\n<p>Order #{order} \u{00b7} Estimated delivery: {day}</p>\n<p><a href=\"https://example.com/orders\">View order status</a> or <a href=\"mailto:support@example.com\">contact support</a>.</p>\n</div>",
         ],
         Category::Personal => &[
-            "<p>Hey!</p>\n<p>So good to hear from you. Yeah, {day} works great for dinner. How about that new {topic} place on 5th? I've heard great things.</p>\n<p>Also — did you see {candidate}'s photos from the trip? Absolutely stunning.</p>\n<p>See you {day}!</p>",
-            "<p>Hi {recipient},</p>\n<p>I was just reading this article about {topic} and immediately thought of you. The part about {service} is particularly interesting.</p>\n<p><a href=\"https://example.com/articles\">Here’s the link</a> if you want to read it later.</p>\n<p>Hope you're doing well! We should catch up soon.</p>\n<p>— {sender}</p>",
+            "<p>Hey!</p>\n<p>So good to hear from you. Yeah, {day} works great for dinner. How about that new {topic} place on 5th? I've heard great things.</p>\n<p>Also - did you see {candidate}'s photos from the trip? Absolutely stunning.</p>\n<p>See you {day}!</p>",
+            "<p>Hi {recipient},</p>\n<p>I was just reading this article about {topic} and immediately thought of you. The part about {service} is particularly interesting.</p>\n<p><a href=\"https://example.com/articles\">Here's the link</a> if you want to read it later.</p>\n<p>Hope you're doing well! We should catch up soon.</p>\n<p>- {sender}</p>",
         ],
         Category::Notification => &[
-            "<div style=\"font-family:monospace;background:#f6f8fa;padding:16px;border-radius:6px;\">\n<p><strong>{candidate}</strong> commented on <a href=\"https://example.com/pulls/{n}\">{project}#{n}</a>:</p>\n<blockquote style=\"border-left:3px solid #ddd;padding-left:12px;color:#555;\">\nLooks good! Just one suggestion — could we add a test for the edge case where {topic} is empty? Otherwise LGTM.\n</blockquote>\n</div>",
-            "<div style=\"font-family:sans-serif;\">\n<p>\u{1f534} <strong>Build failed</strong> — {project}@main</p>\n<p>Commit: <code>{order}</code><br>\nAuthor: {candidate}<br>\nFailed step: {service} tests</p>\n<pre style=\"background:#f6f8fa;padding:12px;border-radius:4px;overflow-x:auto;\">\nerror[E0308]: mismatched types\n  --&gt; src/{topic}.rs:42:5\n   |\n42 |     expected_function()\n   |     ^^^^^^^^^^^^^^^^^^^ expected `String`, found `&amp;str`\n</pre>\n</div>",
+            "<div style=\"font-family:monospace;background:#f6f8fa;padding:16px;border-radius:6px;\">\n<p><strong>{candidate}</strong> commented on <a href=\"https://example.com/pulls/{n}\">{project}#{n}</a>:</p>\n<blockquote style=\"border-left:3px solid #ddd;padding-left:12px;color:#555;\">\nLooks good! Just one suggestion - could we add a test for the edge case where {topic} is empty? Otherwise LGTM.\n</blockquote>\n</div>",
+            "<div style=\"font-family:sans-serif;\">\n<p>\u{1f534} <strong>Build failed</strong> - {project}@main</p>\n<p>Commit: <code>{order}</code><br>\nAuthor: {candidate}<br>\nFailed step: {service} tests</p>\n<pre style=\"background:#f6f8fa;padding:12px;border-radius:4px;overflow-x:auto;\">\nerror[E0308]: mismatched types\n  --&gt; src/{topic}.rs:42:5\n   |\n42 |     expected_function()\n   |     ^^^^^^^^^^^^^^^^^^^ expected `String`, found `&amp;str`\n</pre>\n</div>",
         ],
     }
 }
@@ -229,7 +229,7 @@ fn body_templates(cat: Category) -> &'static [&'static str] {
 /// Get i18n subject templates for a given locale key and category.
 /// Falls back to Latin if no locale templates exist.
 pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'static str] {
-    // The i18n templates are extensive — we store them per locale.
+    // The i18n templates are extensive - we store them per locale.
     // For brevity we include the most common (ja, zh, ko); others fall back to Latin.
     match (locale_key, cat) {
         // Japanese
@@ -246,17 +246,17 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "1on1アジェンダ（{day}）",
         ],
         ("ja", Category::Newsletter) => &[
-            "今週の{topic}ニュース — 第{n}号",
+            "今週の{topic}ニュース - 第{n}号",
             "{topic}ウィークリーダイジェスト",
             "{month}の{service}まとめ",
             "開発者向けダイジェスト: {topic}特集",
         ],
         ("ja", Category::Commerce) => &[
             "ご注文 #{order} が発送されました",
-            "注文確認 — #{order}",
+            "注文確認 - #{order}",
             "{service}からの領収書",
             "サブスクリプション更新: {service}",
-            "お支払い確認 — 請求書 #{n}",
+            "お支払い確認 - 請求書 #{n}",
         ],
         ("ja", Category::Personal) => &[
             "Re: {day}のディナーどう？",
@@ -273,7 +273,7 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "[GitHub] {project}にプッシュされました",
             "[Jira] {project}-{n}: ステータスがレビュー中に変更",
             "[Slack] #{team}に新しいメッセージ",
-            "[CI] ビルド{status} — {project}@main",
+            "[CI] ビルド{status} - {project}@main",
             "[Sentry] {service}で新しい問題が発生",
         ],
         // Chinese
@@ -290,17 +290,17 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "1对1会议议程（{day}）",
         ],
         ("zh", Category::Newsletter) => &[
-            "本周{topic}动态 — 第{n}期",
+            "本周{topic}动态 - 第{n}期",
             "{topic}周报",
             "{month}{service}月度总结",
             "开发者周刊：{topic}专题",
         ],
         ("zh", Category::Commerce) => &[
             "您的订单 #{order} 已发货！",
-            "订单确认 — #{order}",
+            "订单确认 - #{order}",
             "来自{service}的收据",
             "订阅续费：{service}",
-            "付款确认 — 发票 #{n}",
+            "付款确认 - 发票 #{n}",
         ],
         ("zh", Category::Personal) => &[
             "回复：{day}一起吃饭？",
@@ -308,7 +308,7 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "生日快乐！\u{1f389}",
             "回复：周末计划",
             "看到一篇关于{topic}的好文章",
-            "搬家通知——新地址",
+            "搬家通知--新地址",
             "回复：你推荐的那本书",
             "好久不见！最近怎么样？",
         ],
@@ -317,7 +317,7 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "[GitHub] {project}有新的推送",
             "[Jira] {project}-{n}：状态已变更为审核中",
             "[Slack] #{team}频道有新消息",
-            "[CI] 构建{status} — {project}@main",
+            "[CI] 构建{status} - {project}@main",
             "[Sentry] {service}出现新问题",
         ],
         // Korean
@@ -334,17 +334,17 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "1:1 미팅 안건 ({day})",
         ],
         ("ko", Category::Newsletter) => &[
-            "이번 주 {topic} 소식 — {n}호",
+            "이번 주 {topic} 소식 - {n}호",
             "{topic} 주간 다이제스트",
             "{month} {service} 정리",
             "개발자 다이제스트: {topic} 특집",
         ],
         ("ko", Category::Commerce) => &[
             "주문 #{order} 배송이 시작되었습니다!",
-            "주문 확인 — #{order}",
+            "주문 확인 - #{order}",
             "{service} 영수증",
             "구독 갱신: {service}",
-            "결제 확인 — 청구서 #{n}",
+            "결제 확인 - 청구서 #{n}",
         ],
         ("ko", Category::Personal) => &[
             "Re: {day}에 저녁 어때?",
@@ -352,7 +352,7 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "생일 축하해! \u{1f389}",
             "Re: 주말 계획",
             "{topic}에 대한 기사 봤어?",
-            "이사 알림 — 새 주소",
+            "이사 알림 - 새 주소",
             "Re: 추천해준 책",
             "오랜만이야! 잘 지내?",
         ],
@@ -361,7 +361,7 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "[GitHub] {project}에 새 푸시",
             "[Jira] {project}-{n}: 상태가 리뷰 중으로 변경됨",
             "[Slack] #{team}에 새 메시지",
-            "[CI] 빌드 {status} — {project}@main",
+            "[CI] 빌드 {status} - {project}@main",
             "[Sentry] {service}에서 새 이슈 발생",
         ],
         // Arabic
@@ -378,17 +378,17 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "جدول أعمال اجتماع 1:1 ({day})",
         ],
         ("ar", Category::Newsletter) => &[
-            "أخبار {topic} هذا الأسبوع — العدد {n}",
+            "أخبار {topic} هذا الأسبوع - العدد {n}",
             "الملخص الأسبوعي لـ {topic}",
             "ملخص {month} من {service}",
             "نشرة المطورين: عدد خاص عن {topic}",
         ],
         ("ar", Category::Commerce) => &[
             "تم شحن طلبك #{order}!",
-            "تأكيد الطلب — #{order}",
+            "تأكيد الطلب - #{order}",
             "إيصالك من {service}",
             "تجديد الاشتراك: {service}",
-            "تأكيد الدفع — فاتورة #{n}",
+            "تأكيد الدفع - فاتورة #{n}",
         ],
         ("ar", Category::Personal) => &[
             "رد: عشاء يوم {day}؟",
@@ -396,7 +396,7 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "عيد ميلاد سعيد! \u{1f389}",
             "رد: خطط نهاية الأسبوع",
             "شاهد هذا المقال عن {topic}",
-            "تحديث الانتقال — العنوان الجديد",
+            "تحديث الانتقال - العنوان الجديد",
             "رد: الكتاب الذي سألت عنه",
             "وحشتني! كيف حالك؟",
         ],
@@ -405,7 +405,7 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "[GitHub] تم الدفع إلى {project}",
             "[Jira] {project}-{n}: تغيرت الحالة إلى قيد المراجعة",
             "[Slack] رسالة جديدة في #{team}",
-            "[CI] البناء {status} — {project}@main",
+            "[CI] البناء {status} - {project}@main",
             "[Sentry] مشكلة جديدة في {service}",
         ],
         // Russian
@@ -422,17 +422,17 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "Повестка 1:1 ({day})",
         ],
         ("ru", Category::Newsletter) => &[
-            "{topic} на этой неделе — Выпуск #{n}",
+            "{topic} на этой неделе - Выпуск #{n}",
             "Еженедельный дайджест {topic}",
             "Итоги {month} от {service}",
             "Дайджест разработчика: спецвыпуск {topic}",
         ],
         ("ru", Category::Commerce) => &[
             "Ваш заказ #{order} отправлен!",
-            "Подтверждение заказа — #{order}",
+            "Подтверждение заказа - #{order}",
             "Чек от {service}",
             "Продление подписки: {service}",
-            "Подтверждение оплаты — счёт #{n}",
+            "Подтверждение оплаты - счёт #{n}",
         ],
         ("ru", Category::Personal) => &[
             "Re: Ужин в {day}?",
@@ -440,7 +440,7 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "С днём рождения! \u{1f389}",
             "Re: Планы на выходные",
             "Глянь статью про {topic}",
-            "Переезд — новый адрес",
+            "Переезд - новый адрес",
             "Re: Книга, которую ты советовал",
             "Давно не общались! Как дела?",
         ],
@@ -449,7 +449,7 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "[GitHub] Пуш в {project}",
             "[Jira] {project}-{n}: Статус изменён на «Ревью»",
             "[Slack] Новое сообщение в #{team}",
-            "[CI] Сборка {status} — {project}@main",
+            "[CI] Сборка {status} - {project}@main",
             "[Sentry] Новая ошибка в {service}",
         ],
         // Hindi
@@ -466,17 +466,17 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "1:1 मीटिंग एजेंडा ({day})",
         ],
         ("hi", Category::Newsletter) => &[
-            "इस हफ़्ते {topic} में — अंक #{n}",
+            "इस हफ़्ते {topic} में - अंक #{n}",
             "{topic} साप्ताहिक डाइजेस्ट",
             "{month} का {service} सारांश",
             "डेवलपर डाइजेस्ट: {topic} विशेषांक",
         ],
         ("hi", Category::Commerce) => &[
             "आपका ऑर्डर #{order} शिप हो गया है!",
-            "ऑर्डर कन्फ़र्मेशन — #{order}",
+            "ऑर्डर कन्फ़र्मेशन - #{order}",
             "{service} से रसीद",
             "सब्सक्रिप्शन रिन्यूअल: {service}",
-            "भुगतान पुष्टि — इनवॉइस #{n}",
+            "भुगतान पुष्टि - इनवॉइस #{n}",
         ],
         ("hi", Category::Personal) => &[
             "Re: {day} को डिनर चलें?",
@@ -484,7 +484,7 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "जन्मदिन मुबारक! \u{1f389}",
             "Re: वीकेंड प्लान",
             "{topic} पर ये आर्टिकल देखो",
-            "शिफ्टिंग अपडेट — नया पता",
+            "शिफ्टिंग अपडेट - नया पता",
             "Re: तुमने जो किताब बताई थी",
             "बहुत दिन हो गए! कैसे हो?",
         ],
@@ -493,7 +493,7 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "[GitHub] {project} में नया पुश",
             "[Jira] {project}-{n}: स्टेटस रिव्यू में बदला",
             "[Slack] #{team} में नया मैसेज",
-            "[CI] बिल्ड {status} — {project}@main",
+            "[CI] बिल्ड {status} - {project}@main",
             "[Sentry] {service} में नई समस्या",
         ],
         // Thai
@@ -510,17 +510,17 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "วาระ 1:1 ({day})",
         ],
         ("th", Category::Newsletter) => &[
-            "ข่าว {topic} ประจำสัปดาห์ — ฉบับที่ {n}",
+            "ข่าว {topic} ประจำสัปดาห์ - ฉบับที่ {n}",
             "สรุป {topic} รายสัปดาห์",
             "สรุป{month}จาก {service}",
             "สรุปสำหรับนักพัฒนา: พิเศษ {topic}",
         ],
         ("th", Category::Commerce) => &[
             "คำสั่งซื้อ #{order} จัดส่งแล้ว!",
-            "ยืนยันคำสั่งซื้อ — #{order}",
+            "ยืนยันคำสั่งซื้อ - #{order}",
             "ใบเสร็จจาก {service}",
             "ต่ออายุสมาชิก: {service}",
-            "ยืนยันการชำระเงิน — ใบแจ้งหนี้ #{n}",
+            "ยืนยันการชำระเงิน - ใบแจ้งหนี้ #{n}",
         ],
         ("th", Category::Personal) => &[
             "Re: ทานข้าว{day}ไหม?",
@@ -528,7 +528,7 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "สุขสันต์วันเกิด! \u{1f389}",
             "Re: แผนสุดสัปดาห์",
             "เจอบทความเรื่อง{topic}มา",
-            "แจ้งย้ายบ้าน — ที่อยู่ใหม่",
+            "แจ้งย้ายบ้าน - ที่อยู่ใหม่",
             "Re: หนังสือที่แนะนำ",
             "ไม่ได้เจอกันนาน! เป็นไงบ้าง?",
         ],
@@ -537,7 +537,7 @@ pub fn i18n_subject_templates(locale_key: &str, cat: Category) -> &'static [&'st
             "[GitHub] push ใหม่ใน {project}",
             "[Jira] {project}-{n}: สถานะเปลี่ยนเป็นรีวิว",
             "[Slack] ข้อความใหม่ใน #{team}",
-            "[CI] บิลด์ {status} — {project}@main",
+            "[CI] บิลด์ {status} - {project}@main",
             "[Sentry] ปัญหาใหม่ใน {service}",
         ],
         // Fallback to Latin
@@ -573,7 +573,7 @@ pub fn i18n_body_templates(locale_key: &str, cat: Category) -> &'static [&'stati
             "<p style=\"direction:rtl;text-align:right;\">أهلاً!</p>\n<p style=\"direction:rtl;text-align:right;\">نعم، {day} مناسب للعشاء. ما رأيك بالمطعم الجديد المتخصص في {topic}؟ سمعت أنه ممتاز.</p>\n<p style=\"direction:rtl;text-align:right;\">هل شاهدت صور {candidate} من الرحلة؟ رائعة جداً.</p>\n<p style=\"direction:rtl;text-align:right;\">نراكم {day}!</p>",
         ],
         ("ru", Category::Work) => &[
-            "<p>Всем привет,</p>\n<p>По итогам обсуждения в {day}. Текущий статус:</p>\n<ul>\n<li>Миграция {project} завершена на {pct}%</li>\n<li>{candidate} занимается интеграцией с {service}</li>\n<li>Нужно до конца недели утвердить спецификацию {topic}</li>\n</ul>\n<p>Если есть блокеры — сообщите.</p>\n<p>С уважением,<br>{sender}</p>",
+            "<p>Всем привет,</p>\n<p>По итогам обсуждения в {day}. Текущий статус:</p>\n<ul>\n<li>Миграция {project} завершена на {pct}%</li>\n<li>{candidate} занимается интеграцией с {service}</li>\n<li>Нужно до конца недели утвердить спецификацию {topic}</li>\n</ul>\n<p>Если есть блокеры - сообщите.</p>\n<p>С уважением,<br>{sender}</p>",
         ],
         ("ru", Category::Personal) => &[
             "<p>Привет!</p>\n<p>Да, {day} для ужина отлично подходит. Как насчёт нового ресторана {topic} на Пятой? Говорят, там здорово.</p>\n<p>Видел фотки {candidate} из поездки? Потрясающие.</p>\n<p>До {day}!</p>",

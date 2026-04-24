@@ -1,7 +1,7 @@
 # Roaming Signatures
 
-**Tier**: 2 — Keeps users from going back
-**Status**: ⚠️ **Backend complete, UI missing** — DB schema with sync columns (`server_id`, `server_html_hash`, `source`, `last_synced_at`, `is_reply_default`, `body_text`). Gmail bidirectional sync via `sendAs` (pull server signatures on initial+delta sync, push local edits). JMAP Identity signature sync (`sync_jmap_identity_signatures`). Inline image extraction from signature HTML (base64 data-URI and CID parsing, dedup via xxh3, storage in inline image store). Exchange has no public API for signatures and never will (see Research §1–2). Missing: signature placement in compose UI.
+**Tier**: 2 - Keeps users from going back
+**Status**: ⚠️ **Backend complete, UI missing** - DB schema with sync columns (`server_id`, `server_html_hash`, `source`, `last_synced_at`, `is_reply_default`, `body_text`). Gmail bidirectional sync via `sendAs` (pull server signatures on initial+delta sync, push local edits). JMAP Identity signature sync (`sync_jmap_identity_signatures`). Inline image extraction from signature HTML (base64 data-URI and CID parsing, dedup via xxh3, storage in inline image store). Exchange has no public API for signatures and never will (see Research §1-2). Missing: signature placement in compose UI.
 
 ---
 
@@ -12,27 +12,27 @@
 | Provider | Native support | API |
 |---|---|---|
 | Exchange (Graph) | Roaming signatures (relatively new, ~2021) | Graph beta endpoints / EWS roaming settings |
-| Gmail API | Signature in settings | `users.settings.sendAs` — per-alias signatures |
+| Gmail API | Signature in settings | `users.settings.sendAs` - per-alias signatures |
 | JMAP | Nothing standardized | N/A |
 | IMAP | Nothing | N/A |
 
 ## Pain points
 
-- First-run experience: user adds their Exchange account, expects their signature to appear in compose automatically. If we don't fetch it, they have to manually recreate it — immediate negative impression.
+- First-run experience: user adds their Exchange account, expects their signature to appear in compose automatically. If we don't fetch it, they have to manually recreate it - immediate negative impression.
 - HTML signatures: signatures are rich HTML (logos, formatted text, links). Need to render them in compose and handle the boundary between user-typed content and the signature block.
 - Multiple signatures: Exchange supports multiple signatures (new email vs reply). Gmail supports per-alias signatures. Need a signature picker or smart default (use reply signature for replies, new-email signature for new compose).
 - JMAP/IMAP accounts: purely local signatures. Need a signature editor that stores locally. Same UI, just no server sync.
 - Signature images: signatures often contain inline images (company logos, headshots). These are the 14KB PNGs that compound at volume. When fetching a roaming signature, need to extract inline images and deduplicate them in the attachment store.
-- Corporate-managed signatures: some orgs push signatures via Exchange transport rules (appended server-side on send). Client-side signature would double up. Need to detect this — if the server appends a signature, don't insert one client-side. Hard to detect reliably.
+- Corporate-managed signatures: some orgs push signatures via Exchange transport rules (appended server-side on send). Client-side signature would double up. Need to detect this - if the server appends a signature, don't insert one client-side. Hard to detect reliably.
 
 ## Work
 
 - ✅ DB schema extended with sync columns (`server_id`, `server_html_hash`, `source`, `last_synced_at`, `is_reply_default`, `body_text`)
-- ✅ Gmail `sendAs` signature fetch — pulled on initial sync and delta sync (`sync_signatures` in `crates/gmail/src/sync/labels.rs`)
-- ✅ Gmail bidirectional sync — local edits pushed via `update_send_as_signature` (`crates/gmail/src/api.rs`), conflict resolution by server HTML hash
-- ✅ JMAP Identity signature sync — `sync_jmap_identity_signatures` in `crates/jmap/src/signatures.rs`, upserts `htmlSignature`/`textSignature` keyed by `(account_id, server_id)`
-- ✅ Inline image handling — `crates/common/src/signature_images.rs` extracts base64 data-URIs and CID references from signature HTML, deduplicates via xxh3, stores in inline image store
-- ✗ Exchange — **permanently blocked.** No public API exists and Microsoft has explicitly confirmed there never will be (see Research §1–2). Sent-mail heuristic not worth the effort. Exchange users create their signature locally on first account add.
+- ✅ Gmail `sendAs` signature fetch - pulled on initial sync and delta sync (`sync_signatures` in `crates/gmail/src/sync/labels.rs`)
+- ✅ Gmail bidirectional sync - local edits pushed via `update_send_as_signature` (`crates/gmail/src/api.rs`), conflict resolution by server HTML hash
+- ✅ JMAP Identity signature sync - `sync_jmap_identity_signatures` in `crates/jmap/src/signatures.rs`, upserts `htmlSignature`/`textSignature` keyed by `(account_id, server_id)`
+- ✅ Inline image handling - `crates/common/src/signature_images.rs` extracts base64 data-URIs and CID references from signature HTML, deduplicates via xxh3, stores in inline image store
+- ✗ Exchange - **permanently blocked.** No public API exists and Microsoft has explicitly confirmed there never will be (see Research §1-2). Sent-mail heuristic not worth the effort. Exchange users create their signature locally on first account add.
 - ⬚ Signature placement in compose (iced UI work)
 
 ---
@@ -48,7 +48,7 @@
 
 #### Current state: No API exists, and Microsoft says there never will be
 
-As of March 2026, **Microsoft Graph has no endpoint for reading or writing roaming signatures** — not in v1.0, not in beta. The `GET /me/mailboxSettings` endpoint returns `automaticRepliesSetting`, `language`, `timeZone`, `dateFormat`, `timeFormat`, `delegateMeetMessageDeliveryOptions`, and `userPurpose`. Signatures are explicitly absent. The beta `mailboxSettings` schema is identical — no signature properties.
+As of March 2026, **Microsoft Graph has no endpoint for reading or writing roaming signatures** - not in v1.0, not in beta. The `GET /me/mailboxSettings` endpoint returns `automaticRepliesSetting`, `language`, `timeZone`, `dateFormat`, `timeFormat`, `delegateMeetMessageDeliveryOptions`, and `userPurpose`. Signatures are explicitly absent. The beta `mailboxSettings` schema is identical - no signature properties.
 
 **Microsoft has explicitly stated they have no plans to add this.** From the [Graph API Support for Roaming Signatures feature request](https://techcommunity.microsoft.com/idea/microsoft365developerplatform/graph-api-support-for-roaming-signatures/4106799) (April 2024): "We have _no plans to support roaming signature management_ in the Microsoft Graph API." Microsoft's recommended alternative is Outlook Add-ins with event-based hooks (`OnMessageCompose`), which is irrelevant to third-party email clients.
 
@@ -58,7 +58,7 @@ This is despite Microsoft having broken EWS signature access when they rolled ou
 
 Roaming signatures are stored in an internal "Substrate" store (moved from the mailbox FAI in April 2023), not accessible through any documented Graph, EWS, or PowerShell endpoint. Outlook clients read from this location directly using internal protocols.
 
-#### All known approaches — exhaustively checked
+#### All known approaches - exhaustively checked
 
 | Approach | Status | Detail |
 |----------|--------|--------|
@@ -73,8 +73,8 @@ Roaming signatures are stored in an internal "Substrate" store (moved from the m
 
 **Exchange signatures cannot be fetched via any public API, and Microsoft has confirmed this will not change.** The only option is:
 
-1. **Do nothing** — user manually creates their signature locally. On first launch, show "Set up your signature" prompt. This is the pragmatic choice.
-2. **Sent-mail heuristic** — fetch recent sent emails, extract signature by pattern matching common markers (`-- `, `<div class="Signature">`, etc.). Fragile, locale-dependent, and not worth the implementation effort given it only saves the user one copy-paste.
+1. **Do nothing** - user manually creates their signature locally. On first launch, show "Set up your signature" prompt. This is the pragmatic choice.
+2. **Sent-mail heuristic** - fetch recent sent emails, extract signature by pattern matching common markers (`-- `, `<div class="Signature">`, etc.). Fragile, locale-dependent, and not worth the implementation effort given it only saves the user one copy-paste.
 
 **Recommendation**: Option 1. Prompt the user to set up their signature on first Exchange account add. Don't waste time on the sent-mail heuristic.
 
@@ -134,7 +134,7 @@ The `GmailSendAs` struct in `crates/gmail/src/types.rs` already deserializes the
 
 #### Required OAuth scope
 
-`https://www.googleapis.com/auth/gmail.settings.basic` — covers read/write access to `sendAs` settings including signatures.
+`https://www.googleapis.com/auth/gmail.settings.basic` - covers read/write access to `sendAs` settings including signatures.
 
 ---
 
@@ -275,8 +275,8 @@ Exchange supports two defaults: one for new compose, one for replies/forwards. G
 
 #### Implementation priority
 
-1. **Gmail fetch on account setup** — highest value, easiest implementation. `GmailSendAs` already has the `signature` field.
-2. **JMAP fetch/push on account setup** — clean API via `jmap-client`. Bidirectional.
-3. **Local signature editor** — already exists. Needs `body_text` field and sync columns.
-4. **Sent-mail heuristic for Exchange** — medium effort, fragile. Defer to post-MVP.
-5. **Transport rule detection** — user setting, not auto-detection. Low effort.
+1. **Gmail fetch on account setup** - highest value, easiest implementation. `GmailSendAs` already has the `signature` field.
+2. **JMAP fetch/push on account setup** - clean API via `jmap-client`. Bidirectional.
+3. **Local signature editor** - already exists. Needs `body_text` field and sync columns.
+4. **Sent-mail heuristic for Exchange** - medium effort, fragile. Defer to post-MVP.
+5. **Transport rule detection** - user setting, not auto-detection. Low effort.

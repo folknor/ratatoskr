@@ -187,7 +187,7 @@ impl App {
                 Task::none()
             }
             CalendarMessage::ExpandPopoverToModal => {
-                // Workflow identity stays the same — only the surface changes.
+                // Workflow identity stays the same - only the surface changes.
                 if let CalendarWorkflow::ViewingEvent { surface, .. } =
                     &mut self.calendar.workflow
                 {
@@ -361,7 +361,7 @@ impl App {
             }
             CalendarMessage::EventsLoaded(load_generation, result) => {
                 if !self.calendar.load_generation.is_current(load_generation) {
-                    // Stale result from a previous load — discard.
+                    // Stale result from a previous load - discard.
                     return Task::none();
                 }
                 match result {
@@ -395,7 +395,7 @@ impl App {
             }
             CalendarMessage::CalendarsLoaded(load_generation, result) => {
                 if !self.calendar.load_generation.is_current(load_generation) {
-                    // Stale result from a previous load — discard.
+                    // Stale result from a previous load - discard.
                     return Task::none();
                 }
                 match result {
@@ -667,7 +667,7 @@ impl App {
 
 /// Map ActionOutcome to the Result<(), String> that CalendarMessage expects.
 ///
-/// LocalOnly maps to Ok(()) — the event is visible locally, the overlay closes.
+/// LocalOnly maps to Ok(()) - the event is visible locally, the overlay closes.
 /// Phase 3 can add richer outcome reporting for the "saved locally, not synced" case.
 fn calendar_outcome_to_result(outcome: rtsk::actions::ActionOutcome) -> Result<(), String> {
     match outcome {

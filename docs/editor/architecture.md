@@ -1,16 +1,16 @@
 # Rich Text Editor Architecture
 
-WYSIWYG rich text editor for email composition in iced. Built from scratch — no
+WYSIWYG rich text editor for email composition in iced. Built from scratch - no
 existing rich text editor exists for iced.
 
 Design informed by deep study of ProseMirror (schema + transactions + position
 mapping), Slate.js (normalization + path-based addressing + operation
-invertibility), Quill (delta algebra), and fleather (native Flutter editor — the
+invertibility), Quill (delta algebra), and fleather (native Flutter editor - the
 only reference project that solves rendering + input on a declarative UI framework
 without contentEditable). See `docs/editor/research-summary.md` for detailed
 analysis of all four.
 
-**Crate:** `crates/rte/` — 14,300+ lines, 680+ tests, zero clippy
+**Crate:** `crates/rte/` - 14,300+ lines, 680+ tests, zero clippy
 warnings. Pure-Rust core modules (no iced dependency) + feature-gated widget.
 
 ---
@@ -61,7 +61,7 @@ and most web editors do internally.
 ### Immutability and structural sharing
 
 `Document.blocks` is `Vec<Arc<Block>>`. After an edit, only the affected block
-gets a new `Arc` allocation. Unchanged blocks are `Arc::clone` — cheap pointer
+gets a new `Arc` allocation. Unchanged blocks are `Arc::clone` - cheap pointer
 copies. `BlockQuote.blocks` also uses `Arc<Block>`. `ListItem` is a flat
 inline block (no nested `Arc`).
 
@@ -83,7 +83,7 @@ DocSelection
   focus: DocPosition           // where the caret visually is
 ```
 
-Flattened char offsets (not `(run_index, char_offset)`) — stable across run
+Flattened char offsets (not `(run_index, char_offset)`) - stable across run
 restructuring. `DocPosition` implements `Ord` for range comparisons.
 `DocSelection` provides `start()`, `end()`, `is_collapsed()`, `block_range()`.
 
@@ -103,7 +103,7 @@ single-block open-ended fragment.
 ### Key helpers on document types
 
 - `StyledRun::split_at(char_offset) -> (StyledRun, StyledRun)`
-- `isolate_runs(runs, start, end) -> Range<usize>` — split runs at boundaries
+- `isolate_runs(runs, start, end) -> Range<usize>` - split runs at boundaries
   for surgical style application
 - `Block::resolve_offset(offset) -> Option<(run_index, offset_in_run)>`
 - `Block::flattened_text()`, `Block::char_len()`, `Block::kind() -> BlockKind`
@@ -198,7 +198,7 @@ oldest eviction.
 
 ### Format toggle logic
 
-**With selection:** `ToggleInlineStyle` operation — walks blocks, uses
+**With selection:** `ToggleInlineStyle` operation - walks blocks, uses
 `isolate_runs()` to split at boundaries, flips the style bit. If all text
 already has the style, removes it; otherwise adds it. Normalization merges
 same-style runs afterward.
@@ -219,8 +219,8 @@ Slate-inspired dirty-block normalization with safety valve
 (max iterations = dirty_count × 42).
 
 Two entry points:
-- `normalize(doc)` — normalize entire document
-- `normalize_blocks(doc, dirty_indices)` — fast path, most edits dirty 1–2 blocks
+- `normalize(doc)` - normalize entire document
+- `normalize_blocks(doc, dirty_indices)` - fast path, most edits dirty 1-2 blocks
 
 Invariants enforced:
 1. Adjacent `StyledRun`s with identical `(style, link)` merge
@@ -303,7 +303,7 @@ Empty runs skipped.
 Parse with html5ever via custom `TreeSink` implementation (Rc<RefCell<Node>>
 handles). Recursive DOM walk with `StyleContext` accumulating inline styles.
 
-- Block elements: `<p>`, `<h1>`–`<h6>` (H4-H6 → H3), `<ul>`, `<ol>`, `<li>`,
+- Block elements: `<p>`, `<h1>`-`<h6>` (H4-H6 → H3), `<ul>`, `<ol>`, `<li>`,
   `<blockquote>`, `<div>`, `<hr>`, `<pre>`
 - Inline elements: `<strong>`/`<b>`, `<em>`/`<i>`, `<u>`, `<s>`/`<strike>`/`<del>`, `<a>`
 - Tables and complex layouts flatten to text paragraphs
@@ -327,12 +327,12 @@ Custom `Widget` trait implementation for iced. Not a `TextEditor` fork.
 
 The widget follows iced's ownership pattern:
 
-- `EditorState` — application-owned mutable state (Document, selection,
+- `EditorState` - application-owned mutable state (Document, selection,
   undo stack, pending style, cursor state, drag state)
-- `RichTextEditor<'a, Message>` — the widget struct, created in `view()` with
+- `RichTextEditor<'a, Message>` - the widget struct, created in `view()` with
   `&'a EditorState`. Builder pattern for font, colors, padding, dimensions.
-- `Action` — events emitted by the widget to the application
-- `WidgetState` — internal tree state holding `ParagraphCache` and focus timing
+- `Action` - events emitted by the widget to the application
+- `WidgetState` - internal tree state holding `ParagraphCache` and focus timing
 
 The application calls `EditorState::perform(action)` in its `update()` to
 apply each action.
@@ -351,10 +351,10 @@ pub struct EditorState {
 ```
 
 Key methods:
-- `perform(action: Action)` — central dispatch for all editor actions
-- `apply_action(EditAction)` — resolve through rules, apply ops, normalize,
+- `perform(action: Action)` - central dispatch for all editor actions
+- `apply_action(EditAction)` - resolve through rules, apply ops, normalize,
   push to undo
-- `undo()` / `redo()` — apply inverse/forward ops, restore cursor
+- `undo()` / `redo()` - apply inverse/forward ops, restore cursor
 - `to_html()` / `from_html()` / `selection_text()`
 
 ### Action enum
@@ -378,9 +378,9 @@ pub enum Action {
 
 ### Rendering (widget/render.rs)
 
-- `ParagraphCache<P>` — one `CacheEntry` per block with dirty tracking and
+- `ParagraphCache<P>` - one `CacheEntry` per block with dirty tracking and
   y-offsets. Only dirty entries re-layout via `Paragraph::with_spans()`.
-- `build_spans_for_block()` — converts StyledRuns to iced Spans with correct
+- `build_spans_for_block()` - converts StyledRuns to iced Spans with correct
   font (bold/italic/bold-italic variants), size, color, underline, strikethrough
 - Font sizes: H1 = 18px, H2 = 16px, H3 = 14px, body = 13px
 - Block spacing, blockquote border/indent, list marker width constants
@@ -390,15 +390,15 @@ pub enum Action {
 
 ### Hit testing and cursor (widget/cursor.rs)
 
-- `BlockLayout` — per-block layout info (y_offset, height, content_offset)
-- `CursorState` — blink timing (500ms), focus tracking, target_x for vertical
+- `BlockLayout` - per-block layout info (y_offset, height, content_offset)
+- `CursorState` - blink timing (500ms), focus tracking, target_x for vertical
   movement
-- `DragState` — anchor position and active flag
-- `hit_test()` / `find_block_at_point()` — binary search blocks by y_offset,
+- `DragState` - anchor position and active flag
+- `hit_test()` / `find_block_at_point()` - binary search blocks by y_offset,
   translate to block-local coordinates
-- `selection_block_ranges()` — decompose selection into per-block participation
+- `selection_block_ranges()` - decompose selection into per-block participation
   (Single/First/Full/Last)
-- `prepare_move_up()` / `prepare_move_down()` — infrastructure for
+- `prepare_move_up()` / `prepare_move_down()` - infrastructure for
   pixel-precise vertical cursor movement with cross-block boundary handling.
   These helpers are tested and ready to wire. Currently, vertical movement
   uses a simpler column-offset fallback in `EditorState::apply_move()`.
@@ -412,7 +412,7 @@ blockquote indent) are accounted for.
 
 ### Input handling (widget/input.rs)
 
-- `map_key_event(key, modifiers, text) -> KeyAction` — central key binding
+- `map_key_event(key, modifiers, text) -> KeyAction` - central key binding
   dispatch. Standard desktop bindings: arrows (±Shift ±Ctrl), Home/End,
   Backspace/Delete, Enter, Ctrl+B/I/U, Ctrl+C/X/V, Ctrl+Z/Y/Shift+Z, Ctrl+A
 - `KeyAction` enum: Edit, Move, Select, SelectAll, Copy, Cut, Paste, Undo, Redo
@@ -424,17 +424,17 @@ blockquote indent) are accounted for.
 
 ### Widget trait implementation
 
-- `layout()` — uses ParagraphCache to compute block paragraph layouts, clamps
+- `layout()` - uses ParagraphCache to compute block paragraph layouts, clamps
   scroll offset, auto-scrolls to keep cursor visible
-- `draw()` — renders via `renderer.with_layer()` (clipping) +
+- `draw()` - renders via `renderer.with_layer()` (clipping) +
   `renderer.with_translation()` (scroll offset). Draws paragraphs, HR/blockquote
   decorations, list markers (bullet/number per item), per-line selection
   rectangles with precise start/end x-coordinates, and blinking cursor at exact
   grapheme position.
-- `update()` — handles window focus/blink, keyboard events (mapped via
+- `update()` - handles window focus/blink, keyboard events (mapped via
   input::map_key_event), mouse click/drag/release with hit testing (accounts
   for scroll offset), mouse wheel scrolling (Lines + Pixels deltas)
-- `mouse_interaction()` — Text cursor when hovering, NotAllowed when disabled
+- `mouse_interaction()` - Text cursor when hovering, NotAllowed when disabled
 
 ### Scrolling
 
@@ -445,7 +445,7 @@ Vertical scroll support with:
   paragraphs via `grapheme_pixel_position()`, not just block top
 - Scroll offset clamped to `[0, max_scroll]` on resize and content changes
 - Content drawn with `with_layer()` (clip) + `with_translation()` (offset).
-  Cursor drawn inside the translation layer — no manual viewport clipping.
+  Cursor drawn inside the translation layer - no manual viewport clipping.
 - Hit testing converts viewport-relative to content-relative coordinates
 - Drag auto-scroll: proportional speed when dragging above/below viewport,
   capped at 30px/frame, continuous redraws while mouse held outside bounds
@@ -462,7 +462,7 @@ Vertical scroll support with:
   from viewport edge, capped at 30px/frame, with continuous redraws.
 - **Image rendering:** Images render as placeholder rectangles with alt text.
   Actual image loading (`inline-image:<hash>` resolution, data-URI decoding)
-  is the app's responsibility — the editor stores src references only.
+  is the app's responsibility - the editor stores src references only.
 
 ---
 
@@ -524,7 +524,7 @@ sending `Action::Edit(EditAction::ToggleInlineStyle(...))` etc.
 
 ## Implementation Status
 
-### What's done (Phases 1–5 editor-side complete)
+### What's done (Phases 1-5 editor-side complete)
 
 - Document model with all 6 block types (Paragraph, Heading, List, BlockQuote,
   HorizontalRule, Image), Arc structural sharing, DocSlice
@@ -548,7 +548,7 @@ sending `Action::Edit(EditAction::ToggleInlineStyle(...))` etc.
   signature detection, out-of-range index clamping.
 - Block::Image: atomic block embed with src/alt/width/height. Widget renders
   placeholder rectangle with alt text; actual image loading is app-side.
-- Flat list model: `Block::ListItem { ordered, indent_level, runs }` — each
+- Flat list model: `Block::ListItem { ordered, indent_level, runs }` - each
   list item is cursor-addressable. HTML serializer reconstructs `<ul>`/`<ol>`
   nesting. HTML parser flattens into items with tracked indent_level.
 - Widget: paragraph caching, exact cursor placement via grapheme_position,
@@ -579,24 +579,24 @@ sending `Action::Edit(EditAction::ToggleInlineStyle(...))` etc.
 | File | What to steal |
 |------|---------------|
 | **JS editors** | |
-| ProseMirror `prosemirror-transform/src/map.ts` | StepMap triples — informed our PosMap design |
-| ProseMirror `prosemirror-model/src/replace.ts` | Slice — informed our DocSlice |
-| ProseMirror `prosemirror-transform/src/mark_step.ts` | AddMarkStep — informed our ToggleInlineStyle + isolate_runs |
-| Slate `packages/slate/src/editor/normalize.ts` | Dirty path tracking — adopted directly (safety valve × 42) |
-| Slate `packages/slate/src/interfaces/operation.ts` | 9 invertible operations — informed our 8 EditOp variants |
-| Slate `packages/slate-history/src/with-history.ts` | History batching — adopted for UndoStack grouping |
+| ProseMirror `prosemirror-transform/src/map.ts` | StepMap triples - informed our PosMap design |
+| ProseMirror `prosemirror-model/src/replace.ts` | Slice - informed our DocSlice |
+| ProseMirror `prosemirror-transform/src/mark_step.ts` | AddMarkStep - informed our ToggleInlineStyle + isolate_runs |
+| Slate `packages/slate/src/editor/normalize.ts` | Dirty path tracking - adopted directly (safety valve × 42) |
+| Slate `packages/slate/src/interfaces/operation.ts` | 9 invertible operations - informed our 8 EditOp variants |
+| Slate `packages/slate-history/src/with-history.ts` | History batching - adopted for UndoStack grouping |
 | **Flutter editors** | |
-| fleather `packages/parchment/lib/src/heuristics/insert_rules.dart` | Insert rules — adopted for rules.rs |
-| fleather `packages/parchment/lib/src/heuristics/delete_rules.dart` | Delete rules — adopted for rules.rs |
-| fleather `packages/fleather/lib/src/rendering/editor.dart` | Cascading hit test — adopted for widget/cursor.rs |
-| fleather `packages/parchment/lib/src/document/leaf.dart` | split/isolate/optimize — adopted for document.rs run splitting |
+| fleather `packages/parchment/lib/src/heuristics/insert_rules.dart` | Insert rules - adopted for rules.rs |
+| fleather `packages/parchment/lib/src/heuristics/delete_rules.dart` | Delete rules - adopted for rules.rs |
+| fleather `packages/fleather/lib/src/rendering/editor.dart` | Cascading hit test - adopted for widget/cursor.rs |
+| fleather `packages/parchment/lib/src/document/leaf.dart` | split/isolate/optimize - adopted for document.rs run splitting |
 | **iced ecosystem** | |
 | iced `widget/src/text_editor.rs` | Input handling, focus/blink, clipboard patterns |
 | iced `widget/src/text/rich.rs` | `Paragraph::with_spans`, span→font mapping |
 | `crates/app/src/font.rs` | Font variants (text_bold, text_italic, etc.) |
 | `crates/app/src/ui/layout.rs` | Type scale and spacing constants |
-| `crates/common/src/html_sanitizer.rs` | Sanitizer pipeline — runs before html5ever parse |
-| research/frostmark `renderer.rs` | ChildData bitflags — adopted for html_parse.rs StyleContext |
+| `crates/common/src/html_sanitizer.rs` | Sanitizer pipeline - runs before html5ever parse |
+| research/frostmark `renderer.rs` | ChildData bitflags - adopted for html_parse.rs StyleContext |
 | research/halloy `selectable_rich_text.rs` | Selection math reference |
 | **Email rendering** | |
-| `/home/folk/Programs/litehtml-rs/` | Separate HTML email viewer — editor does NOT handle arbitrary HTML |
+| `/home/folk/Programs/litehtml-rs/` | Separate HTML email viewer - editor does NOT handle arbitrary HTML |

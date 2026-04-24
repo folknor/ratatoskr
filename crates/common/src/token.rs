@@ -39,7 +39,7 @@ struct TokenResponse {
 ///
 /// Works with any provider that accepts a standard `grant_type=refresh_token`
 /// form POST (Google, Microsoft, Fastmail, etc.). The `client_secret` is
-/// optional — PKCE-only flows omit it.
+/// optional - PKCE-only flows omit it.
 pub async fn refresh_oauth_token(
     http: &reqwest::Client,
     token_endpoint: &str,

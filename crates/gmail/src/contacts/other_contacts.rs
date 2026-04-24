@@ -230,7 +230,7 @@ fn persist_other_contacts(
 
         let display_name = extract_display_name(person, &email);
 
-        // Upsert into seen_addresses — don't overwrite locally-observed data
+        // Upsert into seen_addresses - don't overwrite locally-observed data
         conn.execute(
             "INSERT INTO seen_addresses \
              (email, account_id, display_name, display_name_source, source, \

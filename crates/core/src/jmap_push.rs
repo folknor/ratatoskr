@@ -9,9 +9,9 @@
 //! The bridge task owns the `JmapPushManager`, keeping its `shutdown_tx` alive.
 //! The task exits when either:
 //!
-//! - The push connection dies (`rx.recv()` returns `None`) — the push manager's
+//! - The push connection dies (`rx.recv()` returns `None`) - the push manager's
 //!   background WebSocket loop ended (server disconnect, max failures).
-//! - The app shuts down — the iced subscription drops the `UnboundedReceiver`,
+//! - The app shuts down - the iced subscription drops the `UnboundedReceiver`,
 //!   which causes `notify_tx.send()` to return `Err`, breaking the loop.
 //!
 //! On exit, the manager drops, `shutdown_tx` closes, and the push connection

@@ -73,7 +73,7 @@ pub fn count_matching(
 struct QueryContext {
     /// Clauses that filter on the messages table (alias `m`).
     msg_clauses: Vec<String>,
-    /// Clauses that filter on the threads table (alias `t`) — for boolean flags.
+    /// Clauses that filter on the threads table (alias `t`) - for boolean flags.
     thread_flag_clauses: Vec<String>,
     /// Positional parameters.
     params: Vec<Box<dyn rusqlite::types::ToSql>>,
@@ -273,7 +273,7 @@ fn build_scope_clause(ctx: &mut QueryContext, scope: &AccountScope) {
     }
 }
 
-/// Build `account:` clause — match by display_name or email on the accounts table.
+/// Build `account:` clause - match by display_name or email on the accounts table.
 /// OR semantics across multiple account values.
 fn build_account_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     let parts: Vec<String> = parsed
@@ -292,7 +292,7 @@ fn build_account_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     ctx.msg_clauses.push(format!("({})", parts.join(" OR ")));
 }
 
-/// Build `folder:` clause — match label name or IMAP folder path.
+/// Build `folder:` clause - match label name or IMAP folder path.
 fn build_folder_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     if parsed.folder.is_empty() {
         return;
@@ -348,7 +348,7 @@ fn build_in_folder_label_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     ctx.msg_clauses.push(format!("({})", parts.join(" OR ")));
 }
 
-/// Build `has:<type>` / `type:` clause — filter by attachment MIME type.
+/// Build `has:<type>` / `type:` clause - filter by attachment MIME type.
 fn build_attachment_type_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     if parsed.attachment_types.is_empty() {
         return;
@@ -367,7 +367,7 @@ fn build_attachment_type_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     ));
 }
 
-/// Build a single MIME condition — glob patterns use LIKE, exact types use `=`.
+/// Build a single MIME condition - glob patterns use LIKE, exact types use `=`.
 fn build_single_mime_condition(ctx: &mut QueryContext, mime: &str) -> String {
     if mime.ends_with("/*") {
         // Glob: e.g. "video/*" -> LIKE 'video/%'
@@ -381,7 +381,7 @@ fn build_single_mime_condition(ctx: &mut QueryContext, mime: &str) -> String {
     }
 }
 
-/// Build `has:contact` clause — check if sender is a known contact.
+/// Build `has:contact` clause - check if sender is a known contact.
 fn build_has_contact_clause(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     if !parsed.has_contact {
         return;
@@ -408,7 +408,7 @@ fn build_thread_flag_clauses(ctx: &mut QueryContext, parsed: &ParsedQuery) {
     build_in_folder_flag_clauses(ctx, parsed);
 }
 
-/// Build `is:tagged` clause — thread has at least one label.
+/// Build `is:tagged` clause - thread has at least one label.
 fn build_is_tagged_clause(ctx: &mut QueryContext) {
     ctx.thread_flag_clauses.push(
         "EXISTS (SELECT 1 FROM thread_labels tl2 \

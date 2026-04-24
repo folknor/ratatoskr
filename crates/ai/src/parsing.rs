@@ -14,7 +14,7 @@ use rtsk::bundling::ThreadBundle;
 static RE_JSON_ARRAY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\[[\s\S]*?\]").expect("valid regex"));
 
-/// Matches a JSON object: `{...}` (greedy — outermost braces)
+/// Matches a JSON object: `{...}` (greedy - outermost braces)
 static RE_JSON_OBJECT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\{[\s\S]*\}").expect("valid regex"));
 

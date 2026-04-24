@@ -7,7 +7,7 @@ use rusqlite::{Connection, params};
 
 use super::super::from_row::FromRow;
 
-/// Persist a draft as 'pending' (upsert — retries update the existing row).
+/// Persist a draft as 'pending' (upsert - retries update the existing row).
 #[allow(clippy::too_many_arguments)]
 pub fn persist_draft_pending_sync(
     conn: &Connection,

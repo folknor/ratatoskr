@@ -1,12 +1,12 @@
 /// Common email provider attachment size limits (in bytes), accounting for
 /// ~37% MIME base64 encoding overhead. These are the *file* sizes you should
-/// target — the on-wire encoded size will be larger.
+/// target - the on-wire encoded size will be larger.
 pub mod limits {
-    /// 7 MB — clears even strict on-prem Exchange (10 MB limit after base64).
+    /// 7 MB - clears even strict on-prem Exchange (10 MB limit after base64).
     pub const EXCHANGE_STRICT: usize = 7 * 1024 * 1024;
-    /// 15 MB — clears Outlook.com and iCloud (20 MB limit after base64).
+    /// 15 MB - clears Outlook.com and iCloud (20 MB limit after base64).
     pub const OUTLOOK_ICLOUD: usize = 15 * 1024 * 1024;
-    /// 18 MB — clears Gmail, Yahoo, Proton (25 MB limit after base64).
+    /// 18 MB - clears Gmail, Yahoo, Proton (25 MB limit after base64).
     pub const GMAIL_YAHOO: usize = 18 * 1024 * 1024;
 }
 

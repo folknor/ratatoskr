@@ -33,7 +33,7 @@ pub(crate) fn mailbox_supports_custom_keywords(mailbox: &async_imap::types::Mail
 /// Build a standardised timeout error message for IMAP operations.
 pub(crate) fn timeout_err(operation: &str, timeout: Duration) -> String {
     format!(
-        "{operation} timed out after {}s — check your server settings or network connection",
+        "{operation} timed out after {}s - check your server settings or network connection",
         timeout.as_secs()
     )
 }
@@ -78,7 +78,7 @@ pub async fn list_folders(session: &mut ImapSession) -> Result<Vec<ImapFolder>, 
         // Detect special-use from attributes (RFC 6154)
         let special_use = detect_special_use(name);
 
-        // Get message counts via STATUS — use raw_path for IMAP commands
+        // Get message counts via STATUS - use raw_path for IMAP commands
         let (exists, unseen) = match tokio::time::timeout(
             IMAP_CMD_TIMEOUT,
             session.status(&raw_path, "(MESSAGES UNSEEN)"),
@@ -164,7 +164,7 @@ pub async fn list_shared_folders(
 
             let special_use = detect_special_use(name);
 
-            // Get message counts — use raw_path for IMAP commands
+            // Get message counts - use raw_path for IMAP commands
             let (exists, unseen) = match tokio::time::timeout(
                 IMAP_CMD_TIMEOUT,
                 session.status(&raw_path, "(MESSAGES UNSEEN)"),
@@ -259,7 +259,7 @@ pub async fn fetch_messages(
             "IMAP {folder}: async-imap returned 0 items but exists={}. Falling back to raw TCP fetch...",
             mailbox.exists
         );
-        // Return early with raw fetch result — caller doesn't need to know about the fallback
+        // Return early with raw fetch result - caller doesn't need to know about the fallback
         return Err(format!("ASYNC_IMAP_EMPTY:{folder}"));
     }
 
@@ -403,7 +403,7 @@ pub async fn fetch_attachment(
         .body()
         .ok_or_else(|| format!("No body for UID {uid}"))?;
 
-    // Parse the full message — mail-parser decodes content-transfer-encoding
+    // Parse the full message - mail-parser decodes content-transfer-encoding
     let parser = MessageParser::default();
     let message = parser
         .parse(raw)
@@ -430,7 +430,7 @@ pub async fn fetch_attachment(
         mail_parser::PartType::Text(text) => text.as_bytes().to_vec(),
         mail_parser::PartType::Html(html) => html.as_bytes().to_vec(),
         mail_parser::PartType::Message(msg) => {
-            // Nested message — encode the raw bytes
+            // Nested message - encode the raw bytes
             msg.raw_message.as_ref().to_vec()
         }
         mail_parser::PartType::Multipart(_) => {

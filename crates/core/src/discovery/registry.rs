@@ -122,7 +122,7 @@ static REGISTRY: &[RegistryEntry] = &[
             alternatives: &[],
         },
     },
-    // Microsoft Outlook / Hotmail — Graph gets Graph scopes, IMAP gets IMAP scopes
+    // Microsoft Outlook / Hotmail - Graph gets Graph scopes, IMAP gets IMAP scopes
     RegistryEntry {
         domains: &[
             "outlook.com",

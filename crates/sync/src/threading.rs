@@ -261,7 +261,7 @@ pub fn build_threads(messages: &[ThreadableMessage]) -> Vec<ThreadGroup> {
         .filter(|&i| arena.containers[i].parent.is_none())
         .collect();
 
-    // Step 4: Group by subject — merge roots with same normalized subject
+    // Step 4: Group by subject - merge roots with same normalized subject
     let mut subject_map: HashMap<String, usize> = HashMap::new();
     for &root_idx in &roots {
         let subject = get_subject_for_container(&arena, root_idx);
@@ -282,7 +282,7 @@ pub fn build_threads(messages: &[ThreadableMessage]) -> Vec<ThreadGroup> {
                 arena.link_parent_child(root_idx, existing_idx);
                 subject_map.insert(normalized, root_idx);
             } else {
-                // Both have messages — merge newer under older
+                // Both have messages - merge newer under older
                 let existing_date = arena.containers[existing_idx]
                     .message
                     .as_ref()

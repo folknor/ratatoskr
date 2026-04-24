@@ -2,7 +2,7 @@
 //!
 //! Contains the document, selection, undo/redo history, and performs all
 //! editing actions (insert, delete, paste, format toggle, movement, clipboard).
-//! This module is renderer-agnostic — it has no dependency on iced's widget or
+//! This module is renderer-agnostic - it has no dependency on iced's widget or
 //! paragraph types.
 
 use crate::document::{
@@ -352,7 +352,7 @@ impl EditorState {
             // Inline fragment: insert runs preserving their styles.
             self.paste_inline_runs(insert_pos, &slice.blocks[0], &mut all_ops);
         } else if slice.blocks.iter().all(|b| !b.is_inline_block()) {
-            // All blocks are non-inline (Image, HR, etc.) — insert as
+            // All blocks are non-inline (Image, HR, etc.) - insert as
             // complete blocks. These have no runs to merge.
             self.paste_complete_blocks(insert_pos, &slice.blocks, &mut all_ops);
         } else {
@@ -758,7 +758,7 @@ impl Default for EditorState {
 
 /// Splice styled runs (with links) into a block at `offset` using the
 /// block-swap strategy: RemoveBlock + InsertBlock. Both ops are recorded,
-/// so redo replays correctly — no side-channel mutations needed.
+/// so redo replays correctly - no side-channel mutations needed.
 fn splice_runs_into_block(
     doc: &mut Document,
     block_idx: usize,
@@ -917,7 +917,7 @@ mod tests {
         assert!(text.contains("wo"));
     }
 
-    // ── EditorState::apply_action — insert ───────────────
+    // ── EditorState::apply_action - insert ───────────────
 
     #[test]
     fn apply_action_insert_text() {
@@ -951,7 +951,7 @@ mod tests {
         assert_eq!(state.selection.focus, DocPosition::new(0, 3));
     }
 
-    // ── EditorState::apply_action — delete ───────────────
+    // ── EditorState::apply_action - delete ───────────────
 
     #[test]
     fn apply_action_delete_backward() {
@@ -1003,7 +1003,7 @@ mod tests {
         );
     }
 
-    // ── EditorState::apply_action — split block ──────────
+    // ── EditorState::apply_action - split block ──────────
 
     #[test]
     fn apply_action_split_block() {
@@ -1033,7 +1033,7 @@ mod tests {
         assert_eq!(state.selection.focus, DocPosition::new(1, 0));
     }
 
-    // ── EditorState::apply_action — toggle inline style ──
+    // ── EditorState::apply_action - toggle inline style ──
 
     #[test]
     fn toggle_style_at_caret_sets_pending() {
@@ -1292,11 +1292,11 @@ mod tests {
         ]));
         state.selection = DocSelection::caret(DocPosition::new(0, 10));
 
-        // Move down to block 1 — offset clamped to 2
+        // Move down to block 1 - offset clamped to 2
         state.perform(Action::Move(MoveAction::Down));
         assert_eq!(state.selection.focus, DocPosition::new(1, 2));
 
-        // Move down to block 2 — offset should recover to 10 (the saved target)
+        // Move down to block 2 - offset should recover to 10 (the saved target)
         state.perform(Action::Move(MoveAction::Down));
         assert_eq!(state.selection.focus, DocPosition::new(2, 10));
     }
@@ -1310,11 +1310,11 @@ mod tests {
         ]));
         state.selection = DocSelection::caret(DocPosition::new(2, 12));
 
-        // Move up to block 1 — clamped to 2
+        // Move up to block 1 - clamped to 2
         state.perform(Action::Move(MoveAction::Up));
         assert_eq!(state.selection.focus, DocPosition::new(1, 2));
 
-        // Move up to block 0 — offset recovers to 12
+        // Move up to block 0 - offset recovers to 12
         state.perform(Action::Move(MoveAction::Up));
         assert_eq!(state.selection.focus, DocPosition::new(0, 12));
     }
@@ -1328,7 +1328,7 @@ mod tests {
         ]));
         state.selection = DocSelection::caret(DocPosition::new(0, 8));
 
-        // Move down — saves target_column = 8, lands at (1, 2)
+        // Move down - saves target_column = 8, lands at (1, 2)
         state.perform(Action::Move(MoveAction::Down));
         assert_eq!(state.selection.focus, DocPosition::new(1, 2));
 
@@ -1336,7 +1336,7 @@ mod tests {
         state.perform(Action::Move(MoveAction::Left));
         assert_eq!(state.selection.focus, DocPosition::new(1, 1));
 
-        // Move down again — target_column is now 1 (the current offset)
+        // Move down again - target_column is now 1 (the current offset)
         state.perform(Action::Move(MoveAction::Down));
         assert_eq!(state.selection.focus, DocPosition::new(2, 1));
     }
@@ -1347,11 +1347,11 @@ mod tests {
             EditorState::from_document(Document::from_blocks(vec![Block::paragraph("abc")]));
         state.selection = DocSelection::caret(DocPosition::new(0, 2));
 
-        // Move up at top boundary — goes to (0, 0)
+        // Move up at top boundary - goes to (0, 0)
         state.perform(Action::Move(MoveAction::Up));
         assert_eq!(state.selection.focus, DocPosition::new(0, 0));
 
-        // Move down at bottom boundary — goes to end position
+        // Move down at bottom boundary - goes to end position
         state.selection = DocSelection::caret(DocPosition::new(0, 2));
         state.perform(Action::Move(MoveAction::Down));
         assert_eq!(state.selection.focus, DocPosition::new(0, 3));
@@ -1368,7 +1368,7 @@ mod tests {
         assert_eq!(state.selection, sel);
     }
 
-    // ── EditorState::perform — focus / blur ──────────────
+    // ── EditorState::perform - focus / blur ──────────────
 
     #[test]
     fn focus_and_blur() {
@@ -1476,7 +1476,7 @@ mod tests {
         state.apply_action(EditAction::ToggleInlineStyle(InlineStyle::BOLD));
         assert!(state.pending_style.contains(InlineStyle::BOLD));
 
-        // Type 'x' — should be bold.
+        // Type 'x' - should be bold.
         state.apply_action(EditAction::InsertText("x".into()));
         assert!(
             state.pending_style.is_empty(),
@@ -1555,7 +1555,7 @@ mod tests {
         let total_text: String = runs.iter().map(|r| r.text.as_str()).collect();
         assert_eq!(total_text, "hello bold textbold");
 
-        // Find the last "bold" — it should have BOLD style.
+        // Find the last "bold" - it should have BOLD style.
         let mut pos = 0;
         let mut found_pasted_bold = false;
         for run in runs {
@@ -1756,7 +1756,7 @@ mod tests {
     #[test]
     fn ensure_cursor_visible_clamps_to_zero() {
         let mut offset = 50.0;
-        // Cursor at y=0 — should scroll to 0.
+        // Cursor at y=0 - should scroll to 0.
         super::super::ensure_cursor_visible(&mut offset, 0.0, 20.0, 200.0, 500.0);
         assert!(offset.abs() < f32::EPSILON);
     }
@@ -1773,7 +1773,7 @@ mod tests {
     #[test]
     fn ensure_cursor_visible_no_scroll_when_content_fits() {
         let mut offset = 0.0;
-        // Total content (100) fits within viewport (200) — max_scroll = 0.
+        // Total content (100) fits within viewport (200) - max_scroll = 0.
         super::super::ensure_cursor_visible(&mut offset, 50.0, 20.0, 200.0, 100.0);
         assert!(offset.abs() < f32::EPSILON);
     }

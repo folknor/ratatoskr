@@ -118,7 +118,7 @@ async fn ensure_oauth_access_token(
     let lock = get_refresh_lock(account_id);
     let _guard = lock.lock().await;
 
-    // Double-check after acquiring lock — another task may have already refreshed
+    // Double-check after acquiring lock - another task may have already refreshed
     let aid = account_id.to_string();
     let (fresh_access, fresh_expires, fresh_refresh) = db
         .with_conn(move |conn| {

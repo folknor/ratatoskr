@@ -69,7 +69,7 @@ struct FileWebLinkResponse {
 /// Create a resumable upload session for a file in Google Drive.
 ///
 /// Returns the upload URL from the `Location` header. The upload URL is
-/// pre-authenticated — subsequent PUT requests do not need a Bearer token.
+/// pre-authenticated - subsequent PUT requests do not need a Bearer token.
 pub async fn create_upload_session(
     http: &reqwest::Client,
     access_token: &str,
@@ -213,7 +213,7 @@ pub async fn resume_upload(
                 .get("range")
                 .and_then(|v| v.to_str().ok())
                 .ok_or_else(|| {
-                    "Resume response missing Range header — no bytes received yet".to_string()
+                    "Resume response missing Range header - no bytes received yet".to_string()
                 })?;
 
             // Format: "bytes=0-{last_byte_received}"

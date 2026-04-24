@@ -774,7 +774,7 @@ pub fn events_for_date(events: &[TimeGridEvent], date: NaiveDate) -> Vec<TimeGri
     events
         .iter()
         .filter(|e| {
-            // Use local time for date filtering — an event at 23:00 local
+            // Use local time for date filtering - an event at 23:00 local
             // should appear on the correct local day, not the UTC day.
             let start = chrono::DateTime::from_timestamp(e.start_time, 0)
                 .map(|dt| dt.with_timezone(&chrono::Local).date_naive());

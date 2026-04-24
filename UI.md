@@ -2,7 +2,7 @@
 
 iced UI for the Ratatoskr email client (`crates/app/`). Uses iced 0.15-dev (Halloy's fork) against a seeded test database.
 
-**iced fork:** `https://github.com/folknor/iced`, branch `sluggrs`. Local checkout at `/home/folk/Programs/sluggrs/repos/iced`. When you need to check what API is available in our iced version, read files in that directory — do not assume upstream iced APIs exist.
+**iced fork:** `https://github.com/folknor/iced`, branch `sluggrs`. Local checkout at `/home/folk/Programs/sluggrs/repos/iced`. When you need to check what API is available in our iced version, read files in that directory - do not assume upstream iced APIs exist.
 
 ## App module structure (`crates/app/src/`)
 
@@ -51,7 +51,7 @@ Non-component UI: `calendar.rs`, `calendar_month.rs`, `calendar_time_grid.rs`, `
 
 ## Gotchas
 
-**`Padding::from` with mixed types:** `Padding::from([0, CONSTANT])` won't compile if `CONSTANT` is `f32` — Rust infers the array as `[i32; 2]`. Always use `[0.0, CONSTANT]` to keep both elements `f32`.
+**`Padding::from` with mixed types:** `Padding::from([0, CONSTANT])` won't compile if `CONSTANT` is `f32` - Rust infers the array as `[i32; 2]`. Always use `[0.0, CONSTANT]` to keep both elements `f32`.
 
 **`iced::Font::DEFAULT` is not Inter:** We set `default_font(font::TEXT)` which is `Font::new("Inter")`. If you construct a font with `iced::Font { weight, ..iced::Font::DEFAULT }` it will NOT use Inter. Always spread from `font::TEXT` instead: `iced::Font { weight, ..font::TEXT }`.
 
@@ -59,17 +59,17 @@ Non-component UI: `calendar.rs`, `calendar_month.rs`, `calendar_time_grid.rs`, `
 
 **`scrollable::scroll_to()` does not exist in this iced fork.** There is no public function to programmatically scroll a `Scrollable` to a specific offset. The internal `State` has `scroll_by()` but it's not exposed as a top-level function. If you need scroll-to-item behavior, you'll need a different approach (e.g., widget operations or state manipulation).
 
-**Button `text_color` doesn't reach children with explicit `.style()`.** If you set `text_color` on a button style but the `text()` or icon inside has its own `.style(some_fn)`, the explicit style wins. The button's `text_color` only affects children that don't override it. This means changing a button style's color has no visible effect when all children set their own style — you have to change the text/icon styles too.
+**Button `text_color` doesn't reach children with explicit `.style()`.** If you set `text_color` on a button style but the `text()` or icon inside has its own `.style(some_fn)`, the explicit style wins. The button's `text_color` only affects children that don't override it. This means changing a button style's color has no visible effect when all children set their own style - you have to change the text/icon styles too.
 
 **Popover menu width is constrained to the trigger's width.** The `PopoverOverlay` layout uses `base_bounds.width` as the menu's max width. If the trigger is `Length::Shrink`, the menu will be tiny. For narrow triggers (like the `select` widget), set an explicit width on the trigger (e.g., `SELECT_MIN_WIDTH`) so the menu has room.
 
 **`height()` on containers is fixed, not minimum.** There's no `min_height()` on containers in this iced version. If you need rows to be "at least X tall but grow for bigger content," use a shared `height()` constant and accept that all rows are that exact height. Use different constants for different row types (e.g., `SETTINGS_ROW_HEIGHT` vs `SETTINGS_TOGGLE_ROW_HEIGHT`).
 
-**Scrollable clips shadows.** If a container inside a `scrollable` has a `shadow`, the shadow will be clipped at the scrollable's bounds. Don't put padding on the outer container around the scrollable — put it on an inner container *inside* the scrollable so the padding becomes part of the scrolled content and gives the shadow room to render.
+**Scrollable clips shadows.** If a container inside a `scrollable` has a `shadow`, the shadow will be clipped at the scrollable's bounds. Don't put padding on the outer container around the scrollable - put it on an inner container *inside* the scrollable so the padding becomes part of the scrolled content and gives the shadow room to render.
 
-**Palette background scale (dark mode).** `base` is the darkest. Each step lightens by a fixed deviation: `base` (0%) → `weakest` (3%) → `weaker` (7%) → `weak` (10%) → `neutral` (12.5%) → `strong` (15%) → `stronger` (17.5%) → `strongest` (20%). In light mode the direction reverses. Use this to create visual depth hierarchy — e.g., fieldsets at `base`, content area at `weakest`, sidebar at `weaker`.
+**Palette background scale (dark mode).** `base` is the darkest. Each step lightens by a fixed deviation: `base` (0%) → `weakest` (3%) → `weaker` (7%) → `weak` (10%) → `neutral` (12.5%) → `strong` (15%) → `stronger` (17.5%) → `strongest` (20%). In light mode the direction reverses. Use this to create visual depth hierarchy - e.g., fieldsets at `base`, content area at `weakest`, sidebar at `weaker`.
 
-**Hover backgrounds are always one palette step away from the element's resting color.** If a row rests on `base`, its hover is `weakest`. If it rests on `weakest`, its hover is `weaker`. Never skip steps — jumping two or more steps makes hover effects feel heavy. This applies to nav buttons, setting rows, dropdown items, chip buttons, and any other interactive surface.
+**Hover backgrounds are always one palette step away from the element's resting color.** If a row rests on `base`, its hover is `weakest`. If it rests on `weakest`, its hover is `weaker`. Never skip steps - jumping two or more steps makes hover effects feel heavy. This applies to nav buttons, setting rows, dropdown items, chip buttons, and any other interactive surface.
 
 **`mouse_area.on_move` gives coordinates relative to that mouse_area's bounds.** If you wrap individual list items in mouse_areas and drag past one item's bounds, `on_move` stops firing or reports clamped coordinates. For drag-to-reorder, wrap the *entire list* in a single mouse_area so cursor Y maps directly to item index via `(point.y / row_height)`.
 
@@ -77,11 +77,11 @@ Non-component UI: `calendar.rs`, `calendar_month.rs`, `calendar_time_grid.rs`, `
 
 **`responsive` closure is `Fn`, not `FnOnce`.** You can't move `Element`s into a `responsive(|size| ...)` closure because it may be called multiple times. Use fixed offsets or store computed sizes in state instead.
 
-**Buttons without `on_press` don't show hover states.** Iced treats them as disabled — no hover background, no cursor change. If you need a hover effect, the button must have `on_press` even if the action is just focusing a child widget.
+**Buttons without `on_press` don't show hover states.** Iced treats them as disabled - no hover background, no cursor change. If you need a hover effect, the button must have `on_press` even if the action is just focusing a child widget.
 
-**Buttons hardcode the pointer cursor.** You cannot override the cursor to e.g. `Interaction::Text` for an inline edit row. Wrapping the button in a `mouse_area` with a different `interaction` won't help — the button's `mouse_interaction` wins for its bounds.
+**Buttons hardcode the pointer cursor.** You cannot override the cursor to e.g. `Interaction::Text` for an inline edit row. Wrapping the button in a `mouse_area` with a different `interaction` won't help - the button's `mouse_interaction` wins for its bounds.
 
-**`text_input` without `on_input` is fully disabled.** No focus, no selection, no cursor — completely inert. To make a read-only but selectable/copyable input, provide a no-op `on_input` (e.g. `|_| Message::Noop`).
+**`text_input` without `on_input` is fully disabled.** No focus, no selection, no cursor - completely inert. To make a read-only but selectable/copyable input, provide a no-op `on_input` (e.g. `|_| Message::Noop`).
 
 **Programmatic focus uses `widget::operation::focus(id)`.** Not `text_input::focus`. The ID is `widget::Id` (accepts `String` via `From<String>`). Set the ID on the text input with `.id("my-id")` and return `iced::widget::operation::focus("my-id".to_string())` as a `Task` from `update()`.
 
@@ -89,9 +89,9 @@ Non-component UI: `calendar.rs`, `calendar_month.rs`, `calendar_time_grid.rs`, `
 
 **Popover overlay positioning must include the `translation` vector.** In `Widget::overlay()`, `layout.position()` returns coordinates relative to the parent widget, not the window. Add the `translation` parameter: `layout.position() + translation`. Without this, popups misposition at non-1.0 scale factors and inside scrollables.
 
-**`Length::Fill` collapses to zero without a fixed-size ancestor.** If a button or container has `height(Length::Fill)` inside a row/column that defaults to `Shrink` height, the Fill child gets zero height — there's nothing to fill into. The fix is to wrap the parent in a container with an explicit fixed `height(CONSTANT)`. Then Fill children inside resolve correctly against that concrete size. Same applies to `width(Length::Fill)` in vertical layouts. This is the #1 cause of "everything disappeared" when restructuring layouts.
+**`Length::Fill` collapses to zero without a fixed-size ancestor.** If a button or container has `height(Length::Fill)` inside a row/column that defaults to `Shrink` height, the Fill child gets zero height - there's nothing to fill into. The fix is to wrap the parent in a container with an explicit fixed `height(CONSTANT)`. Then Fill children inside resolve correctly against that concrete size. Same applies to `width(Length::Fill)` in vertical layouts. This is the #1 cause of "everything disappeared" when restructuring layouts.
 
-**Dropdown menus in narrow containers need explicit width.** The popover menu inherits its max width from the trigger element. If the trigger is inside a narrow container (e.g., the sidebar header right-stack after a mode button takes 76px), the menu will be too narrow to show full labels. Give the menu container an explicit `width(CONSTANT)` so it overflows the trigger — standard dropdown behavior.
+**Dropdown menus in narrow containers need explicit width.** The popover menu inherits its max width from the trigger element. If the trigger is inside a narrow container (e.g., the sidebar header right-stack after a mode button takes 76px), the menu will be too narrow to show full labels. Give the menu container an explicit `width(CONSTANT)` so it overflows the trigger - standard dropdown behavior.
 
 **`iced::window::gain_focus(id)` exists in the Halloy fork.** Despite earlier assumptions, the fork does expose `gain_focus` for programmatic window focusing. Works on X11; Wayland ignores it (compositor policy). Use it for bring-to-foreground behavior like focusing a pop-out calendar window.
 
@@ -101,11 +101,11 @@ Non-component UI: `calendar.rs`, `calendar_month.rs`, `calendar_time_grid.rs`, `
 
 iced has three size concepts in the rendering pipeline:
 
-1. **Physical size** — actual pixels on screen (from winit's `WindowEvent::Resized`)
-2. **Viewport scale factor** — `system_dpi * app_scale_factor` (our app auto-detects scale from monitor DPI via `display-info` crate; see `src/display.rs`)
-3. **Logical size** — `physical_size / viewport_scale_factor` — this is what the layout engine uses
+1. **Physical size** - actual pixels on screen (from winit's `WindowEvent::Resized`)
+2. **Viewport scale factor** - `system_dpi * app_scale_factor` (our app auto-detects scale from monitor DPI via `display-info` crate; see `src/display.rs`)
+3. **Logical size** - `physical_size / viewport_scale_factor` - this is what the layout engine uses
 
-The `window::resize_events()` subscription reports the **logical size** (already divided by the full scale factor, including the app's). This is the same size the PaneGrid uses for layout. So `resize_event.width == PaneGrid_layout_width`. Do NOT divide by the app scale factor again — it's already factored in.
+The `window::resize_events()` subscription reports the **logical size** (already divided by the full scale factor, including the app's). This is the same size the PaneGrid uses for layout. So `resize_event.width == PaneGrid_layout_width`. Do NOT divide by the app scale factor again - it's already factored in.
 
 The chain: `winit::Resized(physical)` → `window::State` creates `Viewport::with_physical_size(physical, system_dpi * app_scale)` → `conversion::window_event` calls `physical.to_logical(viewport.scale_factor())` → that logical size is what `resize_events()` emits AND what `ui.relayout(logical_size, ...)` uses for layout.
 
@@ -122,7 +122,7 @@ Where `region` comes from `Node::split_regions()`. For a nested split like ours 
 - **Outer split ratio**: relative to the full PaneGrid width (region = full bounds)
 - **Inner split ratio**: relative to the right portion's width (region = everything after the sidebar)
 
-The `ResizeEvent` sends this ratio directly — no pre-clamping. iced's `min_size` only affects the visual layout (via `axis.split()` which clamps widths), not the event ratio.
+The `ResizeEvent` sends this ratio directly - no pre-clamping. iced's `min_size` only affects the visual layout (via `axis.split()` which clamps widths), not the event ratio.
 
 ### How `axis.split()` works internally
 
@@ -137,7 +137,7 @@ For nested splits, `min_size_a` and `min_size_b` account for pane count: `min_si
 
 ### Per-pane minimum enforcement
 
-iced's PaneGrid only supports a single global `min_size` for all panes. Per-pane minimums require clamping the ratio in `update()` before calling `State::resize()`. Important: this clamping must also run on `WindowResized`, not just `PaneResized` — otherwise shrinking the window can push panes below their minimum, and the constraint only snaps back on the next drag.
+iced's PaneGrid only supports a single global `min_size` for all panes. Per-pane minimums require clamping the ratio in `update()` before calling `State::resize()`. Important: this clamping must also run on `WindowResized`, not just `PaneResized` - otherwise shrinking the window can push panes below their minimum, and the constraint only snaps back on the next drag.
 
 ### Variable shadowing trap
 
@@ -145,7 +145,7 @@ When destructuring `Node::Split { id, ratio, .. }` inside a function that also t
 
 ## Layout module (`src/ui/layout.rs`)
 
-All sizing, spacing, padding, and radii are centralized here. Views import `use crate::ui::layout::*` and reference named constants. **No magic numbers in view or widget code** — every `.size()`, avatar diameter, border radius, and padding must reference a layout constant.
+All sizing, spacing, padding, and radii are centralized here. Views import `use crate::ui::layout::*` and reference named constants. **No magic numbers in view or widget code** - every `.size()`, avatar diameter, border radius, and padding must reference a layout constant.
 
 **Spacing scale** (geometric): `SPACE_XXXS` (2) → `SPACE_XXS` (4) → `SPACE_XS` (8) → `SPACE_SM` (12) → `SPACE_MD` (16) → `SPACE_LG` (24) → `SPACE_XL` (32) → `SPACE_XXL` (48) → `SPACE_XXXL` (64).
 
@@ -169,7 +169,7 @@ All sizing, spacing, padding, and radii are centralized here. Views import `use 
 
 ### A widget owns its entire layout.
 
-The widget function builds every container, row, spacing, and style internally. There is no "partial widget" that the caller finishes assembling. If two instances of a widget should look the same, they will — because there is exactly one code path.
+The widget function builds every container, row, spacing, and style internally. There is no "partial widget" that the caller finishes assembling. If two instances of a widget should look the same, they will - because there is exactly one code path.
 
 ### Widget constructors accept data, not UI elements.
 
@@ -177,7 +177,7 @@ Constructors take primitive values (`&str`, `bool`, `usize`) and domain objects 
 
 ### All widgets belong in widgets.rs.
 
-Domain-specific widgets do not exist unless the user asks for it explicitly. A "scope dropdown" is not a widget — it's a sidebar view function that calls the generic `dropdown` widget with account data. The generic `dropdown` widget lives in `widgets.rs`. The sidebar-specific assembly lives in `sidebar.rs`.
+Domain-specific widgets do not exist unless the user asks for it explicitly. A "scope dropdown" is not a widget - it's a sidebar view function that calls the generic `dropdown` widget with account data. The generic `dropdown` widget lives in `widgets.rs`. The sidebar-specific assembly lives in `sidebar.rs`.
 
 ### Every slot in a structured widget gets its own container.
 
@@ -187,17 +187,17 @@ Name the slots and give each one a container:
 - `icon_slot`: `container(icon).width(FIXED).height(FIXED).align_x(Center).align_y(Center)`
 - `label_slot`: `container(text).width(Fill).align_y(Center)`
 
-### `center()` vs `align_x/y(Center)` — know the difference.
+### `center()` vs `align_x/y(Center)` - know the difference.
 
-- `center(Length::Fill)` — the content expands to fill the container. For text widgets, this stretches them to the container width.
-- `center(Length::Shrink)` — the content stays at natural size, centered within the container.
-- `align_x(Alignment::Center)` + `align_y(Alignment::Center)` — centers without giving the content a size hint. Safest for mixed content types.
+- `center(Length::Fill)` - the content expands to fill the container. For text widgets, this stretches them to the container width.
+- `center(Length::Shrink)` - the content stays at natural size, centered within the container.
+- `align_x(Alignment::Center)` + `align_y(Alignment::Center)` - centers without giving the content a size hint. Safest for mixed content types.
 
 Default to `align_x/y(Center)` for icon slots. Only use `center(Length::Fill)` when you specifically need the content to expand (e.g., centering a letter inside an avatar stack).
 
 ### Style functions override button text_color.
 
-When a row has icon + text slots inside a button, don't rely on the button style's `text_color` to control their color. Each slot with an explicit `.style()` call must use the correct style function directly. If you add a `text_muted` style for inactive nav buttons, both the icon and label need to reference it — the button style alone won't propagate.
+When a row has icon + text slots inside a button, don't rely on the button style's `text_color` to control their color. Each slot with an explicit `.style()` call must use the correct style function directly. If you add a `text_muted` style for inactive nav buttons, both the icon and label need to reference it - the button style alone won't propagate.
 
 ### Don't guess at visual issues.
 

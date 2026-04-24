@@ -29,7 +29,7 @@ pub struct CalDavSyncResult {
 /// Sync CalDAV calendars and events for an account.
 ///
 /// 1. Discover calendars via PROPFIND on calendar-home-set
-/// 2. For each calendar, compare ctag — skip if unchanged
+/// 2. For each calendar, compare ctag - skip if unchanged
 /// 3. If changed, list events (ETags), diff against stored, fetch changed
 /// 4. Upsert events to DB, prune deleted events
 pub async fn sync_caldav_calendars(
@@ -58,7 +58,7 @@ pub async fn sync_caldav_calendars(
             cal.href.clone(),
             cal.display_name.clone(),
             cal.color.clone(),
-            false, // is_primary — CalDAV doesn't specify a "primary" calendar
+            false, // is_primary - CalDAV doesn't specify a "primary" calendar
         )
         .await?;
 

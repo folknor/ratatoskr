@@ -1,4 +1,4 @@
-//! OIDC Discovery — fetch `.well-known/openid-configuration` and extract
+//! OIDC Discovery - fetch `.well-known/openid-configuration` and extract
 //! OAuth2 endpoints for generic OIDC providers (Keycloak, Authentik, etc.).
 //!
 //! This enables Ratatoskr to authenticate against any standards-compliant
@@ -12,7 +12,7 @@ const MAX_BODY_SIZE: usize = 1_024 * 1_024;
 /// Subset of the OpenID Connect Discovery 1.0 response that we need.
 #[derive(Debug, Deserialize)]
 struct OidcDiscoveryDocument {
-    /// REQUIRED per spec — must match the issuer URL used to fetch this document.
+    /// REQUIRED per spec - must match the issuer URL used to fetch this document.
     issuer: String,
     authorization_endpoint: String,
     token_endpoint: String,
@@ -37,7 +37,7 @@ pub struct OidcEndpoints {
     pub supports_public_client: bool,
 }
 
-/// Scopes we request — `offline_access` is critical for refresh tokens.
+/// Scopes we request - `offline_access` is critical for refresh tokens.
 const DESIRED_SCOPES: &[&str] = &["openid", "email", "profile", "offline_access"];
 
 /// Intersect the provider's `scopes_supported` with our desired scopes.
@@ -73,7 +73,7 @@ fn is_valid_https_url(url: &str) -> bool {
 /// Probe `https://{domain}/.well-known/openid-configuration` for OIDC support.
 ///
 /// Returns `None` if the domain doesn't serve an OIDC discovery document.
-/// This is a best-effort probe — failure is not an error, it just means
+/// This is a best-effort probe - failure is not an error, it just means
 /// the domain isn't an OIDC issuer.
 pub async fn probe(domain: &str) -> Option<OidcEndpoints> {
     probe_issuer(&format!("https://{domain}")).await
@@ -120,7 +120,7 @@ pub async fn probe_issuer(issuer_url: &str) -> Option<OidcEndpoints> {
     // Spec requirement: issuer in the document must match the request issuer
     if doc.issuer.trim_end_matches('/') != normalized_issuer {
         log::warn!(
-            "OIDC discovery: issuer mismatch — expected {normalized_issuer}, got {}",
+            "OIDC discovery: issuer mismatch - expected {normalized_issuer}, got {}",
             doc.issuer
         );
         return None;

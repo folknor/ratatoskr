@@ -10,7 +10,7 @@ use store::inline_image_store::InlineImageStoreState;
 ///
 /// Constructed once at app startup from pre-initialized stores.
 /// All fields are cheaply cloneable (`Arc<Mutex<…>>` internally).
-/// The service constructs `ProviderCtx` from these fields per-call —
+/// The service constructs `ProviderCtx` from these fields per-call -
 /// callers never see `ProviderCtx`.
 #[derive(Clone)]
 pub struct ActionContext {

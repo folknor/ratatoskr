@@ -2,7 +2,7 @@
 
 ## Overview
 
-A single-row bar at the bottom of the main window that displays sync progress, persistent warnings, and transient confirmations. Implemented as a `Component` (same pattern as `Sidebar`, `ThreadList`, `ReadingPane`) with its own state machine, subscription, and view. The status bar is small but touches sync, auth, and command execution — this spec is precise about the integration boundaries.
+A single-row bar at the bottom of the main window that displays sync progress, persistent warnings, and transient confirmations. Implemented as a `Component` (same pattern as `Sidebar`, `ThreadList`, `ReadingPane`) with its own state machine, subscription, and view. The status bar is small but touches sync, auth, and command execution - this spec is precise about the integration boundaries.
 
 References: [problem statement](./problem-statement.md), [accounts spec](../accounts/problem-statement.md).
 
@@ -12,7 +12,7 @@ References: [problem statement](./problem-statement.md), [accounts spec](../acco
 
 ### File: `crates/app/src/ui/status_bar.rs`
 
-The status bar is a `Component` implementing `update`, `view`, and `subscription`. It does not own any database handles — all data flows in via messages from the parent `App`.
+The status bar is a `Component` implementing `update`, `view`, and `subscription`. It does not own any database handles - all data flows in via messages from the parent `App`.
 
 ### Module Registration
 
@@ -26,7 +26,7 @@ Add `pub mod status_bar;` to `crates/app/src/ui/mod.rs`. Add `status_bar: Status
 
 ```rust
 pub struct StatusBar {
-    /// Currently active warnings. At most one per account — setting a
+    /// Currently active warnings. At most one per account - setting a
     /// warning for an account that already has one replaces it.
     warnings: HashMap<String, AccountWarning>,
 
@@ -55,7 +55,7 @@ pub struct AccountWarning {
 
 #[derive(Debug, Clone)]
 pub enum WarningKind {
-    /// OAuth token expired or refresh failed. Clickable — opens re-auth.
+    /// OAuth token expired or refresh failed. Clickable - opens re-auth.
     TokenExpiry,
     /// Persistent connection failure. Not clickable (no recovery action).
     ConnectionFailure { message: String },
@@ -87,7 +87,7 @@ struct Confirmation {
 
 ### 2.5 Resolved Display Content
 
-The view function resolves the current display state from the priority rules. This is not stored — it is computed fresh on every `view()` call.
+The view function resolves the current display state from the priority rules. This is not stored - it is computed fresh on every `view()` call.
 
 ```rust
 enum ResolvedContent<'a> {
@@ -377,7 +377,7 @@ fn subscription(&self) -> iced::Subscription<StatusBarMessage> {
 }
 ```
 
-**Note on confirmation expiry timing:** When a single confirmation is the only content (no cycling needed), the tick subscription still runs so the confirmation can be expired after `CONFIRMATION_DURATION`. The tick interval equals the confirmation duration (both 3s), so the confirmation expires on the first tick after creation. This is acceptable — sub-second precision is not needed for a "roughly 3 seconds" display.
+**Note on confirmation expiry timing:** When a single confirmation is the only content (no cycling needed), the tick subscription still runs so the confirmation can be expired after `CONFIRMATION_DURATION`. The tick interval equals the confirmation duration (both 3s), so the confirmation expires on the first tick after creation. This is acceptable - sub-second precision is not needed for a "roughly 3 seconds" display.
 
 ### 5.3 `view()`
 
@@ -388,7 +388,7 @@ fn view(&self) -> Element<'_, StatusBarMessage> {
 
     match content {
         ResolvedContent::Idle => {
-            // Empty bar — still render the container for consistent height.
+            // Empty bar - still render the container for consistent height.
             container(Space::new().height(0))
                 .width(Length::Fill)
                 .height(STATUS_BAR_HEIGHT)
@@ -523,7 +523,7 @@ fn style_status_bar_container(theme: &Theme) -> container::Style {
 }
 ```
 
-The status bar uses `background.weaker` — the same level as the sidebar. The top border (1px, 10% alpha of `strongest`) provides a subtle separator from the main content area.
+The status bar uses `background.weaker` - the same level as the sidebar. The top border (1px, 10% alpha of `strongest`) provides a subtle separator from the main content area.
 
 ### 7.2 Warning Text Style
 
@@ -689,7 +689,7 @@ pub struct IcedProgressReporter {
 impl ProgressReporter for IcedProgressReporter {
     fn emit_json(&self, event_name: &str, json: serde_json::Value) {
         let event = SyncEvent::from_json(event_name, json);
-        // Best-effort send — drop on failure (receiver closed).
+        // Best-effort send - drop on failure (receiver closed).
         let _ = self.sender.send(event);
     }
 }
@@ -807,17 +807,17 @@ Confirmations are triggered by the app after successful command execution. Examp
 | Mark as read | "Marked as read" |
 | Snooze | "Snoozed until {time}" |
 
-The app calls `self.status_bar.show_confirmation(text)` from the relevant action handler (e.g., in `handle_thread_list_event` or future command dispatch). This is not routed through the `Message` enum — it is a direct method call in the same `update()` cycle as the action.
+The app calls `self.status_bar.show_confirmation(text)` from the relevant action handler (e.g., in `handle_thread_list_event` or future command dispatch). This is not routed through the `Message` enum - it is a direct method call in the same `update()` cycle as the action.
 
 ### 11.2 Confirmation Preemption
 
 From the problem statement: confirmations briefly interrupt sync progress (~3s), then sync resumes. This is handled by the priority resolution in `resolve()` (section 4): confirmations are checked before sync progress. After `CONFIRMATION_DURATION` elapses, the confirmation is expired and sync progress shows again.
 
-Warnings are never preempted — the `resolve()` function checks warnings first, unconditionally.
+Warnings are never preempted - the `resolve()` function checks warnings first, unconditionally.
 
 ### 11.3 Overlapping Confirmations
 
-If a new confirmation arrives while one is already showing, the new one replaces the old one and resets the timer. Only one confirmation is stored at a time. This is correct because the user just performed a new action — the most recent feedback is the most relevant.
+If a new confirmation arrives while one is already showing, the new one replaces the old one and resets the timer. Only one confirmation is stored at a time. This is correct because the user just performed a new action - the most recent feedback is the most relevant.
 
 ---
 
@@ -829,7 +829,7 @@ If a new confirmation arrives while one is already showing, the new one replaces
 | Warning | `icon::alert_triangle()` | Standard warning indicator. Already in icon.rs. |
 | Confirmation | `icon::check()` | Success/completion. Already in icon.rs. |
 
-All icons use `ICON_MD` (12px) — the standard small icon size. No new icon codepoints are needed.
+All icons use `ICON_MD` (12px) - the standard small icon size. No new icon codepoints are needed.
 
 **Note on animated spinner:** The problem statement mentions a spinner icon (`\u{21BB}`). True rotation animation would require a custom widget with `draw()` override. For the initial implementation, `icon::refresh()` (static) is sufficient. An animated spinner can be added later as a polish pass without changing the component architecture.
 
@@ -837,7 +837,7 @@ All icons use `ICON_MD` (12px) — the standard small icon size. No new icon cod
 
 ## 13. Idle State Behavior
 
-When no warnings, sync progress, or confirmations are active, the status bar renders an empty container at its fixed height. This maintains consistent layout — the main content area does not shift when the status bar transitions between idle and active.
+When no warnings, sync progress, or confirmations are active, the status bar renders an empty container at its fixed height. This maintains consistent layout - the main content area does not shift when the status bar transitions between idle and active.
 
 The empty container still renders the background and top border, providing a subtle visual baseline at the bottom of the window. This is intentional: the bar's physical presence is constant, only its text content appears and disappears.
 
@@ -847,8 +847,8 @@ The empty container still renders the background and top border, providing a sub
 
 Only warning content is interactive. The `view()` function wraps warning content in a `mouse_area` with:
 
-- `on_press(StatusBarMessage::WarningClicked)` — only for `TokenExpiry` warnings (which have a recovery action).
-- `interaction(iced::mouse::Interaction::Pointer)` — cursor changes to hand on hover.
+- `on_press(StatusBarMessage::WarningClicked)` - only for `TokenExpiry` warnings (which have a recovery action).
+- `interaction(iced::mouse::Interaction::Pointer)` - cursor changes to hand on hover.
 
 `ConnectionFailure` warnings render without the `mouse_area` wrapper (no `on_press`, no cursor change). Sync progress and confirmations are never interactive.
 
@@ -960,7 +960,7 @@ Manual verification with the seeded database:
 
 These are explicitly deferred and do not affect the current implementation:
 
-- **Animated spinner icon** — Replace static `refresh` icon with a rotating custom widget during sync.
-- **Right-side content** — The problem statement reserves the right side of the status bar for future use (connection indicator, notification count). The current layout uses a single left-aligned row; adding right-side content means switching to a `row![left_content, Space::fill(), right_content]` layout.
-- **Undo action on confirmation** — "Message moved to Trash [Undo]" with a clickable undo link. Requires the confirmation struct to carry an undo action closure or message variant.
-- **Sync ETA** — "Syncing... ~2 min remaining" based on progress rate. Requires tracking timestamps alongside progress counts.
+- **Animated spinner icon** - Replace static `refresh` icon with a rotating custom widget during sync.
+- **Right-side content** - The problem statement reserves the right side of the status bar for future use (connection indicator, notification count). The current layout uses a single left-aligned row; adding right-side content means switching to a `row![left_content, Space::fill(), right_content]` layout.
+- **Undo action on confirmation** - "Message moved to Trash [Undo]" with a clickable undo link. Requires the confirmation struct to carry an undo action closure or message variant.
+- **Sync ETA** - "Syncing... ~2 min remaining" based on progress rate. Requires tracking timestamps alongside progress counts.

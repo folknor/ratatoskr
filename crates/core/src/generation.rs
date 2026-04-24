@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 /// A monotonically increasing counter for guarding async loads against
-/// stale results. `next()` is the only way to obtain a token — it bumps
+/// stale results. `next()` is the only way to obtain a token - it bumps
 /// the counter and returns the token in one step. `is_current()` is the
 /// only way to check freshness.
 ///
@@ -44,7 +44,7 @@ impl<T> Default for GenerationCounter<T> {
 /// An opaque token capturing a generation counter value at a point in time.
 /// Carried through async tasks and Message variants to detect staleness.
 ///
-/// Branded by `T` — a token from `GenerationCounter<Nav>` cannot be
+/// Branded by `T` - a token from `GenerationCounter<Nav>` cannot be
 /// checked against `GenerationCounter<Search>`.
 pub struct GenerationToken<T>(u64, PhantomData<T>);
 

@@ -60,7 +60,7 @@ pub(super) async fn persist_messages(
         })
         .await?;
 
-    // 2-5. Fire-and-forget post-DB writes — all independent, run concurrently.
+    // 2-5. Fire-and-forget post-DB writes - all independent, run concurrently.
     tokio::join!(
         store_bodies(sctx.body_store, messages),
         store_inline_images(sctx.inline_images, messages),
@@ -101,7 +101,7 @@ pub(super) async fn delete_messages(
         log::warn!("Failed to delete Graph bodies: {e}");
     }
 
-    // Delete from search index (batch — single commit)
+    // Delete from search index (batch - single commit)
     let id_refs: Vec<&str> = message_ids.iter().map(String::as_str).collect();
     if let Err(e) = sctx.search.delete_messages_batch(&id_refs).await {
         log::warn!("Failed to batch-delete search documents: {e}");
@@ -496,7 +496,7 @@ pub(super) async fn refresh_reactions_for_recent_messages(
                                 count += 1;
                             }
                         } else {
-                            // Owner reaction was removed — delete the row if it exists
+                            // Owner reaction was removed - delete the row if it exists
                             tx.execute(
                                 "DELETE FROM message_reactions \
                                  WHERE message_id = ?1 AND account_id = ?2 \

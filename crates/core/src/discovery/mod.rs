@@ -99,7 +99,7 @@ async fn run_cascade(email: &str, domain: &str) -> Result<DiscoveredConfig, Stri
 /// resolve the specific OAuth2 endpoints.
 ///
 /// Only upgrades when the `provider_domain` from the OAuth2Unsupported result
-/// matches the OIDC issuer domain — prevents assigning wrong OIDC endpoints
+/// matches the OIDC issuer domain - prevents assigning wrong OIDC endpoints
 /// to third-party IMAP servers discovered via autoconfig.
 fn upgrade_oauth2_unsupported(
     options: &mut [ProtocolOption],

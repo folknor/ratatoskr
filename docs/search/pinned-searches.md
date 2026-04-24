@@ -2,9 +2,9 @@
 
 ## Overview
 
-Pinned searches are ephemeral, user-curated search result sets that live at the top of the sidebar. They fill the gap between throwaway searches and persistent smart folders — a lightweight way to park a set of threads as a working context without committing to a permanent smart folder.
+Pinned searches are ephemeral, user-curated search result sets that live at the top of the sidebar. They fill the gap between throwaway searches and persistent smart folders - a lightweight way to park a set of threads as a working context without committing to a permanent smart folder.
 
-The motivating use case: a user searches for threads they need to act on today. They don't want a smart folder that re-evaluates every time — they want a static list of "these 12 threads" that they can work through and dismiss. This is the Thunderbird "search results tab" pattern, adapted to Ratatoskr's single-window layout.
+The motivating use case: a user searches for threads they need to act on today. They don't want a smart folder that re-evaluates every time - they want a static list of "these 12 threads" that they can work through and dismiss. This is the Thunderbird "search results tab" pattern, adapted to Ratatoskr's single-window layout.
 
 ## Model
 
@@ -21,7 +21,7 @@ PinnedSearch {
 ```
 
 - **`query`** is the full query string (same syntax as the search bar and smart folders).
-- **`thread_ids`** is a snapshot of matching threads at the time the search was run. This is the result set — it does not re-evaluate automatically.
+- **`thread_ids`** is a snapshot of matching threads at the time the search was run. This is the result set - it does not re-evaluate automatically.
 - **Thread metadata is always live.** When the user clicks a pinned search, the thread list fetches current state (read/unread, starred, snippet, message count) for the stored thread IDs from the database. The snapshot determines *which* threads to show; the database determines *how* they look right now.
 
 ## Lifecycle
@@ -53,7 +53,7 @@ When the user clicks a pinned search:
 3. A label below the search bar (or inline) shows "Last updated 3 days ago" (or "Just now", "2 hours ago", etc.)
 4. The user can hit Enter / click search to re-execute the query, which refreshes the thread ID snapshot and updates the timestamp
 
-Re-executing does not create a new pinned search — it updates the active one (same as editing in place).
+Re-executing does not create a new pinned search - it updates the active one (same as editing in place).
 
 ### Dismissal
 
@@ -111,37 +111,37 @@ Pinned searches occupy the **top of the sidebar**, above the compose button, uni
 
 Pinned searches should look different from navigation items to reinforce that they are temporary working contexts, not permanent destinations:
 
-- **Background**: a subtle card or chip-like container, slightly elevated from the sidebar background (one palette step up — e.g., `weakest` if sidebar rests on `base`)
+- **Background**: a subtle card or chip-like container, slightly elevated from the sidebar background (one palette step up - e.g., `weakest` if sidebar rests on `base`)
 - **Query text**: primary text color, truncated with ellipsis if the query is long. Single line.
 - **Timestamp**: secondary/muted text, small (`TEXT_XS`), below the query text. Relative format: "Just now", "2 hours ago", "3 days ago".
 - **Dismiss button**: small X icon, right-aligned, visible on hover or always visible (TBD based on density). Uses `text_muted()` color, `text_secondary` on hover.
-- **Active state**: when a pinned search is selected, the card gets the same active highlight as `nav_button(active: true)` — stronger background, accent text.
+- **Active state**: when a pinned search is selected, the card gets the same active highlight as `nav_button(active: true)` - stronger background, accent text.
 - **No unread badge**: pinned searches are not live queries, so unread counts don't apply.
 - **No icon**: the query string is the entire identity. No folder icon, no custom emoji.
 
 ### Section Header
 
-The pinned searches section has no visible header when items exist — the visual distinction of the cards is enough. When the section is empty (no pinned searches), nothing is rendered — no placeholder, no empty state message.
+The pinned searches section has no visible header when items exist - the visual distinction of the cards is enough. When the section is empty (no pinned searches), nothing is rendered - no placeholder, no empty state message.
 
 If a "Clear all" affordance is needed, it can live in the command palette rather than taking up sidebar space.
 
 ### Scrolling Behavior
 
-The pinned searches section is part of the sidebar's scrollable area. If the user accumulates many pinned searches, they scroll with the rest of the sidebar. There is no separate scroll region or fixed-position pinning — the section simply grows.
+The pinned searches section is part of the sidebar's scrollable area. If the user accumulates many pinned searches, they scroll with the rest of the sidebar. There is no separate scroll region or fixed-position pinning - the section simply grows.
 
-No cap on the number of pinned searches. If the sidebar fills up, that's a signal to the user to curate their list. This is intentional — it promotes engagement with the feature and encourages dismissing searches that are no longer relevant.
+No cap on the number of pinned searches. If the sidebar fills up, that's a signal to the user to curate their list. This is intentional - it promotes engagement with the feature and encourages dismissing searches that are no longer relevant.
 
-**Auto-creation risk:** Users who search heavily (the target audience) may accumulate pinned searches faster than they curate them, making the feature feel like clutter rather than support. The current design accepts this tradeoff. If post-launch data shows the list grows unmanageably, the first mitigation is auto-expiry: pinned searches older than N days (e.g., 14) that haven't been clicked since creation are silently removed. This preserves the zero-friction creation model while preventing indefinite accumulation. A harder intervention — requiring an explicit "pin" action — is a last resort because it undermines the feature's core value of automatic parking.
+**Auto-creation risk:** Users who search heavily (the target audience) may accumulate pinned searches faster than they curate them, making the feature feel like clutter rather than support. The current design accepts this tradeoff. If post-launch data shows the list grows unmanageably, the first mitigation is auto-expiry: pinned searches older than N days (e.g., 14) that haven't been clicked since creation are silently removed. This preserves the zero-friction creation model while preventing indefinite accumulation. A harder intervention - requiring an explicit "pin" action - is a last resort because it undermines the feature's core value of automatic parking.
 
 ## Search Bar Interaction
 
 When a pinned search is active (selected in the sidebar):
 
 1. **Search bar** shows the stored query string, fully editable
-2. **Staleness label** appears near the search bar: "Last updated 3 days ago". This is a subtle, non-intrusive label — not a banner or alert. It could sit below the search bar or right-aligned within it.
+2. **Staleness label** appears near the search bar: "Last updated 3 days ago". This is a subtle, non-intrusive label - not a banner or alert. It could sit below the search bar or right-aligned within it.
 3. **Thread list** shows the stored threads with live metadata
 4. **Editing the query** and executing updates the pinned search in place (no new entry)
-5. **Pressing Escape** clears the search bar and returns to the previously active folder view, but does **not** dismiss the pinned search — it remains in the sidebar for later
+5. **Pressing Escape** clears the search bar and returns to the previously active folder view, but does **not** dismiss the pinned search - it remains in the sidebar for later
 
 ### Interaction with Normal Search
 
@@ -160,7 +160,7 @@ No new keyboard shortcuts. Pinned searches are accessed by clicking in the sideb
 
 ## Persistence
 
-Pinned searches persist across app restarts. They are stored in SQLite (main database or a separate local state table — implementation detail).
+Pinned searches persist across app restarts. They are stored in SQLite (main database or a separate local state table - implementation detail).
 
 They do **not** sync across devices. Pinned searches are local working state, specific to the machine and session. Smart folders (which sync as part of account config) are the persistent, cross-device equivalent.
 
@@ -182,7 +182,7 @@ CREATE TABLE pinned_search_threads (
 );
 ```
 
-Thread metadata is not stored — it's fetched live from the threads table when the pinned search is displayed.
+Thread metadata is not stored - it's fetched live from the threads table when the pinned search is displayed.
 
 ## Resolved Questions
 
@@ -191,7 +191,7 @@ Thread metadata is not stored — it's fetched live from the threads table when 
 
 ## Open Questions
 
-1. ~~**Entry display format**~~ **Resolved: date+time primary, truncated query as subtitle.** Each pinned search entry shows two lines: the date+time as the primary label (e.g., "Mar 19, 14:32") in normal text, and the query string as a muted subtitle truncated with ellipsis. Date+time only is too anonymous — users can't distinguish entries without clicking. Query only is unreadable at 180px. The two-line format gives enough context to scan while keeping entries compact. The full query is always accessible in the search bar when clicked.
+1. ~~**Entry display format**~~ **Resolved: date+time primary, truncated query as subtitle.** Each pinned search entry shows two lines: the date+time as the primary label (e.g., "Mar 19, 14:32") in normal text, and the query string as a muted subtitle truncated with ellipsis. Date+time only is too anonymous - users can't distinguish entries without clicking. Query only is unreadable at 180px. The two-line format gives enough context to scan while keeping entries compact. The full query is always accessible in the search bar when clicked.
 
 ## Ecosystem Patterns
 
@@ -202,7 +202,7 @@ How requirements in this spec map to patterns from the [iced ecosystem survey](.
 | Requirement | Primary Source | How It Applies |
 |---|---|---|
 | Card/chip styling | shadcn-rs + iced-plus tokens | Token palette for elevation, active state, text colors |
-| Race on rapid navigation | bloom generational tracking | Generational counter for thread metadata queries — prevents stale results when the user clicks through pinned searches quickly |
+| Race on rapid navigation | bloom generational tracking | Generational counter for thread metadata queries - prevents stale results when the user clicks through pinned searches quickly |
 | Edit-in-place state machine | bloom config shadow | Config shadowing inspires the approach: shadow query/results during edit, commit on execute, discard on Escape. Custom `navigated_away` flag needed beyond what bloom provides |
 | Command palette integration | raffi query routing + trebuchet Component | Context-sensitive commands ("Save as Smart Folder" available only when a pinned search is active); Component events for the graduation-to-smart-folder flow |
 | Escape key state restoration | feu raw keyboard | Raw keyboard interception to capture Escape before widget processing; actual restoration logic (return to previous folder view) is custom state management |
@@ -211,4 +211,4 @@ How requirements in this spec map to patterns from the [iced ecosystem survey](.
 ### Gaps
 
 - **Relative timestamps** ("Just now", "2 hours ago", "3 days ago"): No surveyed project implements human-friendly relative time formatting. Use `chrono-humanize` crate.
-- **Tree rendering for hierarchical folders**: Noted as a broader sidebar gap — relevant here if pinned searches ever need nested grouping, but not a blocker for the current flat-list design.
+- **Tree rendering for hierarchical folders**: Noted as a broader sidebar gap - relevant here if pinned searches ever need nested grouping, but not a blocker for the current flat-list design.

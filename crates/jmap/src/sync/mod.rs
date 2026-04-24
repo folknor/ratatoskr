@@ -257,7 +257,7 @@ pub async fn jmap_delta_sync(
 
     log::info!("[JMAP] Starting delta sync for account {account_id}");
     let Some(email_state) = email_state else {
-        log::error!("[JMAP] No email state for account {account_id} — run initial sync first");
+        log::error!("[JMAP] No email state for account {account_id} - run initial sync first");
         return Err("JMAP_NO_STATE".to_string());
     };
 
@@ -539,7 +539,7 @@ pub(crate) fn emit_progress(ctx: &SyncCtx<'_>, phase: &str, current: u64, total:
 }
 
 // ---------------------------------------------------------------------------
-// Shared account discovery (JMAP Sharing — Phase 1)
+// Shared account discovery (JMAP Sharing - Phase 1)
 // ---------------------------------------------------------------------------
 
 /// Discover shared accounts from the JMAP Session and persist them.
@@ -552,7 +552,7 @@ pub(crate) fn emit_progress(ctx: &SyncCtx<'_>, phase: &str, current: u64, total:
 /// 2. Disables sync (with error) for previously-known shared accounts that
 ///    are no longer in the Session (access revoked server-side).
 ///
-/// Does not fail the overall sync — discovery errors are logged and skipped.
+/// Does not fail the overall sync - discovery errors are logged and skipped.
 pub(crate) async fn discover_shared_accounts(client: &JmapClient, account_id: &str, db: &DbState) {
     let session = client.inner().session();
 
@@ -598,13 +598,13 @@ pub(crate) async fn discover_shared_accounts(client: &JmapClient, account_id: &s
     for known_id in &known_ids {
         if !session_id_set.contains(known_id.as_str()) {
             log::info!(
-                "[JMAP] Shared account {known_id} no longer in Session for {account_id} — disabling"
+                "[JMAP] Shared account {known_id} no longer in Session for {account_id} - disabling"
             );
             if let Err(e) = sync_state::disable_shared_mailbox_sync_with_error(
                 db,
                 account_id,
                 known_id,
-                "Access revoked — account no longer in JMAP Session",
+                "Access revoked - account no longer in JMAP Session",
             )
             .await
             {
@@ -622,7 +622,7 @@ pub(crate) async fn discover_shared_accounts(client: &JmapClient, account_id: &s
 }
 
 // ---------------------------------------------------------------------------
-// Principal-based identity resolution (JMAP Sharing — Phase 6)
+// Principal-based identity resolution (JMAP Sharing - Phase 6)
 // ---------------------------------------------------------------------------
 
 /// Resolve email addresses for shared accounts via JMAP Principals.
@@ -685,7 +685,7 @@ pub(crate) async fn resolve_shared_account_identities(
             });
 
         let Some(principal_id) = owner_principal_id else {
-            // No owner principal — try using the account name as email fallback.
+            // No owner principal - try using the account name as email fallback.
             let account_name = account.name();
             if account_name.contains('@') {
                 if let Err(e) = sync_state::set_shared_mailbox_email(
@@ -768,7 +768,7 @@ async fn fetch_principal_email(
 }
 
 // ---------------------------------------------------------------------------
-// ShareNotification polling (JMAP Sharing — Phase 5)
+// ShareNotification polling (JMAP Sharing - Phase 5)
 // ---------------------------------------------------------------------------
 
 /// Poll for ShareNotification changes (RFC 9670).
@@ -778,12 +778,12 @@ async fn fetch_principal_email(
 /// New notifications are fetched, logged, and destroyed (acknowledged).
 ///
 /// On any mailbox-related notification, re-runs session discovery to pick up
-/// grants or revocations. Non-fatal — errors are logged and skipped.
+/// grants or revocations. Non-fatal - errors are logged and skipped.
 pub(crate) async fn poll_share_notifications(client: &JmapClient, account_id: &str, db: &DbState) {
     let inner = client.inner();
     let session = inner.session();
 
-    // Check for principals capability — ShareNotification requires it.
+    // Check for principals capability - ShareNotification requires it.
     if !session.has_capability("urn:ietf:params:jmap:principals") {
         return;
     }
@@ -825,7 +825,7 @@ pub(crate) async fn poll_share_notifications(client: &JmapClient, account_id: &s
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("cannotCalculateChanges") {
-                // State expired — reset by capturing fresh state.
+                // State expired - reset by capturing fresh state.
                 if let Ok(state) = get_share_notification_state(client).await {
                     let _ = sync_state::save_jmap_sync_state(
                         db,
@@ -902,7 +902,7 @@ pub(crate) async fn poll_share_notifications(client: &JmapClient, account_id: &s
         // If any mailbox sharing changed, re-run session discovery to pick up
         // new or revoked accounts.
         if has_mailbox_change {
-            log::info!("[JMAP] Mailbox sharing changed — re-running session discovery");
+            log::info!("[JMAP] Mailbox sharing changed - re-running session discovery");
             discover_shared_accounts(client, account_id, db).await;
         }
     }

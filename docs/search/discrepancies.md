@@ -27,7 +27,7 @@ It aims to preserve earlier audit information while correcting a few places wher
 4. **Date boundary semantics differ across engines.**
    SQL uses strict `<` / `>` for `before:` / `after:`. Tantivy uses inclusive bounds. The same query can therefore include boundary-day messages in one path and exclude them in another.
 
-5. ~~**Unknown `is:` / `has:` values are consumed and dropped instead of falling back to free text.**~~ ✅ Fixed — unrecognized values now preserved as free text (e.g., `is:important` becomes free text `"is:important"`).
+5. ~~**Unknown `is:` / `has:` values are consumed and dropped instead of falling back to free text.**~~ ✅ Fixed - unrecognized values now preserved as free text (e.g., `is:important` becomes free text `"is:important"`).
 
 6. **`is:tagged` currently includes system-folder membership such as Inbox.**
    The implementation checks only whether any `thread_labels` row exists for the thread. In practice that means ordinary Inbox mail often counts as "tagged", which is much broader than normal user expectation.
@@ -85,7 +85,7 @@ It aims to preserve earlier audit information while correcting a few places wher
 23. **Date typeahead lacks the "Pick a date..." path.**
     Current implementation offers static presets only.
 
-24. ~~**Static typeahead coverage is incomplete.**~~ ✅ Fixed — added `is:tagged`, `has:powerpoint`, `has:spreadsheet`, `has:calendar`, `has:contact`.
+24. ~~**Static typeahead coverage is incomplete.**~~ ✅ Fixed - added `is:tagged`, `has:powerpoint`, `has:spreadsheet`, `has:calendar`, `has:contact`.
 
 25. **Result limits are still fixed and engine-specific.**
     Combined search uses one SQL candidate limit, Tantivy uses its own limit, and SQL fallback uses another hardcoded limit. Broad searches can truncate in engine-specific ways before paging/refinement exists.

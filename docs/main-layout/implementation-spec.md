@@ -2,7 +2,7 @@
 
 Backend prerequisites for the initial main layout UI per `docs/main-layout/problem-statement.md`. All work is in `crates/core/` (the `rtsk` crate). No UI work.
 
-**Scope note:** This document covers four specific early backend slices (label colors, thread detail, attachment collapse, focused region) that were prerequisites for the initial reading pane and conversation view. It is not the full backend spec for the main layout — the broader product surface (sidebar navigation, search pipeline, command dispatch, pinned searches, multi-window, calendar mode) implies a much larger backend/query surface documented in their respective specs. Treat this as a phase-specific implementation record, not the living authority for all main-layout backend needs.
+**Scope note:** This document covers four specific early backend slices (label colors, thread detail, attachment collapse, focused region) that were prerequisites for the initial reading pane and conversation view. It is not the full backend spec for the main layout - the broader product surface (sidebar navigation, search pipeline, command dispatch, pinned searches, multi-window, calendar mode) implies a much larger backend/query surface documented in their respective specs. Treat this as a phase-specific implementation record, not the living authority for all main-layout backend needs.
 
 ## Implementation Status
 
@@ -21,16 +21,16 @@ All deviations are minor improvements:
 
 - **Slice 1**: Uses `all_presets()` accessor instead of referencing `PRESETS` directly (encapsulation)
 - **Slice 2**: Factored into named helper functions instead of one monolithic function (stays under 100-line limit). Adds `&#39;` HTML entity decoding. Uses char-aware truncation instead of byte-aware (multi-byte safety).
-- **Slice 3**: Module registered as `mod thread_ui_state` + `pub use *` instead of `pub mod` (items accessible, module path private — no functional impact)
+- **Slice 3**: Module registered as `mod thread_ui_state` + `pub use *` instead of `pub mod` (items accessible, module path private - no functional impact)
 
 ## Current State
 
 The main layout needs four backend capabilities that do not exist:
 
-1. **Label color fallback** — Gmail labels have `color_bg`/`color_fg` from the API. All other providers store `None`. Thread card label dots need colors for every label.
-2. **Thread detail data layer** — The conversation view's message collapsing rules need per-message read state, message ownership detection, and quote-stripped summaries. No single function returns this data.
-3. **Attachment collapse persistence** — A per-thread boolean for whether the attachment group is collapsed. No storage exists.
-4. **`focused_region` on `CommandContext`** — Context-dependent keyboard shortcuts need focus tracking. `CommandContext` has no focus field.
+1. **Label color fallback** - Gmail labels have `color_bg`/`color_fg` from the API. All other providers store `None`. Thread card label dots need colors for every label.
+2. **Thread detail data layer** - The conversation view's message collapsing rules need per-message read state, message ownership detection, and quote-stripped summaries. No single function returns this data.
+3. **Attachment collapse persistence** - A per-thread boolean for whether the attachment group is collapsed. No storage exists.
+4. **`focused_region` on `CommandContext`** - Context-dependent keyboard shortcuts need focus tracking. `CommandContext` has no focus field.
 
 ## Slice 1: Label Color Fallback
 
@@ -40,7 +40,7 @@ Add a deterministic color assignment for labels that have no `color_bg`/`color_f
 
 The `category_colors.rs` module already defines 25 Exchange preset colors as `PRESETS: &[(&str, &str, &str)]` (preset name, background hex, foreground hex) and exposes `all_presets()`, `preset_to_hex()`, and `nearest_exchange_preset()`. This palette is the canonical color set for the entire app.
 
-Labels need a **deterministic hash-based assignment**: given a label name (and optionally account_id as a namespace), produce a stable index into the 25-preset palette. The same label name always gets the same color. No database writes — this is a pure function applied at read time.
+Labels need a **deterministic hash-based assignment**: given a label name (and optionally account_id as a namespace), produce a stable index into the 25-preset palette. The same label name always gets the same color. No database writes - this is a pure function applied at read time.
 
 ### New function in `core/src/category_colors.rs`
 
@@ -85,7 +85,7 @@ This function lives in a new `core/src/label_colors.rs` module (imports from `ca
 
 ### Why not write colors to the database?
 
-Writing fallback colors to the `labels` table would conflate synced (authoritative) and local (derived) values. If a user later connects the same IMAP account to a provider that does support colors, the local values would fight with the synced ones. Keeping the fallback as a pure function avoids this — synced colors always win, and the hash is recomputed on every read.
+Writing fallback colors to the `labels` table would conflate synced (authoritative) and local (derived) values. If a user later connects the same IMAP account to a provider that does support colors, the local values would fight with the synced ones. Keeping the fallback as a pure function avoids this - synced colors always win, and the hash is recomputed on every read.
 
 ### No migration needed
 
@@ -223,7 +223,7 @@ WHERE account_id = ?1 AND thread_id = ?2
 ORDER BY date DESC
 ```
 
-This returns a subset of message fields — **not** `DbMessage`, which has ~20 additional columns (reply_to, body_cached, raw_size, internal_date, unsubscribe headers, auth headers, IMAP metadata) and a custom row mapper in `queries.rs` that expects `SELECT *`. The `ThreadDetailMessage` struct defined above is the purpose-built row type for this query. Map rows directly into `ThreadDetailMessage` fields (the body fields are populated separately from the body store in Step 2).
+This returns a subset of message fields - **not** `DbMessage`, which has ~20 additional columns (reply_to, body_cached, raw_size, internal_date, unsubscribe headers, auth headers, IMAP metadata) and a custom row mapper in `queries.rs` that expects `SELECT *`. The `ThreadDetailMessage` struct defined above is the purpose-built row type for this query. Map rows directly into `ThreadDetailMessage` fields (the body fields are populated separately from the body store in Step 2).
 
 Ordered newest-first for the conversation view.
 
@@ -261,9 +261,9 @@ SELECT email FROM accounts WHERE id = ?1
 Collect into a `HashSet<String>` (lowercased). For each message, `is_own_message = identity_emails.contains(&message.from_address.to_lowercase())`.
 
 The three sources cover:
-- `accounts.email` — the primary account email, always present
-- `send_identities` — delegated/shared mailbox identities (migration v42)
-- `send_as_aliases` — Gmail send-as aliases, IMAP aliases (migration v10)
+- `accounts.email` - the primary account email, always present
+- `send_identities` - delegated/shared mailbox identities (migration v42)
+- `send_as_aliases` - Gmail send-as aliases, IMAP aliases (migration v10)
 
 #### Step 4: Generate collapsed summaries
 
@@ -277,17 +277,17 @@ For each message, produce a ~60-character plain-text summary suitable for collap
 /// 1. Prefer `body_text` over `body_html` (plain text is cleaner).
 ///    If only HTML is available, strip tags first.
 /// 2. Remove lines starting with `>` (quoted text).
-/// 3. Remove everything after the signature delimiter (`-- \n` — note
+/// 3. Remove everything after the signature delimiter (`-- \n` - note
 ///    the trailing space per RFC 3676).
 /// 4. Collapse whitespace, trim, truncate to ~60 chars with ellipsis.
 fn make_collapsed_summary(body_text: Option<&str>, body_html: Option<&str>) -> Option<String>
 ```
 
-For HTML-only messages, a minimal tag stripper is sufficient — remove all `<...>` tags, decode `&amp;` / `&lt;` / `&gt;` / `&nbsp;` / `&quot;`, collapse whitespace. No need for a full HTML parser; these summaries are lossy previews.
+For HTML-only messages, a minimal tag stripper is sufficient - remove all `<...>` tags, decode `&amp;` / `&lt;` / `&gt;` / `&nbsp;` / `&quot;`, collapse whitespace. No need for a full HTML parser; these summaries are lossy previews.
 
 The function processes lines in order:
 1. Split by `\n`
-2. Stop at `-- \n` (signature delimiter — note the trailing space)
+2. Stop at `-- \n` (signature delimiter - note the trailing space)
 3. Skip lines starting with `>` (after optional whitespace)
 4. Skip blank lines
 5. Join remaining lines with spaces, collapse runs of whitespace
@@ -303,7 +303,7 @@ WHERE tl.account_id = ?1 AND tl.thread_id = ?2
 ORDER BY l.sort_order ASC, l.name ASC
 ```
 
-For each label, resolve colors using `resolve_label_color()` from Slice 1. System labels (from `SYSTEM_FOLDER_ROLES`) are filtered out — they are structural, not display labels.
+For each label, resolve colors using `resolve_label_color()` from Slice 1. System labels (from `SYSTEM_FOLDER_ROLES`) are filtered out - they are structural, not display labels.
 
 #### Step 6: Query attachments
 
@@ -343,15 +343,15 @@ WHERE account_id = ?1 AND id = ?2
 
 ### Connection access
 
-Neither `DbState` nor `BodyStoreState` originally exposed a `conn()` accessor — both only had `async with_conn(closure)` which runs the closure on `spawn_blocking` internally. The thread detail function needs both connections simultaneously, so nesting `with_conn` calls would be awkward.
+Neither `DbState` nor `BodyStoreState` originally exposed a `conn()` accessor - both only had `async with_conn(closure)` which runs the closure on `spawn_blocking` internally. The thread detail function needs both connections simultaneously, so nesting `with_conn` calls would be awkward.
 
-**Implemented:** `pub fn conn(&self) -> Arc<Mutex<Connection>>` accessors were added to both `DbState` and `BodyStoreState`. Both structs already hold `conn: Arc<Mutex<Connection>>` — the accessor just clones the Arc. This is used extensively by the iced frontend for synchronous multi-database access.
+**Implemented:** `pub fn conn(&self) -> Arc<Mutex<Connection>>` accessors were added to both `DbState` and `BodyStoreState`. Both structs already hold `conn: Arc<Mutex<Connection>>` - the accessor just clones the Arc. This is used extensively by the iced frontend for synchronous multi-database access.
 
-*Note: The Tauri command wrappers originally specified here are no longer relevant — the Tauri/React frontend has been permanently removed in favor of iced. The iced app calls core functions directly via the `conn()` accessors.*
+*Note: The Tauri command wrappers originally specified here are no longer relevant - the Tauri/React frontend has been permanently removed in favor of iced. The iced app calls core functions directly via the `conn()` accessors.*
 
 ### Why synchronous?
 
-The function touches two SQLite databases but does no I/O beyond disk reads (which SQLite handles internally). Running it on `spawn_blocking` with both connections locked is simpler and faster than interleaving async calls. The iced frontend will call the core function directly (no Tauri command needed) — it just needs the two `&Connection` references.
+The function touches two SQLite databases but does no I/O beyond disk reads (which SQLite handles internally). Running it on `spawn_blocking` with both connections locked is simpler and faster than interleaving async calls. The iced frontend will call the core function directly (no Tauri command needed) - it just needs the two `&Connection` references.
 
 ## Slice 3: Attachment Collapse Persistence
 
@@ -368,9 +368,9 @@ CREATE TABLE IF NOT EXISTS thread_ui_state (
 );
 ```
 
-Compound primary key on `(account_id, thread_id)` — thread IDs are unique per account but not globally (IMAP providers may reuse IDs across accounts).
+Compound primary key on `(account_id, thread_id)` - thread IDs are unique per account but not globally (IMAP providers may reuse IDs across accounts).
 
-No foreign key to `threads` — the UI state should survive thread table rebuilds during re-sync. Orphaned rows are harmless (tiny, boolean-only) and can be cleaned up by a periodic vacuum if needed.
+No foreign key to `threads` - the UI state should survive thread table rebuilds during re-sync. Orphaned rows are harmless (tiny, boolean-only) and can be cleaned up by a periodic vacuum if needed.
 
 ### Core functions in `core/src/db/queries_extra/thread_ui_state.rs` (new file)
 
@@ -384,7 +384,7 @@ pub fn get_attachments_collapsed(
 ) -> Result<bool, String>
 
 /// Set the attachment group collapse state for a thread.
-/// Uses INSERT OR REPLACE — creates the row on first toggle.
+/// Uses INSERT OR REPLACE - creates the row on first toggle.
 pub fn set_attachments_collapsed(
     conn: &Connection,
     account_id: &str,
@@ -401,7 +401,7 @@ VALUES (?1, ?2, ?3)
 ON CONFLICT(account_id, thread_id) DO UPDATE SET attachments_collapsed = ?3
 ```
 
-*Note: Tauri command wrappers originally specified here are no longer relevant — the iced app calls these core functions directly.*
+*Note: Tauri command wrappers originally specified here are no longer relevant - the iced app calls these core functions directly.*
 
 ### Integration with `get_thread_detail`
 
@@ -437,7 +437,7 @@ pub struct CommandContext {
 }
 ```
 
-`Option<FocusedRegion>` rather than a bare `FocusedRegion` — `None` means no region has focus (e.g., app just launched, or focus is on a dialog/overlay that isn't one of the five regions). This avoids inventing a "no focus" variant that commands would need to handle.
+`Option<FocusedRegion>` rather than a bare `FocusedRegion` - `None` means no region has focus (e.g., app just launched, or focus is on a dialog/overlay that isn't one of the five regions). This avoids inventing a "no focus" variant that commands would need to handle.
 
 ### `empty_context()` update
 
@@ -464,7 +464,7 @@ Core defines the `FocusedRegion` enum and the `CommandContext` field. The app la
 - **Tauri/React**: The TS side tracks which panel has focus and includes `focusedRegion` when constructing the `CommandContext` for palette queries. This can be driven by DOM `focus`/`blur` events on the panel containers.
 - **iced**: The iced app tracks focus in its model (e.g., an `active_pane: Option<FocusedRegion>` field on `App`) and sets it on `CommandContext` before querying the registry. Focus changes come from click events on panes and keyboard navigation (Tab, Escape).
 
-Without the app layer populating this field, context-dependent shortcuts (main-layout Phase 3) will not work — the field will remain `None` and all shortcuts will behave as if no region is focused.
+Without the app layer populating this field, context-dependent shortcuts (main-layout Phase 3) will not work - the field will remain `None` and all shortcuts will behave as if no region is focused.
 
 ### No migration needed
 
@@ -508,9 +508,9 @@ impl BodyStoreState {
 
 | File | Contents |
 |------|----------|
-| `core/src/label_colors.rs` | `color_for_label()`, `resolve_label_color()` — Slice 1 |
-| `core/src/db/queries_extra/thread_detail.rs` | `ThreadDetail`, `ThreadDetailMessage`, `ThreadLabel`, `ThreadAttachment`, `get_thread_detail()` — Slice 2 |
-| `core/src/db/queries_extra/thread_ui_state.rs` | `get_attachments_collapsed()`, `set_attachments_collapsed()` — Slice 3 |
+| `core/src/label_colors.rs` | `color_for_label()`, `resolve_label_color()` - Slice 1 |
+| `core/src/db/queries_extra/thread_detail.rs` | `ThreadDetail`, `ThreadDetailMessage`, `ThreadLabel`, `ThreadAttachment`, `get_thread_detail()` - Slice 2 |
+| `core/src/db/queries_extra/thread_ui_state.rs` | `get_attachments_collapsed()`, `set_attachments_collapsed()` - Slice 3 |
 
 ### Module registration
 
@@ -520,7 +520,7 @@ Add to `core/src/lib.rs`:
 pub mod label_colors;
 ```
 
-Add to `core/src/db/queries_extra.rs` (the flat module file, not a `mod.rs` — this is the existing pattern):
+Add to `core/src/db/queries_extra.rs` (the flat module file, not a `mod.rs` - this is the existing pattern):
 
 ```rust
 pub mod thread_detail;
@@ -533,12 +533,12 @@ pub use thread_ui_state::*;
 
 ```
 Slice 1 (label color fallback)
-  └── Slice 2 (thread detail data layer) — uses resolve_label_color()
+  └── Slice 2 (thread detail data layer) - uses resolve_label_color()
 
 Slice 3 (attachment collapse persistence)
-  └── Slice 2 (thread detail data layer) — reads attachments_collapsed
+  └── Slice 2 (thread detail data layer) - reads attachments_collapsed
 
-Slice 4 (focused_region on CommandContext) — independent
+Slice 4 (focused_region on CommandContext) - independent
 ```
 
 Slice 1 and Slice 3 can be done in parallel. Slice 2 depends on both. Slice 4 is independent and can be done at any time.
@@ -561,11 +561,11 @@ The backend slices themselves (SQL queries, color hashing, `CommandContext` fiel
 
 ## Phase 3 Backend: What's Already Done vs What's Missing
 
-The main-layout Phase 3 (Interaction Flow) requires email mutations and compose/send — these **already exist** in the backend:
+The main-layout Phase 3 (Interaction Flow) requires email mutations and compose/send - these **already exist** in the backend:
 
-- **Archive, trash, star, mark read, move to folder** — implemented for all four providers via `ProviderOps` trait (`core/src/provider/ops.rs`), with Tauri command wrappers in `src/provider/commands.rs`.
-- **Send email** — `send_email` on `ProviderOps`, implemented per provider.
-- **Label toggle (add/remove)** — `add_label` / `remove_label` on `ProviderOps`.
+- **Archive, trash, star, mark read, move to folder** - implemented for all four providers via `ProviderOps` trait (`core/src/provider/ops.rs`), with Tauri command wrappers in `src/provider/commands.rs`.
+- **Send email** - `send_email` on `ProviderOps`, implemented per provider.
+- **Label toggle (add/remove)** - `add_label` / `remove_label` on `ProviderOps`.
 
 The one missing backend piece for Phase 3 is **auto-advance**:
 

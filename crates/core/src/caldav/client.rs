@@ -448,7 +448,7 @@ impl CalDavClient {
     /// Get the calendar-home-set URL or return an error.
     fn require_calendar_home_url(&self) -> Result<String, String> {
         self.calendar_home_url.clone().ok_or_else(|| {
-            "No calendar-home-set URL — call discover() or set_calendar_home_url() first"
+            "No calendar-home-set URL - call discover() or set_calendar_home_url() first"
                 .to_string()
         })
     }

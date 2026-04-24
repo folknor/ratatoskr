@@ -55,7 +55,7 @@ impl CalendarView {
 /// Which presentation surface is active for a `ViewingEvent` workflow.
 ///
 /// Exists because `ExpandPopoverToModal` is the one transition where
-/// workflow identity stays the same while presentation changes — the
+/// workflow identity stays the same while presentation changes - the
 /// user is still viewing the same event, only the surface differs.
 #[derive(Debug, Clone)]
 pub enum ViewingSurface {
@@ -82,7 +82,7 @@ pub enum CalendarWorkflow {
     /// Creating a new event in the editor.
     ///
     /// `account_id` is authoritative for mutation dispatch.
-    /// `session.draft.account_id` is a synced display copy — updated
+    /// `session.draft.account_id` is a synced display copy - updated
     /// alongside this field by the `CalendarSelected` handler, never
     /// read for lifecycle decisions.
     CreatingEvent {
@@ -93,7 +93,7 @@ pub enum CalendarWorkflow {
     ///
     /// `event_id` and `account_id` are authoritative for mutation dispatch.
     /// `session.draft.id` / `session.draft.account_id` are carried display
-    /// copies — consistent by construction, never read for lifecycle decisions.
+    /// copies - consistent by construction, never read for lifecycle decisions.
     EditingEvent {
         event_id: String,
         account_id: String,
@@ -136,7 +136,7 @@ pub enum CalendarModal {
     EventFull { event: CalendarEventData },
     /// Editing or creating an event. Create-vs-edit semantics
     /// and the mutable draft come from `CalendarWorkflow`, not from
-    /// this variant. This is a unit marker — the draft lives on
+    /// this variant. This is a unit marker - the draft lives on
     /// `EditorSession` in the workflow state.
     ///
     /// **Invariant:** `EventEditor` without `CreatingEvent` or
@@ -320,7 +320,7 @@ pub struct EventSnapshot {
 /// The single source of truth for all editable event state during editing.
 #[derive(Debug, Clone)]
 pub struct EditorSession {
-    /// The mutable draft — fields are updated as the user types.
+    /// The mutable draft - fields are updated as the user types.
     pub draft: CalendarEventData,
     /// Snapshot of editable fields at editor open time, for dirty detection.
     pub original: EventSnapshot,
@@ -388,7 +388,7 @@ pub struct CalendarState {
     /// Cached time grid config for day/work-week/week views.
     pub time_grid_config: calendar_time_grid::TimeGridConfig,
     /// Current event lifecycle workflow state. Source of truth for
-    /// what the user is doing — surfaces are synchronized from this.
+    /// what the user is doing - surfaces are synchronized from this.
     pub workflow: CalendarWorkflow,
     /// Current quick-glance popover, if any (presentation cache).
     pub active_popover: Option<CalendarPopover>,
@@ -609,7 +609,7 @@ pub enum EventField {
     AllDay(bool),
     /// Calendar selection carrying both calendar and account ownership.
     /// `account_id` comes from `CalendarListEntry.account_id` at selection
-    /// time — not reconstructed from a later lookup.
+    /// time - not reconstructed from a later lookup.
     CalendarSelected {
         calendar_id: Option<String>,
         account_id: Option<String>,
@@ -634,7 +634,7 @@ pub enum CalendarMessage {
     SelectDate(NaiveDate),
     /// A time slot was clicked in day/week views (for event creation pre-fill).
     SelectSlot(NaiveDate, u32),
-    /// A time slot was double-clicked — open event creation dialog.
+    /// A time slot was double-clicked - open event creation dialog.
     DoubleClickSlot(NaiveDate, u32),
     /// Switch the active calendar view.
     SetView(CalendarView),
@@ -682,7 +682,7 @@ pub enum CalendarMessage {
     /// Event detail was loaded from DB after clicking an event.
     EventLoaded(Result<CalendarEventData, String>),
     /// Calendar events loaded from DB for view rendering.
-    /// The token is a generation guard — stale results are discarded.
+    /// The token is a generation guard - stale results are discarded.
     EventsLoaded(
         rtsk::generation::GenerationToken<rtsk::generation::Calendar>,
         Result<Vec<calendar_time_grid::TimeGridEvent>, String>,
@@ -696,7 +696,7 @@ pub enum CalendarMessage {
     /// Toggle visibility of a calendar (checkbox in sidebar).
     ToggleCalendarVisibility(String, bool),
     /// Calendars loaded from DB for sidebar list.
-    /// The token is a generation guard — stale results are discarded.
+    /// The token is a generation guard - stale results are discarded.
     CalendarsLoaded(
         rtsk::generation::GenerationToken<rtsk::generation::Calendar>,
         Result<Vec<CalendarListEntry>, String>,
@@ -707,7 +707,7 @@ pub enum CalendarMessage {
 
 /// Render the full calendar layout (sidebar + main area + calendar surfaces).
 ///
-/// Returns an `Element<CalendarMessage>` — the parent maps this to the
+/// Returns an `Element<CalendarMessage>` - the parent maps this to the
 /// top-level app Message.
 pub fn calendar_layout(state: &CalendarState) -> Element<'_, CalendarMessage> {
     let sidebar = calendar_sidebar(state);
@@ -1469,7 +1469,7 @@ fn event_editor_card<'a>(
         .style(theme::ButtonClass::Ghost.style());
     content = content.push(form_field("Recurrence", recurrence_toggle.into()));
 
-    // Action buttons — save is disabled when no calendar is selected.
+    // Action buttons - save is disabled when no calendar is selected.
     let can_save = event.calendar_id.is_some();
     let save_btn = button(text("Save").size(TEXT_SM))
         .padding(PAD_BUTTON)
@@ -1709,7 +1709,7 @@ fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMessage> {
             let cal_id = cal.id.clone();
             let is_visible = cal.is_visible;
 
-            // Color dot + name + checkbox — entire row is click target
+            // Color dot + name + checkbox - entire row is click target
             let color_dot = text("\u{25CF}")
                 .size(TEXT_SM)
                 .color(parse_hex_color(&cal.color));

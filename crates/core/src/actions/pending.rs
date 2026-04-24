@@ -19,7 +19,7 @@ struct RetryPolicy {
 /// Look up retry policy by operation type.
 ///
 /// Folder-level actions (archive, trash, spam, move, delete) get the most
-/// aggressive retry — silent divergence is the #1 user-visible bug.
+/// aggressive retry - silent divergence is the #1 user-visible bug.
 /// Label actions get moderate retry. Flag actions (star, read) get lighter
 /// retry since sync reconciles them within 5 minutes.
 fn retry_policy(operation_type: &str) -> RetryPolicy {
@@ -86,7 +86,7 @@ pub async fn enqueue_if_retryable(
 ///
 /// Called periodically (e.g., on SyncTick). Fetches pending ops, groups by
 /// account (one provider per account), and dispatches sequentially.
-/// Respects the in-flight guard — skips threads with active mutations.
+/// Respects the in-flight guard - skips threads with active mutations.
 pub async fn process_pending_ops(ctx: &ActionContext) {
     let ops = match db_pending_ops_get(&ctx.db, None, Some(20)).await {
         Ok(ops) => ops,
@@ -142,7 +142,7 @@ async fn process_account_group(
             Some(g) => g,
             None => {
                 log::debug!(
-                    "[pending_ops] Skipping {} for {}/{} — in flight",
+                    "[pending_ops] Skipping {} for {}/{} - in flight",
                     op.operation_type,
                     op.account_id,
                     op.resource_id
@@ -171,7 +171,7 @@ async fn process_account_group(
             )
             .await
         } else {
-            // No provider — use public wrappers (which will also fail to create provider)
+            // No provider - use public wrappers (which will also fail to create provider)
             dispatch_pending_op(
                 retry_ctx,
                 &op.account_id,
@@ -395,7 +395,7 @@ async fn dispatch_pending_op_with_provider(
     }
 }
 
-/// Recover from crash — reset stale 'executing' ops to 'pending'.
+/// Recover from crash - reset stale 'executing' ops to 'pending'.
 /// Also resurface stale 'sending' drafts as 'failed'.
 /// Call once at app boot.
 pub async fn recover_on_boot(ctx: &ActionContext) {

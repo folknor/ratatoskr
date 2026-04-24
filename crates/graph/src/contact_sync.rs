@@ -54,7 +54,7 @@ pub(crate) async fn graph_contacts_delta_sync(
 ) -> Result<(), String> {
     let tokens = sync_state::load_graph_contact_delta_tokens(db, account_id).await?;
     if tokens.is_empty() {
-        // No delta tokens — nothing to do (initial sync hasn't run or was cleared)
+        // No delta tokens - nothing to do (initial sync hasn't run or was cleared)
         return Ok(());
     }
 

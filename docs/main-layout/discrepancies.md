@@ -6,7 +6,7 @@ Audit date: 2026-03-23
 
 ## Resolved
 
-### Core's `get_thread_detail()` — WIRED ✅
+### Core's `get_thread_detail()` - WIRED ✅
 `ThreadDetailLoaded` message exists and is dispatched. `load_thread_detail()` calls core's `get_thread_detail()` with `BodyStoreState`. `body_html`, `body_text`, `is_own_message`, collapsed summaries, and resolved label colors all flow through. Old raw SQL fallback path and `ThreadMessagesLoaded`/`ThreadAttachmentsLoaded` message variants removed (2026-03-23).
 
 ### HTML rendering pipeline now fires ✅
@@ -25,7 +25,7 @@ With `get_thread_detail()` wired, `body_html` is populated from the body store. 
 
 ## Divergences
 
-### No PaneGrid — custom divider implementation
+### No PaneGrid - custom divider implementation
 The problem statement references `PaneGrid`. The implementation uses manual divider widgets with `mouse_area` drag tracking. Conscious divergence.
 
 ### Thread list label dots always empty
@@ -43,11 +43,11 @@ Renders static "Calendar placeholder" and "No pinned items" text. Calendar is a 
 ## Not implemented
 
 ### Interaction flow (Phase 3, partial)
-- **Keyboard shortcuts** — j/k, Enter, Escape wired via command palette. Email action shortcuts available.
-- **Auto-advance** after archive/trash/move — not implemented.
-- **Multi-select** (Shift+click range, Ctrl+click toggle) — not implemented.
-- **Inline reply composer** — not implemented.
-- **Context-dependent shortcut dispatch** — `FocusedRegion` exists but region-specific key behavior table not fully implemented.
+- **Keyboard shortcuts** - j/k, Enter, Escape wired via command palette. Email action shortcuts available.
+- **Auto-advance** after archive/trash/move - not implemented.
+- **Multi-select** (Shift+click range, Ctrl+click toggle) - not implemented.
+- **Inline reply composer** - not implemented.
+- **Context-dependent shortcut dispatch** - `FocusedRegion` exists but region-specific key behavior table not fully implemented.
 
 ### Scroll virtualization
 Thread list renders all cards in `column![]` inside `scrollable`. No virtualization. `THREAD_CARD_HEIGHT` exists for future use.
@@ -72,4 +72,4 @@ Implemented. Three counters: `nav_generation`, `thread_generation`, `search_gene
 Thread detail now uses core's `get_thread_detail()`. Thread listing uses `get_threads_scoped` from core. Attachment collapse uses core's `set_attachments_collapsed`. Calendar, contacts, and other domains have varying levels of core integration.
 
 ### Dead code
-- `PendingChord::started` — `#[allow(dead_code)]`
+- `PendingChord::started` - `#[allow(dead_code)]`

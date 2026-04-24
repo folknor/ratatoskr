@@ -29,16 +29,16 @@ pub(super) async fn run_delta_sync(ctx: &SyncCtx<'_>) -> Result<GmailSyncResult,
     let last_history_id = { sync_state::load_account_history_id(ctx.db, ctx.account_id).await? };
     let Some(last_history_id) = last_history_id else {
         log::error!(
-            "[Gmail] No history_id found for account {} — run initial sync first",
+            "[Gmail] No history_id found for account {} - run initial sync first",
             ctx.account_id
         );
-        return Err("No history_id found — run initial sync first".to_string());
+        return Err("No history_id found - run initial sync first".to_string());
     };
     log::debug!("[Gmail] Delta sync from history_id={last_history_id}");
 
     let cycle = ctx.client.increment_sync_cycle();
 
-    // Sync signatures on each delta (lightweight — single API call)
+    // Sync signatures on each delta (lightweight - single API call)
     labels::sync_signatures(ctx).await?;
 
     // Calendar delta sync: every 5th cycle (calendar events change moderately)

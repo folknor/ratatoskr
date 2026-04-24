@@ -2,7 +2,7 @@
 //! and `ContactCard/set` from the jmap-client crate.
 //!
 //! Uses JSContact (RFC 9553) `ContactCard` objects. The jmap-client crate
-//! stores all JSContact properties in a `serde_json::Map` — we extract
+//! stores all JSContact properties in a `serde_json::Map` - we extract
 //! display name, emails, phones, organizations, notes, and addresses from
 //! the raw JSON for persistence into the local contacts DB.
 //!
@@ -56,7 +56,7 @@ struct ExtractedContact {
 fn extract_contact(card: &jmap_client::contact_card::ContactCard) -> Option<ExtractedContact> {
     let server_id = card.id()?.to_string();
 
-    // Extract emails — the `emails` property is a map of id → { address, ... }
+    // Extract emails - the `emails` property is a map of id → { address, ... }
     let mut email_addresses: Vec<String> = Vec::new();
     if let Some(emails_map) = card.emails() {
         for (_key, entry) in emails_map {
@@ -104,7 +104,7 @@ fn extract_contact(card: &jmap_client::contact_card::ContactCard) -> Option<Extr
 fn extract_display_name(card: &jmap_client::contact_card::ContactCard) -> Option<String> {
     let name_obj = card.name()?;
 
-    // Try `full` first (a string or an array of components — check both)
+    // Try `full` first (a string or an array of components - check both)
     if let Some(full) = name_obj.get("full")
         && let Some(s) = full.as_str()
     {
@@ -114,7 +114,7 @@ fn extract_display_name(card: &jmap_client::contact_card::ContactCard) -> Option
         }
     }
 
-    // Try `components` array — look for given + surname
+    // Try `components` array - look for given + surname
     if let Some(components) = name_obj.get("components").and_then(|v| v.as_array()) {
         let mut given = String::new();
         let mut surname = String::new();
@@ -265,7 +265,7 @@ pub async fn jmap_contacts_delta_sync(
     let state = sync_state::load_jmap_sync_state(db, account_id, "ContactCard").await?;
     let Some(mut since_state) = state else {
         log::warn!(
-            "[JMAP-Contacts] No ContactCard state for account {account_id} — running initial sync"
+            "[JMAP-Contacts] No ContactCard state for account {account_id} - running initial sync"
         );
         return jmap_contacts_initial_sync(client, account_id, db).await;
     };
@@ -360,7 +360,7 @@ pub async fn jmap_contacts_delta_sync(
 
 /// Push a local contact edit to the JMAP server via `ContactCard/set`.
 ///
-/// Only pushes phone, company, and notes — display name changes are
+/// Only pushes phone, company, and notes - display name changes are
 /// local-only overrides (consistent with Google/Graph providers).
 pub async fn jmap_contacts_push_update(
     client: &JmapClient,

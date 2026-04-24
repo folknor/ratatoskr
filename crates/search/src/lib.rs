@@ -120,9 +120,9 @@ pub struct SearchParams {
     /// `Some(ids)` = search only those accounts.
     pub account_ids: Option<Vec<String>>,
     pub free_text: Option<String>,
-    /// From filters — multiple values produce OR semantics.
+    /// From filters - multiple values produce OR semantics.
     pub from: Vec<String>,
-    /// To filters — multiple values produce OR semantics.
+    /// To filters - multiple values produce OR semantics.
     pub to: Vec<String>,
     pub subject: Option<String>,
     pub has_attachment: Option<bool>,

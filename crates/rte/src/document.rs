@@ -85,7 +85,7 @@ impl StyledRun {
     /// Split this run at a character offset, returning `(left, right)`.
     ///
     /// Panics if `char_offset` is out of bounds (but 0 and char_len are valid
-    /// — they produce an empty left or right respectively).
+    /// - they produce an empty left or right respectively).
     pub fn split_at(&self, char_offset: usize) -> (Self, Self) {
         let byte_offset = self.char_to_byte_offset(char_offset);
         let (left_text, right_text) = self.text.split_at(byte_offset);
@@ -180,7 +180,7 @@ pub enum Block {
     /// A paragraph of styled text runs.
     Paragraph { runs: Vec<StyledRun> },
 
-    /// A heading (H1–H3) with styled text runs.
+    /// A heading (H1-H3) with styled text runs.
     Heading {
         level: HeadingLevel,
         runs: Vec<StyledRun>,

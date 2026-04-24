@@ -10,7 +10,7 @@ use crate::db::{DbState, params};
 // ── Test helpers ────────────────────────────────────────────────────
 
 /// Create a minimal ActionContext backed by in-memory DBs + temp dirs.
-/// Returns (ctx, _tmpdir) — keep _tmpdir alive for the test duration.
+/// Returns (ctx, _tmpdir) - keep _tmpdir alive for the test duration.
 fn make_test_ctx() -> (ActionContext, tempfile::TempDir) {
     let tmp = tempfile::tempdir().expect("tempdir");
 
@@ -146,7 +146,7 @@ fn flight_guard_acquire_and_release() {
     let guard3 = ctx.try_acquire_flight("acc1", "thread2");
     assert!(guard3.is_some());
 
-    // Drop first guard — thread1 released
+    // Drop first guard - thread1 released
     drop(guard);
     assert!(!ctx.is_in_flight("acc1", "thread1"));
 
@@ -193,7 +193,7 @@ async fn archive_local_is_idempotent() {
     let (ctx, _tmp) = make_test_ctx();
     insert_test_account(&ctx, "acc1");
     insert_test_thread(&ctx, "acc1", "t1");
-    // No INBOX label — archive is a no-op but should not error
+    // No INBOX label - archive is a no-op but should not error
     let result = super::archive::archive_local(&ctx, "acc1", "t1").await;
     assert!(result.is_ok());
 }
@@ -315,7 +315,7 @@ async fn enqueue_replaces_existing_pending_op() {
     .await;
     assert_eq!(count_pending_ops(&ctx, "acc1", "t1", "star"), 1);
 
-    // Second enqueue with opposite params — should replace, not duplicate
+    // Second enqueue with opposite params - should replace, not duplicate
     super::pending::enqueue_if_retryable(
         &ctx,
         &outcome,
@@ -458,7 +458,7 @@ async fn batch_preserves_target_order() {
     insert_test_thread(&ctx, "acc2", "t2");
     insert_test_thread(&ctx, "acc1", "t3");
 
-    // Mixed accounts — outcomes should be in same order as targets
+    // Mixed accounts - outcomes should be in same order as targets
     let outcomes = super::batch::batch_execute(
         &ctx,
         vec![
@@ -543,7 +543,7 @@ async fn batch_respects_flight_guard() {
     .await;
 
     assert_eq!(outcomes.len(), 2);
-    assert!(outcomes[0].is_failed(), "t1 should fail — in flight");
+    assert!(outcomes[0].is_failed(), "t1 should fail - in flight");
     assert!(outcomes[1].is_success(), "t2 should succeed");
 }
 

@@ -11,7 +11,7 @@ use super::keybinding::{KeyBinding, NamedKey, current_platform};
 
 /// Tracks command usage counts for recency/frequency ranking.
 ///
-/// Persistence is deferred to Slice 6 — the app layer will be responsible
+/// Persistence is deferred to Slice 6 - the app layer will be responsible
 /// for saving and restoring this data.
 pub struct UsageTracker {
     counts: HashMap<CommandId, u32>,
@@ -701,7 +701,7 @@ fn register_email(out: &mut Vec<CommandDescriptor>) {
             },
             &["delete", "remove", "trash"],
         )),
-        "Delete — Move to Trash",
+        "Delete - Move to Trash",
         "Move the selected thread to the Trash folder. Can be undone.",
     ));
     out.push(with_docs(desc(

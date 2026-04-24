@@ -46,5 +46,5 @@ pub use sync::threading;
 pub mod sync_dispatch;
 pub mod url_cleaning;
 
-// Re-exports for app-layer convenience — avoids direct common dependency.
+// Re-exports for app-layer convenience - avoids direct common dependency.
 pub use common::crypto::load_encryption_key;

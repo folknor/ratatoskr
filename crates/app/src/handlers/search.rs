@@ -518,7 +518,7 @@ impl App {
         iced::widget::operation::focus::<Message>("search-bar".to_string())
     }
 
-    /// Handle smart folder selection from the sidebar — fill the search bar
+    /// Handle smart folder selection from the sidebar - fill the search bar
     /// and execute the query via the unified search pipeline.
     pub(crate) fn handle_smart_folder_selected(
         &mut self,
@@ -542,7 +542,7 @@ impl App {
 
         let load_gen = self.thread_list.typeahead.generation.next();
 
-        // Static operators — resolve immediately
+        // Static operators - resolve immediately
         let static_items: Option<Vec<TypeaheadItem>> = match operator {
             "in" => Some(
                 [
@@ -622,7 +622,7 @@ impl App {
             ));
         }
 
-        // Dynamic operators — query DB asynchronously
+        // Dynamic operators - query DB asynchronously
         let db = Arc::clone(&self.db);
         let partial = partial.to_string();
         let op = operator.to_string();
@@ -642,7 +642,7 @@ impl App {
         )
     }
 
-    /// Handle typeahead selection — insert the value into the query.
+    /// Handle typeahead selection - insert the value into the query.
     pub(crate) fn handle_typeahead_select(&mut self, idx: usize) -> Task<Message> {
         let Some(item) = self.thread_list.typeahead.items.get(idx) else {
             return Task::none();

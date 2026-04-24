@@ -27,7 +27,7 @@ Audit date: 2026-03-22
 ## Not implemented
 
 ### Keybinding management UI (Slice 6f)
-No settings panel for viewing/rebinding shortcuts. Lower priority — default bindings work out of the box. Deferred past V1.
+No settings panel for viewing/rebinding shortcuts. Lower priority - default bindings work out of the box. Deferred past V1.
 
 ---
 

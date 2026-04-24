@@ -1,21 +1,21 @@
 # Search App Integration: Implementation Spec
 
-Detailed implementation specification for wiring the unified search pipeline into the iced app and completing the smart folder migration. The backend (parser, SQL builder, Tantivy cross-account, unified pipeline) is complete — slices 1-4 in `docs/search/implementation-spec.md`. This document covers slices 5-6 in full: the search bar widget, search execution with generational tracking, result rendering, smart folder migration, operator typeahead, and the "Search here" interaction.
+Detailed implementation specification for wiring the unified search pipeline into the iced app and completing the smart folder migration. The backend (parser, SQL builder, Tantivy cross-account, unified pipeline) is complete - slices 1-4 in `docs/search/implementation-spec.md`. This document covers slices 5-6 in full: the search bar widget, search execution with generational tracking, result rendering, smart folder migration, operator typeahead, and the "Search here" interaction.
 
 ## References
 
 - **Product spec:** `docs/search/problem-statement.md`
 - **Backend spec:** `docs/search/implementation-spec.md` (slices 1-4 complete)
-- **Unified pipeline:** `crates/core/src/search_pipeline.rs` — `search()` entry point
-- **Parser:** `crates/smart-folder/src/parser.rs` — `ParsedQuery`, `parse_query()`
-- **SQL builder:** `crates/smart-folder/src/sql_builder.rs` — `query_threads()`, `count_matching()`
-- **Token system:** `crates/smart-folder/src/tokens.rs` — `resolve_query_tokens()` (to be deprecated)
-- **Smart folder facade:** `crates/smart-folder/src/lib.rs` — `execute_smart_folder_query()`, `count_smart_folder_unread()`
-- **App entry:** `crates/app/src/main.rs` — `App`, `Message` enum, generational tracking
-- **Thread list:** `crates/app/src/ui/thread_list.rs` — `ThreadList`, `ThreadListMessage`
-- **Component trait:** `crates/app/src/component.rs` — `Component` trait
-- **App types:** `crates/app/src/db.rs` — `Thread`, `Account`, `Label`
-- **Layout constants:** `crates/app/src/ui/layout.rs` — spacing, text, padding tokens
+- **Unified pipeline:** `crates/core/src/search_pipeline.rs` - `search()` entry point
+- **Parser:** `crates/smart-folder/src/parser.rs` - `ParsedQuery`, `parse_query()`
+- **SQL builder:** `crates/smart-folder/src/sql_builder.rs` - `query_threads()`, `count_matching()`
+- **Token system:** `crates/smart-folder/src/tokens.rs` - `resolve_query_tokens()` (to be deprecated)
+- **Smart folder facade:** `crates/smart-folder/src/lib.rs` - `execute_smart_folder_query()`, `count_smart_folder_unread()`
+- **App entry:** `crates/app/src/main.rs` - `App`, `Message` enum, generational tracking
+- **Thread list:** `crates/app/src/ui/thread_list.rs` - `ThreadList`, `ThreadListMessage`
+- **Component trait:** `crates/app/src/component.rs` - `Component` trait
+- **App types:** `crates/app/src/db.rs` - `Thread`, `Account`, `Label`
+- **Layout constants:** `crates/app/src/ui/layout.rs` - spacing, text, padding tokens
 - **Pinned searches:** `docs/search/pinned-searches.md` (downstream dependency)
 - **Sidebar spec:** `docs/sidebar/problem-statement.md`
 - **Implementation plan:** `docs/implementation-plan.md`
@@ -47,9 +47,9 @@ In `crates/app/src/ui/thread_list.rs`:
 /// What the thread list is currently displaying.
 #[derive(Debug, Clone)]
 pub enum ThreadListMode {
-    /// Browsing a folder or label — threads loaded from scoped DB query.
+    /// Browsing a folder or label - threads loaded from scoped DB query.
     Folder,
-    /// Displaying search results — threads came from the unified search pipeline.
+    /// Displaying search results - threads came from the unified search pipeline.
     Search,
 }
 ```
@@ -119,11 +119,11 @@ pub enum Message {
     /// The u64 is the search generation for staleness detection.
     SearchResultsLoaded(u64, Result<Vec<Thread>, String>),
 
-    /// User pressed Escape in the search bar — clear search and
+    /// User pressed Escape in the search bar - clear search and
     /// return to folder view.
     SearchClear,
 
-    /// Global `/` keypress — focus the search bar.
+    /// Global `/` keypress - focus the search bar.
     FocusSearchBar,
 }
 ```
@@ -134,7 +134,7 @@ This is the single most important correctness mechanism in the search integratio
 
 #### The problem
 
-The user types "m", "me", "mee", "meet", "meeti", "meetin", "meeting" in quick succession. Each keystroke (after debounce) dispatches a search `Task`. These tasks are async and may complete out of order — the search for "me" (broad, many results) might take longer than "meeting" (narrow, few results). If the "me" results arrive after the "meeting" results, the thread list flickers from correct results back to stale ones.
+The user types "m", "me", "mee", "meet", "meeti", "meetin", "meeting" in quick succession. Each keystroke (after debounce) dispatches a search `Task`. These tasks are async and may complete out of order - the search for "me" (broad, many results) might take longer than "meeting" (narrow, few results). If the "me" results arrive after the "meeting" results, the thread list flickers from correct results back to stale ones.
 
 #### The solution
 
@@ -180,7 +180,7 @@ Message::SearchExecute => {
 }
 
 Message::SearchResultsLoaded(g, _) if g != self.search_generation => {
-    // Stale results — a newer search has been dispatched.
+    // Stale results - a newer search has been dispatched.
     // Silently drop.
     Task::none()
 }
@@ -216,11 +216,11 @@ Message::FocusSearchBar => {
 - `search_generation` is incremented exactly once per search dispatch and once on `SearchClear`.
 - It is never decremented.
 - The `SearchResultsLoaded` handler rejects results where `g != self.search_generation` (matches the existing pattern for `AccountsLoaded`, `LabelsLoaded`, `ThreadsLoaded`).
-- `SearchClear` increments the generation to invalidate any in-flight search — without this, clearing the search bar could be followed by stale results popping in.
+- `SearchClear` increments the generation to invalidate any in-flight search - without this, clearing the search bar could be followed by stale results popping in.
 
 ### 1.5 Search Bar Widget
 
-The search bar is an `iced::widget::text_input` with surrounding container styling, integrated into the thread list header. It is not a separate `Component` — it lives within the `ThreadList` component's view, with its state managed at the `App` level (because smart folder selection and "Search here" need to set the query programmatically).
+The search bar is an `iced::widget::text_input` with surrounding container styling, integrated into the thread list header. It is not a separate `Component` - it lives within the `ThreadList` component's view, with its state managed at the `App` level (because smart folder selection and "Search here" need to set the query programmatically).
 
 #### Thread list header change
 
@@ -295,7 +295,7 @@ The search query string is owned by `App` (not `ThreadList`) because external ev
 pub search_query: String,
 ```
 
-`App` sets `self.thread_list.search_query = self.search_query.clone()` before `view()` is called — or more idiomatically, keep the query on `ThreadList` and have the `ThreadListEvent::SearchQueryChanged` event propagate it up to `App` for dispatch. The source of truth for "what to search" is the event flow, not shared state.
+`App` sets `self.thread_list.search_query = self.search_query.clone()` before `view()` is called - or more idiomatically, keep the query on `ThreadList` and have the `ThreadListEvent::SearchQueryChanged` event propagate it up to `App` for dispatch. The source of truth for "what to search" is the event flow, not shared state.
 
 ### 1.6 Keyboard Shortcuts
 
@@ -325,11 +325,11 @@ iced::event::listen_with(|event, _status, _id| {
 })
 ```
 
-**Important:** The `/` shortcut must only fire when the search bar is not already focused and no other text input has focus. Iced's `_status` parameter in `listen_with` can be used to check if the event was captured by a widget. If `status == Status::Captured`, skip it — a text input consumed the keypress.
+**Important:** The `/` shortcut must only fire when the search bar is not already focused and no other text input has focus. Iced's `_status` parameter in `listen_with` can be used to check if the event was captured by a widget. If `status == Status::Captured`, skip it - a text input consumed the keypress.
 
 **Escape behavior (three states):**
-- If search bar has content: dispatch `SearchClear` — clears the query, increments `search_generation`, restores folder view.
-- If search bar is empty and focused: dispatch `SearchBlur` — unfocuses the search bar via `widget::operation::unfocus("search-input")`. This is a separate message from `SearchClear` because blur-without-clear has no side effects on the thread list.
+- If search bar has content: dispatch `SearchClear` - clears the query, increments `search_generation`, restores folder view.
+- If search bar is empty and focused: dispatch `SearchBlur` - unfocuses the search bar via `widget::operation::unfocus("search-input")`. This is a separate message from `SearchClear` because blur-without-clear has no side effects on the thread list.
 - If search bar is empty and not focused: no-op (propagate to other handlers, e.g., command palette Escape).
 
 Add `SearchBlur` to the Message enum:
@@ -341,7 +341,7 @@ SearchBlur, // Unfocus the search bar without clearing
 
 Search should execute after a brief debounce (150ms) while the user is typing, and immediately on Enter. The debounce prevents hammering the search pipeline on every keystroke while keeping the feel instant.
 
-**V1 timer strategy:** The implementation below uses a polling `iced::time::every(50ms)` subscription that checks a deadline. This is simple but slightly wasteful (ticks even when idle). A cleaner approach would be a one-shot timer that fires once at the deadline, but iced does not expose a one-shot timer primitive directly. The polling approach is acceptable for V1 — the subscription is only active when `search_debounce_deadline` is `Some`, and 50ms ticks are negligible overhead.
+**V1 timer strategy:** The implementation below uses a polling `iced::time::every(50ms)` subscription that checks a deadline. This is simple but slightly wasteful (ticks even when idle). A cleaner approach would be a one-shot timer that fires once at the deadline, but iced does not expose a one-shot timer primitive directly. The polling approach is acceptable for V1 - the subscription is only active when `search_debounce_deadline` is `Some`, and 50ms ticks are negligible overhead.
 
 #### Implementation via subscription
 
@@ -408,7 +408,7 @@ Message::SearchExecute => {
 
 ### 1.8 Search Execution (Async Bridge)
 
-The unified search pipeline (`crates/core/src/search_pipeline.rs`) takes `&SearchState` and `&Connection` — both are synchronous, blocking operations. The app must call it off the main thread.
+The unified search pipeline (`crates/core/src/search_pipeline.rs`) takes `&SearchState` and `&Connection` - both are synchronous, blocking operations. The app must call it off the main thread.
 
 #### The async wrapper
 
@@ -425,7 +425,7 @@ async fn execute_search(
 
         // TODO: SearchState needs to be accessible. Either:
         // (a) Store SearchState in App alongside Db, or
-        // (b) Create a new SearchState per search (expensive — avoid).
+        // (b) Create a new SearchState per search (expensive - avoid).
         // Option (a) is correct: SearchState wraps Arc<...> and is Clone.
 
         let results = rtsk::search_pipeline::search(
@@ -466,10 +466,10 @@ Since `SearchState` is `Clone` (wraps `Arc`), pass a clone into the search task.
 
 There are four result types in play. Their roles are distinct:
 
-- **`UnifiedSearchResult`** (`crates/core/src/search_pipeline.rs`) — the core pipeline's output. Carries thread-level search results with relevance scores. This is the authoritative search contract.
-- **`Thread`** (`crates/app/src/db.rs`) — the app's display type for the thread list. The thread card widget renders these. Search results are converted to `Thread` before reaching the UI.
-- **`DbThread`** (`crates/db/src/db/types.rs`) — the raw DB row type. Smart folder execution historically returned these. The migration adapter converts `UnifiedSearchResult` → `DbThread` for backward compatibility with sidebar unread-count code.
-- **`SearchResult`** (`docs/search/problem-statement.md`) — the product-level contract. `UnifiedSearchResult` is the implementation of this contract.
+- **`UnifiedSearchResult`** (`crates/core/src/search_pipeline.rs`) - the core pipeline's output. Carries thread-level search results with relevance scores. This is the authoritative search contract.
+- **`Thread`** (`crates/app/src/db.rs`) - the app's display type for the thread list. The thread card widget renders these. Search results are converted to `Thread` before reaching the UI.
+- **`DbThread`** (`crates/db/src/db/types.rs`) - the raw DB row type. Smart folder execution historically returned these. The migration adapter converts `UnifiedSearchResult` → `DbThread` for backward compatibility with sidebar unread-count code.
+- **`SearchResult`** (`docs/search/problem-statement.md`) - the product-level contract. `UnifiedSearchResult` is the implementation of this contract.
 
 The conversion flow is: `search()` → `Vec<UnifiedSearchResult>` → `unified_to_app_thread()` → `Vec<Thread>` → thread list. Smart folder compatibility: `UnifiedSearchResult` → `unified_to_db_thread()` → `Vec<DbThread>`. Long-term, per the search implementation spec, these should converge into a unified thread-presentation type.
 
@@ -486,7 +486,7 @@ fn unified_to_app_thread(r: UnifiedSearchResult) -> Thread {
         message_count: r.message_count.unwrap_or(1),
         is_read: r.is_read,
         is_starred: r.is_starred,
-        has_attachments: false, // Not in UnifiedSearchResult — see note
+        has_attachments: false, // Not in UnifiedSearchResult - see note
         from_name: r.from_name,
         from_address: r.from_address,
     }
@@ -495,7 +495,7 @@ fn unified_to_app_thread(r: UnifiedSearchResult) -> Thread {
 
 **Note on `has_attachments`:** `UnifiedSearchResult` does not carry `has_attachments`. Two options:
 
-1. Add `has_attachments: bool` to `UnifiedSearchResult` — populated from `DbThread.has_attachments` in the SQL paths, defaulting to `false` in the Tantivy-only path.
+1. Add `has_attachments: bool` to `UnifiedSearchResult` - populated from `DbThread.has_attachments` in the SQL paths, defaulting to `false` in the Tantivy-only path.
 2. Accept the missing field for now. The thread card will not show the attachment indicator for search results from the Tantivy-only path.
 
 Option (1) is correct and should be done. Extend `UnifiedSearchResult` in `crates/core/src/search_pipeline.rs`:
@@ -511,7 +511,7 @@ Populate from `DbThread.has_attachments` in `db_thread_to_unified()` and `enrich
 
 ### 1.9 Result Rendering
 
-Search results reuse the same `thread_card` widget function in `crates/app/src/ui/widgets.rs`. No new widget is needed — search results are `Vec<Thread>` by the time they reach the thread list, identical to folder-view threads.
+Search results reuse the same `thread_card` widget function in `crates/app/src/ui/widgets.rs`. No new widget is needed - search results are `Vec<Thread>` by the time they reach the thread list, identical to folder-view threads.
 
 #### Sort order
 
@@ -576,9 +576,9 @@ fn restore_folder_view(&mut self) -> Task<Message> {
 }
 ```
 
-**Memory consideration:** Cloning the thread list before search is acceptable. A list of 1000 `Thread` structs is roughly 100-200 KB — trivial. The alternative (re-querying the database for the folder's threads) is correct but slower and produces a visible reload flicker.
+**Memory consideration:** Cloning the thread list before search is acceptable. A list of 1000 `Thread` structs is roughly 100-200 KB - trivial. The alternative (re-querying the database for the folder's threads) is correct but slower and produces a visible reload flicker.
 
-**V1 shortcut note:** This clone-and-restore approach is pragmatic but not the long-term design. It assumes folder view is "whatever threads happened to be on screen," which breaks if the underlying data changed during search (new messages, sync, etc.). The eventual design should restore by re-navigating to the explicit `NavigationTarget` (as proposed in the command palette spec) rather than replaying cached state. For V1, the clone is good enough — stale-after-search is a minor edge case, and the alternative (full re-query) adds latency.
+**V1 shortcut note:** This clone-and-restore approach is pragmatic but not the long-term design. It assumes folder view is "whatever threads happened to be on screen," which breaks if the underlying data changed during search (new messages, sync, etc.). The eventual design should restore by re-navigating to the explicit `NavigationTarget` (as proposed in the command palette spec) rather than replaying cached state. For V1, the clone is good enough - stale-after-search is a minor edge case, and the alternative (full re-query) adds latency.
 
 ---
 
@@ -586,7 +586,7 @@ fn restore_folder_view(&mut self) -> Task<Message> {
 
 ### 2.1 Execution Path Change
 
-Smart folders currently use `execute_smart_folder_query()` (`crates/smart-folder/src/lib.rs`), which calls `resolve_query_tokens()` then `parse_query()` then `query_threads()` — the SQL-only path. After migration, smart folders call the unified `search()` pipeline from `crates/core/src/search_pipeline.rs`, gaining:
+Smart folders currently use `execute_smart_folder_query()` (`crates/smart-folder/src/lib.rs`), which calls `resolve_query_tokens()` then `parse_query()` then `query_threads()` - the SQL-only path. After migration, smart folders call the unified `search()` pipeline from `crates/core/src/search_pipeline.rs`, gaining:
 
 - Tantivy ranking for smart folders that contain free text
 - All new operators (`account:`, `folder:`, `in:`, `type:`, `has:` shorthands)
@@ -626,7 +626,7 @@ pub fn execute_smart_folder_query(
 
 Both paths already have access to the connection; `SearchState` must be threaded through.
 
-**Unread count path:** `count_smart_folder_unread` should remain SQL-only — unread counts don't need Tantivy ranking. Keep it as-is but update it to use the new parser directly (it already does):
+**Unread count path:** `count_smart_folder_unread` should remain SQL-only - unread counts don't need Tantivy ranking. Keep it as-is but update it to use the new parser directly (it already does):
 
 ```rust
 pub fn count_smart_folder_unread(
@@ -634,7 +634,7 @@ pub fn count_smart_folder_unread(
     query: &str,
     scope: &AccountScope,
 ) -> Result<i64, String> {
-    // No token resolution needed — parser handles relative offsets natively
+    // No token resolution needed - parser handles relative offsets natively
     let mut parsed = parse_query(query);
     parsed.is_unread = Some(true);
     sql_builder::count_matching(conn, &parsed, scope)
@@ -666,7 +666,7 @@ fn unified_to_db_thread(r: UnifiedSearchResult) -> DbThread {
 }
 ```
 
-**Missing fields:** `is_snoozed`, `is_pinned`, `is_muted` are thread-level flags not carried in `UnifiedSearchResult`. For smart folder display this is acceptable — these flags affect the thread card UI minimally (snooze icon, pin icon). To fix properly, extend `UnifiedSearchResult` with these fields. The SQL paths already have them (they come from `DbThread`); the Tantivy path defaults to `false`. This is a minor enhancement — not blocking.
+**Missing fields:** `is_snoozed`, `is_pinned`, `is_muted` are thread-level flags not carried in `UnifiedSearchResult`. For smart folder display this is acceptable - these flags affect the thread card UI minimally (snooze icon, pin icon). To fix properly, extend `UnifiedSearchResult` with these fields. The SQL paths already have them (they come from `DbThread`); the Tantivy path defaults to `false`. This is a minor enhancement - not blocking.
 
 ### 2.3 Token Migration
 
@@ -750,12 +750,12 @@ SidebarEvent::SmartFolderSelected { id, query } => {
 
 When the search bar shows a smart folder's query and the user modifies it:
 - Results update live (via the normal debounce -> search -> generational tracking flow).
-- The modified query is ephemeral — not auto-saved.
+- The modified query is ephemeral - not auto-saved.
 - `active_smart_folder_id` remains set, so "Update Smart Folder" is available in the command palette.
 
 ### 2.5 Smart Folder CRUD via Command Palette
 
-Smart folder management moves from the settings UI to the command palette. The settings-based smart folder editor is removed. These commands use the real `CommandId` / `CommandDescriptor` / `CommandArgs` system from the command palette spec — not a separate command model.
+Smart folder management moves from the settings UI to the command palette. The settings-based smart folder editor is removed. These commands use the real `CommandId` / `CommandDescriptor` / `CommandArgs` system from the command palette spec - not a separate command model.
 
 #### New CommandId variants
 
@@ -773,17 +773,17 @@ CommandId::SmartFolderRename,   // "Rename Smart Folder"
 ```rust
 // In register_app() in crates/cmdk/src/registry.rs:
 
-// SmartFolderSave — parameterized (Text input for name)
+// SmartFolderSave - parameterized (Text input for name)
 // Available when search_query is non-empty.
 // InputSchema::Single(ParamDef::Text { label: "Name", placeholder: "Smart folder name..." })
 
-// SmartFolderUpdate — direct (no parameters)
+// SmartFolderUpdate - direct (no parameters)
 // Available when active_smart_folder_id is Some.
 
-// SmartFolderDelete — direct (no parameters)
+// SmartFolderDelete - direct (no parameters)
 // Available when active_smart_folder_id is Some.
 
-// SmartFolderRename — parameterized (Text input for new name)
+// SmartFolderRename - parameterized (Text input for new name)
 // Available when active_smart_folder_id is Some.
 // InputSchema::Single(ParamDef::Text { label: "New name", placeholder: "Folder name..." })
 ```
@@ -812,7 +812,7 @@ pub enum CommandArgs {
 }
 ```
 
-`SmartFolderUpdate` and `SmartFolderDelete` are direct commands — they use `active_smart_folder_id` from context, not from args.
+`SmartFolderUpdate` and `SmartFolderDelete` are direct commands - they use `active_smart_folder_id` from context, not from args.
 
 #### App dispatch
 
@@ -861,10 +861,10 @@ for folder in &mut nav_state.smart_folders {
 
 When the cursor is inside an operator value (e.g., `from:ali|`), a popup appears below the search bar showing matches from the relevant data source. This requires:
 
-1. **Cursor-local token detection** — identifying which operator the cursor is positioned inside.
-2. **Per-operator data source routing** — querying the appropriate DB table.
-3. **Popup rendering** — an overlay anchored below the search bar.
-4. **Selection interaction** — arrow keys to navigate, Enter to select, Escape to dismiss.
+1. **Cursor-local token detection** - identifying which operator the cursor is positioned inside.
+2. **Per-operator data source routing** - querying the appropriate DB table.
+3. **Popup rendering** - an overlay anchored below the search bar.
+4. **Selection interaction** - arrow keys to navigate, Enter to select, Escape to dismiss.
 
 ### 3.2 Cursor Token Detection
 
@@ -1133,10 +1133,10 @@ SidebarEvent::SearchHere { query_prefix } => {
         self.pre_search_threads = Some(self.thread_list.threads.clone());
     }
 
-    // Focus the search bar — cursor at end, ready for typing
+    // Focus the search bar - cursor at end, ready for typing
     iced::widget::operation::focus("search-bar".to_string())
 
-    // Do NOT execute search yet — the prefix alone may return
+    // Do NOT execute search yet - the prefix alone may return
     // too many results. Wait for the user to type something.
     // However, if the prefix forms a valid query (e.g., "in:inbox"),
     // it could be executed immediately. Decision: execute immediately
@@ -1159,7 +1159,7 @@ The interaction model when a smart folder is selected:
 
 ### 4.3 Pinned Search Integration Point
 
-Phase 4 establishes the integration point for pinned searches (`docs/search/pinned-searches.md`). Every search execution that produces results creates or updates a pinned search entry. This spec does not implement pinned searches — it defines the hook:
+Phase 4 establishes the integration point for pinned searches (`docs/search/pinned-searches.md`). Every search execution that produces results creates or updates a pinned search entry. This spec does not implement pinned searches - it defines the hook:
 
 ```rust
 Message::SearchResultsLoaded(_, Ok(threads)) if !threads.is_empty() => {
@@ -1195,7 +1195,7 @@ fn staleness_label<'a>(updated_at: Option<i64>) -> Element<'a, ThreadListMessage
 
 The `format_relative_time` function uses `chrono-humanize` or a simple custom implementation.
 
-This label is only visible when `active_pinned_search_id` is `Some` — a field added by the pinned searches spec, not this one.
+This label is only visible when `active_pinned_search_id` is `Some` - a field added by the pinned searches spec, not this one.
 
 ---
 
@@ -1203,7 +1203,7 @@ This label is only visible when `active_pinned_search_id` is `Some` — a field 
 
 ### Error Handling
 
-All search errors (`String` from the unified pipeline) are displayed in `self.status` and do not crash the app. The thread list remains in its current state on error — it does not clear.
+All search errors (`String` from the unified pipeline) are displayed in `self.status` and do not crash the app. The thread list remains in its current state on error - it does not clear.
 
 ### Thread Selection After Search
 
@@ -1228,7 +1228,7 @@ The product spec mandates that search must feel instant. The local search pipeli
 - No "Searching..." placeholder text.
 - The thread list updates in place when results arrive.
 
-If search ever takes long enough to be perceptible (which would indicate a bug or an unusually large mailbox), the generational tracking ensures correctness — the user sees the results of whatever they last typed, not an intermediate state.
+If search ever takes long enough to be perceptible (which would indicate a bug or an unusually large mailbox), the generational tracking ensures correctness - the user sees the results of whatever they last typed, not an intermediate state.
 
 ### Accessibility
 
@@ -1247,22 +1247,22 @@ If search ever takes long enough to be perceptible (which would indicate a bug o
 ### Modified files (by phase)
 
 **Phase 1:**
-- `crates/app/src/main.rs` — `App` struct (new fields: `search_generation`, `search_query`, `search_state`, `active_smart_folder_id`, `search_debounce_deadline`, `pre_search_threads`), `Message` enum (new variants), `update()` handlers, `subscription()` keyboard listener, `execute_search()` async fn
-- `crates/app/src/ui/thread_list.rs` — `ThreadListMode` enum, `ThreadList` struct (new fields: `mode`, `search_query`), `ThreadListMessage` (new variants), `ThreadListEvent` (new variants), `thread_list_header()` rewrite with real text_input
-- `crates/app/src/ui/layout.rs` — No changes needed (existing `PAD_INPUT`, `TEXT_MD` etc. are sufficient)
-- `crates/core/src/search_pipeline.rs` — Add `has_attachments` to `UnifiedSearchResult`
+- `crates/app/src/main.rs` - `App` struct (new fields: `search_generation`, `search_query`, `search_state`, `active_smart_folder_id`, `search_debounce_deadline`, `pre_search_threads`), `Message` enum (new variants), `update()` handlers, `subscription()` keyboard listener, `execute_search()` async fn
+- `crates/app/src/ui/thread_list.rs` - `ThreadListMode` enum, `ThreadList` struct (new fields: `mode`, `search_query`), `ThreadListMessage` (new variants), `ThreadListEvent` (new variants), `thread_list_header()` rewrite with real text_input
+- `crates/app/src/ui/layout.rs` - No changes needed (existing `PAD_INPUT`, `TEXT_MD` etc. are sufficient)
+- `crates/core/src/search_pipeline.rs` - Add `has_attachments` to `UnifiedSearchResult`
 
 **Phase 2:**
-- `crates/smart-folder/src/lib.rs` — `execute_smart_folder_query()` signature change (add `&SearchState`), internals changed to call unified pipeline
-- `crates/smart-folder/src/tokens.rs` — Retained for one release cycle, then removed
-- `crates/db/src/db/migrations.rs` — Token migration SQL
-- `crates/app/src/ui/sidebar.rs` — `SidebarEvent::SmartFolderSelected` variant
-- `crates/app/src/main.rs` — Smart folder selection handler
+- `crates/smart-folder/src/lib.rs` - `execute_smart_folder_query()` signature change (add `&SearchState`), internals changed to call unified pipeline
+- `crates/smart-folder/src/tokens.rs` - Retained for one release cycle, then removed
+- `crates/db/src/db/migrations.rs` - Token migration SQL
+- `crates/app/src/ui/sidebar.rs` - `SidebarEvent::SmartFolderSelected` variant
+- `crates/app/src/main.rs` - Smart folder selection handler
 
 **Phase 3:**
-- `crates/smart-folder/src/parser.rs` — `analyze_cursor_context()` function
-- `crates/app/src/ui/thread_list.rs` — `TypeaheadState`, typeahead message variants, popup rendering, selection logic
+- `crates/smart-folder/src/parser.rs` - `analyze_cursor_context()` function
+- `crates/app/src/ui/thread_list.rs` - `TypeaheadState`, typeahead message variants, popup rendering, selection logic
 
 **Phase 4:**
-- `crates/app/src/ui/sidebar.rs` — `SidebarEvent::SearchHere`, right-click handling, `build_search_here_prefix()`
-- `crates/app/src/main.rs` — `SearchHere` event handler
+- `crates/app/src/ui/sidebar.rs` - `SidebarEvent::SearchHere`, right-click handling, `build_search_here_prefix()`
+- `crates/app/src/main.rs` - `SearchHere` event handler

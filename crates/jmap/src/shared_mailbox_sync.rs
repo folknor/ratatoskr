@@ -1,4 +1,4 @@
-//! Orchestration layer for per-shared-account sync (JMAP Sharing — Phase 2).
+//! Orchestration layer for per-shared-account sync (JMAP Sharing - Phase 2).
 //!
 //! Each shared JMAP account syncs independently with its own Mailbox/Email
 //! state tokens, following the same pattern as `graph/src/shared_mailbox_sync.rs`.
@@ -59,7 +59,7 @@ pub async fn sync_shared_account(
 
     let now = chrono::Utc::now().timestamp();
 
-    // Check if we have existing state tokens — if not, run initial sync.
+    // Check if we have existing state tokens - if not, run initial sync.
     let email_state = load_sync_state_ctx(&ctx, "Email").await?;
 
     if email_state.is_none() {
@@ -121,7 +121,7 @@ pub async fn sync_shared_account(
 
 /// Sync all enabled shared JMAP accounts for a Ratatoskr account.
 ///
-/// Each shared account syncs independently — one failure does not block others.
+/// Each shared account syncs independently - one failure does not block others.
 #[allow(clippy::too_many_arguments)]
 pub async fn sync_all_shared_accounts(
     client: &JmapClient,

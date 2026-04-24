@@ -62,7 +62,7 @@ pub fn search_contacts_unified(
     let mut results = Vec::new();
     let mut seen_emails: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    // 1. Search contacts table (highest priority) — FTS5 with LIKE fallback.
+    // 1. Search contacts table (highest priority) - FTS5 with LIKE fallback.
     search_contacts_fts_or_like(
         conn,
         trimmed,
@@ -78,7 +78,7 @@ pub fn search_contacts_unified(
         search_gal_cache(conn, &like_pattern, gal_remaining, &mut seen_emails, &mut results)?;
     }
 
-    // 3. Search seen_addresses table (lower priority, fills remaining) — FTS5 with LIKE fallback.
+    // 3. Search seen_addresses table (lower priority, fills remaining) - FTS5 with LIKE fallback.
     let remaining = limit - i64::try_from(results.len()).unwrap_or(i64::MAX);
     if remaining > 0 {
         search_seen_addresses_fts_or_like(
@@ -140,7 +140,7 @@ fn search_contacts_fts_or_like(
                 }
                 return Ok(());
             }
-            Err(_) => { /* FTS5 table missing — fall through to LIKE */ }
+            Err(_) => { /* FTS5 table missing - fall through to LIKE */ }
         }
     }
 
@@ -255,7 +255,7 @@ fn search_seen_addresses_fts_or_like(
                 }
                 return Ok(());
             }
-            Err(_) => { /* FTS5 table missing — fall through to LIKE */ }
+            Err(_) => { /* FTS5 table missing - fall through to LIKE */ }
         }
     }
 

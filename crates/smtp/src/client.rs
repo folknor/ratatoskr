@@ -69,7 +69,7 @@ fn build_transport(config: &SmtpConfig) -> Result<AsyncSmtpTransport<Tokio1Execu
             builder.build()
         }
         _ => {
-            // Plain / no encryption (typically port 25) — not recommended
+            // Plain / no encryption (typically port 25) - not recommended
             AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&config.host)
                 .port(config.port)
                 .credentials(credentials)
