@@ -156,9 +156,8 @@ impl Db {
     }
 
     pub async fn any_auto_response_active(&self) -> Result<bool, String> {
-        let db = self.read_db_state();
-        tokio::runtime::Handle::current().block_on(async move {
-            db.with_conn(rtsk::auto_responses::any_auto_response_active).await
-        })
+        self.read_db_state()
+            .with_conn(rtsk::auto_responses::any_auto_response_active)
+            .await
     }
 }

@@ -34,7 +34,7 @@ image = { version = "0.25", default-features = false, features = [
     "jpeg", "png", "webp", "bmp", "tiff", "gif", "rayon",
 ] }
 mozjpeg-rs = "0.9.2"
-oxipng = { version = "10", default-features = false, features = ["parallel"] }
+oxipng = { version = "10.1.1", default-features = false, features = ["parallel"] }
 lopdf = "0.40"
 zip = { version = "8.5.1", default-features = false, features = ["deflate"] }
 thiserror = "2"
