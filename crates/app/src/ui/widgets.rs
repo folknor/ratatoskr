@@ -1313,15 +1313,20 @@ pub fn collapsed_message_row<'a, M: Clone + 'a>(
 
 // ── Attachment card ─────────────────────────────────────
 
-pub fn attachment_card<'a, M: 'a>(
-    att: &'a ThreadAttachment,
-    version_count: usize,
+pub fn attachment_card<'a, M: 'a + Clone>(
+    primary: &'a ThreadAttachment,
+    versions: &[&'a ThreadAttachment],
+    expanded: bool,
+    on_toggle: Option<M>,
 ) -> Element<'a, M> {
-    let filename = att.filename.as_deref().unwrap_or("(unnamed)");
-    let file_icon = file_type_icon(att.mime_type.as_deref());
-    let meta = format_attachment_meta(att);
+    let filename = primary.filename.as_deref().unwrap_or("(unnamed)");
+    let file_icon = file_type_icon(primary.mime_type.as_deref());
+    // The primary card line shows the LATEST version's metadata. Versions
+    // are pre-sorted latest-first, so versions[0] is the latest.
+    let latest = versions.first().copied().unwrap_or(primary);
+    let meta = format_attachment_meta(latest);
 
-    let mut line1 = row![
+    let title_row = row![
         container(file_icon.size(ICON_MD).style(text::secondary)).align_y(Alignment::Center),
         container(
             text(filename)
@@ -1334,24 +1339,64 @@ pub fn attachment_card<'a, M: 'a>(
     .spacing(SPACE_XS)
     .align_y(Alignment::Center);
 
-    // Show version count badge for deduplicated attachments
-    if version_count > 1 {
-        line1 = line1.push(Space::new().width(SPACE_XS));
-        line1 = line1.push(
-            container(
-                text(format!("{version_count} versions"))
+    let line1: Element<'a, M> = if let Some(toggle_msg) = on_toggle {
+        let chevron = if expanded {
+            icon::chevron_down()
+        } else {
+            icon::chevron_right()
+        };
+        let versions_btn = button(
+            row![
+                chevron
+                    .size(ICON_XS)
+                    .style(theme::TextClass::Tertiary.style()),
+                text(format!("{} versions", versions.len()))
                     .size(TEXT_XS)
                     .style(theme::TextClass::Tertiary.style()),
-            )
+            ]
+            .spacing(SPACE_XXS)
             .align_y(Alignment::Center),
-        );
-    }
+        )
+        .on_press(toggle_msg)
+        .style(theme::ButtonClass::Ghost.style())
+        .padding(PAD_ICON_BTN);
+
+        row![
+            title_row,
+            Space::new().width(Length::Fill),
+            versions_btn,
+        ]
+        .align_y(Alignment::Center)
+        .into()
+    } else {
+        title_row.into()
+    };
 
     let line2 = text(meta)
         .size(TEXT_SM)
         .style(theme::TextClass::Tertiary.style());
 
-    container(column![line1, line2].spacing(SPACE_XXXS))
+    let mut card_col = column![line1, line2].spacing(SPACE_XXXS);
+
+    if expanded && versions.len() > 1 {
+        card_col = card_col.push(Space::new().height(SPACE_XS));
+        card_col = card_col.push(divider());
+        card_col = card_col.push(Space::new().height(SPACE_XXS));
+        for (i, ver) in versions.iter().enumerate() {
+            let label = format_attachment_version_line(ver, i == 0);
+            card_col = card_col.push(
+                row![
+                    Space::new().width(SPACE_MD),
+                    text(label)
+                        .size(TEXT_SM)
+                        .style(theme::TextClass::Tertiary.style()),
+                ]
+                .align_y(Alignment::Center),
+            );
+        }
+    }
+
+    container(card_col)
         .padding(PAD_NAV_ITEM)
         .style(theme::ContainerClass::Elevated.style())
         .width(Length::Fill)
@@ -1423,6 +1468,23 @@ fn format_attachment_meta(att: &ThreadAttachment) -> String {
         .unwrap_or_default();
     let sender = att.from_name.as_deref().unwrap_or("unknown");
     format!("{type_label} \u{00B7} {size} \u{00B7} {date} from {sender}")
+}
+
+/// Per-version line shown under an expanded attachment card. Drops the type
+/// label (already implied by the parent filename + icon) and tags the latest.
+fn format_attachment_version_line(att: &ThreadAttachment, is_latest: bool) -> String {
+    let size = format_file_size(att.size);
+    let date = att
+        .date
+        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+        .map(|dt| dt.format("%b %d").to_string())
+        .unwrap_or_default();
+    let sender = att.from_name.as_deref().unwrap_or("unknown");
+    if is_latest {
+        format!("{size} \u{00B7} {date} from {sender} (latest)")
+    } else {
+        format!("{size} \u{00B7} {date} from {sender}")
+    }
 }
 
 fn mime_to_type_label(mime: Option<&str>) -> &'static str {

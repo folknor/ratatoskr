@@ -206,6 +206,36 @@ pub fn generate_threads(
             .map(|&i| &thread_people[i])
             .collect();
 
+        // Versioning: ~30% of multi-message Work/Personal/Commerce threads
+        // carry a "shared filename" attached to 2-3 messages with varied
+        // sizes per occurrence, so the dedup / "N versions" UI path is
+        // exercised in dev-seed. Without this, identical filenames across
+        // messages in the same thread are vanishingly rare given the random
+        // 14-entry pool.
+        let version_attachment: Option<&AttachmentInfo> = if num_msgs >= 2
+            && matches!(
+                cat,
+                Category::Work | Category::Personal | Category::Commerce
+            )
+            && rng.random::<f64>() < 0.30
+        {
+            Some(&ATTACHMENT_POOL[rng.random_range(0..ATTACHMENT_POOL.len())])
+        } else {
+            None
+        };
+        let version_message_indices: Vec<u32> = if version_attachment.is_some() {
+            let want: u32 = if num_msgs >= 3 { 3 } else { 2 };
+            let count = want.min(num_msgs) as usize;
+            let mut picks: Vec<u32> = (0..num_msgs).collect();
+            for i in 0..count {
+                let j = rng.random_range(i..picks.len());
+                picks.swap(i, j);
+            }
+            picks.into_iter().take(count).collect()
+        } else {
+            Vec::new()
+        };
+
         let thread_id = crate::next_uuid(rng);
         let is_read = rng.random::<f64>() < 0.7;
         let is_starred = rng.random::<f64>() < 0.08;
@@ -323,6 +353,24 @@ pub fn generate_threads(
 
             // Attachments (~20% of work/personal/commerce)
             let mut msg_attachment_ids: Vec<(String, &'static str, &'static str, i64)> = Vec::new();
+
+            // Version carrier: if this thread has versioning and this message
+            // is one of the chosen carrier indices, attach the shared filename
+            // with a varied size.
+            if let Some(att) = version_attachment
+                && version_message_indices.contains(&mi)
+            {
+                let size_var = att.base_size / 4;
+                let size = att.base_size + rng.random_range(-size_var..size_var);
+                msg_attachment_ids.push((
+                    crate::next_uuid(rng),
+                    att.filename,
+                    att.mime_type,
+                    size,
+                ));
+                has_attachments = true;
+            }
+
             if rng.random::<f64>() < 0.20
                 && matches!(
                     cat,

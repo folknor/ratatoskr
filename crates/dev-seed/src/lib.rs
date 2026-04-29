@@ -47,6 +47,12 @@ pub fn next_message_id(rng: &mut impl RngExt) -> String {
 pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create data dir: {e}"))?;
 
+    // The app refuses to start the action service without a key file.
+    // Dev-seed wipes the data dir on every launch, so generate a fresh
+    // deterministic key here. Dev-seed never writes encrypted data, so
+    // a zero key is sufficient.
+    write_dev_encryption_key(app_data_dir)?;
+
     let start = std::time::Instant::now();
     let mut rng = SmallRng::seed_from_u64(config.seed);
 
@@ -147,6 +153,26 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
         pending_bodies.len(),
         elapsed.as_secs_f64()
     );
+
+    Ok(())
+}
+
+/// Write a deterministic 32-byte zero encryption key to `ratatoskr.key`.
+///
+/// `load_encryption_key` expects base64-encoded 32 bytes; 32 zero bytes
+/// encode to a known fixed string, so no base64 dependency is needed.
+fn write_dev_encryption_key(app_data_dir: &Path) -> Result<(), String> {
+    let key_path = app_data_dir.join("ratatoskr.key");
+    // base64(b'\x00' * 32) = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    const ZERO_KEY_B64: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    std::fs::write(&key_path, ZERO_KEY_B64).map_err(|e| format!("write key file: {e}"))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("set key permissions: {e}"))?;
+    }
 
     Ok(())
 }

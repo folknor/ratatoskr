@@ -1442,18 +1442,21 @@ impl AddAccountWizard {
             .align_x(Alignment::Center)
             .width(Length::Fill);
 
+        let logo_handle =
+            svg::Handle::from_memory(include_bytes!("../../../../assets/icon.svg"));
+        col = col.push(
+            container(
+                svg(logo_handle)
+                    .width(Length::Fixed(WELCOME_ICON_SIZE))
+                    .height(Length::Fixed(WELCOME_ICON_SIZE))
+                    .content_fit(iced::ContentFit::Contain),
+            )
+            .width(Length::Fixed(WELCOME_ICON_SIZE))
+            .height(Length::Fixed(WELCOME_ICON_SIZE)),
+        );
+        col = col.push(Space::new().height(SPACE_SM));
+
         if self.is_first_launch {
-            let logo_handle =
-                svg::Handle::from_memory(include_bytes!("../../../../assets/icon.svg"));
-            col = col.push(
-                container(
-                    svg(logo_handle)
-                        .width(WELCOME_ICON_SIZE)
-                        .height(WELCOME_ICON_SIZE),
-                )
-                .align_x(Alignment::Center),
-            );
-            col = col.push(Space::new().height(SPACE_SM));
             col = col.push(
                 text("Welcome to Ratatoskr")
                     .size(TEXT_HEADING)

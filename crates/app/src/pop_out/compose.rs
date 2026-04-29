@@ -1699,11 +1699,21 @@ fn compose_body<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Ele
         .height(Length::Fill)
         .font(font::text());
 
-    container(editor)
+    let body_card = container(editor)
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(PAD_CONTENT)
-        .style(theme::ContainerClass::EmailBody.style())
+        .style(theme::ContainerClass::EmailBody.style());
+
+    container(body_card)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(iced::Padding {
+            top: 0.0,
+            right: SPACE_SM,
+            bottom: 0.0,
+            left: SPACE_SM,
+        })
         .into()
 }
 

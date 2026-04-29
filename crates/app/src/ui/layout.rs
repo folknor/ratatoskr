@@ -359,7 +359,7 @@ pub const COLOR_PALETTE_COLUMNS: usize = 5;
 /// Protocol selection card height
 pub const PROTOCOL_CARD_HEIGHT: f32 = 64.0;
 /// Welcome icon size on the first-launch email input screen.
-pub const WELCOME_ICON_SIZE: f32 = 48.0;
+pub const WELCOME_ICON_SIZE: f32 = 96.0;
 /// Color swatch button padding (around the canvas).
 pub const PAD_COLOR_SWATCH: f32 = 2.0;
 /// Alpha for dimmed (already-used) color swatches.

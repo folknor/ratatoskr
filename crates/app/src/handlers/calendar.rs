@@ -299,12 +299,21 @@ impl App {
                 };
                 let event_id = event_id.clone();
                 let account_id = account_id.clone();
+
+                // Always close the confirmation modal first - the Delete click
+                // must produce immediate visual feedback regardless of whether
+                // the async dispatch can run.
+                self.calendar.workflow = CalendarWorkflow::Idle;
+                self.calendar.sync_surfaces();
+
                 let Some(ctx) = self.action_ctx() else {
+                    log::error!("DeleteEvent: action service unavailable");
+                    self.status_bar.show_confirmation(
+                        "Cannot delete: action service unavailable".to_string(),
+                    );
                     return Task::none();
                 };
 
-                self.calendar.workflow = CalendarWorkflow::Idle;
-                self.calendar.sync_surfaces();
                 Task::perform(
                     async move {
                         let outcome =
@@ -324,11 +333,14 @@ impl App {
                 match result {
                     Ok(()) => {
                         log::info!("Calendar event deleted");
+                        self.status_bar
+                            .show_confirmation("Event deleted".to_string());
                         return self.reload_calendar_events();
                     }
                     Err(e) => {
                         log::error!("Failed to delete calendar event: {e}");
-                        self.status = format!("Delete failed: {e}");
+                        self.status_bar
+                            .show_confirmation(format!("Delete failed: {e}"));
                     }
                 }
                 Task::none()

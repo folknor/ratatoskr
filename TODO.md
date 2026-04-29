@@ -20,11 +20,13 @@
 
 - [ ] **Settings/Accounts: Edit Account** - This section needs rework.
 
-- [ ] **Compose window input fields** - The to/cc/bcc and the Subject fields have different styling.
+- [x] **Compose window input fields** - The to/cc/bcc and the Subject fields have different styling.
 
-- [ ] **Compose window account dropdown + cc/bcc buttons** - These need similar styling to other such controls with proper hover effects. The chevron icon in the dropdown should also be unified across the codebase, we use different chevron icons all over the place. Bottom buttons (Discard/Attach/Send) partially addressed: Send now uses `ICON_LG`/`TEXT_LG`/`theme::ON_AVATAR` to mirror the main sidebar Compose button, and Discard/Attach were bumped to `ICON_LG`/`TEXT_LG` to size-match. Remaining: account dropdown + Cc/Bcc toggle button hover styling, and codebase-wide chevron unification.
+- [ ] **Codebase-wide chevron unification** - The chevron icon should be unified across the codebase; we use different chevron icons in different places (dropdowns, accordions, popovers, etc.). Audit all chevron uses and standardize on one icon set + sizing scale.
 
-- [ ] **Compose window "pop ups"** - There's a popup when you Discard, and to Insert Link. These are not actually modals at the moment; they render at the bottom of the compose window.
+- [x] **Compose window account dropdown + cc/bcc buttons** - These need similar styling to other such controls with proper hover effects. The chevron icon in the dropdown should also be unified across the codebase, we use different chevron icons all over the place. Bottom buttons (Discard/Attach/Send) partially addressed: Send now uses `ICON_LG`/`TEXT_LG`/`theme::ON_AVATAR` to mirror the main sidebar Compose button, and Discard/Attach were bumped to `ICON_LG`/`TEXT_LG` to size-match. Remaining: account dropdown + Cc/Bcc toggle button hover styling, and codebase-wide chevron unification.
+
+- [x] **Compose window "pop ups"** - There's a popup when you Discard, and to Insert Link. These are not actually modals at the moment; they render at the bottom of the compose window.
 
 - [x] **Compose window labels** - The From/To/CC/Bcc/Subject labels should be right-aligned, so that they float near their relative inputs.
 
@@ -56,11 +58,9 @@
 
 - [ ] **Settings/Composing: Signatures** - This section needs work.
 
-- [ ] **App logo in first-launch modal** - SVG rendered via iced svg feature, embedded with include_bytes, but it's not showing.
+- [x] **App logo in first-launch modal** - SVG rendered via iced svg feature, embedded with include_bytes, but it's not showing. Now also shows in the non-first-launch Add Account dialog.
 
 - [ ] **Standardized popup/dropdown/modal** - Currently setting dropdowns, various modal dialogs (the Settings slide-in, Add Account modal, etc) use various methods to dim/control/disable/dismiss. We need standardized controls for all this. For example the Add Account modal currently dims the background (rest of the window), but it doesn't prevent interaction with any controls - even controls that are actually directly below it can still be interacted with. We need the same treatment as the Settings slide-in that does in fact disable things behind it. See `docs/ui/overlay-standardization-plan.md` for the implementation plan.
-
-- [x] **Compose window close should prompt for unsaved changes** - Clicking the window X on a compose pop-out silently saves the draft and closes. It should show the discard confirmation modal if the message has been edited, giving the user the choice to discard or keep editing. Currently `handle_window_close()` in `main.rs` skips the prompt entirely.
 
 - [ ] **Cursor bleed-through on blocking overlays** - When a Sheet or Modal is active, hovering over the blocker area may still show pointer/hand cursors from widgets in the base layer underneath. The `mouse_area` blocker sets `.interaction(mouse::Interaction::default())` but iced's `stack!` may composite `mouse_interaction` from all layers. May be pre-existing. Investigate whether iced's stack respects the topmost layer's cursor or falls through.
 
@@ -78,10 +78,6 @@
 
 - [x] **`create_event_from_email` account derivation** - Currently uses `sidebar.accounts.first()` for account prefill (`main.rs`). This is the last surviving sidebar-accounts reference in the calendar flow. Should derive account from the email message's actual account rather than assuming the first sidebar account is correct.
 
-- [x] **Label pills in reading pane** - Pills should not show on each message, only at the top. Labels are per-thread, not per-message, at least in the UI.
-
-- [x] **Link click handling (email content)** - Should open in system browser. Nothing happens.
-
 - [ ] **Link hover URL disclosure (email content)** - Links in email bodies need either a tooltip that shows the destination URL or status-bar disclosure. Decision still pending.
 
 - [ ] **Link context menu (email content)** - Right-clicking a link in an email body should offer actions like Copy Link and related link operations.
@@ -89,10 +85,6 @@
 - [ ] **Pop out message viewer body rendering** - The current pills for selecting Plain/Simple/Original/Source need to move. The spec currently doesn't say clearly where they should go. This needs to be resolved first.
 
 - [ ] **Pop out message viewer body rendering toggle buttons** - The current pills for selecting Plain/Simple/Original/Source have zero effect, and the "Source" button just shows a generic "error" about message bodies being in a separate database. Even with dev-seed.
-
-- [x] **Pop out message viewer dropdown menu** - It seems to be constrained to the width of the window, which doesn't work because it's all the way on the right side. It needs room to show its contents. Either it needs to be able to render outside the window, or it needs to grow left.
-
-- [x] **Pop out message viewer paddings/margin** - This needs to be unified. Currently for example the date/time stamp on the right side of the subject hugs the right window edge much closer than the dropdown action button above it. And also I'm not sure the subject and datetime are baseline aligned - it seems the subject floats a bit higher up. Could be wrong about that, haven't measured pixels.
 
 - [ ] **Message box / toast notification system** - Generic modal message box and/or toast notification infrastructure for the app. Needed for: compose draft save failure on close (currently silently aborts the close with no user feedback), action service retry exhaustion warnings, and any future error/confirmation flows. Should support at least: transient toasts (auto-dismiss), persistent error banners, and modal confirmation dialogs.
 
@@ -103,13 +95,9 @@
 - [ ] **Token input: cursor x-position drift** - The text caret in To/Cc/Bcc fields drifts further from the last typed glyph the longer the typed string gets. Cause: `draw_text_area` (`crates/app/src/ui/token_input.rs`) computes the cursor x from a per-character estimate (`text.chars().count() * TEXT_LG * TOKEN_AVG_CHAR_WIDTH_FACTOR`, factor `0.54`) - fine for monospace, wrong for Inter where `m`/`w` are wider than `i`/`l`. Proper fix: store a `<iced::Renderer as iced::advanced::text::Renderer>::Paragraph` in `TokenInputState`, update it on text changes (`Text { content: widget.text, .. }` then read `min_bounds().width`), and use that measured width for the cursor x. Same pattern iced's own `text_input` uses (see `min_bounds()` calls in iced `widget/src/text_input.rs`). Will also unblock accurate click-to-position-caret if that's wired later.
 
 - [ ] **Autocomplete: cross-field drag-and-drop** - Drag detection works but drop cancels. Context menu "Move to" is the workaround. Needs ghost token rendering and target field hit-testing.
-- [x] **Autocomplete: email validation before tokenization** - Enter/Tab/comma/semicolon tokenize any non-empty text. Should validate plausible email format before creating a token.
 - [ ] **Autocomplete: context menu Cut/Copy/Paste** - Token context menu has Delete, Expand group, Move-to-field only. Missing clipboard operations.
 - [ ] **Autocomplete: bulk-paste "Save as group"** - Banner renders but save action is not wired.
-- [x] **Autocomplete: richer dropdown rendering** - Currently plain text "Name <email>". Spec calls for two-column layout (name + email), group icon, member count display.
-- [x] **Autocomplete: group token "(N)" suffix** - `member_count` stored on Token but chip label is just the group name.
 - [ ] **Autocomplete: search debounce** - Search dispatches immediately on every keystroke. Spec calls for 10-20ms debounce to coalesce rapid typing.
-- [x] **Autocomplete: paste dedup** - `dedup_parsed()` exists but is never called. Also no dedup against existing tokens in the field.
 - [ ] **Autocomplete: reuse beyond compose** - Widget only used in compose. Calendar attendee picker and group editor could reuse it.
 - [ ] **Contact pills on recipients** - Per `docs/pop-out-windows/problem-statement.md`: recipients in To/Cc fields should appear as plain text but become contact pills on hover, revealing an inline edit button for quick contact editing. Applies to: reading pane message headers, pop-out message view, compose window recipient display. Currently recipients are plain text everywhere with no hover interaction. Needs: (1) a contact pill widget that blends with background at rest and reveals pill styling + edit button on hover, (2) display name resolution from the contact system (name → email fallback chain), (3) wiring to the existing `EditContact` flow that opens the settings contact editor.
 
@@ -120,7 +108,7 @@
 - [x] **First-launch modal not dismissible** - In zero-accounts state, cancel doesn't close the wizard. Spec says it should dismiss over an unusable empty app. Intentional safety measure or bug - decide and document.
 
 - [x] **App-specific-password help not clickable** - Discovery types carry `help_url` but UI shows plain text "Check {domain} for setup instructions" - no clickable link to provider app-password pages.
-- [x] **Deleted-account compose/pop-out cleanup** - Account deletion doesn't close compose windows or message-view pop-outs for the deleted account, and doesn't block sending from a deleted identity.
+
 - [ ] **Sync-task cancellation on account deletion** - Delete flow removes DB data but doesn't cancel in-flight sync tasks. Stale sync completions could write to deleted account state.
 
 - [ ] **Scroll virtualization** - Thread list renders all cards in `column![]` inside `scrollable`. Needs iced-level virtual scrolling for large mailboxes.
@@ -163,12 +151,10 @@ Views, editor, pop-out, sidebar all partially implemented. **39 discrepancies re
 Event popover (quick-glance card):
 - [ ] Position is wrong - currently right-aligned in the calendar view, should anchor near the clicked event pill
 - [ ] Styling needs work (visual polish pass)
-- [x] Escape doesn't close it
 - [ ] Clicking a different event pill while the popover is open just closes the popover instead of closing and immediately opening the new event's popover. Root cause: `popover_stack` (`crates/app/src/ui/calendar.rs`) renders a full-viewport `mouse_area` backdrop with `on_press(ClosePopover)` on top of the calendar base, which swallows the click before it reaches the underlying event pill. Will be resolved by the deferred AnchoredOverlay migration (see "Calendar event detail popover -> AnchoredOverlay" above) - anchoring the popover near the pill removes the need for a click-blocking backdrop.
 
 Event detail modal:
 - [ ] Needs significant visual and layout work
-- [x] Escape doesn't close it
 
 Event editor modal:
 - [ ] Does not adhere to the editor spec at all - needs a full implementation pass
@@ -181,11 +167,6 @@ Month view:
 
 Week view:
 - [ ] All-day events are not laid out properly at the top of the day columns
-
-Calendar sidebar:
-- [x] Clicking a calendar name doesn't toggle visibility - have to click the checkbox directly. The entire row should be a click target.
-- [x] Calendar rows need a hover effect
-- [x] Mini month view: the "has event" dot under each day pushes the date number upward instead of being laid out without affecting the date position
 
 ### Generic OAuth - `docs/generic-oauth/problem-statement.md`
 
@@ -248,12 +229,6 @@ Backend complete (server delegation + overdue handling). Missing UI.
 
 Backend complete (Gmail + JMAP sync). Exchange fetch permanently blocked (no public API, Microsoft confirmed no plans).
 
-### BIMI - `docs/roadmap/bimi.md`
-
-Backend complete (DNS + SVG + cache).
-
-- [x] **BIMI cache** - Is this actually working? I dont think we cache for example if we get no response. We should cache that as well, and not re-ping every time. Caches should persist across sessions as well so we dont re-ping BIMI for every email every time we start the app.
-
 ### Auto-Responses - `docs/auto-responses/problem-statement.md`
 
 Read/write API complete on all 3 providers. Remaining:
@@ -281,7 +256,6 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 ## Security / Bug Findings (unfixed)
 
-- [x] **`contact_photo_cache` join duplicates chat sidebar entries** - Keyed by `(email, account_id)`, so contacts with photos from multiple accounts produce duplicate rows.
 - [ ] **Microsoft ID token not signature-verified** - JWT payload is base64-decoded and trusted for email/name claims without verifying the signature. Token comes over TLS from Microsoft, but a MITM or compromised endpoint could inject arbitrary identity claims.
 
 ## Remaining Enhancements (other)

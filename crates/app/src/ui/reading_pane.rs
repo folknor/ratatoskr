@@ -23,6 +23,11 @@ pub enum ReadingPaneMessage {
     ToggleMessageExpanded(usize),
     ToggleAllMessages,
     ToggleAttachmentsCollapsed,
+    /// Save all attachments in the current thread.
+    SaveAllAttachments,
+    /// Toggle expansion of the version list for the attachment with the given
+    /// filename (versions are deduped on filename).
+    ToggleAttachmentVersions(String),
     PopOut(usize),
     /// Reply to the message at the given index.
     Reply(usize),
@@ -95,9 +100,13 @@ pub struct ReadingPane {
     current_thread: Option<ThreadRef>,
     /// Search terms to highlight in message bodies. Empty when not in search mode.
     pub search_highlight_terms: Vec<String>,
-    /// Cached deduplicated attachments: `(index_into_thread_attachments, duplicate_count)`.
-    /// Computed once when thread detail loads, not on every view cycle.
-    deduped_attachments: Vec<(usize, usize)>,
+    /// Cached deduplicated attachments. The first usize is the index of the
+    /// **latest** version (primary card), the Vec contains all indices for
+    /// that filename sorted latest-first.
+    deduped_attachments: Vec<(usize, Vec<usize>)>,
+    /// Set of filenames whose versions list is currently expanded.
+    /// Reset on thread switch.
+    expanded_attachment_versions: std::collections::HashSet<String>,
     /// Pre-parsed HTML bodies, one per message. Avoids re-parsing HTML on every
     /// view cycle - only rebuilt when thread detail loads.
     cached_html: Vec<Option<super::html_render::CachedHtmlBody>>,
@@ -129,6 +138,7 @@ impl ReadingPane {
             current_thread: None,
             search_highlight_terms: Vec::new(),
             deduped_attachments: Vec::new(),
+            expanded_attachment_versions: std::collections::HashSet::new(),
             cached_html: Vec::new(),
             inline_images: HashMap::new(),
         }
@@ -148,6 +158,7 @@ impl ReadingPane {
         self.message_expanded.clear();
         self.focused_message = None;
         self.deduped_attachments.clear();
+        self.expanded_attachment_versions.clear();
         self.cached_html.clear();
         self.inline_images.clear();
         // Restore attachment collapse state from cache
@@ -244,22 +255,34 @@ impl ReadingPane {
 
     /// Recompute the deduplicated attachment list from `thread_attachments`.
     fn recompute_deduped_attachments(&mut self) {
-        let mut seen: HashMap<&str, usize> = HashMap::new();
-        for att in &self.thread_attachments {
-            let name = att.filename.as_deref().unwrap_or("");
-            *seen.entry(name).or_insert(0) += 1;
+        // Group indices by filename, then sort each group latest-first by date.
+        // Output rows are ordered by the position of each group's latest index
+        // in `thread_attachments` so the most recent uploads appear first.
+        let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
+        for (i, att) in self.thread_attachments.iter().enumerate() {
+            let name = att.filename.as_deref().unwrap_or("").to_string();
+            by_name.entry(name).or_default().push(i);
+        }
+        for indices in by_name.values_mut() {
+            indices.sort_by(|&a, &b| {
+                let date_a = self.thread_attachments[a].date.unwrap_or(0);
+                let date_b = self.thread_attachments[b].date.unwrap_or(0);
+                date_b.cmp(&date_a)
+            });
         }
 
-        let mut emitted: HashMap<&str, bool> = HashMap::new();
-        self.deduped_attachments.clear();
-        for (i, att) in self.thread_attachments.iter().enumerate() {
-            let name = att.filename.as_deref().unwrap_or("");
-            if !emitted.contains_key(name) {
-                let count = seen.get(name).copied().unwrap_or(1);
-                self.deduped_attachments.push((i, count));
-                emitted.insert(name, true);
-            }
-        }
+        let mut rows: Vec<(usize, Vec<usize>)> = by_name
+            .into_values()
+            .map(|indices| (indices[0], indices))
+            .collect();
+        // Order rows by the latest version's position in the thread (most
+        // recent first), giving us a stable, date-ordered top-level list.
+        rows.sort_by(|a, b| {
+            let date_a = self.thread_attachments[a.0].date.unwrap_or(0);
+            let date_b = self.thread_attachments[b.0].date.unwrap_or(0);
+            date_b.cmp(&date_a)
+        });
+        self.deduped_attachments = rows;
     }
 
     fn thread_key(&self) -> Option<String> {
@@ -319,6 +342,17 @@ impl Component for ReadingPane {
                     }
                 });
                 (Task::none(), event)
+            }
+            ReadingPaneMessage::SaveAllAttachments => {
+                // Save logic not yet wired - see "Attachment saving" TODO.
+                log::info!("SaveAllAttachments: not yet implemented");
+                (Task::none(), None)
+            }
+            ReadingPaneMessage::ToggleAttachmentVersions(filename) => {
+                if !self.expanded_attachment_versions.remove(&filename) {
+                    self.expanded_attachment_versions.insert(filename);
+                }
+                (Task::none(), None)
             }
             ReadingPaneMessage::PopOut(index) => {
                 let event = ReadingPaneEvent::OpenMessagePopOut {
@@ -459,6 +493,7 @@ fn thread_view_with_commands<'a>(
                 &pane.thread_attachments,
                 &pane.deduped_attachments,
                 pane.attachments_collapsed,
+                &pane.expanded_attachment_versions,
             )
             .map(Message::ReadingPane),
         );
@@ -561,6 +596,7 @@ fn thread_view<'a>(
             &pane.thread_attachments,
             &pane.deduped_attachments,
             pane.attachments_collapsed,
+            &pane.expanded_attachment_versions,
         ));
     }
 
@@ -727,8 +763,9 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
 
 fn attachment_group<'a>(
     attachments: &'a [ThreadAttachment],
-    deduped_indices: &'a [(usize, usize)],
+    deduped_indices: &'a [(usize, Vec<usize>)],
     collapsed: bool,
+    expanded_versions: &'a std::collections::HashSet<String>,
 ) -> Element<'a, ReadingPaneMessage> {
     let chevron = if collapsed {
         icon::chevron_right()
@@ -736,7 +773,8 @@ fn attachment_group<'a>(
         icon::chevron_down()
     };
 
-    let header = button(
+    // Header: chevron + title is one button (collapse/expand).
+    let title_btn = button(
         row![
             container(
                 chevron
@@ -752,36 +790,69 @@ fn attachment_group<'a>(
                     .style(text::base),
             )
             .align_y(Alignment::Center),
-            Space::new().width(Length::Fill),
-            container(
-                text("Save All")
-                    .size(TEXT_SM)
-                    .style(theme::TextClass::Accent.style()),
-            )
-            .align_y(Alignment::Center),
         ]
         .align_y(Alignment::Center),
     )
     .on_press(ReadingPaneMessage::ToggleAttachmentsCollapsed)
     .style(theme::ButtonClass::Ghost.style())
+    .padding(PAD_ICON_BTN)
     .width(Length::Fill);
+
+    // Save All: separate button styled like Reply/Forward in-section actions.
+    let save_all_btn = button(
+        row![
+            icon::download().size(ICON_SM).style(text::secondary),
+            text("Save All").size(TEXT_SM).style(text::secondary),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
+    )
+    .on_press(ReadingPaneMessage::SaveAllAttachments)
+    .style(theme::ButtonClass::Ghost.style())
+    .padding(PAD_ICON_BTN);
+
+    let header = row![title_btn, save_all_btn]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center);
 
     let mut content_col = column![header].spacing(SPACE_XS);
 
     if !collapsed {
-        for &(att_idx, version_count) in deduped_indices {
-            if let Some(att) = attachments.get(att_idx) {
-                content_col = content_col.push(widgets::attachment_card(att, version_count));
-            }
+        for (att_idx, version_indices) in deduped_indices {
+            let Some(primary) = attachments.get(*att_idx) else {
+                continue;
+            };
+            let versions: Vec<&ThreadAttachment> = version_indices
+                .iter()
+                .filter_map(|i| attachments.get(*i))
+                .collect();
+            let filename_key = primary.filename.clone().unwrap_or_default();
+            let expanded = expanded_versions.contains(&filename_key);
+            let on_toggle = if versions.len() > 1 {
+                Some(ReadingPaneMessage::ToggleAttachmentVersions(
+                    filename_key.clone(),
+                ))
+            } else {
+                None
+            };
+            content_col = content_col.push(widgets::attachment_card(
+                primary, &versions, expanded, on_toggle,
+            ));
         }
     }
 
+    // Top padding intentionally smaller than PAD_CONTENT.top: the toolbar
+    // above already provides bottom padding, so the default 16px stacked
+    // on top of that read as too much separation.
     container(
         container(content_col)
             .padding(PAD_CARD)
-            .style(theme::ContainerClass::Elevated.style()),
+            .style(theme::ContainerClass::MessageCard.style()),
     )
-    .padding(PAD_CONTENT)
+    .padding(iced::Padding {
+        top: 0.0,
+        ..PAD_CONTENT
+    })
     .width(Length::Fill)
     .into()
 }
