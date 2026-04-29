@@ -1541,7 +1541,7 @@ fn build_recipient_row_inner<'a>(
         field,
     ]
     .spacing(SPACE_XS)
-    .align_y(Alignment::Start)
+    .align_y(Alignment::Center)
     .into()
 }
 
@@ -1605,7 +1605,7 @@ fn compose_footer<'a>(
     };
 
     let discard_btn = button(
-        row![icon::trash().size(ICON_SM), text("Discard").size(TEXT_MD),]
+        row![icon::trash().size(ICON_LG), text("Discard").size(TEXT_LG),]
             .spacing(SPACE_XXS)
             .align_y(Alignment::Center),
     )
@@ -1618,8 +1618,8 @@ fn compose_footer<'a>(
 
     let send_btn = button(
         row![
-            icon::send().size(ICON_SM),
-            text("Send").size(TEXT_MD).font(font::text_semibold()),
+            icon::send().size(ICON_LG).color(theme::ON_AVATAR),
+            text("Send").size(TEXT_LG).color(theme::ON_AVATAR),
         ]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
@@ -1633,8 +1633,8 @@ fn compose_footer<'a>(
 
     let attach_btn = button(
         row![
-            icon::paperclip().size(ICON_SM),
-            text("Attach").size(TEXT_MD),
+            icon::paperclip().size(ICON_LG),
+            text("Attach").size(TEXT_LG),
         ]
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),

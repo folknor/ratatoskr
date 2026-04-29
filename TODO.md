@@ -12,9 +12,9 @@
 
 - [ ] **Settings/Notifications** - VIP Senders should move to contact editing, and this should be a toggle button here.
 
-- [ ] **Compose window help text** - The help text in the compose windows to/cc/bcc fields ("Add recipients...") is not vertically centered in the input field.
+- [ ] **Compose window help text** - The help text in the compose windows to/cc/bcc fields ("Add recipients...") is not vertically centered in the input field. Note: `token_input.rs::draw_text_area` already draws the placeholder with `align_y: Vertical::Center` inside a `TOKEN_HEIGHT` box and `PAD_TOKEN_INPUT` is symmetric (top=4, bottom=4), so on paper it should be centered. The misalignment must come from elsewhere - possibly the field's overall layout height vs. the `TOKEN_HEIGHT` slot, or font metrics asymmetry. Needs investigation with rendered measurements.
 
-- [ ] **Settings slide-in/over panel** - Clicking anywhere on the background of this panel currently closes it for some reason. Only the (1) back button, (2) selecting a different Settings section, or (3) closing the Settings should dismiss the slide-in. Possibly Esc should hotkey to it as well. Currently Esc closes the settings completely, but perhaps it should close a slide-in, if open, first.
+- [ ] **Settings slide-in/over panel Escape handling** - Currently Esc closes the settings completely. It should close an open slide-in first, only closing settings entirely if no slide-in is open.
 
 - [x] **Settings/People: Contacts list** - Group/account pills need to lay out horizontally first, then vertically.
 
@@ -22,17 +22,23 @@
 
 - [ ] **Compose window input fields** - The to/cc/bcc and the Subject fields have different styling.
 
-- [ ] **Compose window account dropdown + cc/bcc buttons** - These need similar styling to other such controls with proper hover effects. The chevron icon in the dropdown should also be unified across the codebase, we use different chevron icons all over the place. Actually, the buttons at the bottom as well: Discard/attach/send, they need uniform app styling. Send should probably use the same styling as the main windows Compose button.
+- [ ] **Compose window account dropdown + cc/bcc buttons** - These need similar styling to other such controls with proper hover effects. The chevron icon in the dropdown should also be unified across the codebase, we use different chevron icons all over the place. Bottom buttons (Discard/Attach/Send) partially addressed: Send now uses `ICON_LG`/`TEXT_LG`/`theme::ON_AVATAR` to mirror the main sidebar Compose button, and Discard/Attach were bumped to `ICON_LG`/`TEXT_LG` to size-match. Remaining: account dropdown + Cc/Bcc toggle button hover styling, and codebase-wide chevron unification.
 
 - [ ] **Compose window "pop ups"** - There's a popup when you Discard, and to Insert Link. These are not actually modals at the moment; they render at the bottom of the compose window.
 
 - [x] **Compose window labels** - The From/To/CC/Bcc/Subject labels should be right-aligned, so that they float near their relative inputs.
 
+- [x] **Compose window labels vertical alignment** - The right-aligned From/To/CC/Bcc/Subject labels are not vertically centered against their input boxes.
+
+- [ ] **Compose autocomplete dropdown styling** - The richer two-line name+email layout and group icon+member count are not actually showing in the autocomplete dropdown - only the name (or email) is showing. The render code at `compose.rs::autocomplete_dropdown` does branch on `entry.is_group` and `entry.display_name`, but in practice neither the second-line email nor the group icon/`(N)` suffix renders. Investigation should start at the data source: verify `ContactMatch.display_name`, `is_group`, and `member_count` are populated (and not `None`/`false`/`0`) in the search result fed into `state.autocomplete.results` - if the fields are empty, the render falls through to the bare `text(&entry.email)` branch.
+
+- [ ] **Calendar editor Delete button non-functional** - The Delete button for existing events in the calendar editor is rendered but clicking it does nothing. Needs wiring to actually delete the event.
+
 - [ ] **Attachment saving** - Should remember last folder. Ideally last folder per thread ID.
 
 - [x] **Reading pane** - There's too much vertical spacing between the top part and the first reply/all/forward action line. Needs a tighter fit; vertical space doesn't come cheap on a laptop.
 
-- [ ] **Collapse individual expanded messages** - Chevron-down button in expanded message header should be a chevron-up to collapse. Also, the button needs a new place to live. Probably a very long, thin button that stretches across the entire horizontal space at the top of the message frame. This needs to be unified with the Attachments panel collapsing, which is currently taking up too much vertical space; also too much padding above the Attachments section.
+- [ ] **Collapse individual expanded messages** - Chevron now points up (fixed: added `icon::chevron_up()` at U+E070, swapped in `widgets::expanded_message_card`). Remaining: the button needs a new place to live - probably a very long, thin button that stretches across the entire horizontal space at the top of the message frame. This needs to be unified with the Attachments panel collapsing, which is currently taking up too much vertical space; also too much padding above the Attachments section.
 
 - [ ] **Attachment "Save All" button** - Needs to have same styling as other in-section buttons in the reading pane, and should not be part of the same interaction block as the collapse/expand header.
 
@@ -46,7 +52,7 @@
 
 - [x] **Settings window dropdown closing** - The dropdown opens when the settings row is clicked, which is nice - but clicking the settings row again doesn't close it. It closes + reopens it with 1 click.
 
-- [ ] **Settings window row hover** - Currently the hover effect for the settings row doesn't use the same border radius as the bottom/top settings rows, which means hovering those looks a bit weird.
+- [ ] **Settings window row hover** - Currently the hover effect for the settings row doesn't use the same border radius as the bottom/top settings rows, which means hovering those looks a bit weird. Root cause: `style_settings_section_container` uses `RADIUS_LG` (8) for the section's outer corners, but `style_action_button` (used by `setting_row`/`toggle_row`/`input_row`) uses `RADIUS_SM` (4) for the row hover background uniformly. Top/bottom rows need radii that match the section's outer corners on the outer edges and stay `RADIUS_SM` on the inner edges. Fix needs new `ButtonClass::ActionTop` / `ActionBottom` / `ActionOnly` variants (or a parameterized style) and `section_inner` to pass each row's position (first/last/middle/only) to the row builders.
 
 - [ ] **Settings/Composing: Signatures** - This section needs work.
 
@@ -74,7 +80,7 @@
 
 - [x] **Label pills in reading pane** - Pills should not show on each message, only at the top. Labels are per-thread, not per-message, at least in the UI.
 
-- [ ] **Link click handling (email content)** - Should open in system browser. Nothing happens.
+- [x] **Link click handling (email content)** - Should open in system browser. Nothing happens.
 
 - [ ] **Link hover URL disclosure (email content)** - Links in email bodies need either a tooltip that shows the destination URL or status-bar disclosure. Decision still pending.
 
@@ -92,7 +98,7 @@
 
 - [ ] **Starred thread card background** - The golden tint on starred thread cards uses a fixed `mix()` ratio (`STARRED_BG_ALPHA`) which may not look right across all themes. Needs a GPU-level blend/shader effect that adapts to the theme's background luminance so the starred highlight reads consistently in both light and dark themes.
 
-- [ ] **Star icon: need filled variant** - Lucide only has outline icons. The star toggle in the reading pane needs a filled star (golden) for the active state and an outline star for inactive. Currently uses Unicode ★ as a stopgap, which causes size mismatch and visual jank. Options: (1) add a second icon font with filled variants, (2) use an SVG/image icon, (3) custom widget that draws a filled star path. The button should also not change background color on toggle - just the icon fill.
+- [ ] **Star icon: need filled variant** *(Deferred - blocked on sluggrs SVG icon rendering)* - Lucide only has outline icons (confirmed: `star` U+E176, `star-half` U+E20B, no filled variant in the bundled font). Currently uses Unicode `*` as a stopgap, which causes size mismatch and visual jank. Will be resolved by switching to real SVG vector icon rendering (recently implemented in sluggrs, our text renderer) - filled and outline star SVGs can both ship and the toggle just swaps the asset. The button should also not change background color on toggle - just the icon fill.
 
 - [ ] **Autocomplete: cross-field drag-and-drop** - Drag detection works but drop cancels. Context menu "Move to" is the workaround. Needs ghost token rendering and target field hit-testing.
 - [x] **Autocomplete: email validation before tokenization** - Enter/Tab/comma/semicolon tokenize any non-empty text. Should validate plausible email format before creating a token.
@@ -156,7 +162,7 @@ Event popover (quick-glance card):
 - [ ] Position is wrong - currently right-aligned in the calendar view, should anchor near the clicked event pill
 - [ ] Styling needs work (visual polish pass)
 - [x] Escape doesn't close it
-- [ ] Clicking a different event pill while the popover is open just closes the popover instead of closing and immediately opening the new event's popover
+- [ ] Clicking a different event pill while the popover is open just closes the popover instead of closing and immediately opening the new event's popover. Root cause: `popover_stack` (`crates/app/src/ui/calendar.rs`) renders a full-viewport `mouse_area` backdrop with `on_press(ClosePopover)` on top of the calendar base, which swallows the click before it reaches the underlying event pill. Will be resolved by the deferred AnchoredOverlay migration (see "Calendar event detail popover -> AnchoredOverlay" above) - anchoring the popover near the pill removes the need for a click-blocking backdrop.
 
 Event detail modal:
 - [ ] Needs significant visual and layout work
@@ -169,6 +175,7 @@ Event editor modal:
 
 Month view:
 - [x] Days that have room for more event pills only show 2 and then "+N more" - should fill available space before collapsing
+- [ ] Event pill overflow still not filling actual available space - current fix uses CALENDAR_CELL_MIN_HEIGHT, so cells only pack events to the minimum height; when the window is taller, cells grow but still cap at the same event count. Needs a layout-aware widget that measures actual rendered cell height.
 
 Week view:
 - [ ] All-day events are not laid out properly at the top of the day columns

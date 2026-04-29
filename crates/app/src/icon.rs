@@ -107,6 +107,9 @@ pub fn chevron_left<'a>() -> Text<'a> {
 pub fn chevron_right<'a>() -> Text<'a> {
     to_text('\u{e06f}')
 }
+pub fn chevron_up<'a>() -> Text<'a> {
+    to_text('\u{e070}')
+}
 pub fn arrow_left<'a>() -> Text<'a> {
     to_text('\u{e048}')
 }

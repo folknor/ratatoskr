@@ -1107,7 +1107,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     .into();
 
     // Collapse chevron button
-    let collapse_btn = button(icon::chevron_down().size(ICON_SM).style(text::secondary))
+    let collapse_btn = button(icon::chevron_up().size(ICON_SM).style(text::secondary))
         .on_press(on_toggle(index))
         .padding(PAD_ICON_BTN)
         .style(theme::ButtonClass::Ghost.style());
