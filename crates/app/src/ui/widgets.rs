@@ -1313,19 +1313,38 @@ pub fn collapsed_message_row<'a, M: Clone + 'a>(
 
 // ── Attachment card ─────────────────────────────────────
 
+/// Click-target messages for an attachment card.
+///
+/// Bundled into a struct to keep `attachment_card`'s arity below the
+/// `too_many_arguments` clippy threshold.
+pub struct AttachmentCardActions<M> {
+    /// Row-body click: open with the system default handler.
+    pub on_open: M,
+    /// Save icon click: save with file picker.
+    pub on_save: M,
+    /// "N versions" toggle. `None` when the card has only one version.
+    pub on_toggle_versions: Option<M>,
+    /// Meta line click: pop out the parent message of the latest version.
+    pub on_pop_out_latest: M,
+    /// One-per-version: pop out the parent message of each version. Index
+    /// matches `versions[]`.
+    pub on_pop_out_versions: Vec<M>,
+}
+
 pub fn attachment_card<'a, M: 'a + Clone>(
     primary: &'a ThreadAttachment,
     versions: &[&'a ThreadAttachment],
     expanded: bool,
-    on_toggle: Option<M>,
+    actions: AttachmentCardActions<M>,
 ) -> Element<'a, M> {
     let filename = primary.filename.as_deref().unwrap_or("(unnamed)");
     let file_icon = file_type_icon(primary.mime_type.as_deref());
     // The primary card line shows the LATEST version's metadata. Versions
     // are pre-sorted latest-first, so versions[0] is the latest.
     let latest = versions.first().copied().unwrap_or(primary);
-    let meta = format_attachment_meta(latest);
+    let meta = format_attachment_meta_no_type(latest);
 
+    // ── Line 1: icon + filename + (versions toggle?) + save icon ──
     let title_row = row![
         container(file_icon.size(ICON_MD).style(text::secondary)).align_y(Alignment::Center),
         container(
@@ -1339,7 +1358,11 @@ pub fn attachment_card<'a, M: 'a + Clone>(
     .spacing(SPACE_XS)
     .align_y(Alignment::Center);
 
-    let line1: Element<'a, M> = if let Some(toggle_msg) = on_toggle {
+    let mut line1 = row![title_row, Space::new().width(Length::Fill)]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center);
+
+    if let Some(toggle_msg) = actions.on_toggle_versions {
         let chevron = if expanded {
             icon::chevron_down()
         } else {
@@ -1360,31 +1383,41 @@ pub fn attachment_card<'a, M: 'a + Clone>(
         .on_press(toggle_msg)
         .style(theme::ButtonClass::Ghost.style())
         .padding(PAD_ICON_BTN);
+        line1 = line1.push(versions_btn);
+    }
 
-        row![
-            title_row,
-            Space::new().width(Length::Fill),
-            versions_btn,
-        ]
-        .align_y(Alignment::Center)
-        .into()
-    } else {
-        title_row.into()
-    };
+    let save_btn = button(icon::download().size(ICON_SM).style(text::secondary))
+        .on_press(actions.on_save)
+        .style(theme::ButtonClass::Ghost.style())
+        .padding(PAD_ICON_BTN);
+    line1 = line1.push(save_btn);
 
-    let line2 = text(meta)
-        .size(TEXT_SM)
-        .style(theme::TextClass::Tertiary.style());
+    // ── Line 2: meta line, clickable to pop out parent message ──
+    let meta_btn = button(
+        text(meta)
+            .size(TEXT_SM)
+            .style(theme::TextClass::Tertiary.style()),
+    )
+    .on_press(actions.on_pop_out_latest.clone())
+    .style(theme::ButtonClass::Ghost.style())
+    .padding(0)
+    .width(Length::Fill);
 
-    let mut card_col = column![line1, line2].spacing(SPACE_XXXS);
+    let mut card_col = column![line1, meta_btn].spacing(SPACE_XXXS);
 
+    // ── Expanded versions list ──
     if expanded && versions.len() > 1 {
         card_col = card_col.push(Space::new().height(SPACE_XS));
         card_col = card_col.push(divider());
         card_col = card_col.push(Space::new().height(SPACE_XXS));
         for (i, ver) in versions.iter().enumerate() {
             let label = format_attachment_version_line(ver, i == 0);
-            card_col = card_col.push(
+            let on_press = actions
+                .on_pop_out_versions
+                .get(i)
+                .cloned()
+                .unwrap_or_else(|| actions.on_pop_out_latest.clone());
+            let version_btn = button(
                 row![
                     Space::new().width(SPACE_MD),
                     text(label)
@@ -1392,15 +1425,32 @@ pub fn attachment_card<'a, M: 'a + Clone>(
                         .style(theme::TextClass::Tertiary.style()),
                 ]
                 .align_y(Alignment::Center),
-            );
+            )
+            .on_press(on_press)
+            .style(theme::ButtonClass::Ghost.style())
+            .padding(0)
+            .width(Length::Fill);
+            card_col = card_col.push(version_btn);
         }
     }
 
-    container(card_col)
+    // ── Outer button: click row body opens with system handler ──
+    let card_btn = button(card_col)
+        .on_press(actions.on_open)
         .padding(PAD_NAV_ITEM)
-        .style(theme::ContainerClass::Elevated.style())
-        .width(Length::Fill)
-        .into()
+        .style(theme::ButtonClass::AttachmentRow.style())
+        .width(Length::Fill);
+
+    tooltip(
+        card_btn,
+        text("Click to open. Use the icons to save or view versions.")
+            .size(TEXT_XS)
+            .style(theme::TextClass::OnPrimary.style()),
+        tooltip::Position::Top,
+    )
+    .gap(SPACE_XXS)
+    .style(theme::ContainerClass::Floating.style())
+    .into()
 }
 
 // ── Helpers ─────────────────────────────────────────────
@@ -1468,6 +1518,20 @@ fn format_attachment_meta(att: &ThreadAttachment) -> String {
         .unwrap_or_default();
     let sender = att.from_name.as_deref().unwrap_or("unknown");
     format!("{type_label} \u{00B7} {size} \u{00B7} {date} from {sender}")
+}
+
+/// Meta line without the type label - the icon + filename extension on
+/// line 1 already convey the file type, so repeating it on line 2 is
+/// redundant. Used by the attachment card's primary meta row.
+fn format_attachment_meta_no_type(att: &ThreadAttachment) -> String {
+    let size = format_file_size(att.size);
+    let date = att
+        .date
+        .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+        .map(|dt| dt.format("%b %d").to_string())
+        .unwrap_or_default();
+    let sender = att.from_name.as_deref().unwrap_or("unknown");
+    format!("{size} \u{00B7} {date} from {sender}")
 }
 
 /// Per-version line shown under an expanded attachment card. Drops the type

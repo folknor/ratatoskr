@@ -102,6 +102,7 @@ pub struct ThreadMessage {
 #[derive(Debug, Clone)]
 pub struct ThreadAttachment {
     pub id: String,
+    pub message_id: String,
     pub filename: Option<String>,
     pub mime_type: Option<String>,
     pub size: Option<i64>,

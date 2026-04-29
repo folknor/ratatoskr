@@ -28,6 +28,15 @@ pub enum ReadingPaneMessage {
     /// Toggle expansion of the version list for the attachment with the given
     /// filename (versions are deduped on filename).
     ToggleAttachmentVersions(String),
+    /// User clicked the row body of an attachment card; open with the system
+    /// default handler. The string is the attachment id.
+    OpenAttachment(String),
+    /// User clicked the save icon on an attachment card. The string is the
+    /// attachment id.
+    SaveAttachment(String),
+    /// User clicked the attachment meta line or a version line; pop out the
+    /// parent message. The string is the message id.
+    PopOutMessageById(String),
     PopOut(usize),
     /// Reply to the message at the given index.
     Reply(usize),
@@ -354,6 +363,25 @@ impl Component for ReadingPane {
                 }
                 (Task::none(), None)
             }
+            ReadingPaneMessage::OpenAttachment(att_id) => {
+                // Open with system handler not yet wired - see "Attachment saving" TODO.
+                log::info!("OpenAttachment({att_id}): not yet implemented");
+                (Task::none(), None)
+            }
+            ReadingPaneMessage::SaveAttachment(att_id) => {
+                log::info!("SaveAttachment({att_id}): not yet implemented");
+                (Task::none(), None)
+            }
+            ReadingPaneMessage::PopOutMessageById(message_id) => {
+                let event = self
+                    .thread_messages
+                    .iter()
+                    .position(|m| m.id == message_id)
+                    .map(|index| ReadingPaneEvent::OpenMessagePopOut {
+                        message_index: index,
+                    });
+                (Task::none(), event)
+            }
             ReadingPaneMessage::PopOut(index) => {
                 let event = ReadingPaneEvent::OpenMessagePopOut {
                     message_index: index,
@@ -487,18 +515,6 @@ fn thread_view_with_commands<'a>(
     // Command-backed toolbar
     col = col.push(command_toolbar(registry, binding_table, ctx));
 
-    if !pane.thread_attachments.is_empty() {
-        col = col.push(
-            attachment_group(
-                &pane.thread_attachments,
-                &pane.deduped_attachments,
-                pane.attachments_collapsed,
-                &pane.expanded_attachment_versions,
-            )
-            .map(Message::ReadingPane),
-        );
-    }
-
     col = col.push(message_list(pane).map(Message::ReadingPane));
     col.into()
 }
@@ -590,15 +606,6 @@ fn thread_view<'a>(
         &pane.thread_labels,
         true,
     ));
-
-    if !pane.thread_attachments.is_empty() {
-        col = col.push(attachment_group(
-            &pane.thread_attachments,
-            &pane.deduped_attachments,
-            pane.attachments_collapsed,
-            &pane.expanded_attachment_versions,
-        ));
-    }
 
     col = col.push(message_list(pane));
     col.into()
@@ -721,6 +728,18 @@ fn message_list<'a>(pane: &'a ReadingPane) -> Element<'a, ReadingPaneMessage> {
     let first_message_date = pane.thread_messages.last().and_then(|m| m.date);
     let mut msg_col = column![].spacing(SPACE_XS).padding(messages_pad);
 
+    // Attachments scroll with the rest of the thread content rather than
+    // staying pinned at the top - the collapse header lets users park the
+    // section out of the way once they're past it.
+    if !pane.thread_attachments.is_empty() {
+        msg_col = msg_col.push(attachment_group(
+            &pane.thread_attachments,
+            &pane.deduped_attachments,
+            pane.attachments_collapsed,
+            &pane.expanded_attachment_versions,
+        ));
+    }
+
     for (i, msg) in pane.thread_messages.iter().enumerate() {
         let is_expanded = pane.message_expanded.get(i).copied().unwrap_or(false);
         if is_expanded {
@@ -828,15 +847,30 @@ fn attachment_group<'a>(
                 .collect();
             let filename_key = primary.filename.clone().unwrap_or_default();
             let expanded = expanded_versions.contains(&filename_key);
-            let on_toggle = if versions.len() > 1 {
+            let on_toggle_versions = if versions.len() > 1 {
                 Some(ReadingPaneMessage::ToggleAttachmentVersions(
                     filename_key.clone(),
                 ))
             } else {
                 None
             };
+            let latest_message_id = versions
+                .first()
+                .map(|v| v.message_id.clone())
+                .unwrap_or_else(|| primary.message_id.clone());
+            let on_pop_out_versions: Vec<ReadingPaneMessage> = versions
+                .iter()
+                .map(|v| ReadingPaneMessage::PopOutMessageById(v.message_id.clone()))
+                .collect();
+            let actions = widgets::AttachmentCardActions {
+                on_open: ReadingPaneMessage::OpenAttachment(primary.id.clone()),
+                on_save: ReadingPaneMessage::SaveAttachment(primary.id.clone()),
+                on_toggle_versions,
+                on_pop_out_latest: ReadingPaneMessage::PopOutMessageById(latest_message_id),
+                on_pop_out_versions,
+            };
             content_col = content_col.push(widgets::attachment_card(
-                primary, &versions, expanded, on_toggle,
+                primary, &versions, expanded, actions,
             ));
         }
     }
@@ -847,11 +881,17 @@ fn attachment_group<'a>(
     container(
         container(content_col)
             .padding(PAD_CARD)
-            .style(theme::ContainerClass::MessageCard.style()),
+            .style(theme::ContainerClass::MessageCard.style())
+            .width(Length::Fill),
     )
+    // Horizontal padding comes from `msg_col` (`messages_pad = [0, SPACE_LG]`)
+    // since the attachment group lives inside the scrollable now. Keep only
+    // the bottom gap that separates it from the first message card.
     .padding(iced::Padding {
         top: 0.0,
-        ..PAD_CONTENT
+        right: 0.0,
+        bottom: PAD_CONTENT.bottom,
+        left: 0.0,
     })
     .width(Length::Fill)
     .into()

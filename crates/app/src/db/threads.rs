@@ -102,6 +102,7 @@ fn convert_message(msg: thread_detail::ThreadDetailMessage) -> ThreadMessage {
 fn convert_attachment(att: thread_detail::ThreadAttachment) -> ThreadAttachment {
     ThreadAttachment {
         id: att.id,
+        message_id: att.message_id,
         filename: att.filename,
         mime_type: att.mime_type,
         size: att.size,
