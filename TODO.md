@@ -294,6 +294,11 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **Pop-out HTML rendering** - SimpleHtml/OriginalHtml modes in message view pop-out fall back to plain text. Depends on the DOM-to-widget pipeline (`html_render.rs`) being wired into the pop-out view. Tracked separately in the HTML rendering section above.
 - [ ] **Pop-out Print** - OS print dialog integration for message view and compose pop-out windows. Platform-specific, no iced precedent. Needs investigation.
 - [ ] **Signature: per-account default dropdown in Account Settings** - Account editor overlay has no signature dropdown for selecting the default signature for an account.
+- [ ] **Compose: improve "Discard this draft?" modal contents** - General polish pass on layout/copy/buttons.
+
+- [ ] **Compose: surface "Add at least one recipient" properly** - Sending with no recipients sets `state.status = "Add at least one recipient"` (`pop_out/compose.rs::Send`), which renders as a small status line at the bottom of the form. Should be a real validation surface - inline error near the To field, a toast, or a focus-and-shake on the empty field. Same path also covers the placeholder "Send not yet wired" message and any future send-failure feedback; depends on the toast/notification system in the main TODO list.
+
+- [ ] **Compose: swap signature when From account changes** - The compose window resolves and inserts a signature once on open (see "Signature placement in compose" under Needs Visual Review). If the user then changes the From account via the dropdown, the previous account's signature stays in the body and the new account's default is not inserted. `ComposeMessage::FromAccountChanged` should remove the existing signature block (tracked via `state.active_signature_id` / `signature_separator_index`) and re-resolve + insert the new account's default in the same placement (bottom for new compose, before quoted text for reply).
 - [ ] **CardDAV contact write-back** - CardDAV client supports PROPFIND/REPORT/GET but not PUT/DELETE. Need vCard generation + PUT method for pushing contact edits to CardDAV servers. See `docs/contacts/problem-statement.md`.
 
 ## Needs Visual Review

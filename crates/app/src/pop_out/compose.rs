@@ -1316,7 +1316,7 @@ pub fn view_compose_window<'a>(
         let noop = Message::PopOut(window_id, PopOutMessage::Compose(ComposeMessage::Noop));
         crate::ui::modal_overlay::modal_overlay(
             with_context_menu,
-            container(discard_confirmation(window_id)).padding(PAD_CONTENT),
+            discard_confirmation(window_id),
             crate::ui::modal_overlay::ModalSurface::Modal,
             noop,
         )
@@ -1324,7 +1324,7 @@ pub fn view_compose_window<'a>(
         let noop = Message::PopOut(window_id, PopOutMessage::Compose(ComposeMessage::Noop));
         crate::ui::modal_overlay::modal_overlay(
             with_context_menu,
-            container(link_dialog(window_id, state)).padding(PAD_CONTENT),
+            link_dialog(window_id, state),
             crate::ui::modal_overlay::ModalSurface::Modal,
             noop,
         )
@@ -1421,7 +1421,7 @@ fn build_from_row<'a>(
     if !state.show_cc {
         from_row = from_row.push(
             button(text("Cc").size(TEXT_SM))
-                .style(theme::ButtonClass::Ghost.style())
+                .style(theme::ButtonClass::Action.style())
                 .on_press(Message::PopOut(
                     window_id,
                     PopOutMessage::Compose(ComposeMessage::ShowCc),
@@ -1432,7 +1432,7 @@ fn build_from_row<'a>(
     if !state.show_bcc {
         from_row = from_row.push(
             button(text("Bcc").size(TEXT_SM))
-                .style(theme::ButtonClass::Ghost.style())
+                .style(theme::ButtonClass::Action.style())
                 .on_press(Message::PopOut(
                     window_id,
                     PopOutMessage::Compose(ComposeMessage::ShowBcc),
@@ -1702,6 +1702,8 @@ fn compose_body<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Ele
     container(editor)
         .width(Length::Fill)
         .height(Length::Fill)
+        .padding(PAD_CONTENT)
+        .style(theme::ContainerClass::EmailBody.style())
         .into()
 }
 
@@ -1723,7 +1725,7 @@ fn compose_footer<'a>(
             .spacing(SPACE_XXS)
             .align_y(Alignment::Center),
     )
-    .style(theme::ButtonClass::Ghost.style())
+    .style(theme::ButtonClass::Action.style())
     .on_press(Message::PopOut(
         window_id,
         PopOutMessage::Compose(discard_msg),
@@ -1753,7 +1755,7 @@ fn compose_footer<'a>(
         .spacing(SPACE_XXS)
         .align_y(Alignment::Center),
     )
-    .style(theme::ButtonClass::Ghost.style())
+    .style(theme::ButtonClass::Action.style())
     .on_press(Message::PopOut(
         window_id,
         PopOutMessage::Compose(ComposeMessage::AttachFiles),
@@ -1768,8 +1770,17 @@ fn compose_footer<'a>(
     ]
     .align_y(Alignment::Center);
 
+    // Pull the left padding in by `PAD_BUTTON.left` so the leftmost button's
+    // *text* lines up at `PAD_CONTENT.left` from the window edge - matching
+    // the Send button's filled background, which sits flush at
+    // `PAD_CONTENT.right` on the other side.
     container(footer_row)
-        .padding(PAD_CONTENT)
+        .padding(iced::Padding {
+            top: PAD_CONTENT.top,
+            right: PAD_CONTENT.right,
+            bottom: PAD_CONTENT.bottom,
+            left: PAD_CONTENT.left - PAD_BUTTON.left,
+        })
         .width(Length::Fill)
         .into()
 }
@@ -1955,7 +1966,7 @@ fn discard_confirmation<'a>(window_id: iced::window::Id) -> Element<'a, Message>
     )
     .padding(PAD_CONTENT)
     .style(theme::ContainerClass::Elevated.style())
-    .width(Length::Fill)
+    .width(Length::Shrink)
     .max_width(420.0)
     .into()
 }
