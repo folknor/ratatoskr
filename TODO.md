@@ -14,7 +14,7 @@
 
 - [ ] **Compose window help text** - The help text in the compose windows to/cc/bcc fields ("Add recipients...") is not vertically centered in the input field. Note: `token_input.rs::draw_text_area` already draws the placeholder with `align_y: Vertical::Center` inside a `TOKEN_HEIGHT` box and `PAD_TOKEN_INPUT` is symmetric (top=4, bottom=4), so on paper it should be centered. The misalignment must come from elsewhere - possibly the field's overall layout height vs. the `TOKEN_HEIGHT` slot, or font metrics asymmetry. Needs investigation with rendered measurements.
 
-- [ ] **Settings slide-in/over panel Escape handling** - Currently Esc closes the settings completely. It should close an open slide-in first, only closing settings entirely if no slide-in is open.
+- [x] **Settings slide-in/over panel Escape handling** - Currently Esc closes the settings completely. It should close an open slide-in first, only closing settings entirely if no slide-in is open.
 
 - [x] **Settings/People: Contacts list** - Group/account pills need to lay out horizontally first, then vertically.
 

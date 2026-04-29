@@ -60,12 +60,16 @@ impl App {
             return self.handle_palette_key(key);
         }
 
-        // 2. If settings is open, Escape closes it.
+        // 2. If settings is open, Escape closes the active sheet first if one is
+        //    open, otherwise closes settings entirely.
         if self.show_settings {
             if *key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
-                return self.update(Message::Settings(
-                    crate::ui::settings::SettingsMessage::Close,
-                ));
+                let msg = if self.settings.active_sheet.is_some() {
+                    crate::ui::settings::SettingsMessage::CloseSheet
+                } else {
+                    crate::ui::settings::SettingsMessage::Close
+                };
+                return self.update(Message::Settings(msg));
             }
             // Don't process other shortcuts while settings is open.
             return Task::none();
