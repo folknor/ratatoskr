@@ -2,7 +2,7 @@ use std::path::Path;
 
 use iced::widget::{
     Canvas, Space, button, canvas, column, container, image, row, rule, scrollable, text,
-    text_input, tooltip,
+    text_input,
 };
 use iced::{Alignment, Color, Element, Length, Rectangle, Renderer, Theme, mouse};
 
@@ -1342,25 +1342,50 @@ pub fn attachment_card<'a, M: 'a + Clone>(
     // The primary card line shows the LATEST version's metadata. Versions
     // are pre-sorted latest-first, so versions[0] is the latest.
     let latest = versions.first().copied().unwrap_or(primary);
-    let meta = format_attachment_meta_no_type(latest);
+    let date_sender = format_attachment_date_sender(latest);
 
-    // ── Line 1: icon + filename + (versions toggle?) + save icon ──
-    let title_row = row![
-        container(file_icon.size(ICON_MD).style(text::secondary)).align_y(Alignment::Center),
+    // ── Top row: filename (left, fills) + size (right) ──
+    let top_row = row![
         container(
             text(filename)
                 .size(TEXT_MD)
                 .style(text::base)
                 .wrapping(text::Wrapping::None),
         )
+        .width(Length::Fill)
+        .align_y(Alignment::Center),
+        container(
+            text(format_file_size(latest.size))
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
         .align_y(Alignment::Center),
     ]
     .spacing(SPACE_XS)
     .align_y(Alignment::Center);
 
-    let mut line1 = row![title_row, Space::new().width(Length::Fill)]
-        .spacing(SPACE_XS)
-        .align_y(Alignment::Center);
+    // ── Bottom row: date+sender (clickable, fills) + (versions toggle?) ──
+    let meta_btn = button(
+        text(date_sender)
+            .size(TEXT_SM)
+            .style(theme::TextClass::Tertiary.style()),
+    )
+    .on_press(actions.on_pop_out_latest.clone())
+    .style(theme::ButtonClass::Ghost.style())
+    .padding(0);
+
+    let mut bottom_row = row![
+        container(meta_btn)
+            .width(Length::Fill)
+            .align_y(Alignment::Center),
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
+
+    // Bottom row is always pinned to ATTACHMENT_CARD_META_ROW_HEIGHT so it
+    // keeps the same height whether or not the versions badge is present.
+    // Otherwise the centered text column expands vertically when the badge
+    // is added, pushing the filename row above up by a few pixels.
 
     if let Some(toggle_msg) = actions.on_toggle_versions {
         let chevron = if expanded {
@@ -1368,6 +1393,11 @@ pub fn attachment_card<'a, M: 'a + Clone>(
         } else {
             icon::chevron_right()
         };
+        // Lucide icons use LineHeight::Relative(1.0) so an icon at size N
+        // renders exactly N tall. Inter text without an override uses the
+        // default line-height (~1.4x), so a text at size N renders taller
+        // and its glyph baseline sits below the icon's vertical center.
+        // Match the icon by forcing the text to LineHeight::Relative(1.0).
         let versions_btn = button(
             row![
                 chevron
@@ -1375,6 +1405,7 @@ pub fn attachment_card<'a, M: 'a + Clone>(
                     .style(theme::TextClass::Tertiary.style()),
                 text(format!("{} versions", versions.len()))
                     .size(TEXT_XS)
+                    .line_height(iced::widget::text::LineHeight::Relative(1.0))
                     .style(theme::TextClass::Tertiary.style()),
             ]
             .spacing(SPACE_XXS)
@@ -1383,32 +1414,50 @@ pub fn attachment_card<'a, M: 'a + Clone>(
         .on_press(toggle_msg)
         .style(theme::ButtonClass::Ghost.style())
         .padding(PAD_ICON_BTN);
-        line1 = line1.push(versions_btn);
+        bottom_row = bottom_row.push(versions_btn);
     }
 
-    let save_btn = button(icon::download().size(ICON_SM).style(text::secondary))
-        .on_press(actions.on_save)
-        .style(theme::ButtonClass::Ghost.style())
-        .padding(PAD_ICON_BTN);
-    line1 = line1.push(save_btn);
+    let bottom_row_pinned = container(bottom_row)
+        .height(Length::Fixed(ATTACHMENT_CARD_META_ROW_HEIGHT))
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
 
-    // ── Line 2: meta line, clickable to pop out parent message ──
-    let meta_btn = button(
-        text(meta)
-            .size(TEXT_SM)
-            .style(theme::TextClass::Tertiary.style()),
+    // ── Text column: filename row above, meta row below ──
+    let text_col = column![top_row, bottom_row_pinned]
+        .spacing(SPACE_XXXS)
+        .width(Length::Fill);
+
+    // ── Main row: file icon | text column ──
+    // The file-type icon is sized larger than standard UI icons so the
+    // attachment is identifiable at a glance. Extra horizontal breathing
+    // room between icon and text via SPACE_MD.
+    //
+    // The row is wrapped in a fixed-height container so the collapsed card
+    // is the same height regardless of whether the "N versions" badge is
+    // present (the badge has button padding, the meta line is bare text;
+    // without the wrapper their natural heights differ).
+    let main_row = container(
+        row![
+            container(
+                file_icon
+                    .size(ICON_ATTACHMENT_FILE)
+                    .style(text::secondary),
+            )
+            .align_y(Alignment::Center),
+            text_col,
+        ]
+        .spacing(SPACE_MD)
+        .align_y(Alignment::Center),
     )
-    .on_press(actions.on_pop_out_latest.clone())
-    .style(theme::ButtonClass::Ghost.style())
-    .padding(0)
-    .width(Length::Fill);
+    .height(Length::Fixed(ATTACHMENT_CARD_MAIN_ROW_HEIGHT))
+    .align_y(Alignment::Center);
 
-    let mut card_col = column![line1, meta_btn].spacing(SPACE_XXXS);
+    let mut card_col = column![main_row].spacing(SPACE_XXXS);
 
-    // ── Expanded versions list ──
+    // ── Expanded versions list (rendered below main row, inside the card) ──
     if expanded && versions.len() > 1 {
-        card_col = card_col.push(Space::new().height(SPACE_XS));
-        card_col = card_col.push(divider());
+        // Small gap between main row and the version list - no divider,
+        // the indentation alone signals "these belong to the row above".
         card_col = card_col.push(Space::new().height(SPACE_XXS));
         for (i, ver) in versions.iter().enumerate() {
             let label = format_attachment_version_line(ver, i == 0);
@@ -1417,40 +1466,73 @@ pub fn attachment_card<'a, M: 'a + Clone>(
                 .get(i)
                 .cloned()
                 .unwrap_or_else(|| actions.on_pop_out_latest.clone());
+            // Indent versions to align under the text column.
             let version_btn = button(
-                row![
-                    Space::new().width(SPACE_MD),
-                    text(label)
-                        .size(TEXT_SM)
-                        .style(theme::TextClass::Tertiary.style()),
-                ]
-                .align_y(Alignment::Center),
+                text(label)
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Tertiary.style()),
             )
             .on_press(on_press)
             .style(theme::ButtonClass::Ghost.style())
             .padding(0)
             .width(Length::Fill);
-            card_col = card_col.push(version_btn);
+            card_col = card_col.push(
+                row![
+                    Space::new().width(ICON_ATTACHMENT_FILE + SPACE_MD),
+                    version_btn,
+                ]
+                .align_y(Alignment::Center),
+            );
         }
+        // After last version: a touch of breathing room before the card
+        // border. PAD_NAV_ITEM's 4px alone reads as too tight after a
+        // dense list of version lines.
+        card_col = card_col.push(Space::new().height(SPACE_XS));
     }
 
-    // ── Outer button: click row body opens with system handler ──
-    let card_btn = button(card_col)
-        .on_press(actions.on_open)
+    // ── Bordered file-info card ──
+    // Reuses the EmailBody style so the attachment card honors the same
+    // "white-vs-theme" preference users set for message bodies. Both
+    // surfaces represent content, not chrome.
+    let info_card = container(card_col)
         .padding(PAD_NAV_ITEM)
-        .style(theme::ButtonClass::AttachmentRow.style())
+        .style(theme::ContainerClass::EmailBody.style())
         .width(Length::Fill);
 
-    tooltip(
-        card_btn,
-        text("Click to open. Use the icons to save or view versions.")
-            .size(TEXT_XS)
-            .style(theme::TextClass::OnPrimary.style()),
-        tooltip::Position::Top,
+    // ── Open / Save action icons sit OUTSIDE the card border, like the
+    //    other reading-pane action buttons (Reply/Forward/etc).
+    //    Pinned to a fixed height matching the collapsed card so they stay
+    //    at the top of the row when the card expands its version list. ──
+    let open_btn = button(
+        container(icon::external_link().size(ICON_MD).style(text::secondary))
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
+            .height(Length::Fill)
+            .width(Length::Fill),
     )
-    .gap(SPACE_XXS)
-    .style(theme::ContainerClass::Floating.style())
-    .into()
+    .on_press(actions.on_open)
+    .style(theme::ButtonClass::Ghost.style())
+    .padding(0)
+    .height(Length::Fixed(ATTACHMENT_ACTION_BTN_HEIGHT))
+    .width(Length::Fixed(ATTACHMENT_ICON_BTN_WIDTH));
+
+    let save_btn = button(
+        container(icon::download().size(ICON_MD).style(text::secondary))
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
+            .height(Length::Fill)
+            .width(Length::Fill),
+    )
+    .on_press(actions.on_save)
+    .style(theme::ButtonClass::Ghost.style())
+    .padding(0)
+    .height(Length::Fixed(ATTACHMENT_ACTION_BTN_HEIGHT))
+    .width(Length::Fixed(ATTACHMENT_ICON_BTN_WIDTH));
+
+    row![info_card, open_btn, save_btn]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Start)
+        .into()
 }
 
 // ── Helpers ─────────────────────────────────────────────
@@ -1520,18 +1602,16 @@ fn format_attachment_meta(att: &ThreadAttachment) -> String {
     format!("{type_label} \u{00B7} {size} \u{00B7} {date} from {sender}")
 }
 
-/// Meta line without the type label - the icon + filename extension on
-/// line 1 already convey the file type, so repeating it on line 2 is
-/// redundant. Used by the attachment card's primary meta row.
-fn format_attachment_meta_no_type(att: &ThreadAttachment) -> String {
-    let size = format_file_size(att.size);
+/// "Mar 14 from Alex Morgan" - file size lives separately in the top-right
+/// of the card now, so the meta line carries only the sender context.
+fn format_attachment_date_sender(att: &ThreadAttachment) -> String {
     let date = att
         .date
         .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
         .map(|dt| dt.format("%b %d").to_string())
         .unwrap_or_default();
     let sender = att.from_name.as_deref().unwrap_or("unknown");
-    format!("{size} \u{00B7} {date} from {sender}")
+    format!("{date} from {sender}")
 }
 
 /// Per-version line shown under an expanded attachment card. Drops the type

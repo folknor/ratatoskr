@@ -254,9 +254,6 @@ pub enum ButtonClass {
     BareTransparent,
     /// Hoverable row (settings rows, collapsible headers).
     Action,
-    /// Attachment row card. MessageCard-style background, with a strong
-    /// primary-color border on hover to signal the row is clickable.
-    AttachmentRow,
     /// Collapsed message row.
     CollapsedMessage,
     /// Active star toggle button.
@@ -296,7 +293,6 @@ impl ButtonClass {
             Self::BareIcon => style_bare_icon_button(theme, status),
             Self::BareTransparent => style_bare_transparent_button(),
             Self::Action => style_action_button(theme, status),
-            Self::AttachmentRow => style_attachment_row_button(theme, status),
             Self::CollapsedMessage => style_collapsed_message_button(theme, status),
             Self::StarActive => style_star_active_button(theme, status),
             Self::Chip { active } => style_chip_button(theme, status, active),
@@ -676,32 +672,6 @@ fn style_bare_transparent_button() -> button::Style {
     button::Style {
         background: None,
         ..Default::default()
-    }
-}
-
-fn style_attachment_row_button(theme: &Theme, status: button::Status) -> button::Style {
-    let p = theme.palette();
-    match status {
-        button::Status::Hovered => button::Style {
-            background: Some(p.background.weaker.color.into()),
-            text_color: p.background.base.text,
-            border: iced::Border {
-                color: p.primary.base.color,
-                width: 2.0,
-                radius: RADIUS_MD.into(),
-            },
-            ..Default::default()
-        },
-        _ => button::Style {
-            background: Some(p.background.weaker.color.into()),
-            text_color: p.background.base.text,
-            border: iced::Border {
-                color: p.background.strongest.color.scale_alpha(0.15),
-                width: 1.0,
-                radius: RADIUS_MD.into(),
-            },
-            ..Default::default()
-        },
     }
 }
 

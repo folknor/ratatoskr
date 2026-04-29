@@ -817,7 +817,9 @@ fn attachment_group<'a>(
     .padding(PAD_ICON_BTN)
     .width(Length::Fill);
 
-    // Save All: separate button styled like Reply/Forward in-section actions.
+    // Save All: separate button styled like Reply/Forward in-section
+    // actions. Width pinned to match the file row's [Open, Save] cluster
+    // so the header's title area ends where the bordered file card ends.
     let save_all_btn = button(
         row![
             icon::download().size(ICON_SM).style(text::secondary),
@@ -828,7 +830,8 @@ fn attachment_group<'a>(
     )
     .on_press(ReadingPaneMessage::SaveAllAttachments)
     .style(theme::ButtonClass::Ghost.style())
-    .padding(PAD_ICON_BTN);
+    .padding(PAD_ICON_BTN)
+    .width(Length::Fixed(ATTACHMENT_HEADER_ACTION_WIDTH));
 
     let header = row![title_btn, save_all_btn]
         .spacing(SPACE_XS)
