@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use iced::widget::{
-    Space, button, column, container, mouse_area, pick_list, row, scrollable, text, text_input,
+    Space, button, column, container, mouse_area, row, scrollable, text, text_input,
 };
 use iced::{Alignment, Element, Length, Point};
 use rte::{Action as RteAction, EditAction, EditorState, InlineStyle, rich_text_editor};
@@ -115,6 +115,7 @@ pub enum ComposeMessage {
     SubjectChanged(String),
     BodyChanged(RteAction),
     FromAccountChanged(AccountInfo),
+    ToggleFromDropdown,
     ShowCc,
     ShowBcc,
     ToTokenInput(TokenInputMessage),
@@ -301,6 +302,7 @@ pub struct ComposeState {
     // From account
     pub from_account: Option<AccountInfo>,
     pub from_accounts: Vec<AccountInfo>,
+    pub from_dropdown_open: bool,
 
     // Subject
     pub subject: String,
@@ -378,6 +380,7 @@ impl ComposeState {
             selected_bcc_token: None,
             from_account,
             from_accounts,
+            from_dropdown_open: false,
             subject: String::new(),
             body: EditorState::new(),
             mode: ComposeMode::New,
@@ -452,6 +455,7 @@ impl ComposeState {
             selected_bcc_token: None,
             from_account,
             from_accounts,
+            from_dropdown_open: false,
             subject: draft.subject.clone().unwrap_or_default(),
             body,
             mode: ComposeMode::New,
@@ -617,6 +621,10 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         }
         ComposeMessage::FromAccountChanged(account) => {
             state.from_account = Some(account);
+            state.from_dropdown_open = false;
+        }
+        ComposeMessage::ToggleFromDropdown => {
+            state.from_dropdown_open = !state.from_dropdown_open;
         }
         ComposeMessage::ShowCc => state.show_cc = true,
         ComposeMessage::ShowBcc => state.show_bcc = true,
@@ -1393,21 +1401,7 @@ fn build_from_row<'a>(
     window_id: iced::window::Id,
     state: &'a ComposeState,
 ) -> Element<'a, Message> {
-    let from_picker = pick_list(
-        state.from_account.clone(),
-        state.from_accounts.clone(),
-        |a: &AccountInfo| a.to_string(),
-    )
-    .on_select(move |account: AccountInfo| {
-        Message::PopOut(
-            window_id,
-            PopOutMessage::Compose(ComposeMessage::FromAccountChanged(account)),
-        )
-    })
-    .text_size(TEXT_MD)
-    .padding(PAD_INPUT)
-    .width(Length::Fill)
-    .style(theme::PickListClass::Ghost.style());
+    let from_picker = from_account_picker(window_id, state);
 
     let from_label = container(
         text("From")
@@ -1448,6 +1442,123 @@ fn build_from_row<'a>(
     }
 
     from_row.into()
+}
+
+/// Build the From-account dropdown trigger plus its popover menu.
+///
+/// Trigger layout: `[ name <email> .... ]  [ account_name ]  [ ⌄ ]`
+/// - name+email is `Length::Fill`, ellipsizes when narrow
+/// - account_name is `Length::Shrink`, rendered in a tertiary (muted) color
+/// - chevron is fixed
+fn from_account_picker<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
+    let main_text = match state.from_account.as_ref() {
+        Some(a) => match a.display_name.as_deref() {
+            Some(n) if !n.is_empty() => format!("{n} <{}>", a.email),
+            _ => a.email.clone(),
+        },
+        None => "Select account".to_string(),
+    };
+    let account_name = state
+        .from_account
+        .as_ref()
+        .and_then(|a| a.account_name.clone())
+        .unwrap_or_default();
+
+    let trigger_row = row![
+        container(
+            text(main_text)
+                .size(TEXT_LG)
+                .style(text::base)
+                .wrapping(iced::widget::text::Wrapping::None)
+                .ellipsis(iced::widget::text::Ellipsis::End)
+        )
+        .width(Length::Fill)
+        .align_y(Alignment::Center),
+        container(
+            text(account_name)
+                .size(TEXT_LG)
+                .style(theme::TextClass::Tertiary.style())
+        )
+        .align_y(Alignment::Center),
+        container(
+            icon::chevron_down()
+                .size(ICON_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .align_y(Alignment::Center),
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
+
+    let trigger = button(trigger_row)
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::ToggleFromDropdown),
+        ))
+        .padding(PAD_INPUT)
+        .width(Length::Fill)
+        .style(theme::ButtonClass::Action.style());
+
+    if !state.from_dropdown_open {
+        return trigger.into();
+    }
+
+    let selected_id = state.from_account.as_ref().map(|a| a.id.clone());
+    let mut items = column![].spacing(SPACE_XXS).width(Length::Fill);
+    for account in &state.from_accounts {
+        let item_main = match account.display_name.as_deref() {
+            Some(n) if !n.is_empty() => format!("{n} <{}>", account.email),
+            _ => account.email.clone(),
+        };
+        let item_meta = account.account_name.clone().unwrap_or_default();
+        let is_selected = selected_id.as_deref() == Some(account.id.as_str());
+        let acc = account.clone();
+        let item = button(
+            row![
+                container(
+                    text(item_main)
+                        .size(TEXT_LG)
+                        .style(text::base)
+                        .wrapping(iced::widget::text::Wrapping::None)
+                        .ellipsis(iced::widget::text::Ellipsis::End)
+                )
+                .width(Length::Fill)
+                .align_y(Alignment::Center),
+                container(
+                    text(item_meta)
+                        .size(TEXT_LG)
+                        .style(theme::TextClass::Tertiary.style())
+                )
+                .align_y(Alignment::Center),
+            ]
+            .spacing(SPACE_XS)
+            .align_y(Alignment::Center),
+        )
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::FromAccountChanged(acc)),
+        ))
+        .padding(PAD_INPUT)
+        .width(Length::Fill)
+        .style(theme::ButtonClass::Dropdown { selected: is_selected }.style());
+        items = items.push(item);
+    }
+
+    let menu = container(items)
+        .padding(PAD_DROPDOWN)
+        .style(theme::ContainerClass::SelectMenu.style())
+        .width(Length::Fill);
+
+    crate::ui::anchored_overlay::anchored_overlay(trigger)
+        .popup(menu)
+        .on_dismiss(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::ToggleFromDropdown),
+        ))
+        .into()
 }
 
 fn build_to_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> Element<'a, Message> {

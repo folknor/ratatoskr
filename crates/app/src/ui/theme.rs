@@ -1510,13 +1510,19 @@ fn style_subtle_divider_rule(theme: &Theme) -> rule::Style {
 
 fn style_ghost_pick_list(theme: &Theme, status: pick_list::Status) -> pick_list::Style {
     let p = theme.palette();
+    let background = match status {
+        pick_list::Status::Hovered | pick_list::Status::Opened { .. } => {
+            iced::Background::Color(p.background.weakest.color)
+        }
+        _ => iced::Background::Color(Color::TRANSPARENT),
+    };
     pick_list::Style {
         text_color: p.background.base.text,
         placeholder_color: p.secondary.weak.color,
         handle_color: p.background.base.text,
-        background: iced::Background::Color(Color::TRANSPARENT),
+        background,
         border: match status {
-            pick_list::Status::Hovered => iced::Border {
+            pick_list::Status::Hovered | pick_list::Status::Opened { .. } => iced::Border {
                 color: p.background.strongest.color.scale_alpha(0.15),
                 width: 1.0,
                 radius: RADIUS_SM.into(),
