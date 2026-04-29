@@ -1517,17 +1517,20 @@ fn build_recipient_row_inner<'a>(
         move |msg| Message::PopOut(window_id, PopOutMessage::Compose(wrap(msg))),
     );
 
-    let field: Element<'a, Message> = if let Some(dropdown) = autocomplete_dropdown {
-        crate::ui::anchored_overlay::anchored_overlay(field)
-            .popup(dropdown)
-            .on_dismiss(Message::PopOut(
-                window_id,
-                PopOutMessage::Compose(ComposeMessage::AutocompleteDismiss),
-            ))
-            .into()
-    } else {
-        field
-    };
+    // Always wrap in AnchoredOverlay (with or without a popup) so the root
+    // widget tag stays stable across autocomplete open/close transitions.
+    // Otherwise the parent row diffs see a different child type and throw
+    // away the inner TokenInputWidget's tree state - including focus.
+    let mut overlay = crate::ui::anchored_overlay::anchored_overlay(field).on_dismiss(
+        Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::AutocompleteDismiss),
+        ),
+    );
+    if let Some(dropdown) = autocomplete_dropdown {
+        overlay = overlay.popup(dropdown);
+    }
+    let field: Element<'a, Message> = overlay.into();
 
     row![
         container(
@@ -1943,11 +1946,7 @@ fn autocomplete_dropdown<'a>(
             .padding(PAD_INPUT)
             .style(row_style);
 
-        items = items.push(
-            container(row_btn)
-                .width(Length::Fill)
-                .height(AUTOCOMPLETE_ROW_HEIGHT),
-        );
+        items = items.push(container(row_btn).width(Length::Fill));
     }
 
     container(scrollable(items).height(Length::Shrink))

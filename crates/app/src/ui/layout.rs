@@ -395,12 +395,14 @@ pub const PAD_TOKEN: Padding = Padding {
 pub const TOKEN_SPACING: f32 = SPACE_XXS;
 /// Spacing between token rows (vertical).
 pub const TOKEN_ROW_SPACING: f32 = SPACE_XXS;
-/// Token input field internal padding.
+/// Token input field internal padding. Horizontal sides match `PAD_INPUT`
+/// so the placeholder/text align with iced's default `text_input` (e.g.
+/// the Subject field next to To/Cc/Bcc in the compose window).
 pub const PAD_TOKEN_INPUT: Padding = Padding {
     top: 4.0,
-    right: 8.0,
+    right: 12.0,
     bottom: 4.0,
-    left: 8.0,
+    left: 12.0,
 };
 /// Minimum width for the text input portion before wrapping.
 pub const TOKEN_TEXT_MIN_WIDTH: f32 = 120.0;

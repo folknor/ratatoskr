@@ -136,8 +136,17 @@ struct TokenInputState {
     token_bounds: Vec<Rectangle>,
     /// Whether the widget is focused.
     is_focused: bool,
+    /// Whether the cursor is currently over the field. Tracked via
+    /// `CursorMoved` events in `update()` so the hover-border draw is
+    /// stable across frames (reading `cursor.is_over()` directly in
+    /// `draw()` misses repaints when nothing else changes).
+    is_hovered: bool,
     /// Tracking a potential drag: (token_id, mouse_down_origin).
     drag_tracking: Option<(TokenId, Point)>,
+    /// Vertical offset applied to chips and the text area when the field
+    /// is taller than the chips need (to match iced text_input's height
+    /// for the same `TEXT_LG`). Computed in `layout()`.
+    chip_v_offset: f32,
 }
 
 // ── Widget struct ───────────────────────────────────────
@@ -202,7 +211,7 @@ fn chip_display_label(token: &Token) -> String {
 /// Uses character count (not byte count) for correct non-ASCII width.
 /// Group tokens include space for the people icon prefix.
 fn estimate_token_width(token: &Token) -> f32 {
-    let avg_char_width = TEXT_MD * TOKEN_AVG_CHAR_WIDTH_FACTOR;
+    let avg_char_width = TEXT_LG * TOKEN_AVG_CHAR_WIDTH_FACTOR;
     let display = chip_display_label(token);
     #[allow(clippy::cast_precision_loss)]
     let text_width = display.chars().count() as f32 * avg_char_width;
@@ -215,7 +224,11 @@ fn estimate_token_width(token: &Token) -> f32 {
 }
 
 /// Compute the text area origin from the token bounds.
-fn text_area_origin(token_bounds: &[Rectangle], field_width: f32) -> (f32, f32) {
+fn text_area_origin(
+    token_bounds: &[Rectangle],
+    field_width: f32,
+    chip_v_offset: f32,
+) -> (f32, f32) {
     if let Some(last) = token_bounds.last() {
         let next_x = last.x + last.width + TOKEN_SPACING;
         let inner_width = field_width - PAD_TOKEN_INPUT.left - PAD_TOKEN_INPUT.right;
@@ -229,7 +242,7 @@ fn text_area_origin(token_bounds: &[Rectangle], field_width: f32) -> (f32, f32) 
             (next_x, last.y)
         }
     } else {
-        (PAD_TOKEN_INPUT.left, PAD_TOKEN_INPUT.top)
+        (PAD_TOKEN_INPUT.left, PAD_TOKEN_INPUT.top + chip_v_offset)
     }
 }
 
@@ -322,7 +335,25 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
             y += TOKEN_HEIGHT + TOKEN_ROW_SPACING;
         }
 
-        let total_height = PAD_TOKEN_INPUT.top + y + TOKEN_HEIGHT + PAD_TOKEN_INPUT.bottom;
+        let raw_chip_height = PAD_TOKEN_INPUT.top + y + TOKEN_HEIGHT + PAD_TOKEN_INPUT.bottom;
+
+        // Match iced text_input(TEXT_LG, PAD_INPUT) for a single-row field
+        // so To/Cc/Bcc and Subject end up the same height. iced's formula:
+        //   padding.top + LineHeight::default().to_absolute(text_size) + padding.bottom
+        // with default LineHeight = Relative(1.3).
+        let single_row_height = PAD_INPUT.top + TEXT_LG * 1.3 + PAD_INPUT.bottom;
+        let total_height = single_row_height.max(raw_chip_height);
+
+        // If the field is taller than chips need (single-row case), shift
+        // chip bounds and the text area down so they sit centered in the
+        // taller slot.
+        let chip_v_offset = ((total_height - raw_chip_height) / 2.0).max(0.0);
+        if chip_v_offset > 0.0 {
+            for bound in &mut state.token_bounds {
+                bound.y += chip_v_offset;
+            }
+        }
+        state.chip_v_offset = chip_v_offset;
 
         layout::Node::new(Size::new(max_width, total_height))
     }
@@ -341,13 +372,17 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
         let bounds = layout.bounds();
         let palette = theme.palette();
 
-        // Field background + border
+        // Field background + border. Match iced's default text_input style
+        // so the To/Cc/Bcc inputs look identical to the Subject text_input
+        // sitting next to them. Hover state comes from `state.is_hovered`
+        // (maintained in `update()`), not a live `cursor.is_over()` read,
+        // so the border tracks the cursor reliably across frames.
         let border_color = if state.is_focused {
-            palette.primary.base.color
-        } else if cursor.is_over(bounds) {
-            palette.background.strongest.color.scale_alpha(0.3)
+            palette.primary.strong.color
+        } else if state.is_hovered {
+            palette.background.base.text
         } else {
-            palette.background.strongest.color.scale_alpha(0.15)
+            palette.background.strong.color
         };
 
         renderer.fill_quad(
@@ -356,11 +391,11 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                 border: border::Border {
                     color: border_color,
                     width: 1.0,
-                    radius: RADIUS_SM.into(),
+                    radius: 2.0.into(),
                 },
                 ..renderer::Quad::default()
             },
-            palette.background.weak.color,
+            palette.background.base.color,
         );
 
         // Draw each token chip
@@ -426,7 +461,7 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                         abs.width - PAD_TOKEN.left - PAD_TOKEN.right - label_x_offset,
                         abs.height,
                     ),
-                    size: iced::Pixels(TEXT_MD),
+                    size: iced::Pixels(TEXT_LG),
                     line_height: iced::advanced::text::LineHeight::default(),
                     font: font::text(),
                     align_x: iced::advanced::text::Alignment::Left,
@@ -436,7 +471,10 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                     ellipsis: iced::advanced::text::Ellipsis::None,
                     hint_factor: None,
                 },
-                Point::new(abs.x + PAD_TOKEN.left + label_x_offset, abs.y),
+                Point::new(
+                    abs.x + PAD_TOKEN.left + label_x_offset,
+                    abs.y + abs.height / 2.0,
+                ),
                 text_color,
                 abs,
             );
@@ -538,13 +576,26 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
             }
 
             // ── Keyboard events (only when focused) ────────
-            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. })
-                if state.is_focused =>
-            {
-                handle_key_press(self, key, modifiers, clipboard, shell);
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key,
+                modifiers,
+                text,
+                ..
+            }) if state.is_focused => {
+                handle_key_press(self, key, modifiers, text.as_deref(), clipboard, shell);
             }
 
             _ => {}
+        }
+
+        // Maintain hover state for the field border. Re-evaluating on every
+        // event the widget sees (mouse moves anywhere, button presses, etc.)
+        // keeps `state.is_hovered` in sync; the explicit redraw request makes
+        // sure the border repaints on the transition.
+        let now_hovered = cursor.position().is_some_and(|p| bounds.contains(p));
+        if state.is_hovered != now_hovered {
+            state.is_hovered = now_hovered;
+            shell.request_redraw();
         }
     }
 
@@ -638,6 +689,7 @@ fn handle_key_press<M: Clone>(
     widget: &TokenInputWidget<'_, M>,
     key: &keyboard::Key,
     modifiers: &keyboard::Modifiers,
+    text: Option<&str>,
     clipboard: &mut dyn Clipboard,
     shell: &mut Shell<'_, M>,
 ) {
@@ -727,12 +779,16 @@ fn handle_key_press<M: Clone>(
             handle_space(widget, shell);
         }
 
-        // Regular character input
+        // Regular character input. Prefer the `text` field from the
+        // KeyPressed event (post-modifier, post-IME) over `Key::Character`,
+        // which only carries the unmodified logical key. Otherwise typing
+        // e.g. Shift+2 on a non-US layout inserts "2" instead of "@".
         keyboard::Key::Character(c) if !modifiers.command() => {
             if widget.selected_token.is_some() {
                 shell.publish((widget.on_message)(TokenInputMessage::DeselectTokens));
             }
-            let new_text = format!("{}{}", widget.text, c.as_str());
+            let to_append = text.unwrap_or(c.as_str());
+            let new_text = format!("{}{}", widget.text, to_append);
             shell.publish((widget.on_message)(TokenInputMessage::TextChanged(
                 new_text,
             )));
@@ -835,7 +891,8 @@ fn draw_text_area(
     palette: &iced::theme::Palette,
     bounds: Rectangle,
 ) {
-    let (text_x, text_y) = text_area_origin(&state.token_bounds, bounds.width);
+    let (text_x, text_y) =
+        text_area_origin(&state.token_bounds, bounds.width, state.chip_v_offset);
 
     let display_text = if widget.text.is_empty() && widget.tokens.is_empty() {
         widget.placeholder
@@ -843,19 +900,24 @@ fn draw_text_area(
         widget.text
     };
 
+    // Match iced's default text_input: placeholder uses
+    // `palette.secondary.base.color`, value uses `palette.background.base.text`.
     let text_color = if widget.text.is_empty() && widget.tokens.is_empty() {
-        palette.background.base.text.scale_alpha(0.4)
+        palette.secondary.base.color
     } else {
         palette.background.base.text
     };
 
     if !display_text.is_empty() {
         let text_area_width = bounds.width - text_x - PAD_TOKEN_INPUT.right;
+        // With align_y::Center the renderer treats `position.y` as the
+        // vertical center of the text. Anchor to the slot's vertical
+        // midpoint so the text actually sits in the middle of the row.
         renderer.fill_text(
             iced::advanced::text::Text {
                 content: display_text.to_string(),
                 bounds: Size::new(text_area_width, TOKEN_HEIGHT),
-                size: iced::Pixels(TEXT_MD),
+                size: iced::Pixels(TEXT_LG),
                 line_height: iced::advanced::text::LineHeight::default(),
                 font: font::text(),
                 align_x: iced::advanced::text::Alignment::Left,
@@ -865,7 +927,10 @@ fn draw_text_area(
                 ellipsis: iced::advanced::text::Ellipsis::None,
                 hint_factor: None,
             },
-            Point::new(bounds.x + text_x, bounds.y + text_y),
+            Point::new(
+                bounds.x + text_x,
+                bounds.y + text_y + TOKEN_HEIGHT / 2.0,
+            ),
             text_color,
             Rectangle {
                 x: bounds.x + text_x,
@@ -883,7 +948,7 @@ fn draw_text_area(
             bounds.x + text_x
         } else {
             let text_width =
-                widget.text.chars().count() as f32 * TEXT_MD * TOKEN_AVG_CHAR_WIDTH_FACTOR;
+                widget.text.chars().count() as f32 * TEXT_LG * TOKEN_AVG_CHAR_WIDTH_FACTOR;
             bounds.x + text_x + text_width
         };
         let cursor_y = bounds.y + text_y + SPACE_XXXS;
