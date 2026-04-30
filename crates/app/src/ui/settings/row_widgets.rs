@@ -197,12 +197,42 @@ pub(super) fn setting_row<'a>(
     control: Element<'a, SettingsMessage>,
     on_press: SettingsMessage,
 ) -> RowBuilder<'a> {
+    setting_row_with_description(label, None, control, on_press)
+}
+
+/// `setting_row` with an optional secondary line beneath the label, matching
+/// `toggle_row`'s two-line layout. The row grows to `SETTINGS_TOGGLE_ROW_HEIGHT`
+/// when a description is present.
+pub(super) fn setting_row_with_description<'a>(
+    label: &'a str,
+    description: Option<&'a str>,
+    control: Element<'a, SettingsMessage>,
+    on_press: SettingsMessage,
+) -> RowBuilder<'a> {
     Box::new(move |position| {
+        let label_col: Element<'a, SettingsMessage> = if let Some(desc) = description {
+            column![
+                text(label).size(TEXT_LG).style(text::base),
+                text(desc)
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Tertiary.style()),
+            ]
+            .spacing(SPACE_XXXS)
+            .into()
+        } else {
+            text(label).size(TEXT_LG).style(text::base).into()
+        };
+
+        let height = if description.is_some() {
+            SETTINGS_TOGGLE_ROW_HEIGHT
+        } else {
+            SETTINGS_ROW_HEIGHT
+        };
+
         button(
             container(
                 row![
-                    container(text(label).size(TEXT_LG).style(text::base))
-                        .align_y(Alignment::Center),
+                    container(label_col).align_y(Alignment::Center),
                     Space::new().width(Length::Fill),
                     control,
                 ]
@@ -210,7 +240,7 @@ pub(super) fn setting_row<'a>(
             )
             .padding(PAD_SETTINGS_ROW)
             .width(Length::Fill)
-            .height(SETTINGS_ROW_HEIGHT)
+            .height(height)
             .align_y(Alignment::Center),
         )
         .on_press(on_press)

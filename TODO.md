@@ -6,8 +6,6 @@
 
 - [ ] **dev-seed calendars** - Obvious.
 
-- [ ] **Settings row help icon** - Add support for a help (?) icon with a tooltip for settings rows. Should anchor to the right side of the label, hugging the label. First candidate: Message Dates.
-
 - [ ] **Settings/People** - The contacts and group lists here need to conform much closer to the spec at docs/contacts/problem-statement.md. We're quite a ways off.
 
 - [ ] **Settings/Notifications** - VIP Senders should move to contact editing, and this should be a toggle button here.
@@ -28,7 +26,7 @@
 
 - [ ] **Collapse individual expanded messages** - Chevron now points up (fixed: added `icon::chevron_up()` at U+E070, swapped in `widgets::expanded_message_card`). Remaining: the button needs a new place to live - probably a very long, thin button that stretches across the entire horizontal space at the top of the message frame. This needs to be unified with the Attachments panel collapsing, which is currently taking up too much vertical space; also too much padding above the Attachments section.
 
-- [ ] **Settings window row hover** - Currently the hover effect for the settings row doesn't use the same border radius as the bottom/top settings rows, which means hovering those looks a bit weird. Root cause: `style_settings_section_container` uses `RADIUS_LG` (8) for the section's outer corners, but `style_action_button` (used by `setting_row`/`toggle_row`/`input_row`) uses `RADIUS_SM` (4) for the row hover background uniformly. Top/bottom rows need radii that match the section's outer corners on the outer edges and stay `RADIUS_SM` on the inner edges. Fix needs new `ButtonClass::ActionTop` / `ActionBottom` / `ActionOnly` variants (or a parameterized style) and `section_inner` to pass each row's position (first/last/middle/only) to the row builders.
+- [ ] **Settings row hover (group editor members)** - The group editor's `group_member_section` (`crates/app/src/ui/settings/tabs.rs`) builds its section manually instead of via `section()`, so its rows still use uniform `RADIUS_SM` hover corners and don't pick up the position-aware styling that the rest of the settings rows now use. Convert it to use `section_untitled` with `RowBuilder` items, or have the helper accept and propagate `RowPosition`.
 
 - [ ] **Settings/Composing: Signatures** - This section needs work.
 

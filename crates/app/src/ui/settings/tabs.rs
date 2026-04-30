@@ -221,8 +221,9 @@ fn general_tab(state: &Settings) -> Element<'_, SettingsMessage> {
                 SettingsMessage::ScaleDragged,
                 Some(SettingsMessage::ScaleReleased),
             ),
-            setting_row(
+            setting_row_with_description(
                 "Message Dates",
+                Some("Relative offset shows \"2h ago\"; Absolute shows the calendar date."),
                 widgets::select(
                     &["Relative Offset", "Absolute"],
                     match state.date_display {
