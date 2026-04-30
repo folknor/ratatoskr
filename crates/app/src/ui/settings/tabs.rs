@@ -1528,8 +1528,8 @@ fn group_filter_row(filter: &str) -> Element<'_, SettingsMessage> {
 /// inside the "Contacts" section between the filter row and the New Contact
 /// button so the list stays compact regardless of how many contacts exist.
 fn contact_list_panel(state: &Settings) -> Element<'_, SettingsMessage> {
-    if state.contacts.is_empty() {
-        return container(
+    let panel: Element<'_, SettingsMessage> = if state.contacts.is_empty() {
+        container(
             text("No contacts yet.")
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
@@ -1540,25 +1540,44 @@ fn contact_list_panel(state: &Settings) -> Element<'_, SettingsMessage> {
         .center_x(Length::Fill)
         .center_y(Length::Fill)
         .style(theme::style_recessed_list_panel)
-        .into();
-    }
+        .into()
+    } else {
+        let mut col = column![]
+            .spacing(PEOPLE_PILL_SPACING)
+            .width(Length::Fill);
+        for contact in &state.contacts {
+            col = col.push(contact_card(contact, &state.managed_accounts));
+        }
 
-    let mut col = column![]
-        .spacing(PEOPLE_PILL_SPACING)
-        .width(Length::Fill);
-    for contact in &state.contacts {
-        col = col.push(contact_card(contact, &state.managed_accounts));
-    }
+        container(
+            scrollable(container(col).padding(PAD_CARD).width(Length::Fill))
+                .direction(iced::widget::scrollable::Direction::Vertical(
+                    iced::widget::scrollable::Scrollbar::new()
+                        .width(6)
+                        .scroller_width(6)
+                        .margin(SPACE_XXS),
+                ))
+                .height(Length::Fill),
+        )
+        .padding(iced::Padding {
+            top: SPACE_XS,
+            right: 0.0,
+            bottom: SPACE_XS,
+            left: 0.0,
+        })
+        .width(Length::Fill)
+        .height(CONTACT_PANEL_HEIGHT)
+        .clip(true)
+        .style(theme::style_recessed_list_panel)
+        .into()
+    };
 
-    container(
-        scrollable(container(col).padding(PAD_CARD).width(Length::Fill))
-            .spacing(SCROLLBAR_SPACING)
-            .height(Length::Fill),
-    )
-    .width(Length::Fill)
-    .height(CONTACT_PANEL_HEIGHT)
-    .style(theme::style_recessed_list_panel)
-    .into()
+    // Inset the panel from the section walls so its rounded corners + border
+    // have breathing room.
+    container(panel)
+        .padding(SPACE_XS)
+        .width(Length::Fill)
+        .into()
 }
 
 fn contact_card<'a>(

@@ -741,7 +741,7 @@ pub fn style_recessed_list_panel(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(p.background.weakest.color.into()),
         border: iced::Border {
-            color: p.background.strongest.color.scale_alpha(0.12),
+            color: p.background.strongest.color.scale_alpha(0.35),
             width: 1.0,
             radius: RADIUS_MD.into(),
         },
@@ -754,7 +754,7 @@ pub fn style_recessed_list_panel(theme: &Theme) -> container::Style {
 pub fn style_pill_card_button(theme: &Theme, status: button::Status) -> button::Style {
     let p = theme.palette();
     let (bg, border_alpha) = match status {
-        button::Status::Hovered => (p.background.weak.color, 0.25),
+        button::Status::Hovered => (p.background.weakest.color, 0.25),
         _ => (p.background.base.color, 0.15),
     };
     button::Style {
