@@ -1321,9 +1321,11 @@ impl App {
 
         if let Some(pop_out) = self.pop_out_windows.get(&window_id) {
             return match pop_out {
-                PopOutWindow::MessageView(state) => {
-                    pop_out::message_view::view_message_window(window_id, state)
-                }
+                PopOutWindow::MessageView(state) => pop_out::message_view::view_message_window(
+                    window_id,
+                    state,
+                    &self.thread_list.bimi_cache,
+                ),
                 PopOutWindow::Compose(state) => {
                     pop_out::compose::view_compose_window(window_id, state)
                 }

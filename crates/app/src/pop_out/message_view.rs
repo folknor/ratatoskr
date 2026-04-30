@@ -218,8 +218,9 @@ impl MessageViewState {
 pub fn view_message_window<'a>(
     window_id: iced::window::Id,
     state: &'a MessageViewState,
+    bimi_cache: &rtsk::bimi::BimiLruCache,
 ) -> Element<'a, Message> {
-    let header = message_view_header(window_id, state);
+    let header = message_view_header(window_id, state, bimi_cache);
     let body = message_view_body(window_id, state);
 
     // Header stays pinned at the top (non-scrolling). The body card takes
@@ -263,6 +264,7 @@ pub fn view_message_window<'a>(
 fn message_view_header<'a>(
     window_id: iced::window::Id,
     state: &'a MessageViewState,
+    bimi_cache: &rtsk::bimi::BimiLruCache,
 ) -> Element<'a, Message> {
     let sender_name = state
         .from_name
@@ -274,8 +276,22 @@ fn message_view_header<'a>(
     // Action buttons + overflow menu (right-aligned on sender name row)
     let actions = action_buttons_with_overflow(window_id, state);
 
-    // From row: name + email + actions
+    // Sender avatar: BIMI logo if cached for the sender's domain, else
+    // initials. Same lookup pattern as the thread list.
+    let bimi_logo = state
+        .from_address
+        .as_deref()
+        .and_then(|addr| addr.rsplit('@').next())
+        .and_then(|domain| match bimi_cache.get(domain) {
+            Some(Some(path)) if path.exists() => Some(path),
+            _ => None,
+        });
+    let avatar =
+        widgets::sender_avatar(sender_name, bimi_logo.as_deref(), AVATAR_MESSAGE_CARD);
+
+    // From row: avatar + (name + email) + actions
     let from_row = row![
+        avatar,
         column![
             text(sender_name)
                 .size(TEXT_LG)
@@ -289,6 +305,7 @@ fn message_view_header<'a>(
         .width(Length::Fill),
         actions,
     ]
+    .spacing(SPACE_SM)
     .align_y(Alignment::Start);
 
     // To row
