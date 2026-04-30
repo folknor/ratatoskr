@@ -42,9 +42,9 @@
 
 - [ ] **Collapse individual expanded messages** - Chevron now points up (fixed: added `icon::chevron_up()` at U+E070, swapped in `widgets::expanded_message_card`). Remaining: the button needs a new place to live - probably a very long, thin button that stretches across the entire horizontal space at the top of the message frame. This needs to be unified with the Attachments panel collapsing, which is currently taking up too much vertical space; also too much padding above the Attachments section.
 
-- [ ] **Attachment "Save All" button** - Needs to have same styling as other in-section buttons in the reading pane, and should not be part of the same interaction block as the collapse/expand header.
+- [x] **Attachment "Save All" button** - Needs to have same styling as other in-section buttons in the reading pane, and should not be part of the same interaction block as the collapse/expand header.
 
-- [ ] **Attachments in the reading pane** - They're not interactive? What's supposed to happen when they are clicked? See spec. Same thing in the pop out message window: not interactive there either.
+- [x] **Attachments in the pop out message window** - Reading pane is done (Open/Save icons outside the card, meta line pops out parent message, versions toggle inline). Pop-out message viewer now has a pinned-bottom panel with `Attachments (N)` header + Save All button, and a wrapping row of compact pills (`[icon] filename size`). On hover, an opaque two-button overlay (Save / Open, rounded to match pill corners) covers the pill. Open / Save / Save All click handlers are stubbed (log only) for now.
 
 - [x] **Email body background override setting** - This needs to apply to the pop out window as well, and we need an inset rounded+bordered area in the pop-out viewing window just like in the reading pane.
 

@@ -89,6 +89,15 @@ pub const ATTACHMENT_HEADER_ACTION_WIDTH: f32 =
 /// the bordered file card. Bumped from the natural ~28px so the icons
 /// have visual breathing room.
 pub const ATTACHMENT_ICON_BTN_WIDTH: f32 = 36.0;
+/// Height of a compact attachment pill in the pop-out message viewer.
+/// Single-row content (`[icon] filename size`), shorter than the reading
+/// pane card since there is no meta line or version list.
+pub const POPOUT_ATTACHMENT_CARD_HEIGHT: f32 = 36.0;
+/// Visible inner-scroll height of the pinned attachments panel in the
+/// pop-out message viewer. Sized to expose ~1.8 rows of cards so the
+/// scrollbar's existence is self-evident.
+pub const POPOUT_ATTACHMENT_PANEL_INNER_HEIGHT: f32 =
+    POPOUT_ATTACHMENT_CARD_HEIGHT * 1.8 + SPACE_XS;
 
 // ── Avatar sizes ───────────────────────────────────────
 // Every avatar_circle() call must reference one of these.

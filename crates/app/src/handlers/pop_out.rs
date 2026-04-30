@@ -244,6 +244,22 @@ fn handle_message_view_update(
             state.remote_content_loaded = true;
             Task::none()
         }
+        MessageViewMessage::HoverAttachment(id) => {
+            state.hovered_attachment_id = id;
+            Task::none()
+        }
+        MessageViewMessage::OpenAttachment(att_id) => {
+            log::info!("OpenAttachment({att_id}): not yet implemented");
+            Task::none()
+        }
+        MessageViewMessage::SaveAttachment(att_id) => {
+            log::info!("SaveAttachment({att_id}): not yet implemented");
+            Task::none()
+        }
+        MessageViewMessage::SaveAllAttachments => {
+            log::info!("SaveAllAttachments: not yet implemented");
+            Task::none()
+        }
         MessageViewMessage::Reply
         | MessageViewMessage::ReplyAll
         | MessageViewMessage::Forward

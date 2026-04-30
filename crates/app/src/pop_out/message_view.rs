@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, row, scrollable, text};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, stack, text};
 use iced::{Alignment, Element, Length, Padding};
 
 use crate::Message;
@@ -58,6 +58,18 @@ pub enum MessageViewMessage {
     CloseContextMenu,
     /// Load remote content in Original HTML mode.
     LoadRemoteContent,
+    /// User clicked Open on an attachment card. The string is the
+    /// attachment id. Stubbed: opens with the system default handler.
+    OpenAttachment(String),
+    /// User clicked Save on an attachment card. The string is the
+    /// attachment id. Stubbed: saves with file picker.
+    SaveAttachment(String),
+    /// User clicked Save All in the attachments panel header. Stubbed:
+    /// saves every attachment with a folder picker.
+    SaveAllAttachments,
+    /// Cursor entered or exited an attachment card. `Some(id)` on enter,
+    /// `None` on exit.
+    HoverAttachment(Option<String>),
     /// No-op (placeholder for unimplemented actions).
     Noop,
 }
@@ -90,6 +102,9 @@ pub struct MessageViewState {
 
     // ── Attachments ──
     pub attachments: Vec<MessageViewAttachment>,
+    /// Attachment id currently under the cursor, if any. Drives the
+    /// hover-overlay (Save / Open buttons) on the compact attachment cards.
+    pub hovered_attachment_id: Option<String>,
 
     // ── Window-local state ──
     pub rendering_mode: RenderingMode,
@@ -137,6 +152,7 @@ impl MessageViewState {
             snippet: msg.snippet.clone(),
             raw_source: None,
             attachments: Vec::new(),
+            hovered_attachment_id: None,
             rendering_mode: default_rendering_mode,
 
             context_menu_open: false,
@@ -172,6 +188,7 @@ impl MessageViewState {
             snippet: None,
             raw_source: None,
             attachments: Vec::new(),
+            hovered_attachment_id: None,
             rendering_mode: default_rendering_mode,
 
             context_menu_open: false,
@@ -206,7 +223,13 @@ pub fn view_message_window<'a>(
     let mode_toggle = rendering_mode_toggle(state.rendering_mode, window_id);
     let body = message_view_body(window_id, state);
 
-    let mut content = column![header, widgets::divider(), mode_toggle].spacing(SPACE_0);
+    // Header + mode toggle stay pinned at the top (non-scrolling).
+    // The body card takes the leftover vertical space and scrolls its own
+    // content; attachments (when present) pin to the bottom below it.
+    let mut content = column![header, widgets::divider(), mode_toggle]
+        .spacing(SPACE_0)
+        .width(Length::Fill)
+        .height(Length::Fill);
 
     // Error banner (shown above body for failed loads / deleted messages)
     if let Some(ref error) = state.error_banner {
@@ -222,14 +245,14 @@ pub fn view_message_window<'a>(
 
     if !state.attachments.is_empty() {
         content = content.push(widgets::divider());
-        content = content.push(message_view_attachments(&state.attachments));
+        content = content.push(message_view_attachments(
+            window_id,
+            &state.attachments,
+            state.hovered_attachment_id.as_deref(),
+        ));
     }
 
-    let scrollable_content = scrollable(content)
-        .spacing(SCROLLBAR_SPACING)
-        .height(Length::Fill);
-
-    container(scrollable_content)
+    container(content)
         .width(Length::Fill)
         .height(Length::Fill)
         .style(theme::ContainerClass::Content.style())
@@ -512,7 +535,11 @@ fn message_view_body<'a>(
                 .as_deref()
                 .or(state.snippet.as_deref())
                 .unwrap_or("(no content)");
-            text(txt).size(TEXT_LG).style(text::secondary).into()
+            text(txt)
+                .size(TEXT_LG)
+                .style(text::secondary)
+                .width(Length::Fill)
+                .into()
         }
         RenderingMode::SimpleHtml | RenderingMode::OriginalHtml => {
             // Phase 3 placeholder: fall back to plain text until HTML pipeline exists
@@ -521,7 +548,11 @@ fn message_view_body<'a>(
                 .as_deref()
                 .or(state.snippet.as_deref())
                 .unwrap_or("(no content)");
-            text(txt).size(TEXT_LG).style(text::secondary).into()
+            text(txt)
+                .size(TEXT_LG)
+                .style(text::secondary)
+                .width(Length::Fill)
+                .into()
         }
         RenderingMode::Source => {
             let src = state.raw_source.as_deref().unwrap_or("Loading source...");
@@ -529,18 +560,28 @@ fn message_view_body<'a>(
                 .size(TEXT_SM)
                 .font(font::monospace())
                 .style(text::secondary)
+                .width(Length::Fill)
                 .into()
         }
     };
 
-    let body_inset = container(body_content)
+    // Inner scrollable wraps just the text so the body card itself can fill
+    // the leftover window height while overflowing text scrolls in place.
+    let scrollable_text = scrollable(body_content)
+        .spacing(SCROLLBAR_SPACING)
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+    let body_inset = container(scrollable_text)
         .padding(PAD_CONTENT)
         .width(Length::Fill)
+        .height(Length::Fill)
         .style(theme::ContainerClass::EmailBody.style());
 
     container(body_inset)
         .padding(PAD_CONTENT)
         .width(Length::Fill)
+        .height(Length::Fill)
         .into()
 }
 
@@ -594,48 +635,218 @@ fn remote_content_banner<'a>(window_id: iced::window::Id) -> Element<'a, Message
 
 // ── Attachments ────────────────────────────────────────
 
-fn message_view_attachments<'a>(attachments: &'a [MessageViewAttachment]) -> Element<'a, Message> {
-    let header = text(format!("Attachments ({})", attachments.len()))
+fn message_view_attachments<'a>(
+    window_id: iced::window::Id,
+    attachments: &'a [MessageViewAttachment],
+    hovered_id: Option<&str>,
+) -> Element<'a, Message> {
+    // ── Panel header: "Attachments (N)" left + Save All right ──
+    let title = text(format!("Attachments ({})", attachments.len()))
         .size(TEXT_MD)
         .font(font::text_semibold())
         .style(text::base);
 
-    let mut col = column![header].spacing(SPACE_XS);
+    let save_all_btn = widgets::action_icon_button(
+        icon::download(),
+        "Save All",
+        Message::PopOut(
+            window_id,
+            PopOutMessage::MessageView(MessageViewMessage::SaveAllAttachments),
+        ),
+    );
 
+    let header_row = row![
+        container(title)
+            .width(Length::Fill)
+            .align_y(Alignment::Center),
+        save_all_btn,
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
+
+    // ── Wrapping row of compact cards ──
+    let mut cards = row![].spacing(SPACE_XS);
     for att in attachments {
-        let filename = att.filename.as_deref().unwrap_or("(unnamed)");
-        let file_ico = file_type_icon(att.mime_type.as_deref());
-        let size_str = format_file_size(att.size);
-        let type_label = mime_to_type_label(att.mime_type.as_deref());
-        let meta = format!("{type_label} \u{00B7} {size_str}");
+        let is_hovered = hovered_id == Some(att.id.as_str());
+        cards = cards.push(compact_attachment_card(window_id, att, is_hovered));
+    }
+    let wrapping_cards = cards.wrap().vertical_spacing(SPACE_XS);
 
-        let card = container(
-            column![
+    let scroll_area = scrollable(container(wrapping_cards).padding(Padding {
+        top: 0.0,
+        right: SCROLLBAR_SPACING,
+        bottom: 0.0,
+        left: 0.0,
+    }))
+    .spacing(SCROLLBAR_SPACING)
+    .width(Length::Fill)
+    .height(Length::Shrink);
+
+    let panel_inner = column![header_row, scroll_area].spacing(SPACE_XS);
+
+    let panel_padding = Padding {
+        top: SPACE_XS,
+        right: PAD_CONTENT.right,
+        bottom: PAD_CONTENT.bottom,
+        left: PAD_CONTENT.left,
+    };
+
+    container(panel_inner)
+        .padding(panel_padding)
+        .width(Length::Fill)
+        .max_height(
+            POPOUT_ATTACHMENT_PANEL_INNER_HEIGHT
+                + panel_padding.top
+                + panel_padding.bottom
+                + 36.0
+                + SPACE_XS,
+        )
+        .into()
+}
+
+/// Compact attachment pill: `[icon] filename size` at rest. On hover, a
+/// semi-transparent overlay (left half = Save, right half = Open) covers
+/// the pill. Width is content-driven so cards size to their filename.
+fn compact_attachment_card<'a>(
+    window_id: iced::window::Id,
+    att: &'a MessageViewAttachment,
+    is_hovered: bool,
+) -> Element<'a, Message> {
+    let filename = att.filename.as_deref().unwrap_or("(unnamed)");
+    let file_ico = file_type_icon(att.mime_type.as_deref());
+    let size_str = format_file_size(att.size);
+
+    // ── At-rest pill content ──
+    let pill_row = row![
+        container(file_ico.size(ICON_MD).style(text::secondary))
+            .align_y(Alignment::Center),
+        container(text(filename).size(TEXT_MD).style(text::base))
+            .align_y(Alignment::Center),
+        container(
+            text(size_str)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .align_y(Alignment::Center),
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
+
+    let pill: Element<'a, Message> = container(pill_row)
+        .padding(Padding {
+            top: 0.0,
+            right: SPACE_SM,
+            bottom: 0.0,
+            left: SPACE_SM,
+        })
+        .height(Length::Fixed(POPOUT_ATTACHMENT_CARD_HEIGHT))
+        .align_y(Alignment::Center)
+        .style(theme::ContainerClass::EmailBody.style())
+        .into();
+
+    let id_for_enter = att.id.clone();
+
+    let inner: Element<'a, Message> = if is_hovered {
+        let save_btn = button(
+            container(
                 row![
-                    container(file_ico.size(ICON_MD).style(text::secondary))
-                        .align_y(Alignment::Center),
-                    container(text(filename).size(TEXT_MD).style(text::base))
-                        .align_y(Alignment::Center),
+                    icon::download().size(ICON_MD).style(text::base),
+                    text("Save").size(TEXT_SM).style(text::base),
                 ]
                 .spacing(SPACE_XS)
                 .align_y(Alignment::Center),
-                text(meta)
-                    .size(TEXT_SM)
-                    .style(theme::TextClass::Tertiary.style()),
-            ]
-            .spacing(SPACE_XXXS),
+            )
+            .center(Length::Fill),
         )
-        .padding(PAD_NAV_ITEM)
-        .style(theme::ContainerClass::Elevated.style())
-        .width(Length::Fill);
-
-        col = col.push(card);
-    }
-
-    container(col)
-        .padding(PAD_CONTENT)
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::MessageView(MessageViewMessage::SaveAttachment(att.id.clone())),
+        ))
+        .style(|theme, status| attachment_overlay_button_style(theme, status, true))
         .width(Length::Fill)
+        .height(Length::Fill);
+
+        let open_btn = button(
+            container(
+                row![
+                    icon::external_link().size(ICON_MD).style(text::base),
+                    text("Open").size(TEXT_SM).style(text::base),
+                ]
+                .spacing(SPACE_XS)
+                .align_y(Alignment::Center),
+            )
+            .center(Length::Fill),
+        )
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::MessageView(MessageViewMessage::OpenAttachment(att.id.clone())),
+        ))
+        .style(|theme, status| attachment_overlay_button_style(theme, status, false))
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+        let overlay = container(
+            row![save_btn, open_btn]
+                .spacing(0.0)
+                .height(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+        stack![pill, overlay].into()
+    } else {
+        pill
+    };
+
+    mouse_area(inner)
+        .on_enter(Message::PopOut(
+            window_id,
+            PopOutMessage::MessageView(MessageViewMessage::HoverAttachment(Some(id_for_enter))),
+        ))
+        .on_exit(Message::PopOut(
+            window_id,
+            PopOutMessage::MessageView(MessageViewMessage::HoverAttachment(None)),
+        ))
         .into()
+}
+
+/// Opaque button style for the hover-overlay action buttons on compact
+/// attachment cards. The two buttons share the pill's rounded corners:
+/// the left button rounds its left side, the right button rounds its
+/// right side. The shared inner edge is square so the two buttons meet
+/// flush.
+fn attachment_overlay_button_style(
+    theme: &iced::Theme,
+    status: button::Status,
+    is_left: bool,
+) -> button::Style {
+    let palette = theme.palette();
+    // Resting bg uses the strong-contrast hover color one palette step
+    // brighter than the panel base. On direct hover the bg shifts another
+    // step so the half being clicked stands out.
+    let bg = match status {
+        button::Status::Hovered | button::Status::Pressed => palette.background.strong.color,
+        _ => palette.background.weak.color,
+    };
+    let radius = if is_left {
+        iced::border::Radius::default()
+            .top_left(RADIUS_MD)
+            .bottom_left(RADIUS_MD)
+    } else {
+        iced::border::Radius::default()
+            .top_right(RADIUS_MD)
+            .bottom_right(RADIUS_MD)
+    };
+    button::Style {
+        background: Some(iced::Background::Color(bg)),
+        text_color: palette.background.base.text,
+        border: iced::Border {
+            radius,
+            ..iced::Border::default()
+        },
+        shadow: iced::Shadow::default(),
+        ..button::Style::default()
+    }
 }
 
 // ── Helpers ────────────────────────────────────────────
