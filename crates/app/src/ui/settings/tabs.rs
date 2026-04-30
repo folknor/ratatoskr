@@ -333,12 +333,11 @@ fn theme_tab(state: &Settings) -> Element<'_, SettingsMessage> {
 
     col = col.push(section(
         "Themes",
-        vec![
+        vec![static_row(
             container(grid)
                 .padding(PAD_SETTINGS_ROW)
-                .width(Length::Fill)
-                .into(),
-        ],
+                .width(Length::Fill),
+        )],
     ));
 
     // Button experiment grid: each candidate next to a Primary for comparison
@@ -391,12 +390,11 @@ fn theme_tab(state: &Settings) -> Element<'_, SettingsMessage> {
 
     col = col.push(section(
         "Button Experiments (section bg)",
-        vec![
+        vec![static_row(
             container(grid)
                 .padding(PAD_SETTINGS_ROW)
-                .width(Length::Fill)
-                .into(),
-        ],
+                .width(Length::Fill),
+        )],
     ));
 
     // Same grid on content/main area background
@@ -561,12 +559,11 @@ fn theme_tab(state: &Settings) -> Element<'_, SettingsMessage> {
 
     col = col.push(section(
         "Semantic Color Pairs",
-        vec![
+        vec![static_row(
             container(semantic_grid)
                 .padding(PAD_SETTINGS_ROW)
-                .width(Length::Fill)
-                .into(),
-        ],
+                .width(Length::Fill),
+        )],
     ));
 
     col.into()
@@ -743,7 +740,7 @@ fn notifications_tab(state: &Settings) -> Element<'_, SettingsMessage> {
             .width(Length::Fill),
         );
 
-        col = col.push(section("VIP Senders", vec![vip_col.into()]));
+        col = col.push(section("VIP Senders", vec![static_row(vip_col)]));
     }
 
     col.into()
@@ -863,7 +860,7 @@ fn account_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
     // Display name
     col = col.push(section(
         "Display Name",
-        vec![
+        vec![static_row(
             container(
                 column![
                     text("Display Name").size(TEXT_SM).style(text::secondary),
@@ -877,9 +874,8 @@ fn account_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
                 .width(Length::Fill),
             )
             .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill)
-            .into(),
-        ],
+            .width(Length::Fill),
+        )],
     ));
 
     // Account color
@@ -923,7 +919,7 @@ fn account_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
 fn account_editor_name_section(editor: &AccountEditor) -> Element<'_, SettingsMessage> {
     section(
         "Account Name",
-        vec![
+        vec![static_row(
             container(
                 column![
                     text("Account Name").size(TEXT_SM).style(text::secondary),
@@ -937,9 +933,8 @@ fn account_editor_name_section(editor: &AccountEditor) -> Element<'_, SettingsMe
                 .width(Length::Fill),
             )
             .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill)
-            .into(),
-        ],
+            .width(Length::Fill),
+        )],
     )
 }
 
@@ -962,12 +957,11 @@ fn account_editor_color_section<'a>(
 
     section(
         "Account Color",
-        vec![
+        vec![static_row(
             container(grid)
                 .padding(PAD_SETTINGS_ROW)
-                .width(Length::Fill)
-                .into(),
-        ],
+                .width(Length::Fill),
+        )],
     )
 }
 
@@ -1008,12 +1002,11 @@ fn account_editor_caldav_section(editor: &AccountEditor) -> Element<'_, Settings
 
     section(
         "Calendar (CalDAV)",
-        vec![
+        vec![static_row(
             container(fields)
                 .padding(PAD_SETTINGS_ROW)
-                .width(Length::Fill)
-                .into(),
-        ],
+                .width(Length::Fill),
+        )],
     )
 }
 
@@ -1021,7 +1014,7 @@ fn account_editor_delete_section(editor: &AccountEditor) -> Element<'_, Settings
     if editor.show_delete_confirmation {
         section(
             "Danger Zone",
-            vec![
+            vec![static_row(
                 container(
                     column![
                         text("Are you sure you want to delete this account?")
@@ -1050,9 +1043,8 @@ fn account_editor_delete_section(editor: &AccountEditor) -> Element<'_, Settings
                     .spacing(SPACE_XS),
                 )
                 .padding(PAD_SETTINGS_ROW)
-                .width(Length::Fill)
-                .into(),
-            ],
+                .width(Length::Fill),
+            )],
         )
     } else {
         section(
@@ -1079,7 +1071,7 @@ fn signature_list_section(state: &Settings) -> Element<'_, SettingsMessage> {
     }
 
     // Group signatures by account_id
-    let mut items: Vec<Element<'_, SettingsMessage>> = Vec::new();
+    let mut items: Vec<RowBuilder<'_>> = Vec::new();
 
     for account in &state.managed_accounts {
         let account_sigs: Vec<&SignatureEntry> = state
@@ -1110,12 +1102,11 @@ fn signature_list_section(state: &Settings) -> Element<'_, SettingsMessage> {
                 }),
         );
 
-        items.push(
+        items.push(static_row(
             container(header_row)
                 .padding(PAD_SETTINGS_ROW)
-                .width(Length::Fill)
-                .into(),
-        );
+                .width(Length::Fill),
+        ));
 
         // Signature rows for this account (with global indices for drag)
         for sig in &account_sigs {
@@ -1129,7 +1120,7 @@ fn signature_list_section(state: &Settings) -> Element<'_, SettingsMessage> {
 
         // Add Signature button for this account
         let aid = account.id.clone();
-        items.push(
+        items.push(Box::new(move |position| {
             button(
                 container(
                     row![
@@ -1150,11 +1141,11 @@ fn signature_list_section(state: &Settings) -> Element<'_, SettingsMessage> {
             )
             .on_press(SettingsMessage::SignatureCreate(aid))
             .padding(PAD_SETTINGS_ROW)
-            .style(theme::ButtonClass::Action.style())
+            .style(move |t, s| theme::style_settings_row_button(t, s, position))
             .width(Length::Fill)
             .height(SETTINGS_ROW_HEIGHT)
-            .into(),
-        );
+            .into()
+        }));
     }
 
     let sig_section = section("Signatures", items);
@@ -1166,83 +1157,85 @@ fn signature_list_section(state: &Settings) -> Element<'_, SettingsMessage> {
         .into()
 }
 
-fn signature_row<'a>(sig: &'a SignatureEntry, global_index: usize) -> Element<'a, SettingsMessage> {
-    let sig_id = sig.id.clone();
+fn signature_row<'a>(sig: &'a SignatureEntry, global_index: usize) -> RowBuilder<'a> {
+    Box::new(move |position| {
+        let sig_id = sig.id.clone();
 
-    let mut label_parts =
-        column![text(&sig.name).size(TEXT_LG).style(text::base),].spacing(SPACE_XXXS);
+        let mut label_parts =
+            column![text(&sig.name).size(TEXT_LG).style(text::base),].spacing(SPACE_XXXS);
 
-    // Show a preview snippet of the body (plain text, first 60 chars)
-    let preview = sig.body_text.as_deref().unwrap_or(&sig.body_html);
-    let snippet: String = preview.chars().take(60).collect();
-    if !snippet.is_empty() {
-        label_parts = label_parts.push(
-            text(snippet)
-                .size(TEXT_SM)
-                .style(theme::TextClass::Tertiary.style()),
-        );
-    }
+        // Show a preview snippet of the body (plain text, first 60 chars)
+        let preview = sig.body_text.as_deref().unwrap_or(&sig.body_html);
+        let snippet: String = preview.chars().take(60).collect();
+        if !snippet.is_empty() {
+            label_parts = label_parts.push(
+                text(snippet)
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Tertiary.style()),
+            );
+        }
 
-    let mut content = row![].spacing(SPACE_SM).align_y(Alignment::Center);
+        let mut content = row![].spacing(SPACE_SM).align_y(Alignment::Center);
 
-    // Drag grip handle
-    content = content.push(
-        mouse_area(
-            container(icon::grip_vertical().size(ICON_MD).style(text::secondary))
-                .align_x(Alignment::Center)
-                .align_y(Alignment::Center),
-        )
-        .on_press(SettingsMessage::SignatureDragGripPress(global_index))
-        .interaction(iced::mouse::Interaction::Grab),
-    );
-
-    content = content.push(
-        container(label_parts)
-            .align_y(Alignment::Center)
-            .width(Length::Fill),
-    );
-
-    // Default / Reply default badges
-    if sig.is_default {
+        // Drag grip handle
         content = content.push(
-            container(text("Default").size(TEXT_XS).style(text::secondary))
-                .padding(PAD_BADGE)
-                .style(theme::ContainerClass::KeyBadge.style()),
+            mouse_area(
+                container(icon::grip_vertical().size(ICON_MD).style(text::secondary))
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center),
+            )
+            .on_press(SettingsMessage::SignatureDragGripPress(global_index))
+            .interaction(iced::mouse::Interaction::Grab),
         );
-    }
-    if sig.is_reply_default {
-        content = content.push(
-            container(text("Reply default").size(TEXT_XS).style(text::secondary))
-                .padding(PAD_BADGE)
-                .style(theme::ContainerClass::KeyBadge.style()),
-        );
-    }
 
-    // Remove button - opens editor sheet with delete confirmation
-    let del_id = sig.id.clone();
-    content = content.push(
+        content = content.push(
+            container(label_parts)
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
+        );
+
+        // Default / Reply default badges
+        if sig.is_default {
+            content = content.push(
+                container(text("Default").size(TEXT_XS).style(text::secondary))
+                    .padding(PAD_BADGE)
+                    .style(theme::ContainerClass::KeyBadge.style()),
+            );
+        }
+        if sig.is_reply_default {
+            content = content.push(
+                container(text("Reply default").size(TEXT_XS).style(text::secondary))
+                    .padding(PAD_BADGE)
+                    .style(theme::ContainerClass::KeyBadge.style()),
+            );
+        }
+
+        // Remove button - opens editor sheet with delete confirmation
+        let del_id = sig.id.clone();
+        content = content.push(
+            button(
+                container(icon::x().size(ICON_MD).style(text::secondary))
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center),
+            )
+            .on_press(SettingsMessage::SignatureDelete(del_id))
+            .padding(PAD_ICON_BTN)
+            .style(theme::ButtonClass::BareIcon.style()),
+        );
+
         button(
-            container(icon::x().size(ICON_MD).style(text::secondary))
-                .align_x(Alignment::Center)
+            container(content)
+                .padding(PAD_SETTINGS_ROW)
+                .width(Length::Fill)
+                .height(SETTINGS_TOGGLE_ROW_HEIGHT)
                 .align_y(Alignment::Center),
         )
-        .on_press(SettingsMessage::SignatureDelete(del_id))
-        .padding(PAD_ICON_BTN)
-        .style(theme::ButtonClass::BareIcon.style()),
-    );
-
-    button(
-        container(content)
-            .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill)
-            .height(SETTINGS_TOGGLE_ROW_HEIGHT)
-            .align_y(Alignment::Center),
-    )
-    .on_press(SettingsMessage::SignatureEdit(sig_id))
-    .padding(0)
-    .style(theme::ButtonClass::Action.style())
-    .width(Length::Fill)
-    .into()
+        .on_press(SettingsMessage::SignatureEdit(sig_id))
+        .padding(0)
+        .style(move |t, s| theme::style_settings_row_button(t, s, position))
+        .width(Length::Fill)
+        .into()
+    })
 }
 
 // ── Signature editor sheet ─────────────────────────────
@@ -1277,7 +1270,7 @@ fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
     // Name field
     col = col.push(section(
         "Name",
-        vec![
+        vec![static_row(
             container(
                 undoable_text_input("Signature name", editor.name.text())
                     .id("sig-name")
@@ -1290,9 +1283,8 @@ fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
                     .width(Length::Fill),
             )
             .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill)
-            .into(),
-        ],
+            .width(Length::Fill),
+        )],
     ));
 
     // Default checkboxes
@@ -1317,7 +1309,7 @@ fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
     // Formatting toolbar + rich text editor
     col = col.push(section(
         "Content",
-        vec![
+        vec![static_row(
             container(column![
                 text("Signature body")
                     .size(TEXT_SM)
@@ -1337,9 +1329,8 @@ fn signature_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
                 .width(Length::Fill),
             ])
             .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill)
-            .into(),
-        ],
+            .width(Length::Fill),
+        )],
     ));
 
     // Action buttons
@@ -1455,10 +1446,10 @@ fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         .max_width(SETTINGS_CONTENT_MAX_WIDTH);
 
     // ── Contacts section ──
-    let mut contact_items: Vec<Element<'_, SettingsMessage>> = Vec::new();
+    let mut contact_items: Vec<RowBuilder<'_>> = Vec::new();
 
     // Filter input
-    contact_items.push(contact_filter_row(&state.contact_filter));
+    contact_items.push(static_row(contact_filter_row(&state.contact_filter)));
 
     // Contact cards
     for contact in &state.contacts {
@@ -1486,10 +1477,10 @@ fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     ));
 
     // ── Groups section ──
-    let mut group_items: Vec<Element<'_, SettingsMessage>> = Vec::new();
+    let mut group_items: Vec<RowBuilder<'_>> = Vec::new();
 
     // Filter input
-    group_items.push(group_filter_row(&state.group_filter));
+    group_items.push(static_row(group_filter_row(&state.group_filter)));
 
     // Group cards
     for group in &state.groups {
@@ -1497,7 +1488,10 @@ fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     }
 
     // New Group button
-    group_items.push(people_add_button("New Group", SettingsMessage::GroupCreate));
+    group_items.push(people_add_button(
+        "New Group",
+        SettingsMessage::GroupCreate,
+    ));
 
     col = col.push(section("Groups", group_items));
 
@@ -1534,7 +1528,8 @@ fn group_filter_row(filter: &str) -> Element<'_, SettingsMessage> {
     .into()
 }
 
-fn contact_card(contact: &crate::db::ContactEntry) -> Element<'_, SettingsMessage> {
+fn contact_card(contact: &crate::db::ContactEntry) -> RowBuilder<'_> {
+    Box::new(move |position| {
     let name = contact.display_name.as_deref().unwrap_or("(no name)");
     let id = contact.id.clone();
 
@@ -1623,12 +1618,14 @@ fn contact_card(contact: &crate::db::ContactEntry) -> Element<'_, SettingsMessag
     )
     .on_press(SettingsMessage::ContactClick(id))
     .padding(0)
-    .style(theme::ButtonClass::Action.style())
+    .style(move |t, s| theme::style_settings_row_button(t, s, position))
     .width(Length::Fill)
     .into()
+    })
 }
 
-fn group_card(group: &crate::db::GroupEntry) -> Element<'_, SettingsMessage> {
+fn group_card(group: &crate::db::GroupEntry) -> RowBuilder<'_> {
+    Box::new(move |position| {
     let id = group.id.clone();
     let member_label = if group.member_count == 1 {
         "1 member".to_string()
@@ -1666,36 +1663,39 @@ fn group_card(group: &crate::db::GroupEntry) -> Element<'_, SettingsMessage> {
     )
     .on_press(SettingsMessage::GroupClick(id))
     .padding(0)
-    .style(theme::ButtonClass::Action.style())
+    .style(move |t, s| theme::style_settings_row_button(t, s, position))
     .width(Length::Fill)
     .into()
+    })
 }
 
-fn people_add_button(label: &str, on_press: SettingsMessage) -> Element<'_, SettingsMessage> {
-    button(
-        container(
-            row![
-                icon::plus().size(ICON_MD).style(text::base),
-                text(label)
-                    .size(TEXT_LG)
-                    .style(text::base)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..crate::font::text()
-                    }),
-            ]
-            .spacing(SPACE_XS)
+fn people_add_button(label: &str, on_press: SettingsMessage) -> RowBuilder<'_> {
+    Box::new(move |position| {
+        button(
+            container(
+                row![
+                    icon::plus().size(ICON_MD).style(text::base),
+                    text(label)
+                        .size(TEXT_LG)
+                        .style(text::base)
+                        .font(iced::Font {
+                            weight: iced::font::Weight::Bold,
+                            ..crate::font::text()
+                        }),
+                ]
+                .spacing(SPACE_XS)
+                .align_y(Alignment::Center),
+            )
+            .center_x(Length::Fill)
             .align_y(Alignment::Center),
         )
-        .center_x(Length::Fill)
-        .align_y(Alignment::Center),
-    )
-    .on_press(on_press)
-    .padding(PAD_SETTINGS_ROW)
-    .style(theme::ButtonClass::Action.style())
-    .width(Length::Fill)
-    .height(SETTINGS_ROW_HEIGHT)
-    .into()
+        .on_press(on_press)
+        .padding(PAD_SETTINGS_ROW)
+        .style(move |t, s| theme::style_settings_row_button(t, s, position))
+        .width(Length::Fill)
+        .height(SETTINGS_ROW_HEIGHT)
+        .into()
+    })
 }
 
 // ── Contact editor sheet ───────────────────────────────
@@ -1837,22 +1837,23 @@ fn contact_field_input<'a>(
     placeholder: &'a str,
     value: &'a str,
     field: ContactField,
-) -> Element<'a, SettingsMessage> {
-    container(column![
-        text(label)
-            .size(TEXT_SM)
-            .style(theme::TextClass::Tertiary.style()),
-        Space::new().height(SPACE_XXXS),
-        text_input(placeholder, value)
-            .on_input(move |v| SettingsMessage::ContactEditorFieldChanged(field.clone(), v))
-            .size(TEXT_LG)
-            .padding(PAD_INPUT)
-            .style(theme::TextInputClass::Settings.style())
-            .width(Length::Fill),
-    ])
-    .padding(PAD_SETTINGS_ROW)
-    .width(Length::Fill)
-    .into()
+) -> RowBuilder<'a> {
+    static_row(
+        container(column![
+            text(label)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+            Space::new().height(SPACE_XXXS),
+            text_input(placeholder, value)
+                .on_input(move |v| SettingsMessage::ContactEditorFieldChanged(field.clone(), v))
+                .size(TEXT_LG)
+                .padding(PAD_INPUT)
+                .style(theme::TextInputClass::Settings.style())
+                .width(Length::Fill),
+        ])
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill),
+    )
 }
 
 fn contact_editor_buttons<'a>(
@@ -1953,7 +1954,7 @@ fn group_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
     // Group name
     col = col.push(section(
         "Name",
-        vec![
+        vec![static_row(
             container(
                 text_input("Group name", &editor.name)
                     .on_input(SettingsMessage::GroupEditorNameChanged)
@@ -1963,9 +1964,8 @@ fn group_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
                     .width(Length::Fill),
             )
             .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill)
-            .into(),
-        ],
+            .width(Length::Fill),
+        )],
     ));
 
     // Members section
@@ -2169,7 +2169,7 @@ fn shortcuts_tab<'a>() -> Element<'a, SettingsMessage> {
         .max_width(SETTINGS_CONTENT_MAX_WIDTH);
 
     for (category, items) in sections {
-        let rows: Vec<Element<'_, SettingsMessage>> = items
+        let rows: Vec<RowBuilder<'_>> = items
             .iter()
             .map(|(desc, key)| {
                 settings_row_container(
@@ -2265,36 +2265,37 @@ fn ai_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         col = col.push(section(
             "API Key",
             vec![
-                container(
-                    column![
-                        text(key_label).size(TEXT_LG).style(text::base),
-                        Space::new().height(SPACE_XXS),
-                        row![
-                            undoable_text_input("", state.ai_api_key.text())
-                                .on_input(SettingsMessage::AiApiKeyChanged)
-                                .on_undo(SettingsMessage::UndoInput(InputField::AiApiKey))
-                                .on_redo(SettingsMessage::RedoInput(InputField::AiApiKey))
-                                .secure(true)
-                                .size(TEXT_LG)
-                                .padding(PAD_INPUT)
-                                .style(theme::TextInputClass::Settings.style())
-                                .width(Length::Fill),
-                            Space::new().width(SPACE_XS),
-                            button(
-                                text(if state.ai_key_saved { "Saved" } else { "Save" })
-                                    .size(TEXT_LG),
-                            )
-                            .on_press(SettingsMessage::SaveAiSettings)
-                            .padding(PAD_ICON_BTN)
-                            .style(theme::ButtonClass::Secondary.style()),
+                static_row(
+                    container(
+                        column![
+                            text(key_label).size(TEXT_LG).style(text::base),
+                            Space::new().height(SPACE_XXS),
+                            row![
+                                undoable_text_input("", state.ai_api_key.text())
+                                    .on_input(SettingsMessage::AiApiKeyChanged)
+                                    .on_undo(SettingsMessage::UndoInput(InputField::AiApiKey))
+                                    .on_redo(SettingsMessage::RedoInput(InputField::AiApiKey))
+                                    .secure(true)
+                                    .size(TEXT_LG)
+                                    .padding(PAD_INPUT)
+                                    .style(theme::TextInputClass::Settings.style())
+                                    .width(Length::Fill),
+                                Space::new().width(SPACE_XS),
+                                button(
+                                    text(if state.ai_key_saved { "Saved" } else { "Save" })
+                                        .size(TEXT_LG),
+                                )
+                                .on_press(SettingsMessage::SaveAiSettings)
+                                .padding(PAD_ICON_BTN)
+                                .style(theme::ButtonClass::Secondary.style()),
+                            ]
+                            .align_y(Alignment::Center),
                         ]
-                        .align_y(Alignment::Center),
-                    ]
-                    .spacing(SPACE_XXXS),
-                )
-                .padding(PAD_SETTINGS_ROW)
-                .width(Length::Fill)
-                .into(),
+                        .spacing(SPACE_XXXS),
+                    )
+                    .padding(PAD_SETTINGS_ROW)
+                    .width(Length::Fill),
+                ),
                 setting_row(
                     "Model",
                     widgets::select(
@@ -2415,7 +2416,7 @@ fn about_tab<'a>() -> Element<'a, SettingsMessage> {
         )],
     ));
 
-    col = col.push(section("License", vec![
+    col = col.push(section("License", vec![static_row(
         container(
             column![
                 text("Apache License 2.0").size(TEXT_LG).style(text::base),
@@ -2432,8 +2433,8 @@ fn about_tab<'a>() -> Element<'a, SettingsMessage> {
                     .size(TEXT_SM)
                     .style(theme::TextClass::Tertiary.style()),
             ]
-        ).padding(PAD_SETTINGS_ROW).into(),
-    ]));
+        ).padding(PAD_SETTINGS_ROW),
+    )]));
 
     col = col.push(section(
         "Links",
@@ -2503,7 +2504,10 @@ fn accounts_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     .width(Length::Fill)
     .height(SETTINGS_ROW_HEIGHT);
 
-    col = col.push(section("Accounts", vec![account_list, add_btn.into()]));
+    col = col.push(section(
+        "Accounts",
+        vec![static_row(account_list), static_row(add_btn)],
+    ));
 
     col.into()
 }
@@ -2680,7 +2684,7 @@ fn import_step_file_select(_wizard: &ImportWizardState) -> Element<'_, SettingsM
     section("Select File", items)
 }
 
-fn import_file_select_row() -> Element<'static, SettingsMessage> {
+fn import_file_select_row() -> RowBuilder<'static> {
     let description = "Select a .csv or .vcf file to import contacts from.";
     settings_row_container(
         SETTINGS_TOGGLE_ROW_HEIGHT,
@@ -2745,19 +2749,19 @@ fn import_file_info_row(path: &str) -> Element<'_, SettingsMessage> {
 }
 
 fn import_header_toggle(has_header: bool) -> Element<'static, SettingsMessage> {
-    toggle_row(
+    build_row(toggle_row(
         "First row is a header",
         "Enable if the first row contains column names, not data.",
         has_header,
         SettingsMessage::ImportToggleHeader,
-    )
+    ))
 }
 
 fn import_mapping_table<'a>(
     preview: &'a import::ImportPreview,
     mappings: &'a [ImportContactField],
 ) -> Element<'a, SettingsMessage> {
-    let mut items: Vec<Element<'a, SettingsMessage>> = Vec::new();
+    let mut items: Vec<RowBuilder<'a>> = Vec::new();
 
     // Header row: column names with mapping dropdowns
     for (i, header) in preview.headers.iter().enumerate() {
@@ -2784,39 +2788,43 @@ fn import_column_mapping_row(
     index: usize,
     header: &str,
     current: ImportContactField,
-) -> Element<'_, SettingsMessage> {
+) -> RowBuilder<'_> {
     let header_owned = header.to_string();
     let selected = current.label().to_string();
 
-    button(
-        container(
-            row![
-                container(text(header_owned).size(TEXT_LG).style(text::base))
+    Box::new(move |position| {
+        button(
+            container(
+                row![
+                    container(text(header_owned).size(TEXT_LG).style(text::base))
+                        .align_y(Alignment::Center)
+                        .width(Length::FillPortion(1)),
+                    container(
+                        text(format!("-> {selected}"))
+                            .size(TEXT_LG)
+                            .style(text::primary),
+                    )
                     .align_y(Alignment::Center)
                     .width(Length::FillPortion(1)),
-                container(
-                    text(format!("-> {selected}"))
-                        .size(TEXT_LG)
-                        .style(text::primary),
-                )
-                .align_y(Alignment::Center)
-                .width(Length::FillPortion(1)),
-            ]
+                ]
+                .align_y(Alignment::Center),
+            )
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .height(SETTINGS_ROW_HEIGHT)
             .align_y(Alignment::Center),
         )
-        .padding(PAD_SETTINGS_ROW)
+        .on_press(SettingsMessage::ImportMappingChanged(
+            index,
+            cycle_import_field(current),
+        ))
+        .padding(0)
+        .style(move |theme, status| {
+            theme::style_settings_row_button(theme, status, position)
+        })
         .width(Length::Fill)
-        .height(SETTINGS_ROW_HEIGHT)
-        .align_y(Alignment::Center),
-    )
-    .on_press(SettingsMessage::ImportMappingChanged(
-        index,
-        cycle_import_field(current),
-    ))
-    .padding(0)
-    .style(theme::ButtonClass::Action.style())
-    .width(Length::Fill)
-    .into()
+        .into()
+    })
 }
 
 /// Cycle through import field options on click.
@@ -2827,7 +2835,7 @@ fn cycle_import_field(current: ImportContactField) -> ImportContactField {
     all[next_idx]
 }
 
-fn import_sample_header() -> Element<'static, SettingsMessage> {
+fn import_sample_header<'a>() -> RowBuilder<'a> {
     settings_row_container(
         SETTINGS_ROW_HEIGHT,
         text("Preview (first rows)")
@@ -2840,7 +2848,7 @@ fn import_sample_header() -> Element<'static, SettingsMessage> {
     )
 }
 
-fn import_sample_row(row: &[String]) -> Element<'_, SettingsMessage> {
+fn import_sample_row(row: &[String]) -> RowBuilder<'_> {
     let display = row.join("  |  ");
     settings_row_container(
         SETTINGS_ROW_HEIGHT,
@@ -2858,12 +2866,12 @@ fn import_preview_stats<'a>(
     } else {
         "No Email column mapped. Map at least one column to Email.".to_string()
     };
-    settings_row_container(
+    build_row(settings_row_container(
         SETTINGS_ROW_HEIGHT,
         text(status)
             .size(TEXT_LG)
             .style(if has_email { text::base } else { text::danger }),
-    )
+    ))
 }
 
 fn import_account_selector<'a>(
@@ -2917,12 +2925,12 @@ fn import_account_selector<'a>(
 }
 
 fn import_update_toggle(update_existing: bool) -> Element<'static, SettingsMessage> {
-    toggle_row(
+    build_row(toggle_row(
         "Update existing contacts",
         "When a duplicate email is found, update the existing contact with imported data.",
         update_existing,
         SettingsMessage::ImportToggleUpdateExisting,
-    )
+    ))
 }
 
 fn import_execute_button() -> Element<'static, SettingsMessage> {
@@ -2961,13 +2969,13 @@ fn import_step_vcf_preview<'a>(
 
     let stat_text =
         format!("{total} contacts found. {valid_count} with valid email, {skipped} without.",);
-    col = col.push(settings_row_container(
+    col = col.push(build_row(settings_row_container(
         SETTINGS_ROW_HEIGHT,
         text(stat_text).size(TEXT_LG).style(text::base),
-    ));
+    )));
 
     // Preview first 10 contacts
-    let mut preview_items: Vec<Element<'a, SettingsMessage>> = Vec::new();
+    let mut preview_items: Vec<RowBuilder<'a>> = Vec::new();
     for contact in wizard.vcf_contacts.iter().take(10) {
         preview_items.push(import_vcf_contact_row(contact));
     }
@@ -2987,7 +2995,7 @@ fn import_step_vcf_preview<'a>(
     col.into()
 }
 
-fn import_vcf_contact_row(contact: &import::ImportedContact) -> Element<'_, SettingsMessage> {
+fn import_vcf_contact_row(contact: &import::ImportedContact) -> RowBuilder<'_> {
     let name = contact
         .effective_display_name()
         .unwrap_or_else(|| "(no name)".to_string());
@@ -3019,7 +3027,7 @@ fn import_vcf_contact_row(contact: &import::ImportedContact) -> Element<'_, Sett
 }
 
 fn import_step_importing() -> Element<'static, SettingsMessage> {
-    settings_row_container(
+    build_row(settings_row_container(
         SETTINGS_TOGGLE_ROW_HEIGHT,
         column![
             text("Importing contacts...")
@@ -3030,14 +3038,14 @@ fn import_step_importing() -> Element<'static, SettingsMessage> {
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         ],
-    )
+    ))
 }
 
 fn import_step_summary(wizard: &ImportWizardState) -> Element<'_, SettingsMessage> {
     let mut col = column![].spacing(SPACE_LG).width(Length::Fill);
 
     if let Some(ref result) = wizard.result {
-        let mut stats: Vec<Element<'_, SettingsMessage>> = Vec::new();
+        let mut stats: Vec<RowBuilder<'_>> = Vec::new();
         stats.push(import_stat_row("Imported", result.imported));
         if result.updated > 0 {
             stats.push(import_stat_row("Updated", result.updated));
@@ -3076,7 +3084,7 @@ fn import_step_summary(wizard: &ImportWizardState) -> Element<'_, SettingsMessag
     col.into()
 }
 
-fn import_stat_row(label: &str, count: usize) -> Element<'_, SettingsMessage> {
+fn import_stat_row(label: &str, count: usize) -> RowBuilder<'_> {
     settings_row_container(
         SETTINGS_ROW_HEIGHT,
         row![

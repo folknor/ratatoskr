@@ -701,6 +701,68 @@ fn style_action_button(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+/// Position of a row within a settings section, controlling which corners
+/// match the section's outer `RADIUS_LG` rounding vs. the inner `RADIUS_SM`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowPosition {
+    Top,
+    Middle,
+    Bottom,
+    Only,
+}
+
+impl RowPosition {
+    pub fn radii(self) -> border::Radius {
+        let outer = RADIUS_LG;
+        let inner = RADIUS_SM;
+        match self {
+            Self::Top => border::Radius::default()
+                .top_left(outer)
+                .top_right(outer)
+                .bottom_left(inner)
+                .bottom_right(inner),
+            Self::Bottom => border::Radius::default()
+                .top_left(inner)
+                .top_right(inner)
+                .bottom_left(outer)
+                .bottom_right(outer),
+            Self::Only => border::Radius::new(outer),
+            Self::Middle => border::Radius::new(inner),
+        }
+    }
+}
+
+/// Position-aware variant of `style_action_button` for settings rows. Outer
+/// corners use `RADIUS_LG` (matching the section container); inner corners
+/// stay `RADIUS_SM` so adjacent rows share a sharper seam.
+pub fn style_settings_row_button(
+    theme: &Theme,
+    status: button::Status,
+    position: RowPosition,
+) -> button::Style {
+    let p = theme.palette();
+    let radius = position.radii();
+    match status {
+        button::Status::Hovered => button::Style {
+            background: Some(p.background.weak.color.into()),
+            text_color: p.background.base.text,
+            border: iced::Border {
+                radius,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        _ => button::Style {
+            text_color: p.secondary.base.color,
+            border: iced::Border {
+                radius,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    }
+}
+
 fn style_collapsed_message_button(theme: &Theme, status: button::Status) -> button::Style {
     let p = theme.palette();
     match status {

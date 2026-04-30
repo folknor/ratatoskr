@@ -7,15 +7,60 @@ use crate::icon;
 use crate::ui::animated_toggler::animated_toggler;
 use crate::ui::layout::*;
 use crate::ui::theme;
+use crate::ui::theme::RowPosition;
 use crate::ui::undoable_text_input::undoable_text_input;
 
 use super::types::*;
+
+// ── Row builder type ────────────────────────────────────
+//
+// Each section item is a closure that receives the row's `RowPosition`
+// (Top/Middle/Bottom/Only) so its hover background can match the section's
+// `RADIUS_LG` outer corners while keeping `RADIUS_SM` on inner seams.
+pub(super) type RowBuilder<'a> =
+    Box<dyn FnOnce(RowPosition) -> Element<'a, SettingsMessage> + 'a>;
+
+/// Wrap a pre-built `Element` so it can be passed alongside position-aware
+/// row builders. Position is ignored - used for items that don't have hover
+/// styling (sliders, info rows, externally-built elements).
+pub(super) fn static_row<'a, E>(elem: E) -> RowBuilder<'a>
+where
+    E: Into<Element<'a, SettingsMessage>> + 'a,
+{
+    Box::new(move |_pos| elem.into())
+}
+
+/// Materialize a `RowBuilder` as an `Element` outside of a section context
+/// (assumes `RowPosition::Only`). Use when a builder is pushed onto a plain
+/// `column!` rather than into a `section()` items vec.
+pub(super) fn build_row<'a>(b: RowBuilder<'a>) -> Element<'a, SettingsMessage> {
+    b(RowPosition::Only)
+}
+
+/// Returns the position for index `i` in a list of length `n`.
+fn position_for(i: usize, n: usize) -> RowPosition {
+    match (n, i) {
+        (1, _) => RowPosition::Only,
+        (_, 0) => RowPosition::Top,
+        (_, last) if last + 1 == n => RowPosition::Bottom,
+        _ => RowPosition::Middle,
+    }
+}
+
+/// Closure factory: builds the action-button style for a settings row at
+/// the given position, capturing `position` so the closure satisfies
+/// iced's `'static`-friendly style fn signature.
+fn settings_row_style(
+    position: RowPosition,
+) -> impl Fn(&iced::Theme, button::Status) -> button::Style + 'static {
+    move |theme, status| theme::style_settings_row_button(theme, status, position)
+}
 
 // ── Shared setting widgets ──────────────────────────────
 
 pub(super) fn section<'a>(
     title: &'a str,
-    items: Vec<Element<'a, SettingsMessage>>,
+    items: Vec<RowBuilder<'a>>,
 ) -> Element<'a, SettingsMessage> {
     section_inner(Some(title), None, None, items)
 }
@@ -23,7 +68,7 @@ pub(super) fn section<'a>(
 pub(super) fn section_with_subtitle<'a>(
     title: &'a str,
     subtitle: &'a str,
-    items: Vec<Element<'a, SettingsMessage>>,
+    items: Vec<RowBuilder<'a>>,
 ) -> Element<'a, SettingsMessage> {
     section_inner(Some(title), Some(subtitle), None, items)
 }
@@ -31,13 +76,13 @@ pub(super) fn section_with_subtitle<'a>(
 pub(super) fn section_with_help<'a>(
     title: &'a str,
     help: SectionHelp<'a>,
-    items: Vec<Element<'a, SettingsMessage>>,
+    items: Vec<RowBuilder<'a>>,
 ) -> Element<'a, SettingsMessage> {
     section_inner(Some(title), None, Some(help), items)
 }
 
 pub(super) fn section_untitled<'a>(
-    items: Vec<Element<'a, SettingsMessage>>,
+    items: Vec<RowBuilder<'a>>,
 ) -> Element<'a, SettingsMessage> {
     section_inner(None, None, None, items)
 }
@@ -53,15 +98,16 @@ fn section_inner<'a>(
     title: Option<&'a str>,
     subtitle: Option<&'a str>,
     help: Option<SectionHelp<'a>>,
-    items: Vec<Element<'a, SettingsMessage>>,
+    items: Vec<RowBuilder<'a>>,
 ) -> Element<'a, SettingsMessage> {
+    let n = items.len();
     let mut col = column![].width(Length::Fill).padding(1);
-    for (i, item) in items.into_iter().enumerate() {
+    for (i, builder) in items.into_iter().enumerate() {
         if i > 0 {
             col =
                 col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
         }
-        col = col.push(item);
+        col = col.push(builder(position_for(i, n)));
     }
     let section_box = container(col)
         .width(Length::Fill)
@@ -134,39 +180,45 @@ fn section_inner<'a>(
 pub(super) fn settings_row_container<'a>(
     height: f32,
     content: impl Into<iced::Element<'a, SettingsMessage>>,
-) -> Element<'a, SettingsMessage> {
-    container(content)
-        .padding(PAD_SETTINGS_ROW)
-        .width(Length::Fill)
-        .height(height)
-        .align_y(Alignment::Center)
-        .into()
+) -> RowBuilder<'a> {
+    let content = content.into();
+    Box::new(move |_pos| {
+        container(content)
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .height(height)
+            .align_y(Alignment::Center)
+            .into()
+    })
 }
 
 pub(super) fn setting_row<'a>(
     label: &'a str,
     control: Element<'a, SettingsMessage>,
     on_press: SettingsMessage,
-) -> Element<'a, SettingsMessage> {
-    button(
-        container(
-            row![
-                container(text(label).size(TEXT_LG).style(text::base)).align_y(Alignment::Center),
-                Space::new().width(Length::Fill),
-                control,
-            ]
+) -> RowBuilder<'a> {
+    Box::new(move |position| {
+        button(
+            container(
+                row![
+                    container(text(label).size(TEXT_LG).style(text::base))
+                        .align_y(Alignment::Center),
+                    Space::new().width(Length::Fill),
+                    control,
+                ]
+                .align_y(Alignment::Center),
+            )
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .height(SETTINGS_ROW_HEIGHT)
             .align_y(Alignment::Center),
         )
-        .padding(PAD_SETTINGS_ROW)
+        .on_press(on_press)
+        .padding(0)
+        .style(settings_row_style(position))
         .width(Length::Fill)
-        .height(SETTINGS_ROW_HEIGHT)
-        .align_y(Alignment::Center),
-    )
-    .on_press(on_press)
-    .padding(0)
-    .style(theme::ButtonClass::Action.style())
-    .width(Length::Fill)
-    .into()
+        .into()
+    })
 }
 
 pub(super) fn toggle_row<'a>(
@@ -174,74 +226,78 @@ pub(super) fn toggle_row<'a>(
     description: &'a str,
     value: bool,
     on_toggle: impl Fn(bool) -> SettingsMessage + 'a,
-) -> Element<'a, SettingsMessage> {
-    // Compute the button's press message before on_toggle is moved into the toggler.
-    // The toggler captures its own click events, so the button only fires when the
-    // user clicks outside the knob (e.g. on the label). No double-firing.
-    let on_press_msg = on_toggle(!value);
-    button(
+) -> RowBuilder<'a> {
+    Box::new(move |position| {
+        // Compute the button's press message before on_toggle is moved into the toggler.
+        // The toggler captures its own click events, so the button only fires when the
+        // user clicks outside the knob (e.g. on the label). No double-firing.
+        let on_press_msg = on_toggle(!value);
+        button(
+            container(
+                row![
+                    column![
+                        text(label).size(TEXT_LG).style(text::base),
+                        text(description)
+                            .size(TEXT_SM)
+                            .style(theme::TextClass::Tertiary.style()),
+                    ]
+                    .spacing(SPACE_XXXS),
+                    Space::new().width(Length::Fill),
+                    animated_toggler(value)
+                        .size(TEXT_HEADING)
+                        .on_toggle(on_toggle)
+                        .style(theme::TogglerClass::Settings.style()),
+                ]
+                .align_y(Alignment::Center),
+            )
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill)
+            .height(SETTINGS_TOGGLE_ROW_HEIGHT)
+            .align_y(Alignment::Center),
+        )
+        .on_press(on_press_msg)
+        .padding(0)
+        .style(settings_row_style(position))
+        .width(Length::Fill)
+        .into()
+    })
+}
+
+pub(super) fn info_row(label: &str, value: &str) -> RowBuilder<'static> {
+    let label_owned = label.to_string();
+    let value_owned = value.to_string();
+    Box::new(move |_pos| {
+        let value_for_clipboard = value_owned.clone();
         container(
             row![
                 column![
-                    text(label).size(TEXT_LG).style(text::base),
-                    text(description)
+                    text(label_owned)
                         .size(TEXT_SM)
                         .style(theme::TextClass::Tertiary.style()),
+                    text_input("", &value_owned)
+                        .on_input(|_| SettingsMessage::Noop)
+                        .size(TEXT_LG)
+                        .padding(0)
+                        .style(theme::TextInputClass::Inline.style()),
                 ]
-                .spacing(SPACE_XXXS),
-                Space::new().width(Length::Fill),
-                animated_toggler(value)
-                    .size(TEXT_HEADING)
-                    .on_toggle(on_toggle)
-                    .style(theme::TogglerClass::Settings.style()),
+                .spacing(SPACE_XXXS)
+                .width(Length::Fill),
+                button(
+                    container(icon::copy().size(ICON_MD).style(text::base))
+                        .align_x(Alignment::Center)
+                        .align_y(Alignment::Center),
+                )
+                .on_press(SettingsMessage::CopyToClipboard(value_for_clipboard))
+                .padding(PAD_ICON_BTN)
+                .style(theme::ButtonClass::BareIcon.style()),
             ]
+            .spacing(SPACE_SM)
             .align_y(Alignment::Center),
         )
         .padding(PAD_SETTINGS_ROW)
         .width(Length::Fill)
-        .height(SETTINGS_TOGGLE_ROW_HEIGHT)
-        .align_y(Alignment::Center),
-    )
-    .on_press(on_press_msg)
-    .padding(0)
-    .style(theme::ButtonClass::Action.style())
-    .width(Length::Fill)
-    .into()
-}
-
-pub(super) fn info_row(label: &str, value: &str) -> Element<'static, SettingsMessage> {
-    let label_owned = label.to_string();
-    let value_owned = value.to_string();
-    let value_for_clipboard = value_owned.clone();
-    container(
-        row![
-            column![
-                text(label_owned)
-                    .size(TEXT_SM)
-                    .style(theme::TextClass::Tertiary.style()),
-                text_input("", &value_owned)
-                    .on_input(|_| SettingsMessage::Noop)
-                    .size(TEXT_LG)
-                    .padding(0)
-                    .style(theme::TextInputClass::Inline.style()),
-            ]
-            .spacing(SPACE_XXXS)
-            .width(Length::Fill),
-            button(
-                container(icon::copy().size(ICON_MD).style(text::base))
-                    .align_x(Alignment::Center)
-                    .align_y(Alignment::Center),
-            )
-            .on_press(SettingsMessage::CopyToClipboard(value_for_clipboard))
-            .padding(PAD_ICON_BTN)
-            .style(theme::ButtonClass::BareIcon.style()),
-        ]
-        .spacing(SPACE_SM)
-        .align_y(Alignment::Center),
-    )
-    .padding(PAD_SETTINGS_ROW)
-    .width(Length::Fill)
-    .into()
+        .into()
+    })
 }
 
 pub(super) fn input_row(
@@ -251,56 +307,65 @@ pub(super) fn input_row(
     value: &str,
     on_input: impl Fn(String) -> SettingsMessage + 'static,
     field: InputField,
-) -> Element<'static, SettingsMessage> {
+) -> RowBuilder<'static> {
     let id_owned = id.to_string();
     let label_owned = label.to_string();
     let placeholder_owned = placeholder.to_string();
     let value_owned = value.to_string();
-    mouse_area(
-        button(
-            container(
-                row![
-                    column![
-                        text(label_owned)
-                            .size(TEXT_SM)
-                            .style(theme::TextClass::Tertiary.style()),
-                        undoable_text_input(&placeholder_owned, &value_owned)
-                            .id(id_owned.clone())
-                            .on_input(on_input)
-                            .on_undo(SettingsMessage::UndoInput(field))
-                            .on_redo(SettingsMessage::RedoInput(field))
-                            .size(TEXT_LG)
-                            .padding(0)
-                            .style(theme::TextInputClass::Inline.style()),
+    Box::new(move |position| {
+        let id_clone = id_owned.clone();
+        mouse_area(
+            button(
+                container(
+                    row![
+                        column![
+                            text(label_owned.clone())
+                                .size(TEXT_SM)
+                                .style(theme::TextClass::Tertiary.style()),
+                            undoable_text_input(&placeholder_owned, &value_owned)
+                                .id(id_clone.clone())
+                                .on_input(on_input)
+                                .on_undo(SettingsMessage::UndoInput(field))
+                                .on_redo(SettingsMessage::RedoInput(field))
+                                .size(TEXT_LG)
+                                .padding(0)
+                                .style(theme::TextInputClass::Inline.style()),
+                        ]
+                        .spacing(SPACE_XXXS)
+                        .width(Length::Fill),
+                        container(icon::pencil().size(ICON_MD).style(text::base))
+                            .align_x(Alignment::Center)
+                            .align_y(Alignment::Center),
                     ]
-                    .spacing(SPACE_XXXS)
-                    .width(Length::Fill),
-                    container(icon::pencil().size(ICON_MD).style(text::base))
-                        .align_x(Alignment::Center)
-                        .align_y(Alignment::Center),
-                ]
-                .spacing(SPACE_SM)
-                .align_y(Alignment::Center),
+                    .spacing(SPACE_SM)
+                    .align_y(Alignment::Center),
+                )
+                .padding(PAD_SETTINGS_ROW)
+                .width(Length::Fill),
             )
-            .padding(PAD_SETTINGS_ROW)
+            .on_press(SettingsMessage::FocusInput(id_clone))
+            .padding(0)
+            .style(settings_row_style(position))
             .width(Length::Fill),
         )
-        .on_press(SettingsMessage::FocusInput(id_owned.clone()))
-        .padding(0)
-        .style(theme::ButtonClass::Action.style())
-        .width(Length::Fill),
-    )
-    .interaction(iced::mouse::Interaction::Text)
-    .into()
+        .interaction(iced::mouse::Interaction::Text)
+        .into()
+    })
 }
 
-pub(super) fn coming_soon_row<'a>(feature: &'a str) -> Element<'a, SettingsMessage> {
-    settings_row_container(
-        SETTINGS_ROW_HEIGHT,
-        text(format!("{feature} coming soon."))
-            .size(TEXT_LG)
-            .style(theme::TextClass::Tertiary.style()),
-    )
+pub(super) fn coming_soon_row<'a>(feature: &'a str) -> RowBuilder<'a> {
+    Box::new(move |_pos| {
+        container(
+            text(format!("{feature} coming soon."))
+                .size(TEXT_LG)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .padding(PAD_SETTINGS_ROW)
+        .width(Length::Fill)
+        .height(SETTINGS_ROW_HEIGHT)
+        .align_y(Alignment::Center)
+        .into()
+    })
 }
 
 /// A row with a label on the left (50%) and an optional icon + slider on the right (50%).
@@ -314,41 +379,47 @@ pub(super) fn slider_row<'a>(
     step: f32,
     on_change: impl Fn(f32) -> SettingsMessage + 'a,
     on_release: Option<SettingsMessage>,
-) -> Element<'a, SettingsMessage> {
-    let mut slider_widget = slider(range, value, on_change)
-        .default(default)
-        .step(step)
-        .style(theme::SliderClass::Settings.style())
-        .width(Length::Fill);
-    if let Some(msg) = on_release {
-        slider_widget = slider_widget.on_release(msg);
-    }
+) -> RowBuilder<'a> {
+    Box::new(move |_pos| {
+        let mut slider_widget = slider(range, value, on_change)
+            .default(default)
+            .step(step)
+            .style(theme::SliderClass::Settings.style())
+            .width(Length::Fill);
+        if let Some(msg) = on_release {
+            slider_widget = slider_widget.on_release(msg);
+        }
 
-    let right_content: Element<'a, SettingsMessage> = if let Some(ic) = icon {
-        row![
-            container(ic.size(ICON_XL).style(text::secondary)).align_y(Alignment::Center),
-            slider_widget,
-        ]
-        .spacing(SPACE_SM)
-        .align_y(Alignment::Center)
+        let right_content: Element<'a, SettingsMessage> = if let Some(ic) = icon {
+            row![
+                container(ic.size(ICON_XL).style(text::secondary)).align_y(Alignment::Center),
+                slider_widget,
+            ]
+            .spacing(SPACE_SM)
+            .align_y(Alignment::Center)
+            .width(Length::Fill)
+            .into()
+        } else {
+            slider_widget.into()
+        };
+
+        container(
+            row![
+                container(text(label).size(TEXT_LG).style(text::base))
+                    .align_y(Alignment::Center)
+                    .width(Length::FillPortion(1)),
+                container(right_content)
+                    .align_y(Alignment::Center)
+                    .width(Length::FillPortion(1)),
+            ]
+            .align_y(Alignment::Center),
+        )
+        .padding(PAD_SETTINGS_ROW)
         .width(Length::Fill)
+        .height(SETTINGS_ROW_HEIGHT)
+        .align_y(Alignment::Center)
         .into()
-    } else {
-        slider_widget.into()
-    };
-
-    settings_row_container(
-        SETTINGS_ROW_HEIGHT,
-        row![
-            container(text(label).size(TEXT_LG).style(text::base))
-                .align_y(Alignment::Center)
-                .width(Length::FillPortion(1)),
-            container(right_content)
-                .align_y(Alignment::Center)
-                .width(Length::FillPortion(1)),
-        ]
-        .align_y(Alignment::Center),
-    )
+    })
 }
 
 /// A group of mutually exclusive radio options, rendered as rows with hover effects.
@@ -358,37 +429,42 @@ pub(super) fn radio_group<'a, V>(
     options: &'a [(&'a str, V)],
     selected: Option<V>,
     on_select: impl Fn(V) -> SettingsMessage + 'a + Copy,
-) -> Vec<Element<'a, SettingsMessage>>
+) -> Vec<RowBuilder<'a>>
 where
     V: Copy + Eq + 'a,
 {
     options
         .iter()
         .map(|(label, value)| {
-            let msg = on_select(*value);
-            button(
-                container(
-                    row![
-                        radio("", *value, selected, on_select)
-                            .size(RADIO_SIZE)
-                            .spacing(0)
-                            .style(theme::RadioClass::Settings.style()),
-                        container(text(*label).size(TEXT_LG).style(text::base))
-                            .align_y(Alignment::Center),
-                    ]
-                    .spacing(RADIO_LABEL_SPACING)
+            let label = *label;
+            let value = *value;
+            let row_builder: RowBuilder<'a> = Box::new(move |position| {
+                let msg = on_select(value);
+                button(
+                    container(
+                        row![
+                            radio("", value, selected, on_select)
+                                .size(RADIO_SIZE)
+                                .spacing(0)
+                                .style(theme::RadioClass::Settings.style()),
+                            container(text(label).size(TEXT_LG).style(text::base))
+                                .align_y(Alignment::Center),
+                        ]
+                        .spacing(RADIO_LABEL_SPACING)
+                        .align_y(Alignment::Center),
+                    )
+                    .padding(PAD_SETTINGS_ROW)
+                    .width(Length::Fill)
+                    .height(SETTINGS_ROW_HEIGHT)
                     .align_y(Alignment::Center),
                 )
-                .padding(PAD_SETTINGS_ROW)
+                .on_press(msg)
+                .padding(0)
+                .style(settings_row_style(position))
                 .width(Length::Fill)
-                .height(SETTINGS_ROW_HEIGHT)
-                .align_y(Alignment::Center),
-            )
-            .on_press(msg)
-            .padding(0)
-            .style(theme::ButtonClass::Action.style())
-            .width(Length::Fill)
-            .into()
+                .into()
+            });
+            row_builder
         })
         .collect()
 }
@@ -406,161 +482,190 @@ pub(super) fn editable_list<'a>(
     items: &'a [EditableItem],
     add_label: &'a str,
     drag_state: &'a Option<DragState>,
-) -> Element<'a, SettingsMessage> {
-    let id = list_id.to_string();
+) -> RowBuilder<'a> {
+    Box::new(move |outer_position| {
+        let id = list_id.to_string();
 
-    let mut col = column![].width(Length::Fill);
+        let mut col = column![].width(Length::Fill);
 
-    for (i, item) in items.iter().enumerate() {
-        if i > 0 {
-            col =
-                col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
-        }
+        // Internal row count = items + Add button.
+        let internal_n = items.len() + 1;
 
-        let is_drag_item = drag_state
-            .as_ref()
-            .is_some_and(|d| d.list_id == list_id && d.dragging_index == i && d.is_dragging);
+        for (i, item) in items.iter().enumerate() {
+            if i > 0 {
+                col = col.push(
+                    iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()),
+                );
+            }
 
-        // ── Left half: grip + label ──
-        let lid_grip = id.clone();
-        let grip_slot = mouse_area(
-            container(
-                icon::grip_vertical()
-                    .size(ICON_MD)
-                    .style(theme::TextClass::Tertiary.style()),
+            let is_drag_item = drag_state
+                .as_ref()
+                .is_some_and(|d| d.list_id == list_id && d.dragging_index == i && d.is_dragging);
+
+            // ── Left half: grip + label ──
+            let lid_grip = id.clone();
+            let grip_slot = mouse_area(
+                container(
+                    icon::grip_vertical()
+                        .size(ICON_MD)
+                        .style(theme::TextClass::Tertiary.style()),
+                )
+                .width(GRIP_SLOT_WIDTH)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
             )
-            .width(GRIP_SLOT_WIDTH)
-            .align_x(Alignment::Center)
-            .align_y(Alignment::Center),
-        )
-        .on_press(SettingsMessage::ListGripPress(lid_grip, i))
-        .interaction(iced::mouse::Interaction::Grab);
+            .on_press(SettingsMessage::ListGripPress(lid_grip, i))
+            .interaction(iced::mouse::Interaction::Grab);
 
-        let label_slot = container(text(&item.label).size(TEXT_LG).style(text::base))
-            .align_y(Alignment::Center)
-            .width(Length::Fill);
+            let label_slot = container(text(&item.label).size(TEXT_LG).style(text::base))
+                .align_y(Alignment::Center)
+                .width(Length::Fill);
 
-        let left_half = row![grip_slot, label_slot]
-            .spacing(SPACE_XS)
-            .align_y(Alignment::Center)
-            .width(Length::FillPortion(1));
+            let left_half = row![grip_slot, label_slot]
+                .spacing(SPACE_XS)
+                .align_y(Alignment::Center)
+                .width(Length::FillPortion(1));
 
-        // ── Right half: optional toggle, menu, remove - all float right ──
-        let mut right_items: Vec<Element<'a, SettingsMessage>> = Vec::new();
-        right_items.push(Space::new().width(Length::Fill).into());
+            // ── Right half: optional toggle, menu, remove - all float right ──
+            let mut right_items: Vec<Element<'a, SettingsMessage>> = Vec::new();
+            right_items.push(Space::new().width(Length::Fill).into());
 
-        if let Some(enabled) = item.enabled {
-            let idx = i;
-            let lid = id.clone();
+            if let Some(enabled) = item.enabled {
+                let idx = i;
+                let lid = id.clone();
+                right_items.push(
+                    animated_toggler(enabled)
+                        .size(TEXT_HEADING)
+                        .on_toggle(move |v| SettingsMessage::ListToggle(lid.clone(), idx, v))
+                        .style(theme::TogglerClass::Settings.style())
+                        .into(),
+                );
+            }
+
+            // Menu button (...)
             right_items.push(
-                animated_toggler(enabled)
-                    .size(TEXT_HEADING)
-                    .on_toggle(move |v| SettingsMessage::ListToggle(lid.clone(), idx, v))
-                    .style(theme::TogglerClass::Settings.style())
-                    .into(),
+                button(
+                    container(icon::ellipsis().size(ICON_MD).style(text::secondary))
+                        .align_x(Alignment::Center)
+                        .align_y(Alignment::Center),
+                )
+                .on_press(SettingsMessage::ListMenu(id.clone(), i))
+                .padding(PAD_ICON_BTN)
+                .style(theme::ButtonClass::BareIcon.style())
+                .into(),
             );
+
+            // Remove button
+            right_items.push(
+                button(
+                    container(icon::x().size(ICON_MD).style(text::secondary))
+                        .align_x(Alignment::Center)
+                        .align_y(Alignment::Center),
+                )
+                .on_press(SettingsMessage::ListRemove(id.clone(), i))
+                .padding(PAD_ICON_BTN)
+                .style(theme::ButtonClass::BareIcon.style())
+                .into(),
+            );
+
+            let right_half = iced::widget::row(right_items)
+                .spacing(SPACE_XS)
+                .align_y(Alignment::Center)
+                .width(Length::FillPortion(1));
+
+            let item_row = row![left_half, right_half].align_y(Alignment::Center);
+
+            // Button for hover effect + row click (toggle).
+            let lid_click = id.clone();
+
+            let mut inner_container = container(item_row)
+                .padding(PAD_SETTINGS_ROW)
+                .width(Length::Fill)
+                .height(SETTINGS_ROW_HEIGHT)
+                .align_y(Alignment::Center);
+
+            if is_drag_item {
+                inner_container = inner_container.style(theme::ContainerClass::DraggingRow.style());
+            }
+
+            // Compose internal position with outer position so that the
+            // editable_list as a whole inherits the section's outer corners.
+            let internal_pos = position_for(i, internal_n);
+            let effective = compose_positions(outer_position, internal_pos);
+
+            let item_btn = button(inner_container)
+                .on_press(SettingsMessage::ListRowClick(lid_click, i))
+                .padding(0)
+                .style(settings_row_style(effective))
+                .width(Length::Fill);
+
+            col = col.push(item_btn);
         }
 
-        // Menu button (...)
-        right_items.push(
-            button(
-                container(icon::ellipsis().size(ICON_MD).style(text::secondary))
-                    .align_x(Alignment::Center)
-                    .align_y(Alignment::Center),
-            )
-            .on_press(SettingsMessage::ListMenu(id.clone(), i))
-            .padding(PAD_ICON_BTN)
-            .style(theme::ButtonClass::BareIcon.style())
-            .into(),
-        );
-
-        // Remove button
-        right_items.push(
-            button(
-                container(icon::x().size(ICON_MD).style(text::secondary))
-                    .align_x(Alignment::Center)
-                    .align_y(Alignment::Center),
-            )
-            .on_press(SettingsMessage::ListRemove(id.clone(), i))
-            .padding(PAD_ICON_BTN)
-            .style(theme::ButtonClass::BareIcon.style())
-            .into(),
-        );
-
-        let right_half = iced::widget::row(right_items)
-            .spacing(SPACE_XS)
-            .align_y(Alignment::Center)
-            .width(Length::FillPortion(1));
-
-        let item_row = row![left_half, right_half].align_y(Alignment::Center);
-
-        // Button for hover effect + row click (toggle).
-        let lid_click = id.clone();
-
-        let mut inner_container = container(item_row)
-            .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill)
-            .height(SETTINGS_ROW_HEIGHT)
-            .align_y(Alignment::Center);
-
-        if is_drag_item {
-            inner_container = inner_container.style(theme::ContainerClass::DraggingRow.style());
+        // Divider before Add button (if there are items)
+        if !items.is_empty() {
+            col = col
+                .push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
         }
 
-        let item_btn = button(inner_container)
-            .on_press(SettingsMessage::ListRowClick(lid_click, i))
-            .padding(0)
-            .style(theme::ButtonClass::Action.style())
-            .width(Length::Fill);
-
-        col = col.push(item_btn);
-    }
-
-    // Divider before Add button (if there are items)
-    if !items.is_empty() {
-        col = col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
-    }
-
-    // Add button - label centered
-    let add_id = id.clone();
-    let add_btn = button(
-        container(
-            row![
-                icon::plus().size(ICON_MD).style(text::base),
-                text(add_label)
-                    .size(TEXT_LG)
-                    .style(text::base)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..crate::font::text()
-                    }),
-            ]
-            .spacing(SPACE_XS)
+        // Add button - label centered
+        let add_id = id.clone();
+        let add_internal_pos = position_for(internal_n.saturating_sub(1), internal_n);
+        let add_effective = compose_positions(outer_position, add_internal_pos);
+        let add_btn = button(
+            container(
+                row![
+                    icon::plus().size(ICON_MD).style(text::base),
+                    text(add_label)
+                        .size(TEXT_LG)
+                        .style(text::base)
+                        .font(iced::Font {
+                            weight: iced::font::Weight::Bold,
+                            ..crate::font::text()
+                        }),
+                ]
+                .spacing(SPACE_XS)
+                .align_y(Alignment::Center),
+            )
+            .center_x(Length::Fill)
             .align_y(Alignment::Center),
         )
-        .center_x(Length::Fill)
-        .align_y(Alignment::Center),
-    )
-    .on_press(SettingsMessage::ListAdd(add_id))
-    .padding(PAD_SETTINGS_ROW)
-    .style(theme::ButtonClass::Action.style())
-    .width(Length::Fill)
-    .height(SETTINGS_ROW_HEIGHT);
+        .on_press(SettingsMessage::ListAdd(add_id))
+        .padding(PAD_SETTINGS_ROW)
+        .style(settings_row_style(add_effective))
+        .width(Length::Fill)
+        .height(SETTINGS_ROW_HEIGHT);
 
-    col = col.push(add_btn);
+        col = col.push(add_btn);
 
-    // Wrap entire list in a single mouse_area for drag tracking.
-    // on_move gives us Y relative to the list top, so we can compute
-    // the target index directly: target = (y / row_height).
-    let lid_move = id.clone();
-    let lid_release = id;
-    let lid_exit = lid_release.clone();
-    let list_area = mouse_area(col)
-        .on_release(SettingsMessage::ListDragEnd(lid_release))
-        .on_exit(SettingsMessage::ListDragEnd(lid_exit))
-        .on_move(move |point| SettingsMessage::ListDragMove(lid_move.clone(), point));
+        // Wrap entire list in a single mouse_area for drag tracking.
+        // on_move gives us Y relative to the list top, so we can compute
+        // the target index directly: target = (y / row_height).
+        let lid_move = id.clone();
+        let lid_release = id;
+        let lid_exit = lid_release.clone();
+        let list_area = mouse_area(col)
+            .on_release(SettingsMessage::ListDragEnd(lid_release))
+            .on_exit(SettingsMessage::ListDragEnd(lid_exit))
+            .on_move(move |point| SettingsMessage::ListDragMove(lid_move.clone(), point));
 
-    list_area.into()
+        list_area.into()
+    })
+}
+
+/// Compose an outer (section-level) position with an inner (sub-list) position
+/// so a multi-row helper that fills a section keeps the section's outer corners
+/// on its first/last rows. Only the corners aligned with the outer position
+/// can be `LG`-rounded; otherwise the inner seams stay `SM`.
+fn compose_positions(outer: RowPosition, inner: RowPosition) -> RowPosition {
+    match (outer, inner) {
+        (RowPosition::Only, p) => p,
+        (RowPosition::Top, RowPosition::Top) => RowPosition::Top,
+        (RowPosition::Top, RowPosition::Only) => RowPosition::Top,
+        (RowPosition::Bottom, RowPosition::Bottom) => RowPosition::Bottom,
+        (RowPosition::Bottom, RowPosition::Only) => RowPosition::Bottom,
+        _ => RowPosition::Middle,
+    }
 }
 
 /// The action type determines the trailing icon.
@@ -581,41 +686,44 @@ pub(super) fn action_row<'a>(
     icon: Option<iced::widget::Text<'a>>,
     kind: ActionKind,
     on_press: SettingsMessage,
-) -> Element<'a, SettingsMessage> {
-    let mut content = row![].spacing(SPACE_SM).align_y(Alignment::Center);
+) -> RowBuilder<'a> {
+    Box::new(move |position| {
+        let mut content = row![].spacing(SPACE_SM).align_y(Alignment::Center);
 
-    if let Some(ico) = icon {
+        if let Some(ico) = icon {
+            content = content.push(
+                container(ico.size(ICON_XL).style(text::secondary)).align_y(Alignment::Center),
+            );
+        }
+
+        let label_col: Element<'a, SettingsMessage> = if let Some(desc) = description {
+            column![
+                text(label).size(TEXT_LG).style(text::base),
+                text(desc)
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Tertiary.style()),
+            ]
+            .spacing(SPACE_XXXS)
+            .into()
+        } else {
+            text(label).size(TEXT_LG).style(text::base).into()
+        };
+
+        content = content.push(label_col);
+        content = content.push(Space::new().width(Length::Fill));
+
+        let trailing = match kind {
+            ActionKind::Url => icon::external_link(),
+            ActionKind::InApp => icon::arrow_right(),
+        };
         content = content
-            .push(container(ico.size(ICON_XL).style(text::secondary)).align_y(Alignment::Center));
-    }
+            .push(container(trailing.size(ICON_XL).style(text::base)).align_y(Alignment::Center));
 
-    let label_col: Element<'a, SettingsMessage> = if let Some(desc) = description {
-        column![
-            text(label).size(TEXT_LG).style(text::base),
-            text(desc)
-                .size(TEXT_SM)
-                .style(theme::TextClass::Tertiary.style()),
-        ]
-        .spacing(SPACE_XXXS)
-        .into()
-    } else {
-        text(label).size(TEXT_LG).style(text::base).into()
-    };
-
-    content = content.push(label_col);
-    content = content.push(Space::new().width(Length::Fill));
-
-    let trailing = match kind {
-        ActionKind::Url => icon::external_link(),
-        ActionKind::InApp => icon::arrow_right(),
-    };
-    content = content
-        .push(container(trailing.size(ICON_XL).style(text::base)).align_y(Alignment::Center));
-
-    button(content)
-        .on_press(on_press)
-        .padding(PAD_SETTINGS_ROW)
-        .style(theme::ButtonClass::Action.style())
-        .width(Length::Fill)
-        .into()
+        button(content)
+            .on_press(on_press)
+            .padding(PAD_SETTINGS_ROW)
+            .style(settings_row_style(position))
+            .width(Length::Fill)
+            .into()
+    })
 }
