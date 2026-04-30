@@ -1,16 +1,20 @@
 use iced::time::Instant;
-use iced::{Point, Task};
+use iced::Task;
 
 use crate::component::Component;
 use crate::db::DateDisplay;
-use crate::ui::layout::*;
 use crate::ui::undoable::UndoableText;
 use rte::EditorState as RteEditorState;
 
-use super::tabs::settings_view;
-use super::types::*;
+use crate::ui::settings::tabs::settings_view;
+use crate::ui::settings::types::*;
 
-// ── Component impl ─────────────────────────────────────
+mod accounts;
+mod contacts_groups;
+mod helpers;
+mod list_drag;
+mod signatures;
+mod undo_redo;
 
 impl Component for Settings {
     type Message = SettingsMessage;
@@ -22,7 +26,6 @@ impl Component for Settings {
     ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
         match message {
             SettingsMessage::Close => {
-                // Auto-save: commit any editing preferences on close.
                 self.commit_preferences();
                 return (Task::none(), Some(SettingsEvent::Closed));
             }
@@ -97,8 +100,6 @@ impl Component for Settings {
                 return self.handle_signature_save();
             }
             SettingsMessage::SignatureDelete(ref id) => {
-                // Show confirmation instead of deleting immediately.
-                // If the editor isn't already open for this signature, open it.
                 let need_open = self
                     .signature_editor
                     .as_ref()
@@ -148,7 +149,6 @@ impl Component for Settings {
                 self.active_tab = Tab::People;
                 self.active_sheet = None;
                 self.sheet_anim.go_mut(false, Instant::now());
-                // LoadContacts handler in main.rs also loads groups.
                 return (
                     Task::none(),
                     Some(SettingsEvent::LoadContacts(self.contact_filter.clone())),
@@ -157,10 +157,7 @@ impl Component for Settings {
             SettingsMessage::ContactEditorSave => {
                 return self.handle_contact_save();
             }
-            // Auto-save for local contacts when fields change
             SettingsMessage::ContactEditorFieldChanged(_, _) => {
-                // The field value is set in handle_remaining_message.
-                // Here we check if we should auto-save (local contact).
                 self.handle_remaining_message(message);
                 if let Some(ref editor) = self.contact_editor {
                     let is_local = editor.source.as_deref().is_none_or(|s| s == "user");
@@ -171,7 +168,6 @@ impl Component for Settings {
                 return (Task::none(), None);
             }
             SettingsMessage::ContactDelete(id) => {
-                // Show confirmation prompt instead of immediate delete
                 self.confirm_delete_contact = Some(id);
                 return (Task::none(), None);
             }
@@ -187,7 +183,6 @@ impl Component for Settings {
                 return self.handle_group_save();
             }
             SettingsMessage::GroupDelete(id) => {
-                // Show confirmation prompt instead of immediate delete
                 self.confirm_delete_group = Some(id);
                 return (Task::none(), None);
             }
@@ -267,7 +262,6 @@ impl Component for Settings {
                             wizard.vcf_contacts.clear();
                         }
                         ImportStep::Summary => {
-                            // Close the wizard
                             self.import_wizard = None;
                             self.active_sheet = None;
                             self.sheet_anim.go_mut(false, Instant::now());
@@ -640,10 +634,7 @@ impl Settings {
                     editor.dirty = true;
                 }
             }
-            SettingsMessage::SignatureEditorBodyChanged(_) => {
-                // Legacy plain-text body changes are no longer used;
-                // the rich text editor sends SignatureEditorAction instead.
-            }
+            SettingsMessage::SignatureEditorBodyChanged(_) => {}
             SettingsMessage::SignatureEditorAction(action) => {
                 if let Some(ref mut editor) = self.signature_editor {
                     editor.body_editor.perform(action);
@@ -761,670 +752,7 @@ impl Settings {
             }
             SettingsMessage::GroupSaved(Ok(())) | SettingsMessage::GroupDeleted(Ok(())) => {}
             SettingsMessage::GroupSaved(Err(_)) | SettingsMessage::GroupDeleted(Err(_)) => {}
-            _ => {} // Already handled in update() or handle_simple_message()
+            _ => {}
         }
-    }
-
-    fn handle_drag_move(&mut self, list_id: &str, point: Point) -> Task<SettingsMessage> {
-        let has_drag = self
-            .drag_state
-            .as_ref()
-            .is_some_and(|d| d.list_id == list_id);
-        if !has_drag {
-            return Task::none();
-        }
-
-        if let Some(ref mut drag) = self.drag_state
-            && drag.start_y < 0.0
-        {
-            drag.start_y = point.y;
-            return Task::none();
-        }
-
-        let Some(drag_ref) = self.drag_state.as_ref() else {
-            return Task::none();
-        };
-        let (from, start_y) = (drag_ref.dragging_index, drag_ref.start_y);
-
-        if !drag_ref.is_dragging {
-            if (point.y - start_y).abs() < DRAG_START_THRESHOLD {
-                return Task::none();
-            }
-            if let Some(ref mut drag) = self.drag_state {
-                drag.is_dragging = true;
-            }
-        }
-
-        let row_step = SETTINGS_ROW_HEIGHT + 1.0;
-        let count = self.list_items_mut(list_id).len();
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let target = ((point.y / row_step).max(0.0) as usize).min(count.saturating_sub(1));
-
-        if target != from {
-            self.list_items_mut(list_id).swap(from, target);
-            if let Some(ref mut drag) = self.drag_state {
-                drag.dragging_index = target;
-            }
-        }
-        Task::none()
-    }
-
-    fn handle_account_drag_move(
-        &mut self,
-        point: Point,
-    ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
-        if self.account_drag.is_none() {
-            return (Task::none(), None);
-        }
-
-        if let Some(ref mut drag) = self.account_drag
-            && drag.start_y < 0.0
-        {
-            drag.start_y = point.y;
-            return (Task::none(), None);
-        }
-
-        let Some(drag_ref) = self.account_drag.as_ref() else {
-            return (Task::none(), None);
-        };
-        let (from, start_y) = (drag_ref.dragging_index, drag_ref.start_y);
-
-        if !drag_ref.is_dragging {
-            if (point.y - start_y).abs() < DRAG_START_THRESHOLD {
-                return (Task::none(), None);
-            }
-            if let Some(ref mut drag) = self.account_drag {
-                drag.is_dragging = true;
-            }
-        }
-
-        let row_step = SETTINGS_TOGGLE_ROW_HEIGHT + 1.0;
-        let count = self.managed_accounts.len();
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let target = ((point.y / row_step).max(0.0) as usize).min(count.saturating_sub(1));
-
-        if target != from {
-            self.managed_accounts.swap(from, target);
-            if let Some(ref mut drag) = self.account_drag {
-                drag.dragging_index = target;
-            }
-        }
-        (Task::none(), None)
-    }
-
-    fn handle_account_drag_end(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
-        let was_dragging = self.account_drag.as_ref().is_some_and(|d| d.is_dragging);
-        self.account_drag = None;
-
-        if was_dragging {
-            // Emit reorder event with new sort orders based on list position.
-            let orders: Vec<(String, i64)> = self
-                .managed_accounts
-                .iter()
-                .enumerate()
-                .map(|(i, a)| {
-                    #[allow(clippy::cast_possible_wrap)]
-                    (a.id.clone(), i as i64)
-                })
-                .collect();
-            return (Task::none(), Some(SettingsEvent::ReorderAccounts(orders)));
-        }
-        (Task::none(), None)
-    }
-
-    fn undo_field(&mut self, field: InputField) {
-        match field {
-            InputField::VipEmail => {
-                self.vip_email_input.undo();
-            }
-            InputField::AiApiKey => {
-                self.ai_api_key.undo();
-            }
-            InputField::OllamaUrl => {
-                self.ai_ollama_url.undo();
-            }
-            InputField::OllamaModel => {
-                self.ai_ollama_model.undo();
-            }
-            InputField::SignatureName => {
-                if let Some(ref mut editor) = self.signature_editor {
-                    editor.name.undo();
-                }
-            }
-            InputField::AccountName => {
-                if let Some(ref mut editor) = self.editing_account {
-                    editor.account_name.undo();
-                }
-            }
-            InputField::AccountDisplayName => {
-                if let Some(ref mut editor) = self.editing_account {
-                    editor.display_name.undo();
-                }
-            }
-            InputField::CaldavUrl => {
-                if let Some(ref mut editor) = self.editing_account {
-                    editor.caldav_url.undo();
-                }
-            }
-            InputField::CaldavUsername => {
-                if let Some(ref mut editor) = self.editing_account {
-                    editor.caldav_username.undo();
-                }
-            }
-            InputField::CaldavPassword => {
-                if let Some(ref mut editor) = self.editing_account {
-                    editor.caldav_password.undo();
-                }
-            }
-            InputField::GroupName => {
-                if let Some(ref mut editor) = self.group_editor {
-                    editor.name.undo();
-                }
-            }
-            InputField::ContactDisplayName => {
-                if let Some(ref mut editor) = self.contact_editor {
-                    editor.display_name.undo();
-                }
-            }
-            InputField::ContactEmail => {
-                if let Some(ref mut editor) = self.contact_editor {
-                    editor.email.undo();
-                }
-            }
-            InputField::ContactEmail2 => {
-                if let Some(ref mut editor) = self.contact_editor {
-                    editor.email2.undo();
-                }
-            }
-            InputField::ContactPhone => {
-                if let Some(ref mut editor) = self.contact_editor {
-                    editor.phone.undo();
-                }
-            }
-            InputField::ContactCompany => {
-                if let Some(ref mut editor) = self.contact_editor {
-                    editor.company.undo();
-                }
-            }
-            InputField::ContactNotes => {
-                if let Some(ref mut editor) = self.contact_editor {
-                    editor.notes.undo();
-                }
-            }
-        }
-    }
-
-    fn redo_field(&mut self, field: InputField) {
-        match field {
-            InputField::VipEmail => {
-                self.vip_email_input.redo();
-            }
-            InputField::AiApiKey => {
-                self.ai_api_key.redo();
-            }
-            InputField::OllamaUrl => {
-                self.ai_ollama_url.redo();
-            }
-            InputField::OllamaModel => {
-                self.ai_ollama_model.redo();
-            }
-            InputField::SignatureName => {
-                if let Some(ref mut editor) = self.signature_editor {
-                    editor.name.redo();
-                }
-            }
-            InputField::AccountName => {
-                if let Some(ref mut editor) = self.editing_account {
-                    editor.account_name.redo();
-                }
-            }
-            InputField::AccountDisplayName => {
-                if let Some(ref mut editor) = self.editing_account {
-                    editor.display_name.redo();
-                }
-            }
-            InputField::CaldavUrl => {
-                if let Some(ref mut editor) = self.editing_account {
-                    editor.caldav_url.redo();
-                }
-            }
-            InputField::CaldavUsername => {
-                if let Some(ref mut editor) = self.editing_account {
-                    editor.caldav_username.redo();
-                }
-            }
-            InputField::CaldavPassword => {
-                if let Some(ref mut editor) = self.editing_account {
-                    editor.caldav_password.redo();
-                }
-            }
-            InputField::GroupName => {
-                if let Some(ref mut editor) = self.group_editor {
-                    editor.name.redo();
-                }
-            }
-            InputField::ContactDisplayName => {
-                if let Some(ref mut editor) = self.contact_editor {
-                    editor.display_name.redo();
-                }
-            }
-            InputField::ContactEmail => {
-                if let Some(ref mut editor) = self.contact_editor {
-                    editor.email.redo();
-                }
-            }
-            InputField::ContactEmail2 => {
-                if let Some(ref mut editor) = self.contact_editor {
-                    editor.email2.redo();
-                }
-            }
-            InputField::ContactPhone => {
-                if let Some(ref mut editor) = self.contact_editor {
-                    editor.phone.redo();
-                }
-            }
-            InputField::ContactCompany => {
-                if let Some(ref mut editor) = self.contact_editor {
-                    editor.company.redo();
-                }
-            }
-            InputField::ContactNotes => {
-                if let Some(ref mut editor) = self.contact_editor {
-                    editor.notes.redo();
-                }
-            }
-        }
-    }
-
-    fn handle_signature_save(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
-        let Some(ref editor) = self.signature_editor else {
-            return (Task::none(), None);
-        };
-        let name = editor.name.text().trim().to_string();
-        if name.is_empty() {
-            return (Task::none(), None);
-        }
-        let request = SignatureSaveRequest {
-            id: editor.signature_id.clone(),
-            account_id: editor.account_id.clone(),
-            name,
-            body_html: editor.body_editor.to_html(),
-            is_default: editor.is_default,
-            is_reply_default: editor.is_reply_default,
-        };
-        // Close sheet
-        self.active_sheet = None;
-        self.sheet_anim.go_mut(false, Instant::now());
-        self.signature_editor = None;
-        (Task::none(), Some(SettingsEvent::SaveSignature(request)))
-    }
-
-    pub(crate) fn open_contact_editor(&mut self, contact_id: &str) {
-        if let Some(contact) = self.contacts.iter().find(|c| c.id == contact_id) {
-            self.contact_editor = Some(ContactEditorState {
-                contact_id: Some(contact.id.clone()),
-                account_id: contact.account_id.clone(),
-                display_name: UndoableText::with_initial(
-                    contact.display_name.as_deref().unwrap_or(""),
-                ),
-                email: UndoableText::with_initial(&contact.email),
-                email2: UndoableText::with_initial(contact.email2.as_deref().unwrap_or("")),
-                phone: UndoableText::with_initial(contact.phone.as_deref().unwrap_or("")),
-                company: UndoableText::with_initial(contact.company.as_deref().unwrap_or("")),
-                notes: UndoableText::with_initial(contact.notes.as_deref().unwrap_or("")),
-                source: contact.source.clone(),
-                server_id: contact.server_id.clone(),
-                dirty: false,
-            });
-            self.active_sheet = Some(SettingsSheetPage::EditContact {
-                contact_id: Some(contact.id.clone()),
-            });
-            self.sheet_anim.go_mut(true, Instant::now());
-        }
-    }
-
-    pub(crate) fn open_new_contact_editor(&mut self) {
-        self.contact_editor = Some(ContactEditorState {
-            contact_id: None,
-            account_id: None,
-            display_name: UndoableText::new(),
-            email: UndoableText::new(),
-            email2: UndoableText::new(),
-            phone: UndoableText::new(),
-            company: UndoableText::new(),
-            notes: UndoableText::new(),
-            source: None,
-            server_id: None,
-            dirty: false,
-        });
-        self.active_sheet = Some(SettingsSheetPage::EditContact { contact_id: None });
-        self.sheet_anim.go_mut(true, Instant::now());
-    }
-
-    fn handle_contact_save(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
-        let Some(ref editor) = self.contact_editor else {
-            return (Task::none(), None);
-        };
-        let email = editor.email.text().trim().to_string();
-        if email.is_empty() {
-            return (Task::none(), None);
-        }
-        let entry = crate::db::ContactEntry {
-            id: editor
-                .contact_id
-                .clone()
-                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
-            email,
-            display_name: non_empty(editor.display_name.text().trim()),
-            email2: non_empty(editor.email2.text().trim()),
-            phone: non_empty(editor.phone.text().trim()),
-            company: non_empty(editor.company.text().trim()),
-            notes: non_empty(editor.notes.text().trim()),
-            account_id: editor.account_id.clone(),
-            account_color: None,
-            groups: Vec::new(),
-            source: editor.source.clone().or_else(|| Some("user".to_string())),
-            server_id: editor.server_id.clone(),
-        };
-        self.active_sheet = None;
-        self.sheet_anim.go_mut(false, Instant::now());
-        self.contact_editor = None;
-        (Task::none(), Some(SettingsEvent::SaveContact(entry)))
-    }
-
-    fn handle_contact_delete(
-        &mut self,
-        id: String,
-    ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
-        self.active_sheet = None;
-        self.sheet_anim.go_mut(false, Instant::now());
-        self.contact_editor = None;
-        (Task::none(), Some(SettingsEvent::DeleteContact(id)))
-    }
-
-    fn open_group_editor(&mut self, group_id: &str) {
-        if let Some(group) = self.groups.iter().find(|g| g.id == group_id) {
-            self.group_editor = Some(GroupEditorState {
-                group_id: Some(group.id.clone()),
-                name: UndoableText::with_initial(&group.name),
-                members: Vec::new(), // will be populated from DB via App
-                filter: String::new(),
-                members_filter: String::new(),
-                dirty: false,
-            });
-            self.active_sheet = Some(SettingsSheetPage::EditGroup {
-                group_id: Some(group.id.clone()),
-            });
-            self.sheet_anim.go_mut(true, Instant::now());
-        }
-    }
-
-    fn open_new_group_editor(&mut self) {
-        self.group_editor = Some(GroupEditorState {
-            group_id: None,
-            name: UndoableText::new(),
-            members: Vec::new(),
-            filter: String::new(),
-            members_filter: String::new(),
-            dirty: false,
-        });
-        self.active_sheet = Some(SettingsSheetPage::EditGroup { group_id: None });
-        self.sheet_anim.go_mut(true, Instant::now());
-    }
-
-    fn handle_group_save(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
-        let Some(ref editor) = self.group_editor else {
-            return (Task::none(), None);
-        };
-        let name = editor.name.text().trim().to_string();
-        if name.is_empty() {
-            return (Task::none(), None);
-        }
-        #[allow(clippy::cast_possible_wrap)]
-        let member_count = editor.members.len() as i64;
-        let group = crate::db::GroupEntry {
-            id: editor
-                .group_id
-                .clone()
-                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
-            name,
-            member_count,
-            created_at: 0,
-            updated_at: 0,
-        };
-        let members = editor.members.clone();
-        self.active_sheet = None;
-        self.sheet_anim.go_mut(false, Instant::now());
-        self.group_editor = None;
-        (Task::none(), Some(SettingsEvent::SaveGroup(group, members)))
-    }
-
-    fn handle_group_delete(
-        &mut self,
-        id: String,
-    ) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
-        self.active_sheet = None;
-        self.sheet_anim.go_mut(false, Instant::now());
-        self.group_editor = None;
-        (Task::none(), Some(SettingsEvent::DeleteGroup(id)))
-    }
-
-    fn handle_import_file_selected(
-        &mut self,
-        path: String,
-        data: Vec<u8>,
-    ) -> Task<SettingsMessage> {
-        let Some(ref mut wizard) = self.import_wizard else {
-            return Task::none();
-        };
-
-        // Detect format from extension
-        let lower_path = path.to_lowercase();
-        let format = if lower_path.ends_with(".vcf") || lower_path.ends_with(".vcard") {
-            import::ImportFormat::Vcf
-        } else {
-            import::ImportFormat::Csv
-        };
-
-        let source = import::ImportSource {
-            format,
-            data,
-            filename: path.clone(),
-        };
-
-        match format {
-            import::ImportFormat::Csv => match import::parse_csv(&source, 20) {
-                Ok(preview) => {
-                    let auto_mappings = import::auto_detect_mappings(&preview.headers);
-                    wizard.mappings = auto_mappings
-                        .iter()
-                        .map(|m| ImportContactField::from_import_field(m.target_field))
-                        .collect();
-                    wizard.has_header = preview.has_header;
-                    wizard.preview = Some(preview);
-                    wizard.source = Some(source);
-                    wizard.file_path = Some(path);
-                    wizard.step = ImportStep::Mapping;
-                }
-                Err(e) => {
-                    log::error!("CSV parse error: {e}");
-                }
-            },
-            import::ImportFormat::Vcf => match import::parse_vcf(&source.data) {
-                Ok(contacts) => {
-                    wizard.vcf_contacts = contacts;
-                    wizard.source = Some(source);
-                    wizard.file_path = Some(path);
-                    wizard.step = ImportStep::VcfPreview;
-                }
-                Err(e) => {
-                    log::error!("VCF parse error: {e}");
-                }
-            },
-        }
-
-        Task::none()
-    }
-
-    fn handle_import_toggle_header(&mut self, has_header: bool) -> Task<SettingsMessage> {
-        let Some(ref mut wizard) = self.import_wizard else {
-            return Task::none();
-        };
-        wizard.has_header = has_header;
-
-        // Re-parse with new header setting
-        if let Some(ref source) = wizard.source
-            && source.format == import::ImportFormat::Csv
-            && let Ok(preview) = import::csv_parser::parse_csv_with_header(source, 20, has_header)
-        {
-            let auto_mappings = import::auto_detect_mappings(&preview.headers);
-            wizard.mappings = auto_mappings
-                .iter()
-                .map(|m| ImportContactField::from_import_field(m.target_field))
-                .collect();
-            wizard.preview = Some(preview);
-        }
-
-        Task::none()
-    }
-
-    fn handle_import_execute(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
-        let Some(ref mut wizard) = self.import_wizard else {
-            return (Task::none(), None);
-        };
-
-        let contacts: Vec<import::ImportedContact> = match wizard.source.as_ref().map(|s| s.format)
-        {
-            Some(import::ImportFormat::Csv) => {
-                let Some(ref source) = wizard.source else {
-                    return (Task::none(), None);
-                };
-                let mappings: Vec<import::ColumnMapping> = wizard
-                    .mappings
-                    .iter()
-                    .enumerate()
-                    .map(|(i, field)| {
-                        let header = wizard
-                            .preview
-                            .as_ref()
-                            .and_then(|p| p.headers.get(i))
-                            .cloned()
-                            .unwrap_or_default();
-                        import::ColumnMapping {
-                            source_index: i,
-                            source_column: header,
-                            target_field: field.to_import_field(),
-                        }
-                    })
-                    .collect();
-                match import::csv_parser::execute_csv_import(source, &mappings, wizard.has_header) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        log::error!("CSV import error: {e}");
-                        return (Task::none(), None);
-                    }
-                }
-            }
-            Some(import::ImportFormat::Vcf) => wizard.vcf_contacts.clone(),
-            None => return (Task::none(), None),
-        };
-
-        wizard.step = ImportStep::Importing;
-        let account_id = wizard.account_id.clone();
-        let update_existing = wizard.update_existing;
-
-        (
-            Task::none(),
-            Some(SettingsEvent::ExecuteContactImport {
-                contacts,
-                account_id,
-                update_existing,
-            }),
-        )
-    }
-
-    pub(super) fn list_items_mut(&mut self, list_id: &str) -> &mut Vec<EditableItem> {
-        match list_id {
-            "labels" => &mut self.demo_labels,
-            "filters" => &mut self.demo_filters,
-            _ => &mut self.demo_labels,
-        }
-    }
-
-    fn open_account_editor(&mut self, account_id: &str) {
-        let Some(account) = self.managed_accounts.iter().find(|a| a.id == account_id) else {
-            return;
-        };
-        // Resolve current color index from hex
-        let presets = label_colors::preset_colors::all_presets();
-        let color_index = account
-            .account_color
-            .as_deref()
-            .and_then(|hex| presets.iter().position(|(_, bg, _)| *bg == hex));
-
-        self.editing_account = Some(AccountEditor {
-            account_id: account.id.clone(),
-            account_email: account.email.clone(),
-            account_name: UndoableText::with_initial(
-                account.account_name.as_deref().unwrap_or(""),
-            ),
-            display_name: UndoableText::with_initial(
-                account.display_name.as_deref().unwrap_or(""),
-            ),
-            account_color_index: color_index,
-            caldav_url: UndoableText::new(),
-            caldav_username: UndoableText::new(),
-            caldav_password: UndoableText::new(),
-            show_delete_confirmation: false,
-            dirty: false,
-        });
-        self.active_sheet = Some(SettingsSheetPage::AccountEditor);
-        self.sheet_anim.go_mut(true, iced::time::Instant::now());
-    }
-
-    fn handle_account_editor_save(&mut self) -> (Task<SettingsMessage>, Option<SettingsEvent>) {
-        let Some(ref editor) = self.editing_account else {
-            return (Task::none(), None);
-        };
-        if !editor.dirty {
-            // Nothing changed - just close
-            self.editing_account = None;
-            self.active_sheet = None;
-            self.sheet_anim.go_mut(false, iced::time::Instant::now());
-            return (Task::none(), None);
-        }
-
-        let presets = label_colors::preset_colors::all_presets();
-        let color_hex = editor
-            .account_color_index
-            .and_then(|i| presets.get(i))
-            .map(|(_, bg, _)| (*bg).to_string());
-
-        let params = rtsk::db::queries_extra::UpdateAccountParams {
-            account_name: Some(editor.account_name.text().to_string()),
-            display_name: Some(editor.display_name.text().to_string()),
-            account_color: color_hex,
-            caldav_url: non_empty(editor.caldav_url.text().trim()),
-            caldav_username: non_empty(editor.caldav_username.text().trim()),
-            caldav_password: non_empty(editor.caldav_password.text().trim()),
-        };
-        let account_id = editor.account_id.clone();
-
-        self.editing_account = None;
-        self.active_sheet = None;
-        self.sheet_anim.go_mut(false, iced::time::Instant::now());
-        (
-            Task::none(),
-            Some(SettingsEvent::SaveAccountChanges { account_id, params }),
-        )
-    }
-}
-
-/// Convert empty strings to `None`.
-fn non_empty(s: &str) -> Option<String> {
-    if s.is_empty() {
-        None
-    } else {
-        Some(s.to_string())
     }
 }
