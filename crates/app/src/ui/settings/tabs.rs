@@ -1478,10 +1478,8 @@ fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     // Filter input
     group_items.push(static_row(group_filter_row(&state.group_filter)));
 
-    // Group cards
-    for group in &state.groups {
-        group_items.push(group_card(group));
-    }
+    // Recessed scrollable panel of group pills
+    group_items.push(static_row(group_list_panel(state)));
 
     // New Group button
     group_items.push(people_add_button(
@@ -1732,66 +1730,116 @@ fn contact_card<'a>(
     .into()
 }
 
-fn group_card(group: &crate::db::GroupEntry) -> RowBuilder<'_> {
-    Box::new(move |position| {
-        let id = group.id.clone();
-        let member_label = if group.member_count == 1 {
-            "1 member".to_string()
-        } else {
-            format!("{} members", group.member_count)
-        };
-        let format_date = |ts: i64| -> String {
-            chrono::DateTime::from_timestamp(ts, 0)
-                .map(|dt| {
-                    dt.with_timezone(&chrono::Local)
-                        .format("%b %d, %Y")
-                        .to_string()
-                })
-                .unwrap_or_default()
-        };
-        let created_label = format!("Created: {}", format_date(group.created_at));
-        let updated_label = format!("Last updated: {}", format_date(group.updated_at));
+fn group_card(group: &crate::db::GroupEntry) -> Element<'_, SettingsMessage> {
+    let id = group.id.clone();
+    let member_label = if group.member_count == 1 {
+        "1 member".to_string()
+    } else {
+        format!("{} members", group.member_count)
+    };
+    let format_date = |ts: i64| -> String {
+        chrono::DateTime::from_timestamp(ts, 0)
+            .map(|dt| {
+                dt.with_timezone(&chrono::Local)
+                    .format("%b %d, %Y")
+                    .to_string()
+            })
+            .unwrap_or_default()
+    };
+    let created_label = format!("Created: {}", format_date(group.created_at));
+    let updated_label = format!("Last updated: {}", format_date(group.updated_at));
 
-        // Top row: name (left) + member count (right).
-        let top_row = row![
-            container(text(&group.name).size(TEXT_LG).style(text::base))
-                .align_y(Alignment::Center)
-                .width(Length::Fill),
-            text(member_label).size(TEXT_SM).style(text::secondary),
-        ]
-        .spacing(SPACE_SM)
-        .align_y(Alignment::Center);
-
-        // Bottom row: created date (left) + last updated date (right).
-        let bottom_row = row![
-            container(
-                text(created_label)
-                    .size(TEXT_SM)
-                    .style(theme::TextClass::Muted.style()),
-            )
+    // Top row: name (left) + member count (right).
+    let top_row = row![
+        container(text(&group.name).size(TEXT_LG).style(text::base))
             .align_y(Alignment::Center)
             .width(Length::Fill),
-            text(updated_label)
+        text(member_label).size(TEXT_SM).style(text::secondary),
+    ]
+    .spacing(SPACE_SM)
+    .align_y(Alignment::Center);
+
+    // Bottom row: created date (left) + last updated date (right).
+    let bottom_row = row![
+        container(
+            text(created_label)
                 .size(TEXT_SM)
                 .style(theme::TextClass::Muted.style()),
-        ]
-        .spacing(SPACE_SM)
-        .align_y(Alignment::Center);
-
-        let content = column![top_row, bottom_row].spacing(SPACE_XXXS);
-
-        button(
-            container(content)
-                .padding(PAD_SETTINGS_ROW)
-                .width(Length::Fill)
-                .align_y(Alignment::Center),
         )
-        .on_press(SettingsMessage::GroupClick(id))
-        .padding(0)
-        .style(move |t, s| theme::style_settings_row_button(t, s, position))
+        .align_y(Alignment::Center)
+        .width(Length::Fill),
+        text(updated_label)
+            .size(TEXT_SM)
+            .style(theme::TextClass::Muted.style()),
+    ]
+    .spacing(SPACE_SM)
+    .align_y(Alignment::Center);
+
+    let content = column![top_row, bottom_row].spacing(SPACE_XXXS);
+
+    button(
+        container(content)
+            .padding(PAD_CARD)
+            .width(Length::Fill)
+            .align_y(Alignment::Center),
+    )
+    .on_press(SettingsMessage::GroupClick(id))
+    .padding(0)
+    .style(theme::style_pill_card_button)
+    .width(Length::Fill)
+    .into()
+}
+
+/// Recessed scrollable panel of group pills, mirroring `contact_list_panel`.
+fn group_list_panel(state: &Settings) -> Element<'_, SettingsMessage> {
+    let panel: Element<'_, SettingsMessage> = if state.groups.is_empty() {
+        container(
+            text("No groups yet.")
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .padding(PAD_CARD)
+        .width(Length::Fill)
+        .height(GROUP_PANEL_HEIGHT)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .style(theme::style_recessed_list_panel)
+        .into()
+    } else {
+        let mut col = column![]
+            .spacing(PEOPLE_PILL_SPACING)
+            .width(Length::Fill);
+        for group in &state.groups {
+            col = col.push(group_card(group));
+        }
+
+        container(
+            scrollable(container(col).padding(PAD_CARD).width(Length::Fill))
+                .direction(iced::widget::scrollable::Direction::Vertical(
+                    iced::widget::scrollable::Scrollbar::new()
+                        .width(6)
+                        .scroller_width(6)
+                        .margin(SPACE_XXS),
+                ))
+                .height(Length::Fill),
+        )
+        .padding(iced::Padding {
+            top: SPACE_XS,
+            right: 0.0,
+            bottom: SPACE_XS,
+            left: 0.0,
+        })
+        .width(Length::Fill)
+        .height(GROUP_PANEL_HEIGHT)
+        .clip(true)
+        .style(theme::style_recessed_list_panel)
+        .into()
+    };
+
+    container(panel)
+        .padding(SPACE_XS)
         .width(Length::Fill)
         .into()
-    })
 }
 
 fn people_add_button(label: &str, on_press: SettingsMessage) -> RowBuilder<'_> {
