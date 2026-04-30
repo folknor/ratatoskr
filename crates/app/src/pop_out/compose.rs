@@ -160,6 +160,12 @@ pub enum ComposeMessage {
         token_id: TokenId,
         position: Point,
     },
+    /// Show the field-area context menu at a given position. Renders only
+    /// the Paste action since Cut/Copy/Delete need a token target.
+    ShowFieldContextMenu {
+        field: RecipientField,
+        position: Point,
+    },
     /// Dismiss the token context menu.
     DismissContextMenu,
     /// Delete a token from a specific field via context menu.
@@ -172,6 +178,21 @@ pub enum ComposeMessage {
         token_id: TokenId,
         from: RecipientField,
         to_field: RecipientField,
+    },
+    /// Copy a token's `Name <email>` to the clipboard.
+    ContextMenuCopy {
+        field: RecipientField,
+        token_id: TokenId,
+    },
+    /// Copy a token's `Name <email>` to the clipboard, then delete it.
+    ContextMenuCut {
+        field: RecipientField,
+        token_id: TokenId,
+    },
+    /// Read the clipboard and paste into `field` via the standard token-input
+    /// paste path (so the bulk-paste banner still triggers at 10+).
+    ContextMenuPaste {
+        field: RecipientField,
     },
     /// Expand a group token into individual member tokens.
     /// The expansion result arrives via `GroupExpanded`.
@@ -204,6 +225,26 @@ pub enum ComposeMessage {
     BccNudgeDismiss(TokenId),
     /// Bulk paste: dismiss.
     BulkPasteDismiss,
+    /// Bulk paste: open the save-as-group dialog.
+    BulkPasteSaveAsGroup,
+    /// Save-as-group dialog: name input changed.
+    GroupSaveNameChanged(String),
+    /// Save-as-group dialog: confirm. Triggers the async DB write at the
+    /// app layer; the result comes back as `GroupSaveResult`.
+    GroupSaveConfirm,
+    /// Save-as-group dialog: cancel.
+    GroupSaveCancel,
+    /// Save-as-group async result. On success carries the new `group_id`
+    /// and `name` so the pasted tokens can be replaced with one group token.
+    GroupSaveResult(Result<GroupSaveSuccess, String>),
+    /// Result of looking up whether a freshly-pasted set of addresses
+    /// matches an existing contact group exactly. If `group` is `Some`,
+    /// the tokens listed in `added_ids` are replaced with one group token.
+    PasteGroupMatchResult {
+        field: RecipientField,
+        added_ids: Vec<TokenId>,
+        group: Option<rtsk::db::queries_extra::MatchedGroup>,
+    },
     // ── Link dialog ──
     /// Toggle the link insertion overlay.
     ToggleLinkDialog,
@@ -272,17 +313,39 @@ pub struct BccNudgeBanner {
     pub source_field: RecipientField,
 }
 
-/// A bulk paste banner shown when 10+ addresses are pasted.
-pub struct BulkPasteBanner {
-    pub count: usize,
+/// Successful save-as-group result. Carries the bits needed to mint the
+/// replacement group token.
+#[derive(Debug, Clone)]
+pub struct GroupSaveSuccess {
+    pub group_id: String,
+    pub name: String,
+    pub member_count: i64,
 }
 
-/// State for the right-click context menu on a token.
+/// A bulk paste banner shown when 10+ addresses are pasted. Tracks which
+/// field the paste landed in and which token ids were added so the
+/// "Save as group" flow can replace exactly those tokens (not whatever the
+/// user has typed since) with a single group token.
+pub struct BulkPasteBanner {
+    pub count: usize,
+    pub field: RecipientField,
+    pub token_ids: Vec<TokenId>,
+}
+
+/// What the right-click context menu is targeting. A specific token
+/// gives the full menu (Cut/Copy/Paste/Delete/Expand-group/Move-to);
+/// the field's empty area gives a Paste-only menu, since Cut/Copy/Delete
+/// have no target.
+pub enum ContextMenuKind {
+    Token { token_id: TokenId, is_group: bool },
+    Field,
+}
+
+/// State for the right-click context menu in a recipient field.
 pub struct TokenContextMenuState {
-    pub token_id: TokenId,
     pub field: RecipientField,
     pub position: Point,
-    pub is_group: bool,
+    pub kind: ContextMenuKind,
 }
 
 // ── State ───────────────────────────────────────────────
@@ -344,6 +407,12 @@ pub struct ComposeState {
     pub link_url: String,
     pub link_text: String,
 
+    // Save-as-group dialog (driven from the bulk-paste banner)
+    pub save_group_dialog_open: bool,
+    pub save_group_name: String,
+    pub save_group_error: Option<String>,
+    pub save_group_in_flight: bool,
+
     // Window geometry
     pub width: f32,
     pub height: f32,
@@ -397,6 +466,10 @@ impl ComposeState {
             link_dialog_open: false,
             link_url: String::new(),
             link_text: String::new(),
+            save_group_dialog_open: false,
+            save_group_name: String::new(),
+            save_group_error: None,
+            save_group_in_flight: false,
             active_signature_id: None,
             signature_separator_index: None,
             width: COMPOSE_DEFAULT_WIDTH,
@@ -472,6 +545,10 @@ impl ComposeState {
             link_dialog_open: false,
             link_url: String::new(),
             link_text: String::new(),
+            save_group_dialog_open: false,
+            save_group_name: String::new(),
+            save_group_error: None,
+            save_group_in_flight: false,
             active_signature_id: draft.signature_id.clone(),
             signature_separator_index,
             width: COMPOSE_DEFAULT_WIDTH,
@@ -738,10 +815,16 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             .iter()
             .any(|t| t.id == token_id && t.is_group);
             state.context_menu = Some(TokenContextMenuState {
-                token_id,
                 field,
                 position,
-                is_group,
+                kind: ContextMenuKind::Token { token_id, is_group },
+            });
+        }
+        ComposeMessage::ShowFieldContextMenu { field, position } => {
+            state.context_menu = Some(TokenContextMenuState {
+                field,
+                position,
+                kind: ContextMenuKind::Field,
             });
         }
         ComposeMessage::DismissContextMenu => {
@@ -788,6 +871,27 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         }
         ComposeMessage::ContextMenuExpandGroup { .. } => {
             // Group expansion requires DB access - handled by pop_out.rs
+            state.context_menu = None;
+        }
+        ComposeMessage::ContextMenuCopy { .. } => {
+            // The clipboard write is dispatched at the app layer; nothing to
+            // do in state besides closing the menu.
+            state.context_menu = None;
+        }
+        ComposeMessage::ContextMenuCut { field, token_id } => {
+            // Same delete as ContextMenuDelete; the clipboard write is
+            // dispatched at the app layer.
+            let tokens = match field {
+                RecipientField::To => &mut state.to.tokens,
+                RecipientField::Cc => &mut state.cc.tokens,
+                RecipientField::Bcc => &mut state.bcc.tokens,
+            };
+            tokens.retain(|t| t.id != token_id);
+            state.context_menu = None;
+            state.draft_dirty = true;
+        }
+        ComposeMessage::ContextMenuPaste { .. } => {
+            // The clipboard read + paste dispatch happens at the app layer.
             state.context_menu = None;
         }
         ComposeMessage::GroupExpanded {
@@ -888,6 +992,151 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         }
         ComposeMessage::BulkPasteDismiss => {
             state.bulk_paste_banner = None;
+        }
+        ComposeMessage::BulkPasteSaveAsGroup => {
+            // Open the dialog. The actual save happens on GroupSaveConfirm
+            // (which routes through the app layer for DB access).
+            if state.bulk_paste_banner.is_some() {
+                state.save_group_dialog_open = true;
+                state.save_group_name = String::new();
+                state.save_group_error = None;
+                state.save_group_in_flight = false;
+            }
+        }
+        ComposeMessage::GroupSaveNameChanged(s) => {
+            state.save_group_name = s;
+            state.save_group_error = None;
+        }
+        ComposeMessage::GroupSaveCancel => {
+            state.save_group_dialog_open = false;
+            state.save_group_name = String::new();
+            state.save_group_error = None;
+            state.save_group_in_flight = false;
+        }
+        ComposeMessage::GroupSaveConfirm => {
+            // The DB write is dispatched at the app layer; we just mark the
+            // request as in-flight so the dialog disables its Save button.
+            if state.bulk_paste_banner.is_some() && !state.save_group_name.trim().is_empty() {
+                state.save_group_in_flight = true;
+                state.save_group_error = None;
+            }
+        }
+        ComposeMessage::GroupSaveResult(Err(e)) => {
+            state.save_group_in_flight = false;
+            state.save_group_error = Some(e);
+        }
+        ComposeMessage::GroupSaveResult(Ok(success)) => {
+            // Replace the pasted tokens (recorded on the banner) with a single
+            // group token. Anything the user typed since the paste stays put.
+            if let Some(banner) = state.bulk_paste_banner.take() {
+                let target = match banner.field {
+                    RecipientField::To => &mut state.to,
+                    RecipientField::Cc => &mut state.cc,
+                    RecipientField::Bcc => &mut state.bcc,
+                };
+                let pasted: std::collections::HashSet<TokenId> =
+                    banner.token_ids.iter().copied().collect();
+                let insert_at = target
+                    .tokens
+                    .iter()
+                    .position(|t| pasted.contains(&t.id))
+                    .unwrap_or(target.tokens.len());
+                target.tokens.retain(|t| !pasted.contains(&t.id));
+                let id = target.next_token_id();
+                target.tokens.insert(
+                    insert_at,
+                    token_input::Token {
+                        id,
+                        email: String::new(),
+                        label: success.name.clone(),
+                        is_group: true,
+                        group_id: Some(success.group_id),
+                        member_count: Some(success.member_count),
+                    },
+                );
+            }
+            state.save_group_dialog_open = false;
+            state.save_group_name = String::new();
+            state.save_group_error = None;
+            state.save_group_in_flight = false;
+            state.draft_dirty = true;
+        }
+        ComposeMessage::PasteGroupMatchResult {
+            field,
+            added_ids,
+            group,
+        } => {
+            // Only act if the pasted set still matches an existing group
+            // AND every token we just pasted is still in the field. If the
+            // user has pruned any of them in the meantime, the match no
+            // longer represents the user's intent - leave the field alone.
+            let Some(matched) = group else {
+                return;
+            };
+            let pasted: std::collections::HashSet<TokenId> = added_ids.iter().copied().collect();
+            let target_now = match field {
+                RecipientField::To => &state.to,
+                RecipientField::Cc => &state.cc,
+                RecipientField::Bcc => &state.bcc,
+            };
+            let still_present = target_now
+                .tokens
+                .iter()
+                .filter(|t| pasted.contains(&t.id))
+                .count();
+            if still_present != pasted.len() {
+                return;
+            }
+            // A group can only appear once across To/Cc/Bcc combined -
+            // adding it twice would just mean sending the same emails
+            // twice. If the group is already present anywhere, treat the
+            // paste as a no-op: drop the pasted individuals and don't
+            // insert a new group token. The pasted tokens themselves are
+            // individuals (`group_id == None`) so they can't false-match.
+            let group_id_str = matched.id.as_str();
+            let already_present = state
+                .to
+                .tokens
+                .iter()
+                .chain(state.cc.tokens.iter())
+                .chain(state.bcc.tokens.iter())
+                .any(|t| t.is_group && t.group_id.as_deref() == Some(group_id_str));
+            let target = match field {
+                RecipientField::To => &mut state.to,
+                RecipientField::Cc => &mut state.cc,
+                RecipientField::Bcc => &mut state.bcc,
+            };
+            let insert_at = target
+                .tokens
+                .iter()
+                .position(|t| pasted.contains(&t.id))
+                .unwrap_or(target.tokens.len());
+            target.tokens.retain(|t| !pasted.contains(&t.id));
+            if !already_present {
+                let id = target.next_token_id();
+                target.tokens.insert(
+                    insert_at,
+                    token_input::Token {
+                        id,
+                        email: String::new(),
+                        label: matched.name,
+                        is_group: true,
+                        group_id: Some(matched.id),
+                        member_count: Some(matched.member_count),
+                    },
+                );
+            }
+            // The bulk-paste banner, if it was tracking this paste, is no
+            // longer accurate - clear it so the user doesn't see "Save as
+            // group?" prompting them to save what's already a group.
+            if let Some(ref banner) = state.bulk_paste_banner {
+                if banner.field == field
+                    && banner.token_ids.iter().any(|t| pasted.contains(t))
+                {
+                    state.bulk_paste_banner = None;
+                }
+            }
+            state.draft_dirty = true;
         }
         // Formatting toolbar - emit ToggleInlineStyle to the rich text editor
         ComposeMessage::FormatBold => {
@@ -1123,10 +1372,20 @@ fn handle_recipient_token_input(
             .any(|t| t.id == tid && t.is_group);
 
             state.context_menu = Some(TokenContextMenuState {
-                token_id: tid,
                 field,
                 position: pos,
-                is_group,
+                kind: ContextMenuKind::Token {
+                    token_id: tid,
+                    is_group,
+                },
+            });
+            return;
+        }
+        TokenInputMessage::FieldContextMenu(position) => {
+            state.context_menu = Some(TokenContextMenuState {
+                field,
+                position: *position,
+                kind: ContextMenuKind::Field,
             });
             return;
         }
@@ -1151,6 +1410,24 @@ fn handle_recipient_token_input(
         0
     };
 
+    // A pill marker is conceptually the cursor in that field - so any
+    // interaction with this field implicitly moves the cursor here, which
+    // means selections in the *other* recipient fields should clear. This
+    // keeps "only one pill selected at a time" across To/Cc/Bcc.
+    match field {
+        RecipientField::To => {
+            state.selected_cc_token = None;
+            state.selected_bcc_token = None;
+        }
+        RecipientField::Cc => {
+            state.selected_to_token = None;
+            state.selected_bcc_token = None;
+        }
+        RecipientField::Bcc => {
+            state.selected_to_token = None;
+            state.selected_cc_token = None;
+        }
+    }
     let (value, selected) = match field {
         RecipientField::To => (&mut state.to, &mut state.selected_to_token),
         RecipientField::Cc => (&mut state.cc, &mut state.selected_cc_token),
@@ -1161,14 +1438,24 @@ fn handle_recipient_token_input(
 
     // Bulk paste banner: show if 10+ addresses were added by paste
     if is_paste {
-        let tokens_after = match field {
-            RecipientField::To => state.to.tokens.len(),
-            RecipientField::Cc => state.cc.tokens.len(),
-            RecipientField::Bcc => state.bcc.tokens.len(),
+        let field_tokens = match field {
+            RecipientField::To => &state.to.tokens,
+            RecipientField::Cc => &state.cc.tokens,
+            RecipientField::Bcc => &state.bcc.tokens,
         };
+        let tokens_after = field_tokens.len();
         let added = tokens_after.saturating_sub(tokens_before);
         if added >= 10 {
-            state.bulk_paste_banner = Some(BulkPasteBanner { count: added });
+            let token_ids = field_tokens
+                .iter()
+                .skip(tokens_before)
+                .map(|t| t.id)
+                .collect();
+            state.bulk_paste_banner = Some(BulkPasteBanner {
+                count: added,
+                field,
+                token_ids,
+            });
         }
     }
 }
@@ -1210,8 +1497,15 @@ fn handle_token_input_message(
             }
         }
         TokenInputMessage::Focused | TokenInputMessage::Blurred => {}
-        TokenInputMessage::TokenContextMenu(_, _) => {
+        TokenInputMessage::TokenContextMenu(_, _)
+        | TokenInputMessage::FieldContextMenu(_) => {
             // Handled at the compose level via handle_recipient_token_input
+        }
+        TokenInputMessage::CopyToken(_) | TokenInputMessage::CutToken(_) => {
+            // Handled at the app layer (handlers/pop_out.rs) which translates
+            // these to ContextMenuCopy/Cut so the same async DB-expand-then-
+            // clipboard-write logic runs whether the trigger is a key chord
+            // or the right-click menu.
         }
         TokenInputMessage::ArrowSelectToken(_) => {}
         TokenInputMessage::ArrowToText => {}
@@ -1325,6 +1619,14 @@ pub fn view_compose_window<'a>(
         crate::ui::modal_overlay::modal_overlay(
             with_context_menu,
             link_dialog(window_id, state),
+            crate::ui::modal_overlay::ModalSurface::Modal,
+            noop,
+        )
+    } else if state.save_group_dialog_open {
+        let noop = Message::PopOut(window_id, PopOutMessage::Compose(ComposeMessage::Noop));
+        crate::ui::modal_overlay::modal_overlay(
+            with_context_menu,
+            save_as_group_dialog(window_id, state),
             crate::ui::modal_overlay::ModalSurface::Modal,
             noop,
         )
@@ -1849,6 +2151,14 @@ fn bulk_paste_banner_view<'a>(
         banner.count,
     );
 
+    let save_btn = button(text("Save as group").size(TEXT_SM))
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::BulkPasteSaveAsGroup),
+        ))
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::Primary.style());
+
     let dismiss_btn = button(text("Dismiss").size(TEXT_SM))
         .on_press(Message::PopOut(
             window_id,
@@ -1858,14 +2168,102 @@ fn bulk_paste_banner_view<'a>(
         .style(theme::ButtonClass::Ghost.style());
 
     container(
-        row![text(label).size(TEXT_SM).width(Length::Fill), dismiss_btn,]
-            .spacing(SPACE_XS)
-            .align_y(Alignment::Center),
+        row![
+            text(label).size(TEXT_SM).width(Length::Fill),
+            save_btn,
+            dismiss_btn,
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center),
     )
     .padding(PAD_CONTENT)
     .width(Length::Fill)
     .style(theme::ContainerClass::Elevated.style())
     .into()
+}
+
+fn save_as_group_dialog<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
+    let count = state
+        .bulk_paste_banner
+        .as_ref()
+        .map_or(0, |b| b.count);
+
+    let name_input = text_input("Group name", &state.save_group_name)
+        .on_input(move |s| {
+            Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::GroupSaveNameChanged(s)),
+            )
+        })
+        .on_submit(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::GroupSaveConfirm),
+        ))
+        .size(TEXT_MD)
+        .padding(PAD_INPUT);
+
+    let cancel_btn = button(text("Cancel").size(TEXT_MD))
+        .style(theme::ButtonClass::Ghost.style())
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::GroupSaveCancel),
+        ))
+        .padding(PAD_BUTTON);
+
+    let save_disabled =
+        state.save_group_name.trim().is_empty() || state.save_group_in_flight;
+
+    let save_label = if state.save_group_in_flight {
+        "Saving..."
+    } else {
+        "Save"
+    };
+    let mut save_btn = button(text(save_label).size(TEXT_MD).font(font::text_semibold()))
+        .style(theme::ButtonClass::Primary.style())
+        .padding(PAD_BUTTON);
+    if !save_disabled {
+        save_btn = save_btn.on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::GroupSaveConfirm),
+        ));
+    }
+
+    let mut col = column![
+        text("Save as contact group")
+            .size(TEXT_TITLE)
+            .font(font::text_semibold())
+            .style(text::base),
+        text(format!(
+            "{count} addresses will be saved as a new contact group."
+        ))
+        .size(TEXT_SM)
+        .style(text::secondary),
+        column![
+            text("Group name").size(TEXT_SM).style(text::secondary),
+            name_input,
+        ]
+        .spacing(SPACE_XXS),
+    ]
+    .spacing(SPACE_SM);
+
+    if let Some(ref err) = state.save_group_error {
+        col = col.push(text(err.as_str()).size(TEXT_SM).style(text::danger));
+    }
+
+    col = col.push(
+        row![cancel_btn, save_btn]
+            .spacing(SPACE_SM)
+            .align_y(Alignment::Center),
+    );
+
+    container(col)
+        .padding(PAD_CONTENT)
+        .style(theme::ContainerClass::Elevated.style())
+        .width(Length::Fixed(state.width * 0.8))
+        .into()
 }
 
 // ── Token context menu ──────────────────────────────────
@@ -1875,66 +2273,83 @@ fn token_context_menu<'a>(
     ctx: &TokenContextMenuState,
 ) -> Element<'a, Message> {
     let mk = |label: &'a str, msg: ComposeMessage| {
-        button(text(label).size(TEXT_SM))
-            .on_press(Message::PopOut(window_id, PopOutMessage::Compose(msg)))
-            .width(Length::Fill)
-            .padding(PAD_INPUT)
-            .style(theme::ButtonClass::Ghost.style())
+        button(
+            container(text(label).size(TEXT_MD).style(text::base))
+                .width(Length::Fill)
+                .align_y(Alignment::Center),
+        )
+        .on_press(Message::PopOut(window_id, PopOutMessage::Compose(msg)))
+        .padding(PAD_NAV_ITEM)
+        .height(DROPDOWN_ITEM_HEIGHT)
+        .style(theme::ButtonClass::Dropdown { selected: false }.style())
+        .width(Length::Fill)
     };
 
     let field = ctx.field;
-    let token_id = ctx.token_id;
+    let mut items = column![].spacing(SPACE_XXS);
 
-    let mut items = column![].spacing(SPACE_0);
-
-    items = items.push(mk(
-        "Delete",
-        ComposeMessage::ContextMenuDelete { field, token_id },
-    ));
-
-    // Expand group (only for group tokens)
-    if ctx.is_group {
-        items = items.push(mk(
-            "Expand group",
-            ComposeMessage::ContextMenuExpandGroup { field, token_id },
-        ));
+    match ctx.kind {
+        ContextMenuKind::Token { token_id, is_group } => {
+            items = items.push(mk(
+                "Cut",
+                ComposeMessage::ContextMenuCut { field, token_id },
+            ));
+            items = items.push(mk(
+                "Copy",
+                ComposeMessage::ContextMenuCopy { field, token_id },
+            ));
+            items = items.push(mk("Paste", ComposeMessage::ContextMenuPaste { field }));
+            items = items.push(mk(
+                "Delete",
+                ComposeMessage::ContextMenuDelete { field, token_id },
+            ));
+            if is_group {
+                items = items.push(mk(
+                    "Expand group",
+                    ComposeMessage::ContextMenuExpandGroup { field, token_id },
+                ));
+            }
+            if field != RecipientField::To {
+                items = items.push(mk(
+                    "Move to To",
+                    ComposeMessage::ContextMenuMoveTo {
+                        token_id,
+                        from: field,
+                        to_field: RecipientField::To,
+                    },
+                ));
+            }
+            if field != RecipientField::Cc {
+                items = items.push(mk(
+                    "Move to Cc",
+                    ComposeMessage::ContextMenuMoveTo {
+                        token_id,
+                        from: field,
+                        to_field: RecipientField::Cc,
+                    },
+                ));
+            }
+            if field != RecipientField::Bcc {
+                items = items.push(mk(
+                    "Move to Bcc",
+                    ComposeMessage::ContextMenuMoveTo {
+                        token_id,
+                        from: field,
+                        to_field: RecipientField::Bcc,
+                    },
+                ));
+            }
+        }
+        ContextMenuKind::Field => {
+            // Empty-area right-click: only Paste makes sense - Cut/Copy/
+            // Delete need a token target.
+            items = items.push(mk("Paste", ComposeMessage::ContextMenuPaste { field }));
+        }
     }
 
-    // Move to other fields
-    if field != RecipientField::To {
-        items = items.push(mk(
-            "Move to To",
-            ComposeMessage::ContextMenuMoveTo {
-                token_id,
-                from: field,
-                to_field: RecipientField::To,
-            },
-        ));
-    }
-    if field != RecipientField::Cc {
-        items = items.push(mk(
-            "Move to Cc",
-            ComposeMessage::ContextMenuMoveTo {
-                token_id,
-                from: field,
-                to_field: RecipientField::Cc,
-            },
-        ));
-    }
-    if field != RecipientField::Bcc {
-        items = items.push(mk(
-            "Move to Bcc",
-            ComposeMessage::ContextMenuMoveTo {
-                token_id,
-                from: field,
-                to_field: RecipientField::Bcc,
-            },
-        ));
-    }
-
-    container(items)
+    container(items.width(Length::Fill))
         .padding(PAD_DROPDOWN)
-        .style(theme::ContainerClass::Elevated.style())
+        .style(theme::ContainerClass::SelectMenu.style())
         .width(180.0)
         .into()
 }

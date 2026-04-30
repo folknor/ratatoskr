@@ -34,7 +34,12 @@ Use `brokkr` (not `cargo`) for check/test. It runs a gremlins scan (banned Unico
 - `brokkr check --fix-gremlins` - rewrite banned Unicode in tracked files (em/en dash -> `-`, smart quotes -> straight, NBSP -> space, zero-width/bidi deleted) before checking
 - `brokkr check -p <crate>` - scope to one package (e.g. `-p rtsk`, `-p app`, `-p squeeze`)
 - `brokkr check -- --test <file>` - forward args to `cargo test` (args after the second `--` go to the test binary)
-- `brokkr test -p <crate> <NAME>` - release-mode focused single-test runner (`--include-ignored --nocapture --test-threads=1`). Works for both unit and integration tests. `-p` is required in this workspace (no default package). `-N` repeats for flake hunting. Gated off for litehtml/sluggrs.
+- `brokkr test -p <crate> <NAME>` - release-mode focused single-test runner. Always passes `--release --include-ignored --nocapture --test-threads=1`. `<NAME>` is a case-sensitive substring filter (matches both unit and integration tests). Streams the test's own stdout/stderr live and prints a `[test] PASS/FAIL` footer with wall time. Defaults to `--all-features`; runs a second sweep if `[check].consumer_features` is set in `brokkr.toml`. Gated off for litehtml/sluggrs (use `brokkr visual` there).
+  - `-p, --package <PKG>` - cargo package. Required in this workspace - no default package, and overrides `[test] default_package` in `brokkr.toml` if set.
+  - `-N, --repeat <N>` - run the test N times per sweep (flaky-test hunting).
+  - `-j, --jobs <N>` - parallel cargo compile jobs.
+  - `--raw` - bypass output filtering, print everything cargo emits.
+  - Example: `brokkr test -p common truncates_without_splitting` or `brokkr test -p calendar extract_tag_value_flattens_nested_text -N 5`.
 - `cargo run -p app` - run the iced app (requires a seeded DB, see `crates/app/seed-db.py`)
 
 Fall back to raw `cargo check`/`cargo test` only when you need to bypass clippy gating for a targeted run.

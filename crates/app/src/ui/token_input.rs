@@ -109,6 +109,15 @@ pub enum TokenInputMessage {
     BackspaceAtStart,
     /// Right-click on a token - emit position for context menu.
     TokenContextMenu(TokenId, Point),
+    /// Right-click in the field's empty area (no token under the cursor) -
+    /// caller shows a minimal Paste-only context menu.
+    FieldContextMenu(Point),
+    /// Ctrl+C / Cmd+C with a selected token - copy it to the clipboard.
+    /// The actual clipboard write happens at the compose layer because group
+    /// tokens require a DB lookup to expand into their member list.
+    CopyToken(TokenId),
+    /// Ctrl+X / Cmd+X with a selected token - copy then delete.
+    CutToken(TokenId),
     /// Arrow key navigated to select a token by index.
     ArrowSelectToken(TokenId),
     /// Arrow right from last token - deselect and focus text.
@@ -206,15 +215,33 @@ fn chip_display_label(token: &Token) -> String {
     }
 }
 
-/// Estimate token chip width from label text.
-///
-/// Uses character count (not byte count) for correct non-ASCII width.
-/// Group tokens include space for the people icon prefix.
+/// Measure token chip width from the actual rendered label using iced's
+/// text shaper. Falls back to a per-character estimate if iced's measurer
+/// can't run (which shouldn't happen in practice, but the fallback keeps
+/// layout deterministic). Group tokens include the people-icon prefix.
 fn estimate_token_width(token: &Token) -> f32 {
-    let avg_char_width = TEXT_LG * TOKEN_AVG_CHAR_WIDTH_FACTOR;
+    use iced::advanced::text::{
+        Alignment, Ellipsis, LineHeight, Paragraph as ParagraphTrait, Shaping, Wrapping,
+    };
+    type IcedParagraph =
+        <iced::Renderer as iced::advanced::text::Renderer>::Paragraph;
+
     let display = chip_display_label(token);
-    #[allow(clippy::cast_precision_loss)]
-    let text_width = display.chars().count() as f32 * avg_char_width;
+    let text = iced::advanced::text::Text {
+        content: display.as_str(),
+        bounds: Size::new(f32::INFINITY, f32::INFINITY),
+        size: iced::Pixels(TEXT_LG),
+        line_height: LineHeight::default(),
+        font: font::text(),
+        align_x: Alignment::Left,
+        align_y: iced::alignment::Vertical::Top,
+        shaping: Shaping::Advanced,
+        wrapping: Wrapping::None,
+        ellipsis: Ellipsis::None,
+        hint_factor: None,
+    };
+    let paragraph = IcedParagraph::with_text(text);
+    let text_width = paragraph.min_bounds().width;
     let icon_width = if token.is_group {
         TOKEN_GROUP_ICON_SIZE + SPACE_XXS
     } else {
@@ -248,7 +275,11 @@ fn text_area_origin(
 
 // ── Group icon drawing ──────────────────────────────────
 
-/// Draw the people icon glyph for group tokens using the icon font.
+/// Draw the people icon glyph for group tokens using the icon font. The
+/// caller positions `position` at the top-left of the icon's square box;
+/// `bounds` and `line_height` are set to exactly the icon size so the
+/// glyph occupies the full box without extra line-height padding shifting
+/// it.
 fn draw_group_icon(
     renderer: &mut iced::Renderer,
     position: Point,
@@ -259,12 +290,14 @@ fn draw_group_icon(
     renderer.fill_text(
         iced::advanced::text::Text {
             content: "\u{e1a4}".to_string(),
-            bounds: Size::new(TOKEN_GROUP_ICON_SIZE, TOKEN_HEIGHT),
+            bounds: Size::new(TOKEN_GROUP_ICON_SIZE, TOKEN_GROUP_ICON_SIZE),
             size: iced::Pixels(TOKEN_GROUP_ICON_SIZE),
-            line_height: iced::advanced::text::LineHeight::default(),
+            line_height: iced::advanced::text::LineHeight::Absolute(iced::Pixels(
+                TOKEN_GROUP_ICON_SIZE,
+            )),
             font: crate::font::ICON,
             align_x: iced::advanced::text::Alignment::Left,
-            align_y: iced::alignment::Vertical::Center,
+            align_y: iced::alignment::Vertical::Top,
             shaping: iced::advanced::text::Shaping::Advanced,
             wrapping: iced::advanced::text::Wrapping::None,
             ellipsis: iced::advanced::text::Ellipsis::None,
@@ -440,11 +473,14 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                 chip_bg,
             );
 
-            // Group icon prefix for group tokens
+            // Group icon prefix for group tokens. Position the icon's bounds
+            // box centered against the chip's vertical midline so font
+            // line-height padding can't push it off-center.
             let label_x_offset = if token.is_group {
+                let icon_y = abs.y + (abs.height - TOKEN_GROUP_ICON_SIZE) / 2.0;
                 draw_group_icon(
                     renderer,
-                    Point::new(abs.x + PAD_TOKEN.left, abs.y),
+                    Point::new(abs.x + PAD_TOKEN.left, icon_y),
                     text_color,
                     abs,
                 );
@@ -515,6 +551,18 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                                     height: chip.height,
                                 };
                                 if abs.contains(pos) {
+                                    // Mirror left-click semantics so the
+                                    // pill highlights as the active marker
+                                    // before the context menu opens.
+                                    if !state.is_focused {
+                                        state.is_focused = true;
+                                        shell.publish(
+                                            (self.on_message)(TokenInputMessage::Focused),
+                                        );
+                                    }
+                                    shell.publish((self.on_message)(
+                                        TokenInputMessage::SelectToken(token.id),
+                                    ));
                                     shell.publish((self.on_message)(
                                         TokenInputMessage::TokenContextMenu(token.id, pos),
                                     ));
@@ -523,6 +571,19 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                                 }
                             }
                         }
+                        // Right-click landed inside the field but not on a
+                        // token - emit a field-context message so the
+                        // caller can show a Paste-only menu.
+                        if !state.is_focused {
+                            state.is_focused = true;
+                            shell.publish((self.on_message)(TokenInputMessage::Focused));
+                        }
+                        shell.publish((self.on_message)(TokenInputMessage::DeselectTokens));
+                        shell.publish((self.on_message)(TokenInputMessage::FieldContextMenu(
+                            pos,
+                        )));
+                        shell.capture_event();
+                        return;
                     }
                 }
             }
@@ -700,6 +761,29 @@ fn handle_key_press<M: Clone>(
         {
             if let Some(content) = clipboard.read(iced::advanced::clipboard::Kind::Standard) {
                 shell.publish((widget.on_message)(TokenInputMessage::Paste(content)));
+                shell.capture_event();
+            }
+        }
+
+        // Copy: Ctrl+C / Cmd+C - only when a token is selected (text-input
+        // copy is handled by the inner text_input). The actual clipboard
+        // write happens at the compose layer so group tokens can be
+        // expanded asynchronously.
+        keyboard::Key::Character(c)
+            if (c.as_str() == "c" || c.as_str() == "C") && modifiers.command() =>
+        {
+            if let Some(selected) = widget.selected_token {
+                shell.publish((widget.on_message)(TokenInputMessage::CopyToken(selected)));
+                shell.capture_event();
+            }
+        }
+
+        // Cut: Ctrl+X / Cmd+X - same path as Copy, plus token deletion.
+        keyboard::Key::Character(c)
+            if (c.as_str() == "x" || c.as_str() == "X") && modifiers.command() =>
+        {
+            if let Some(selected) = widget.selected_token {
+                shell.publish((widget.on_message)(TokenInputMessage::CutToken(selected)));
                 shell.capture_event();
             }
         }

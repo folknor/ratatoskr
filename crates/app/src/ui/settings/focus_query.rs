@@ -22,7 +22,7 @@ fn id_to_filter(id: &Id) -> Option<FilterId> {
 /// Walks the widget tree and returns `Some(FilterId)` if a known filter
 /// input is currently focused, `None` otherwise. Always finishes with an
 /// `Outcome::Some(...)` so the caller's `Task::widget(...)` always emits a
-/// message — that lets us clear `focused_filter` when focus moves to a
+/// message - that lets us clear `focused_filter` when focus moves to a
 /// non-filter widget.
 pub fn find_focused_filter() -> impl Operation<Option<FilterId>> {
     struct FindFocusedFilter {

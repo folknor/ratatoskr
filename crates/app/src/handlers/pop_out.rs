@@ -162,6 +162,177 @@ impl App {
                     },
                 )
             }
+            // Compose save-as-group confirm - DB write + state update
+            (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::GroupSaveConfirm),
+            ) => {
+                // Run the standard reducer first so the dialog flips to
+                // in-flight (and rejects empty names) without a second pass.
+                crate::pop_out::compose::update_compose(
+                    state,
+                    ComposeMessage::GroupSaveConfirm,
+                );
+                // Bail out if the reducer rejected the request.
+                if !state.save_group_in_flight {
+                    return Task::none();
+                }
+                let Some(banner) = state.bulk_paste_banner.as_ref() else {
+                    return Task::none();
+                };
+                let field_tokens = match banner.field {
+                    crate::pop_out::compose::RecipientField::To => &state.to.tokens,
+                    crate::pop_out::compose::RecipientField::Cc => &state.cc.tokens,
+                    crate::pop_out::compose::RecipientField::Bcc => &state.bcc.tokens,
+                };
+                let pasted: std::collections::HashSet<_> =
+                    banner.token_ids.iter().copied().collect();
+                let emails: Vec<String> = field_tokens
+                    .iter()
+                    .filter(|t| pasted.contains(&t.id))
+                    .map(|t| t.email.clone())
+                    .filter(|e| !e.is_empty())
+                    .collect();
+                if emails.is_empty() {
+                    // Nothing to save - surface as an error and bail.
+                    return Task::done(Message::PopOut(
+                        window_id,
+                        PopOutMessage::Compose(ComposeMessage::GroupSaveResult(Err(
+                            "No valid addresses to save.".to_string(),
+                        ))),
+                    ));
+                }
+                let name = state.save_group_name.trim().to_string();
+                let group_id = uuid::Uuid::new_v4().to_string();
+                let now = chrono::Utc::now().timestamp();
+                #[allow(clippy::cast_possible_wrap)]
+                let member_count = emails.len() as i64;
+                let entry = crate::db::GroupEntry {
+                    id: group_id.clone(),
+                    name: name.clone(),
+                    member_count,
+                    created_at: now,
+                    updated_at: now,
+                };
+                let success = crate::pop_out::compose::GroupSaveSuccess {
+                    group_id,
+                    name,
+                    member_count,
+                };
+                let db_clone = Arc::clone(&db);
+                let emails_for_save = emails.clone();
+                Task::perform(
+                    async move { db_clone.save_group(entry, emails_for_save).await },
+                    move |result| {
+                        let payload = result.map(|()| success.clone());
+                        Message::PopOut(
+                            window_id,
+                            PopOutMessage::Compose(ComposeMessage::GroupSaveResult(payload)),
+                        )
+                    },
+                )
+            }
+            // Compose context-menu Copy / Cut / Paste - clipboard side
+            // effects, plus the standard reducer for state changes.
+            (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::ContextMenuCopy { .. }),
+            )
+            | (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::ContextMenuCut { .. }),
+            ) => {
+                let PopOutMessage::Compose(msg) = pop_out_msg else {
+                    return Task::none();
+                };
+                let (field, token_id, is_cut) = match &msg {
+                    ComposeMessage::ContextMenuCopy { field, token_id } => {
+                        (*field, *token_id, false)
+                    }
+                    ComposeMessage::ContextMenuCut { field, token_id } => {
+                        (*field, *token_id, true)
+                    }
+                    _ => return Task::none(),
+                };
+                handle_compose_copy_or_cut(state, &db, field, token_id, is_cut)
+            }
+            // Ctrl+X / Ctrl+C from the token input - same path as the
+            // context-menu Copy/Cut entries; figure out which field the
+            // message came from and forward to the shared helper.
+            (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::ToTokenInput(
+                    crate::ui::token_input::TokenInputMessage::CopyToken(_)
+                    | crate::ui::token_input::TokenInputMessage::CutToken(_),
+                )),
+            )
+            | (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::CcTokenInput(
+                    crate::ui::token_input::TokenInputMessage::CopyToken(_)
+                    | crate::ui::token_input::TokenInputMessage::CutToken(_),
+                )),
+            )
+            | (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::BccTokenInput(
+                    crate::ui::token_input::TokenInputMessage::CopyToken(_)
+                    | crate::ui::token_input::TokenInputMessage::CutToken(_),
+                )),
+            ) => {
+                use crate::pop_out::compose::RecipientField;
+                use crate::ui::token_input::TokenInputMessage;
+                let PopOutMessage::Compose(msg) = pop_out_msg else {
+                    return Task::none();
+                };
+                let (field, inner) = match msg {
+                    ComposeMessage::ToTokenInput(inner) => (RecipientField::To, inner),
+                    ComposeMessage::CcTokenInput(inner) => (RecipientField::Cc, inner),
+                    ComposeMessage::BccTokenInput(inner) => (RecipientField::Bcc, inner),
+                    _ => return Task::none(),
+                };
+                let (token_id, is_cut) = match inner {
+                    TokenInputMessage::CopyToken(id) => (id, false),
+                    TokenInputMessage::CutToken(id) => (id, true),
+                    _ => return Task::none(),
+                };
+                handle_compose_copy_or_cut(state, &db, field, token_id, is_cut)
+            }
+            (
+                PopOutWindow::Compose(state),
+                PopOutMessage::Compose(ComposeMessage::ContextMenuPaste { .. }),
+            ) => {
+                let PopOutMessage::Compose(ComposeMessage::ContextMenuPaste { field }) =
+                    pop_out_msg
+                else {
+                    return Task::none();
+                };
+                crate::pop_out::compose::update_compose(
+                    state,
+                    ComposeMessage::ContextMenuPaste { field },
+                );
+                iced::clipboard::read().map(move |opt| {
+                    let Some(content) = opt else {
+                        return Message::PopOut(
+                            window_id,
+                            PopOutMessage::Compose(ComposeMessage::Noop),
+                        );
+                    };
+                    let inner = crate::ui::token_input::TokenInputMessage::Paste(content);
+                    let outer = match field {
+                        crate::pop_out::compose::RecipientField::To => {
+                            ComposeMessage::ToTokenInput(inner)
+                        }
+                        crate::pop_out::compose::RecipientField::Cc => {
+                            ComposeMessage::CcTokenInput(inner)
+                        }
+                        crate::pop_out::compose::RecipientField::Bcc => {
+                            ComposeMessage::BccTokenInput(inner)
+                        }
+                    };
+                    Message::PopOut(window_id, PopOutMessage::Compose(outer))
+                })
+            }
             // All other compose messages
             (PopOutWindow::Compose(state), PopOutMessage::Compose(_)) => {
                 let PopOutMessage::Compose(msg) = pop_out_msg else {
@@ -169,16 +340,190 @@ impl App {
                 };
                 let trigger_autocomplete =
                     crate::handlers::contacts::should_trigger_autocomplete(&msg);
+                let paste_field = paste_field_for_message(&msg);
+                let tokens_before = paste_field.map(|f| field_token_count(state, f));
                 crate::pop_out::compose::update_compose(state, msg);
-                if trigger_autocomplete {
-                    crate::handlers::contacts::dispatch_autocomplete_search(&db, window_id, state)
+                let group_match_task =
+                    if let (Some(field), Some(before)) = (paste_field, tokens_before) {
+                        dispatch_paste_group_match(state, &db, window_id, field, before)
+                    } else {
+                        Task::none()
+                    };
+                let autocomplete_task = if trigger_autocomplete {
+                    crate::handlers::contacts::dispatch_autocomplete_search(
+                        &db, window_id, state,
+                    )
                 } else {
                     Task::none()
-                }
+                };
+                Task::batch([group_match_task, autocomplete_task])
             }
             _ => Task::none(),
         }
     }
+}
+
+/// Shared implementation for "copy / cut a token" - whether the trigger is
+/// the right-click context menu or the Ctrl+C / Ctrl+X key chords. Mutates
+/// state via `update_compose` (Cut deletes the token; Copy is a no-op apart
+/// from closing the context menu) and returns the clipboard-write task.
+/// Group tokens require an async DB expand; regular tokens write
+/// synchronously.
+fn handle_compose_copy_or_cut(
+    state: &mut crate::pop_out::compose::ComposeState,
+    db: &Arc<Db>,
+    field: crate::pop_out::compose::RecipientField,
+    token_id: crate::ui::token_input::TokenId,
+    is_cut: bool,
+) -> Task<Message> {
+    use crate::pop_out::compose::RecipientField;
+    let tokens = match field {
+        RecipientField::To => &state.to.tokens,
+        RecipientField::Cc => &state.cc.tokens,
+        RecipientField::Bcc => &state.bcc.tokens,
+    };
+    let token = tokens.iter().find(|t| t.id == token_id);
+    let group_id = token.and_then(|t| {
+        if t.is_group {
+            t.group_id.clone()
+        } else {
+            None
+        }
+    });
+    let direct_string = token.and_then(token_clipboard_string);
+    let mutate_msg = if is_cut {
+        ComposeMessage::ContextMenuCut { field, token_id }
+    } else {
+        ComposeMessage::ContextMenuCopy { field, token_id }
+    };
+    crate::pop_out::compose::update_compose(state, mutate_msg);
+    if let Some(gid) = group_id {
+        let db_clone = Arc::clone(db);
+        Task::perform(
+            async move { db_clone.expand_contact_group(gid).await },
+            |result| result,
+        )
+        .then(|expanded| match expanded {
+            Ok(members) if !members.is_empty() => {
+                iced::clipboard::write(group_members_clipboard_string(&members))
+            }
+            _ => Task::none(),
+        })
+    } else {
+        match direct_string {
+            Some(s) if !s.is_empty() => iced::clipboard::write(s),
+            _ => Task::none(),
+        }
+    }
+}
+
+/// If `msg` is a token-input paste on a recipient field, return that field.
+/// Used to detect when a paste just happened so we can look up whether the
+/// pasted set matches an existing group.
+fn paste_field_for_message(
+    msg: &ComposeMessage,
+) -> Option<crate::pop_out::compose::RecipientField> {
+    use crate::pop_out::compose::RecipientField;
+    use crate::ui::token_input::TokenInputMessage;
+    match msg {
+        ComposeMessage::ToTokenInput(TokenInputMessage::Paste(_)) => Some(RecipientField::To),
+        ComposeMessage::CcTokenInput(TokenInputMessage::Paste(_)) => Some(RecipientField::Cc),
+        ComposeMessage::BccTokenInput(TokenInputMessage::Paste(_)) => Some(RecipientField::Bcc),
+        _ => None,
+    }
+}
+
+fn field_token_count(
+    state: &crate::pop_out::compose::ComposeState,
+    field: crate::pop_out::compose::RecipientField,
+) -> usize {
+    use crate::pop_out::compose::RecipientField;
+    match field {
+        RecipientField::To => state.to.tokens.len(),
+        RecipientField::Cc => state.cc.tokens.len(),
+        RecipientField::Bcc => state.bcc.tokens.len(),
+    }
+}
+
+/// After a paste reducer has run, look up whether the just-added addresses
+/// exactly match an existing contact group; if so, the result message will
+/// collapse them into a single group token. Skipped for pastes that added
+/// fewer than 2 tokens since a 1-address paste can't sensibly recreate a
+/// group.
+fn dispatch_paste_group_match(
+    state: &crate::pop_out::compose::ComposeState,
+    db: &Arc<Db>,
+    window_id: iced::window::Id,
+    field: crate::pop_out::compose::RecipientField,
+    tokens_before: usize,
+) -> Task<Message> {
+    use crate::pop_out::compose::RecipientField;
+    let field_tokens = match field {
+        RecipientField::To => &state.to.tokens,
+        RecipientField::Cc => &state.cc.tokens,
+        RecipientField::Bcc => &state.bcc.tokens,
+    };
+    if field_tokens.len() <= tokens_before + 1 {
+        return Task::none();
+    }
+    let added = &field_tokens[tokens_before..];
+    let added_ids: Vec<crate::ui::token_input::TokenId> = added.iter().map(|t| t.id).collect();
+    let added_emails: Vec<String> = added
+        .iter()
+        .map(|t| t.email.clone())
+        .filter(|e| !e.is_empty())
+        .collect();
+    if added_emails.len() < 2 {
+        return Task::none();
+    }
+    let db_clone = Arc::clone(db);
+    Task::perform(
+        async move { db_clone.find_group_matching_emails(added_emails).await },
+        move |result| {
+            let group = result.ok().flatten();
+            Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::PasteGroupMatchResult {
+                    field,
+                    added_ids: added_ids.clone(),
+                    group,
+                }),
+            )
+        },
+    )
+}
+
+/// Format a token for copy/cut to the clipboard. Prefers `Name <email>` so
+/// the round-trip via paste rebuilds an equivalent token; falls back to the
+/// bare email when there's no display name. Group tokens are handled
+/// separately via DB expansion so this returns `None` for them - copying a
+/// group must produce a `Name <email>, ...` list of its members, which
+/// requires a DB lookup.
+fn token_clipboard_string(t: &crate::ui::token_input::Token) -> Option<String> {
+    if t.is_group {
+        return None;
+    }
+    if t.email.is_empty() {
+        return Some(t.label.clone());
+    }
+    Some(if t.label.is_empty() || t.label == t.email {
+        t.email.clone()
+    } else {
+        format!("{} <{}>", t.label, t.email)
+    })
+}
+
+/// Format a group's expanded members as a comma-separated `Name <email>`
+/// list suitable for the clipboard.
+fn group_members_clipboard_string(members: &[(String, Option<String>)]) -> String {
+    members
+        .iter()
+        .map(|(email, name)| match name.as_deref().filter(|n| !n.is_empty()) {
+            Some(n) => format!("{n} <{email}>"),
+            None => email.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 // ── Message view update (free function) ─────────────────

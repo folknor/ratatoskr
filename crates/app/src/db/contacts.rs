@@ -172,6 +172,18 @@ impl Db {
             .collect())
     }
 
+    /// Find a contact group whose recursively-expanded member set is
+    /// exactly equal to the given emails (case-insensitive). Used to
+    /// re-collapse a paste of `Name <email>, ...` back into a single group
+    /// token when the pasted set matches an existing group.
+    pub async fn find_group_matching_emails(
+        &self,
+        emails: Vec<String>,
+    ) -> Result<Option<rtsk::db::queries_extra::MatchedGroup>, String> {
+        let db = self.read_db_state();
+        rtsk::db::queries_extra::db_find_group_matching_emails(&db, emails).await
+    }
+
     /// Insert or update a contact.
     pub async fn save_contact(&self, entry: ContactEntry) -> Result<(), String> {
         self.with_write_conn(move |conn| {

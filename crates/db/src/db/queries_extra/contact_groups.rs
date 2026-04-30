@@ -239,6 +239,58 @@ pub async fn db_expand_contact_group_with_names(
     db.with_conn(move |conn| expand_group_with_names_sync(conn, &group_id)).await
 }
 
+/// A group matched against a set of pasted emails.
+#[derive(Debug, Clone)]
+pub struct MatchedGroup {
+    pub id: String,
+    pub name: String,
+    pub member_count: i64,
+}
+
+/// Find a contact group whose recursively-expanded member email set is
+/// exactly equal to `emails` (case-insensitive). Returns the first match
+/// found; if multiple groups have the same member set the choice is
+/// arbitrary but stable per scan order.
+pub async fn db_find_group_matching_emails(
+    db: &DbState,
+    emails: Vec<String>,
+) -> Result<Option<MatchedGroup>, String> {
+    let target: HashSet<String> = emails.into_iter().map(|e| e.to_lowercase()).collect();
+    if target.is_empty() {
+        return Ok(None);
+    }
+    db.with_conn(move |conn| {
+        let mut stmt = conn
+            .prepare("SELECT id, name FROM contact_groups")
+            .map_err(|e| e.to_string())?;
+        let groups: Vec<(String, String)> = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        drop(stmt);
+
+        for (gid, gname) in groups {
+            let mut visited = HashSet::new();
+            let mut group_emails = HashSet::new();
+            expand_recursive(conn, &gid, &mut visited, &mut group_emails)?;
+            if group_emails == target {
+                #[allow(clippy::cast_possible_wrap)]
+                let count = group_emails.len() as i64;
+                return Ok(Some(MatchedGroup {
+                    id: gid,
+                    name: gname,
+                    member_count: count,
+                }));
+            }
+        }
+        Ok(None)
+    })
+    .await
+}
+
 // ── Synchronous group helpers (for app-layer settings UI) ──
 
 /// A group entry for the settings UI.
