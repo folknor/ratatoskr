@@ -73,6 +73,24 @@ pub(super) fn section_with_subtitle<'a>(
     section_inner(Some(title), Some(subtitle), None, items)
 }
 
+/// Section with an owned `String` title - for cases where the title is
+/// computed dynamically (e.g. "Members (12)").
+pub(super) fn section_dynamic_title<'a>(
+    title: String,
+    items: Vec<RowBuilder<'a>>,
+) -> Element<'a, SettingsMessage> {
+    section_dynamic_inner(title, None, items)
+}
+
+/// Section with an owned `String` title and an owned `String` subtitle.
+pub(super) fn section_dynamic_with_subtitle<'a>(
+    title: String,
+    subtitle: String,
+    items: Vec<RowBuilder<'a>>,
+) -> Element<'a, SettingsMessage> {
+    section_dynamic_inner(title, Some(subtitle), items)
+}
+
 pub(super) fn section_with_help<'a>(
     title: &'a str,
     help: SectionHelp<'a>,
@@ -175,6 +193,44 @@ fn section_inner<'a>(
         column![section_box]
     }
     .into()
+}
+
+fn section_dynamic_inner<'a>(
+    title: String,
+    subtitle: Option<String>,
+    items: Vec<RowBuilder<'a>>,
+) -> Element<'a, SettingsMessage> {
+    let n = items.len();
+    let mut col = column![].width(Length::Fill).padding(1);
+    for (i, builder) in items.into_iter().enumerate() {
+        if i > 0 {
+            col =
+                col.push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
+        }
+        col = col.push(builder(position_for(i, n)));
+    }
+    let section_box = container(col)
+        .width(Length::Fill)
+        .style(theme::ContainerClass::SettingsSection.style());
+
+    let title_text = text(title)
+        .size(TEXT_XL)
+        .style(text::base)
+        .font(iced::Font {
+            weight: iced::font::Weight::Bold,
+            ..crate::font::text()
+        });
+
+    let mut header = column![title_text].spacing(SPACE_XXXS);
+    if let Some(sub) = subtitle {
+        header = header.push(
+            text(sub)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        );
+    }
+
+    column![header, section_box].spacing(SPACE_XS).into()
 }
 
 pub(super) fn settings_row_container<'a>(

@@ -89,6 +89,7 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
         config.threads,
     )?;
     contacts::seed_vips(&conn, &mut rng, &pools.combined, &accs)?;
+    contacts::seed_groups(&conn, &mut rng, &pools.combined, &accs)?;
     pinned_searches::seed_pinned_searches(&conn, &accs)?;
 
     conn.execute_batch("COMMIT")

@@ -545,3 +545,9 @@ pub const CHAT_BUBBLE_SPACING: f32 = 4.0;
 pub const CHAT_GROUP_SPACING: f32 = 12.0;
 /// Spacing around date separator lines.
 pub const CHAT_DATE_SEPARATOR_SPACING: f32 = 16.0;
+
+// ── Group editor member tile grid ──────────────────────
+/// Columns per row in the group editor's member tile grid.
+pub const MEMBER_TILE_COLS: usize = 4;
+/// Height of each member tile in the grid.
+pub const MEMBER_TILE_HEIGHT: f32 = 64.0;

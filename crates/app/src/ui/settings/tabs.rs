@@ -1447,6 +1447,15 @@ fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         .max_width(SETTINGS_CONTENT_MAX_WIDTH);
 
     // ── Contacts section ──
+    // ── Import action (top of the contact management UI per spec) ──
+    col = col.push(section_untitled(vec![action_row(
+        "Import Contacts",
+        Some("Import from CSV or vCard file"),
+        Some(icon::upload()),
+        ActionKind::InApp,
+        SettingsMessage::ImportContactsOpen,
+    )]));
+
     let mut contact_items: Vec<RowBuilder<'_>> = Vec::new();
 
     // Filter input
@@ -1454,7 +1463,7 @@ fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
 
     // Contact cards
     for contact in &state.contacts {
-        contact_items.push(contact_card(contact));
+        contact_items.push(contact_card(contact, &state.managed_accounts));
     }
 
     // New Contact button
@@ -1464,18 +1473,6 @@ fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     ));
 
     col = col.push(section("Contacts", contact_items));
-
-    // ── Import section ──
-    col = col.push(section(
-        "Import",
-        vec![action_row(
-            "Import Contacts",
-            Some("Import from CSV or vCard file"),
-            Some(icon::upload()),
-            ActionKind::InApp,
-            SettingsMessage::ImportContactsOpen,
-        )],
-    ));
 
     // ── Groups section ──
     let mut group_items: Vec<RowBuilder<'_>> = Vec::new();
@@ -1529,144 +1526,219 @@ fn group_filter_row(filter: &str) -> Element<'_, SettingsMessage> {
     .into()
 }
 
-fn contact_card(contact: &crate::db::ContactEntry) -> RowBuilder<'_> {
+fn contact_card<'a>(
+    contact: &'a crate::db::ContactEntry,
+    accounts: &'a [ManagedAccount],
+) -> RowBuilder<'a> {
     Box::new(move |position| {
-    let name = contact.display_name.as_deref().unwrap_or("(no name)");
-    let id = contact.id.clone();
+        let name = contact.display_name.as_deref().unwrap_or("(no name)");
+        let id = contact.id.clone();
 
-    let mut left_col = column![].spacing(SPACE_XXXS);
-    left_col = left_col.push(text(name).size(TEXT_LG).style(text::base));
-
-    if let Some(ref phone) = contact.phone {
-        left_col = left_col.push(
-            text(format!("Phone: {phone}"))
+        // ── Header row: display name (left) + email (right) ──
+        let header = row![
+            container(text(name).size(TEXT_LG).style(text::base))
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
+            text(&contact.email)
                 .size(TEXT_SM)
                 .style(text::secondary),
-        );
-    }
-    if let Some(ref company) = contact.company {
-        left_col = left_col.push(
-            text(format!("Company: {company}"))
-                .size(TEXT_SM)
-                .style(text::secondary),
-        );
-    }
-    if let Some(ref notes) = contact.notes {
-        left_col = left_col.push(
-            text(format!("Notes: {notes}"))
-                .size(TEXT_SM)
-                .style(text::secondary),
-        );
-    }
-
-    // Group + account source pills - horizontal row
-    let mut pill_row = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
-    let mut has_pills = false;
-
-    for group_name in &contact.groups {
-        let pill = container(text(group_name).size(TEXT_XS).style(text::primary))
-            .padding(iced::Padding {
-                top: 1.0,
-                right: 6.0,
-                bottom: 1.0,
-                left: 6.0,
-            })
-            .style(theme::ContainerClass::Badge.style());
-        pill_row = pill_row.push(pill);
-        has_pills = true;
-    }
-
-    if let Some(ref source) = contact.source {
-        let source_label = match source.as_str() {
-            "google" => "Google",
-            "graph" => "Microsoft",
-            "carddav" => "CardDAV",
-            "jmap" => "JMAP",
-            "user" => "Local",
-            other => other,
-        };
-        let source_pill = container(text(source_label).size(TEXT_XS).style(text::secondary))
-            .padding(iced::Padding {
-                top: 1.0,
-                right: 6.0,
-                bottom: 1.0,
-                left: 6.0,
-            })
-            .style(theme::ContainerClass::Badge.style());
-        pill_row = pill_row.push(source_pill);
-        has_pills = true;
-    }
-
-    if has_pills {
-        left_col = left_col.push(pill_row);
-    }
-
-    let mut right_col = column![].spacing(SPACE_XXXS).align_x(Alignment::End);
-    right_col = right_col.push(text(&contact.email).size(TEXT_SM).style(text::secondary));
-    if let Some(ref email2) = contact.email2 {
-        right_col = right_col.push(text(email2).size(TEXT_SM).style(text::secondary));
-    }
-
-    let content = row![left_col.width(Length::Fill), right_col,]
+        ]
         .spacing(SPACE_SM)
         .align_y(Alignment::Center);
 
-    button(
-        container(content)
-            .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill)
-            .align_y(Alignment::Center),
-    )
-    .on_press(SettingsMessage::ContactClick(id))
-    .padding(0)
-    .style(move |t, s| theme::style_settings_row_button(t, s, position))
-    .width(Length::Fill)
-    .into()
+        // ── Optional secondary email (right-aligned, below header) ──
+        let email2_row: Option<Element<'a, SettingsMessage>> = contact.email2.as_ref().map(|e2| {
+            row![
+                Space::new().width(Length::Fill),
+                text(e2)
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Tertiary.style()),
+            ]
+            .spacing(SPACE_SM)
+            .into()
+        });
+
+        // ── Detail lines (left-aligned, only if present) ──
+        let mut details = column![].spacing(SPACE_XXXS);
+        if let Some(ref phone) = contact.phone {
+            details = details.push(
+                text(format!("Phone: {phone}"))
+                    .size(TEXT_SM)
+                    .style(text::secondary),
+            );
+        }
+        if let Some(ref company) = contact.company {
+            details = details.push(
+                text(format!("Company: {company}"))
+                    .size(TEXT_SM)
+                    .style(text::secondary),
+            );
+        }
+        if let Some(ref notes) = contact.notes {
+            details = details.push(
+                text(format!("Notes: {notes}"))
+                    .size(TEXT_SM)
+                    .style(text::secondary),
+            );
+        }
+
+        // ── Group pills (primary-tinted) ──
+        let groups_row: Option<Element<'a, SettingsMessage>> = if contact.groups.is_empty() {
+            None
+        } else {
+            let mut r = row![].spacing(SPACE_XXS).align_y(Alignment::Center);
+            for group_name in &contact.groups {
+                r = r.push(
+                    container(text(group_name).size(TEXT_XS).style(text::primary))
+                        .padding(iced::Padding {
+                            top: 1.0,
+                            right: 6.0,
+                            bottom: 1.0,
+                            left: 6.0,
+                        })
+                        .style(theme::ContainerClass::Badge.style()),
+                );
+            }
+            Some(r.into())
+        };
+
+        // ── Account pill (colored dot + account name) ──
+        let account_row: Option<Element<'a, SettingsMessage>> =
+            contact.account_id.as_deref().and_then(|aid| {
+                let account = accounts.iter().find(|a| a.id == aid)?;
+                let account_label = account
+                    .account_name
+                    .as_deref()
+                    .or(account.display_name.as_deref())
+                    .unwrap_or(&account.email);
+                let pill = match account.account_color.as_deref() {
+                    Some(hex) => {
+                        let color = crate::ui::theme::hex_to_color(hex);
+                        container(
+                            row![
+                                widgets::color_dot::<SettingsMessage>(color),
+                                text(account_label.to_string())
+                                    .size(TEXT_XS)
+                                    .style(text::secondary),
+                            ]
+                            .spacing(SPACE_XXS)
+                            .align_y(Alignment::Center),
+                        )
+                        .padding(iced::Padding {
+                            top: 1.0,
+                            right: 6.0,
+                            bottom: 1.0,
+                            left: 6.0,
+                        })
+                        .style(theme::ContainerClass::Badge.style())
+                    }
+                    None => container(
+                        text(account_label.to_string())
+                            .size(TEXT_XS)
+                            .style(text::secondary),
+                    )
+                    .padding(iced::Padding {
+                        top: 1.0,
+                        right: 6.0,
+                        bottom: 1.0,
+                        left: 6.0,
+                    })
+                    .style(theme::ContainerClass::Badge.style()),
+                };
+                Some(
+                    row![pill]
+                        .spacing(SPACE_XXS)
+                        .align_y(Alignment::Center)
+                        .into(),
+                )
+            });
+
+        // Assemble. Header always present; later rows optional.
+        let mut col = column![header].spacing(SPACE_XXXS);
+        if let Some(e2) = email2_row {
+            col = col.push(e2);
+        }
+        col = col.push(details);
+        if let Some(gr) = groups_row {
+            col = col.push(gr);
+        }
+        if let Some(ar) = account_row {
+            col = col.push(ar);
+        }
+
+        button(
+            container(col)
+                .padding(PAD_SETTINGS_ROW)
+                .width(Length::Fill)
+                .align_y(Alignment::Center),
+        )
+        .on_press(SettingsMessage::ContactClick(id))
+        .padding(0)
+        .style(move |t, s| theme::style_settings_row_button(t, s, position))
+        .width(Length::Fill)
+        .into()
     })
 }
 
 fn group_card(group: &crate::db::GroupEntry) -> RowBuilder<'_> {
     Box::new(move |position| {
-    let id = group.id.clone();
-    let member_label = if group.member_count == 1 {
-        "1 member".to_string()
-    } else {
-        format!("{} members", group.member_count)
-    };
-    let updated_label = chrono::DateTime::from_timestamp(group.updated_at, 0)
-        .map(|dt| {
-            dt.with_timezone(&chrono::Local)
-                .format("%b %d, %Y")
-                .to_string()
-        })
-        .unwrap_or_default();
+        let id = group.id.clone();
+        let member_label = if group.member_count == 1 {
+            "1 member".to_string()
+        } else {
+            format!("{} members", group.member_count)
+        };
+        let format_date = |ts: i64| -> String {
+            chrono::DateTime::from_timestamp(ts, 0)
+                .map(|dt| {
+                    dt.with_timezone(&chrono::Local)
+                        .format("%b %d, %Y")
+                        .to_string()
+                })
+                .unwrap_or_default()
+        };
+        let created_label = format!("Created: {}", format_date(group.created_at));
+        let updated_label = format!("Last updated: {}", format_date(group.updated_at));
 
-    let content = row![
-        column![text(&group.name).size(TEXT_LG).style(text::base),].width(Length::Fill),
-        column![
+        // Top row: name (left) + member count (right).
+        let top_row = row![
+            container(text(&group.name).size(TEXT_LG).style(text::base))
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
             text(member_label).size(TEXT_SM).style(text::secondary),
+        ]
+        .spacing(SPACE_SM)
+        .align_y(Alignment::Center);
+
+        // Bottom row: created date (left) + last updated date (right).
+        let bottom_row = row![
+            container(
+                text(created_label)
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Muted.style()),
+            )
+            .align_y(Alignment::Center)
+            .width(Length::Fill),
             text(updated_label)
                 .size(TEXT_SM)
                 .style(theme::TextClass::Muted.style()),
         ]
-        .align_x(Alignment::End)
-        .spacing(SPACE_XXXS),
-    ]
-    .spacing(SPACE_SM)
-    .align_y(Alignment::Center);
+        .spacing(SPACE_SM)
+        .align_y(Alignment::Center);
 
-    button(
-        container(content)
-            .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill)
-            .height(SETTINGS_ROW_HEIGHT)
-            .align_y(Alignment::Center),
-    )
-    .on_press(SettingsMessage::GroupClick(id))
-    .padding(0)
-    .style(move |t, s| theme::style_settings_row_button(t, s, position))
-    .width(Length::Fill)
-    .into()
+        let content = column![top_row, bottom_row].spacing(SPACE_XXXS);
+
+        button(
+            container(content)
+                .padding(PAD_SETTINGS_ROW)
+                .width(Length::Fill)
+                .align_y(Alignment::Center),
+        )
+        .on_press(SettingsMessage::GroupClick(id))
+        .padding(0)
+        .style(move |t, s| theme::style_settings_row_button(t, s, position))
+        .width(Length::Fill)
+        .into()
     })
 }
 
@@ -1969,8 +2041,11 @@ fn group_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
         )],
     ));
 
-    // Members section
-    col = col.push(group_member_section(editor, state));
+    // Add Members section (filter + paste hint + non-member contacts)
+    col = col.push(group_add_members_section(editor, state));
+
+    // Members grid (dynamic title + tile grid; click to remove)
+    col = col.push(group_members_grid_section(editor));
 
     // Action buttons
     col = col.push(group_editor_buttons(editor, &state.confirm_delete_group));
@@ -1978,16 +2053,18 @@ fn group_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
     col.into()
 }
 
-fn group_member_section<'a>(
+/// Add Members section: filter input over a list of non-member contact rows,
+/// with a paste hint subtitle.
+fn group_add_members_section<'a>(
     editor: &'a GroupEditorState,
     state: &'a Settings,
 ) -> Element<'a, SettingsMessage> {
-    let mut member_items: Vec<Element<'a, SettingsMessage>> = Vec::new();
+    let mut items: Vec<RowBuilder<'a>> = Vec::new();
 
-    // Add member filter
-    member_items.push(
+    // Filter input
+    items.push(static_row(
         container(
-            text_input("Add member by email...", &editor.filter)
+            text_input("Filter contacts...", &editor.filter)
                 .on_input(SettingsMessage::GroupEditorFilterChanged)
                 .on_submit(SettingsMessage::GroupEditorAddMember(editor.filter.clone()))
                 .size(TEXT_LG)
@@ -1996,96 +2073,135 @@ fn group_member_section<'a>(
                 .width(Length::Fill),
         )
         .padding(PAD_SETTINGS_ROW)
-        .width(Length::Fill)
-        .into(),
-    );
+        .width(Length::Fill),
+    ));
 
-    // Show matching contacts (not already members)
+    // Non-member contacts, optionally filtered by the input.
     let filter_lower = editor.filter.to_lowercase();
-    if !filter_lower.is_empty() {
-        for contact in &state.contacts {
-            let dominated = contact.email.to_lowercase().contains(&filter_lower)
-                || contact
-                    .display_name
-                    .as_deref()
-                    .unwrap_or("")
-                    .to_lowercase()
-                    .contains(&filter_lower);
-            if dominated && !editor.members.contains(&contact.email) {
-                let email = contact.email.clone();
-                let label = contact.display_name.as_deref().unwrap_or(&contact.email);
-                member_items.push(
-                    button(
-                        container(
-                            row![
-                                icon::plus().size(ICON_SM).style(text::primary),
-                                text(label).size(TEXT_MD).style(text::base),
-                                Space::new().width(Length::Fill),
-                                text(&contact.email).size(TEXT_SM).style(text::secondary),
-                            ]
-                            .spacing(SPACE_XS)
-                            .align_y(Alignment::Center),
-                        )
-                        .padding(PAD_SETTINGS_ROW)
-                        .width(Length::Fill),
-                    )
-                    .on_press(SettingsMessage::GroupEditorAddMember(email))
-                    .padding(0)
-                    .style(theme::ButtonClass::Action.style())
-                    .width(Length::Fill)
-                    .into(),
-                );
-            }
+    for contact in &state.contacts {
+        if editor.members.contains(&contact.email) {
+            continue;
         }
+        let matches = filter_lower.is_empty()
+            || contact.email.to_lowercase().contains(&filter_lower)
+            || contact
+                .display_name
+                .as_deref()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains(&filter_lower);
+        if !matches {
+            continue;
+        }
+        items.push(group_add_candidate_row(contact));
     }
 
-    // Current members as removable tiles
-    for email in &editor.members {
-        let email_clone = email.clone();
-        member_items.push(
-            button(
-                container(
-                    row![
-                        text(email).size(TEXT_MD).style(text::base),
-                        Space::new().width(Length::Fill),
-                        icon::trash().size(ICON_SM).style(text::danger),
-                    ]
-                    .spacing(SPACE_XS)
+    section_with_subtitle(
+        "Add Members",
+        "You can paste a large list of email addresses here.",
+        items,
+    )
+}
+
+fn group_add_candidate_row<'a>(contact: &'a crate::db::ContactEntry) -> RowBuilder<'a> {
+    Box::new(move |position| {
+        let email_for_press = contact.email.clone();
+        let label: &str = contact.display_name.as_deref().unwrap_or(&contact.email);
+        button(
+            container(
+                row![
+                    container(icon::plus().size(ICON_SM).style(text::primary))
+                        .align_y(Alignment::Center),
+                    container(text(label).size(TEXT_LG).style(text::base))
+                        .align_y(Alignment::Center)
+                        .width(Length::Fill),
+                    container(
+                        text(&contact.email)
+                            .size(TEXT_SM)
+                            .style(theme::TextClass::Tertiary.style()),
+                    )
                     .align_y(Alignment::Center),
-                )
-                .padding(PAD_SETTINGS_ROW)
-                .width(Length::Fill),
+                ]
+                .spacing(SPACE_SM)
+                .align_y(Alignment::Center),
             )
-            .on_press(SettingsMessage::GroupEditorRemoveMember(email_clone))
-            .padding(0)
-            .style(theme::ButtonClass::Action.style())
+            .padding(PAD_SETTINGS_ROW)
             .width(Length::Fill)
-            .into(),
+            .height(SETTINGS_ROW_HEIGHT)
+            .align_y(Alignment::Center),
+        )
+        .on_press(SettingsMessage::GroupEditorAddMember(email_for_press))
+        .padding(0)
+        .style(move |t, s| theme::style_settings_row_button(t, s, position))
+        .width(Length::Fill)
+        .into()
+    })
+}
+
+/// Members section: dynamic title `Members (N)` over a wrapping tile grid.
+/// Each tile is a square-ish card containing the member's email; clicking a
+/// tile removes the member from the group.
+fn group_members_grid_section<'a>(
+    editor: &'a GroupEditorState,
+) -> Element<'a, SettingsMessage> {
+    let title = format!("Members ({})", editor.members.len());
+
+    if editor.members.is_empty() {
+        return section_dynamic_with_subtitle(
+            title,
+            "No members yet. Use the list above or paste emails to add them."
+                .to_string(),
+            vec![static_row(Space::new().height(SPACE_XS))],
         );
     }
 
-    // Build the section manually because the title is a dynamic String.
-    let title_text = text(format!("Members ({})", editor.members.len()))
-        .size(TEXT_XL)
-        .style(text::base)
-        .font(iced::Font {
-            weight: iced::font::Weight::Bold,
-            ..crate::font::text()
-        });
-
-    let mut items_col = column![].width(Length::Fill).padding(1);
-    for (i, item) in member_items.into_iter().enumerate() {
-        if i > 0 {
-            items_col = items_col
-                .push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
+    let mut grid = column![].spacing(SPACE_XS).width(Length::Fill);
+    for chunk in editor.members.chunks(MEMBER_TILE_COLS) {
+        let mut row_widget = row![].spacing(SPACE_XS).width(Length::Fill);
+        for email in chunk {
+            row_widget = row_widget.push(member_tile(email));
         }
-        items_col = items_col.push(item);
+        // Pad partial trailing row so tile widths stay consistent.
+        for _ in chunk.len()..MEMBER_TILE_COLS {
+            row_widget = row_widget.push(
+                Space::new()
+                    .width(Length::FillPortion(1))
+                    .height(MEMBER_TILE_HEIGHT),
+            );
+        }
+        grid = grid.push(row_widget);
     }
-    let section_box = container(items_col)
-        .width(Length::Fill)
-        .style(theme::ContainerClass::SettingsSection.style());
 
-    column![title_text, section_box].spacing(SPACE_XS).into()
+    section_dynamic_with_subtitle(
+        title,
+        "Click a tile to remove that member.".to_string(),
+        vec![static_row(
+            container(grid)
+                .padding(PAD_SETTINGS_ROW)
+                .width(Length::Fill),
+        )],
+    )
+}
+
+fn member_tile(email: &str) -> Element<'_, SettingsMessage> {
+    let email_for_press = email.to_string();
+    button(
+        container(
+            text(email)
+                .size(TEXT_SM)
+                .style(text::base)
+                .align_x(Alignment::Center),
+        )
+        .padding(PAD_BADGE)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill),
+    )
+    .on_press(SettingsMessage::GroupEditorRemoveMember(email_for_press))
+    .padding(0)
+    .height(MEMBER_TILE_HEIGHT)
+    .width(Length::FillPortion(1))
+    .style(theme::ButtonClass::ProtocolCard.style())
+    .into()
 }
 
 fn group_editor_buttons<'a>(
