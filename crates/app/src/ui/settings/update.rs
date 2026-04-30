@@ -146,6 +146,8 @@ impl Component for Settings {
             }
             SettingsMessage::SelectTab(Tab::People) => {
                 self.active_tab = Tab::People;
+                self.active_sheet = None;
+                self.sheet_anim.go_mut(false, Instant::now());
                 // LoadContacts handler in main.rs also loads groups.
                 return (
                     Task::none(),
@@ -281,11 +283,59 @@ impl Component for Settings {
             }
             SettingsMessage::ContactFilterChanged(v) => {
                 self.contact_filter = v.clone();
+                self.focused_filter = Some(FilterId::Contacts);
                 return (Task::none(), Some(SettingsEvent::LoadContacts(v)));
             }
             SettingsMessage::GroupFilterChanged(v) => {
                 self.group_filter = v.clone();
+                self.focused_filter = Some(FilterId::Groups);
                 return (Task::none(), Some(SettingsEvent::LoadGroups(v)));
+            }
+            SettingsMessage::FilterFocused(id) => {
+                self.focused_filter = Some(id);
+            }
+            SettingsMessage::FilterFocusUpdated(maybe_id) => {
+                self.focused_filter = maybe_id;
+            }
+            SettingsMessage::FilterCleared(id) => {
+                match id {
+                    FilterId::Contacts => {
+                        self.contact_filter.clear();
+                        if self.focused_filter == Some(FilterId::Contacts) {
+                            self.focused_filter = None;
+                        }
+                        return (
+                            Task::none(),
+                            Some(SettingsEvent::LoadContacts(String::new())),
+                        );
+                    }
+                    FilterId::Groups => {
+                        self.group_filter.clear();
+                        if self.focused_filter == Some(FilterId::Groups) {
+                            self.focused_filter = None;
+                        }
+                        return (
+                            Task::none(),
+                            Some(SettingsEvent::LoadGroups(String::new())),
+                        );
+                    }
+                    FilterId::GroupAddMembers => {
+                        if let Some(ref mut editor) = self.group_editor {
+                            editor.filter.clear();
+                        }
+                        if self.focused_filter == Some(FilterId::GroupAddMembers) {
+                            self.focused_filter = None;
+                        }
+                    }
+                    FilterId::GroupMembers => {
+                        if let Some(ref mut editor) = self.group_editor {
+                            editor.members_filter.clear();
+                        }
+                        if self.focused_filter == Some(FilterId::GroupMembers) {
+                            self.focused_filter = None;
+                        }
+                    }
+                }
             }
             SettingsMessage::GroupClick(id) => {
                 self.open_group_editor(&id);
@@ -323,6 +373,8 @@ impl Settings {
             SettingsMessage::SelectTab(tab) => {
                 self.active_tab = tab;
                 self.hovered_help = None;
+                self.active_sheet = None;
+                self.sheet_anim.go_mut(false, Instant::now());
             }
             SettingsMessage::ToggleSelect(field) => {
                 self.open_select = if self.open_select == Some(field) {
@@ -469,7 +521,6 @@ impl Settings {
             SettingsMessage::AiApiKeyChanged(v) => self.ai_api_key.set_text(v),
             SettingsMessage::OllamaUrlChanged(v) => self.ai_ollama_url.set_text(v),
             SettingsMessage::OllamaModelChanged(v) => self.ai_ollama_model.set_text(v),
-            SettingsMessage::SaveAiSettings => self.ai_key_saved = true,
             SettingsMessage::ListGripPress(list_id, index) => {
                 self.drag_state = Some(DragState {
                     list_id,
@@ -700,6 +751,13 @@ impl Settings {
                 if let Some(ref mut editor) = self.group_editor {
                     editor.filter = v;
                 }
+                self.focused_filter = Some(FilterId::GroupAddMembers);
+            }
+            SettingsMessage::GroupEditorMembersFilterChanged(v) => {
+                if let Some(ref mut editor) = self.group_editor {
+                    editor.members_filter = v;
+                }
+                self.focused_filter = Some(FilterId::GroupMembers);
             }
             SettingsMessage::GroupSaved(Ok(())) | SettingsMessage::GroupDeleted(Ok(())) => {}
             SettingsMessage::GroupSaved(Err(_)) | SettingsMessage::GroupDeleted(Err(_)) => {}
@@ -1091,6 +1149,7 @@ impl Settings {
                 name: UndoableText::with_initial(&group.name),
                 members: Vec::new(), // will be populated from DB via App
                 filter: String::new(),
+                members_filter: String::new(),
                 dirty: false,
             });
             self.active_sheet = Some(SettingsSheetPage::EditGroup {
@@ -1106,6 +1165,7 @@ impl Settings {
             name: UndoableText::new(),
             members: Vec::new(),
             filter: String::new(),
+            members_filter: String::new(),
             dirty: false,
         });
         self.active_sheet = Some(SettingsSheetPage::EditGroup { group_id: None });

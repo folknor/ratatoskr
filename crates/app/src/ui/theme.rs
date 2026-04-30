@@ -732,6 +732,28 @@ impl RowPosition {
     }
 }
 
+/// Container style for a search/filter input wrapper. The outer container
+/// owns the bg + border so the search icon, text_input (Inline style), and
+/// clear button all read as one unified field. When `focused` is true the
+/// border switches to the primary color to indicate the field has focus.
+pub fn style_filter_container(theme: &Theme, focused: bool) -> container::Style {
+    let p = theme.palette();
+    let border_color = if focused {
+        p.primary.base.color
+    } else {
+        p.background.strongest.color.scale_alpha(0.35)
+    };
+    container::Style {
+        background: Some(p.background.weakest.color.into()),
+        border: iced::Border {
+            color: border_color,
+            width: 1.0,
+            radius: RADIUS_SM.into(),
+        },
+        ..Default::default()
+    }
+}
+
 /// Container style for a recessed scrollable list panel inside a settings
 /// section (e.g. the contacts / groups list in the People tab). Uses a
 /// slightly inset background so it reads as a different surface from the

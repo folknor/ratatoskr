@@ -1,3 +1,4 @@
+pub mod focus_query;
 mod row_widgets;
 mod tabs;
 pub mod types;

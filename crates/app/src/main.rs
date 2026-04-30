@@ -211,6 +211,10 @@ pub enum Message {
     WindowResized(iced::window::Id, Size),
     WindowMoved(iced::window::Id, Point),
     ToggleRightSidebar,
+    /// Run after each mouse press while settings is open: queries the widget
+    /// tree to find which filter input (if any) currently owns focus, then
+    /// updates `Settings.focused_filter` accordingly.
+    SettingsCheckFocus,
     SetDateDisplay(db::DateDisplay),
     WindowCloseRequested(iced::window::Id),
 
@@ -707,6 +711,12 @@ impl App {
                 iced::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
                     Some(Message::ModifiersChanged(*modifiers))
                 }
+                iced::Event::Mouse(iced::mouse::Event::ButtonPressed { .. }) => {
+                    // Re-query which filter input owns focus after every
+                    // mouse press while settings is open, so the focus
+                    // border stays in sync with the actual focused widget.
+                    Some(Message::SettingsCheckFocus)
+                }
                 _ => None,
             }),
             self.sidebar.subscription().map(Message::Sidebar),
@@ -872,6 +882,19 @@ impl App {
             Message::ToggleRightSidebar => {
                 self.right_sidebar_open = !self.right_sidebar_open;
                 Task::none()
+            }
+            Message::SettingsCheckFocus => {
+                if !self.show_settings {
+                    return Task::none();
+                }
+                iced::advanced::widget::operate(
+                    crate::ui::settings::focus_query::find_focused_filter(),
+                )
+                .map(|maybe| {
+                    Message::Settings(
+                        crate::ui::settings::SettingsMessage::FilterFocusUpdated(maybe),
+                    )
+                })
             }
             Message::SetDateDisplay(display) => {
                 self.reading_pane.date_display = display;

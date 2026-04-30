@@ -90,7 +90,6 @@ pub enum SettingsMessage {
     AiApiKeyChanged(String),
     OllamaUrlChanged(String),
     OllamaModelChanged(String),
-    SaveAiSettings,
     // Editable list
     ListGripPress(String, usize), // grip pressed - start potential drag
     ListDragMove(String, Point),  // cursor moved while grip held
@@ -150,6 +149,12 @@ pub enum SettingsMessage {
     SignatureDragGripPress(usize),
     SignatureDragMove(Point),
     SignatureDragEnd,
+    // Filter inputs (People tab + group editor)
+    FilterFocused(FilterId),
+    FilterCleared(FilterId),
+    /// Result of a widget-tree focus query (run after each mouse press)
+    /// telling us which filter input - if any - currently owns focus.
+    FilterFocusUpdated(Option<FilterId>),
     // Contacts
     ContactFilterChanged(String),
     ContactsLoaded(Result<Vec<crate::db::ContactEntry>, String>),
@@ -188,6 +193,7 @@ pub enum SettingsMessage {
     GroupEditorAddMember(String),
     GroupEditorSave,
     GroupEditorFilterChanged(String),
+    GroupEditorMembersFilterChanged(String),
     GroupMembersLoaded(String, Result<Vec<String>, String>),
 }
 
@@ -380,6 +386,16 @@ pub struct PreferencesState {
 
 // ── State ───────────────────────────────────────────────
 
+/// Identifies a filter input so Escape / X-button handlers know which
+/// filter to clear and which one currently owns focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterId {
+    Contacts,
+    Groups,
+    GroupAddMembers,
+    GroupMembers,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputField {
     VipEmail,
@@ -484,7 +500,10 @@ pub struct GroupEditorState {
     pub group_id: Option<String>,
     pub name: UndoableText,
     pub members: Vec<String>,
+    /// Filter text for the "Add Members" candidate list.
     pub filter: String,
+    /// Filter text for the existing-members list at the bottom.
+    pub members_filter: String,
     /// Whether fields have been modified since opening the editor.
     pub dirty: bool,
 }
@@ -689,7 +708,8 @@ pub struct Settings {
     pub ai_auto_archive_promotions: bool,
     pub ai_auto_archive_social: bool,
     pub ai_auto_archive_newsletters: bool,
-    pub ai_key_saved: bool,
+    // Filter focus tracking
+    pub focused_filter: Option<FilterId>,
     // Sheet
     pub active_sheet: Option<SettingsSheetPage>,
     pub sheet_anim: animation::Animation<bool>,
@@ -956,7 +976,7 @@ impl Default for Settings {
             ai_auto_archive_promotions: false,
             ai_auto_archive_social: false,
             ai_auto_archive_newsletters: false,
-            ai_key_saved: false,
+            focused_filter: None,
             active_sheet: None,
             sheet_anim: animation::Animation::new(false)
                 .easing(Easing::EaseOutCubic)

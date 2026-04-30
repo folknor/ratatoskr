@@ -36,15 +36,25 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
     let sheet_t: f32 = state.sheet_anim.interpolate(0.0, 1.0, now);
     let show_sheet = state.active_sheet.is_some() || sheet_t > 0.001;
 
+    // Float the scrollbar so its appearing/disappearing doesn't shift the
+    // content horizontally. We instead reserve a fixed right gutter on the
+    // outer container that's wide enough to host the scrollbar so the
+    // bar overlays empty space rather than the content.
+    let scrollbar_gutter = SCROLLBAR_SPACING + 8.0;
     let content_area = container(
         scrollable(
             container(content)
                 .padding(PAD_SETTINGS_CONTENT)
                 .align_x(Alignment::Center),
         )
-        .spacing(SCROLLBAR_SPACING)
         .height(Length::Fill),
     )
+    .padding(iced::Padding {
+        top: 0.0,
+        right: scrollbar_gutter,
+        bottom: 0.0,
+        left: 0.0,
+    })
     .width(Length::Fill)
     .height(Length::Fill)
     .style(theme::ContainerClass::Content.style());
@@ -1430,7 +1440,10 @@ fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let mut contact_items: Vec<RowBuilder<'_>> = Vec::new();
 
     // Filter input
-    contact_items.push(static_row(contact_filter_row(&state.contact_filter)));
+    contact_items.push(static_row(contact_filter_row(
+        &state.contact_filter,
+        state.focused_filter == Some(FilterId::Contacts),
+    )));
 
     // Recessed scrollable panel of contact pills
     contact_items.push(static_row(contact_list_panel(state)));
@@ -1447,7 +1460,10 @@ fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     let mut group_items: Vec<RowBuilder<'_>> = Vec::new();
 
     // Filter input
-    group_items.push(static_row(group_filter_row(&state.group_filter)));
+    group_items.push(static_row(group_filter_row(
+        &state.group_filter,
+        state.focused_filter == Some(FilterId::Groups),
+    )));
 
     // Recessed scrollable panel of group pills
     group_items.push(static_row(group_list_panel(state)));
@@ -1463,34 +1479,96 @@ fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     col.into()
 }
 
-fn contact_filter_row(filter: &str) -> Element<'_, SettingsMessage> {
-    let filter_owned = filter.to_string();
-    container(
-        text_input("Filter contacts...", &filter_owned)
-            .on_input(SettingsMessage::ContactFilterChanged)
-            .size(TEXT_LG)
-            .padding(PAD_INPUT)
-            .style(theme::TextInputClass::Settings.style())
-            .width(Length::Fill),
-    )
+fn contact_filter_row(filter: &str, focused: bool) -> Element<'_, SettingsMessage> {
+    container(filter_row(
+        "contact-filter",
+        "Filter contacts...",
+        filter,
+        SettingsMessage::ContactFilterChanged,
+        FilterId::Contacts,
+        focused,
+    ))
     .padding(PAD_SETTINGS_ROW)
     .width(Length::Fill)
     .into()
 }
 
-fn group_filter_row(filter: &str) -> Element<'_, SettingsMessage> {
-    let filter_owned = filter.to_string();
-    container(
-        text_input("Filter groups...", &filter_owned)
-            .on_input(SettingsMessage::GroupFilterChanged)
-            .size(TEXT_LG)
-            .padding(PAD_INPUT)
-            .style(theme::TextInputClass::Settings.style())
-            .width(Length::Fill),
-    )
+fn group_filter_row(filter: &str, focused: bool) -> Element<'_, SettingsMessage> {
+    container(filter_row(
+        "group-filter",
+        "Filter groups...",
+        filter,
+        SettingsMessage::GroupFilterChanged,
+        FilterId::Groups,
+        focused,
+    ))
     .padding(PAD_SETTINGS_ROW)
     .width(Length::Fill)
     .into()
+}
+
+/// Shared search/filter input. The outer container owns the bg + border so
+/// the search icon (left), inline text input (center), and clear button
+/// (right, when value is non-empty) all read as one unified field. Wraps
+/// the input in a `mouse_area` so a click sets `focused_filter` even when
+/// the user hasn't typed yet (Escape must know which filter to clear).
+fn filter_row<'a>(
+    id: &'a str,
+    placeholder: &'a str,
+    value: &'a str,
+    on_input: impl Fn(String) -> SettingsMessage + 'static,
+    filter_id: FilterId,
+    focused: bool,
+) -> Element<'a, SettingsMessage> {
+    let value_owned = value.to_string();
+    let id_owned = id.to_string();
+    let has_value = !value_owned.is_empty();
+
+    // Trailing slot is fixed-size so the row height stays constant whether
+    // the clear button is showing or not. Width = PAD_ICON_BTN (l+r) + ICON_SM.
+    let trailing_slot_width = ICON_SM + PAD_ICON_BTN.left + PAD_ICON_BTN.right;
+    let trailing: Element<'a, SettingsMessage> = if has_value {
+        button(
+            container(icon::x().size(ICON_SM).style(text::secondary))
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+        )
+        .on_press(SettingsMessage::FilterCleared(filter_id))
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::BareIcon.style())
+        .into()
+    } else {
+        Space::new()
+            .width(Length::Fixed(trailing_slot_width))
+            .height(Length::Fixed(
+                ICON_SM + PAD_ICON_BTN.top + PAD_ICON_BTN.bottom,
+            ))
+            .into()
+    };
+
+    let content = row![
+        container(icon::search().size(ICON_MD).style(text::secondary))
+            .align_y(Alignment::Center),
+        text_input(placeholder, &value_owned)
+            .id(id_owned)
+            .on_input(on_input)
+            .size(TEXT_LG)
+            .padding(0)
+            .style(theme::TextInputClass::Inline.style())
+            .width(Length::Fill),
+        trailing,
+    ]
+    .spacing(SPACE_XS)
+    .align_y(Alignment::Center);
+
+    let body = container(content)
+        .padding(PAD_INPUT)
+        .width(Length::Fill)
+        .style(move |theme| theme::style_filter_container(theme, focused));
+
+    mouse_area(body)
+        .on_press(SettingsMessage::FilterFocused(filter_id))
+        .into()
 }
 
 /// Recessed, fixed-height scrollable panel holding the contact pills. Used
@@ -1498,16 +1576,21 @@ fn group_filter_row(filter: &str) -> Element<'_, SettingsMessage> {
 /// button so the list stays compact regardless of how many contacts exist.
 fn contact_list_panel(state: &Settings) -> Element<'_, SettingsMessage> {
     let panel: Element<'_, SettingsMessage> = if state.contacts.is_empty() {
+        let msg = if state.contact_filter.trim().is_empty() {
+            "No contacts yet."
+        } else {
+            "No contacts match the filter."
+        };
         container(
-            text("No contacts yet.")
+            text(msg)
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         )
         .padding(PAD_CARD)
         .width(Length::Fill)
-        .height(CONTACT_PANEL_HEIGHT)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
+        .height(PEOPLE_PANEL_HEIGHT)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
         .style(theme::style_recessed_list_panel)
         .into()
     } else {
@@ -1535,7 +1618,7 @@ fn contact_list_panel(state: &Settings) -> Element<'_, SettingsMessage> {
             left: 0.0,
         })
         .width(Length::Fill)
-        .height(CONTACT_PANEL_HEIGHT)
+        .height(PEOPLE_PANEL_HEIGHT)
         .clip(true)
         .style(theme::style_recessed_list_panel)
         .into()
@@ -1764,16 +1847,21 @@ fn group_card(group: &crate::db::GroupEntry) -> Element<'_, SettingsMessage> {
 /// Recessed scrollable panel of group pills, mirroring `contact_list_panel`.
 fn group_list_panel(state: &Settings) -> Element<'_, SettingsMessage> {
     let panel: Element<'_, SettingsMessage> = if state.groups.is_empty() {
+        let msg = if state.group_filter.trim().is_empty() {
+            "No groups yet."
+        } else {
+            "No groups match the filter."
+        };
         container(
-            text("No groups yet.")
+            text(msg)
                 .size(TEXT_SM)
                 .style(theme::TextClass::Tertiary.style()),
         )
         .padding(PAD_CARD)
         .width(Length::Fill)
-        .height(GROUP_PANEL_HEIGHT)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
+        .height(PEOPLE_PANEL_HEIGHT)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
         .style(theme::style_recessed_list_panel)
         .into()
     } else {
@@ -1801,7 +1889,7 @@ fn group_list_panel(state: &Settings) -> Element<'_, SettingsMessage> {
             left: 0.0,
         })
         .width(Length::Fill)
-        .height(GROUP_PANEL_HEIGHT)
+        .height(PEOPLE_PANEL_HEIGHT)
         .clip(true)
         .style(theme::style_recessed_list_panel)
         .into()
@@ -2140,15 +2228,14 @@ fn group_add_members_section<'a>(
 ) -> Element<'a, SettingsMessage> {
     let items: Vec<RowBuilder<'a>> = vec![
         static_row(
-            container(
-                text_input("Filter contacts...", &editor.filter)
-                    .on_input(SettingsMessage::GroupEditorFilterChanged)
-                    .on_submit(SettingsMessage::GroupEditorAddMember(editor.filter.clone()))
-                    .size(TEXT_LG)
-                    .padding(PAD_INPUT)
-                    .style(theme::TextInputClass::Settings.style())
-                    .width(Length::Fill),
-            )
+            container(filter_row(
+                "group-add-filter",
+                "Filter contacts...",
+                &editor.filter,
+                SettingsMessage::GroupEditorFilterChanged,
+                FilterId::GroupAddMembers,
+                state.focused_filter == Some(FilterId::GroupAddMembers),
+            ))
             .padding(PAD_SETTINGS_ROW)
             .width(Length::Fill),
         ),
@@ -2231,9 +2318,9 @@ fn group_add_candidates_panel<'a>(
         )
         .padding(PAD_CARD)
         .width(Length::Fill)
-        .height(GROUP_PANEL_HEIGHT)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
+        .height(PEOPLE_PANEL_HEIGHT)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
         .style(theme::style_recessed_list_panel)
         .into()
     } else {
@@ -2261,7 +2348,7 @@ fn group_add_candidates_panel<'a>(
             left: 0.0,
         })
         .width(Length::Fill)
-        .height(GROUP_PANEL_HEIGHT)
+        .height(PEOPLE_PANEL_HEIGHT)
         .clip(true)
         .style(theme::style_recessed_list_panel)
         .into()
@@ -2283,31 +2370,95 @@ fn group_members_list_section<'a>(
 ) -> Element<'a, SettingsMessage> {
     let title = format!("Members ({})", editor.members.len());
 
-    if editor.members.is_empty() {
-        return section_dynamic_with_subtitle(
-            title,
-            "No members yet. Use the list above or paste emails to add them."
-                .to_string(),
-            vec![static_row(Space::new().height(SPACE_XS))],
-        );
-    }
+    let filter = container(filter_row(
+        "group-members-filter",
+        "Filter members...",
+        &editor.members_filter,
+        SettingsMessage::GroupEditorMembersFilterChanged,
+        FilterId::GroupMembers,
+        state.focused_filter == Some(FilterId::GroupMembers),
+    ))
+    .padding(PAD_SETTINGS_ROW)
+    .width(Length::Fill);
+
+    let panel: Element<'_, SettingsMessage> = if editor.members.is_empty() {
+        let empty_panel = container(
+            text("No members yet. Use the list above or paste emails to add them.")
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .padding(PAD_CARD)
+        .width(Length::Fill)
+        .height(PEOPLE_PANEL_HEIGHT)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(theme::style_recessed_list_panel);
+        container(empty_panel)
+            .padding(SPACE_XS)
+            .width(Length::Fill)
+            .into()
+    } else {
+        group_members_list_panel(editor, state)
+    };
 
     section_dynamic_with_subtitle(
         title,
         "Click a member to remove them from the group.".to_string(),
-        vec![static_row(group_members_list_panel(editor, state))],
+        vec![static_row(filter), static_row(panel)],
     )
 }
 
 /// Recessed scrollable panel housing the member pills (one per row).
+/// Honours `editor.members_filter` so the list narrows as the user types
+/// in the filter input above the panel.
 fn group_members_list_panel<'a>(
     editor: &'a GroupEditorState,
     state: &'a Settings,
 ) -> Element<'a, SettingsMessage> {
+    let filter_lower = editor.members_filter.to_lowercase();
+    let visible: Vec<&'a String> = editor
+        .members
+        .iter()
+        .filter(|email| {
+            if filter_lower.is_empty() {
+                return true;
+            }
+            if email.to_lowercase().contains(&filter_lower) {
+                return true;
+            }
+            // Also match against the contact's display name when known.
+            state
+                .contacts
+                .iter()
+                .find(|c| &c.email == *email)
+                .and_then(|c| c.display_name.as_deref())
+                .map(|n| n.to_lowercase().contains(&filter_lower))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    if visible.is_empty() {
+        let empty = container(
+            text("No members match the filter.")
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .padding(PAD_CARD)
+        .width(Length::Fill)
+        .height(PEOPLE_PANEL_HEIGHT)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(theme::style_recessed_list_panel);
+        return container(empty)
+            .padding(SPACE_XS)
+            .width(Length::Fill)
+            .into();
+    }
+
     let mut col = column![]
         .spacing(PEOPLE_PILL_SPACING)
         .width(Length::Fill);
-    for email in &editor.members {
+    for email in visible {
         col = col.push(member_pill(email, state));
     }
 
@@ -2328,7 +2479,7 @@ fn group_members_list_panel<'a>(
         left: 0.0,
     })
     .width(Length::Fill)
-    .height(GROUP_PANEL_HEIGHT)
+    .height(PEOPLE_PANEL_HEIGHT)
     .clip(true)
     .style(theme::style_recessed_list_panel);
 
@@ -2571,36 +2722,13 @@ fn ai_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         col = col.push(section(
             "API Key",
             vec![
-                static_row(
-                    container(
-                        column![
-                            text(key_label).size(TEXT_LG).style(text::base),
-                            Space::new().height(SPACE_XXS),
-                            row![
-                                undoable_text_input("", state.ai_api_key.text())
-                                    .on_input(SettingsMessage::AiApiKeyChanged)
-                                    .on_undo(SettingsMessage::UndoInput(InputField::AiApiKey))
-                                    .on_redo(SettingsMessage::RedoInput(InputField::AiApiKey))
-                                    .secure(true)
-                                    .size(TEXT_LG)
-                                    .padding(PAD_INPUT)
-                                    .style(theme::TextInputClass::Settings.style())
-                                    .width(Length::Fill),
-                                Space::new().width(SPACE_XS),
-                                button(
-                                    text(if state.ai_key_saved { "Saved" } else { "Save" })
-                                        .size(TEXT_LG),
-                                )
-                                .on_press(SettingsMessage::SaveAiSettings)
-                                .padding(PAD_ICON_BTN)
-                                .style(theme::ButtonClass::Secondary.style()),
-                            ]
-                            .align_y(Alignment::Center),
-                        ]
-                        .spacing(SPACE_XXXS),
-                    )
-                    .padding(PAD_SETTINGS_ROW)
-                    .width(Length::Fill),
+                input_row_secure(
+                    "ai-api-key",
+                    key_label,
+                    "",
+                    state.ai_api_key.text(),
+                    SettingsMessage::AiApiKeyChanged,
+                    InputField::AiApiKey,
                 ),
                 setting_row(
                     "Model",

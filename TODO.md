@@ -8,6 +8,8 @@
 
 - [ ] **Settings/People** - The contacts and group lists here need to conform much closer to the spec at docs/contacts/problem-statement.md. We're quite a ways off.
 
+- [ ] **Slide-in editor: confirm-discard on unsaved changes** - The contact and group editor slide-ins can currently close without warning whenever the slide-in "wants" to dismiss: clicking the Back button, pressing Escape, clicking a different settings tab in the left nav, or any other future close path. If the editor is dirty (new contact/group with content, or an existing one with edits not yet saved/auto-saved), we should pop a "Discard unsaved changes?" confirmation first. Needs a single chokepoint so every dismiss path runs the same check rather than per-call-site retrofits. Same pattern likely belongs on the account editor and signature editor sheets too.
+
 - [ ] **Settings/Notifications** - VIP Senders should move to contact editing, and this should be a toggle button here.
 
 - [ ] **Compose window help text** - The help text in the compose windows to/cc/bcc fields ("Add recipients...") is not vertically centered in the input field. Note: `token_input.rs::draw_text_area` already draws the placeholder with `align_y: Vertical::Center` inside a `TOKEN_HEIGHT` box and `PAD_TOKEN_INPUT` is symmetric (top=4, bottom=4), so on paper it should be centered. The misalignment must come from elsewhere - possibly the field's overall layout height vs. the `TOKEN_HEIGHT` slot, or font metrics asymmetry. Needs investigation with rendered measurements.

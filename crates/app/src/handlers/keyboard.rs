@@ -61,9 +61,16 @@ impl App {
         }
 
         // 2. If settings is open, Escape closes the active sheet first if one is
-        //    open, otherwise closes settings entirely.
+        //    open, otherwise closes settings entirely. Filter inputs intercept
+        //    Escape first so it clears the active filter without cascading up
+        //    to close the sheet / settings.
         if self.show_settings {
             if *key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
+                if let Some(filter_id) = self.settings.focused_filter {
+                    return self.update(Message::Settings(
+                        crate::ui::settings::SettingsMessage::FilterCleared(filter_id),
+                    ));
+                }
                 let msg = if self.settings.active_sheet.is_some() {
                     crate::ui::settings::SettingsMessage::CloseSheet
                 } else {

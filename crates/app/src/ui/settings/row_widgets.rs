@@ -386,31 +386,31 @@ pub(super) fn info_row(label: &str, value: &str) -> RowBuilder<'static> {
     })
 }
 
-pub(super) fn input_row(
+pub(super) fn input_row<'a>(
     id: &str,
     label: &str,
     placeholder: &str,
     value: &str,
     on_input: impl Fn(String) -> SettingsMessage + 'static,
     field: InputField,
-) -> RowBuilder<'static> {
+) -> RowBuilder<'a> {
     input_row_inner(id, label, placeholder, value, on_input, field, false)
 }
 
 /// `input_row` with `secure(true)` on the underlying text input - for
 /// password-like fields.
-pub(super) fn input_row_secure(
+pub(super) fn input_row_secure<'a>(
     id: &str,
     label: &str,
     placeholder: &str,
     value: &str,
     on_input: impl Fn(String) -> SettingsMessage + 'static,
     field: InputField,
-) -> RowBuilder<'static> {
+) -> RowBuilder<'a> {
     input_row_inner(id, label, placeholder, value, on_input, field, true)
 }
 
-fn input_row_inner(
+fn input_row_inner<'a>(
     id: &str,
     label: &str,
     placeholder: &str,
@@ -418,7 +418,7 @@ fn input_row_inner(
     on_input: impl Fn(String) -> SettingsMessage + 'static,
     field: InputField,
     secure: bool,
-) -> RowBuilder<'static> {
+) -> RowBuilder<'a> {
     let id_owned = id.to_string();
     let label_owned = label.to_string();
     let placeholder_owned = placeholder.to_string();
