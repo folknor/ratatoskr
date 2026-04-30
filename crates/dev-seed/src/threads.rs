@@ -527,17 +527,16 @@ pub fn generate_threads(
             Category::Commerce => acc.category_labels.receipts,
             Category::Notification => None,
         };
-        if let Some(target) = category_label {
-            if rng.random::<f64>() < 0.6 {
-                if let Some((_, label_id)) = acc.labels.iter().find(|(name, _)| name == target) {
-                    conn.execute(
-                        "INSERT OR IGNORE INTO thread_labels (thread_id, account_id, label_id)
-                         VALUES (?1, ?2, ?3)",
-                        rusqlite::params![thread_id, acc.id, label_id],
-                    )
-                    .map_err(|e| format!("insert thread_label (user): {e}"))?;
-                }
-            }
+        if let Some(target) = category_label
+            && rng.random::<f64>() < 0.6
+            && let Some((_, label_id)) = acc.labels.iter().find(|(name, _)| name == target)
+        {
+            conn.execute(
+                "INSERT OR IGNORE INTO thread_labels (thread_id, account_id, label_id)
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![thread_id, acc.id, label_id],
+            )
+            .map_err(|e| format!("insert thread_label (user): {e}"))?;
         }
     }
 

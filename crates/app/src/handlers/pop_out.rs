@@ -74,22 +74,18 @@ impl App {
             (
                 PopOutWindow::MessageView(_),
                 PopOutMessage::MessageView(MessageViewMessage::Archive),
-            ) => {
-                return self.dispatch_pop_out_action(
-                    window_id,
-                    crate::action_resolve::MailActionIntent::Archive,
-                );
-            }
+            ) => self.dispatch_pop_out_action(
+                window_id,
+                crate::action_resolve::MailActionIntent::Archive,
+            ),
             // Delete - route through action service for DB + provider dispatch
             (
                 PopOutWindow::MessageView(_),
                 PopOutMessage::MessageView(MessageViewMessage::Delete),
-            ) => {
-                return self.dispatch_pop_out_action(
-                    window_id,
-                    crate::action_resolve::MailActionIntent::Trash,
-                );
-            }
+            ) => self.dispatch_pop_out_action(
+                window_id,
+                crate::action_resolve::MailActionIntent::Trash,
+            ),
             // All other message view messages
             (PopOutWindow::MessageView(state), PopOutMessage::MessageView(_)) => {
                 let PopOutMessage::MessageView(msg) = pop_out_msg else {
@@ -718,12 +714,12 @@ impl App {
         mode: ComposeMode,
     ) -> Task<Message> {
         // Dedup: if replying to a thread that already has a compose window, focus it
-        if let Some(ref tid) = state.reply_thread_id {
-            if let Some((&existing_id, _)) = self.pop_out_windows.iter().find(|(_, w)| {
+        if let Some(ref tid) = state.reply_thread_id
+            && let Some((&existing_id, _)) = self.pop_out_windows.iter().find(|(_, w)| {
                 matches!(w, PopOutWindow::Compose(s) if s.reply_thread_id.as_deref() == Some(tid))
-            }) {
-                return iced::window::gain_focus(existing_id);
-            }
+            })
+        {
+            return iced::window::gain_focus(existing_id);
         }
 
         // Auto-select shared mailbox identity only for reply/forward flows
@@ -731,18 +727,14 @@ impl App {
         // do not explicitly deny submit.
         if state.reply_thread_id.is_some()
             && self.current_mailbox_may_submit().unwrap_or(true)
-        {
-            if let rtsk::scope::ViewScope::SharedMailbox {
+            && let rtsk::scope::ViewScope::SharedMailbox {
                 ref account_id,
                 ref mailbox_id,
             } = self.sidebar.selected_scope
-            {
-                if let Ok(Some(shared_email)) =
-                    self.db.get_shared_mailbox_email(account_id, mailbox_id)
-                {
-                    state.set_shared_mailbox_from(account_id, &shared_email);
-                }
-            }
+            && let Ok(Some(shared_email)) =
+                self.db.get_shared_mailbox_email(account_id, mailbox_id)
+        {
+            state.set_shared_mailbox_from(account_id, &shared_email);
         }
 
         state.mode = mode;
@@ -893,10 +885,10 @@ impl App {
                 async move {
                     // Try body store first (has full decompressed bodies),
                     // fall back to DB snippet if body store unavailable.
-                    if let Some(bs) = body_store {
-                        if let Ok(Some(body)) = bs.get(message_id.clone()).await {
-                            return Ok((body.body_text, body.body_html));
-                        }
+                    if let Some(bs) = body_store
+                        && let Ok(Some(body)) = bs.get(message_id.clone()).await
+                    {
+                        return Ok((body.body_text, body.body_html));
                     }
                     db.load_message_body(account_id, message_id).await
                 },

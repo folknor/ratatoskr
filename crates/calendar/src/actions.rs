@@ -87,19 +87,19 @@ async fn create_calendar_provider(
         "google_api" | "gmail_api" => {
             let client = GmailClient::from_account(db, account_id, encryption_key)
                 .await
-                .map_err(|e| ActionError::remote(e))?;
+                .map_err(ActionError::remote)?;
             Ok(CalendarProvider::Google(client))
         }
         "graph" => {
             let client = GraphClient::from_account(db, account_id, encryption_key)
                 .await
-                .map_err(|e| ActionError::remote(e))?;
+                .map_err(ActionError::remote)?;
             Ok(CalendarProvider::Graph(client))
         }
         "jmap" => {
             let client = JmapClient::from_account(db, account_id, &encryption_key)
                 .await
-                .map_err(|e| ActionError::remote(e))?;
+                .map_err(ActionError::remote)?;
             Ok(CalendarProvider::Jmap(client))
         }
         "caldav" => Ok(CalendarProvider::CalDav {
@@ -145,12 +145,12 @@ async fn dispatch_create(
         CalendarProvider::Google(client) => {
             google_calendar_create_event_impl(client, &ctx.db, calendar_remote_id, json)
                 .await
-                .map_err(|e| ActionError::remote(e))
+                .map_err(ActionError::remote)
         }
         CalendarProvider::Graph(client) => {
             graph_calendar_create_event_impl(client, &ctx.db, calendar_remote_id, json)
                 .await
-                .map_err(|e| ActionError::remote(e))
+                .map_err(ActionError::remote)
         }
         CalendarProvider::Jmap(client) => {
             let remote_id = jmap::calendar_sync::create_event_remote(
@@ -164,7 +164,7 @@ async fn dispatch_create(
                 input.is_all_day,
             )
             .await
-            .map_err(|e| ActionError::remote(e))?;
+            .map_err(ActionError::remote)?;
             Ok(CalendarEventDto {
                 remote_event_id: remote_id,
                 summary: Some(input.title.clone()),
@@ -186,7 +186,7 @@ async fn dispatch_create(
             json,
         )
         .await
-        .map_err(|e| ActionError::remote(e)),
+        .map_err(ActionError::remote),
     }
 }
 
@@ -208,11 +208,11 @@ async fn dispatch_update(
             json,
         )
         .await
-        .map_err(|e| ActionError::remote(e)),
+        .map_err(ActionError::remote),
         CalendarProvider::Graph(client) => {
             graph_calendar_update_event_impl(client, &ctx.db, remote_event_id, json)
                 .await
-                .map_err(|e| ActionError::remote(e))
+                .map_err(ActionError::remote)
         }
         CalendarProvider::Jmap(client) => {
             jmap::calendar_sync::update_event_remote(
@@ -226,7 +226,7 @@ async fn dispatch_update(
                 input.is_all_day,
             )
             .await
-            .map_err(|e| ActionError::remote(e))?;
+            .map_err(ActionError::remote)?;
             Ok(CalendarEventDto {
                 remote_event_id: remote_event_id.to_string(),
                 summary: Some(input.title.clone()),
@@ -249,7 +249,7 @@ async fn dispatch_update(
             etag.map(String::from),
         )
         .await
-        .map_err(|e| ActionError::remote(e)),
+        .map_err(ActionError::remote),
     }
 }
 
@@ -264,17 +264,17 @@ async fn dispatch_delete(
         CalendarProvider::Google(client) => {
             google_calendar_delete_event_impl(client, &ctx.db, calendar_remote_id, remote_event_id)
                 .await
-                .map_err(|e| ActionError::remote(e))
+                .map_err(ActionError::remote)
         }
         CalendarProvider::Graph(client) => {
             graph_calendar_delete_event_impl(client, &ctx.db, remote_event_id)
                 .await
-                .map_err(|e| ActionError::remote(e))
+                .map_err(ActionError::remote)
         }
         CalendarProvider::Jmap(client) => {
             jmap::calendar_sync::delete_event_remote(client, remote_event_id)
                 .await
-                .map_err(|e| ActionError::remote(e))
+                .map_err(ActionError::remote)
         }
         CalendarProvider::CalDav { account_id } => caldav_delete_event_impl(
             &ctx.db,
@@ -284,7 +284,7 @@ async fn dispatch_delete(
             etag.map(String::from),
         )
         .await
-        .map_err(|e| ActionError::remote(e)),
+        .map_err(ActionError::remote),
     }
 }
 
@@ -386,7 +386,7 @@ pub async fn create_calendar_event(
         };
         let event_id =
             rtsk::db::queries_extra::calendars::create_calendar_event_sync(&conn, &params)
-                .map_err(|e| ActionError::db(e))?;
+                .map_err(ActionError::db)?;
 
         Ok((event_id, calendar_remote_id))
     })
@@ -518,7 +518,7 @@ pub async fn update_calendar_event(
                 visibility: input.visibility,
             };
             rtsk::db::queries_extra::calendars::update_calendar_event_sync(&conn, &eid, &params)
-                .map_err(|e| ActionError::db(e))
+                .map_err(ActionError::db)
         })
         .await
         .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
@@ -654,7 +654,7 @@ pub async fn delete_calendar_event(
                 .lock()
                 .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
             rtsk::db::queries_extra::calendars::delete_calendar_event_sync(&conn, &eid)
-                .map_err(|e| ActionError::db(e))
+                .map_err(ActionError::db)
         })
         .await
         .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
@@ -709,7 +709,7 @@ pub async fn delete_calendar_event(
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         rtsk::db::queries_extra::calendars::delete_calendar_event_sync(&conn, &eid)
-            .map_err(|e| ActionError::db(e))
+            .map_err(ActionError::db)
     })
     .await
     .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))

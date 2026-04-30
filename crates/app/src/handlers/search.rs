@@ -52,6 +52,7 @@ pub(crate) enum PinnedSearchRef {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Clear variant + id field reserved for upcoming pinned-search edits
 pub(crate) enum SearchPinnedStateBehavior {
     Clear,
     SmartFolder { id: String },
@@ -887,7 +888,7 @@ fn thread_matches_scope(thread: &Thread, scope: &AccountScope) -> bool {
     match scope {
         AccountScope::All => true,
         AccountScope::Single(id) => thread.account_id == *id,
-        AccountScope::Multiple(ids) => ids.iter().any(|id| thread.account_id == *id),
+        AccountScope::Multiple(ids) => ids.contains(&thread.account_id),
     }
 }
 

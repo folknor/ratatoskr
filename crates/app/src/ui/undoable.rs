@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Utility module; not all helpers are wired in yet.
+
 //! Undo/redo infrastructure for plain text inputs and pill-based list inputs.
 //!
 //! `UndoableText` tracks state snapshots for short text fields (search bar,

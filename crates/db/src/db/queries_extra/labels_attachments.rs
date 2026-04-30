@@ -2,6 +2,8 @@ use super::super::DbState;
 use super::super::types::{AttachmentSender, AttachmentWithContext, LabelSortOrderItem};
 use rusqlite::params;
 
+// TODO(refactor): wrap fields in an UpsertLabelParams struct.
+#[allow(clippy::too_many_arguments)]
 pub async fn db_upsert_label_coalesce(
     db: &DbState,
     id: String,
@@ -61,6 +63,8 @@ pub async fn db_update_label_sort_order(
     .await
 }
 
+// TODO(refactor): wrap fields in an UpsertAttachmentParams struct.
+#[allow(clippy::too_many_arguments)]
 pub async fn db_upsert_attachment(
     db: &DbState,
     id: String,

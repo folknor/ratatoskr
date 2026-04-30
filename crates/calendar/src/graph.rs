@@ -165,17 +165,17 @@ fn parse_event_datetime(
     is_all_day: bool,
 ) -> Result<GraphDateTimeTimeZone, String> {
     // Try nested Graph format first: { "dateTime": "...", "timeZone": "..." }
-    if let Some(obj) = value.get(key).and_then(|v| v.as_object()) {
-        if let Some(dt) = obj.get("dateTime").and_then(|v| v.as_str()) {
-            let tz = obj
-                .get("timeZone")
-                .and_then(|v| v.as_str())
-                .unwrap_or("UTC");
-            return Ok(GraphDateTimeTimeZone {
-                date_time: dt.to_string(),
-                time_zone: tz.to_string(),
-            });
-        }
+    if let Some(obj) = value.get(key).and_then(|v| v.as_object())
+        && let Some(dt) = obj.get("dateTime").and_then(|v| v.as_str())
+    {
+        let tz = obj
+            .get("timeZone")
+            .and_then(|v| v.as_str())
+            .unwrap_or("UTC");
+        return Ok(GraphDateTimeTimeZone {
+            date_time: dt.to_string(),
+            time_zone: tz.to_string(),
+        });
     }
 
     // Try flat ISO string

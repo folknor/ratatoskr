@@ -17,6 +17,7 @@ use super::types::{CONTACT_SELECT, GraphContact, GraphContactFolder, ODataCollec
 
 /// Full contact sync: fetch all contact folders, page through all contacts,
 /// upsert into contacts table with source='graph', then prune stale entries.
+#[allow(dead_code)] // wired in once Graph contact sync ships
 pub(crate) async fn graph_contacts_initial_sync(
     client: &GraphClient,
     account_id: &str,
@@ -83,6 +84,7 @@ pub(crate) async fn graph_contacts_delta_sync(
 // Folder listing
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)] // wired in once Graph contact sync ships
 async fn fetch_contact_folders(
     client: &GraphClient,
     db: &DbState,

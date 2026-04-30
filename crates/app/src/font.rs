@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Typography helpers; not all weights/sizes are wired in yet.
+
 use std::borrow::Cow;
 use std::sync::OnceLock;
 

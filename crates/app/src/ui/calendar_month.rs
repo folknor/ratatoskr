@@ -34,6 +34,7 @@ pub struct MonthDay {
 }
 
 /// Complete month grid data.
+#[allow(dead_code)] // year/month retained for header rendering pass
 pub struct MonthGridData {
     pub year: i32,
     pub month: u32,
@@ -69,7 +70,7 @@ pub fn build_month_grid(
     // the last day of the month lands in row 5 or row 6.
     let last_of_month = last_day_of_month(year, month);
     let total_days_shown = days_between(grid_start, last_of_month) + 1;
-    let num_weeks = (total_days_shown + 6) / 7; // ceiling division
+    let num_weeks = total_days_shown.div_ceil(7);
     let num_weeks = num_weeks.max(5); // always at least 5 rows
 
     let mut weeks = Vec::with_capacity(num_weeks);
@@ -342,6 +343,8 @@ fn event_entry<'a, M: 'a + Clone>(event: &'a MonthEvent, on_click: M) -> Element
 ///
 /// Shows a header with prev/next arrows and month/year label,
 /// followed by a 7-column grid of date numbers.
+// TODO(refactor): wrap navigation params into a struct.
+#[allow(clippy::too_many_arguments)]
 pub fn mini_month<'a, M: 'a + Clone>(
     year: i32,
     month: u32,
@@ -409,7 +412,7 @@ pub fn mini_month<'a, M: 'a + Clone>(
     let grid_start = rewind_to_weekday(first_of_month, week_start);
     let last = last_day_of_month(year, month);
     let total = days_between(grid_start, last) + 1;
-    let num_weeks = ((total + 6) / 7).max(5);
+    let num_weeks = total.div_ceil(7).max(5);
 
     let mut grid = column![].spacing(SPACE_0);
     for w in 0..num_weeks {

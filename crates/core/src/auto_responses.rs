@@ -30,20 +30,15 @@ pub struct AutoResponseConfig {
     pub external_audience: ExternalAudience,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ExternalAudience {
     None,
     ContactsOnly,
     /// Gmail `restrictToDomain = true` - replies only to same-domain senders.
     DomainOnly,
+    #[default]
     All,
-}
-
-impl Default for ExternalAudience {
-    fn default() -> Self {
-        Self::All
-    }
 }
 
 impl ExternalAudience {
@@ -317,15 +312,15 @@ pub async fn push_gmail_auto_response(
         body["responseBodyHtml"] = serde_json::Value::String(msg.clone());
     }
 
-    if let Some(ref start) = config.start_date {
-        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(start) {
-            body["startTime"] = serde_json::Value::String((dt.timestamp() * 1000).to_string());
-        }
+    if let Some(ref start) = config.start_date
+        && let Ok(dt) = chrono::DateTime::parse_from_rfc3339(start)
+    {
+        body["startTime"] = serde_json::Value::String((dt.timestamp() * 1000).to_string());
     }
-    if let Some(ref end) = config.end_date {
-        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(end) {
-            body["endTime"] = serde_json::Value::String((dt.timestamp() * 1000).to_string());
-        }
+    if let Some(ref end) = config.end_date
+        && let Ok(dt) = chrono::DateTime::parse_from_rfc3339(end)
+    {
+        body["endTime"] = serde_json::Value::String((dt.timestamp() * 1000).to_string());
     }
 
     body["restrictToContacts"] =

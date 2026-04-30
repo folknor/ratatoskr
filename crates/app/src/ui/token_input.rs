@@ -16,7 +16,7 @@ use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::{Clipboard, Layout, Shell, Widget};
 use iced::keyboard;
 use iced::mouse;
-use iced::{Element, Event, Length, Point, Rectangle, Size, Theme, Vector, border};
+use iced::{Element, Event, Length, Point, Rectangle, Size, Theme, border};
 
 use crate::font;
 use crate::ui::layout::*;
@@ -47,6 +47,7 @@ pub struct TokenId(pub u64);
 
 /// Which recipient field this widget instance represents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // re-exported alias of compose::RecipientField; consumers haven't switched yet
 pub enum RecipientField {
     To,
     Cc,
@@ -540,51 +541,51 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
                 button: mouse::Button::Right,
                 ..
             }) => {
-                if let Some(pos) = cursor.position() {
-                    if bounds.contains(pos) {
-                        for (i, token) in self.tokens.iter().enumerate() {
-                            if let Some(chip) = state.token_bounds.get(i) {
-                                let abs = Rectangle {
-                                    x: bounds.x + chip.x,
-                                    y: bounds.y + chip.y,
-                                    width: chip.width,
-                                    height: chip.height,
-                                };
-                                if abs.contains(pos) {
-                                    // Mirror left-click semantics so the
-                                    // pill highlights as the active marker
-                                    // before the context menu opens.
-                                    if !state.is_focused {
-                                        state.is_focused = true;
-                                        shell.publish(
-                                            (self.on_message)(TokenInputMessage::Focused),
-                                        );
-                                    }
-                                    shell.publish((self.on_message)(
-                                        TokenInputMessage::SelectToken(token.id),
-                                    ));
-                                    shell.publish((self.on_message)(
-                                        TokenInputMessage::TokenContextMenu(token.id, pos),
-                                    ));
-                                    shell.capture_event();
-                                    return;
+                if let Some(pos) = cursor.position()
+                    && bounds.contains(pos)
+                {
+                    for (i, token) in self.tokens.iter().enumerate() {
+                        if let Some(chip) = state.token_bounds.get(i) {
+                            let abs = Rectangle {
+                                x: bounds.x + chip.x,
+                                y: bounds.y + chip.y,
+                                width: chip.width,
+                                height: chip.height,
+                            };
+                            if abs.contains(pos) {
+                                // Mirror left-click semantics so the
+                                // pill highlights as the active marker
+                                // before the context menu opens.
+                                if !state.is_focused {
+                                    state.is_focused = true;
+                                    shell.publish(
+                                        (self.on_message)(TokenInputMessage::Focused),
+                                    );
                                 }
+                                shell.publish((self.on_message)(
+                                    TokenInputMessage::SelectToken(token.id),
+                                ));
+                                shell.publish((self.on_message)(
+                                    TokenInputMessage::TokenContextMenu(token.id, pos),
+                                ));
+                                shell.capture_event();
+                                return;
                             }
                         }
-                        // Right-click landed inside the field but not on a
-                        // token - emit a field-context message so the
-                        // caller can show a Paste-only menu.
-                        if !state.is_focused {
-                            state.is_focused = true;
-                            shell.publish((self.on_message)(TokenInputMessage::Focused));
-                        }
-                        shell.publish((self.on_message)(TokenInputMessage::DeselectTokens));
-                        shell.publish((self.on_message)(TokenInputMessage::FieldContextMenu(
-                            pos,
-                        )));
-                        shell.capture_event();
-                        return;
                     }
+                    // Right-click landed inside the field but not on a
+                    // token - emit a field-context message so the
+                    // caller can show a Paste-only menu.
+                    if !state.is_focused {
+                        state.is_focused = true;
+                        shell.publish((self.on_message)(TokenInputMessage::Focused));
+                    }
+                    shell.publish((self.on_message)(TokenInputMessage::DeselectTokens));
+                    shell.publish((self.on_message)(TokenInputMessage::FieldContextMenu(
+                        pos,
+                    )));
+                    shell.capture_event();
+                    return;
                 }
             }
 
@@ -595,20 +596,20 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
             })
             | Event::Touch(iced::touch::Event::FingerPressed { .. }) => {
                 // Start drag tracking if clicking on a token
-                if let Some(pos) = cursor.position() {
-                    if bounds.contains(pos) {
-                        for (i, token) in self.tokens.iter().enumerate() {
-                            if let Some(chip) = state.token_bounds.get(i) {
-                                let abs = Rectangle {
-                                    x: bounds.x + chip.x,
-                                    y: bounds.y + chip.y,
-                                    width: chip.width,
-                                    height: chip.height,
-                                };
-                                if abs.contains(pos) {
-                                    state.drag_tracking = Some((token.id, pos));
-                                    break;
-                                }
+                if let Some(pos) = cursor.position()
+                    && bounds.contains(pos)
+                {
+                    for (i, token) in self.tokens.iter().enumerate() {
+                        if let Some(chip) = state.token_bounds.get(i) {
+                            let abs = Rectangle {
+                                x: bounds.x + chip.x,
+                                y: bounds.y + chip.y,
+                                width: chip.width,
+                                height: chip.height,
+                            };
+                            if abs.contains(pos) {
+                                state.drag_tracking = Some((token.id, pos));
+                                break;
                             }
                         }
                     }
@@ -671,21 +672,21 @@ impl<M: Clone> Widget<M, Theme, iced::Renderer> for TokenInputWidget<'_, M> {
         let state = tree.state.downcast_ref::<TokenInputState>();
         let bounds = layout.bounds();
 
-        if let Some(pos) = cursor.position() {
-            if bounds.contains(pos) {
-                for chip in &state.token_bounds {
-                    let abs = Rectangle {
-                        x: bounds.x + chip.x,
-                        y: bounds.y + chip.y,
-                        width: chip.width,
-                        height: chip.height,
-                    };
-                    if abs.contains(pos) {
-                        return mouse::Interaction::Pointer;
-                    }
+        if let Some(pos) = cursor.position()
+            && bounds.contains(pos)
+        {
+            for chip in &state.token_bounds {
+                let abs = Rectangle {
+                    x: bounds.x + chip.x,
+                    y: bounds.y + chip.y,
+                    width: chip.width,
+                    height: chip.height,
+                };
+                if abs.contains(pos) {
+                    return mouse::Interaction::Pointer;
                 }
-                return mouse::Interaction::Text;
             }
+            return mouse::Interaction::Text;
         }
 
         mouse::Interaction::default()

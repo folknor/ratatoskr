@@ -143,6 +143,7 @@ pub enum CalendarModal {
     /// `EditingEvent` in workflow state is a contract violation.
     EventEditor,
     /// Delete confirmation dialog.
+    #[allow(dead_code)] // event_id + account_id captured here so the modal can dispatch the delete
     ConfirmDelete {
         event_id: String,
         title: String,
@@ -152,13 +153,13 @@ pub enum CalendarModal {
     ConfirmDiscard { title: String },
 }
 
-/// Data for a calendar event in the UI layer.
-///
-/// Used for both detail display and editor form state.
-/// Time fields are stored as raw strings during editing to avoid
-/// fighting the user on intermediate keystroke states (e.g., typing
-/// "12" would be parsed as "1" then "2" if parsed per-keystroke).
-/// Parsed to integers only on save.
+// Data for a calendar event in the UI layer.
+//
+// Used for both detail display and editor form state.
+// Time fields are stored as raw strings during editing to avoid
+// fighting the user on intermediate keystroke states (e.g., typing
+// "12" would be parsed as "1" then "2" if parsed per-keystroke).
+// Parsed to integers only on save.
 
 /// An attendee for display in event detail.
 #[derive(Debug, Clone)]
@@ -407,6 +408,7 @@ pub struct CalendarState {
 }
 
 impl CalendarState {
+    #[allow(dead_code)] // default constructor kept; callers go through with_default_view today
     pub fn new() -> Self {
         Self::with_default_view(CalendarView::Month)
     }
@@ -733,9 +735,7 @@ pub fn calendar_layout(state: &CalendarState) -> Element<'_, CalendarMessage> {
                 };
                 event_editor_card(draft, is_creating, &state.calendars)
             }
-            CalendarModal::ConfirmDelete {
-                event_id, title, ..
-            } => delete_confirm_card(title),
+            CalendarModal::ConfirmDelete { title, .. } => delete_confirm_card(title),
             CalendarModal::ConfirmDiscard { title } => discard_confirm_card(title),
         };
         crate::ui::modal_overlay::modal_overlay(
@@ -842,14 +842,14 @@ fn event_detail_popover(event: &CalendarEventData) -> Element<'_, CalendarMessag
                     .style(text::secondary),
             );
         }
-    } else if let Some(ref email) = event.organizer_email {
-        if !email.is_empty() {
-            content = content.push(
-                text(format!("Invited by {email}"))
-                    .size(TEXT_SM)
-                    .style(text::secondary),
-            );
-        }
+    } else if let Some(ref email) = event.organizer_email
+        && !email.is_empty()
+    {
+        content = content.push(
+            text(format!("Invited by {email}"))
+                .size(TEXT_SM)
+                .style(text::secondary),
+        );
     }
 
     // Attendees (hidden if empty)
@@ -1012,14 +1012,14 @@ fn event_full_modal<'a>(
         .align_y(Alignment::Center);
 
     // Timezone
-    if let Some(ref tz) = event.timezone {
-        if !tz.is_empty() {
-            datetime_row = datetime_row.push(
-                text(tz)
-                    .size(TEXT_SM)
-                    .style(theme::TextClass::Muted.style()),
-            );
-        }
+    if let Some(ref tz) = event.timezone
+        && !tz.is_empty()
+    {
+        datetime_row = datetime_row.push(
+            text(tz)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Muted.style()),
+        );
     }
     detail = detail.push(datetime_row);
 
@@ -1057,14 +1057,14 @@ fn event_full_modal<'a>(
                     .style(text::secondary),
             );
         }
-    } else if let Some(ref email) = event.organizer_email {
-        if !email.is_empty() {
-            detail = detail.push(
-                text(format!("Organizer: {email}"))
-                    .size(TEXT_SM)
-                    .style(text::secondary),
-            );
-        }
+    } else if let Some(ref email) = event.organizer_email
+        && !email.is_empty()
+    {
+        detail = detail.push(
+            text(format!("Organizer: {email}"))
+                .size(TEXT_SM)
+                .style(text::secondary),
+        );
     }
 
     // Attendees
@@ -1488,20 +1488,20 @@ fn event_editor_card<'a>(
     let mut action_row = row![save_btn, cancel_btn].spacing(SPACE_XS);
 
     // Delete button for existing events (not for new event creation).
-    if !is_creating {
-        if let Some(ref id) = event.id {
-            action_row = action_row.push(Space::new().width(Length::Fill));
-            action_row = action_row.push(
-                button(text("Delete").size(TEXT_SM).style(text::danger))
-                    .on_press(CalendarMessage::ConfirmDeleteEvent {
-                        event_id: id.clone(),
-                        title: event.title.clone(),
-                        account_id: event.account_id.clone(),
-                    })
-                    .padding(PAD_BUTTON)
-                    .style(theme::ButtonClass::Ghost.style()),
-            );
-        }
+    if !is_creating
+        && let Some(ref id) = event.id
+    {
+        action_row = action_row.push(Space::new().width(Length::Fill));
+        action_row = action_row.push(
+            button(text("Delete").size(TEXT_SM).style(text::danger))
+                .on_press(CalendarMessage::ConfirmDeleteEvent {
+                    event_id: id.clone(),
+                    title: event.title.clone(),
+                    account_id: event.account_id.clone(),
+                })
+                .padding(PAD_BUTTON)
+                .style(theme::ButtonClass::Ghost.style()),
+        );
     }
 
     content = content.push(Space::new().height(SPACE_XS));
@@ -1672,7 +1672,7 @@ fn calendar_sidebar(state: &CalendarState) -> Element<'_, CalendarMessage> {
         today,
         state.week_start,
         &state.dates_with_events,
-        |d| CalendarMessage::SelectDate(d),
+        CalendarMessage::SelectDate,
         CalendarMessage::PrevMonth,
         CalendarMessage::NextMonth,
     );
@@ -1859,7 +1859,7 @@ fn calendar_main_view(state: &CalendarState) -> Element<'_, CalendarMessage> {
 fn calendar_main_month(state: &CalendarState) -> Element<'_, CalendarMessage> {
     container(calendar_month::month_view(
         &state.month_grid,
-        |d| CalendarMessage::SelectDate(d),
+        CalendarMessage::SelectDate,
         |id| CalendarMessage::EventClicked(id.to_string()),
     ))
     .width(Length::Fill)
@@ -1873,7 +1873,7 @@ fn calendar_main_time_grid(state: &CalendarState) -> Element<'_, CalendarMessage
     container(calendar_time_grid::time_grid_view(
         &state.time_grid_config,
         |id| CalendarMessage::EventClicked(id.to_string()),
-        |date, hour| CalendarMessage::SelectSlot(date, hour),
+        CalendarMessage::SelectSlot,
     ))
     .width(Length::Fill)
     .height(Length::Fill)

@@ -325,18 +325,18 @@ fn message_view_header<'a>(
     }
 
     // Cc row (if present)
-    if let Some(ref cc) = state.cc_addresses {
-        if !cc.is_empty() {
-            header_fields = header_fields.push(
-                row![
-                    text("Cc: ")
-                        .size(TEXT_SM)
-                        .style(theme::TextClass::Tertiary.style()),
-                    text(cc.as_str()).size(TEXT_SM).style(text::secondary),
-                ]
-                .spacing(SPACE_XXS),
-            );
-        }
+    if let Some(ref cc) = state.cc_addresses
+        && !cc.is_empty()
+    {
+        header_fields = header_fields.push(
+            row![
+                text("Cc: ")
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Tertiary.style()),
+                text(cc.as_str()).size(TEXT_SM).style(text::secondary),
+            ]
+            .spacing(SPACE_XXS),
+        );
     }
 
     // Subject + date row
@@ -919,6 +919,7 @@ fn file_type_icon<'a>(mime_type: Option<&str>) -> iced::widget::Text<'a> {
     }
 }
 
+#[allow(dead_code)] // helper kept for upcoming attachment list redesign
 fn mime_to_type_label(mime: Option<&str>) -> &'static str {
     match mime.unwrap_or("") {
         t if t.starts_with("image/") => "Image",

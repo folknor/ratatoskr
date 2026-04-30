@@ -37,6 +37,7 @@ pub enum WarningKind {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // phase + generation populated for the upcoming staleness pruning
 pub struct SyncAccountProgress {
     pub email: String,
     pub current: u64,
@@ -54,6 +55,7 @@ struct Confirmation {
 }
 
 /// Resolved display content, computed fresh on every `view()` call.
+#[allow(dead_code)] // account_id needed once the warning click handler dispatches per-account
 enum ResolvedContent {
     Idle,
     Warning {
@@ -305,6 +307,7 @@ impl StatusBar {
     /// Begin a new sync generation for an account. Returns the new
     /// generation number. Call this at the start of each sync cycle
     /// so that old progress entries can be detected as stale.
+    #[allow(dead_code)] // generation pruning landing in a follow-up
     pub fn begin_sync_generation(&mut self, account_id: &str) -> u64 {
         let generation = self
             .sync_generations
@@ -316,6 +319,7 @@ impl StatusBar {
 
     /// Check if an account's sync progress entry is stale (its
     /// generation is behind the current generation for that account).
+    #[allow(dead_code)] // generation pruning landing in a follow-up
     pub fn is_sync_stale(&self, account_id: &str) -> bool {
         let Some(progress) = self.sync_progress.get(account_id) else {
             return false;
@@ -325,6 +329,7 @@ impl StatusBar {
     }
 
     /// Remove stale sync progress entries (where generation is behind).
+    #[allow(dead_code)] // generation pruning landing in a follow-up
     pub fn prune_stale_sync(&mut self) {
         let stale_ids: Vec<String> = self
             .sync_progress
@@ -373,12 +378,12 @@ impl StatusBar {
         }
 
         // 2. Active confirmation briefly preempts sync progress.
-        if let Some(ref conf) = self.confirmation {
-            if now.duration_since(conf.created_at) < CONFIRMATION_DURATION {
-                return ResolvedContent::Confirmation {
-                    text: conf.text.clone(),
-                };
-            }
+        if let Some(ref conf) = self.confirmation
+            && now.duration_since(conf.created_at) < CONFIRMATION_DURATION
+        {
+            return ResolvedContent::Confirmation {
+                text: conf.text.clone(),
+            };
         }
 
         // 3. Sync progress is the steady-state default.
@@ -387,12 +392,12 @@ impl StatusBar {
         }
 
         // 4. Confirmation that arrived with no sync active.
-        if let Some(ref conf) = self.confirmation {
-            if now.duration_since(conf.created_at) < CONFIRMATION_DURATION {
-                return ResolvedContent::Confirmation {
-                    text: conf.text.clone(),
-                };
-            }
+        if let Some(ref conf) = self.confirmation
+            && now.duration_since(conf.created_at) < CONFIRMATION_DURATION
+        {
+            return ResolvedContent::Confirmation {
+                text: conf.text.clone(),
+            };
         }
 
         // 5. Persistent auto-reply indicator (lowest priority above idle).
@@ -486,10 +491,10 @@ impl Component for StatusBar {
                 self.warning_cycle_index = self.warning_cycle_index.wrapping_add(1);
                 self.sync_cycle_index = self.sync_cycle_index.wrapping_add(1);
 
-                if let Some(ref conf) = self.confirmation {
-                    if now.duration_since(conf.created_at) >= CONFIRMATION_DURATION {
-                        self.confirmation = None;
-                    }
+                if let Some(ref conf) = self.confirmation
+                    && now.duration_since(conf.created_at) >= CONFIRMATION_DURATION
+                {
+                    self.confirmation = None;
                 }
 
                 (iced::Task::none(), None)
@@ -541,21 +546,20 @@ impl Component for StatusBar {
                         .interaction(iced::mouse::Interaction::Pointer)
                         .into()
                 } else {
-                    bar.into()
+                    bar
                 }
             }
             ResolvedContent::SyncProgress { text: sync_text } => {
-                build_status_row(icon::refresh(), &sync_text, TextClass::Muted).into()
+                build_status_row(icon::refresh(), &sync_text, TextClass::Muted)
             }
             ResolvedContent::Confirmation { text: conf_text } => {
-                build_status_row(icon::check(), &conf_text, TextClass::Muted).into()
+                build_status_row(icon::check(), &conf_text, TextClass::Muted)
             }
             ResolvedContent::AutoReplyActive => build_status_row(
                 icon::mail(),
                 "Out of Office auto-reply is active",
                 TextClass::Accent,
-            )
-            .into(),
+            ),
         }
     }
 

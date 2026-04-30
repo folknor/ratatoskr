@@ -118,17 +118,15 @@ async fn auto_merge_one(db: &DbState, pair: &DuplicatePair) -> Result<bool, Stri
     }
 
     // For contacts vs seen_addresses: update display name if primary is null
-    if pair.primary_name.is_none() {
-        if let Some(ref seen_name) = pair.secondary_name {
-            let pid = pair.primary_id.clone();
-            let name = seen_name.clone();
-            db.with_conn(move |conn| {
-                crate::db::queries_extra::contacts::merge_seen_duplicate_sync(
-                    conn, &pid, &name,
-                )
-            })
-            .await?;
-        }
+    if pair.primary_name.is_none()
+        && let Some(ref seen_name) = pair.secondary_name
+    {
+        let pid = pair.primary_id.clone();
+        let name = seen_name.clone();
+        db.with_conn(move |conn| {
+            crate::db::queries_extra::contacts::merge_seen_duplicate_sync(conn, &pid, &name)
+        })
+        .await?;
     }
 
     Ok(true)

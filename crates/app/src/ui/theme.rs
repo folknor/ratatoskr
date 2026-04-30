@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Theme infrastructure; some variants and TOML loader not yet wired in.
+
 use std::cell::Cell;
 
 use iced::theme::palette::Seed;

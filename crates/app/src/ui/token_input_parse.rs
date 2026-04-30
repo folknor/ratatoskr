@@ -76,23 +76,22 @@ fn parse_single_address(input: &str) -> Option<ParsedAddress> {
     let trimmed = input.trim();
 
     // Try angle-bracket format: `Name <email>` or `"Name" <email>`
-    if let Some(angle_start) = trimmed.rfind('<') {
-        if let Some(angle_end) = trimmed.rfind('>') {
-            if angle_end > angle_start {
-                let email = trimmed[angle_start + 1..angle_end].trim();
-                if !is_plausible_email(email) {
-                    return None;
-                }
-
-                let name_part = trimmed[..angle_start].trim();
-                let display_name = extract_display_name(name_part);
-
-                return Some(ParsedAddress {
-                    email: email.to_lowercase(),
-                    display_name,
-                });
-            }
+    if let Some(angle_start) = trimmed.rfind('<')
+        && let Some(angle_end) = trimmed.rfind('>')
+        && angle_end > angle_start
+    {
+        let email = trimmed[angle_start + 1..angle_end].trim();
+        if !is_plausible_email(email) {
+            return None;
         }
+
+        let name_part = trimmed[..angle_start].trim();
+        let display_name = extract_display_name(name_part);
+
+        return Some(ParsedAddress {
+            email: email.to_lowercase(),
+            display_name,
+        });
     }
 
     // Try bare email

@@ -7,6 +7,7 @@ use label_colors::preset_colors;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)] // id deserialized from API for diagnostics; not currently used downstream
 struct OutlookCategory {
     id: String,
     display_name: String,

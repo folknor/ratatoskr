@@ -34,6 +34,7 @@ impl SendDelegation {
     }
 
     /// Parse from the database `delegation` column value.
+    #[allow(clippy::should_implement_trait)] // infallible; FromStr would require an Err type we don't need
     pub fn from_str(s: &str) -> Self {
         match s {
             "exchange" => Self::Exchange,
@@ -85,6 +86,7 @@ impl ScheduledStatus {
         }
     }
 
+    #[allow(clippy::should_implement_trait)] // returns Option, not Result; FromStr would require an error type
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "pending" => Some(Self::Pending),

@@ -14,6 +14,7 @@ use crate::ui::widgets;
 
 /// Which direction to advance after an email action removes the current thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Previous variant kept for symmetry; only Next is dispatched today
 pub enum AutoAdvanceDirection {
     /// Select the next thread (below) after action.
     Next,
@@ -109,6 +110,7 @@ pub enum ThreadListMessage {
 
 /// Events the thread list emits upward to the App.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // BatchAction / TypeaheadQuery / SearchUndo / SearchRedo land per follow-up
 pub enum ThreadListEvent {
     ThreadSelected(usize),
     /// The search query text changed (propagated to App for debounce).
@@ -366,10 +368,10 @@ impl Component for ThreadList {
                 } else {
                     (idx, anchor)
                 };
-                if self.selected_threads.is_empty() {
-                    if let Some(prev) = self.selected_thread {
-                        self.selected_threads.insert(prev);
-                    }
+                if self.selected_threads.is_empty()
+                    && let Some(prev) = self.selected_thread
+                {
+                    self.selected_threads.insert(prev);
                 }
                 for i in start..=end {
                     self.selected_threads.insert(i);
@@ -398,7 +400,7 @@ impl Component for ThreadList {
                 }
                 let start = self
                     .selected_thread
-                    .or_else(|| self.last_selected_anchor)
+                    .or(self.last_selected_anchor)
                     .unwrap_or(0);
                 for idx in start..self.threads.len() {
                     self.selected_threads.insert(idx);

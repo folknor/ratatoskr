@@ -234,6 +234,33 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **Compose: swap signature when From account changes** - The compose window resolves and inserts a signature once on open (see "Signature placement in compose" under Needs Visual Review). If the user then changes the From account via the dropdown, the previous account's signature stays in the body and the new account's default is not inserted. `ComposeMessage::FromAccountChanged` should remove the existing signature block (tracked via `state.active_signature_id` / `signature_separator_index`) and re-resolve + insert the new account's default in the same placement (bottom for new compose, before quoted text for reply).
 - [ ] **CardDAV contact write-back** - CardDAV client supports PROPFIND/REPORT/GET but not PUT/DELETE. Need vCard generation + PUT method for pushing contact edits to CardDAV servers. See `docs/contacts/problem-statement.md`.
 
+## Refactor Backlog
+
+Flagged inline as `TODO(refactor)` with `#[allow(clippy::too_many_arguments)]` or `#[allow(clippy::type_complexity)]` so clippy stays clean. Nothing here is blocking - each is a localized API cleanup that would replace a long arg list or nested-Option tuple with a named struct.
+
+**Replace long arg lists with a params struct:**
+- [ ] `db_save_local_draft` (15 args) - `crates/db/src/db/queries_extra/compose.rs:505` -> `SaveLocalDraftParams`
+- [ ] `db_insert_scheduled_email` (14 args) - `crates/db/src/db/queries_extra/compose.rs:705` -> `ScheduledEmailParams`
+- [ ] `db_upsert_contact_full` (10 args) - `crates/db/src/db/queries_extra/contacts.rs:121` -> `UpsertContactParams`
+- [ ] `db_upsert_attachment` (10 args) - `crates/db/src/db/queries_extra/labels_attachments.rs:66` -> `UpsertAttachmentParams`
+- [ ] `db_upsert_alias` (10 args) - `crates/db/src/db/queries_extra/compose.rs:402` -> `UpsertAliasParams`
+- [ ] `db_upsert_label_coalesce` (9 args) - `crates/db/src/db/queries_extra/labels_attachments.rs:5` -> `UpsertLabelParams`
+- [ ] `db_update_template` (8 args) - `crates/db/src/db/queries_extra/compose.rs:46` -> `UpdateTemplateParams`
+- [ ] `upsert_auto_response_sync` (8 args) - `crates/db/src/db/queries_extra/auto_responses.rs:49` -> `UpsertAutoResponseParams`
+- [ ] `gmail::ops::send_reaction` (9 args) - `crates/gmail/src/ops.rs:454` -> `ReactionMessage` (headers + threading fields)
+- [ ] `imap_delta_sync` (8 args) - `crates/imap/src/imap_delta.rs:41` -> bundle stores/state into a `SyncCtx` struct
+- [ ] `compose::new_reply` (8 args) - `crates/app/src/pop_out/compose.rs:563` -> `ReplyContext`
+- [ ] `compose::build_recipient_row_inner` (8 args) - `crates/app/src/pop_out/compose.rs:1915` -> recipient row params struct (autocomplete + selection state)
+- [ ] `calendar_month::mini_month` (9 args) - `crates/app/src/ui/calendar_month.rs:346` -> navigation params struct
+- [ ] `settings::row_widgets::slider_row` (8 args) - `crates/app/src/ui/settings/row_widgets.rs:486` -> `SliderRow` builder
+- [ ] `undoable_text_input::handle_update` (9 args) - `crates/app/src/ui/undoable_text_input.rs:291` -> `UpdateCtx` struct
+
+**Replace nested-Option tuples with named structs:**
+- [ ] `get_contact_meta_by_id_sync` returns `Option<(Option<String>, Option<String>, Option<String>)>` - `crates/db/src/db/queries_extra/action_helpers.rs:42` -> `ContactMeta` struct
+- [ ] `merge_contact_pair_sync` builds a 6-tuple of `Option<String>` for the merge row - `crates/db/src/db/queries_extra/contacts.rs:949` -> `MergeContactRow` struct
+- [ ] address-row 4-tuples of `Option<String>` (two call sites) - `crates/db/src/db/queries_extra/thread_persistence.rs:447, 665` -> `AddressRow` struct
+- [ ] compressed-body batches `(String, Option<Vec<u8>>, Option<Vec<u8>>)` (two call sites) - `crates/stores/src/body_store.rs:152, 241` -> `CompressedBody` struct
+
 ## Needs Visual Review
 
 Completed features that need to be visually verified in the running app.

@@ -8,7 +8,7 @@ use crate::window_state::WindowState;
 use serde::{Deserialize, Serialize};
 
 /// Full session state, saved on app close.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionState {
     /// Main window geometry and layout state.
     pub main_window: WindowState,
@@ -40,10 +40,10 @@ impl SessionState {
     pub fn load(data_dir: &std::path::Path) -> Self {
         // Try session.json first
         let session_path = data_dir.join("session.json");
-        if let Ok(bytes) = std::fs::read(&session_path) {
-            if let Ok(session) = serde_json::from_slice::<Self>(&bytes) {
-                return session;
-            }
+        if let Ok(bytes) = std::fs::read(&session_path)
+            && let Ok(session) = serde_json::from_slice::<Self>(&bytes)
+        {
+            return session;
         }
 
         // Fall back to window.json (old format migration)
@@ -55,11 +55,3 @@ impl SessionState {
     }
 }
 
-impl Default for SessionState {
-    fn default() -> Self {
-        Self {
-            main_window: WindowState::default(),
-            message_views: Vec::new(),
-        }
-    }
-}

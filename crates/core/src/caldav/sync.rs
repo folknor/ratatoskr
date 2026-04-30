@@ -65,15 +65,15 @@ pub async fn sync_caldav_calendars(
         // Check ctag for quick change detection
         let stored_ctag = load_calendar_ctag(db, &calendar_id).await?;
 
-        if let Some(ref remote_ctag) = cal.ctag {
-            if stored_ctag.as_ref() == Some(remote_ctag) {
-                log::debug!(
-                    "CalDAV: calendar {} ctag unchanged, skipping",
-                    cal.display_name.as_deref().unwrap_or(&cal.href)
-                );
-                skipped_unchanged += 1;
-                continue;
-            }
+        if let Some(ref remote_ctag) = cal.ctag
+            && stored_ctag.as_ref() == Some(remote_ctag)
+        {
+            log::debug!(
+                "CalDAV: calendar {} ctag unchanged, skipping",
+                cal.display_name.as_deref().unwrap_or(&cal.href)
+            );
+            skipped_unchanged += 1;
+            continue;
         }
 
         // Sync events for this calendar

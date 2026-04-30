@@ -13,6 +13,7 @@ pub(crate) use other_contacts::sync_google_other_contacts;
 
 /// Result of a Google contacts sync.
 #[derive(Debug)]
+#[allow(dead_code)] // counts surfaced once the sync caller starts logging them
 pub(crate) struct SyncContactsResult {
     pub synced: usize,
     pub deleted: usize,
@@ -342,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_contacts_with_no_email_skipped() {
-        let persons = vec![
+        let persons = [
             make_person(
                 "people/1",
                 Some("valid@test.com"),

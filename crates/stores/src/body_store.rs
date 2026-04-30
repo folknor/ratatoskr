@@ -149,6 +149,8 @@ impl BodyStoreState {
         let conn = Arc::clone(&self.conn);
         tokio::task::spawn_blocking(move || {
             // Compress all bodies outside the lock - CPU-intensive work.
+            // TODO(refactor): introduce a CompressedBody struct.
+            #[allow(clippy::type_complexity)]
             let compressed: Vec<(String, Option<Vec<u8>>, Option<Vec<u8>>)> = bodies
                 .iter()
                 .map(|body| {
@@ -238,6 +240,8 @@ impl BodyStoreState {
         let conn = Arc::clone(&self.conn);
         tokio::task::spawn_blocking(move || {
             // Lock only for the DB reads - collect compressed blobs.
+            // TODO(refactor): introduce a CompressedBody struct.
+            #[allow(clippy::type_complexity)]
             let compressed_rows: Vec<(String, Option<Vec<u8>>, Option<Vec<u8>>)> = {
                 let conn = conn
                     .lock()

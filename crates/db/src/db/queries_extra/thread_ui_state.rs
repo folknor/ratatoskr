@@ -49,6 +49,11 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys = ON;")
             .expect("pragmas");
         migrations::run_all(&conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO accounts (id, email) VALUES ('acc-1', 'acc-1@example.com')",
+            [],
+        )
+        .expect("seed account");
         conn
     }
 

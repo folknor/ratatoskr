@@ -24,6 +24,7 @@ fn derive_account_name(email: &str) -> String {
 
 /// Pick the next unused account color from the label-colors palette.
 /// Falls back to the first color if all are used.
+#[allow(dead_code)] // wired in once account creation auto-assigns a color
 fn next_account_color(conn: &Connection) -> String {
     let used = get_used_account_colors_sync(conn).unwrap_or_default();
 

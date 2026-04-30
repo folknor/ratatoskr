@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Layout token library; not all constants are wired in yet.
+
 use iced::Padding;
 
 // ── Spacing scale (geometric progression) ───────────────

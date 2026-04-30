@@ -1,14 +1,12 @@
 use iced::Task;
 
-use std::sync::Arc;
-
 use crate::command_dispatch;
-use crate::db::Db;
 use crate::{APP_DATA_DIR, App, Message};
 use cmdk::{CommandArgs, CommandId, KeyBinding, OptionItem};
-use rtsk::actions::{ActionOutcome, FolderId, MailOperation, TagId};
+use rtsk::actions::{ActionOutcome, TagId};
 use rtsk::scope::ViewScope;
 
+#[allow(dead_code)] // Keybinding override API; not yet wired into the settings UI.
 impl App {
     /// Save keybinding overrides to disk. Call this after any mutation
     /// to `self.binding_table` overrides (`set_override`, `unbind`,
@@ -666,6 +664,7 @@ pub(crate) fn build_command_args(command_id: CommandId, item: &OptionItem) -> Op
 }
 
 /// Build `CommandArgs` from free text input for Text-param commands.
+#[allow(dead_code)] // Reserved for text-param command path; not wired in yet.
 pub(crate) fn build_command_args_from_text(
     command_id: CommandId,
     text: &str,

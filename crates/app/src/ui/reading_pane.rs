@@ -302,14 +302,16 @@ impl ReadingPane {
 
     /// Update the star state for a thread if it's currently displayed.
     pub fn update_star(&mut self, account_id: &str, thread_id: &str, is_starred: bool) {
-        if let Some(ref mut t) = self.current_thread {
-            if t.account_id == account_id && t.id == thread_id {
-                t.is_starred = is_starred;
-            }
+        if let Some(ref mut t) = self.current_thread
+            && t.account_id == account_id
+            && t.id == thread_id
+        {
+            t.is_starred = is_starred;
         }
     }
 
     /// Get the message ID of the currently focused message (for CommandContext).
+    #[allow(dead_code)] // CommandContext consumer not yet calling this
     pub fn focused_message_id(&self) -> Option<String> {
         let idx = self.focused_message?;
         self.thread_messages.get(idx).map(|m| m.id.clone())

@@ -21,7 +21,7 @@ pub use crate::db::queries_extra::{
 /// * `recipient_email`     - our email address (the one confirming reading)
 /// * `recipient_name`      - display name for our `From:` header
 /// * `is_manual`           - `true` → `manual-action/MDN-sent-manually`,
-///                           `false` → `automatic-action/MDN-sent-automatically`
+///   `false` → `automatic-action/MDN-sent-automatically`
 pub fn build_mdn_message(
     original_from: &str,
     original_message_id: &str,
@@ -161,10 +161,9 @@ pub async fn is_mdn_sent_imap(
     }
 }
 
-/// For Graph (Microsoft), `isReadReceiptRequested` is read-only on the API
-/// side - there is no server-side keyword to set. We only track MDN sent
-/// status locally via [`mark_mdn_sent_local`].
-///
+// For Graph (Microsoft), `isReadReceiptRequested` is read-only on the API
+// side - there is no server-side keyword to set. We only track MDN sent
+// status locally via [`mark_mdn_sent_local`].
 
 // ---------------------------------------------------------------------------
 // Tests

@@ -48,6 +48,7 @@ pub enum SidebarMessage {
 
 /// Events the sidebar emits upward to the App.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // shared-mailbox / public-folder routing is wired one variant at a time
 pub enum SidebarEvent {
     AccountSelected(usize),
     AllAccountsSelected,

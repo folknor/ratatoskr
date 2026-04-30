@@ -1,4 +1,4 @@
-use chrono::{Datelike, Local, NaiveDate};
+use chrono::{Local, NaiveDate};
 use iced::widget::{Space, button, column, container, scrollable, text};
 use iced::{Element, Length, Padding};
 
@@ -175,10 +175,10 @@ fn starred_item(thread: &Thread) -> Element<'_, Message> {
 // ── Helpers ─────────────────────────────────────────────
 
 /// Filter calendar events to those occurring on a specific date.
-fn events_for_date<'a>(
-    events: &'a [crate::ui::calendar_time_grid::TimeGridEvent],
+fn events_for_date(
+    events: &[crate::ui::calendar_time_grid::TimeGridEvent],
     date: NaiveDate,
-) -> Vec<&'a crate::ui::calendar_time_grid::TimeGridEvent> {
+) -> Vec<&crate::ui::calendar_time_grid::TimeGridEvent> {
     events
         .iter()
         .filter(|ev| {

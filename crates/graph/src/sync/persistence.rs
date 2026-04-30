@@ -231,7 +231,7 @@ fn upsert_messages(
                 date: b.date,
                 is_read: b.is_read,
                 is_starred: b.is_starred,
-                raw_size: Some(i64::from(b.raw_size)),
+                raw_size: Some(b.raw_size),
                 internal_date: Some(b.internal_date),
                 list_unsubscribe: b.list_unsubscribe.clone(),
                 list_unsubscribe_post: b.list_unsubscribe_post.clone(),

@@ -12,7 +12,6 @@ use iced::futures::StreamExt;
 use iced::futures::stream::BoxStream;
 use iced::{Subscription, Task};
 
-use crate::db::Db;
 use crate::{App, Message};
 
 // ── JMAP push subscription ─────────────────────────────────────────
@@ -110,7 +109,7 @@ impl App {
                     encryption_key,
                     &body_store,
                     &inline_images,
-                    &*search_state,
+                    &search_state,
                     reporter.as_ref(),
                 )
                 .await

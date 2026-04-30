@@ -458,10 +458,10 @@ impl App {
         }
         // Load persisted usage counts for command ranking
         let usage_path = data_dir.join("command_usage.json");
-        if let Ok(json) = std::fs::read_to_string(&usage_path) {
-            if let Ok(map) = serde_json::from_str::<std::collections::HashMap<String, u32>>(&json) {
-                registry.usage.load_from_map(&map);
-            }
+        if let Ok(json) = std::fs::read_to_string(&usage_path)
+            && let Ok(map) = serde_json::from_str::<std::collections::HashMap<String, u32>>(&json)
+        {
+            registry.usage.load_from_map(&map);
         }
         let resolver = Arc::new(command_resolver::AppInputResolver::new(Arc::clone(&db)));
 
@@ -1088,10 +1088,10 @@ impl App {
             Message::Calendar(cal_msg) => self.handle_calendar(*cal_msg),
             Message::ToggleAppMode => {
                 // If calendar is popped out, focus the pop-out instead of toggling
-                if self.app_mode == AppMode::Mail {
-                    if let Some(win_id) = self.calendar_pop_out_id() {
-                        return iced::window::gain_focus(win_id);
-                    }
+                if self.app_mode == AppMode::Mail
+                    && let Some(win_id) = self.calendar_pop_out_id()
+                {
+                    return iced::window::gain_focus(win_id);
                 }
                 let target = match self.app_mode {
                     AppMode::Mail => AppMode::Calendar,
@@ -1101,10 +1101,10 @@ impl App {
             }
             Message::SetAppMode(mode) => {
                 // If switching to calendar while it's popped out, focus the pop-out
-                if mode == AppMode::Calendar {
-                    if let Some(win_id) = self.calendar_pop_out_id() {
-                        return iced::window::gain_focus(win_id);
-                    }
+                if mode == AppMode::Calendar
+                    && let Some(win_id) = self.calendar_pop_out_id()
+                {
+                    return iced::window::gain_focus(win_id);
                 }
                 if self.app_mode == mode {
                     return Task::none();
@@ -1357,7 +1357,7 @@ impl App {
             };
         }
 
-        ui::widgets::empty_placeholder("Window not found", "").into()
+        ui::widgets::empty_placeholder("Window not found", "")
     }
 
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
@@ -1746,17 +1746,17 @@ impl App {
         event.account_id = account_id.clone();
 
         // Pre-assign calendar when unambiguous for this account.
-        if event.calendar_id.is_none() {
-            if let Some(ref acct) = account_id {
-                let account_cals: Vec<_> = self
-                    .calendar
-                    .calendars
-                    .iter()
-                    .filter(|c| &c.account_id == acct)
-                    .collect();
-                if account_cals.len() == 1 {
-                    event.calendar_id = Some(account_cals[0].id.clone());
-                }
+        if event.calendar_id.is_none()
+            && let Some(ref acct) = account_id
+        {
+            let account_cals: Vec<_> = self
+                .calendar
+                .calendars
+                .iter()
+                .filter(|c| &c.account_id == acct)
+                .collect();
+            if account_cals.len() == 1 {
+                event.calendar_id = Some(account_cals[0].id.clone());
             }
         }
 
@@ -2339,18 +2339,18 @@ impl App {
         }
 
         // Local drafts open in a compose pop-out instead of the reading pane.
-        if let Some(t) = thread {
-            if t.is_local_draft {
-                let draft_id = t.id.clone();
-                let db = Arc::clone(&self.db);
-                return Task::perform(
-                    async move {
-                        let core_db = db.read_db_state();
-                        rtsk::db::queries_extra::db_get_local_draft(&core_db, draft_id).await
-                    },
-                    Message::LocalDraftLoaded,
-                );
-            }
+        if let Some(t) = thread
+            && t.is_local_draft
+        {
+            let draft_id = t.id.clone();
+            let db = Arc::clone(&self.db);
+            return Task::perform(
+                async move {
+                    let core_db = db.read_db_state();
+                    rtsk::db::queries_extra::db_get_local_draft(&core_db, draft_id).await
+                },
+                Message::LocalDraftLoaded,
+            );
         }
 
         self.reading_pane.set_thread(thread);

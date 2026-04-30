@@ -33,32 +33,30 @@ pub async fn calendar_sync_account_impl(
                 )
                 .optional()
                 .map_err(|e| e.to_string())
-                .and_then(|row| {
-                    let Some((provider, calendar_provider, caldav_url)) = row else {
-                        return Ok(None);
-                    };
+                .map(|row| {
+                    let (provider, calendar_provider, caldav_url) = row?;
 
                     if calendar_provider.as_deref() == Some("google_api") || provider == "gmail_api"
                     {
-                        Ok(Some("google_api"))
+                        Some("google_api")
                     } else if calendar_provider.as_deref() == Some("graph") || provider == "graph" {
-                        Ok(Some("graph"))
+                        Some("graph")
                     } else if calendar_provider.as_deref() == Some("caldav")
                         || (provider == "caldav"
                             && caldav_url
                                 .as_deref()
                                 .is_some_and(|value| !value.trim().is_empty()))
                     {
-                        Ok(Some("caldav"))
+                        Some("caldav")
                     } else {
-                        Ok(None)
+                        None
                     }
                 })
             }
         })
         .await?;
 
-    match provider.as_deref() {
+    match provider {
         Some("google_api") => sync_google_calendar_account(account_id, db, gmail).await,
         Some("graph") => sync_graph_calendar_account(account_id, db, graph).await,
         Some("caldav") => {

@@ -17,19 +17,18 @@ impl App {
             } => {
                 if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)
                     && window_id != self.main_window_id
+                    && let Some(PopOutWindow::Compose(state)) =
+                        self.pop_out_windows.get_mut(&window_id)
                 {
-                    if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id)
-                    {
-                        if state.link_dialog_open {
-                            state.link_dialog_open = false;
-                            state.link_url.clear();
-                            state.link_text.clear();
-                            return Task::none();
-                        }
-                        if state.discard_confirm_open {
-                            state.discard_confirm_open = false;
-                            return Task::none();
-                        }
+                    if state.link_dialog_open {
+                        state.link_dialog_open = false;
+                        state.link_url.clear();
+                        state.link_text.clear();
+                        return Task::none();
+                    }
+                    if state.discard_confirm_open {
+                        state.discard_confirm_open = false;
+                        return Task::none();
                     }
                 }
 

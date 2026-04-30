@@ -46,6 +46,8 @@ pub fn get_auto_response_sync(
 }
 
 /// Upsert an auto-response cache entry.
+// TODO(refactor): wrap fields in an UpsertAutoResponseParams struct.
+#[allow(clippy::too_many_arguments)]
 pub fn upsert_auto_response_sync(
     conn: &Connection,
     account_id: &str,

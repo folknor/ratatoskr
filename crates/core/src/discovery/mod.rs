@@ -75,12 +75,12 @@ async fn run_cascade(email: &str, domain: &str) -> Result<DiscoveredConfig, Stri
     let mut options = merge::merge_and_rank(all_results);
 
     // Post-process: upgrade OAuth2Unsupported results using OIDC endpoints
-    if let Some(ref endpoints) = oidc_endpoints {
-        if upgrade_oauth2_unsupported(&mut options, endpoints) {
-            // Re-sort: upgraded options now have OidcWellKnown source
-            // (confidence 1) which may change their ranking.
-            merge::re_rank(&mut options);
-        }
+    if let Some(ref endpoints) = oidc_endpoints
+        && upgrade_oauth2_unsupported(&mut options, endpoints)
+    {
+        // Re-sort: upgraded options now have OidcWellKnown source
+        // (confidence 1) which may change their ranking.
+        merge::re_rank(&mut options);
     }
 
     Ok(DiscoveredConfig {

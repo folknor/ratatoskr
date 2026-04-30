@@ -336,38 +336,38 @@ pub async fn lookup_bimi(
     }
 
     // 2. Check DMARC
-    if let Some(ar) = authentication_results {
-        if !dmarc_passed(ar) {
-            debug!("BIMI: DMARC did not pass for {domain}");
-            cache_negative(&domain, conn);
-            return None;
-        }
+    if let Some(ar) = authentication_results
+        && !dmarc_passed(ar)
+    {
+        debug!("BIMI: DMARC did not pass for {domain}");
+        cache_negative(&domain, conn);
+        return None;
     }
     // If no Authentication-Results header is available, we still attempt the
     // lookup - some callers may have pre-verified DMARC externally.
 
     // 3. Try BIMI-Indicator shortcut
-    if let Some(indicator) = bimi_indicator {
-        if let Some(svg_data) = decode_bimi_indicator(indicator) {
-            let logo_key = format!("bimi-indicator:{domain}");
-            let path = cache_path(cache_dir, &logo_key);
+    if let Some(indicator) = bimi_indicator
+        && let Some(svg_data) = decode_bimi_indicator(indicator)
+    {
+        let logo_key = format!("bimi-indicator:{domain}");
+        let path = cache_path(cache_dir, &logo_key);
 
-            if !path.exists() {
-                if let Err(e) = rasterize_svg_to_png(&svg_data, &path) {
-                    warn!("BIMI-Indicator rasterize failed for {domain}: {e}");
-                } else {
-                    let now = chrono::Utc::now().timestamp();
-                    let expires = now + POSITIVE_TTL_SECS;
-                    if let Err(e) =
-                        upsert_bimi_cache(conn, &domain, true, Some(&logo_key), None, expires)
-                    {
-                        warn!("failed to cache BIMI indicator for {domain}: {e}");
-                    }
-                    return Some(path);
-                }
+        if !path.exists() {
+            if let Err(e) = rasterize_svg_to_png(&svg_data, &path) {
+                warn!("BIMI-Indicator rasterize failed for {domain}: {e}");
             } else {
+                let now = chrono::Utc::now().timestamp();
+                let expires = now + POSITIVE_TTL_SECS;
+                if let Err(e) =
+                    upsert_bimi_cache(conn, &domain, true, Some(&logo_key), None, expires)
+                {
+                    warn!("failed to cache BIMI indicator for {domain}: {e}");
+                }
                 return Some(path);
             }
+        } else {
+            return Some(path);
         }
     }
 

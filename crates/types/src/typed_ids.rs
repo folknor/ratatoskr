@@ -1,8 +1,8 @@
-/// Typed ID newtypes for provider API parameters.
-///
-/// These prevent passing a folder ID where a tag ID is expected (or vice
-/// versa) at compile time. All providers receive the correct type and can
-/// pattern-match or strip prefixes as needed.
+// Typed ID newtypes for provider API parameters.
+//
+// These prevent passing a folder ID where a tag ID is expected (or vice
+// versa) at compile time. All providers receive the correct type and can
+// pattern-match or strip prefixes as needed.
 
 /// A folder/mailbox/container ID (Gmail label, JMAP mailbox, Graph folder, IMAP path).
 /// Used with `move_to_folder`, `rename_folder`, `delete_folder`.

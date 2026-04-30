@@ -236,11 +236,11 @@ fn active_account_info(app: &App) -> (Option<String>, Option<cmdk::ProviderKind>
         | ViewScope::PublicFolder { account_id, .. } => Some(account_id.as_str()),
         ViewScope::AllAccounts => None,
     };
-    if let Some(aid) = scope_account {
-        if let Some(account) = app.sidebar.accounts.iter().find(|a| a.id == aid) {
-            let pk = provider_str_to_kind(&account.provider);
-            return (Some(account.id.clone()), pk);
-        }
+    if let Some(aid) = scope_account
+        && let Some(account) = app.sidebar.accounts.iter().find(|a| a.id == aid)
+    {
+        let pk = provider_str_to_kind(&account.provider);
+        return (Some(account.id.clone()), pk);
     }
     // 2. If in unified view but a thread is selected, derive account
     //    from the selected thread. Look up provider from account list.

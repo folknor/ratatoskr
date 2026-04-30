@@ -451,6 +451,8 @@ fn build_reaction_mime(
 /// * `original_subject` - The `Subject` of the original message (used for `Re:` prefix).
 /// * `thread_id` - Gmail thread ID to keep the reaction in the same thread.
 /// * `emoji` - The emoji character to react with (e.g. "👍").
+// TODO(refactor): wrap headers/threading fields in a ReactionMessage struct.
+#[allow(clippy::too_many_arguments)]
 pub async fn send_reaction(
     client: &GmailClient,
     db: &DbState,

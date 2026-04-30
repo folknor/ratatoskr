@@ -478,9 +478,7 @@ pub fn get_shared_mailbox_navigation(
 /// Returns `None` if no rights are set (all fields are `None`), meaning
 /// the provider doesn't supply rights data for this label.
 fn rights_from_label(label: &crate::db::types::DbLabel) -> Option<MailboxRightsInfo> {
-    if label.right_read.is_none() {
-        return None;
-    }
+    label.right_read?;
     Some(MailboxRightsInfo {
         may_read_items: label.right_read,
         may_add_items: label.right_add,

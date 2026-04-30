@@ -166,21 +166,21 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
 
     // 2. For synced contacts, attempt provider delete
     let mut provider_outcome = None;
-    if source_str != "user" {
-        if let (Some(aid), Some(sid)) = (account_id.as_deref(), server_id.as_deref()) {
-            match dispatch_delete(ctx, source_str, aid, sid).await {
-                Ok(()) => {}
-                Err(e) => {
-                    // Provider-first: don't delete locally if provider fails.
-                    // CardDAV is still a stub - local-only until PUT is wired.
-                    if matches!(source_str, "jmap" | "google" | "graph") {
-                        let outcome = ActionOutcome::Failed { error: e };
-                        mlog.emit(&outcome);
-                        return outcome;
-                    }
-                    // Unimplemented providers → delete locally, report LocalOnly
-                    provider_outcome = Some(e);
+    if source_str != "user"
+        && let (Some(aid), Some(sid)) = (account_id.as_deref(), server_id.as_deref())
+    {
+        match dispatch_delete(ctx, source_str, aid, sid).await {
+            Ok(()) => {}
+            Err(e) => {
+                // Provider-first: don't delete locally if provider fails.
+                // CardDAV is still a stub - local-only until PUT is wired.
+                if matches!(source_str, "jmap" | "google" | "graph") {
+                    let outcome = ActionOutcome::Failed { error: e };
+                    mlog.emit(&outcome);
+                    return outcome;
                 }
+                // Unimplemented providers → delete locally, report LocalOnly
+                provider_outcome = Some(e);
             }
         }
     }

@@ -37,7 +37,8 @@ fn compute_since_date(days_back: i64) -> String {
 }
 
 /// Run delta IMAP sync for an account.
-#[allow(clippy::too_many_lines)]
+// TODO(refactor): bundle stores/state into a SyncCtx struct.
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 pub async fn imap_delta_sync(
     _progress: &dyn ProgressReporter,
     db: &DbState,
@@ -347,12 +348,11 @@ async fn batch_delta_check(
                                     "[sync] Retry batch delta failed, per-folder fallback: {e}"
                                 );
                                 for req in &missing {
-                                    if let Some(saved) = state_map.get(&req.folder) {
-                                        if let Ok(r) =
+                                    if let Some(saved) = state_map.get(&req.folder)
+                                        && let Ok(r) =
                                             per_folder_check(config, &req.folder, saved).await
-                                        {
-                                            map.insert(r.folder.clone(), r);
-                                        }
+                                    {
+                                        map.insert(r.folder.clone(), r);
                                     }
                                 }
                             }

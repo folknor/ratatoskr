@@ -7,6 +7,8 @@
 // boxes/tofu without emoji fonts, but the selected emoji is inserted as
 // text regardless.
 
+#![allow(dead_code)] // Module not yet wired into compose toolbar.
+
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 

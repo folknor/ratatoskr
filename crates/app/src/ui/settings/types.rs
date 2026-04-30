@@ -213,6 +213,7 @@ pub enum ContactField {
 
 /// Events the settings component emits upward to the App.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // ReorderSignatures is reserved for the upcoming drag-and-drop save path
 pub enum SettingsEvent {
     /// Settings panel closed. If preferences were dirty, they have been
     /// committed (auto-save on close). The App should apply them.
@@ -463,6 +464,7 @@ pub struct SignatureEditorState {
 
 /// State for signature drag-reorder within a single account section.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // populated for the unfinished signature drag-reorder feature
 pub struct SignatureDragState {
     /// Account ID of the group being dragged within.
     pub account_id: String,
@@ -730,6 +732,7 @@ pub struct Settings {
     /// Signature ID pending delete confirmation.
     pub confirm_delete_signature: Option<String>,
     /// Active signature drag-reorder state.
+    #[allow(dead_code)] // see SignatureDragState above
     pub signature_drag: Option<SignatureDragState>,
     // Contacts management
     pub contact_filter: String,
@@ -761,18 +764,13 @@ pub struct ManagedAccount {
 }
 
 /// Account health status for the settings card indicator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AccountHealth {
+    #[default]
     Healthy,
     Warning,
     Error,
     Disabled,
-}
-
-impl Default for AccountHealth {
-    fn default() -> Self {
-        Self::Healthy
-    }
 }
 
 /// Compute account health from token expiry and sync state.
@@ -786,7 +784,7 @@ pub fn compute_health(
     }
     let now = chrono::Utc::now().timestamp();
     if let Some(expires) = token_expires_at {
-        let no_recent_sync = last_sync_at.map_or(true, |ls| now - ls > 3600);
+        let no_recent_sync = last_sync_at.is_none_or(|ls| now - ls > 3600);
         if expires < now && no_recent_sync {
             return AccountHealth::Error;
         }
@@ -845,8 +843,10 @@ pub struct EditableItem {
 
 impl Settings {
     pub fn with_scale(scale: f32) -> Self {
-        let mut s = Self::default();
-        s.scale = scale;
+        let mut s = Self {
+            scale,
+            ..Self::default()
+        };
         s.committed_preferences.scale = scale;
         s
     }
@@ -876,6 +876,7 @@ impl Settings {
 
     /// Whether the editing shadow differs from committed state.
     /// Returns `false` if no editing session is active.
+    #[allow(dead_code)] // not yet consumed by close-without-save confirmation flow
     pub fn has_unsaved_changes(&self) -> bool {
         self.editing_preferences
             .as_ref()

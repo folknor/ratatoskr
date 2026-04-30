@@ -498,10 +498,9 @@ pub fn oauth_config_for_provider(provider_id: &str) -> Option<AuthMethod> {
         if let RegistryAuth::OAuth2 {
             provider_id: pid, ..
         } = auth
+            && *pid == provider_id
         {
-            if *pid == provider_id {
-                return Some(auth_method_from_registry(auth));
-            }
+            return Some(auth_method_from_registry(auth));
         }
     }
     // Search per-option auth overrides in the full registry.

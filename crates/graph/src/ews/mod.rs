@@ -80,6 +80,7 @@ pub struct EwsHeaders {
 ///
 /// The binary format is a sequence of null-terminated ASCII hex GUID strings.
 /// Each GUID is in the form `{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}\0`.
+#[allow(dead_code)] // helper for an EWS path that hasn't shipped yet
 pub(crate) fn decode_replica_list(base64_data: &str) -> Result<Vec<String>, String> {
     let bytes = BASE64
         .decode(base64_data)

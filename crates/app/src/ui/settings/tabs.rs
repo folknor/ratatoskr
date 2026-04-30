@@ -1437,42 +1437,32 @@ fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         SettingsMessage::ImportContactsOpen,
     )]));
 
-    let mut contact_items: Vec<RowBuilder<'_>> = Vec::new();
-
-    // Filter input
-    contact_items.push(static_row(contact_filter_row(
-        &state.contact_filter,
-        state.focused_filter == Some(FilterId::Contacts),
-    )));
-
-    // Recessed scrollable panel of contact pills
-    contact_items.push(static_row(contact_list_panel(state)));
-
-    // New Contact button
-    contact_items.push(people_add_button(
-        "New Contact",
-        SettingsMessage::ContactCreate,
-    ));
+    let contact_items: Vec<RowBuilder<'_>> = vec![
+        // Filter input
+        static_row(contact_filter_row(
+            &state.contact_filter,
+            state.focused_filter == Some(FilterId::Contacts),
+        )),
+        // Recessed scrollable panel of contact pills
+        static_row(contact_list_panel(state)),
+        // New Contact button
+        people_add_button("New Contact", SettingsMessage::ContactCreate),
+    ];
 
     col = col.push(section("Contacts", contact_items));
 
     // ── Groups section ──
-    let mut group_items: Vec<RowBuilder<'_>> = Vec::new();
-
-    // Filter input
-    group_items.push(static_row(group_filter_row(
-        &state.group_filter,
-        state.focused_filter == Some(FilterId::Groups),
-    )));
-
-    // Recessed scrollable panel of group pills
-    group_items.push(static_row(group_list_panel(state)));
-
-    // New Group button
-    group_items.push(people_add_button(
-        "New Group",
-        SettingsMessage::GroupCreate,
-    ));
+    let group_items: Vec<RowBuilder<'_>> = vec![
+        // Filter input
+        static_row(group_filter_row(
+            &state.group_filter,
+            state.focused_filter == Some(FilterId::Groups),
+        )),
+        // Recessed scrollable panel of group pills
+        static_row(group_list_panel(state)),
+        // New Group button
+        people_add_button("New Group", SettingsMessage::GroupCreate),
+    ];
 
     col = col.push(section("Groups", group_items));
 
@@ -2905,7 +2895,7 @@ fn accounts_tab(state: &Settings) -> Element<'_, SettingsMessage> {
 
     let account_list: Element<'_, SettingsMessage> = if state.managed_accounts.len() > 1 {
         mouse_area(card_col)
-            .on_move(|point| SettingsMessage::AccountDragMove(point))
+            .on_move(SettingsMessage::AccountDragMove)
             .on_release(SettingsMessage::AccountDragEnd)
             .on_exit(SettingsMessage::AccountDragEnd)
             .into()
@@ -3294,7 +3284,7 @@ fn import_preview_stats<'a>(
     preview: &'a import::ImportPreview,
     mappings: &'a [ImportContactField],
 ) -> Element<'a, SettingsMessage> {
-    let has_email = mappings.iter().any(|m| *m == ImportContactField::Email);
+    let has_email = mappings.contains(&ImportContactField::Email);
     let status = if has_email {
         format!("{} rows to import.", preview.total_rows)
     } else {

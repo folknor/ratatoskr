@@ -24,6 +24,7 @@ impl<T> GenerationCounter<T> {
     /// Bump the counter and return a token capturing the new value.
     /// This is the only way to obtain a token.
     #[must_use = "use the returned token, or `let _ = counter.next()` to invalidate without capturing"]
+    #[allow(clippy::should_implement_trait)] // not an iterator; bumps a generation counter
     pub fn next(&mut self) -> GenerationToken<T> {
         self.value = self.value.wrapping_add(1);
         GenerationToken(self.value, PhantomData)

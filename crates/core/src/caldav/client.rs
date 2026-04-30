@@ -300,10 +300,10 @@ impl CalDavClient {
             .headers(self.auth_headers())
             .body(ical_data.to_string());
 
-        if let Some(etag_val) = etag {
-            if let Ok(val) = format!("\"{etag_val}\"").parse::<reqwest::header::HeaderValue>() {
-                req = req.header(IF_MATCH, val);
-            }
+        if let Some(etag_val) = etag
+            && let Ok(val) = format!("\"{etag_val}\"").parse::<reqwest::header::HeaderValue>()
+        {
+            req = req.header(IF_MATCH, val);
         }
 
         let resp = req.send().await.map_err(|e| format!("PUT {url}: {e}"))?;
@@ -332,10 +332,10 @@ impl CalDavClient {
 
         let mut req = self.http.delete(&url).headers(self.auth_headers());
 
-        if let Some(etag_val) = etag {
-            if let Ok(val) = format!("\"{etag_val}\"").parse::<reqwest::header::HeaderValue>() {
-                req = req.header(IF_MATCH, val);
-            }
+        if let Some(etag_val) = etag
+            && let Ok(val) = format!("\"{etag_val}\"").parse::<reqwest::header::HeaderValue>()
+        {
+            req = req.header(IF_MATCH, val);
         }
 
         let resp = req.send().await.map_err(|e| format!("DELETE {url}: {e}"))?;

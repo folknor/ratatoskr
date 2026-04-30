@@ -75,6 +75,7 @@ pub(super) fn section_with_subtitle<'a>(
 
 /// Section with an owned `String` title - for cases where the title is
 /// computed dynamically (e.g. "Members (12)").
+#[allow(dead_code)] // helper kept for upcoming dynamic-title sections
 pub(super) fn section_dynamic_title<'a>(
     title: String,
     items: Vec<RowBuilder<'a>>,
@@ -482,6 +483,8 @@ pub(super) fn coming_soon_row<'a>(feature: &'a str) -> RowBuilder<'a> {
 
 /// A row with a label on the left (50%) and an optional icon + slider on the right (50%).
 /// No hover effect - only direct slider interaction. The slider has a strong snap toward `default`.
+// TODO(refactor): bundle slider params into a SliderRow struct with builder methods.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn slider_row<'a>(
     label: &'a str,
     icon: Option<iced::widget::Text<'a>>,

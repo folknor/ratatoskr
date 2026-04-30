@@ -201,13 +201,13 @@ fn render_spans<'a, M: Clone + 'a>(
     on_link_click: &std::rc::Rc<dyn Fn(String) -> M + 'a>,
 ) -> Element<'a, M> {
     // Fast path: single text-only span (the common case).
-    if spans.len() == 1 {
-        if let InlineSpan::Text(txt) = &spans[0] {
-            return text(txt.clone())
-                .size(TEXT_LG)
-                .style(text::secondary)
-                .into();
-        }
+    if spans.len() == 1
+        && let InlineSpan::Text(txt) = &spans[0]
+    {
+        return text(txt.clone())
+            .size(TEXT_LG)
+            .style(text::secondary)
+            .into();
     }
 
     let mut elements: Vec<Element<'a, M>> = Vec::with_capacity(spans.len());

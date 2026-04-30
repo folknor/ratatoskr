@@ -1348,7 +1348,7 @@ mod tests {
         let results = registry.query(&ctx, "");
         let archive = results.iter().find(|r| r.id == CommandId::EmailArchive);
         assert!(archive.is_some());
-        assert!(!archive.map_or(true, |a| a.available));
+        assert!(!archive.is_none_or(|a| a.available));
     }
 
     #[test]
@@ -1357,7 +1357,7 @@ mod tests {
         let ctx = context_with_selection();
         let results = registry.query(&ctx, "");
         let archive = results.iter().find(|r| r.id == CommandId::EmailArchive);
-        assert!(archive.map_or(false, |a| a.available));
+        assert!(archive.is_some_and(|a| a.available));
     }
 
     #[test]
@@ -1371,8 +1371,8 @@ mod tests {
         let perm = results
             .iter()
             .find(|r| r.id == CommandId::EmailPermanentDelete);
-        assert!(trash.map_or(false, |t| t.available));
-        assert!(!perm.map_or(true, |p| p.available));
+        assert!(trash.is_some_and(|t| t.available));
+        assert!(!perm.is_none_or(|p| p.available));
 
         // In trash: Trash not available, PermanentDelete available
         let mut ctx2 = context_with_selection();
@@ -1382,8 +1382,8 @@ mod tests {
         let perm2 = results2
             .iter()
             .find(|r| r.id == CommandId::EmailPermanentDelete);
-        assert!(!trash2.map_or(true, |t| t.available));
-        assert!(perm2.map_or(false, |p| p.available));
+        assert!(!trash2.is_none_or(|t| t.available));
+        assert!(perm2.is_some_and(|p| p.available));
     }
 
     #[test]
@@ -1393,7 +1393,7 @@ mod tests {
         let results = registry.query(&ctx, "arch");
         let archive = results.iter().find(|r| r.id == CommandId::EmailArchive);
         assert!(archive.is_some());
-        assert!(archive.map_or(false, |a| a.score > 0));
+        assert!(archive.is_some_and(|a| a.score > 0));
     }
 
     #[test]
@@ -1475,7 +1475,7 @@ mod tests {
         let registry = CommandRegistry::new();
         let result = registry.validate_param_request(CommandId::EmailMoveToFolder, 0, &[]);
         assert!(result.is_ok());
-        assert!(result.map_or(false, |p| p.is_list_picker()));
+        assert!(result.is_ok_and(|p| p.is_list_picker()));
     }
 
     #[test]
@@ -1524,13 +1524,13 @@ mod tests {
         let ctx = empty_context();
         let results = registry.query(&ctx, "");
         let sync = results.iter().find(|r| r.id == CommandId::AppSyncFolder);
-        assert!(!sync.map_or(true, |s| s.available));
+        assert!(!sync.is_none_or(|s| s.available));
 
         let mut ctx2 = empty_context();
         ctx2.active_account_id = Some("acc-1".to_string());
         let results2 = registry.query(&ctx2, "");
         let sync2 = results2.iter().find(|r| r.id == CommandId::AppSyncFolder);
-        assert!(sync2.map_or(false, |s| s.available));
+        assert!(sync2.is_some_and(|s| s.available));
     }
 
     // --- Slice 4: Ranking signals ---
@@ -1625,15 +1625,15 @@ mod tests {
         let ctx = context_with_selection();
         let results = registry.query(&ctx, "arch");
         let archive = results.iter().find(|r| r.id == CommandId::EmailArchive);
-        assert!(archive.map_or(false, |a| a.available));
-        assert!(archive.map_or(false, |a| a.score >= 1000));
+        assert!(archive.is_some_and(|a| a.available));
+        assert!(archive.is_some_and(|a| a.score >= 1000));
 
         // Without selection: Archive is unavailable
         let ctx2 = empty_context();
         let results2 = registry.query(&ctx2, "arch");
         let archive2 = results2.iter().find(|r| r.id == CommandId::EmailArchive);
-        assert!(!archive2.map_or(true, |a| a.available));
-        assert!(archive2.map_or(true, |a| a.score < 1000));
+        assert!(!archive2.is_none_or(|a| a.available));
+        assert!(archive2.is_none_or(|a| a.score < 1000));
     }
 
     #[test]
@@ -1769,18 +1769,18 @@ mod tests {
         let registry = CommandRegistry::new();
         let archive = registry.get(CommandId::EmailArchive);
         assert!(
-            archive.map_or(false, |d| d.keywords.contains(&"done")),
+            archive.is_some_and(|d| d.keywords.contains(&"done")),
             "Archive should have 'done' keyword"
         );
         let trash = registry.get(CommandId::EmailTrash);
         assert!(
-            trash.map_or(false, |d| d.keywords.contains(&"delete")),
+            trash.is_some_and(|d| d.keywords.contains(&"delete")),
             "Trash should have 'delete' keyword"
         );
         // Commands with no keywords should have empty slice
         let nav_next = registry.get(CommandId::NavNext);
         assert!(
-            nav_next.map_or(false, |d| d.keywords.is_empty()),
+            nav_next.is_some_and(|d| d.keywords.is_empty()),
             "NavNext should have no keywords"
         );
     }

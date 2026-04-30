@@ -384,15 +384,15 @@ fn strip_remote_images(html: &str) -> String {
             // Strip external url() references in style attributes to prevent
             // tracking pixels via CSS background-image, list-style-image, etc.
             element!("*[style]", |el| {
-                if let Some(style) = el.get_attribute("style") {
-                    if CSS_URL_HTTP_RE.is_match(&style) {
-                        let cleaned = CSS_URL_HTTP_REPLACE_RE
-                            .replace_all(&style, "none")
-                            .to_string();
-                        el.set_attribute("style", &cleaned).unwrap_or_else(|e| {
-                            log::warn!("failed to rewrite style attribute: {e}");
-                        });
-                    }
+                if let Some(style) = el.get_attribute("style")
+                    && CSS_URL_HTTP_RE.is_match(&style)
+                {
+                    let cleaned = CSS_URL_HTTP_REPLACE_RE
+                        .replace_all(&style, "none")
+                        .to_string();
+                    el.set_attribute("style", &cleaned).unwrap_or_else(|e| {
+                        log::warn!("failed to rewrite style attribute: {e}");
+                    });
                 }
                 Ok(())
             }),

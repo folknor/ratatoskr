@@ -111,14 +111,14 @@ impl Component for ChatTimeline {
                 }
 
                 // Subject change indicator
-                if needs_subject_indicator(p, msg) {
-                    if let Some(ref subj) = msg.subject {
-                        col = col.push(
-                            text(subj)
-                                .size(TEXT_SM)
-                                .style(theme::TextClass::Muted.style()),
-                        );
-                    }
+                if needs_subject_indicator(p, msg)
+                    && let Some(ref subj) = msg.subject
+                {
+                    col = col.push(
+                        text(subj)
+                            .size(TEXT_SM)
+                            .style(theme::TextClass::Muted.style()),
+                    );
                 }
 
                 // Extra spacing on sender change
@@ -210,16 +210,12 @@ fn needs_subject_indicator(prev: &ChatMessage, curr: &ChatMessage) -> bool {
 /// "Re: hello" and "Re: Re: hello" compare as equal.
 fn normalize_subject(s: &str) -> String {
     let mut s = s.trim().to_lowercase();
-    loop {
-        if let Some(rest) = s
-            .strip_prefix("re:")
-            .or_else(|| s.strip_prefix("fwd:"))
-            .or_else(|| s.strip_prefix("fw:"))
-        {
-            s = rest.trim_start().to_string();
-        } else {
-            break;
-        }
+    while let Some(rest) = s
+        .strip_prefix("re:")
+        .or_else(|| s.strip_prefix("fwd:"))
+        .or_else(|| s.strip_prefix("fw:"))
+    {
+        s = rest.trim_start().to_string();
     }
     s
 }
@@ -233,7 +229,6 @@ fn local_date(timestamp: i64) -> chrono::NaiveDate {
 }
 
 fn format_date_label(timestamp: i64) -> String {
-    use chrono::TimeZone;
     let today = chrono::Local::now().date_naive();
     let msg_date = local_date(timestamp);
 

@@ -71,10 +71,10 @@ impl Component for Settings {
                 return self.handle_account_editor_save();
             }
             SettingsMessage::DeleteAccountRequested(id) => {
-                if let Some(ref mut editor) = self.editing_account {
-                    if editor.account_id == id {
-                        editor.show_delete_confirmation = true;
-                    }
+                if let Some(ref mut editor) = self.editing_account
+                    && editor.account_id == id
+                {
+                    editor.show_delete_confirmation = true;
                 }
                 return (Task::none(), None);
             }
@@ -102,24 +102,24 @@ impl Component for Settings {
                 let need_open = self
                     .signature_editor
                     .as_ref()
-                    .map_or(true, |e| e.signature_id.as_deref() != Some(id.as_str()));
-                if need_open {
-                    if let Some(sig) = self.signatures.iter().find(|s| s.id == *id) {
-                        self.signature_editor = Some(SignatureEditorState {
-                            signature_id: Some(sig.id.clone()),
-                            account_id: sig.account_id.clone(),
-                            name: UndoableText::with_initial(&sig.name),
-                            body_editor: RteEditorState::from_html(&sig.body_html),
-                            is_default: sig.is_default,
-                            is_reply_default: sig.is_reply_default,
-                            dirty: false,
-                        });
-                        self.active_sheet = Some(SettingsSheetPage::EditSignature {
-                            signature_id: Some(sig.id.clone()),
-                            account_id: sig.account_id.clone(),
-                        });
-                        self.sheet_anim.go_mut(true, Instant::now());
-                    }
+                    .is_none_or(|e| e.signature_id.as_deref() != Some(id.as_str()));
+                if need_open
+                    && let Some(sig) = self.signatures.iter().find(|s| s.id == *id)
+                {
+                    self.signature_editor = Some(SignatureEditorState {
+                        signature_id: Some(sig.id.clone()),
+                        account_id: sig.account_id.clone(),
+                        name: UndoableText::with_initial(&sig.name),
+                        body_editor: RteEditorState::from_html(&sig.body_html),
+                        is_default: sig.is_default,
+                        is_reply_default: sig.is_reply_default,
+                        dirty: false,
+                    });
+                    self.active_sheet = Some(SettingsSheetPage::EditSignature {
+                        signature_id: Some(sig.id.clone()),
+                        account_id: sig.account_id.clone(),
+                    });
+                    self.sheet_anim.go_mut(true, Instant::now());
                 }
                 self.confirm_delete_signature = Some(id.clone());
                 return (Task::none(), None);
@@ -209,10 +209,10 @@ impl Component for Settings {
                 return (self.handle_import_file_selected(path, data), None);
             }
             SettingsMessage::ImportMappingChanged(index, field) => {
-                if let Some(ref mut wizard) = self.import_wizard {
-                    if let Some(mapping) = wizard.mappings.get_mut(index) {
-                        *mapping = field;
-                    }
+                if let Some(ref mut wizard) = self.import_wizard
+                    && let Some(mapping) = wizard.mappings.get_mut(index)
+                {
+                    *mapping = field;
                 }
                 return (Task::none(), None);
             }
@@ -688,10 +688,10 @@ impl Settings {
                 log::error!("Failed to load groups: {e}");
             }
             SettingsMessage::GroupMembersLoaded(group_id, Ok(members)) => {
-                if let Some(ref mut editor) = self.group_editor {
-                    if editor.group_id.as_deref() == Some(group_id.as_str()) {
-                        editor.members = members;
-                    }
+                if let Some(ref mut editor) = self.group_editor
+                    && editor.group_id.as_deref() == Some(group_id.as_str())
+                {
+                    editor.members = members;
                 }
             }
             SettingsMessage::GroupMembersLoaded(_, Err(e)) => {
@@ -740,11 +740,11 @@ impl Settings {
                 }
             }
             SettingsMessage::GroupEditorAddMember(email) => {
-                if let Some(ref mut editor) = self.group_editor {
-                    if !editor.members.contains(&email) {
-                        editor.members.push(email);
-                        editor.dirty = true;
-                    }
+                if let Some(ref mut editor) = self.group_editor
+                    && !editor.members.contains(&email)
+                {
+                    editor.members.push(email);
+                    editor.dirty = true;
                 }
             }
             SettingsMessage::GroupEditorFilterChanged(v) => {
@@ -817,11 +817,11 @@ impl Settings {
             return (Task::none(), None);
         }
 
-        if let Some(ref mut drag) = self.account_drag {
-            if drag.start_y < 0.0 {
-                drag.start_y = point.y;
-                return (Task::none(), None);
-            }
+        if let Some(ref mut drag) = self.account_drag
+            && drag.start_y < 0.0
+        {
+            drag.start_y = point.y;
+            return (Task::none(), None);
         }
 
         let Some(drag_ref) = self.account_drag.as_ref() else {
@@ -1273,19 +1273,16 @@ impl Settings {
         wizard.has_header = has_header;
 
         // Re-parse with new header setting
-        if let Some(ref source) = wizard.source {
-            if source.format == import::ImportFormat::Csv {
-                if let Ok(preview) =
-                    import::csv_parser::parse_csv_with_header(source, 20, has_header)
-                {
-                    let auto_mappings = import::auto_detect_mappings(&preview.headers);
-                    wizard.mappings = auto_mappings
-                        .iter()
-                        .map(|m| ImportContactField::from_import_field(m.target_field))
-                        .collect();
-                    wizard.preview = Some(preview);
-                }
-            }
+        if let Some(ref source) = wizard.source
+            && source.format == import::ImportFormat::Csv
+            && let Ok(preview) = import::csv_parser::parse_csv_with_header(source, 20, has_header)
+        {
+            let auto_mappings = import::auto_detect_mappings(&preview.headers);
+            wizard.mappings = auto_mappings
+                .iter()
+                .map(|m| ImportContactField::from_import_field(m.target_field))
+                .collect();
+            wizard.preview = Some(preview);
         }
 
         Task::none()

@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Reusable widget library; not all helpers are wired in yet.
+
 use std::path::Path;
 
 use iced::widget::{
@@ -9,7 +11,7 @@ use iced::{Alignment, Color, Element, Length, Rectangle, Renderer, Theme, mouse}
 use cmdk::{BindingTable, CommandContext, CommandId, CommandRegistry};
 
 use crate::Message;
-use crate::db::{DateDisplay, ResolvedLabel, Thread, ThreadAttachment, ThreadMessage};
+use crate::db::{DateDisplay, Thread, ThreadAttachment, ThreadMessage};
 use crate::font;
 use crate::icon;
 use crate::ui::layout::*;
@@ -1971,11 +1973,11 @@ fn highlighted_text_body<'a, M: 'a>(body: &'a str, terms: &'a [String]) -> Eleme
     match_ranges.sort_by_key(|r| r.0);
     let mut merged: Vec<(usize, usize)> = Vec::new();
     for (s, e) in match_ranges {
-        if let Some(last) = merged.last_mut() {
-            if s <= last.1 {
-                last.1 = last.1.max(e);
-                continue;
-            }
+        if let Some(last) = merged.last_mut()
+            && s <= last.1
+        {
+            last.1 = last.1.max(e);
+            continue;
         }
         merged.push((s, e));
     }
@@ -2095,7 +2097,7 @@ pub fn color_palette_grid<'a, M: Clone + 'a>(
         }
     }
 
-    if presets.len() % COLOR_PALETTE_COLUMNS != 0 {
+    if !presets.len().is_multiple_of(COLOR_PALETTE_COLUMNS) {
         grid = grid.push(current_row);
     }
 

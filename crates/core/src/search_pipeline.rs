@@ -302,6 +302,7 @@ fn enrich_from_sql(
 }
 
 /// Parse a date string (ISO 8601 or unix timestamp) into epoch seconds.
+#[allow(dead_code)] // helper kept for upcoming smart-folder date pipeline
 fn parse_date_string(s: &str) -> Option<i64> {
     s.parse::<i64>().ok()
 }

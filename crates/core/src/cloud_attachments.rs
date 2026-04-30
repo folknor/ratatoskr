@@ -162,6 +162,7 @@ impl UploadStatus {
         }
     }
 
+    #[allow(clippy::should_implement_trait)] // returns Option, not Result; FromStr would require an error type
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "pending" => Some(Self::Pending),

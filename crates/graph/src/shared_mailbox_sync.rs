@@ -178,8 +178,8 @@ mod tests {
 
     #[test]
     fn shared_mailbox_initial_sync_days_is_reasonable() {
-        assert!(SHARED_MAILBOX_INITIAL_SYNC_DAYS >= 7);
-        assert!(SHARED_MAILBOX_INITIAL_SYNC_DAYS <= 90);
+        const _: () = assert!(SHARED_MAILBOX_INITIAL_SYNC_DAYS >= 7);
+        const _: () = assert!(SHARED_MAILBOX_INITIAL_SYNC_DAYS <= 90);
     }
 
     #[test]

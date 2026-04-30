@@ -575,9 +575,8 @@ pub fn get_threads_for_shared_mailbox(
 ) -> Result<Vec<DbThread>, String> {
     let lim = limit.unwrap_or(200);
 
-    let sql = if let Some(lid) = label_id {
-        format!(
-            "WITH mb_threads AS (
+    let sql = if label_id.is_some() {
+        "WITH mb_threads AS (
                SELECT id FROM threads
                WHERE account_id = ?1 AND shared_mailbox_id = ?2
              )
@@ -601,10 +600,8 @@ pub fn get_threads_for_shared_mailbox(
              GROUP BY t.account_id, t.id
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?4"
-        )
     } else {
-        format!(
-            "WITH mb_threads AS (
+        "WITH mb_threads AS (
                SELECT id FROM threads
                WHERE account_id = ?1 AND shared_mailbox_id = ?2
              )
@@ -624,10 +621,9 @@ pub fn get_threads_for_shared_mailbox(
                AND t.is_chat_thread = 0
              ORDER BY t.is_pinned DESC, t.last_message_at DESC
              LIMIT ?3"
-        )
     };
 
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
 
     if label_id.is_some() {
         stmt.query_map(

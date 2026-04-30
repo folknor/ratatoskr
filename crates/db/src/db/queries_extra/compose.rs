@@ -43,6 +43,8 @@ pub async fn db_insert_template(
     .await
 }
 
+// TODO(refactor): wrap fields in an UpdateTemplateParams struct.
+#[allow(clippy::too_many_arguments)]
 pub async fn db_update_template(
     db: &DbState,
     id: String,
@@ -216,23 +218,23 @@ pub async fn db_update_signature(db: &DbState, p: UpdateSignatureParams) -> Resu
     db.with_conn(move |conn| {
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         let account_id = get_signature_account_id(&tx, &p.id)?;
-        if p.is_default == Some(true) {
-            if let Some(ref aid) = account_id {
-                tx.execute(
-                    "UPDATE signatures SET is_default = 0 WHERE account_id = ?1",
-                    params![aid],
-                )
-                .map_err(|e| e.to_string())?;
-            }
+        if p.is_default == Some(true)
+            && let Some(ref aid) = account_id
+        {
+            tx.execute(
+                "UPDATE signatures SET is_default = 0 WHERE account_id = ?1",
+                params![aid],
+            )
+            .map_err(|e| e.to_string())?;
         }
-        if p.is_reply_default == Some(true) {
-            if let Some(ref aid) = account_id {
-                tx.execute(
-                    "UPDATE signatures SET is_reply_default = 0 WHERE account_id = ?1",
-                    params![aid],
-                )
-                .map_err(|e| e.to_string())?;
-            }
+        if p.is_reply_default == Some(true)
+            && let Some(ref aid) = account_id
+        {
+            tx.execute(
+                "UPDATE signatures SET is_reply_default = 0 WHERE account_id = ?1",
+                params![aid],
+            )
+            .map_err(|e| e.to_string())?;
         }
         let mut sets: Vec<(&str, Box<dyn rusqlite::types::ToSql>)> = Vec::new();
         if let Some(v) = p.name {
@@ -399,6 +401,8 @@ pub async fn db_get_aliases_for_account(
     .await
 }
 
+// TODO(refactor): wrap fields in an UpsertAliasParams struct.
+#[allow(clippy::too_many_arguments)]
 pub async fn db_upsert_alias(
     db: &DbState,
     account_id: String,
@@ -502,6 +506,8 @@ pub async fn db_delete_alias(db: &DbState, id: String) -> Result<(), String> {
     .await
 }
 
+// TODO(refactor): 15 args - migrate to a SaveLocalDraftParams struct.
+#[allow(clippy::too_many_arguments)]
 pub async fn db_save_local_draft(
     db: &DbState,
     id: String,
@@ -696,6 +702,8 @@ pub async fn db_get_scheduled_emails_for_account(
     .await
 }
 
+// TODO(refactor): 14 args - migrate to a ScheduledEmailParams struct.
+#[allow(clippy::too_many_arguments)]
 pub async fn db_insert_scheduled_email(
     db: &DbState,
     account_id: String,

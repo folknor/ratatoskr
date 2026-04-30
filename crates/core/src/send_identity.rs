@@ -33,13 +33,12 @@ pub fn select_from_address(
     }
 
     // 1. Shared mailbox match
-    if let Some(ref mb_id) = context.shared_mailbox_id {
-        if let Some(hit) = identities
+    if let Some(ref mb_id) = context.shared_mailbox_id
+        && let Some(hit) = identities
             .iter()
             .find(|i| i.mailbox_id.as_deref() == Some(mb_id.as_str()))
-        {
-            return Ok(Some(hit.clone()));
-        }
+    {
+        return Ok(Some(hit.clone()));
     }
 
     // 2. Reply-address match (case-insensitive)

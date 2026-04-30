@@ -178,10 +178,10 @@ pub async fn refresh_gal_for_account(
     // Check cache age
     let now = chrono::Utc::now().timestamp();
     let stale_threshold = now - 86400; // 24 hours
-    if let Some(cached_at) = gal_cache_age(db, account_id.to_string()).await? {
-        if cached_at > stale_threshold {
-            return Ok(0); // cache is fresh
-        }
+    if let Some(cached_at) = gal_cache_age(db, account_id.to_string()).await?
+        && cached_at > stale_threshold
+    {
+        return Ok(0); // cache is fresh
     }
 
     // Look up provider type via db

@@ -36,6 +36,7 @@ impl Db {
     }
 
     /// Synchronous access to the writable connection.
+    #[allow(dead_code)] // available for sync code paths; not currently used
     pub fn with_write_conn_sync<F, T>(&self, f: F) -> Result<T, String>
     where
         F: FnOnce(&Connection) -> Result<T, String>,

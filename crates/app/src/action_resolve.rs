@@ -109,6 +109,7 @@ pub enum ResolveOutcome {
 /// Phase C builds `MailUndoPayload` from `MailOperation` +
 /// `CompensationContext` + `OptimisticMutation` without re-reading UI state.
 #[derive(Debug, Clone)]
+#[allow(clippy::enum_variant_names)] // intentional: each variant sets a distinct boolean flag
 pub enum OptimisticMutation {
     SetStarred {
         account_id: String,
@@ -517,9 +518,7 @@ fn build_standard_undo_payloads(
                         CompensationContext::SourceFolder(s) => s.clone(),
                         CompensationContext::None => None,
                     };
-                    if source.is_none() {
-                        return None;
-                    }
+                    source.as_ref()?;
                     Some(MailUndoPayload::Trash {
                         account_id,
                         thread_ids,

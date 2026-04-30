@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Icon set; not all icons are wired in yet.
+
 use iced::widget::text::{LineHeight, Text};
 
 pub const FONT: iced::Font = iced::Font::new("lucide");

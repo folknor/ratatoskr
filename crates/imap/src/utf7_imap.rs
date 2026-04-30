@@ -89,7 +89,7 @@ fn decode_utf7_part(text: &str) -> String {
 
     let body = &text[1..text.len() - 1];
     let mut b64 = body.replace(',', "/");
-    while b64.len() % 4 != 0 {
+    while !b64.len().is_multiple_of(4) {
         b64.push('=');
     }
 

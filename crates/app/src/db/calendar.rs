@@ -39,6 +39,7 @@ impl Db {
     }
 
     /// Create a new calendar event. Returns the new event's id.
+    #[allow(dead_code)] // Calendar CRUD wrappers; calendar UI calls core directly for now.
     pub async fn create_calendar_event(
         &self,
         params: LocalCalendarEventParams,
@@ -48,6 +49,7 @@ impl Db {
     }
 
     /// Update an existing calendar event.
+    #[allow(dead_code)] // see create_calendar_event above
     pub async fn update_calendar_event(
         &self,
         event_id: String,
@@ -91,6 +93,7 @@ impl Db {
     }
 
     /// Delete a calendar event by id.
+    #[allow(dead_code)] // see create_calendar_event above
     pub async fn delete_calendar_event(&self, event_id: String) -> Result<(), String> {
         self.with_write_conn(move |conn| delete_calendar_event_sync(conn, &event_id))
             .await

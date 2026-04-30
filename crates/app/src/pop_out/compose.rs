@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use iced::widget::{
-    Space, button, column, container, mouse_area, row, scrollable, text, text_input,
-};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Alignment, Element, Length, Point};
 use rte::{Action as RteAction, EditAction, EditorState, InlineStyle, rich_text_editor};
 
@@ -299,6 +297,7 @@ impl AutocompleteState {
 }
 
 /// Active drag state for a token being moved between fields.
+#[allow(dead_code)] // token_id/source_field/label populated for inspection during drag overlay rework
 pub struct ComposeTokenDrag {
     pub token_id: TokenId,
     pub source_field: RecipientField,
@@ -307,6 +306,7 @@ pub struct ComposeTokenDrag {
 }
 
 /// A Bcc nudge banner shown when a group token is added to To or Cc.
+#[allow(dead_code)] // source_field stays populated for the upcoming undo path
 pub struct BccNudgeBanner {
     pub group_name: String,
     pub token_id: TokenId,
@@ -510,7 +510,7 @@ impl ComposeState {
             .as_deref()
             .filter(|h| !h.trim().is_empty())
             .map(EditorState::from_html)
-            .unwrap_or_else(EditorState::new);
+            .unwrap_or_default();
 
         let signature_separator_index = draft
             .signature_separator_index
@@ -560,6 +560,8 @@ impl ComposeState {
         }
     }
 
+    // TODO(refactor): wrap reply fields in a ReplyContext struct.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_reply(
         accounts: &[db::Account],
         mode: &ComposeMode,
@@ -577,38 +579,38 @@ impl ComposeState {
         state.subject = mode.prefixed_subject();
 
         // Add To recipient (not for Forward - forward starts with empty To)
-        if !matches!(state.mode, ComposeMode::Forward { .. }) {
-            if let Some(email) = to_email {
-                let label = to_name.filter(|n| !n.is_empty()).unwrap_or(email);
-                let id = state.to.next_token_id();
-                state.to.tokens.push(token_input::Token {
+        if !matches!(state.mode, ComposeMode::Forward { .. })
+            && let Some(email) = to_email
+        {
+            let label = to_name.filter(|n| !n.is_empty()).unwrap_or(email);
+            let id = state.to.next_token_id();
+            state.to.tokens.push(token_input::Token {
+                id,
+                email: email.to_string(),
+                label: label.to_string(),
+                is_group: false,
+                group_id: None,
+                member_count: None,
+            });
+        }
+
+        // Add Cc recipients for ReplyAll
+        if let ComposeMode::ReplyAll { .. } = &state.mode
+            && let Some(cc_str) = cc_emails
+        {
+            for addr in cc_str.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                let id = state.cc.next_token_id();
+                state.cc.tokens.push(token_input::Token {
                     id,
-                    email: email.to_string(),
-                    label: label.to_string(),
+                    email: addr.to_string(),
+                    label: addr.to_string(),
                     is_group: false,
                     group_id: None,
                     member_count: None,
                 });
             }
-        }
-
-        // Add Cc recipients for ReplyAll
-        if let ComposeMode::ReplyAll { .. } = &state.mode {
-            if let Some(cc_str) = cc_emails {
-                for addr in cc_str.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-                    let id = state.cc.next_token_id();
-                    state.cc.tokens.push(token_input::Token {
-                        id,
-                        email: addr.to_string(),
-                        label: addr.to_string(),
-                        is_group: false,
-                        group_id: None,
-                        member_count: None,
-                    });
-                }
-                if !state.cc.tokens.is_empty() {
-                    state.show_cc = true;
-                }
+            if !state.cc.tokens.is_empty() {
+                state.show_cc = true;
             }
         }
 
@@ -1129,12 +1131,11 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             // The bulk-paste banner, if it was tracking this paste, is no
             // longer accurate - clear it so the user doesn't see "Save as
             // group?" prompting them to save what's already a group.
-            if let Some(ref banner) = state.bulk_paste_banner {
-                if banner.field == field
-                    && banner.token_ids.iter().any(|t| pasted.contains(t))
-                {
-                    state.bulk_paste_banner = None;
-                }
+            if let Some(ref banner) = state.bulk_paste_banner
+                && banner.field == field
+                && banner.token_ids.iter().any(|t| pasted.contains(t))
+            {
+                state.bulk_paste_banner = None;
             }
             state.draft_dirty = true;
         }
@@ -1911,6 +1912,8 @@ fn build_bcc_row<'a>(window_id: iced::window::Id, state: &'a ComposeState) -> El
     )
 }
 
+// TODO(refactor): bundle row params (autocomplete + selection state) into a struct.
+#[allow(clippy::too_many_arguments)]
 fn build_recipient_row_inner<'a>(
     label: &'a str,
     value: &'a TokenInputValue,

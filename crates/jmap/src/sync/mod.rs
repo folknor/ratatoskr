@@ -53,6 +53,7 @@ pub(crate) struct SyncCtx<'a> {
 impl SyncCtx<'_> {
     /// The JMAP account ID to use in method calls.
     /// Falls back to `default_account_id()` if no override is set.
+    #[allow(dead_code)] // used once delegated-mailbox sync ships
     pub fn target_account_id(&self) -> String {
         if let Some(ref id) = self.jmap_account_id {
             id.clone()

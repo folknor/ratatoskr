@@ -39,6 +39,8 @@ pub fn get_label_kind_sync(
 }
 
 /// Look up contact metadata by ID (source, server_id, account_id).
+// TODO(refactor): introduce a ContactMeta struct instead of the nested-Option tuple.
+#[allow(clippy::type_complexity)]
 pub fn get_contact_meta_by_id_sync(
     conn: &Connection,
     contact_id: &str,

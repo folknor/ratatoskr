@@ -544,7 +544,7 @@ mod tests {
             group
                 .group_types
                 .as_ref()
-                .map_or(false, |t| t.contains(&"Unified".to_string()))
+                .is_some_and(|t| t.contains(&"Unified".to_string()))
         );
         assert_eq!(group.mail_enabled, Some(true));
         assert_eq!(group.security_enabled, Some(false));

@@ -444,6 +444,8 @@ pub fn delete_messages_and_cleanup_threads(
                      FROM messages WHERE account_id = ?1 AND thread_id = ?2",
                 )
                 .map_err(|e| format!("prepare addr: {e}"))?;
+            // TODO(refactor): introduce an AddressRow struct instead of the nested-Option tuple.
+            #[allow(clippy::type_complexity)]
             let rows: Vec<(
                 Option<String>,
                 Option<String>,
@@ -662,6 +664,8 @@ fn rebuild_thread_participants(
              FROM messages WHERE account_id = ?1 AND thread_id = ?2",
         )
         .map_err(|e| format!("prepare addr query: {e}"))?;
+    // TODO(refactor): introduce an AddressRow struct instead of the nested-Option tuple.
+    #[allow(clippy::type_complexity)]
     let rows: Vec<(Option<String>, Option<String>, Option<String>, Option<String>)> = addr_stmt
         .query_map(rusqlite::params![account_id, thread_id], |row| {
             Ok((

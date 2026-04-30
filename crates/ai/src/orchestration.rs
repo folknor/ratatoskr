@@ -607,7 +607,7 @@ mod tests {
 
     #[test]
     fn thread_for_bundling_formatting() {
-        let threads = vec![
+        let threads = [
             ThreadForBundling {
                 thread_id: "t1".to_string(),
                 subject: "Meeting notes".to_string(),

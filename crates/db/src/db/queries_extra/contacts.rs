@@ -118,6 +118,8 @@ pub async fn db_find_contact_id_by_email(
 ///
 /// Used by the contact action service. The app-crate `save_contact_inner`
 /// has equivalent SQL - this is the core-accessible version.
+// TODO(refactor): wrap mutable fields in an UpsertContactParams struct.
+#[allow(clippy::too_many_arguments)]
 pub fn db_upsert_contact_full(
     conn: &Connection,
     id: &str,
@@ -628,7 +630,7 @@ pub fn get_seen_address_stats_sync(
     )
     .map_err(|e| e.to_string())
     .map(Some)
-    .or_else(|_| Ok(None))
+    .or(Ok(None))
 }
 
 // ---------------------------------------------------------------------------
@@ -705,7 +707,7 @@ pub fn get_google_contact_server_info_sync(
     )
     .map_err(|e| e.to_string())
     .map(Some)
-    .or_else(|_| Ok(None))
+    .or(Ok(None))
 }
 
 // ---------------------------------------------------------------------------
@@ -763,7 +765,7 @@ pub fn get_graph_contact_server_info_sync(
     )
     .map_err(|e| e.to_string())
     .map(Some)
-    .or_else(|_| Ok(None))
+    .or(Ok(None))
 }
 
 // ---------------------------------------------------------------------------
@@ -946,6 +948,8 @@ pub fn merge_contact_pair_sync(
         .map_err(|e| format!("begin merge tx: {e}"))?;
 
     // Read merge contact's fields
+    // TODO(refactor): introduce a MergeContactRow struct instead of the nested-Option tuple.
+    #[allow(clippy::type_complexity)]
     let merge_row: Option<(
         Option<String>,
         Option<String>,

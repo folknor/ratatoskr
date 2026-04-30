@@ -167,21 +167,21 @@ pub async fn delete_draft(ctx: &ActionContext, account_id: &str, draft_id: &str)
     };
 
     // 2. Provider delete (best-effort, only if remote_draft_id exists)
-    if let Some(remote_draft_id) = remote_id {
-        if let Ok(provider) = create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-            let provider_ctx = ProviderCtx {
-                account_id,
-                db: &ctx.db,
-                body_store: &ctx.body_store,
-                inline_images: &ctx.inline_images,
-                search: &ctx.search,
-                progress: &NoopProgressReporter,
-            };
-            // Best-effort: don't fail if remote delete fails.
-            // The orphaned server draft will be cleaned up by sync.
-            if let Err(e) = provider.delete_draft(&provider_ctx, &remote_draft_id).await {
-                log::warn!("Remote draft delete failed for {account_id}/{draft_id}: {e}");
-            }
+    if let Some(remote_draft_id) = remote_id
+        && let Ok(provider) = create_provider(&ctx.db, account_id, ctx.encryption_key).await
+    {
+        let provider_ctx = ProviderCtx {
+            account_id,
+            db: &ctx.db,
+            body_store: &ctx.body_store,
+            inline_images: &ctx.inline_images,
+            search: &ctx.search,
+            progress: &NoopProgressReporter,
+        };
+        // Best-effort: don't fail if remote delete fails.
+        // The orphaned server draft will be cleaned up by sync.
+        if let Err(e) = provider.delete_draft(&provider_ctx, &remote_draft_id).await {
+            log::warn!("Remote draft delete failed for {account_id}/{draft_id}: {e}");
         }
     }
 

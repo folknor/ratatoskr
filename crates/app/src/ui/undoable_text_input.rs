@@ -288,6 +288,8 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
 
 impl<Message: Clone> UndoableWrapper<'_, Message> {
     /// Core update logic, split out to keep `update()` under the line limit.
+    // TODO(refactor): pass an UpdateCtx struct in place of the eight individual args.
+    #[allow(clippy::too_many_arguments)]
     fn handle_update(
         &mut self,
         tree: &mut Tree,
@@ -320,12 +322,12 @@ impl<Message: Clone> UndoableWrapper<'_, Message> {
         }
 
         // Intercept undo/redo BEFORE forwarding to the inner TextInput.
-        if wrapper.is_focused {
-            if let Some(msg) = self.check_undo_redo(event) {
-                shell.publish(msg);
-                shell.capture_event();
-                return;
-            }
+        if wrapper.is_focused
+            && let Some(msg) = self.check_undo_redo(event)
+        {
+            shell.publish(msg);
+            shell.capture_event();
+            return;
         }
 
         // Forward everything else to the inner TextInput.

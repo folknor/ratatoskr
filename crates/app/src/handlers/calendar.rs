@@ -346,7 +346,7 @@ impl App {
                 Task::none()
             }
             CalendarMessage::SwitchToMail => {
-                return self.update(Message::SetAppMode(crate::AppMode::Mail));
+                self.update(Message::SetAppMode(crate::AppMode::Mail))
             }
             CalendarMessage::PopOutCalendar => {
                 // Check if a calendar pop-out already exists.
@@ -639,8 +639,7 @@ impl App {
             .calendars
             .iter()
             .filter(|c| {
-                for_account
-                    .map_or(true, |acct| c.account_id == acct)
+                for_account.is_none_or(|acct| c.account_id == acct)
             })
             .collect();
         if eligible.len() == 1 {

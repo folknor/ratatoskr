@@ -754,6 +754,34 @@ pub async fn discover_myrights(session: &mut ImapSession, folder: &str) -> Resul
     .map_err(|_| format!("MYRIGHTS timed out after {}s", IMAP_CMD_TIMEOUT.as_secs()))?
 }
 
+/// Classify which namespace a folder path belongs to based on prefix matching.
+#[allow(dead_code)]
+pub(crate) fn classify_folder_namespace(
+    info: &NamespaceInfo,
+    folder_path: &str,
+) -> Option<NamespaceType> {
+    // Check other_users and shared first (they have non-empty prefixes),
+    // then fall back to personal.
+    for entry in &info.other_users {
+        if !entry.prefix.is_empty() && folder_path.starts_with(&entry.prefix) {
+            return Some(NamespaceType::OtherUsers);
+        }
+    }
+    for entry in &info.shared {
+        if !entry.prefix.is_empty() && folder_path.starts_with(&entry.prefix) {
+            return Some(NamespaceType::Shared);
+        }
+    }
+    // If the personal namespace has a non-empty prefix, check it; otherwise
+    // treat everything not matched above as personal.
+    for entry in &info.personal {
+        if entry.prefix.is_empty() || folder_path.starts_with(&entry.prefix) {
+            return Some(NamespaceType::Personal);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -870,31 +898,4 @@ mod tests {
         let ns_type = classify_folder_namespace(&info, folder);
         assert_eq!(ns_type, Some(NamespaceType::Personal));
     }
-}
-
-/// Classify which namespace a folder path belongs to based on prefix matching.
-pub(crate) fn classify_folder_namespace(
-    info: &NamespaceInfo,
-    folder_path: &str,
-) -> Option<NamespaceType> {
-    // Check other_users and shared first (they have non-empty prefixes),
-    // then fall back to personal.
-    for entry in &info.other_users {
-        if !entry.prefix.is_empty() && folder_path.starts_with(&entry.prefix) {
-            return Some(NamespaceType::OtherUsers);
-        }
-    }
-    for entry in &info.shared {
-        if !entry.prefix.is_empty() && folder_path.starts_with(&entry.prefix) {
-            return Some(NamespaceType::Shared);
-        }
-    }
-    // If the personal namespace has a non-empty prefix, check it; otherwise
-    // treat everything not matched above as personal.
-    for entry in &info.personal {
-        if entry.prefix.is_empty() || folder_path.starts_with(&entry.prefix) {
-            return Some(NamespaceType::Personal);
-        }
-    }
-    None
 }

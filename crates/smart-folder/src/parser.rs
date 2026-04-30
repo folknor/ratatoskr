@@ -868,7 +868,7 @@ mod tests {
     fn date_year_only() {
         let q = parse_query("after:2025");
         let expected =
-            chrono::NaiveDate::from_ymd_opt(2025, 1, 1).and_then(|d| naive_date_to_timestamp(d));
+            chrono::NaiveDate::from_ymd_opt(2025, 1, 1).and_then(naive_date_to_timestamp);
         assert_eq!(q.after, expected);
     }
 
@@ -876,7 +876,7 @@ mod tests {
     fn date_year_month_compact() {
         let q = parse_query("after:202603");
         let expected =
-            chrono::NaiveDate::from_ymd_opt(2026, 3, 1).and_then(|d| naive_date_to_timestamp(d));
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 1).and_then(naive_date_to_timestamp);
         assert_eq!(q.after, expected);
     }
 
@@ -884,7 +884,7 @@ mod tests {
     fn date_full_compact() {
         let q = parse_query("after:20260311");
         let expected =
-            chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(|d| naive_date_to_timestamp(d));
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(naive_date_to_timestamp);
         assert_eq!(q.after, expected);
     }
 
@@ -892,7 +892,7 @@ mod tests {
     fn date_slash_separated() {
         let q = parse_query("before:2026/03/11");
         let expected =
-            chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(|d| naive_date_to_timestamp(d));
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(naive_date_to_timestamp);
         assert_eq!(q.before, expected);
     }
 
@@ -900,7 +900,7 @@ mod tests {
     fn date_dash_separated() {
         let q = parse_query("before:2026-03-11");
         let expected =
-            chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(|d| naive_date_to_timestamp(d));
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(naive_date_to_timestamp);
         assert_eq!(q.before, expected);
     }
 
@@ -908,7 +908,7 @@ mod tests {
     fn date_space_separated_greedy() {
         let q = parse_query("after:2026 03 11");
         let expected =
-            chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(|d| naive_date_to_timestamp(d));
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 11).and_then(naive_date_to_timestamp);
         assert_eq!(q.after, expected);
     }
 
@@ -916,7 +916,7 @@ mod tests {
     fn date_space_separated_year_month_only() {
         let q = parse_query("after:2026 03 hello");
         let expected =
-            chrono::NaiveDate::from_ymd_opt(2026, 3, 1).and_then(|d| naive_date_to_timestamp(d));
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 1).and_then(naive_date_to_timestamp);
         assert_eq!(q.after, expected);
         assert_eq!(q.free_text, "hello");
     }
@@ -925,7 +925,7 @@ mod tests {
     fn date_space_greedy_does_not_consume_non_digits() {
         let q = parse_query("after:2026 hello");
         let expected =
-            chrono::NaiveDate::from_ymd_opt(2026, 1, 1).and_then(|d| naive_date_to_timestamp(d));
+            chrono::NaiveDate::from_ymd_opt(2026, 1, 1).and_then(naive_date_to_timestamp);
         assert_eq!(q.after, expected);
         assert_eq!(q.free_text, "hello");
     }
