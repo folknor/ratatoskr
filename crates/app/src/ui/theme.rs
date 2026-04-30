@@ -744,7 +744,7 @@ pub fn style_settings_row_button(
     let radius = position.radii();
     match status {
         button::Status::Hovered => button::Style {
-            background: Some(p.background.weak.color.into()),
+            background: Some(p.background.weakest.color.into()),
             text_color: p.background.base.text,
             border: iced::Border {
                 radius,
