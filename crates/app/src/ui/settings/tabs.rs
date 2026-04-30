@@ -861,21 +861,13 @@ fn account_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
     // Display name
     col = col.push(section(
         "Display Name",
-        vec![static_row(
-            container(
-                column![
-                    text("Display Name").size(TEXT_SM).style(text::secondary),
-                    text_input("Your Name", &editor.display_name)
-                        .on_input(SettingsMessage::DisplayNameEditorChanged)
-                        .size(TEXT_LG)
-                        .padding(PAD_INPUT)
-                        .style(theme::TextInputClass::Settings.style()),
-                ]
-                .spacing(SPACE_XXXS)
-                .width(Length::Fill),
-            )
-            .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill),
+        vec![input_row(
+            "account-display-name",
+            "Display Name",
+            "Your Name",
+            editor.display_name.text(),
+            SettingsMessage::DisplayNameEditorChanged,
+            InputField::AccountDisplayName,
         )],
     ));
 
@@ -920,21 +912,13 @@ fn account_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
 fn account_editor_name_section(editor: &AccountEditor) -> Element<'_, SettingsMessage> {
     section(
         "Account Name",
-        vec![static_row(
-            container(
-                column![
-                    text("Account Name").size(TEXT_SM).style(text::secondary),
-                    text_input("e.g. Work", &editor.account_name)
-                        .on_input(SettingsMessage::AccountNameEditorChanged)
-                        .size(TEXT_LG)
-                        .padding(PAD_INPUT)
-                        .style(theme::TextInputClass::Settings.style()),
-                ]
-                .spacing(SPACE_XXXS)
-                .width(Length::Fill),
-            )
-            .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill),
+        vec![input_row(
+            "account-name",
+            "Account Name",
+            "e.g. Work",
+            editor.account_name.text(),
+            SettingsMessage::AccountNameEditorChanged,
+            InputField::AccountName,
         )],
     )
 }
@@ -967,47 +951,34 @@ fn account_editor_color_section<'a>(
 }
 
 fn account_editor_caldav_section(editor: &AccountEditor) -> Element<'_, SettingsMessage> {
-    let fields = column![
-        column![
-            text("CalDAV URL").size(TEXT_SM).style(text::secondary),
-            text_input("https://", &editor.caldav_url)
-                .on_input(SettingsMessage::CaldavUrlChanged)
-                .size(TEXT_LG)
-                .padding(PAD_INPUT)
-                .style(theme::TextInputClass::Settings.style()),
-        ]
-        .spacing(SPACE_XXXS)
-        .width(Length::Fill),
-        column![
-            text("Username").size(TEXT_SM).style(text::secondary),
-            text_input("", &editor.caldav_username)
-                .on_input(SettingsMessage::CaldavUsernameChanged)
-                .size(TEXT_LG)
-                .padding(PAD_INPUT)
-                .style(theme::TextInputClass::Settings.style()),
-        ]
-        .spacing(SPACE_XXXS)
-        .width(Length::Fill),
-        column![
-            text("Password").size(TEXT_SM).style(text::secondary),
-            text_input("", &editor.caldav_password)
-                .on_input(SettingsMessage::CaldavPasswordChanged)
-                .size(TEXT_LG)
-                .padding(PAD_INPUT)
-                .style(theme::TextInputClass::Settings.style()),
-        ]
-        .spacing(SPACE_XXXS)
-        .width(Length::Fill),
-    ]
-    .spacing(SPACE_SM);
-
     section(
         "Calendar (CalDAV)",
-        vec![static_row(
-            container(fields)
-                .padding(PAD_SETTINGS_ROW)
-                .width(Length::Fill),
-        )],
+        vec![
+            input_row(
+                "caldav-url",
+                "CalDAV URL",
+                "https://",
+                editor.caldav_url.text(),
+                SettingsMessage::CaldavUrlChanged,
+                InputField::CaldavUrl,
+            ),
+            input_row(
+                "caldav-username",
+                "Username",
+                "",
+                editor.caldav_username.text(),
+                SettingsMessage::CaldavUsernameChanged,
+                InputField::CaldavUsername,
+            ),
+            input_row_secure(
+                "caldav-password",
+                "Password",
+                "",
+                editor.caldav_password.text(),
+                SettingsMessage::CaldavPasswordChanged,
+                InputField::CaldavPassword,
+            ),
+        ],
     )
 }
 
@@ -1966,66 +1937,72 @@ fn contact_account_selector<'a>(
 fn contact_editor_fields(editor: &ContactEditorState) -> Element<'_, SettingsMessage> {
     let fields = vec![
         contact_field_input(
+            "contact-display-name",
             "Display name",
             "Name",
-            &editor.display_name,
+            editor.display_name.text(),
             ContactField::DisplayName,
+            InputField::ContactDisplayName,
         ),
         contact_field_input(
+            "contact-email",
             "Email",
             "email@example.com",
-            &editor.email,
+            editor.email.text(),
             ContactField::Email,
+            InputField::ContactEmail,
         ),
         contact_field_input(
+            "contact-email2",
             "Email 2",
             "Optional second email",
-            &editor.email2,
+            editor.email2.text(),
             ContactField::Email2,
+            InputField::ContactEmail2,
         ),
         contact_field_input(
+            "contact-phone",
             "Phone",
             "Optional phone number",
-            &editor.phone,
+            editor.phone.text(),
             ContactField::Phone,
+            InputField::ContactPhone,
         ),
         contact_field_input(
+            "contact-company",
             "Company",
             "Optional company",
-            &editor.company,
+            editor.company.text(),
             ContactField::Company,
+            InputField::ContactCompany,
         ),
         contact_field_input(
+            "contact-notes",
             "Notes",
             "Optional notes",
-            &editor.notes,
+            editor.notes.text(),
             ContactField::Notes,
+            InputField::ContactNotes,
         ),
     ];
     section("Details", fields)
 }
 
-fn contact_field_input<'a>(
-    label: &'a str,
-    placeholder: &'a str,
-    value: &'a str,
-    field: ContactField,
-) -> RowBuilder<'a> {
-    static_row(
-        container(column![
-            text(label)
-                .size(TEXT_SM)
-                .style(theme::TextClass::Tertiary.style()),
-            Space::new().height(SPACE_XXXS),
-            text_input(placeholder, value)
-                .on_input(move |v| SettingsMessage::ContactEditorFieldChanged(field.clone(), v))
-                .size(TEXT_LG)
-                .padding(PAD_INPUT)
-                .style(theme::TextInputClass::Settings.style())
-                .width(Length::Fill),
-        ])
-        .padding(PAD_SETTINGS_ROW)
-        .width(Length::Fill),
+fn contact_field_input(
+    id: &str,
+    label: &str,
+    placeholder: &str,
+    value: &str,
+    contact_field: ContactField,
+    input_field: InputField,
+) -> RowBuilder<'static> {
+    input_row(
+        id,
+        label,
+        placeholder,
+        value,
+        move |v| SettingsMessage::ContactEditorFieldChanged(contact_field.clone(), v),
+        input_field,
     )
 }
 
@@ -2072,7 +2049,7 @@ fn contact_editor_buttons<'a>(
             btn_row = btn_row.push(text("Auto-saved").size(TEXT_SM).style(text::secondary));
         } else {
             // New contact: still need a Create button
-            let can_save = !editor.email.trim().is_empty();
+            let can_save = !editor.email.text().trim().is_empty();
             let mut save_btn =
                 button(container(text("Create").size(TEXT_LG)).center_x(Length::Fill))
                     .padding(PAD_BUTTON)
@@ -2085,7 +2062,7 @@ fn contact_editor_buttons<'a>(
         }
     } else {
         // Synced contact: explicit Save button, enabled when dirty
-        let can_save = !editor.email.trim().is_empty() && editor.dirty;
+        let can_save = !editor.email.text().trim().is_empty() && editor.dirty;
         let mut save_btn = button(container(text("Save").size(TEXT_LG)).center_x(Length::Fill))
             .padding(PAD_BUTTON)
             .style(theme::ButtonClass::Primary.style())
@@ -2115,29 +2092,31 @@ fn group_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
         .max_width(SETTINGS_CONTENT_MAX_WIDTH);
 
     col = col.push(
-        text(title)
-            .size(TEXT_HEADING)
-            .style(text::base)
-            .font(iced::Font {
-                weight: iced::font::Weight::Bold,
-                ..crate::font::text()
-            }),
+        column![
+            text(title)
+                .size(TEXT_HEADING)
+                .style(text::base)
+                .font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..crate::font::text()
+                }),
+            text("Group changes are not saved automatically. Use the Save button at the bottom.")
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        ]
+        .spacing(SPACE_XXS),
     );
 
     // Group name
     col = col.push(section(
         "Name",
-        vec![static_row(
-            container(
-                text_input("Group name", &editor.name)
-                    .on_input(SettingsMessage::GroupEditorNameChanged)
-                    .size(TEXT_LG)
-                    .padding(PAD_INPUT)
-                    .style(theme::TextInputClass::Settings.style())
-                    .width(Length::Fill),
-            )
-            .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill),
+        vec![input_row(
+            "group-name",
+            "Name",
+            "Group name",
+            editor.name.text(),
+            SettingsMessage::GroupEditorNameChanged,
+            InputField::GroupName,
         )],
     ));
 
@@ -2145,7 +2124,7 @@ fn group_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
     col = col.push(group_add_members_section(editor, state));
 
     // Members grid (dynamic title + tile grid; click to remove)
-    col = col.push(group_members_grid_section(editor));
+    col = col.push(group_members_list_section(editor, state));
 
     // Action buttons
     col = col.push(group_editor_buttons(editor, &state.confirm_delete_group));
@@ -2294,11 +2273,13 @@ fn group_add_candidates_panel<'a>(
         .into()
 }
 
-/// Members section: dynamic title `Members (N)` over a wrapping tile grid.
-/// Each tile is a square-ish card containing the member's email; clicking a
-/// tile removes the member from the group.
-fn group_members_grid_section<'a>(
+/// Members section: dynamic title `Members (N)` over a recessed scrollable
+/// panel of full-width member pills. Mirrors the Add Members layout, just
+/// with a delete (trash) icon instead of a plus icon. Clicking a pill
+/// removes that member from the group.
+fn group_members_list_section<'a>(
     editor: &'a GroupEditorState,
+    state: &'a Settings,
 ) -> Element<'a, SettingsMessage> {
     let title = format!("Members ({})", editor.members.len());
 
@@ -2313,36 +2294,25 @@ fn group_members_grid_section<'a>(
 
     section_dynamic_with_subtitle(
         title,
-        "Click a tile to remove that member.".to_string(),
-        vec![static_row(group_members_grid_panel(editor))],
+        "Click a member to remove them from the group.".to_string(),
+        vec![static_row(group_members_list_panel(editor, state))],
     )
 }
 
-/// Recessed scrollable panel housing the member tile grid. Mirrors the
-/// container treatment used by the People tab Contacts/Groups panels;
-/// tiles inside stay as a chunked column-of-rows grid (4 cols, FillPortion).
-fn group_members_grid_panel<'a>(
+/// Recessed scrollable panel housing the member pills (one per row).
+fn group_members_list_panel<'a>(
     editor: &'a GroupEditorState,
+    state: &'a Settings,
 ) -> Element<'a, SettingsMessage> {
-    let mut grid = column![].spacing(SPACE_XS).width(Length::Fill);
-    for chunk in editor.members.chunks(MEMBER_TILE_COLS) {
-        let mut row_widget = row![].spacing(SPACE_XS).width(Length::Fill);
-        for email in chunk {
-            row_widget = row_widget.push(member_tile(email));
-        }
-        // Pad partial trailing row so tile widths stay consistent.
-        for _ in chunk.len()..MEMBER_TILE_COLS {
-            row_widget = row_widget.push(
-                Space::new()
-                    .width(Length::FillPortion(1))
-                    .height(MEMBER_TILE_HEIGHT),
-            );
-        }
-        grid = grid.push(row_widget);
+    let mut col = column![]
+        .spacing(PEOPLE_PILL_SPACING)
+        .width(Length::Fill);
+    for email in &editor.members {
+        col = col.push(member_pill(email, state));
     }
 
     let panel = container(
-        scrollable(container(grid).padding(PAD_CARD).width(Length::Fill))
+        scrollable(container(col).padding(PAD_CARD).width(Length::Fill))
             .direction(iced::widget::scrollable::Direction::Vertical(
                 iced::widget::scrollable::Scrollbar::new()
                     .width(6)
@@ -2368,24 +2338,58 @@ fn group_members_grid_panel<'a>(
         .into()
 }
 
-fn member_tile(email: &str) -> Element<'_, SettingsMessage> {
+/// A single member rendered as a pill: trash icon (left, danger) + display
+/// name (when known) + email (right). Clicking removes the member.
+fn member_pill<'a>(email: &'a str, state: &'a Settings) -> Element<'a, SettingsMessage> {
     let email_for_press = email.to_string();
+
+    // Look up the contact for a display name; fall back to email-only.
+    let display_name: Option<&str> = state
+        .contacts
+        .iter()
+        .find(|c| c.email == email)
+        .and_then(|c| c.display_name.as_deref());
+
+    let label_col: Element<'a, SettingsMessage> = if let Some(name) = display_name {
+        row![
+            container(text(name).size(TEXT_LG).style(text::base))
+                .align_y(Alignment::Center)
+                .width(Length::Fill),
+            container(
+                text(email)
+                    .size(TEXT_SM)
+                    .style(theme::TextClass::Tertiary.style()),
+            )
+            .align_y(Alignment::Center),
+        ]
+        .spacing(SPACE_SM)
+        .align_y(Alignment::Center)
+        .into()
+    } else {
+        container(text(email).size(TEXT_LG).style(text::base))
+            .align_y(Alignment::Center)
+            .width(Length::Fill)
+            .into()
+    };
+
     button(
         container(
-            text(email)
-                .size(TEXT_SM)
-                .style(text::base)
-                .align_x(Alignment::Center),
+            row![
+                container(icon::trash().size(ICON_SM).style(text::danger))
+                    .align_y(Alignment::Center),
+                label_col,
+            ]
+            .spacing(SPACE_SM)
+            .align_y(Alignment::Center),
         )
-        .padding(PAD_BADGE)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill),
+        .padding(PAD_CARD)
+        .width(Length::Fill)
+        .align_y(Alignment::Center),
     )
     .on_press(SettingsMessage::GroupEditorRemoveMember(email_for_press))
     .padding(0)
-    .height(MEMBER_TILE_HEIGHT)
-    .width(Length::FillPortion(1))
-    .style(theme::ButtonClass::ProtocolCard.style())
+    .style(theme::style_pill_card_button)
+    .width(Length::Fill)
     .into()
 }
 
@@ -2422,7 +2426,7 @@ fn group_editor_buttons<'a>(
 
     btn_row = btn_row.push(Space::new().width(Length::Fill));
 
-    let can_save = !editor.name.trim().is_empty();
+    let can_save = !editor.name.text().trim().is_empty();
     let mut save_btn = button(container(text("Save").size(TEXT_LG)).center_x(Length::Fill))
         .padding(PAD_BUTTON)
         .style(theme::ButtonClass::Primary.style())

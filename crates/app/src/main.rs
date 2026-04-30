@@ -1821,7 +1821,7 @@ impl App {
             // Create a new editor pre-populated with the email
             self.settings.open_new_contact_editor();
             if let Some(ref mut editor) = self.settings.contact_editor {
-                editor.email = email;
+                editor.email.set_text(email);
             }
         }
 

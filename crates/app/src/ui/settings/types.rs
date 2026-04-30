@@ -387,6 +387,21 @@ pub enum InputField {
     OllamaUrl,
     OllamaModel,
     SignatureName,
+    // Account editor
+    AccountName,
+    AccountDisplayName,
+    CaldavUrl,
+    CaldavUsername,
+    CaldavPassword,
+    // Group editor
+    GroupName,
+    // Contact editor
+    ContactDisplayName,
+    ContactEmail,
+    ContactEmail2,
+    ContactPhone,
+    ContactCompany,
+    ContactNotes,
 }
 
 // ── Signature types ──────────────────────────────────────
@@ -448,12 +463,12 @@ pub struct SignatureDragState {
 pub struct ContactEditorState {
     pub contact_id: Option<String>,
     pub account_id: Option<String>,
-    pub display_name: String,
-    pub email: String,
-    pub email2: String,
-    pub phone: String,
-    pub company: String,
-    pub notes: String,
+    pub display_name: UndoableText,
+    pub email: UndoableText,
+    pub email2: UndoableText,
+    pub phone: UndoableText,
+    pub company: UndoableText,
+    pub notes: UndoableText,
     /// Contact source: "user" (local), "google", "graph", "carddav", etc.
     /// None for newly created contacts (treated as local).
     pub source: Option<String>,
@@ -467,7 +482,7 @@ pub struct ContactEditorState {
 #[derive(Debug, Clone)]
 pub struct GroupEditorState {
     pub group_id: Option<String>,
-    pub name: String,
+    pub name: UndoableText,
     pub members: Vec<String>,
     pub filter: String,
     /// Whether fields have been modified since opening the editor.
@@ -767,12 +782,12 @@ pub fn compute_health(
 pub struct AccountEditor {
     pub account_id: String,
     pub account_email: String,
-    pub account_name: String,
-    pub display_name: String,
+    pub account_name: UndoableText,
+    pub display_name: UndoableText,
     pub account_color_index: Option<usize>,
-    pub caldav_url: String,
-    pub caldav_username: String,
-    pub caldav_password: String,
+    pub caldav_url: UndoableText,
+    pub caldav_username: UndoableText,
+    pub caldav_password: UndoableText,
     pub show_delete_confirmation: bool,
     pub dirty: bool,
 }

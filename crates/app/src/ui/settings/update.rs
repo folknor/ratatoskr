@@ -515,13 +515,13 @@ impl Settings {
             SettingsMessage::ListMenu(_, _) => {}
             SettingsMessage::AccountNameEditorChanged(v) => {
                 if let Some(ref mut editor) = self.editing_account {
-                    editor.account_name = v;
+                    editor.account_name.set_text(v);
                     editor.dirty = true;
                 }
             }
             SettingsMessage::DisplayNameEditorChanged(v) => {
                 if let Some(ref mut editor) = self.editing_account {
-                    editor.display_name = v;
+                    editor.display_name.set_text(v);
                     editor.dirty = true;
                 }
             }
@@ -533,19 +533,19 @@ impl Settings {
             }
             SettingsMessage::CaldavUrlChanged(v) => {
                 if let Some(ref mut editor) = self.editing_account {
-                    editor.caldav_url = v;
+                    editor.caldav_url.set_text(v);
                     editor.dirty = true;
                 }
             }
             SettingsMessage::CaldavUsernameChanged(v) => {
                 if let Some(ref mut editor) = self.editing_account {
-                    editor.caldav_username = v;
+                    editor.caldav_username.set_text(v);
                     editor.dirty = true;
                 }
             }
             SettingsMessage::CaldavPasswordChanged(v) => {
                 if let Some(ref mut editor) = self.editing_account {
-                    editor.caldav_password = v;
+                    editor.caldav_password.set_text(v);
                     editor.dirty = true;
                 }
             }
@@ -655,12 +655,12 @@ impl Settings {
             SettingsMessage::ContactEditorFieldChanged(field, value) => {
                 if let Some(ref mut editor) = self.contact_editor {
                     match field {
-                        ContactField::DisplayName => editor.display_name = value,
-                        ContactField::Email => editor.email = value,
-                        ContactField::Email2 => editor.email2 = value,
-                        ContactField::Phone => editor.phone = value,
-                        ContactField::Company => editor.company = value,
-                        ContactField::Notes => editor.notes = value,
+                        ContactField::DisplayName => editor.display_name.set_text(value),
+                        ContactField::Email => editor.email.set_text(value),
+                        ContactField::Email2 => editor.email2.set_text(value),
+                        ContactField::Phone => editor.phone.set_text(value),
+                        ContactField::Company => editor.company.set_text(value),
+                        ContactField::Notes => editor.notes.set_text(value),
                     }
                     editor.dirty = true;
                 }
@@ -678,7 +678,7 @@ impl Settings {
             }
             SettingsMessage::GroupEditorNameChanged(v) => {
                 if let Some(ref mut editor) = self.group_editor {
-                    editor.name = v;
+                    editor.name.set_text(v);
                     editor.dirty = true;
                 }
             }
@@ -833,6 +833,66 @@ impl Settings {
                     editor.name.undo();
                 }
             }
+            InputField::AccountName => {
+                if let Some(ref mut editor) = self.editing_account {
+                    editor.account_name.undo();
+                }
+            }
+            InputField::AccountDisplayName => {
+                if let Some(ref mut editor) = self.editing_account {
+                    editor.display_name.undo();
+                }
+            }
+            InputField::CaldavUrl => {
+                if let Some(ref mut editor) = self.editing_account {
+                    editor.caldav_url.undo();
+                }
+            }
+            InputField::CaldavUsername => {
+                if let Some(ref mut editor) = self.editing_account {
+                    editor.caldav_username.undo();
+                }
+            }
+            InputField::CaldavPassword => {
+                if let Some(ref mut editor) = self.editing_account {
+                    editor.caldav_password.undo();
+                }
+            }
+            InputField::GroupName => {
+                if let Some(ref mut editor) = self.group_editor {
+                    editor.name.undo();
+                }
+            }
+            InputField::ContactDisplayName => {
+                if let Some(ref mut editor) = self.contact_editor {
+                    editor.display_name.undo();
+                }
+            }
+            InputField::ContactEmail => {
+                if let Some(ref mut editor) = self.contact_editor {
+                    editor.email.undo();
+                }
+            }
+            InputField::ContactEmail2 => {
+                if let Some(ref mut editor) = self.contact_editor {
+                    editor.email2.undo();
+                }
+            }
+            InputField::ContactPhone => {
+                if let Some(ref mut editor) = self.contact_editor {
+                    editor.phone.undo();
+                }
+            }
+            InputField::ContactCompany => {
+                if let Some(ref mut editor) = self.contact_editor {
+                    editor.company.undo();
+                }
+            }
+            InputField::ContactNotes => {
+                if let Some(ref mut editor) = self.contact_editor {
+                    editor.notes.undo();
+                }
+            }
         }
     }
 
@@ -853,6 +913,66 @@ impl Settings {
             InputField::SignatureName => {
                 if let Some(ref mut editor) = self.signature_editor {
                     editor.name.redo();
+                }
+            }
+            InputField::AccountName => {
+                if let Some(ref mut editor) = self.editing_account {
+                    editor.account_name.redo();
+                }
+            }
+            InputField::AccountDisplayName => {
+                if let Some(ref mut editor) = self.editing_account {
+                    editor.display_name.redo();
+                }
+            }
+            InputField::CaldavUrl => {
+                if let Some(ref mut editor) = self.editing_account {
+                    editor.caldav_url.redo();
+                }
+            }
+            InputField::CaldavUsername => {
+                if let Some(ref mut editor) = self.editing_account {
+                    editor.caldav_username.redo();
+                }
+            }
+            InputField::CaldavPassword => {
+                if let Some(ref mut editor) = self.editing_account {
+                    editor.caldav_password.redo();
+                }
+            }
+            InputField::GroupName => {
+                if let Some(ref mut editor) = self.group_editor {
+                    editor.name.redo();
+                }
+            }
+            InputField::ContactDisplayName => {
+                if let Some(ref mut editor) = self.contact_editor {
+                    editor.display_name.redo();
+                }
+            }
+            InputField::ContactEmail => {
+                if let Some(ref mut editor) = self.contact_editor {
+                    editor.email.redo();
+                }
+            }
+            InputField::ContactEmail2 => {
+                if let Some(ref mut editor) = self.contact_editor {
+                    editor.email2.redo();
+                }
+            }
+            InputField::ContactPhone => {
+                if let Some(ref mut editor) = self.contact_editor {
+                    editor.phone.redo();
+                }
+            }
+            InputField::ContactCompany => {
+                if let Some(ref mut editor) = self.contact_editor {
+                    editor.company.redo();
+                }
+            }
+            InputField::ContactNotes => {
+                if let Some(ref mut editor) = self.contact_editor {
+                    editor.notes.redo();
                 }
             }
         }
@@ -886,12 +1006,14 @@ impl Settings {
             self.contact_editor = Some(ContactEditorState {
                 contact_id: Some(contact.id.clone()),
                 account_id: contact.account_id.clone(),
-                display_name: contact.display_name.clone().unwrap_or_default(),
-                email: contact.email.clone(),
-                email2: contact.email2.clone().unwrap_or_default(),
-                phone: contact.phone.clone().unwrap_or_default(),
-                company: contact.company.clone().unwrap_or_default(),
-                notes: contact.notes.clone().unwrap_or_default(),
+                display_name: UndoableText::with_initial(
+                    contact.display_name.as_deref().unwrap_or(""),
+                ),
+                email: UndoableText::with_initial(&contact.email),
+                email2: UndoableText::with_initial(contact.email2.as_deref().unwrap_or("")),
+                phone: UndoableText::with_initial(contact.phone.as_deref().unwrap_or("")),
+                company: UndoableText::with_initial(contact.company.as_deref().unwrap_or("")),
+                notes: UndoableText::with_initial(contact.notes.as_deref().unwrap_or("")),
                 source: contact.source.clone(),
                 server_id: contact.server_id.clone(),
                 dirty: false,
@@ -907,12 +1029,12 @@ impl Settings {
         self.contact_editor = Some(ContactEditorState {
             contact_id: None,
             account_id: None,
-            display_name: String::new(),
-            email: String::new(),
-            email2: String::new(),
-            phone: String::new(),
-            company: String::new(),
-            notes: String::new(),
+            display_name: UndoableText::new(),
+            email: UndoableText::new(),
+            email2: UndoableText::new(),
+            phone: UndoableText::new(),
+            company: UndoableText::new(),
+            notes: UndoableText::new(),
             source: None,
             server_id: None,
             dirty: false,
@@ -925,7 +1047,7 @@ impl Settings {
         let Some(ref editor) = self.contact_editor else {
             return (Task::none(), None);
         };
-        let email = editor.email.trim().to_string();
+        let email = editor.email.text().trim().to_string();
         if email.is_empty() {
             return (Task::none(), None);
         }
@@ -935,11 +1057,11 @@ impl Settings {
                 .clone()
                 .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             email,
-            display_name: non_empty(editor.display_name.trim()),
-            email2: non_empty(editor.email2.trim()),
-            phone: non_empty(editor.phone.trim()),
-            company: non_empty(editor.company.trim()),
-            notes: non_empty(editor.notes.trim()),
+            display_name: non_empty(editor.display_name.text().trim()),
+            email2: non_empty(editor.email2.text().trim()),
+            phone: non_empty(editor.phone.text().trim()),
+            company: non_empty(editor.company.text().trim()),
+            notes: non_empty(editor.notes.text().trim()),
             account_id: editor.account_id.clone(),
             account_color: None,
             groups: Vec::new(),
@@ -966,7 +1088,7 @@ impl Settings {
         if let Some(group) = self.groups.iter().find(|g| g.id == group_id) {
             self.group_editor = Some(GroupEditorState {
                 group_id: Some(group.id.clone()),
-                name: group.name.clone(),
+                name: UndoableText::with_initial(&group.name),
                 members: Vec::new(), // will be populated from DB via App
                 filter: String::new(),
                 dirty: false,
@@ -981,7 +1103,7 @@ impl Settings {
     fn open_new_group_editor(&mut self) {
         self.group_editor = Some(GroupEditorState {
             group_id: None,
-            name: String::new(),
+            name: UndoableText::new(),
             members: Vec::new(),
             filter: String::new(),
             dirty: false,
@@ -994,7 +1116,7 @@ impl Settings {
         let Some(ref editor) = self.group_editor else {
             return (Task::none(), None);
         };
-        let name = editor.name.trim().to_string();
+        let name = editor.name.text().trim().to_string();
         if name.is_empty() {
             return (Task::none(), None);
         }
@@ -1186,12 +1308,16 @@ impl Settings {
         self.editing_account = Some(AccountEditor {
             account_id: account.id.clone(),
             account_email: account.email.clone(),
-            account_name: account.account_name.clone().unwrap_or_default(),
-            display_name: account.display_name.clone().unwrap_or_default(),
+            account_name: UndoableText::with_initial(
+                account.account_name.as_deref().unwrap_or(""),
+            ),
+            display_name: UndoableText::with_initial(
+                account.display_name.as_deref().unwrap_or(""),
+            ),
             account_color_index: color_index,
-            caldav_url: String::new(),
-            caldav_username: String::new(),
-            caldav_password: String::new(),
+            caldav_url: UndoableText::new(),
+            caldav_username: UndoableText::new(),
+            caldav_password: UndoableText::new(),
             show_delete_confirmation: false,
             dirty: false,
         });
@@ -1218,12 +1344,12 @@ impl Settings {
             .map(|(_, bg, _)| (*bg).to_string());
 
         let params = rtsk::db::queries_extra::UpdateAccountParams {
-            account_name: Some(editor.account_name.clone()),
-            display_name: Some(editor.display_name.clone()),
+            account_name: Some(editor.account_name.text().to_string()),
+            display_name: Some(editor.display_name.text().to_string()),
             account_color: color_hex,
-            caldav_url: non_empty(editor.caldav_url.trim()),
-            caldav_username: non_empty(editor.caldav_username.trim()),
-            caldav_password: non_empty(editor.caldav_password.trim()),
+            caldav_url: non_empty(editor.caldav_url.text().trim()),
+            caldav_username: non_empty(editor.caldav_username.text().trim()),
+            caldav_password: non_empty(editor.caldav_password.text().trim()),
         };
         let account_id = editor.account_id.clone();
 

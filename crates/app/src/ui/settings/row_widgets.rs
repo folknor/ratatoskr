@@ -394,6 +394,31 @@ pub(super) fn input_row(
     on_input: impl Fn(String) -> SettingsMessage + 'static,
     field: InputField,
 ) -> RowBuilder<'static> {
+    input_row_inner(id, label, placeholder, value, on_input, field, false)
+}
+
+/// `input_row` with `secure(true)` on the underlying text input - for
+/// password-like fields.
+pub(super) fn input_row_secure(
+    id: &str,
+    label: &str,
+    placeholder: &str,
+    value: &str,
+    on_input: impl Fn(String) -> SettingsMessage + 'static,
+    field: InputField,
+) -> RowBuilder<'static> {
+    input_row_inner(id, label, placeholder, value, on_input, field, true)
+}
+
+fn input_row_inner(
+    id: &str,
+    label: &str,
+    placeholder: &str,
+    value: &str,
+    on_input: impl Fn(String) -> SettingsMessage + 'static,
+    field: InputField,
+    secure: bool,
+) -> RowBuilder<'static> {
     let id_owned = id.to_string();
     let label_owned = label.to_string();
     let placeholder_owned = placeholder.to_string();
@@ -413,6 +438,7 @@ pub(super) fn input_row(
                                 .on_input(on_input)
                                 .on_undo(SettingsMessage::UndoInput(field))
                                 .on_redo(SettingsMessage::RedoInput(field))
+                                .secure(secure)
                                 .size(TEXT_LG)
                                 .padding(0)
                                 .style(theme::TextInputClass::Inline.style()),
