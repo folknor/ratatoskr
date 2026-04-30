@@ -2153,48 +2153,28 @@ fn group_editor_sheet(state: &Settings) -> Element<'_, SettingsMessage> {
     col.into()
 }
 
-/// Add Members section: filter input over a list of non-member contact rows,
-/// with a paste hint subtitle.
+/// Add Members section: filter input + recessed panel of non-member contact
+/// pills, with a paste hint subtitle.
 fn group_add_members_section<'a>(
     editor: &'a GroupEditorState,
     state: &'a Settings,
 ) -> Element<'a, SettingsMessage> {
-    let mut items: Vec<RowBuilder<'a>> = Vec::new();
-
-    // Filter input
-    items.push(static_row(
-        container(
-            text_input("Filter contacts...", &editor.filter)
-                .on_input(SettingsMessage::GroupEditorFilterChanged)
-                .on_submit(SettingsMessage::GroupEditorAddMember(editor.filter.clone()))
-                .size(TEXT_LG)
-                .padding(PAD_INPUT)
-                .style(theme::TextInputClass::Settings.style())
-                .width(Length::Fill),
-        )
-        .padding(PAD_SETTINGS_ROW)
-        .width(Length::Fill),
-    ));
-
-    // Non-member contacts, optionally filtered by the input.
-    let filter_lower = editor.filter.to_lowercase();
-    for contact in &state.contacts {
-        if editor.members.contains(&contact.email) {
-            continue;
-        }
-        let matches = filter_lower.is_empty()
-            || contact.email.to_lowercase().contains(&filter_lower)
-            || contact
-                .display_name
-                .as_deref()
-                .unwrap_or("")
-                .to_lowercase()
-                .contains(&filter_lower);
-        if !matches {
-            continue;
-        }
-        items.push(group_add_candidate_row(contact));
-    }
+    let items: Vec<RowBuilder<'a>> = vec![
+        static_row(
+            container(
+                text_input("Filter contacts...", &editor.filter)
+                    .on_input(SettingsMessage::GroupEditorFilterChanged)
+                    .on_submit(SettingsMessage::GroupEditorAddMember(editor.filter.clone()))
+                    .size(TEXT_LG)
+                    .padding(PAD_INPUT)
+                    .style(theme::TextInputClass::Settings.style())
+                    .width(Length::Fill),
+            )
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill),
+        ),
+        static_row(group_add_candidates_panel(editor, state)),
+    ];
 
     section_with_subtitle(
         "Add Members",
@@ -2203,39 +2183,115 @@ fn group_add_members_section<'a>(
     )
 }
 
-fn group_add_candidate_row<'a>(contact: &'a crate::db::ContactEntry) -> RowBuilder<'a> {
-    Box::new(move |position| {
-        let email_for_press = contact.email.clone();
-        let label: &str = contact.display_name.as_deref().unwrap_or(&contact.email);
-        button(
-            container(
-                row![
-                    container(icon::plus().size(ICON_SM).style(text::primary))
-                        .align_y(Alignment::Center),
-                    container(text(label).size(TEXT_LG).style(text::base))
-                        .align_y(Alignment::Center)
-                        .width(Length::Fill),
-                    container(
-                        text(&contact.email)
-                            .size(TEXT_SM)
-                            .style(theme::TextClass::Tertiary.style()),
-                    )
+fn group_add_candidate_pill<'a>(
+    contact: &'a crate::db::ContactEntry,
+) -> Element<'a, SettingsMessage> {
+    let email_for_press = contact.email.clone();
+    let label: &str = contact.display_name.as_deref().unwrap_or(&contact.email);
+    button(
+        container(
+            row![
+                container(icon::plus().size(ICON_SM).style(text::primary))
                     .align_y(Alignment::Center),
-                ]
-                .spacing(SPACE_SM)
+                container(text(label).size(TEXT_LG).style(text::base))
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill),
+                container(
+                    text(&contact.email)
+                        .size(TEXT_SM)
+                        .style(theme::TextClass::Tertiary.style()),
+                )
                 .align_y(Alignment::Center),
-            )
-            .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill)
-            .height(SETTINGS_ROW_HEIGHT)
+            ]
+            .spacing(SPACE_SM)
             .align_y(Alignment::Center),
         )
-        .on_press(SettingsMessage::GroupEditorAddMember(email_for_press))
-        .padding(0)
-        .style(move |t, s| theme::style_settings_row_button(t, s, position))
+        .padding(PAD_CARD)
+        .width(Length::Fill)
+        .align_y(Alignment::Center),
+    )
+    .on_press(SettingsMessage::GroupEditorAddMember(email_for_press))
+    .padding(0)
+    .style(theme::style_pill_card_button)
+    .width(Length::Fill)
+    .into()
+}
+
+/// Recessed scrollable panel of candidate contact pills (non-members
+/// optionally filtered).
+fn group_add_candidates_panel<'a>(
+    editor: &'a GroupEditorState,
+    state: &'a Settings,
+) -> Element<'a, SettingsMessage> {
+    let filter_lower = editor.filter.to_lowercase();
+    let candidates: Vec<&crate::db::ContactEntry> = state
+        .contacts
+        .iter()
+        .filter(|c| !editor.members.contains(&c.email))
+        .filter(|c| {
+            filter_lower.is_empty()
+                || c.email.to_lowercase().contains(&filter_lower)
+                || c.display_name
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .contains(&filter_lower)
+        })
+        .collect();
+
+    let panel: Element<'_, SettingsMessage> = if candidates.is_empty() {
+        let msg = if filter_lower.is_empty() {
+            "All contacts are already in this group."
+        } else {
+            "No matching contacts."
+        };
+        container(
+            text(msg)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .padding(PAD_CARD)
+        .width(Length::Fill)
+        .height(GROUP_PANEL_HEIGHT)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .style(theme::style_recessed_list_panel)
+        .into()
+    } else {
+        let mut col = column![]
+            .spacing(PEOPLE_PILL_SPACING)
+            .width(Length::Fill);
+        for contact in candidates {
+            col = col.push(group_add_candidate_pill(contact));
+        }
+
+        container(
+            scrollable(container(col).padding(PAD_CARD).width(Length::Fill))
+                .direction(iced::widget::scrollable::Direction::Vertical(
+                    iced::widget::scrollable::Scrollbar::new()
+                        .width(6)
+                        .scroller_width(6)
+                        .margin(SPACE_XXS),
+                ))
+                .height(Length::Fill),
+        )
+        .padding(iced::Padding {
+            top: SPACE_XS,
+            right: 0.0,
+            bottom: SPACE_XS,
+            left: 0.0,
+        })
+        .width(Length::Fill)
+        .height(GROUP_PANEL_HEIGHT)
+        .clip(true)
+        .style(theme::style_recessed_list_panel)
+        .into()
+    };
+
+    container(panel)
+        .padding(SPACE_XS)
         .width(Length::Fill)
         .into()
-    })
 }
 
 /// Members section: dynamic title `Members (N)` over a wrapping tile grid.
@@ -2255,6 +2311,19 @@ fn group_members_grid_section<'a>(
         );
     }
 
+    section_dynamic_with_subtitle(
+        title,
+        "Click a tile to remove that member.".to_string(),
+        vec![static_row(group_members_grid_panel(editor))],
+    )
+}
+
+/// Recessed scrollable panel housing the member tile grid. Mirrors the
+/// container treatment used by the People tab Contacts/Groups panels;
+/// tiles inside stay as a chunked column-of-rows grid (4 cols, FillPortion).
+fn group_members_grid_panel<'a>(
+    editor: &'a GroupEditorState,
+) -> Element<'a, SettingsMessage> {
     let mut grid = column![].spacing(SPACE_XS).width(Length::Fill);
     for chunk in editor.members.chunks(MEMBER_TILE_COLS) {
         let mut row_widget = row![].spacing(SPACE_XS).width(Length::Fill);
@@ -2272,15 +2341,31 @@ fn group_members_grid_section<'a>(
         grid = grid.push(row_widget);
     }
 
-    section_dynamic_with_subtitle(
-        title,
-        "Click a tile to remove that member.".to_string(),
-        vec![static_row(
-            container(grid)
-                .padding(PAD_SETTINGS_ROW)
-                .width(Length::Fill),
-        )],
+    let panel = container(
+        scrollable(container(grid).padding(PAD_CARD).width(Length::Fill))
+            .direction(iced::widget::scrollable::Direction::Vertical(
+                iced::widget::scrollable::Scrollbar::new()
+                    .width(6)
+                    .scroller_width(6)
+                    .margin(SPACE_XXS),
+            ))
+            .height(Length::Fill),
     )
+    .padding(iced::Padding {
+        top: SPACE_XS,
+        right: 0.0,
+        bottom: SPACE_XS,
+        left: 0.0,
+    })
+    .width(Length::Fill)
+    .height(GROUP_PANEL_HEIGHT)
+    .clip(true)
+    .style(theme::style_recessed_list_panel);
+
+    container(panel)
+        .padding(SPACE_XS)
+        .width(Length::Fill)
+        .into()
 }
 
 fn member_tile(email: &str) -> Element<'_, SettingsMessage> {
