@@ -732,6 +732,43 @@ impl RowPosition {
     }
 }
 
+/// Container style for a recessed scrollable list panel inside a settings
+/// section (e.g. the contacts / groups list in the People tab). Uses a
+/// slightly inset background so it reads as a different surface from the
+/// section it sits in.
+pub fn style_recessed_list_panel(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.background.weakest.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.12),
+            width: 1.0,
+            radius: RADIUS_MD.into(),
+        },
+        ..Default::default()
+    }
+}
+
+/// "Pill" button style for free-floating contact / group cards inside a
+/// recessed panel. Visible border at rest; brighter background on hover.
+pub fn style_pill_card_button(theme: &Theme, status: button::Status) -> button::Style {
+    let p = theme.palette();
+    let (bg, border_alpha) = match status {
+        button::Status::Hovered => (p.background.weak.color, 0.25),
+        _ => (p.background.base.color, 0.15),
+    };
+    button::Style {
+        background: Some(bg.into()),
+        text_color: p.background.base.text,
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(border_alpha),
+            width: 1.0,
+            radius: RADIUS_MD.into(),
+        },
+        ..Default::default()
+    }
+}
+
 /// Position-aware variant of `style_action_button` for settings rows. Outer
 /// corners use `RADIUS_LG` (matching the section container); inner corners
 /// stay `RADIUS_SM` so adjacent rows share a sharper seam.

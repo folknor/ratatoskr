@@ -1461,10 +1461,8 @@ fn people_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     // Filter input
     contact_items.push(static_row(contact_filter_row(&state.contact_filter)));
 
-    // Contact cards
-    for contact in &state.contacts {
-        contact_items.push(contact_card(contact, &state.managed_accounts));
-    }
+    // Recessed scrollable panel of contact pills
+    contact_items.push(static_row(contact_list_panel(state)));
 
     // New Contact button
     contact_items.push(people_add_button(
@@ -1526,12 +1524,48 @@ fn group_filter_row(filter: &str) -> Element<'_, SettingsMessage> {
     .into()
 }
 
+/// Recessed, fixed-height scrollable panel holding the contact pills. Used
+/// inside the "Contacts" section between the filter row and the New Contact
+/// button so the list stays compact regardless of how many contacts exist.
+fn contact_list_panel(state: &Settings) -> Element<'_, SettingsMessage> {
+    if state.contacts.is_empty() {
+        return container(
+            text("No contacts yet.")
+                .size(TEXT_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .padding(PAD_CARD)
+        .width(Length::Fill)
+        .height(CONTACT_PANEL_HEIGHT)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .style(theme::style_recessed_list_panel)
+        .into();
+    }
+
+    let mut col = column![]
+        .spacing(PEOPLE_PILL_SPACING)
+        .width(Length::Fill);
+    for contact in &state.contacts {
+        col = col.push(contact_card(contact, &state.managed_accounts));
+    }
+
+    container(
+        scrollable(container(col).padding(PAD_CARD).width(Length::Fill))
+            .spacing(SCROLLBAR_SPACING)
+            .height(Length::Fill),
+    )
+    .width(Length::Fill)
+    .height(CONTACT_PANEL_HEIGHT)
+    .style(theme::style_recessed_list_panel)
+    .into()
+}
+
 fn contact_card<'a>(
     contact: &'a crate::db::ContactEntry,
     accounts: &'a [ManagedAccount],
-) -> RowBuilder<'a> {
-    Box::new(move |position| {
-        let name = contact.display_name.as_deref().unwrap_or("(no name)");
+) -> Element<'a, SettingsMessage> {
+    let name = contact.display_name.as_deref().unwrap_or("(no name)");
         let id = contact.id.clone();
 
         // ── Header row: display name (left) + email (right) ──
@@ -1666,18 +1700,17 @@ fn contact_card<'a>(
             col = col.push(ar);
         }
 
-        button(
-            container(col)
-                .padding(PAD_SETTINGS_ROW)
-                .width(Length::Fill)
-                .align_y(Alignment::Center),
-        )
-        .on_press(SettingsMessage::ContactClick(id))
-        .padding(0)
-        .style(move |t, s| theme::style_settings_row_button(t, s, position))
-        .width(Length::Fill)
-        .into()
-    })
+    button(
+        container(col)
+            .padding(PAD_CARD)
+            .width(Length::Fill)
+            .align_y(Alignment::Center),
+    )
+    .on_press(SettingsMessage::ContactClick(id))
+    .padding(0)
+    .style(theme::style_pill_card_button)
+    .width(Length::Fill)
+    .into()
 }
 
 fn group_card(group: &crate::db::GroupEntry) -> RowBuilder<'_> {

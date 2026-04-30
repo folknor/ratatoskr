@@ -551,3 +551,12 @@ pub const CHAT_DATE_SEPARATOR_SPACING: f32 = 16.0;
 pub const MEMBER_TILE_COLS: usize = 4;
 /// Height of each member tile in the grid.
 pub const MEMBER_TILE_HEIGHT: f32 = 64.0;
+
+// ── People tab list panel ──────────────────────────────
+/// Fixed height of the recessed scrollable panel holding contact pills
+/// in the People tab. Targets ~5 minimal cards visible at a glance.
+pub const CONTACT_PANEL_HEIGHT: f32 = 380.0;
+/// Same idea for the Groups list panel.
+pub const GROUP_PANEL_HEIGHT: f32 = 240.0;
+/// Vertical spacing between contact / group pills inside their panel.
+pub const PEOPLE_PILL_SPACING: f32 = 8.0;
