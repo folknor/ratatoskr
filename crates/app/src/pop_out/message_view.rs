@@ -418,10 +418,18 @@ fn overflow_context_menu<'a>(
     current_mode: RenderingMode,
     window_id: iced::window::Id,
 ) -> Element<'a, Message> {
+    // Wrap the icon in a row with a zero-width TEXT_SM text alongside it so
+    // the trigger's content has the same line-height extent as
+    // `action_icon_button` (which packs ICON_MD + TEXT_SM label). Without
+    // this, the hamburger renders shorter than Reply/Reply All/Forward.
     let trigger = button(
-        icon::ellipsis_vertical()
-            .size(ICON_MD)
-            .style(text::secondary),
+        row![
+            icon::ellipsis_vertical()
+                .size(ICON_MD)
+                .style(text::secondary),
+            text("").size(TEXT_SM),
+        ]
+        .align_y(Alignment::Center),
     )
     .on_press(Message::PopOut(
         window_id,
