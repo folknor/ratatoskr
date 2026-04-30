@@ -112,3 +112,7 @@ pub enum Autocomplete {}
 /// Brand for chat timeline loads.
 #[derive(Debug)]
 pub enum Chat {}
+
+/// Brand for chat contacts list loads (sidebar CHATS section).
+#[derive(Debug)]
+pub enum ChatList {}

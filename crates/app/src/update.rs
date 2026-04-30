@@ -463,6 +463,17 @@ impl App {
                 Task::none()
             }
             Message::ChatReadMarked => Task::none(),
+            Message::ChatContactsLoaded(g, _) if !self.chat_list_generation.is_current(g) => {
+                Task::none()
+            }
+            Message::ChatContactsLoaded(_, Ok(contacts)) => {
+                self.sidebar.chat_contacts = contacts;
+                Task::none()
+            }
+            Message::ChatContactsLoaded(_, Err(e)) => {
+                log::error!("ChatContactsLoaded error: {e}");
+                Task::none()
+            }
 
             // Clear all pinned searches
             Message::ClearAllPinnedSearches => self.handle_clear_all_pinned_searches(),

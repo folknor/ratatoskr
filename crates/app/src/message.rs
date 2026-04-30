@@ -152,6 +152,10 @@ pub enum Message {
     ),
     ChatOlderLoaded(String, Result<Vec<rtsk::chat::ChatMessage>, String>),
     ChatReadMarked,
+    ChatContactsLoaded(
+        GenerationToken<rtsk::generation::ChatList>,
+        Result<Vec<rtsk::chat::ChatContactSummary>, String>,
+    ),
 
     // Pinned search management
     ClearAllPinnedSearches,

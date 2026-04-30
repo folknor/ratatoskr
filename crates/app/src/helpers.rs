@@ -11,7 +11,7 @@ use rtsk::db::queries_extra::{
     get_threads_scoped,
 };
 use rtsk::db::types::{AccountScope, DbThread};
-use rtsk::generation::{GenerationToken, Nav};
+use rtsk::generation::{ChatList, GenerationToken, Nav};
 use rtsk::scope::ViewScope;
 use std::sync::Arc;
 use types::{Bundle, FeatureView, SidebarSelection};
@@ -109,10 +109,26 @@ impl App {
 
     pub(crate) fn load_navigation_and_threads(&mut self) -> Task<Message> {
         let token = self.nav_generation.next();
+        let chat_token = self.chat_list_generation.next();
         Task::batch([
             self.fire_navigation_load(token),
             self.load_threads_for_current_view(token),
+            self.fire_chat_contacts_load(chat_token),
         ])
+    }
+
+    pub(crate) fn fire_chat_contacts_load(
+        &self,
+        load_gen: GenerationToken<ChatList>,
+    ) -> Task<Message> {
+        let db_state = self.db.read_db_state();
+        Task::perform(
+            async move {
+                let r = rtsk::chat::get_chat_contacts(&db_state).await;
+                (load_gen, r)
+            },
+            |(g, result)| Message::ChatContactsLoaded(g, result),
+        )
     }
 }
 

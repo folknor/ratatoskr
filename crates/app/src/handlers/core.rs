@@ -68,6 +68,7 @@ impl App {
                 self.reset_view_state();
                 self.load_navigation_and_threads()
             }
+            SidebarEvent::ChatSelected(email) => self.enter_chat_view(email),
         }
     }
 
@@ -79,6 +80,7 @@ impl App {
         self.clear_search_state();
         self.clear_pinned_search_context();
         self.active_chat = None;
+        self.sidebar.active_chat = None;
         self.clear_thread_selection();
         self.chat_timeline = None;
         let _ = self.nav_generation.next();

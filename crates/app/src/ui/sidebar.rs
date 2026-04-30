@@ -30,6 +30,8 @@ pub enum SidebarMessage {
     SelectPinnedSearch(i64),
     DismissPinnedSearch(i64),
     RefreshPinnedSearch(i64),
+    ToggleChatsSection,
+    SelectChat(String),
     ToggleMode,
     /// Right-click "Search here" on a label/folder.
     SearchHere(String),
@@ -58,6 +60,7 @@ pub enum SidebarEvent {
     PinnedSearchSelected(i64),
     PinnedSearchDismissed(i64),
     PinnedSearchRefreshed(i64),
+    ChatSelected(String),
     ModeToggled,
     /// "Search here" - prefill search bar with a scope query prefix.
     SearchHere {
@@ -107,6 +110,13 @@ pub struct Sidebar {
     pub shared_mailboxes: Vec<SharedMailbox>,
     /// Pinned public folders.
     pub pinned_public_folders: Vec<PinnedPublicFolder>,
+    /// Designated chat contacts, set by parent App after each load.
+    pub chat_contacts: Vec<rtsk::chat::ChatContactSummary>,
+    /// Email of the chat contact whose timeline is currently active, if any.
+    /// Pushed by App::view before each Sidebar::view call.
+    pub active_chat: Option<String>,
+    /// Whether the CHATS section is expanded.
+    pub chats_expanded: bool,
 }
 
 impl Sidebar {
@@ -124,6 +134,9 @@ impl Sidebar {
             active_pinned_search: None,
             shared_mailboxes: Vec::new(),
             pinned_public_folders: Vec::new(),
+            chat_contacts: Vec::new(),
+            active_chat: None,
+            chats_expanded: true,
         }
     }
 
@@ -214,6 +227,13 @@ impl Component for Sidebar {
             }
             SidebarMessage::RefreshPinnedSearch(id) => {
                 (Task::none(), Some(SidebarEvent::PinnedSearchRefreshed(id)))
+            }
+            SidebarMessage::ToggleChatsSection => {
+                self.chats_expanded = !self.chats_expanded;
+                (Task::none(), None)
+            }
+            SidebarMessage::SelectChat(email) => {
+                (Task::none(), Some(SidebarEvent::ChatSelected(email)))
             }
             SidebarMessage::ToggleMode => (Task::none(), Some(SidebarEvent::ModeToggled)),
             SidebarMessage::SearchHere(query_prefix) => (
@@ -315,6 +335,17 @@ impl Component for Sidebar {
             scroll_content = scroll_content.push(pinned_searches_section(self));
             scroll_content = scroll_content.push(Space::new().height(SPACE_XXS));
         }
+
+        // Chats (between pinned searches and universal folders, only if non-empty,
+        // scope-independent)
+        if !self.chat_contacts.is_empty() {
+            if !self.pinned_searches.is_empty() {
+                scroll_content = scroll_content.push(widgets::section_break::<SidebarMessage>());
+            }
+            scroll_content = scroll_content.push(chats_section(self));
+            scroll_content = scroll_content.push(Space::new().height(SPACE_XXS));
+        }
+
         scroll_content = scroll_content.push(Space::new().height(SPACE_XS));
         scroll_content = scroll_content.push(nav_items(self));
         scroll_content = scroll_content.push(widgets::section_break());
@@ -647,6 +678,125 @@ fn pinned_public_folders_section(sidebar: &Sidebar) -> Element<'_, SidebarMessag
         col = col.push(item);
     }
     col.into()
+}
+
+// ── Chats ───────────────────────────────────────────────
+
+fn chats_section(sidebar: &Sidebar) -> Element<'_, SidebarMessage> {
+    let children: Vec<Element<'_, SidebarMessage>> = sidebar
+        .chat_contacts
+        .iter()
+        .map(|c| chat_entry_card(sidebar, c))
+        .collect();
+
+    widgets::collapsible_section(
+        "CHATS",
+        sidebar.chats_expanded,
+        SidebarMessage::ToggleChatsSection,
+        children,
+    )
+}
+
+/// Maximum display lengths for the two chat-entry text lines.
+const CHAT_NAME_MAX_CHARS: usize = 22;
+const CHAT_PREVIEW_MAX_CHARS: usize = 32;
+
+fn chat_entry_card<'a>(
+    sidebar: &'a Sidebar,
+    contact: &'a rtsk::chat::ChatContactSummary,
+) -> Element<'a, SidebarMessage> {
+    use iced::widget::text::Wrapping;
+
+    let active = sidebar.active_chat.as_deref() == Some(contact.email.as_str());
+    let unread = contact.unread_count > 0;
+
+    let display_name = contact
+        .display_name
+        .clone()
+        .unwrap_or_else(|| contact.email.clone());
+    let name_display = truncate_query(&display_name, CHAT_NAME_MAX_CHARS);
+
+    let time_label = contact
+        .latest_message_at
+        .map(format_relative_time_short)
+        .unwrap_or_default();
+
+    let preview_display = contact
+        .latest_message_preview
+        .as_deref()
+        .map(|p| truncate_query(p, CHAT_PREVIEW_MAX_CHARS))
+        .unwrap_or_else(|| "-".to_string());
+
+    let avatar = container(widgets::avatar_circle::<SidebarMessage>(
+        &display_name,
+        AVATAR_DROPDOWN_TRIGGER,
+    ))
+    .align_y(Alignment::Center);
+
+    let name_style: fn(&iced::Theme) -> text::Style =
+        if active { text::primary } else { text::base };
+    let name_font = if unread {
+        crate::font::text_bold()
+    } else {
+        crate::font::text()
+    };
+
+    let name_widget = text(name_display)
+        .size(TEXT_SM)
+        .style(name_style)
+        .font(name_font)
+        .wrapping(Wrapping::None);
+
+    let header_row = row![
+        container(name_widget).width(Length::Fill).align_y(Alignment::Center),
+        text(time_label)
+            .size(TEXT_XS)
+            .style(theme::TextClass::Muted.style())
+            .wrapping(Wrapping::None),
+    ]
+    .spacing(SPACE_XXS)
+    .align_y(Alignment::Center);
+
+    let preview_widget = text(preview_display)
+        .size(TEXT_SM)
+        .style(theme::TextClass::Muted.style())
+        .wrapping(Wrapping::None);
+
+    let text_col = column![header_row, preview_widget]
+        .spacing(SPACE_XXXS)
+        .width(Length::Fill);
+
+    let content = row![avatar, text_col]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center);
+
+    button(container(content).padding(PAD_NAV_ITEM))
+        .on_press(SidebarMessage::SelectChat(contact.email.clone()))
+        .padding(0)
+        .style(theme::ButtonClass::PinnedSearch { active }.style())
+        .width(Length::Fill)
+        .into()
+}
+
+/// Compact relative time label used by the CHATS section ("just now", "5m",
+/// "2h", "3d"). Distinct from `format_relative_time` (used by pinned searches)
+/// because the chat sidebar entries need shorter labels per the chats spec.
+fn format_relative_time_short(timestamp: i64) -> String {
+    let Some(dt) = chrono::DateTime::from_timestamp(timestamp, 0) else {
+        return String::new();
+    };
+    let now = chrono::Utc::now();
+    let delta = now.signed_duration_since(dt);
+
+    if delta.num_seconds() < 60 {
+        "now".to_string()
+    } else if delta.num_minutes() < 60 {
+        format!("{}m", delta.num_minutes())
+    } else if delta.num_hours() < 24 {
+        format!("{}h", delta.num_hours())
+    } else {
+        format!("{}d", delta.num_days())
+    }
 }
 
 // ── Pinned searches ─────────────────────────────────────

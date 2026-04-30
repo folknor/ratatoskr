@@ -85,6 +85,7 @@ pub struct App {
     // Chat state
     pub(crate) chat_timeline: Option<crate::ui::chat_timeline::ChatTimeline>,
     pub(crate) chat_generation: GenerationCounter<rtsk::generation::Chat>,
+    pub(crate) chat_list_generation: GenerationCounter<rtsk::generation::ChatList>,
 
     // Search state
     pub(crate) search_state: Option<Arc<rtsk::search::SearchState>>,
@@ -263,6 +264,7 @@ impl App {
             search_state,
             chat_timeline: None,
             chat_generation: GenerationCounter::new(),
+            chat_list_generation: GenerationCounter::new(),
             search_generation: GenerationCounter::new(),
             search_query: UndoableText::new(),
             search_debounce_deadline: None,
