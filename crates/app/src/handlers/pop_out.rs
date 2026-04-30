@@ -230,6 +230,8 @@ fn handle_message_view_update(
         }
         MessageViewMessage::SetRenderingMode(mode) => {
             state.rendering_mode = mode;
+            // Mode picker lives inside the overflow menu; close it on select.
+            state.context_menu_open = false;
             Task::none()
         }
         MessageViewMessage::OpenContextMenu => {

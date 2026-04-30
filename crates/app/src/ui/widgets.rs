@@ -192,6 +192,36 @@ pub fn color_dot_sized<'a, M: 'a>(color: Color, size: f32) -> Element<'a, M> {
     container(dot).center_y(Length::Shrink).into()
 }
 
+/// Decorative radio circle: outer ring (primary color when selected, muted
+/// otherwise) with a smaller filled disk centered inside when selected.
+/// Has no click handler - the parent widget owns interaction.
+pub fn radio_circle<'a, M: 'a>(selected: bool) -> Element<'a, M> {
+    let inner: Element<'a, M> = if selected {
+        let inner_size = RADIO_CIRCLE_SIZE * 0.3;
+        container(Space::new())
+            .width(Length::Fixed(inner_size))
+            .height(Length::Fixed(inner_size))
+            .style(theme::ContainerClass::RadioCircleInner.style())
+            .into()
+    } else {
+        Space::new().into()
+    };
+
+    let outer_class = if selected {
+        theme::ContainerClass::RadioCircleSelected
+    } else {
+        theme::ContainerClass::RadioCircleUnselected
+    };
+
+    container(inner)
+        .width(Length::Fixed(RADIO_CIRCLE_SIZE))
+        .height(Length::Fixed(RADIO_CIRCLE_SIZE))
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(outer_class.style())
+        .into()
+}
+
 // ── Badges ──────────────────────────────────────────────
 
 pub fn count_badge<'a, M: 'a>(count: i64) -> Element<'a, M> {
@@ -418,6 +448,9 @@ pub enum DropdownIcon<'a> {
     Icon(char),
     /// Renders a filled color dot.
     ColorDot(Color),
+    /// Renders a radio circle (primary-colored when selected, muted
+    /// otherwise). For dropdowns used as single-select pickers.
+    Radio { selected: bool },
 }
 
 impl DropdownIcon<'_> {
@@ -429,6 +462,7 @@ impl DropdownIcon<'_> {
                 .style(text::secondary)
                 .into(),
             DropdownIcon::ColorDot(color) => color_dot_sized(color, size),
+            DropdownIcon::Radio { selected } => radio_circle(selected),
         }
     }
 }

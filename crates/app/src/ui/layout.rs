@@ -113,6 +113,10 @@ pub const AVATAR_MESSAGE_CARD: f32 = 32.0;
 /// 56px - Contact sidebar hero
 pub const AVATAR_CONTACT_HERO: f32 = 56.0;
 
+/// 14px - Radio button circle in dropdown rows / picker rows. Outer ring
+/// at this size, inner filled disk at ~50% of this size when selected.
+pub const RADIO_CIRCLE_SIZE: f32 = 14.0;
+
 // ── Leading slot widths ────────────────────────────────
 // When a list item has an icon or avatar on the left,
 // wrap it in a fixed-width container using these values

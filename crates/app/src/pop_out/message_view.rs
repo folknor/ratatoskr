@@ -220,13 +220,13 @@ pub fn view_message_window<'a>(
     state: &'a MessageViewState,
 ) -> Element<'a, Message> {
     let header = message_view_header(window_id, state);
-    let mode_toggle = rendering_mode_toggle(state.rendering_mode, window_id);
     let body = message_view_body(window_id, state);
 
-    // Header + mode toggle stay pinned at the top (non-scrolling).
-    // The body card takes the leftover vertical space and scrolls its own
-    // content; attachments (when present) pin to the bottom below it.
-    let mut content = column![header, widgets::divider(), mode_toggle]
+    // Header stays pinned at the top (non-scrolling). The body card takes
+    // the leftover vertical space and scrolls its own content; attachments
+    // (when present) pin to the bottom below it. Rendering-mode picker
+    // lives inside the header's overflow context menu.
+    let mut content = column![header]
         .spacing(SPACE_0)
         .width(Length::Fill)
         .height(Length::Fill);
@@ -244,7 +244,6 @@ pub fn view_message_window<'a>(
     content = content.push(body);
 
     if !state.attachments.is_empty() {
-        content = content.push(widgets::divider());
         content = content.push(message_view_attachments(
             window_id,
             &state.attachments,
@@ -347,7 +346,12 @@ fn message_view_header<'a>(
     header_fields = header_fields.push(subject_row);
 
     container(header_fields)
-        .padding(PAD_CONTENT)
+        .padding(Padding {
+            top: PAD_CONTENT.top,
+            right: SPACE_SM,
+            bottom: SPACE_XS,
+            left: SPACE_SM,
+        })
         .width(Length::Fill)
         .into()
 }
@@ -382,7 +386,8 @@ fn action_buttons_with_overflow<'a>(
             PopOutMessage::MessageView(MessageViewMessage::Forward),
         ),
     );
-    let overflow = overflow_context_menu(state.context_menu_open, window_id);
+    let overflow =
+        overflow_context_menu(state.context_menu_open, state.rendering_mode, window_id);
 
     row![reply_btn, reply_all_btn, forward_btn, overflow]
         .spacing(SPACE_XXS)
@@ -391,7 +396,11 @@ fn action_buttons_with_overflow<'a>(
 
 // ── Overflow menu ──────────────────────────────────────
 
-fn overflow_context_menu<'a>(open: bool, window_id: iced::window::Id) -> Element<'a, Message> {
+fn overflow_context_menu<'a>(
+    open: bool,
+    current_mode: RenderingMode,
+    window_id: iced::window::Id,
+) -> Element<'a, Message> {
     let trigger = button(
         icon::ellipsis_vertical()
             .size(ICON_MD)
@@ -408,7 +417,14 @@ fn overflow_context_menu<'a>(open: bool, window_id: iced::window::Id) -> Element
         return trigger.into();
     }
 
-    let menu_items = column![
+    let modes = [
+        (RenderingMode::PlainText, "Plain Text"),
+        (RenderingMode::SimpleHtml, "Simple HTML"),
+        (RenderingMode::OriginalHtml, "Original HTML"),
+        (RenderingMode::Source, "Source"),
+    ];
+
+    let mut menu_items = column![
         context_menu_item(
             icon::archive(),
             "Archive",
@@ -441,8 +457,20 @@ fn overflow_context_menu<'a>(open: bool, window_id: iced::window::Id) -> Element
                 PopOutMessage::MessageView(MessageViewMessage::SaveAs),
             ),
         ),
+        widgets::divider(),
     ]
     .spacing(SPACE_XXS);
+
+    for (mode, label) in modes {
+        menu_items = menu_items.push(context_menu_radio_item(
+            mode == current_mode,
+            label,
+            Message::PopOut(
+                window_id,
+                PopOutMessage::MessageView(MessageViewMessage::SetRenderingMode(mode)),
+            ),
+        ));
+    }
 
     let menu = container(menu_items)
         .padding(PAD_DROPDOWN)
@@ -466,7 +494,11 @@ fn context_menu_item<'a>(
 ) -> Element<'a, Message> {
     button(
         row![
-            container(ico.size(ICON_MD).style(text::secondary)).align_y(Alignment::Center),
+            container(ico.size(ICON_MD).style(text::secondary))
+                .width(SLOT_DROPDOWN)
+                .height(SLOT_DROPDOWN)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
             container(text(label).size(TEXT_MD).style(text::base)).align_y(Alignment::Center),
         ]
         .spacing(SPACE_XS)
@@ -475,52 +507,39 @@ fn context_menu_item<'a>(
     .on_press(on_press)
     .padding(PAD_NAV_ITEM)
     .height(DROPDOWN_ITEM_HEIGHT)
-    .style(theme::ButtonClass::Action.style())
+    .style(theme::ButtonClass::Dropdown { selected: false }.style())
     .width(Length::Fill)
     .into()
 }
 
-// ── Rendering mode toggle ──────────────────────────────
-
-fn rendering_mode_toggle<'a>(
-    current: RenderingMode,
-    window_id: iced::window::Id,
+/// Variant of `context_menu_item` that shows a radio circle in the leading
+/// slot instead of an icon. Used for single-select options inside a
+/// dropdown (e.g. the rendering-mode picker in the overflow menu).
+fn context_menu_radio_item<'a>(
+    selected: bool,
+    label: &'a str,
+    on_press: Message,
 ) -> Element<'a, Message> {
-    let modes = [
-        (RenderingMode::PlainText, "Plain Text"),
-        (RenderingMode::SimpleHtml, "Simple HTML"),
-        (RenderingMode::OriginalHtml, "Original HTML"),
-        (RenderingMode::Source, "Source"),
-    ];
-
-    let mut toggle_row = row![].spacing(SPACE_XS);
-    for (mode, label) in modes {
-        let is_active = current == mode;
-        toggle_row = toggle_row.push(
-            button(text(label).size(TEXT_SM).style(if is_active {
-                text::primary
-            } else {
-                text::secondary
-            }))
-            .on_press(Message::PopOut(
-                window_id,
-                PopOutMessage::MessageView(MessageViewMessage::SetRenderingMode(mode)),
-            ))
-            .padding(PAD_ICON_BTN)
-            .style(theme::ButtonClass::Chip { active: is_active }.style()),
-        );
-    }
-
-    container(toggle_row)
-        .padding(Padding {
-            top: 0.0,
-            right: SPACE_LG,
-            bottom: SPACE_SM,
-            left: SPACE_LG,
-        })
-        .width(Length::Fill)
-        .into()
+    button(
+        row![
+            container(widgets::radio_circle(selected))
+                .width(SLOT_DROPDOWN)
+                .height(SLOT_DROPDOWN)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+            container(text(label).size(TEXT_MD).style(text::base)).align_y(Alignment::Center),
+        ]
+        .spacing(SPACE_XS)
+        .align_y(Alignment::Center),
+    )
+    .on_press(on_press)
+    .padding(PAD_NAV_ITEM)
+    .height(DROPDOWN_ITEM_HEIGHT)
+    .style(theme::ButtonClass::Dropdown { selected: false }.style())
+    .width(Length::Fill)
+    .into()
 }
+
 
 // ── Body ───────────────────────────────────────────────
 
@@ -578,8 +597,16 @@ fn message_view_body<'a>(
         .height(Length::Fill)
         .style(theme::ContainerClass::EmailBody.style());
 
+    // Outer wrapper hugs the window edges more tightly than the header
+    // (12px vs the header's 24px), matching the compose pop-out so the
+    // body card visually owns the full content area.
     container(body_inset)
-        .padding(PAD_CONTENT)
+        .padding(Padding {
+            top: 0.0,
+            right: SPACE_SM,
+            bottom: SPACE_XS,
+            left: SPACE_SM,
+        })
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
@@ -685,10 +712,10 @@ fn message_view_attachments<'a>(
     let panel_inner = column![header_row, scroll_area].spacing(SPACE_XS);
 
     let panel_padding = Padding {
-        top: SPACE_XS,
-        right: PAD_CONTENT.right,
+        top: SPACE_XXS,
+        right: SPACE_SM,
         bottom: PAD_CONTENT.bottom,
-        left: PAD_CONTENT.left,
+        left: SPACE_SM,
     };
 
     container(panel_inner)

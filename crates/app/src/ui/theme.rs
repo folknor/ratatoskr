@@ -375,6 +375,12 @@ pub enum ContainerClass {
     ChatBubbleSent,
     /// Chat bubble - received from contact (surface background).
     ChatBubbleReceived,
+    /// Radio circle outer ring - selected state (primary color).
+    RadioCircleSelected,
+    /// Radio circle outer ring - unselected state (muted border).
+    RadioCircleUnselected,
+    /// Radio circle inner filled disk (rendered only when selected).
+    RadioCircleInner,
 }
 
 impl ContainerClass {
@@ -412,6 +418,9 @@ impl ContainerClass {
             Self::ChordIndicator => style_chord_indicator_container,
             Self::ChatBubbleSent => style_chat_bubble_sent,
             Self::ChatBubbleReceived => style_chat_bubble_received,
+            Self::RadioCircleSelected => style_radio_circle_selected,
+            Self::RadioCircleUnselected => style_radio_circle_unselected,
+            Self::RadioCircleInner => style_radio_circle_inner,
         }
     }
 }
@@ -1473,6 +1482,36 @@ fn style_chat_bubble_received(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(p.background.weakest.color.into()),
         border: border::rounded(super::layout::CHAT_BUBBLE_RADIUS),
+        ..Default::default()
+    }
+}
+
+fn style_radio_circle_selected(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(theme.palette().primary.base.color.into()),
+        border: border::rounded(super::layout::RADIO_CIRCLE_SIZE / 2.0),
+        ..Default::default()
+    }
+}
+
+fn style_radio_circle_unselected(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.background.base.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.5),
+            width: 1.5,
+            radius: (super::layout::RADIO_CIRCLE_SIZE / 2.0).into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn style_radio_circle_inner(_theme: &Theme) -> container::Style {
+    let inner_size = super::layout::RADIO_CIRCLE_SIZE * 0.3;
+    container::Style {
+        background: Some(ON_AVATAR.into()),
+        border: border::rounded(inner_size / 2.0),
         ..Default::default()
     }
 }

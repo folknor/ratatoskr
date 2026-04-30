@@ -8,7 +8,8 @@ use crate::types::NotificationCandidate;
 use db::db::DbState;
 use db::db::queries::load_recent_rule_bundled_threads;
 
-/// Check settings and return threads that need AI categorization.
+/// Check settings and return threads that need AI bundling
+/// (inbox classification into Primary/Updates/Promotions/Social/Newsletters).
 pub async fn get_ai_bundling_candidates(
     db: &DbState,
     account_id: &str,
