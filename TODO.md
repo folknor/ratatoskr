@@ -14,23 +14,11 @@
 
 - [ ] **Compose window help text** - The help text in the compose windows to/cc/bcc fields ("Add recipients...") is not vertically centered in the input field. Note: `token_input.rs::draw_text_area` already draws the placeholder with `align_y: Vertical::Center` inside a `TOKEN_HEIGHT` box and `PAD_TOKEN_INPUT` is symmetric (top=4, bottom=4), so on paper it should be centered. The misalignment must come from elsewhere - possibly the field's overall layout height vs. the `TOKEN_HEIGHT` slot, or font metrics asymmetry. Needs investigation with rendered measurements.
 
-- [x] **Settings slide-in/over panel Escape handling** - Currently Esc closes the settings completely. It should close an open slide-in first, only closing settings entirely if no slide-in is open.
-
-- [x] **Settings/People: Contacts list** - Group/account pills need to lay out horizontally first, then vertically.
-
 - [ ] **Settings/Accounts: Edit Account** - This section needs rework.
-
-- [x] **Compose window input fields** - The to/cc/bcc and the Subject fields have different styling.
 
 - [ ] **Codebase-wide chevron unification** - The chevron icon should be unified across the codebase; we use different chevron icons in different places (dropdowns, accordions, popovers, etc.). Audit all chevron uses and standardize on one icon set + sizing scale.
 
-- [x] **Compose window account dropdown + cc/bcc buttons** - These need similar styling to other such controls with proper hover effects. The chevron icon in the dropdown should also be unified across the codebase, we use different chevron icons all over the place. Bottom buttons (Discard/Attach/Send) partially addressed: Send now uses `ICON_LG`/`TEXT_LG`/`theme::ON_AVATAR` to mirror the main sidebar Compose button, and Discard/Attach were bumped to `ICON_LG`/`TEXT_LG` to size-match. Remaining: account dropdown + Cc/Bcc toggle button hover styling, and codebase-wide chevron unification.
-
-- [x] **Compose window "pop ups"** - There's a popup when you Discard, and to Insert Link. These are not actually modals at the moment; they render at the bottom of the compose window.
-
-- [x] **Compose window labels** - The From/To/CC/Bcc/Subject labels should be right-aligned, so that they float near their relative inputs.
-
-- [x] **Compose window labels vertical alignment** - The right-aligned From/To/CC/Bcc/Subject labels are not vertically centered against their input boxes.
+- [ ] **Compose account dropdown + Cc/Bcc toggle hover styling** - The account dropdown and Cc/Bcc toggle buttons in the compose window still need proper hover effects matching the rest of the compose toolbar.
 
 - [ ] **Compose autocomplete dropdown styling** - The richer two-line name+email layout and group icon+member count are not actually showing in the autocomplete dropdown - only the name (or email) is showing. The render code at `compose.rs::autocomplete_dropdown` does branch on `entry.is_group` and `entry.display_name`, but in practice neither the second-line email nor the group icon/`(N)` suffix renders. Investigation should start at the data source: verify `ContactMatch.display_name`, `is_group`, and `member_count` are populated (and not `None`/`false`/`0`) in the search result fed into `state.autocomplete.results` - if the fields are empty, the render falls through to the bare `text(&entry.email)` branch.
 
@@ -38,27 +26,11 @@
 
 - [ ] **Attachment saving** - Should remember last folder. Ideally last folder per thread ID.
 
-- [x] **Reading pane** - There's too much vertical spacing between the top part and the first reply/all/forward action line. Needs a tighter fit; vertical space doesn't come cheap on a laptop.
-
 - [ ] **Collapse individual expanded messages** - Chevron now points up (fixed: added `icon::chevron_up()` at U+E070, swapped in `widgets::expanded_message_card`). Remaining: the button needs a new place to live - probably a very long, thin button that stretches across the entire horizontal space at the top of the message frame. This needs to be unified with the Attachments panel collapsing, which is currently taking up too much vertical space; also too much padding above the Attachments section.
-
-- [x] **Attachment "Save All" button** - Needs to have same styling as other in-section buttons in the reading pane, and should not be part of the same interaction block as the collapse/expand header.
-
-- [x] **Attachments in the pop out message window** - Reading pane is done (Open/Save icons outside the card, meta line pops out parent message, versions toggle inline). Pop-out message viewer now has a pinned-bottom panel with `Attachments (N)` header + Save All button, and a wrapping row of compact pills (`[icon] filename size`). On hover, an opaque two-button overlay (Save / Open, rounded to match pill corners) covers the pill. Open / Save / Save All click handlers are stubbed (log only) for now.
-
-- [x] **Email body background override setting** - This needs to apply to the pop out window as well, and we need an inset rounded+bordered area in the pop-out viewing window just like in the reading pane.
-
-- [x] **Compose window close** - Closing the compose window doesn't currently ask the user whether they want to discard the draft. Should wire that in same as the Discard button.
-
-- [x] **Settings window dropdown rows** - The inlined dropdowns inside settings rows currently have their own background color hover effect, but this is not necessary because the entire settings row has a background hover effect.
-
-- [x] **Settings window dropdown closing** - The dropdown opens when the settings row is clicked, which is nice - but clicking the settings row again doesn't close it. It closes + reopens it with 1 click.
 
 - [ ] **Settings window row hover** - Currently the hover effect for the settings row doesn't use the same border radius as the bottom/top settings rows, which means hovering those looks a bit weird. Root cause: `style_settings_section_container` uses `RADIUS_LG` (8) for the section's outer corners, but `style_action_button` (used by `setting_row`/`toggle_row`/`input_row`) uses `RADIUS_SM` (4) for the row hover background uniformly. Top/bottom rows need radii that match the section's outer corners on the outer edges and stay `RADIUS_SM` on the inner edges. Fix needs new `ButtonClass::ActionTop` / `ActionBottom` / `ActionOnly` variants (or a parameterized style) and `section_inner` to pass each row's position (first/last/middle/only) to the row builders.
 
 - [ ] **Settings/Composing: Signatures** - This section needs work.
-
-- [x] **App logo in first-launch modal** - SVG rendered via iced svg feature, embedded with include_bytes, but it's not showing. Now also shows in the non-first-launch Add Account dialog.
 
 - [ ] **Standardized popup/dropdown/modal** - Currently setting dropdowns, various modal dialogs (the Settings slide-in, Add Account modal, etc) use various methods to dim/control/disable/dismiss. We need standardized controls for all this. For example the Add Account modal currently dims the background (rest of the window), but it doesn't prevent interaction with any controls - even controls that are actually directly below it can still be interacted with. We need the same treatment as the Settings slide-in that does in fact disable things behind it. See `docs/ui/overlay-standardization-plan.md` for the implementation plan.
 
@@ -66,7 +38,7 @@
 
 - [ ] **Focus trapping for modals and sheets** - iced does not natively support focus trapping. Modal and Sheet surfaces should trap Tab/Shift-Tab focus within their content, but currently focus can escape to widgets behind the blocker. If iced adds focus trapping support, `modal_overlay()` (see `docs/ui/overlay-standardization-plan.md`) is the single place to wire it in. Until then, this is a known contract gap.
 
-- [x] **Remove remaining legacy `category` terminology** - The glossary is now descriptive only, but there is still some legacy provider-oriented naming left in code/docs that should be cleaned up where it does not represent a true provider-native term. The main remaining item is `crates/graph/src/category_sync.rs` (the function inside is already `graph_label_sync`), plus any stray bundling comments/docs that still say "categorization" when they mean bundles/classification.
+- [ ] **Legacy `category` terminology cleanup** - `crates/graph/src/category_sync.rs` should be renamed (the function inside is already `graph_label_sync`), and any remaining bundling comments/docs that still say "categorization" when they mean bundles/classification need rewording.
 
 - [ ] **Calendar event detail popover → AnchoredOverlay** - `calendar::popover_stack()` is the only anchored surface still using a hand-rolled `stack![]` instead of the `AnchoredOverlay` primitive. Target behavior: anchor near the clicked event pill using `anchor_point`. Requires capturing click coordinates in `CalendarPopover::EventDetail` (not currently stored). See `docs/ui/overlay-standardization-plan.md` deferred work.
 
@@ -75,8 +47,6 @@
 - [ ] **Escape key audit for overlay surfaces** - Verify every Modal surface dismisses on Escape. Verify no Sheet surface dismisses on Escape. Verify calendar modals (event detail, editor, delete confirm, discard confirm) all handle Escape correctly. Includes nested-modal case: Escape from ConfirmDiscard should return to the editor (preserving the draft), not close everything. Requires routing Escape through the calendar handler for workflow-aware dispatch rather than the current blunt `is_some() → None` in main.rs. Mechanical verification pass, best done after `modal_overlay()` has been in use for a bit.
 
 - [ ] **Calendar move semantics for existing events** - The calendar picker is disabled for `EditingEvent` because moving an event between calendars requires provider-specific support (some providers need delete+create). When provider calendar-move APIs are implemented, re-enable the picker for existing events and update `account_id` ownership logic in the `CalendarSelected` handler accordingly.
-
-- [x] **`create_event_from_email` account derivation** - Currently uses `sidebar.accounts.first()` for account prefill (`main.rs`). This is the last surviving sidebar-accounts reference in the calendar flow. Should derive account from the email message's actual account rather than assuming the first sidebar account is correct.
 
 - [ ] **Link hover URL disclosure (email content)** - Links in email bodies need either a tooltip that shows the destination URL or status-bar disclosure. Decision still pending.
 
@@ -104,10 +74,6 @@
 - [ ] **Action service: user-facing retry status** *(Deferred - blocked on toast system)* - Backend complete: `db_pending_ops_count()`, `db_pending_ops_failed_count()`, `db_pending_ops_retry_failed()` all exist. Zero UI wiring. Needs the toast/notification system (first TODO item) before this can surface "N actions pending retry" badges or "Archive failed after 10 retries" persistent notifications. Without this, users have no visibility into silently diverged state.
 
 - [ ] **Action service: native provider batching** *(Deferred - low ROI until bulk ops are common)* - `batch_execute` dispatches per-thread `MailOperation` sequentially within each account. Provider reuse per account already eliminated client construction overhead - remaining cost is network latency (one round-trip per thread). Native batching (Gmail batch API, Graph `/$batch`, JMAP `Email/set`, IMAP multi-UID STORE) would reduce 50 round-trips to 1-3 for bulk operations. `PartialEq` on `MailOperation` enables grouping identical operations; the executor contract already specifies regrouping semantics. Implementation deferred until bulk operations on 50+ threads become a real user workflow.
-
-- [x] **First-launch modal not dismissible** - In zero-accounts state, cancel doesn't close the wizard. Spec says it should dismiss over an unusable empty app. Intentional safety measure or bug - decide and document.
-
-- [x] **App-specific-password help not clickable** - Discovery types carry `help_url` but UI shows plain text "Check {domain} for setup instructions" - no clickable link to provider app-password pages.
 
 - [ ] **Sync-task cancellation on account deletion** - Delete flow removes DB data but doesn't cancel in-flight sync tasks. Stale sync completions could write to deleted account state.
 
@@ -158,11 +124,9 @@ Event detail modal:
 
 Event editor modal:
 - [ ] Does not adhere to the editor spec at all - needs a full implementation pass
-- [x] Deleting an event from the editor doesn't work
 - [ ] Discarding changes doesn't work (but doesn't save changes either, so no data loss)
 
 Month view:
-- [x] Days that have room for more event pills only show 2 and then "+N more" - should fill available space before collapsing
 - [ ] Event pill overflow still not filling actual available space - current fix uses CALENDAR_CELL_MIN_HEIGHT, so cells only pack events to the minimum height; when the window is taller, cells grow but still cap at the same event count. Needs a layout-aware widget that measures actual rendered cell height.
 
 Week view:
