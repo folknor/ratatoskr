@@ -1,6 +1,8 @@
 use iced::Task;
 
-use crate::ui::chat_timeline::{ChatTimeline, ChatTimelineEvent};
+use crate::ui::chat_timeline::{
+    CHAT_SCROLLABLE_ID, CHAT_TIMELINE_PAGE, ChatTimeline, ChatTimelineEvent,
+};
 use crate::{App, Message};
 
 impl App {
@@ -18,9 +20,27 @@ impl App {
         let token = self.chat_generation.next();
         let chat_list_token = self.chat_list_generation.next();
 
+        let Some(body_store) = self.body_store.clone() else {
+            log::warn!("enter_chat_view: body store unavailable");
+            return self.fire_chat_contacts_load(chat_list_token);
+        };
+        let Some(inline_image_store) = self.inline_image_store.clone() else {
+            log::warn!("enter_chat_view: inline image store unavailable");
+            return self.fire_chat_contacts_load(chat_list_token);
+        };
+
         let timeline_load = Task::perform(
             async move {
-                rtsk::chat::get_chat_timeline(&db_state, &email, &user_emails, 50, None).await
+                rtsk::chat::get_chat_timeline(
+                    &db_state,
+                    &body_store,
+                    &inline_image_store,
+                    &email,
+                    &user_emails,
+                    CHAT_TIMELINE_PAGE,
+                    None,
+                )
+                .await
             },
             move |result| Message::ChatTimelineLoaded(token, result),
         );
@@ -35,12 +55,19 @@ impl App {
         &mut self,
         messages: Vec<rtsk::chat::ChatMessage>,
     ) -> Task<Message> {
-        if let Some(ref mut timeline) = self.chat_timeline {
-            timeline.messages = messages;
-            timeline.loading = false;
-            // TODO: snap to bottom once iced fork exposes scroll_to/snap_to
-        }
-        Task::none()
+        let Some(timeline) = self.chat_timeline.as_mut() else {
+            return Task::none();
+        };
+        // A short page means we've reached the start of history.
+        timeline.has_more = messages.len() >= CHAT_TIMELINE_PAGE;
+        timeline.messages = messages;
+        timeline.loading = false;
+        // Pre-build image handles so iced's GPU image cache stays stable
+        // across view cycles. (Re-creating handles each frame thrashes the
+        // cache and causes flicker / driver pressure.)
+        timeline.refresh_image_handles();
+        // Snap to bottom so the most recent message is visible on entry.
+        iced::widget::operation::snap_to_end::<Message>(CHAT_SCROLLABLE_ID.to_string())
     }
 
     /// Handle events from the chat timeline component.
@@ -61,15 +88,23 @@ impl App {
                 let contact = timeline.contact_email.clone();
                 let db_state = self.db.read_db_state();
                 let user_emails = self.user_emails();
+                let Some(body_store) = self.body_store.clone() else {
+                    return Task::none();
+                };
+                let Some(inline_image_store) = self.inline_image_store.clone() else {
+                    return Task::none();
+                };
 
                 let email = contact.clone();
                 Task::perform(
                     async move {
                         rtsk::chat::get_chat_timeline(
                             &db_state,
+                            &body_store,
+                            &inline_image_store,
                             &email,
                             &user_emails,
-                            50,
+                            CHAT_TIMELINE_PAGE,
                             Some(before),
                         )
                         .await
@@ -86,9 +121,16 @@ impl App {
         messages: Vec<rtsk::chat::ChatMessage>,
     ) -> Task<Message> {
         if let Some(ref mut timeline) = self.chat_timeline {
+            let got = messages.len();
             let mut older = messages;
             older.append(&mut timeline.messages);
             timeline.messages = older;
+            // A short page means we just hit the start of history.
+            if got < CHAT_TIMELINE_PAGE {
+                timeline.has_more = false;
+            }
+            // Build handles for the newly prepended messages.
+            timeline.refresh_image_handles();
         }
         Task::none()
     }

@@ -1,4 +1,8 @@
+use std::collections::HashMap;
+
 use db::db::DbState;
+use store::body_store::BodyStoreState;
+use store::inline_image_store::InlineImageStoreState;
 
 /// Summary data for a chat contact in the sidebar.
 #[derive(Debug, Clone)]
@@ -24,6 +28,18 @@ pub struct ChatMessage {
     pub subject: Option<String>,
     pub is_read: bool,
     pub is_from_user: bool,
+    /// Plain-text body, loaded from the body store. `None` if the body store
+    /// has no row for this message (shouldn't happen for seeded data).
+    pub body_text: Option<String>,
+    /// Inline image attachments to render alongside the body.
+    pub inline_images: Vec<ChatInlineImage>,
+}
+
+/// An inline image attachment, ready to hand to `iced::widget::image`.
+#[derive(Debug, Clone)]
+pub struct ChatInlineImage {
+    pub mime_type: String,
+    pub bytes: Vec<u8>,
 }
 
 /// Designate an email address as a chat contact.
@@ -82,8 +98,13 @@ pub async fn get_chat_contacts(db: &DbState) -> Result<Vec<ChatContactSummary>, 
 ///
 /// Returns messages across all accounts and threads, ordered chronologically
 /// (oldest first). Use `before` timestamp for pagination.
+///
+/// Bodies are loaded from `body_store`; inline image bytes are resolved via
+/// `inline_image_store` so the UI can render them directly.
 pub async fn get_chat_timeline(
     db: &DbState,
+    body_store: &BodyStoreState,
+    inline_image_store: &InlineImageStoreState,
     email: &str,
     user_emails: &[String],
     limit: usize,
@@ -92,32 +113,100 @@ pub async fn get_chat_timeline(
     let email = email.to_lowercase();
     let user_emails: Vec<String> = user_emails.iter().map(|e| e.to_lowercase()).collect();
 
-    db.with_conn(move |conn| {
-        let mut messages = crate::db::queries_extra::chat::get_chat_timeline_sync(
-            conn, &email, limit, before,
-        )?
-        .into_iter()
-        .map(|row| {
-            let is_from_user = user_emails
-                .iter()
-                .any(|ue| ue.eq_ignore_ascii_case(&row.from_address));
+    // Phase 1: messages + inline-image rows from main DB.
+    let (mut messages, inline_rows) = db
+        .with_conn(move |conn| {
+            let rows = crate::db::queries_extra::chat::get_chat_timeline_sync(
+                conn, &email, limit, before,
+            )?;
+            let message_ids: Vec<String> =
+                rows.iter().map(|r| r.message_id.clone()).collect();
+            let images = crate::db::queries_extra::chat::get_chat_inline_images_sync(
+                conn,
+                &message_ids,
+            )?;
 
-            ChatMessage {
-                message_id: row.message_id,
-                account_id: row.account_id,
-                thread_id: row.thread_id,
-                from_address: row.from_address,
-                from_name: row.from_name,
-                date: row.date,
-                subject: row.subject,
-                is_read: row.is_read,
-                is_from_user,
-            }
+            let mut messages: Vec<ChatMessage> = rows
+                .into_iter()
+                .map(|row| {
+                    let is_from_user = user_emails
+                        .iter()
+                        .any(|ue| ue.eq_ignore_ascii_case(&row.from_address));
+                    ChatMessage {
+                        message_id: row.message_id,
+                        account_id: row.account_id,
+                        thread_id: row.thread_id,
+                        from_address: row.from_address,
+                        from_name: row.from_name,
+                        date: row.date,
+                        subject: row.subject,
+                        is_read: row.is_read,
+                        is_from_user,
+                        body_text: None,
+                        inline_images: Vec::new(),
+                    }
+                })
+                .collect();
+            messages.reverse();
+            Ok::<_, String>((messages, images))
         })
-        .collect::<Vec<_>>();
+        .await?;
 
-        messages.reverse();
-        Ok(messages)
-    })
-    .await
+    if messages.is_empty() {
+        return Ok(messages);
+    }
+
+    // Phase 2: bodies. Plain text only - HTML rendering and signature
+    // stripping are deferred to the Phase 5 polish work.
+    let message_ids: Vec<String> = messages.iter().map(|m| m.message_id.clone()).collect();
+    let bodies = body_store.get_batch(message_ids).await?;
+    let mut body_map: HashMap<String, Option<String>> = HashMap::new();
+    for body in bodies {
+        body_map.insert(body.message_id, body.body_text);
+    }
+
+    // Phase 3: inline image bytes from the inline_image store, batched by hash.
+    let mut by_message: HashMap<String, Vec<&db::db::queries_extra::chat::DbChatInlineImage>> =
+        HashMap::new();
+    for row in &inline_rows {
+        by_message.entry(row.message_id.clone()).or_default().push(row);
+    }
+    // `get_batch_sync` expects `(key_for_result_map, lookup_content_hash)`
+    // pairs and is keyed by CID for the reading-pane caller. For chat we
+    // just want hash -> bytes, so duplicate the hash on both sides.
+    let unique_hashes: Vec<(String, String)> = inline_rows
+        .iter()
+        .map(|r| (r.content_hash.clone(), r.content_hash.clone()))
+        .collect();
+    let bytes_map = if unique_hashes.is_empty() {
+        HashMap::new()
+    } else {
+        let conn = inline_image_store.conn();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn
+                .lock()
+                .map_err(|e| format!("inline image store lock: {e}"))?;
+            InlineImageStoreState::get_batch_sync(&conn, &unique_hashes)
+        })
+        .await
+        .map_err(|e| format!("spawn_blocking: {e}"))??
+    };
+
+    for msg in &mut messages {
+        if let Some(text) = body_map.remove(&msg.message_id).flatten() {
+            msg.body_text = Some(text);
+        }
+        if let Some(rows) = by_message.get(&msg.message_id) {
+            for row in rows {
+                if let Some(bytes) = bytes_map.get(&row.content_hash) {
+                    msg.inline_images.push(ChatInlineImage {
+                        mime_type: row.mime_type.clone(),
+                        bytes: bytes.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(messages)
 }

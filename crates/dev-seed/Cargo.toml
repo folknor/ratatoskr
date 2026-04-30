@@ -22,6 +22,12 @@ toml = "1"
 serde = { workspace = true }
 log = "0.4"
 hotpath = { workspace = true, optional = true }
+# Generate small placeholder PNGs for seeded inline-image attachments.
+# Restricted to the `png` feature to keep the dep footprint small.
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Hash for chat inline-image content_hash (matches `xxh3_64` formatting used
+# by the rest of the codebase, e.g. `common/src/signature_images.rs`).
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 
 [features]
 hotpath = ["dep:hotpath", "hotpath/hotpath", "db/hotpath", "store/hotpath"]

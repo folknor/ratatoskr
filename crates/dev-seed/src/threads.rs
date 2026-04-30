@@ -100,6 +100,15 @@ pub struct PendingBody {
     pub body_text: String,
 }
 
+/// Inline image blob to be inserted into `inline_images.db` after the main
+/// transaction. `content_hash` is the primary key and is content-addressed
+/// (xxh3 of the bytes) so identical images dedupe naturally.
+pub struct PendingInlineImage {
+    pub content_hash: String,
+    pub bytes: Vec<u8>,
+    pub mime_type: String,
+}
+
 pub struct SeedStats {
     pub threads: u32,
     pub messages: u32,
@@ -107,6 +116,7 @@ pub struct SeedStats {
     pub chat_contacts: u32,
     pub chat_threads: u32,
     pub chat_messages: u32,
+    pub chat_inline_images: u32,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -126,6 +136,7 @@ pub fn generate_threads(
         chat_contacts: 0,
         chat_threads: 0,
         chat_messages: 0,
+        chat_inline_images: 0,
     };
     let mut imap_uid_counter: HashMap<(String, String), u32> = HashMap::new();
     let now = FIXED_NOW;

@@ -105,14 +105,16 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
         &config.locale,
         config.threads,
     )?;
+    let mut pending_inline_images: Vec<threads::PendingInlineImage> = Vec::new();
     chats::seed_chats(
         &conn,
         &mut rng,
         &accs,
         &pools,
         &config.locale,
-        config.chats_per_account,
+        config.chats,
         &mut pending_bodies,
+        &mut pending_inline_images,
         &mut stats,
     )?;
     contacts::seed_vips(&conn, &mut rng, &pools.combined, &accs)?;
@@ -172,10 +174,46 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
         .execute_batch("COMMIT")
         .map_err(|e| format!("body commit: {e}"))?;
 
+    // ── Populate inline image store ─────────────────────────
+    if !pending_inline_images.is_empty() {
+        let iis = store::inline_image_store::InlineImageStoreState::init(app_data_dir)
+            .map_err(|e| format!("init inline image store: {e}"))?;
+        let iis_conn = iis.conn();
+        let iis_conn = iis_conn
+            .lock()
+            .map_err(|e| format!("inline image store lock: {e}"))?;
+        iis_conn
+            .execute_batch("BEGIN")
+            .map_err(|e| format!("inline image begin: {e}"))?;
+        {
+            let mut stmt = iis_conn
+                .prepare(
+                    "INSERT OR IGNORE INTO inline_images \
+                     (content_hash, data, mime_type, size) \
+                     VALUES (?1, ?2, ?3, ?4)",
+                )
+                .map_err(|e| format!("prepare inline image insert: {e}"))?;
+            for img in &pending_inline_images {
+                let size = i64::try_from(img.bytes.len()).unwrap_or(i64::MAX);
+                stmt.execute(rusqlite::params![
+                    img.content_hash,
+                    img.bytes,
+                    img.mime_type,
+                    size,
+                ])
+                .map_err(|e| format!("insert inline image: {e}"))?;
+            }
+        }
+        iis_conn
+            .execute_batch("COMMIT")
+            .map_err(|e| format!("inline image commit: {e}"))?;
+    }
+
     let elapsed = start.elapsed();
     log::info!(
         "Dev-seed complete: {} threads, {} messages, {} attachments, {} bodies; \
-         chats: {} contacts, {} threads, {} messages in {:.1}s",
+         chats: {} contacts, {} threads, {} messages, {} inline images \
+         ({} unique blobs) in {:.1}s",
         stats.threads,
         stats.messages,
         stats.attachments,
@@ -183,6 +221,8 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
         stats.chat_contacts,
         stats.chat_threads,
         stats.chat_messages,
+        stats.chat_inline_images,
+        pending_inline_images.len(),
         elapsed.as_secs_f64()
     );
 

@@ -27,6 +27,60 @@ pub struct DbChatMessage {
     pub is_read: bool,
 }
 
+/// Inline image attachment row for chat rendering.
+///
+/// Only inline image-type attachments are surfaced for chat - regular file
+/// attachments are out of scope for the timeline view per Phase 2.
+#[derive(Debug, Clone)]
+pub struct DbChatInlineImage {
+    pub message_id: String,
+    pub account_id: String,
+    pub content_hash: String,
+    pub mime_type: String,
+}
+
+/// Fetch inline image attachments for a set of chat messages.
+///
+/// Filters to `is_inline = 1` AND `mime_type LIKE 'image/%'` AND a non-null
+/// `content_hash`. The hash is the lookup key for the inline image store.
+pub fn get_chat_inline_images_sync(
+    conn: &Connection,
+    message_ids: &[String],
+) -> Result<Vec<DbChatInlineImage>, String> {
+    if message_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let placeholders: Vec<String> = (0..message_ids.len()).map(|i| format!("?{}", i + 1)).collect();
+    let placeholders_csv = placeholders.join(", ");
+    let sql = format!(
+        "SELECT message_id, account_id, content_hash, mime_type \
+         FROM attachments \
+         WHERE message_id IN ({placeholders_csv}) \
+           AND is_inline = 1 \
+           AND mime_type LIKE 'image/%' \
+           AND content_hash IS NOT NULL"
+    );
+
+    let params: Vec<&dyn rusqlite::types::ToSql> = message_ids
+        .iter()
+        .map(|s| s as &dyn rusqlite::types::ToSql)
+        .collect();
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    stmt.query_map(params.as_slice(), |row| {
+        Ok(DbChatInlineImage {
+            message_id: row.get("message_id")?,
+            account_id: row.get("account_id")?,
+            content_hash: row.get("content_hash")?,
+            mime_type: row.get("mime_type")?,
+        })
+    })
+    .map_err(|e| e.to_string())?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| e.to_string())
+}
+
 /// Insert or update a chat contact designation and recompute chat flags/summary.
 pub fn designate_chat_contact_sync(
     conn: &Connection,

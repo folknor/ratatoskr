@@ -1,6 +1,6 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use iced::widget::{Space, column, container, row, scrollable, text};
+use iced::widget::{Space, column, container, image, row, scrollable, text};
 use iced::{Alignment, Element, Length};
 
 use crate::component::Component;
@@ -28,10 +28,32 @@ pub enum ChatTimelineEvent {
 
 // ── State ──────────────────────────────────────────────
 
+/// Page size for chat timeline loads. Anything smaller than this in a
+/// returned page means we've hit the start of history.
+pub const CHAT_TIMELINE_PAGE: usize = 50;
+
+/// Stable widget id for the chat timeline scrollable. The handler issues
+/// `snap_to_end` against this id after the initial load so the latest
+/// message is visible without the user having to scroll.
+pub const CHAT_SCROLLABLE_ID: &str = "chat-timeline-scroll";
+
 pub struct ChatTimeline {
     pub messages: Vec<ChatMessage>,
     pub loading: bool,
     pub contact_email: String,
+    /// Whether more (older) messages may exist on the server. Set to true
+    /// pessimistically until a load returns fewer than `CHAT_TIMELINE_PAGE`
+    /// rows, at which point we know we've reached the start.
+    pub has_more: bool,
+    /// Precomputed image handles keyed by (message_id, inline_image_index).
+    ///
+    /// `image::Handle::from_bytes` calls `Id::unique()` internally, so
+    /// constructing handles in `view()` thrashes iced's GPU cache: every
+    /// frame the renderer sees a new handle id, re-decodes the PNG, and
+    /// re-uploads to the GPU. Doing it once when messages arrive and
+    /// reusing the same `Handle` (cheap to clone - shares underlying bytes
+    /// via `Arc`) keeps the cache stable.
+    pub image_handles: HashMap<(String, usize), image::Handle>,
     expanded: HashSet<String>,
 }
 
@@ -41,7 +63,23 @@ impl ChatTimeline {
             messages: Vec::new(),
             loading: true,
             contact_email,
+            has_more: true,
+            image_handles: HashMap::new(),
             expanded: HashSet::new(),
+        }
+    }
+
+    /// Precompute image handles for any messages in `messages` whose images
+    /// don't yet have cached handles. Idempotent: messages already in the
+    /// cache are left alone.
+    pub fn refresh_image_handles(&mut self) {
+        for msg in &self.messages {
+            for (idx, img) in msg.inline_images.iter().enumerate() {
+                let key = (msg.message_id.clone(), idx);
+                self.image_handles
+                    .entry(key)
+                    .or_insert_with(|| image::Handle::from_bytes(img.bytes.clone()));
+            }
         }
     }
 }
@@ -74,7 +112,7 @@ impl Component for ChatTimeline {
         if self.loading && self.messages.is_empty() {
             return container(
                 text("Loading...")
-                    .size(TEXT_SM)
+                    .size(TEXT_MD)
                     .style(theme::TextClass::Muted.style()),
             )
             .center_x(Length::Fill)
@@ -86,11 +124,12 @@ impl Component for ChatTimeline {
 
         let mut col = column![].spacing(CHAT_BUBBLE_SPACING).padding(SPACE_MD);
 
-        // "Load older" button at top
-        if !self.messages.is_empty() {
+        // "Load older" button at top - only when there's actually more
+        // history to fetch.
+        if !self.messages.is_empty() && self.has_more {
             let load_btn = iced::widget::button(
                 text("Load older messages")
-                    .size(TEXT_SM)
+                    .size(TEXT_MD)
                     .style(theme::TextClass::Accent.style()),
             )
             .on_press(ChatTimelineMessage::LoadOlder)
@@ -116,7 +155,7 @@ impl Component for ChatTimeline {
                 {
                     col = col.push(
                         text(subj)
-                            .size(TEXT_SM)
+                            .size(TEXT_MD)
                             .style(theme::TextClass::Muted.style()),
                     );
                 }
@@ -131,11 +170,16 @@ impl Component for ChatTimeline {
                 col = col.push(Space::new().height(CHAT_DATE_SEPARATOR_SPACING));
             }
 
-            col = col.push(chat_bubble(msg, self.expanded.contains(&msg.message_id)));
+            col = col.push(chat_bubble(
+                msg,
+                &self.image_handles,
+                self.expanded.contains(&msg.message_id),
+            ));
             prev = Some(msg);
         }
 
         scrollable(col)
+            .id(CHAT_SCROLLABLE_ID.to_string())
             .height(Length::Fill)
             .width(Length::Fill)
             .into()
@@ -144,14 +188,23 @@ impl Component for ChatTimeline {
 
 // ── Bubble rendering ───────────────────────────────────
 
-fn chat_bubble<'a>(msg: &'a ChatMessage, _expanded: bool) -> Element<'a, ChatTimelineMessage> {
-    // TODO: load body text from body store. For now use subject as placeholder.
-    let body = msg.subject.as_deref().unwrap_or("(no content)");
+fn chat_bubble<'a>(
+    msg: &'a ChatMessage,
+    image_handles: &'a HashMap<(String, usize), image::Handle>,
+    _expanded: bool,
+) -> Element<'a, ChatTimelineMessage> {
+    let body = msg
+        .body_text
+        .as_deref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| msg.subject.clone())
+        .unwrap_or_else(|| "(no content)".to_string());
 
     let content = column![
-        text(body).size(TEXT_SM),
+        text(body).size(TEXT_MD),
         text(format_time(msg.date))
-            .size(TEXT_XS)
+            .size(TEXT_SM)
             .style(theme::TextClass::Muted.style()),
     ]
     .spacing(SPACE_XXXS);
@@ -167,26 +220,57 @@ fn chat_bubble<'a>(msg: &'a ChatMessage, _expanded: bool) -> Element<'a, ChatTim
         .max_width(CHAT_BUBBLE_MAX_WIDTH)
         .style(style);
 
+    // Inline images render as separate "image bubbles" above the text bubble -
+    // same alignment as the sender, no extra padding/background. Keeps the
+    // chat-app feel ("photos appear inline") while sidestepping the complexity
+    // of injecting <img> nodes into a rendered HTML body.
+    let mut col = column![].spacing(SPACE_XXS).align_x(if msg.is_from_user {
+        Alignment::End
+    } else {
+        Alignment::Start
+    });
+    for (i, _img) in msg.inline_images.iter().enumerate() {
+        if let Some(handle) = image_handles.get(&(msg.message_id.clone(), i)) {
+            col = col.push(inline_image_widget(handle));
+        }
+    }
+    col = col.push(bubble);
+
     if msg.is_from_user {
-        // Right-aligned: spacer + bubble
-        row![Space::new().width(Length::Fill), bubble,]
+        // Right-aligned: spacer + content column.
+        row![Space::new().width(Length::Fill), col]
             .align_y(Alignment::End)
             .width(Length::Fill)
             .into()
     } else {
-        // Left-aligned: bubble + spacer
-        row![bubble, Space::new().width(Length::Fill),]
+        // Left-aligned: content column + spacer.
+        row![col, Space::new().width(Length::Fill)]
             .align_y(Alignment::Start)
             .width(Length::Fill)
             .into()
     }
 }
 
+/// Render an inline image bubble using a handle whose `Id` was assigned once
+/// (when the message was loaded) so iced's GPU cache stays stable across
+/// view cycles. Cloning the handle is cheap - shares the underlying bytes
+/// via `Arc`.
+fn inline_image_widget<'a>(handle: &'a image::Handle) -> Element<'a, ChatTimelineMessage> {
+    container(
+        image(handle.clone())
+            .width(Length::Shrink)
+            .height(Length::Shrink)
+            .content_fit(iced::ContentFit::Contain),
+    )
+    .max_width(CHAT_BUBBLE_MAX_WIDTH)
+    .into()
+}
+
 fn date_separator<'a>(timestamp: i64) -> Element<'a, ChatTimelineMessage> {
     let label = format_date_label(timestamp);
     container(
         text(label)
-            .size(TEXT_SM)
+            .size(TEXT_MD)
             .style(theme::TextClass::Muted.style()),
     )
     .center_x(Length::Fill)
