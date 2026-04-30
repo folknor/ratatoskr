@@ -12,6 +12,9 @@ pub struct Config {
     pub locale: String,
     /// RNG seed for deterministic generation.
     pub seed: u64,
+    /// Number of designated chat contacts to seed per account.
+    /// Each contact gets 1-3 strictly-1:1 threads. Set to 0 to disable.
+    pub chats_per_account: u32,
 }
 
 impl Default for Config {
@@ -21,6 +24,7 @@ impl Default for Config {
             accounts: 4,
             locale: "mixed".to_string(),
             seed: 42,
+            chats_per_account: 5,
         }
     }
 }

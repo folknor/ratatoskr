@@ -1,5 +1,6 @@
 pub mod accounts;
 pub mod calendars;
+pub mod chats;
 pub mod config;
 pub mod contacts;
 pub mod people;
@@ -12,6 +13,22 @@ pub use config::Config;
 use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
 use std::path::Path;
+
+/// Weighted random selection over a slice of `Copy` items.
+///
+/// Shared between thread and chat seeding. The slices must have equal length;
+/// weights need not sum to 1 - they are normalised internally.
+pub fn weighted_choice<T: Copy>(rng: &mut impl RngExt, items: &[T], weights: &[f64]) -> T {
+    let total: f64 = weights.iter().sum();
+    let mut r: f64 = rng.random::<f64>() * total;
+    for (item, weight) in items.iter().zip(weights.iter()) {
+        r -= weight;
+        if r <= 0.0 {
+            return *item;
+        }
+    }
+    items[items.len() - 1]
+}
 
 /// Generate a deterministic UUID v4 from the seeded RNG.
 pub fn next_uuid(rng: &mut impl RngExt) -> String {
@@ -80,13 +97,23 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
     let accs = accounts::seed_accounts(&conn, &mut rng, config.accounts)?;
     calendars::seed_calendars(&conn, &mut rng, &accs)?;
     let pools = people::generate_pools(&mut rng);
-    let (pending_bodies, stats) = threads::generate_threads(
+    let (mut pending_bodies, mut stats) = threads::generate_threads(
         &conn,
         &mut rng,
         &accs,
         &pools,
         &config.locale,
         config.threads,
+    )?;
+    chats::seed_chats(
+        &conn,
+        &mut rng,
+        &accs,
+        &pools,
+        &config.locale,
+        config.chats_per_account,
+        &mut pending_bodies,
+        &mut stats,
     )?;
     contacts::seed_vips(&conn, &mut rng, &pools.combined, &accs)?;
     contacts::seed_groups(&conn, &mut rng, &pools.combined, &accs)?;
@@ -147,11 +174,15 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
 
     let elapsed = start.elapsed();
     log::info!(
-        "Dev-seed complete: {} threads, {} messages, {} attachments, {} bodies in {:.1}s",
+        "Dev-seed complete: {} threads, {} messages, {} attachments, {} bodies; \
+         chats: {} contacts, {} threads, {} messages in {:.1}s",
         stats.threads,
         stats.messages,
         stats.attachments,
         pending_bodies.len(),
+        stats.chat_contacts,
+        stats.chat_threads,
+        stats.chat_messages,
         elapsed.as_secs_f64()
     );
 

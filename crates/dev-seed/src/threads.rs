@@ -91,18 +91,7 @@ static ATTACHMENT_POOL: &[AttachmentInfo] = &[
     },
 ];
 
-/// Weighted random selection.
-fn weighted_choice<T: Copy>(rng: &mut impl RngExt, items: &[T], weights: &[f64]) -> T {
-    let total: f64 = weights.iter().sum();
-    let mut r: f64 = rng.random::<f64>() * total;
-    for (item, weight) in items.iter().zip(weights.iter()) {
-        r -= weight;
-        if r <= 0.0 {
-            return *item;
-        }
-    }
-    items[items.len() - 1]
-}
+use crate::weighted_choice;
 
 /// Body to be inserted into the body store after the main transaction.
 pub struct PendingBody {
@@ -115,6 +104,9 @@ pub struct SeedStats {
     pub threads: u32,
     pub messages: u32,
     pub attachments: u32,
+    pub chat_contacts: u32,
+    pub chat_threads: u32,
+    pub chat_messages: u32,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -131,6 +123,9 @@ pub fn generate_threads(
         threads: 0,
         messages: 0,
         attachments: 0,
+        chat_contacts: 0,
+        chat_threads: 0,
+        chat_messages: 0,
     };
     let mut imap_uid_counter: HashMap<(String, String), u32> = HashMap::new();
     let now = FIXED_NOW;
