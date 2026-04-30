@@ -3,7 +3,7 @@ use quick_xml::Reader;
 use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 
-use super::xml_helpers::{extract_attribute, strip_ns};
+use super::xml_helpers::{extract_attribute, push_general_ref, strip_ns};
 use super::{EwsEffectiveRights, EwsFolder, EwsItem, EwsRecipient, FindItemsResult};
 
 // ── Response parsers ────────────────────────────────────────
@@ -71,6 +71,7 @@ pub(super) fn parse_find_folder_response(xml: &str) -> Result<Vec<EwsFolder>, St
                     buf.push_str(&text);
                 }
             }
+            Ok(Event::GeneralRef(ref e)) => push_general_ref(e, &mut buf),
             Ok(Event::End(ref e)) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 let local = strip_ns(&name);
@@ -190,6 +191,7 @@ pub(super) fn parse_get_folder_response(xml: &str) -> Result<EwsFolder, String> 
                     buf.push_str(&text);
                 }
             }
+            Ok(Event::GeneralRef(ref e)) => push_general_ref(e, &mut buf),
             Ok(Event::End(ref e)) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 let local = strip_ns(&name);
@@ -337,6 +339,7 @@ pub(super) fn parse_find_items_response(xml: &str) -> Result<FindItemsResult, St
                     buf.push_str(&text);
                 }
             }
+            Ok(Event::GeneralRef(ref e)) => push_general_ref(e, &mut buf),
             Ok(Event::End(ref e)) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 let local = strip_ns(&name);
@@ -480,6 +483,7 @@ pub(super) fn parse_get_item_response(xml: &str) -> Result<EwsItem, String> {
                     buf.push_str(&text);
                 }
             }
+            Ok(Event::GeneralRef(ref e)) => push_general_ref(e, &mut buf),
             Ok(Event::End(ref e)) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 let local = strip_ns(&name);

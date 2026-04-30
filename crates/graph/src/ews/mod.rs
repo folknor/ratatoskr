@@ -2,6 +2,8 @@ mod client;
 mod parsers;
 mod xml_helpers;
 
+pub(crate) use xml_helpers::push_general_ref;
+
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 
 // Re-export parsers and xml_helpers for internal use within the ews module

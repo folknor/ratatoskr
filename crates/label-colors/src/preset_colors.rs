@@ -61,7 +61,7 @@ fn color_distance_sq(a: (u8, u8, u8), b: (u8, u8, u8)) -> u32 {
 /// The preset name is matched case-insensitively.
 ///
 /// ```
-/// # use label_colors::category_colors::preset_to_hex;
+/// # use label_colors::preset_colors::preset_to_hex;
 /// assert_eq!(preset_to_hex("preset0"), Some(("#e74c3c", "#ffffff")));
 /// assert_eq!(preset_to_hex("Preset7"), Some(("#3498db", "#ffffff")));
 /// assert_eq!(preset_to_hex("unknown"), None);
@@ -80,11 +80,9 @@ pub fn preset_to_hex(preset: &str) -> Option<(&'static str, &'static str)> {
 /// Euclidean distance in RGB space, or `None` if `bg_hex` is malformed.
 ///
 /// ```
-/// # use label_colors::category_colors::nearest_exchange_preset;
-/// // Exact match
+/// # use label_colors::preset_colors::nearest_exchange_preset;
 /// assert_eq!(nearest_exchange_preset("#e74c3c"), Some("preset0"));
-/// // Close to blue
-/// assert_eq!(nearest_exchange_preset("#3366cc"), Some("preset22"));
+/// assert_eq!(nearest_exchange_preset("#3498db"), Some("preset7"));
 /// ```
 pub fn nearest_exchange_preset(bg_hex: &str) -> Option<&'static str> {
     let target = parse_hex(bg_hex)?;

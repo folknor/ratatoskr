@@ -2,7 +2,7 @@ use quick_xml::Reader;
 use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 
-use super::ews::EwsHeaders;
+use super::ews::{EwsHeaders, push_general_ref};
 
 const AUTODISCOVER_URL: &str = "https://outlook.office365.com/autodiscover/autodiscover.xml";
 
@@ -272,6 +272,7 @@ fn parse_user_settings(xml: &str) -> Vec<(String, String)> {
                     buf.push_str(&text);
                 }
             }
+            Ok(Event::GeneralRef(ref e)) => push_general_ref(e, &mut buf),
             Ok(Event::End(ref e)) => {
                 let name = String::from_utf8_lossy(e.name().local_name().as_ref()).to_string();
                 if in_user_setting {
@@ -331,6 +332,7 @@ fn parse_alternative_mailboxes(xml: &str) -> Vec<SharedMailbox> {
                     buf.push_str(&text);
                 }
             }
+            Ok(Event::GeneralRef(ref e)) => push_general_ref(e, &mut buf),
             Ok(Event::End(ref e)) => {
                 let name = String::from_utf8_lossy(e.name().local_name().as_ref()).to_string();
                 if in_alternative_mailbox {

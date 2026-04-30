@@ -1,6 +1,6 @@
 use quick_xml::Reader;
-use quick_xml::escape::unescape;
-use quick_xml::events::Event;
+use quick_xml::escape::{resolve_xml_entity, unescape};
+use quick_xml::events::{BytesRef, Event};
 
 // ── SOAP envelope ───────────────────────────────────────────
 
@@ -88,6 +88,7 @@ pub(super) fn check_soap_fault(xml: &str) -> Result<(), String> {
                     buf.push_str(&text);
                 }
             }
+            Ok(Event::GeneralRef(ref e)) => push_general_ref(e, &mut buf),
             Ok(Event::End(ref e)) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 let local = strip_ns(&name);
@@ -115,6 +116,27 @@ pub(super) fn check_soap_fault(xml: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+// quick-xml 0.36+ emits Event::GeneralRef separately from Event::Text, so
+// every parser that accumulates body text needs to fold these back in or
+// `&lt;` and friends silently vanish.
+pub(crate) fn push_general_ref(e: &BytesRef<'_>, buf: &mut String) {
+    let Ok(name) = std::str::from_utf8(e.as_ref()) else {
+        return;
+    };
+    if let Some(rest) = name.strip_prefix('#') {
+        let codepoint = if let Some(hex) = rest.strip_prefix(['x', 'X']) {
+            u32::from_str_radix(hex, 16).ok()
+        } else {
+            rest.parse::<u32>().ok()
+        };
+        if let Some(c) = codepoint.and_then(char::from_u32) {
+            buf.push(c);
+        }
+    } else if let Some(s) = resolve_xml_entity(name) {
+        buf.push_str(s);
+    }
 }
 
 // ── Attribute extraction ────────────────────────────────────

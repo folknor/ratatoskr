@@ -40,11 +40,15 @@ pub fn auto_detect_mappings(headers: &[String]) -> Vec<ColumnMapping> {
 /// Detect the contact field from a header name, respecting already-used fields.
 fn detect_field(normalized: &str, used: &[ContactField]) -> ContactField {
     // Try each pattern set in priority order
+    // FirstName/LastName must precede DisplayName: NAME_PATTERNS contains
+    // generic substrings like "name" and "navn" that are also present in
+    // "First Name" / "Fornavn" / "Etternavn", so DisplayName would otherwise
+    // win on a substring match.
     let candidates = [
         (ContactField::Email, EMAIL_PATTERNS),
-        (ContactField::DisplayName, NAME_PATTERNS),
         (ContactField::FirstName, FIRST_NAME_PATTERNS),
         (ContactField::LastName, LAST_NAME_PATTERNS),
+        (ContactField::DisplayName, NAME_PATTERNS),
         (ContactField::Phone, PHONE_PATTERNS),
         (ContactField::Company, COMPANY_PATTERNS),
         (ContactField::Email2, EMAIL2_PATTERNS),
