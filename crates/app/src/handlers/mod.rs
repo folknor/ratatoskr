@@ -11,6 +11,7 @@ mod calendar;
 mod chat;
 pub(crate) mod commands;
 mod contacts;
+mod core;
 mod keyboard;
 mod navigation;
 mod palette;
