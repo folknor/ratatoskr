@@ -145,6 +145,18 @@ impl App {
                     move |result| Message::ChatOlderLoaded(contact, result),
                 )
             }
+            ChatTimelineEvent::ViewAsEmailRequested => {
+                // Pop the most recent (last in chronological order)
+                // message into a message-view window. The pop-out's body
+                // and attachment loaders fill in the rest async.
+                let Some(timeline) = self.chat_timeline.as_ref() else {
+                    return Task::none();
+                };
+                let Some(latest) = timeline.messages.last().cloned() else {
+                    return Task::none();
+                };
+                self.open_chat_message_view_window(&latest)
+            }
         }
     }
 

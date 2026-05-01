@@ -18,12 +18,21 @@ pub enum ChatTimelineMessage {
     ToggleExpand(String),
     /// User wants to load older messages.
     LoadOlder,
+    /// User clicked "View as email" in the timeline header. Opens the
+    /// most recent message in a message-view pop-out window so the
+    /// conversation can be read in classic email format without
+    /// undesignating the chat contact.
+    ViewAsEmail,
 }
 
 #[derive(Debug, Clone)]
 pub enum ChatTimelineEvent {
     /// Request to load older messages.
     LoadOlderRequested,
+    /// Open the most-recent timeline message in a message-view pop-out.
+    /// The component carries no `App` reference, so the handler resolves
+    /// the message itself - the event is just a signal.
+    ViewAsEmailRequested,
 }
 
 // ── State ──────────────────────────────────────────────
@@ -105,12 +114,18 @@ impl Component for ChatTimeline {
                 iced::Task::none(),
                 Some(ChatTimelineEvent::LoadOlderRequested),
             ),
+            ChatTimelineMessage::ViewAsEmail => (
+                iced::Task::none(),
+                Some(ChatTimelineEvent::ViewAsEmailRequested),
+            ),
         }
     }
 
     fn view(&self) -> Element<'_, ChatTimelineMessage> {
+        let header = chat_header(&self.contact_email, !self.messages.is_empty());
+
         if self.loading && self.messages.is_empty() {
-            return container(
+            let loading = container(
                 text("Loading...")
                     .size(TEXT_MD)
                     .style(theme::TextClass::Muted.style()),
@@ -118,8 +133,8 @@ impl Component for ChatTimeline {
             .center_x(Length::Fill)
             .center_y(Length::Fill)
             .width(Length::Fill)
-            .height(Length::Fill)
-            .into();
+            .height(Length::Fill);
+            return column![header, loading].into();
         }
 
         let mut col = column![].spacing(CHAT_BUBBLE_SPACING).padding(SPACE_MD);
@@ -178,12 +193,50 @@ impl Component for ChatTimeline {
             prev = Some(msg);
         }
 
-        scrollable(col)
+        let body = scrollable(col)
             .id(CHAT_SCROLLABLE_ID.to_string())
             .height(Length::Fill)
-            .width(Length::Fill)
-            .into()
+            .width(Length::Fill);
+        column![header, body].into()
     }
+}
+
+// ── Header ─────────────────────────────────────────────
+
+/// Top strip with the contact email on the left and a "View as email"
+/// button on the right. The button is disabled when there are no
+/// messages to view, since there'd be nothing to pop into the
+/// message-view window.
+fn chat_header<'a>(
+    contact_email: &'a str,
+    has_messages: bool,
+) -> Element<'a, ChatTimelineMessage> {
+    let label = text(contact_email)
+        .size(TEXT_LG)
+        .style(theme::TextClass::Default.style());
+
+    let mut view_btn = iced::widget::button(
+        text("View as email")
+            .size(TEXT_SM)
+            .style(theme::TextClass::Muted.style()),
+    )
+    .padding(PAD_BUTTON)
+    .style(theme::ButtonClass::Ghost.style());
+    if has_messages {
+        view_btn = view_btn.on_press(ChatTimelineMessage::ViewAsEmail);
+    }
+
+    let row = iced::widget::row![
+        container(label).width(Length::Fill).align_y(Alignment::Center),
+        view_btn,
+    ]
+    .align_y(Alignment::Center)
+    .spacing(SPACE_SM);
+
+    container(row)
+        .padding(PAD_PANEL_HEADER)
+        .width(Length::Fill)
+        .into()
 }
 
 // ── Bubble rendering ───────────────────────────────────

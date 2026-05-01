@@ -170,6 +170,48 @@ impl MessageViewState {
         }
     }
 
+    /// Construct state from a `ChatMessage` (chat-view "View as email" path).
+    ///
+    /// `ChatMessage` doesn't carry `to_addresses` / `cc_addresses` / `snippet`
+    /// the way `ThreadMessage` does, so those fields stay `None` and the
+    /// pop-out's body/attachment loaders fill in the rest async.
+    pub fn from_chat_message(
+        msg: &rtsk::chat::ChatMessage,
+        generation: rtsk::generation::GenerationToken<rtsk::generation::PopOut>,
+        source_selection: Option<types::SidebarSelection>,
+        default_rendering_mode: RenderingMode,
+    ) -> Self {
+        Self {
+            message_id: msg.message_id.clone(),
+            thread_id: msg.thread_id.clone(),
+            account_id: msg.account_id.clone(),
+            from_name: msg.from_name.clone(),
+            from_address: Some(msg.from_address.clone()),
+            to_addresses: None,
+            cc_addresses: None,
+            subject: msg.subject.clone(),
+            date: Some(msg.date),
+            body_text: None,
+            body_html: None,
+            snippet: None,
+            raw_source: None,
+            inline_images: std::collections::HashMap::new(),
+            attachments: Vec::new(),
+            hovered_attachment_id: None,
+            rendering_mode: default_rendering_mode,
+
+            context_menu_open: false,
+            remote_content_loaded: false,
+            error_banner: None,
+            source_selection,
+            width: MESSAGE_VIEW_DEFAULT_WIDTH,
+            height: MESSAGE_VIEW_DEFAULT_HEIGHT,
+            x: None,
+            y: None,
+            generation,
+        }
+    }
+
     /// Construct state from a session restore entry (minimal data, body loaded async).
     pub fn from_session_entry(
         entry: &MessageViewSessionEntry,

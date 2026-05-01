@@ -28,11 +28,6 @@ Phase legend (rough): `1` data model + queries, `2` timeline view,
 
 ## Medium
 
-8. **No "view as email" toggle.** Spec calls for a per-conversation
-   affordance to switch back to the threaded reading-pane view without
-   undesignating the contact. No route, no menu, no command. (Phase 6
-   polish.)
-
 9. **No production backfill for `thread_participants`.** Implementation
    phases plan a "post-migration fixup" that parses every existing
    `messages` row's address fields. The dev workflow doesn't need it
@@ -100,6 +95,12 @@ Phase legend (rough): `1` data model + queries, `2` timeline view,
   occurrence of each non-empty `message_id_header`, so the same RFC
   Message-ID delivered to two accounts (forwarding alias, shared
   mailbox) renders once. Empty / NULL headers stay distinct.
+- "View as email" header bar: contact email on the left, Ghost-styled
+  toggle on the right. Click pops the most recent timeline message
+  into a message-view pop-out window via
+  `App::open_chat_message_view_window` (uses the same
+  `dispatch_message_view_loads` path as the reading-pane pop-out).
+  Disabled when the timeline has no messages.
 - Mark-read on chat entry: `mark_chat_read_local` flips `messages.is_read`,
   `threads.is_read`, and `chat_contacts.unread_count` in one transaction;
   `mark_chat_read_remote` then dispatches `provider.mark_read` per affected

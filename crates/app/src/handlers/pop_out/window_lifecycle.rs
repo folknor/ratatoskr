@@ -48,6 +48,48 @@ impl App {
         self.dispatch_message_view_loads(window_id, generation, account_id, message_id, open_task)
     }
 
+    /// Open a message-view pop-out for a chat-timeline message.
+    ///
+    /// This is the "View as email" path from chat view: the user wants to
+    /// see one of the bubbles rendered in classic email format (full
+    /// headers, signatures, quoted history) without leaving the chat
+    /// timeline. Works the same as `open_message_view_window` from the
+    /// thread reading pane, but pulls header data off `ChatMessage`
+    /// rather than `reading_pane.thread_messages`.
+    pub(crate) fn open_chat_message_view_window(
+        &mut self,
+        msg: &rtsk::chat::ChatMessage,
+    ) -> Task<Message> {
+        let generation = self.next_pop_out_generation();
+        // Chat view has no sidebar selection of its own (active_chat sits
+        // outside ViewScope), so we pass through whatever was selected
+        // before the user entered chat. That keeps any subsequent
+        // pop-out-initiated action (archive, etc.) resolving against the
+        // user's last folder context, not nothing.
+        let source_selection = Some(self.sidebar.selection.clone());
+        let state = MessageViewState::from_chat_message(
+            msg,
+            generation,
+            source_selection,
+            self.settings.default_rendering_mode,
+        );
+        let account_id = state.account_id.clone();
+        let message_id = state.message_id.clone();
+
+        let settings = iced::window::Settings {
+            size: Size::new(MESSAGE_VIEW_DEFAULT_WIDTH, MESSAGE_VIEW_DEFAULT_HEIGHT),
+            min_size: Some(Size::new(MESSAGE_VIEW_MIN_WIDTH, MESSAGE_VIEW_MIN_HEIGHT)),
+            exit_on_close_request: false,
+            ..Default::default()
+        };
+
+        let (window_id, open_task) = iced::window::open(settings);
+        self.pop_out_windows
+            .insert(window_id, PopOutWindow::MessageView(Box::new(state)));
+
+        self.dispatch_message_view_loads(window_id, generation, account_id, message_id, open_task)
+    }
+
     /// Open a compose window with the given mode.
     pub(crate) fn open_compose_window(&mut self, mode: ComposeMode) -> Task<Message> {
         let state = ComposeState::new(&self.sidebar.accounts);
