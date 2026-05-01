@@ -443,14 +443,83 @@ async fn fetch_caldav_event(
 }
 
 fn join_calendar_path(base: &str, segment: &str) -> Result<String, String> {
-    let base_with_slash = if base.ends_with('/') {
-        base.to_string()
-    } else {
-        format!("{base}/")
-    };
-    reqwest::Url::parse(&base_with_slash)
-        .map_err(|e| format!("invalid calendar URL: {e}"))?
+    let mut parsed =
+        reqwest::Url::parse(base).map_err(|e| format!("invalid calendar URL: {e}"))?;
+
+    // Preserve `base`'s query and fragment across the join. The standard
+    // `Url::join` for a relative ref drops the base's query/fragment; some
+    // shared-hosting CalDAV setups (multi-tenant Davical with routing query
+    // params, certain Exchange CalDAV bridges) require those on every
+    // request URL. Stripping before join + restoring after lets us reuse
+    // path-resolution semantics without losing them. (Round 3 #41.)
+    let saved_query = parsed.query().map(str::to_owned);
+    let saved_fragment = parsed.fragment().map(str::to_owned);
+
+    // Ensure the base path ends with '/' so the last segment is preserved
+    // by Url::join. `set_path` is harmless if the path already ends with /.
+    if !parsed.path().ends_with('/') {
+        let mut new_path = parsed.path().to_string();
+        new_path.push('/');
+        parsed.set_path(&new_path);
+    }
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+
+    let mut joined = parsed
         .join(segment)
-        .map(|u| u.to_string())
-        .map_err(|e| format!("invalid CalDAV path {segment}: {e}"))
+        .map_err(|e| format!("invalid CalDAV path {segment}: {e}"))?;
+
+    // If `segment` brought its own query/fragment (rare for our callers,
+    // but defensive), don't clobber it with the base's.
+    if joined.query().is_none()
+        && let Some(q) = saved_query
+    {
+        joined.set_query(Some(&q));
+    }
+    if joined.fragment().is_none()
+        && let Some(f) = saved_fragment
+    {
+        joined.set_fragment(Some(&f));
+    }
+
+    Ok(joined.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::join_calendar_path;
+
+    #[test]
+    fn join_appends_segment_when_base_has_no_trailing_slash() {
+        let got = join_calendar_path("https://h/cal/work", "abc.ics").expect("join");
+        assert_eq!(got, "https://h/cal/work/abc.ics");
+    }
+
+    #[test]
+    fn join_preserves_base_query_string() {
+        let got =
+            join_calendar_path("https://h/cal/work?routing=tenant42", "abc.ics").expect("join");
+        assert_eq!(got, "https://h/cal/work/abc.ics?routing=tenant42");
+    }
+
+    #[test]
+    fn join_preserves_base_query_with_trailing_slash() {
+        let got =
+            join_calendar_path("https://h/cal/work/?routing=tenant42", "abc.ics").expect("join");
+        assert_eq!(got, "https://h/cal/work/abc.ics?routing=tenant42");
+    }
+
+    #[test]
+    fn join_preserves_base_fragment() {
+        let got = join_calendar_path("https://h/cal/work#anchor", "abc.ics").expect("join");
+        assert_eq!(got, "https://h/cal/work/abc.ics#anchor");
+    }
+
+    #[test]
+    fn join_segment_query_takes_precedence_over_base_query() {
+        // Defensive: callers don't currently pass a query in `segment`, but
+        // if they ever do, it must not be silently overwritten.
+        let got = join_calendar_path("https://h/cal/?base=1", "abc.ics?seg=2").expect("join");
+        assert_eq!(got, "https://h/cal/abc.ics?seg=2");
+    }
 }

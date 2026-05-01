@@ -450,6 +450,14 @@ fn map_graph_event(event: GraphEvent) -> Result<GraphCalendarEvent, String> {
     // get the duration in days then truncate to 1 and re-emit as `P1D`.
     // Anchor end_time to start_time + Δdate*86400 to keep the duration
     // exact regardless of where the host's DST falls.
+    //
+    // Round 3 #42: this correction reads only the date component from each
+    // dateTime string, so for a (likely-malformed) all-day payload whose
+    // `start.timeZone` and `end.timeZone` differ, the corrected end is
+    // pinned to the start zone. That is the correct call - all-day events
+    // are conceptually zone-agnostic and the start drives display - but
+    // worth flagging so a future reader doesn't "fix" it back to per-side
+    // resolution.
     let end_time = if is_all_day {
         match (
             parse_graph_all_day_date(&event.start),
@@ -638,6 +646,15 @@ fn parse_graph_all_day_date(dt: &GraphDateTimeTimeZone) -> Option<chrono::NaiveD
 /// which calcard does not currently map; we patch the gap with a small
 /// alias table. Both forms point at the same IANA zone (chrono_tz handles
 /// the actual standard-vs-daylight resolution per-instant).
+///
+/// Round 3 #43: a handful of post-2014 Windows zone names (South Sudan,
+/// Saratov, Astrakhan, ...) are present in Microsoft's enumeration but
+/// missing from calcard's alias map. Without a fallback the wall clock
+/// is reinterpreted as UTC and the event lands at the wrong instant; the
+/// shipped table maps each to its IANA name (which calcard *does* know
+/// from chrono_tz). The list intentionally stays narrow - only zones we
+/// can verify map cleanly to a single IANA name. Wider Windows-zone
+/// support is the upstream calcard fix.
 fn resolve_graph_tz(name: &str) -> Option<calcard::common::timezone::Tz> {
     use calcard::common::timezone::Tz;
     use std::str::FromStr;
@@ -656,6 +673,27 @@ fn resolve_graph_tz(name: &str) -> Option<calcard::common::timezone::Tz> {
     let normalized = name.replace("Daylight Time", "Standard Time");
     if normalized != name
         && let Ok(tz) = Tz::from_str(&normalized)
+        && !tz.is_floating()
+    {
+        return Some(tz);
+    }
+    // Curated Windows -> IANA fallbacks. Each entry is a Microsoft Windows
+    // zone name that calcard does not currently alias, paired with the
+    // canonical IANA name from CLDR's windowsZones.xml. chrono_tz (which
+    // calcard wraps) recognises the IANA names directly.
+    let iana_alias = match name {
+        "South Sudan Standard Time" => Some("Africa/Juba"),
+        "Sao Tome Standard Time" => Some("Africa/Sao_Tome"),
+        "Saratov Standard Time" => Some("Europe/Saratov"),
+        "Volgograd Standard Time" => Some("Europe/Volgograd"),
+        "Astrakhan Standard Time" => Some("Europe/Astrakhan"),
+        "Magallanes Standard Time" => Some("America/Punta_Arenas"),
+        "Bougainville Standard Time" => Some("Pacific/Bougainville"),
+        "Qyzylorda Standard Time" => Some("Asia/Qyzylorda"),
+        _ => None,
+    };
+    if let Some(iana) = iana_alias
+        && let Ok(tz) = Tz::from_str(iana)
         && !tz.is_floating()
     {
         return Some(tz);
@@ -864,5 +902,41 @@ mod tests {
         // preset0 should map to a hex color
         let color = category_color_to_hex("preset0");
         assert!(color.is_some());
+    }
+
+    #[test]
+    fn resolve_graph_tz_returns_none_for_empty_and_utc() {
+        assert!(resolve_graph_tz("").is_none());
+        assert!(resolve_graph_tz("UTC").is_none());
+        assert!(resolve_graph_tz("utc").is_none());
+    }
+
+    #[test]
+    fn resolve_graph_tz_falls_back_for_south_sudan() {
+        // Round 3 #43: "South Sudan Standard Time" is in Microsoft's
+        // Windows enumeration (CLDR maps it to Africa/Juba) but calcard
+        // does not currently alias it. The fallback table covers the
+        // gap so the wall clock isn't silently reinterpreted as UTC.
+        let tz = resolve_graph_tz("South Sudan Standard Time").expect("falls back");
+        assert!(!tz.is_floating());
+    }
+
+    #[test]
+    fn resolve_graph_tz_falls_back_for_saratov() {
+        let tz = resolve_graph_tz("Saratov Standard Time").expect("falls back");
+        assert!(!tz.is_floating());
+    }
+
+    #[test]
+    fn resolve_graph_tz_falls_back_for_magallanes() {
+        let tz = resolve_graph_tz("Magallanes Standard Time").expect("falls back");
+        assert!(!tz.is_floating());
+    }
+
+    #[test]
+    fn resolve_graph_tz_returns_none_for_unknown_zone() {
+        // A clearly-bogus zone name still falls through to UTC interpretation
+        // upstream, so this must return None rather than guessing.
+        assert!(resolve_graph_tz("Bogus Standard Time").is_none());
     }
 }

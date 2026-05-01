@@ -1418,7 +1418,13 @@ fn expand_recurrence_with_overrides(
     // - COUNT set without UNTIL: no time bound; COUNT alone limits output.
     // - Neither: synthesize a 2-year fallback window so an unbounded rule
     //   doesn't run away.
-    let window_end = match (rule.until, rule.count) {
+    //
+    // Resolve UNTIL through the event's recurrence zone. Floating and
+    // DATE-only UNTIL values were stored raw at parse time so the anchor
+    // matches the event's zone rather than the host's chrono::Local; UTC
+    // UNTIL values are pre-resolved and unaffected. (Round 3 #7, #8.)
+    let until_ts = rule.until.and_then(|u| u.resolve(tz));
+    let window_end = match (until_ts, rule.count) {
         (Some(until), _) => until,
         (None, Some(_)) => i64::MAX,
         (None, None) => two_year_window_end(event.start_time, tz),
@@ -1548,6 +1554,46 @@ struct ByDay {
     day: chrono::Weekday,
 }
 
+/// Raw UNTIL value from an RRULE, before zone resolution.
+///
+/// `parse_rrule` runs before `RecurrenceTz` is known (the event's TZID
+/// lives on the row, not in the RRULE string), so floating and DATE-only
+/// UNTIL values are stored as raw wall-clock data and resolved at expand
+/// time against the event's recurrence zone. Without this split, a NY
+/// event with `UNTIL=20260315` from a host in Pacific/Auckland used to
+/// anchor at Auckland local 23:59:59 instead of NY local - clipping the
+/// last day for west-of-source hosts and over-including for east-of-
+/// source hosts. Apple/Google anchor in the event zone; we now match.
+/// (Round 3 #7, closes #8 since DATE-only UNTIL alongside TZID DTSTART
+/// also resolves through the event zone.)
+#[derive(Debug, Clone, Copy)]
+enum Until {
+    /// `YYYYMMDD` form. RFC 5545 § 3.3.10 says DATE-only UNTIL is only
+    /// valid alongside floating DTSTART; some Outlook CalDAV bridges emit
+    /// it alongside TZID-bearing DTSTART anyway. Either way, resolves at
+    /// 23:59:59 in the event's zone.
+    Date(chrono::NaiveDate),
+    /// `YYYYMMDDTHHMMSS` form. RFC 5545: floating, only legal when DTSTART
+    /// is floating. Resolved in the event's zone at expand time.
+    Floating(chrono::NaiveDateTime),
+    /// `YYYYMMDDTHHMMSSZ` form. Already an absolute UTC instant; no
+    /// zone-aware resolution needed.
+    Utc(i64),
+}
+
+impl Until {
+    fn resolve(self, tz: RecurrenceTz) -> Option<i64> {
+        match self {
+            Self::Date(date) => {
+                let dt = date.and_hms_opt(23, 59, 59)?;
+                tz.resolve(dt)
+            }
+            Self::Floating(dt) => tz.resolve(dt),
+            Self::Utc(ts) => Some(ts),
+        }
+    }
+}
+
 /// Parsed pieces of an RRULE string. Unknown parts are ignored silently
 /// unless they're in the documented "unsupported but recognized" set
 /// (`unsupported_parts`), in which case the rule is treated as malformed
@@ -1557,7 +1603,7 @@ struct Rrule {
     freq: String,
     interval: i64,
     count: Option<usize>,
-    until: Option<i64>,
+    until: Option<Until>,
     byday: Vec<ByDay>,
     bymonthday: Vec<i32>,
     bymonth: Vec<u32>,
@@ -2093,8 +2139,9 @@ fn expand_yearly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     // i32 is more than enough for any real recurrence and `try_from` keeps a
     // wedged INTERVAL=2_000_000_000 from silently casting to a negative
     // step. On overflow we step by 1 year and let the COUNT/UNTIL/RRULE_MAX
-    // bounds terminate.
-    let interval_years: i32 = i32::try_from(rule.interval).unwrap_or(1).max(1);
+    // bounds terminate. (`parse_rrule` already clamps interval to >=1, so
+    // no further `.max(1)` is needed here.)
+    let interval_years: i32 = i32::try_from(rule.interval).unwrap_or(1);
     let mut year = start_dt.year();
     // Hoist the months slice. The default path uses a single-element stack
     // array; explicit BYMONTH borrows the rule's slice. Previously cloned a
@@ -2300,7 +2347,11 @@ fn days_in_month(year: i32, month: u32) -> u32 {
 ///
 /// Anything else (offset like `+0100`, sub-minute precision, trailing
 /// garbage) is rejected with `None` rather than silently mis-anchored.
-fn parse_until_date(val: &str) -> Option<i64> {
+///
+/// Returns the raw `Until` shape; zone resolution happens in
+/// `Until::resolve` once the event's `RecurrenceTz` is in scope. (Round 3
+/// #7.)
+fn parse_until_date(val: &str) -> Option<Until> {
     let date_part = val.get(..8)?;
     let year: i32 = date_part.get(0..4)?.parse().ok()?;
     let month: u32 = date_part.get(4..6)?.parse().ok()?;
@@ -2320,8 +2371,7 @@ fn parse_until_date(val: &str) -> Option<i64> {
 
     // DATE-only form: exactly 8 chars.
     if val.len() == 8 {
-        let dt = date.and_hms_opt(23, 59, 59)?;
-        return crate::db::time::resolve_local_to_timestamp(dt, &chrono::Local);
+        return Some(Until::Date(date));
     }
 
     // DATE-TIME form must be exactly 15 (floating) or 16 (UTC) chars and
@@ -2338,9 +2388,9 @@ fn parse_until_date(val: &str) -> Option<i64> {
 
     match (val.len(), val.as_bytes().get(15)) {
         // Floating: 15 chars, no trailing character.
-        (15, None) => crate::db::time::resolve_local_to_timestamp(dt, &chrono::Local),
+        (15, None) => Some(Until::Floating(dt)),
         // UTC: 16 chars, trailing 'Z'.
-        (16, Some(&b'Z')) => Some(dt.and_utc().timestamp()),
+        (16, Some(&b'Z')) => Some(Until::Utc(dt.and_utc().timestamp())),
         // Anything else (offset like +0100, fractional seconds, trailing
         // garbage) is malformed; rejecting prevents silent UTC mis-anchor.
         _ => {
@@ -2780,30 +2830,32 @@ mod tests {
 
     #[test]
     fn parse_until_date_strict_z_form() {
-        // 16-char with Z is valid UTC.
-        let utc = parse_until_date("20260315T120000Z").expect("valid UTC UNTIL");
+        // 16-char with Z is valid UTC: pre-resolved at parse time since
+        // it's already an absolute instant.
+        let parsed = parse_until_date("20260315T120000Z").expect("valid UTC UNTIL");
         let expected = chrono::NaiveDate::from_ymd_opt(2026, 3, 15)
             .and_then(|d| d.and_hms_opt(12, 0, 0))
             .map(|d| d.and_utc().timestamp())
             .expect("valid");
-        assert_eq!(utc, expected);
+        match parsed {
+            Until::Utc(ts) => assert_eq!(ts, expected),
+            other => panic!("expected Until::Utc, got {other:?}"),
+        }
     }
 
     #[test]
-    fn parse_until_date_15_char_floating_resolves_in_local() {
-        // 15-char no-Z form is floating; anchored in chrono::Local. Only
-        // assert that parsing succeeds and is distinct from the UTC-anchored
-        // value (when local != UTC). The exact timestamp depends on the
-        // host's TZ, so we don't pin a specific value.
+    fn parse_until_date_15_char_floating_returns_floating() {
+        // 15-char no-Z form is floating; we keep the raw NaiveDateTime so
+        // the resolver can anchor it in the event's recurrence zone, not
+        // the host's chrono::Local. (Round 3 #7.)
         let parsed = parse_until_date("20260315T120000").expect("floating UNTIL");
-        let utc_equiv = chrono::NaiveDate::from_ymd_opt(2026, 3, 15)
+        let expected = chrono::NaiveDate::from_ymd_opt(2026, 3, 15)
             .and_then(|d| d.and_hms_opt(12, 0, 0))
-            .map(|d| d.and_utc().timestamp())
             .expect("valid");
-        // In any non-UTC zone parsed != utc_equiv. In UTC they would match;
-        // we just confirm parsed is finite and within a sensible window.
-        let one_day = 86_400;
-        assert!((parsed - utc_equiv).abs() <= 14 * 3600 + one_day);
+        match parsed {
+            Until::Floating(dt) => assert_eq!(dt, expected),
+            other => panic!("expected Until::Floating, got {other:?}"),
+        }
     }
 
     #[test]
@@ -2817,17 +2869,102 @@ mod tests {
     }
 
     #[test]
-    fn parse_until_date_date_only_anchors_in_local() {
-        // 8-char DATE-only form anchors at 23:59:59 in chrono::Local rather
-        // than UTC midnight - prevents clipping of evening occurrences for
-        // west-of-UTC users and over-inclusion for east-of-UTC users.
+    fn parse_until_date_date_only_returns_date() {
+        // 8-char DATE-only form: parser keeps the raw NaiveDate so the
+        // resolver can anchor at 23:59:59 in the event's zone (not the
+        // host's chrono::Local). Round 3 #7 fixed the cross-zone clipping
+        // that the old "always-Local" anchor produced.
         let parsed = parse_until_date("20260315").expect("date-only UNTIL");
-        let utc_eod = chrono::NaiveDate::from_ymd_opt(2026, 3, 15)
-            .and_then(|d| d.and_hms_opt(23, 59, 59))
-            .map(|d| d.and_utc().timestamp())
+        let expected = chrono::NaiveDate::from_ymd_opt(2026, 3, 15).expect("valid");
+        match parsed {
+            Until::Date(d) => assert_eq!(d, expected),
+            other => panic!("expected Until::Date, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn until_resolve_date_anchors_in_event_zone_not_host() {
+        // Round 3 #7 cross-zone repro. UNTIL=20260315 from any host zone
+        // must anchor at 23:59:59 in the event zone (NY), so the last
+        // resolved instant equals the NY end-of-day expressed in UTC.
+        let ny: chrono_tz::Tz = "America/New_York".parse().expect("ny");
+        let until = Until::Date(
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 15).expect("date"),
+        );
+        let resolved = until
+            .resolve(RecurrenceTz::Iana(ny))
+            .expect("resolves cleanly");
+
+        // Mar 15 2026 NY-local is EDT (DST started Mar 8) -> UTC-4. So
+        // 23:59:59 NY = 03:59:59 next day UTC.
+        let expected_utc_naive = chrono::NaiveDate::from_ymd_opt(2026, 3, 16)
+            .and_then(|d| d.and_hms_opt(3, 59, 59))
             .expect("valid");
-        let one_day = 86_400;
-        assert!((parsed - utc_eod).abs() <= 14 * 3600 + one_day);
+        let expected = expected_utc_naive.and_utc().timestamp();
+        assert_eq!(resolved, expected);
+    }
+
+    #[test]
+    fn until_resolve_floating_anchors_in_event_zone_not_host() {
+        // Same cross-zone idea for the 15-char floating form.
+        let ny: chrono_tz::Tz = "America/New_York".parse().expect("ny");
+        let dt = chrono::NaiveDate::from_ymd_opt(2026, 3, 15)
+            .and_then(|d| d.and_hms_opt(12, 0, 0))
+            .expect("valid");
+        let resolved = Until::Floating(dt)
+            .resolve(RecurrenceTz::Iana(ny))
+            .expect("resolves cleanly");
+        // 12:00 NY EDT (Mar 15 is post-DST) = 16:00 UTC.
+        let expected = chrono::NaiveDate::from_ymd_opt(2026, 3, 15)
+            .and_then(|d| d.and_hms_opt(16, 0, 0))
+            .expect("valid")
+            .and_utc()
+            .timestamp();
+        assert_eq!(resolved, expected);
+    }
+
+    #[test]
+    fn until_resolve_utc_passes_through() {
+        // UTC UNTIL is already an absolute instant.
+        let ts = 1_750_000_000;
+        let ny: chrono_tz::Tz = "America/New_York".parse().expect("ny");
+        assert_eq!(Until::Utc(ts).resolve(RecurrenceTz::Iana(ny)), Some(ts));
+        assert_eq!(Until::Utc(ts).resolve(RecurrenceTz::Local), Some(ts));
+    }
+
+    #[test]
+    fn date_only_until_keeps_event_zone_last_day() {
+        // Round 3 #7 integration repro. NY event with UNTIL=20260315
+        // must include the Mar 15 instance (Mar 15 NY-local is < Mar 15
+        // 23:59:59 NY) regardless of the host's zone. Pre-fix, west-of-NY
+        // hosts (e.g. Pacific/Auckland UTC+13) anchored UNTIL in
+        // chrono::Local, which resolved to Mar 15 23:59:59 Auckland =
+        // Mar 15 10:59:59 UTC, *before* Mar 15 NY 09:00 (= Mar 15 13:00
+        // UTC). The rule then dropped Mar 15 silently. With the
+        // event-zone resolve, Mar 15 NY-local instances are kept.
+        use chrono_tz::Tz;
+        let ny: Tz = "America/New_York".parse().expect("ny");
+        let dt = chrono::NaiveDate::from_ymd_opt(2026, 3, 13)
+            .and_then(|d| d.and_hms_opt(9, 0, 0))
+            .expect("valid");
+        let start = ny
+            .from_local_datetime(&dt)
+            .single()
+            .expect("unambiguous")
+            .timestamp();
+        let mut event = make_event(start, 3600);
+        event.timezone = Some("America/New_York".to_string());
+        let instances = expand_recurrence(&event, "FREQ=DAILY;UNTIL=20260315");
+
+        // Expected: Mar 13, 14, 15. Pre-fix this dropped Mar 15 on
+        // east-of-NY hosts (and over-included a non-existent Mar 16
+        // post-DST resolve on west-of-NY hosts).
+        assert_eq!(instances.len(), 3, "should emit Mar 13/14/15 NY-local");
+        let last = ny
+            .timestamp_opt(instances[2].start_time, 0)
+            .single()
+            .expect("resolves");
+        assert_eq!(last.naive_local().date().day(), 15);
     }
 
     #[test]

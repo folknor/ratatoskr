@@ -169,14 +169,26 @@ fn extract_vevent(
         .and_then(|v| v.as_text())
         .map(String::from);
 
-    let (start_time, is_all_day, timezone) =
-        extract_datetime(component, &ICalendarProperty::Dtstart, resolver);
+    // Pick the source entries once per endpoint and reuse them below for
+    // both the resolve and the all-day correction. The previous shape
+    // re-walked `component.properties(prop)` inside each helper -- 4 walks
+    // per all-day event, 2 per timed. (Round 3 #24.)
+    let dtstart_pick = pick_datetime_entry(component, &ICalendarProperty::Dtstart);
+    let dtend_pick = pick_datetime_entry(component, &ICalendarProperty::Dtend);
+
+    let (start_time, is_all_day, timezone) = match dtstart_pick {
+        Some((entry, is_date_only)) => extract_datetime(entry, is_date_only, resolver),
+        None => (None, false, None),
+    };
     // DTEND's resolved zone is unused: the master's TZID drives recurrence
     // expansion (RFC 5545 § 3.8.5.3 anchors recurrence on DTSTART), and
     // mixed start/end zones in a single VEVENT are degenerate enough
     // that we'd rather inherit DTSTART's zone for both endpoints. The
     // unused tuple element below drops it intentionally.
-    let (end_time, _, _) = extract_datetime(component, &ICalendarProperty::Dtend, resolver);
+    let (end_time, _, _) = match dtend_pick {
+        Some((entry, is_date_only)) => extract_datetime(entry, is_date_only, resolver),
+        None => (None, false, None),
+    };
 
     // If DTEND is missing but DURATION is present, compute end time
     let end_time = end_time.or_else(|| {
@@ -207,10 +219,9 @@ fn extract_vevent(
     // sits at 01:00 local instead) but downstream code already special-
     // cases is_all_day, so this is invisible to display.
     let end_time = if is_all_day && let (Some(start), Some(end)) = (start_time, end_time) {
-        match (
-            extract_all_day_date(component, &ICalendarProperty::Dtstart),
-            extract_all_day_date(component, &ICalendarProperty::Dtend),
-        ) {
+        let start_date = dtstart_pick.and_then(|(e, d)| extract_all_day_date(e, d));
+        let end_date = dtend_pick.and_then(|(e, d)| extract_all_day_date(e, d));
+        match (start_date, end_date) {
             (Some(start_date), Some(end_date)) => {
                 let days = end_date.signed_duration_since(start_date).num_days();
                 Some(start + days * 86400)
@@ -339,20 +350,10 @@ fn extract_vevent(
 /// user's zone, not UTC midnight - the latter shifts the displayed calendar
 /// date for any user not on UTC.
 fn extract_datetime(
-    component: &calcard::icalendar::ICalendarComponent,
-    prop: &ICalendarProperty,
+    entry: &ICalendarEntry,
+    is_date_only: bool,
     resolver: &TzResolver<&str>,
 ) -> (Option<i64>, bool, Option<String>) {
-    let Some(entry) = pick_datetime_entry(component, prop) else {
-        return (None, false, None);
-    };
-
-    // Check if it's a DATE-only value (all-day event)
-    let is_date_only = entry
-        .parameter(&ICalendarParameterName::Value)
-        .and_then(|v| v.as_text())
-        .is_some_and(|t| t.eq_ignore_ascii_case("DATE"));
-
     let Some(ICalendarValue::PartialDateTime(dt)) = entry.values.first() else {
         return (None, is_date_only, None);
     };
@@ -472,7 +473,7 @@ fn extract_datetime(
 fn pick_datetime_entry<'c, 'p: 'c>(
     component: &'c calcard::icalendar::ICalendarComponent,
     prop: &'p ICalendarProperty,
-) -> Option<&'c ICalendarEntry> {
+) -> Option<(&'c ICalendarEntry, bool)> {
     let mut iter = component.properties(prop);
     let first = iter.next()?;
     let mut best = first;
@@ -491,7 +492,11 @@ fn pick_datetime_entry<'c, 'p: 'c>(
             "VEVENT carries {count} entries for {prop:?} (RFC 5545 violation); selected by precedence: VALUE=DATE > TZID > UTC > floating"
         );
     }
-    Some(best)
+    // VALUE=DATE is the score-4 bucket in `score_datetime_candidate`; surface
+    // it to the caller so `extract_datetime` and `extract_all_day_date` can
+    // share a single walk per endpoint instead of each running their own
+    // `pick_datetime_entry` + `parameter(Value)` lookup. (Round 3 #24.)
+    Some((best, best_score == 4))
 }
 
 fn score_datetime_candidate(entry: &ICalendarEntry) -> u8 {
@@ -552,7 +557,7 @@ fn build_local_midnight(dt: &calcard::common::PartialDateTime) -> Option<i64> {
 fn extract_recurrence_id_canonical(
     component: &calcard::icalendar::ICalendarComponent,
 ) -> Option<String> {
-    let entry = pick_datetime_entry(component, &ICalendarProperty::RecurrenceId)?;
+    let (entry, is_date_only) = pick_datetime_entry(component, &ICalendarProperty::RecurrenceId)?;
     let Some(ICalendarValue::PartialDateTime(dt)) = entry.values.first() else {
         return None;
     };
@@ -564,10 +569,6 @@ fn extract_recurrence_id_canonical(
     let month = u32::from(dt.month?);
     let day = u32::from(dt.day?);
 
-    let is_date_only = entry
-        .parameter(&ICalendarParameterName::Value)
-        .and_then(|v| v.as_text())
-        .is_some_and(|t| t.eq_ignore_ascii_case("DATE"));
     if is_date_only {
         return Some(format!("{year:04}{month:02}{day:02}"));
     }
@@ -625,14 +626,9 @@ fn extract_recurrence_id_canonical(
 /// `_ => Some(end)` arm and keep the original timed end_time, which is
 /// the safer reading for a malformed feed.
 fn extract_all_day_date(
-    component: &calcard::icalendar::ICalendarComponent,
-    prop: &ICalendarProperty,
+    entry: &ICalendarEntry,
+    is_date_only: bool,
 ) -> Option<chrono::NaiveDate> {
-    let entry = pick_datetime_entry(component, prop)?;
-    let is_date_only = entry
-        .parameter(&ICalendarParameterName::Value)
-        .and_then(|v| v.as_text())
-        .is_some_and(|t| t.eq_ignore_ascii_case("DATE"));
     if !is_date_only {
         return None;
     }
@@ -993,14 +989,30 @@ fn response_status_is_ok(status: &str) -> bool {
     propstat_status_is_ok(status)
 }
 
+/// Result of `parse_propfind_events`. Splits successfully-parsed event
+/// entries from hrefs the server explicitly reported as failing, so the
+/// sync layer can preserve local copies for the failed set rather than
+/// mistaking a server-reported error for "absent" and deleting locally.
+/// (Round 3 #51.)
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PropfindEventsResult {
+    pub entries: Vec<CalDavEventEntry>,
+    /// Hrefs whose `<response>` carried either a non-2xx response-level
+    /// status or had no successful `<propstat>` block. The local copy must
+    /// be preserved across this sync round - the server reported a
+    /// failure, not an absence.
+    pub failed_uris: Vec<String>,
+}
+
 /// Parse a PROPFIND Depth:1 response to extract event URIs and ETags.
 ///
 /// Field reads are parent-scoped (see `parse_propfind_calendars`) and CDATA
 /// sections are accumulated alongside text. ETag values are preserved verbatim
 /// including the RFC 7232 quotes / weak indicator.
-pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
+pub fn parse_propfind_events(xml: &str) -> PropfindEventsResult {
     let mut reader = Reader::from_str(xml);
     let mut entries = Vec::new();
+    let mut failed_uris: Vec<String> = Vec::new();
 
     let mut stack: Vec<String> = Vec::new();
     let mut buf = String::new();
@@ -1010,6 +1022,15 @@ pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
     let mut response_etag = String::new();
     let mut response_content_type = String::new();
     let mut response_is_collection = false;
+    // True when at least one `<propstat>` in the current `<response>` came
+    // back with a 2xx status. If a response has propstat blocks but none
+    // are 2xx, we flag the href as failed so the sync layer doesn't
+    // mistake it for "absent". (Round 3 #51.)
+    let mut any_ok_propstat = false;
+    // True if we observed any `<propstat>` at all this response. Lets us
+    // distinguish "response carried no propstat blocks" from "every
+    // propstat was non-2xx".
+    let mut any_propstat_seen = false;
 
     let mut propstat_status = String::new();
     let mut pending_etag: Option<String> = None;
@@ -1026,12 +1047,15 @@ pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
                     response_etag.clear();
                     response_content_type.clear();
                     response_is_collection = false;
+                    any_ok_propstat = false;
+                    any_propstat_seen = false;
                 }
                 if name == "propstat" {
                     propstat_status.clear();
                     pending_etag = None;
                     pending_content_type = None;
                     pending_is_collection = false;
+                    any_propstat_seen = true;
                 }
                 // RFC 4918 § 14.10: <D:resourcetype><D:collection/></D:resourcetype>
                 // marks a CalDAV sub-collection. Davical, Bedework, and old
@@ -1100,6 +1124,7 @@ pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
                 }
                 if name == "propstat" {
                     if propstat_status_is_ok(&propstat_status) {
+                        any_ok_propstat = true;
                         if let Some(v) = pending_etag.take() {
                             response_etag = v;
                         }
@@ -1119,17 +1144,35 @@ pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
                     pending_content_type = None;
                     pending_is_collection = false;
                 }
-                if name == "response"
-                    && response_status_is_ok(&response_status)
-                    && !response_href.is_empty()
-                    && !response_etag.is_empty()
-                    && !response_is_collection
-                    && is_icalendar_resource(&response_href, &response_content_type)
-                {
-                    entries.push(CalDavEventEntry {
-                        uri: response_href.clone(),
-                        etag: response_etag.clone(),
-                    });
+                if name == "response" {
+                    let response_ok = response_status_is_ok(&response_status);
+                    let pushed_entry = response_ok
+                        && !response_href.is_empty()
+                        && !response_etag.is_empty()
+                        && !response_is_collection
+                        && is_icalendar_resource(&response_href, &response_content_type);
+                    if pushed_entry {
+                        entries.push(CalDavEventEntry {
+                            uri: response_href.clone(),
+                            etag: response_etag.clone(),
+                        });
+                    } else if !response_href.is_empty() {
+                        // Flag as failed only when the server explicitly
+                        // reported an error for this href - either at the
+                        // response level (non-2xx status) or via every
+                        // propstat block returning non-2xx. Hrefs we
+                        // skipped for our own reasons (collection,
+                        // non-iCal content type) are NOT failures - they
+                        // were never event resources to begin with, and
+                        // adding them to failed_uris would hold non-event
+                        // hrefs in the local cache forever. (Round 3 #51.)
+                        let response_level_failed = !response_ok;
+                        let propstat_level_failed =
+                            any_propstat_seen && !any_ok_propstat;
+                        if response_level_failed || propstat_level_failed {
+                            failed_uris.push(response_href.clone());
+                        }
+                    }
                 }
                 stack.pop();
                 buf.clear();
@@ -1139,7 +1182,10 @@ pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
         }
     }
 
-    entries
+    PropfindEventsResult {
+        entries,
+        failed_uris,
+    }
 }
 
 /// Parse a CTag from a PROPFIND response.
@@ -1322,6 +1368,27 @@ fn local_name(raw: &[u8]) -> String {
     }
 }
 
+/// Count `<response>` elements at any depth in a multistatus body.
+///
+/// Used to disambiguate a "207 with zero `<response>` children" (server bug
+/// or first-login race) from a "207 with responses but none are calendars"
+/// (home-set legitimately empty, or only non-calendar resources visible).
+/// Cheap second pass over an already-fetched body, only invoked on the
+/// empty-result path. (Round 3 #49.)
+pub fn count_propfind_response_children(xml: &str) -> usize {
+    let mut reader = Reader::from_str(xml);
+    let mut count = 0;
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref e)) if local_name(e.name().as_ref()) == "response" => {
+                count += 1;
+            }
+            Ok(Event::Eof) | Err(_) => return count,
+            _ => {}
+        }
+    }
+}
+
 /// Check if a resource looks like an iCalendar resource.
 ///
 /// Content-type matching is case-insensitive (RFC 7231 § 3.1.1.1: media-type
@@ -1452,6 +1519,103 @@ END:VCALENDAR\r\n";
         assert!(events[0].is_all_day);
         assert!(events[0].start_time.is_some());
         assert!(events[0].end_time.is_some());
+    }
+
+    #[test]
+    fn parse_lf_only_line_endings() {
+        // Round 3 #48: some Linux CalDAV bridges emit LF-only line endings
+        // even though RFC 5545 mandates CRLF. calcard should still unfold
+        // and produce the right values; this test pins that behaviour so
+        // an upstream regression here surfaces in our own suite rather
+        // than mid-sync. If calcard ever drops LF-only support, we'll
+        // need a normalization pre-pass before handing payloads to it.
+        let ical = "BEGIN:VCALENDAR\n\
+VERSION:2.0\n\
+BEGIN:VEVENT\n\
+UID:lf-only-1@example.com\n\
+SUMMARY:LF only line endings\n\
+DTSTART:20260315T100000Z\n\
+DTEND:20260315T110000Z\n\
+END:VEVENT\n\
+END:VCALENDAR\n";
+
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].uid.as_deref(), Some("lf-only-1@example.com"));
+        assert_eq!(events[0].summary.as_deref(), Some("LF only line endings"));
+        assert!(events[0].start_time.is_some());
+    }
+
+    #[test]
+    fn parse_folded_long_description() {
+        // Round 3 #48: RFC 5545 § 3.1 folds lines longer than 75 octets by
+        // inserting CRLF + (SP | HTAB). The folded continuation must be
+        // joined back into the original value (the leading space is part
+        // of the fold marker, not the content). A regression here would
+        // truncate long DESCRIPTIONs at the 75-octet boundary.
+        //
+        // String pieces are concatenated explicitly because Rust's `\`
+        // line-continuation in string literals strips the leading
+        // whitespace on the next code line - which would also strip the
+        // single space that *is* the fold marker, defeating the test.
+        let ical = concat!(
+            "BEGIN:VCALENDAR\r\n",
+            "VERSION:2.0\r\n",
+            "BEGIN:VEVENT\r\n",
+            "UID:folded-1@example.com\r\n",
+            "SUMMARY:Folded long description\r\n",
+            "DTSTART:20260315T100000Z\r\n",
+            "DTEND:20260315T110000Z\r\n",
+            "DESCRIPTION:This is a long description that needs folding to fit within\r\n",
+            " the 75-octet line limit RFC 5545 imposes; the continuation begins\r\n",
+            " with a single space to mark the fold.\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n",
+        );
+
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        let description = events[0]
+            .description
+            .as_deref()
+            .expect("description present");
+        // Substrings from across the fold boundaries must appear in order
+        // in the unfolded value.
+        assert!(description.contains("long description that needs folding"));
+        assert!(description.contains("the 75-octet line limit RFC 5545 imposes"));
+        assert!(description.contains("a single space to mark the fold"));
+    }
+
+    #[test]
+    fn parse_lf_only_with_folded_description() {
+        // Round 3 #48: combined repro - LF-only endings *plus* a folded
+        // DESCRIPTION. This is the shape that some Linux bridges emit
+        // and is the scariest combination because both behaviours can
+        // mask a regression in the other.
+        let ical = concat!(
+            "BEGIN:VCALENDAR\n",
+            "VERSION:2.0\n",
+            "BEGIN:VEVENT\n",
+            "UID:lf-folded-1@example.com\n",
+            "SUMMARY:LF + folded\n",
+            "DTSTART:20260315T100000Z\n",
+            "DTEND:20260315T110000Z\n",
+            "DESCRIPTION:Linux bridges sometimes emit LF-only iCalendar with the\n",
+            " standard fold marker for long values; both must round-trip through\n",
+            " calcard or events vanish silently.\n",
+            "END:VEVENT\n",
+            "END:VCALENDAR\n",
+        );
+
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        let description = events[0]
+            .description
+            .as_deref()
+            .expect("description present");
+        assert!(description.contains("Linux bridges sometimes emit LF-only iCalendar"));
+        assert!(description.contains("standard fold marker"));
+        assert!(description.contains("events vanish silently"));
     }
 
     #[test]
@@ -1998,13 +2162,14 @@ END:VCALENDAR\r\n";
   </D:response>
 </D:multistatus>"#;
 
-        let entries = parse_propfind_events(xml);
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].uri, "/calendars/user/personal/event1.ics");
+        let result = parse_propfind_events(xml);
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].uri, "/calendars/user/personal/event1.ics");
         // ETag values are preserved verbatim, including the RFC 7232 quotes.
-        assert_eq!(entries[0].etag, "\"etag-111\"");
-        assert_eq!(entries[1].uri, "/calendars/user/personal/event2.ics");
-        assert_eq!(entries[1].etag, "\"etag-222\"");
+        assert_eq!(result.entries[0].etag, "\"etag-111\"");
+        assert_eq!(result.entries[1].uri, "/calendars/user/personal/event2.ics");
+        assert_eq!(result.entries[1].etag, "\"etag-222\"");
+        assert!(result.failed_uris.is_empty());
     }
 
     #[test]
@@ -2208,9 +2373,14 @@ END:VCALENDAR\r\n";
     </D:propstat>
   </D:response>
 </D:multistatus>"#;
-        let entries = parse_propfind_events(xml);
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].uri, "/calendars/user/work/event1.ics");
+        let result = parse_propfind_events(xml);
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].uri, "/calendars/user/work/event1.ics");
+        // The collection href has a 2xx propstat - it just isn't an event
+        // resource. NOT a server-reported failure, so it must not show up
+        // in failed_uris (otherwise sync would treat it as a sticky entry
+        // forever).
+        assert!(result.failed_uris.is_empty());
     }
 
     #[test]
@@ -2264,9 +2434,10 @@ END:VCALENDAR\r\n";
     </D:propstat>
   </D:response>
 </D:multistatus>"#;
-        let entries = parse_propfind_events(xml);
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].etag, "W/\"weak-etag-111\"");
+        let result = parse_propfind_events(xml);
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].etag, "W/\"weak-etag-111\"");
+        assert!(result.failed_uris.is_empty());
     }
 
     #[test]
@@ -2375,9 +2546,54 @@ END:VCALENDAR</C:calendar-data>
   </D:response>
 </D:multistatus>"#;
 
-        let entries = parse_propfind_events(xml);
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].uri, "/calendars/user/personal/event1.ics");
+        let result = parse_propfind_events(xml);
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].uri, "/calendars/user/personal/event1.ics");
+        // Round 3 #51: the 500 entry must show up in failed_uris so the
+        // sync layer preserves the local copy across this round rather
+        // than mistaking a server-reported failure for "absent".
+        assert_eq!(
+            result.failed_uris,
+            vec!["/calendars/user/personal/event2.ics".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_propfind_events_flags_propstat_404_as_failed() {
+        // Round 3 #51: a 207-OK response whose only propstat is non-2xx
+        // (e.g. a 404 from a transient server error or a permission flap)
+        // must NOT be silently dropped - the sync layer would then treat
+        // the href as absent and delete the local copy. Surface it via
+        // failed_uris instead so the local copy is preserved.
+        let xml = r#"<?xml version="1.0"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/calendars/user/personal/event1.ics</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:getetag>"etag-111"</D:getetag>
+        <D:getcontenttype>text/calendar</D:getcontenttype>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+  <D:response>
+    <D:href>/calendars/user/personal/event2.ics</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:getetag/>
+      </D:prop>
+      <D:status>HTTP/1.1 404 Not Found</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+        let result = parse_propfind_events(xml);
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].uri, "/calendars/user/personal/event1.ics");
+        assert_eq!(
+            result.failed_uris,
+            vec!["/calendars/user/personal/event2.ics".to_string()]
+        );
     }
 
     #[test]

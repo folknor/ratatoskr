@@ -120,8 +120,13 @@ async fn sync_calendar_events(
     calendar_id: &str,
     calendar_href: &str,
 ) -> Result<(usize, usize), String> {
-    // List all events on the server (URIs + ETags)
-    let remote_entries = client.list_events(calendar_href).await?;
+    // List all events on the server (URIs + ETags). The result also carries
+    // failed_uris - hrefs the server explicitly reported as failing in the
+    // 207. Those must NOT be dropped from the local cache; we treat them
+    // as "preserve" below. (Round 3 #51.)
+    let remote_listing = client.list_events(calendar_href).await?;
+    let remote_entries = remote_listing.entries;
+    let failed_uris: HashSet<String> = remote_listing.failed_uris.into_iter().collect();
 
     // Load stored ETags for comparison
     let stored_etags = load_stored_etags(db, calendar_id).await?;
@@ -150,6 +155,11 @@ async fn sync_calendar_events(
     // perspective; preserving it costs nothing because the next successful
     // sync naturally reconciles. Real "user deleted everything" still
     // works through the explicit `full_resync_calendar` path.
+    //
+    // Per-entry failure preservation: hrefs the server reported as failing
+    // (non-2xx response or non-2xx-only propstat) are also held back from
+    // the deletion list. Same reasoning - a server-reported failure is
+    // not the same as "absent". (Round 3 #51.)
     let deleted_uris: Vec<String> = if remote_entries.is_empty() && !stored_etags.is_empty() {
         log::warn!(
             "CalDAV sync for calendar {calendar_id}: server returned 0 events but local cache has {} - \
@@ -159,11 +169,24 @@ async fn sync_calendar_events(
         );
         Vec::new()
     } else {
-        stored_etags
+        let candidates: Vec<String> = stored_etags
             .keys()
             .filter(|uri| !remote_uri_set.contains(*uri))
+            .filter(|uri| !failed_uris.contains(*uri))
             .cloned()
-            .collect()
+            .collect();
+        if !failed_uris.is_empty() {
+            let preserved = stored_etags
+                .keys()
+                .filter(|uri| failed_uris.contains(*uri))
+                .count();
+            if preserved > 0 {
+                log::warn!(
+                    "CalDAV sync for calendar {calendar_id}: server reported {preserved} stored events as failing in this 207; preserving local copies."
+                );
+            }
+        }
+        candidates
     };
 
     log::info!(

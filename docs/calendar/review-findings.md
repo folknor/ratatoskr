@@ -8,24 +8,6 @@ Findings are grouped by code area.
 
 #### `expand_recurrence` / load path
 
-7. **Low** [arch/claude Low] - **`parse_until_date` ignores the event's
-   RecurrenceTz.** `:1965-2013`. `expand_recurrence` threads
-   `RecurrenceTz` through every helper, but `parse_until_date` is
-   called from `parse_rrule` *before* tz is known and unconditionally
-   anchors floating + DATE-only UNTIL in `chrono::Local`. NY event
-   with `RRULE:FREQ=DAILY;UNTIL=20260315` from a host in Pacific/Auckland:
-   expected last instance Mar 15 NY-local; observed Mar 14 NY-local.
-   Apple/Google anchor in event zone. Fix: keep a raw `Until` enum
-   (`Date(NaiveDate)` / `DateTime(NaiveDateTime)` / `Utc(i64)`) and
-   resolve inside `expand_recurrence` once tz is in hand.
-
-8. **Note** [bugs/claude notes] - **`parse_until_date` DATE-only +
-   TZID-bearing DTSTART boundary clipping.** RFC 5545 says DATE-only
-   UNTIL is only legal alongside floating DTSTART, but some Outlook
-   bridges emit DATE-only UNTIL alongside TZID-bearing DTSTART (RFC
-   violation, real in the wild). Off-by-some-hours UNTIL clipping for
-   west/east-of-UTC users.
-
 9. **Note** [arch/claude notes] - **`expand_recurrence` `wall_duration`
    collapses to 0 when the master event lives entirely inside a DST
    gap.** `DTSTART;TZID=America/New_York:20260308T023000` +
@@ -34,11 +16,6 @@ Findings are grouped by code area.
    inherits zero-length end. Pre-existing parse-time issue
    (`extract_datetime` resolves both endpoints through the gap), not
    introduced in Round 2; flagged for follow-up.
-
-10. **Cosmetic** [arch/claude notes] - **`expand_yearly` overflow guard
-    has dead code.** `i32::try_from(rule.interval).unwrap_or(1).max(1)`
-    at `:1779` - `parse_rrule` already clamps interval to ≥1, so the
-    `.max(1)` is unreachable.
 
 16. **Note (perf)** [perf/codex Medium implicit, perf/claude reference] -
     **`YEARLY_MAX_STEPS=80_000` is large but no longer a render-path
@@ -60,18 +37,6 @@ Findings are grouped by code area.
     Decided: keep the linear walk - simplicity is the right tradeoff
     against the rarity of the gap path.
 
-### `crates/core/src/caldav/parse.rs`
-
-24. **Low (perf)** [perf/claude L16] - **`pick_datetime_entry` runs
-    twice per all-day endpoint.** `:144-145, 175-188`.
-    `extract_datetime(Dtstart)` calls `pick_datetime_entry(Dtstart)`,
-    then `extract_all_day_date(Dtstart)` calls it again; same for
-    Dtend. For all-day events that's 4 walks of
-    `component.properties(prop)` instead of 2. Fix: have
-    `pick_datetime_entry` return the picked entry alongside an
-    `is_date_only` flag, and have `extract_vevent` pass it into both
-    downstream helpers.
-
 ### `crates/core/src/caldav/client.rs`
 
 38. **Note** [arch/claude notes] - **Weak ETag dropped from `If-Match`
@@ -85,32 +50,9 @@ Findings are grouped by code area.
     pervasively. Trade-off acknowledged in doc comment; flag for the
     racing-edits user complaint when it lands.
 
-### `crates/calendar/src/caldav/mod.rs`
+### Feature work (not yet implemented)
 
-
-41. **Low** (carry-over from Round 2) - `join_calendar_path`
-    (`:413-424`) drops query strings from calendar URLs via
-    `Url::join` semantics. Edge case for shared-hosting CalDAV
-    servers requiring routing query parameters.
-
-### `crates/graph/src/calendar_sync.rs`
-
-42. **Low** [arch/claude Low] - **Graph all-day correction silently
-    disagrees with TZID for malformed payloads.** `:442-455`.
-    `map_graph_event` recomputes end via `parse_graph_all_day_date`
-    (which only reads the date from the dateTime string), independent
-    of `time_zone`. If Graph ever returns an all-day event whose
-    `start.timeZone` and `end.timeZone` differ (cross-zone "all-day"),
-    the correction overrides whatever the per-side resolve produced.
-    Probably the right call (start drives the zone) but worth a
-    comment.
-
-43. **Medium** (carry-over from Round 2) - `resolve_graph_tz` falls
-    through to `None` for unknown Windows zone names (`:574`); the
-    fallback now logs WARN with the offending zone name. Underlying
-    calcard alias gap is the real fix. Repro: `2024-06-15T10:00:00`
-    in `Africa/Juba` ("South Sudan Standard Time", not in calcard)
-    becomes 10:00Z instead of 08:00Z (with a log line now).
+These are deferred items that need real lift, not just polish.
 
 45. **Medium** - **Inverted error signaling in `expand_recurrence`.**
     Malformed rules and rules using unsupported BY-rules now log a
@@ -133,16 +75,6 @@ Findings are grouped by code area.
     when calcard surfaces empty values; user-cleared-title support
     requires an upstream calcard change before it can land.
 
-48. **Medium** - **Folded-line + CRLF handling depends on calcard.**
-    LF-only line endings (some Linux bridges) may fail to unfold;
-    long DESCRIPTION lines get truncated. Worth a unit test covering
-    LF-only + folded long line.
-
-49. **Medium** - **PROPFIND 207 with zero `<response>` children**
-    returns empty Vec with no log; indistinguishable from "no
-    calendars provisioned" / first-login race / server-side error
-    misreported as 207.
-
 50. **Medium** - **Multi-href delegation home-sets** are collected by
     `extract_hrefs_property` (returns `Vec<String>`), but only the
     first is consumed by the discovery flow. Reaching the rest
@@ -150,15 +82,9 @@ Findings are grouped by code area.
     (single `Option<String>` today), the persisted DB column, and
     `list_calendars`. Multi-href encounters now log a WARN.
 
-51. **Medium** - **Empty remote set guard** in `sync_calendar_events`
-    skips the deletion phase when remote returns 0 entries against a
-    non-empty local cache. Still open: the propstat-status-not-
-    inspected case where individual entries get filtered out as
-    "absent" mid-batch even though the response was 207-OK overall.
-
 ### Test gaps flagged
 
-The Round 3 review flagged four behaviors as untested. Three now have
+The Round 3 review flagged four behaviors as untested. Three have
 pinning tests in `crates/db/src/db/queries_extra/calendars.rs`
 (`count_zero_drops_master_emits_empty`,
 `negative_master_duration_does_not_panic`,
@@ -166,7 +92,11 @@ pinning tests in `crates/db/src/db/queries_extra/calendars.rs`
 discover_principal against a redirecting base URL) is closed by the
 #30 fix in this round - the base-URL try uses
 `propfind_with_final_url` and resolves the principal against the
-post-redirect URL.
+post-redirect URL. The Round 3 #48 LF-only + folded-line gap is now
+covered by `parse_lf_only_line_endings`,
+`parse_folded_long_description`, and
+`parse_lf_only_with_folded_description` in
+`crates/core/src/caldav/parse.rs`.
 
 ---
 

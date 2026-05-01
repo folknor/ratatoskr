@@ -1,7 +1,7 @@
 use reqwest::header::{CONTENT_TYPE, IF_MATCH};
 use reqwest::{Method, StatusCode};
 
-use super::parse::{self, CalDavEventEntry};
+use super::parse;
 
 /// Authentication method for the CalDAV server.
 #[derive(Debug, Clone)]
@@ -342,11 +342,18 @@ impl CalDavClient {
             // reported as 207, or a parser limitation we haven't seen
             // yet). Log so an operator chasing "where did my calendars
             // go" has a starting point. The caller still gets Ok(empty)
-            // - this is informational, not an error.
-            log::warn!(
-                "CalDAV list_calendars at {url} returned 0 calendars from a {} byte response",
-                body.len()
-            );
+            // - this is informational, not an error. (Round 3 #49.)
+            let response_count = parse::count_propfind_response_children(&body);
+            if response_count == 0 {
+                log::warn!(
+                    "CalDAV list_calendars at {url} returned a 207 with zero <response> children ({} bytes); first-login race or a server-side error misreported as 207",
+                    body.len()
+                );
+            } else {
+                log::warn!(
+                    "CalDAV list_calendars at {url} parsed {response_count} <response> children but found 0 calendars; the home-set has no calendars or only non-calendar resources are visible"
+                );
+            }
         }
         Ok(calendars)
     }
@@ -358,19 +365,29 @@ impl CalDavClient {
     /// List all events in a calendar (URIs + ETags).
     ///
     /// Event URIs are resolved to absolute URLs against the calendar URL for
-    /// the same reason `list_calendars` does so for calendar hrefs.
-    pub async fn list_events(&self, calendar_url: &str) -> Result<Vec<CalDavEventEntry>, String> {
+    /// the same reason `list_calendars` does so for calendar hrefs. The
+    /// returned struct also carries hrefs that the server reported as
+    /// failing (non-2xx response status, or no successful propstat block);
+    /// the sync layer must preserve local copies for those rather than
+    /// mistaking server-reported failure for "absent". (Round 3 #51.)
+    pub async fn list_events(
+        &self,
+        calendar_url: &str,
+    ) -> Result<parse::PropfindEventsResult, String> {
         let url = self.resolve_url(calendar_url);
         let (_, body) = self
             .propfind_raw(&url, "1", PROPFIND_EVENTS)
             .await
             .map_err(|e| format!("PROPFIND events failed: {e}"))?;
 
-        let mut entries = parse::parse_propfind_events(&body);
-        for entry in &mut entries {
+        let mut result = parse::parse_propfind_events(&body);
+        for entry in &mut result.entries {
             entry.uri = self.resolve_url_against(&url, &entry.uri);
         }
-        Ok(entries)
+        for uri in &mut result.failed_uris {
+            *uri = self.resolve_url_against(&url, uri);
+        }
+        Ok(result)
     }
 
     // -----------------------------------------------------------------------
