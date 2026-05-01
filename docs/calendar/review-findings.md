@@ -25,14 +25,16 @@ All findings addressed. Lenses and targets:
 
 Addressed in commits 4b5c6c97..5401618b. Topics, by area of fix:
 
-- RRULE expansion now respects `event.timezone` end-to-end via a new
-  `RecurrenceTz` enum; wall-clock duration replaces raw seconds.
-  *(See Round 3 #18 - the consumer is wired but the CalDAV producer is
-  not, so the headline fix is largely inert for CalDAV.)*
-- All-day event end_time anchored to `start + Δdate*86400` in CalDAV
-  parse and Graph map paths; recurring all-day duration computed in event
-  zone. *(See Round 3 #22 - the parse-side fix and the expand-side fix
-  interact incorrectly across DST.)*
+- RRULE expansion respects `event.timezone` end-to-end via the
+  `RecurrenceTz` enum; wall-clock duration replaces raw seconds. The
+  CalDAV producer now plumbs the resolved IANA name through into
+  `ParsedVEvent.timezone` and onto the row's `timezone` column, so the
+  expander walks recurrences in the source zone for CalDAV (matching
+  Graph's existing behavior).
+- All-day event end_time anchored to `start + days*86400` in CalDAV
+  parse and Graph map paths; recurring all-day duration computed in
+  event zone via a date-delta wall_duration so spring-forward weeks
+  don't inherit a 25-hour duration on every subsequent instance.
 - RECURRENCE-ID folded into the CalDAV sync key, with the canonical
   wall-clock form as the discriminator. Override rows stay distinct from
   the master, master expansion subtracts override slots at load time,
@@ -120,20 +122,6 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
    MO,TU,WE,TH,FR` (~22/mo) caps at 120 → ~5.5 months. Fix: bump
    weekly/monthly defaults to match `expand_daily`'s 800, or scale by
    BY-rule density. `:1542, 1607`.
-
-5. **High** [arch/codex High, perf/codex High] - **CalDAV TZID is parsed
-   but not persisted onto `calendar_events.timezone`.** `extract_datetime`
-   (`parse.rs:299`) resolves TZID to compute the timestamp but returns
-   only `(Option<i64>, bool)`. `ParsedVEvent` has no timezone field;
-   `upsert_parsed_event` (`sync.rs:283`) leaves `timezone: None` via
-   `..Default::default()`. The new `RecurrenceTz::from_event_timezone`
-   (`:1141`) then resolves `None` to `Local` for *every* CalDAV row -
-   so the entire RRULE TZ fix from Round 2 is inert on the CalDAV path.
-   Graph events are unaffected (`graph/calendar_sync.rs:482` populates
-   `timezone`). Repro: sync `DTSTART;TZID=Pacific/Kiritimati:20260101T090000`
-   with `FREQ=MONTHLY;COUNT=3` on a Europe/Oslo host; stored row has
-   `timezone=NULL`; expansion uses Oslo wall time. **The headline fix
-   in commit 4b5c6c97 is largely cosmetic for CalDAV until this lands.**
 
 6. **Medium** [bugs/claude M1] - **Windows zone names fall through to
    `chrono::Local`.** `RecurrenceTz::from_event_timezone` (`:1085-1103`)
@@ -243,36 +231,6 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
     simplicity is probably the right tradeoff.
 
 ### `crates/core/src/caldav/parse.rs`
-
-21. **High** [perf/claude H4, bugs/claude L2, arch/claude implicit] -
-    **`extract_all_day_date` doesn't check `VALUE=DATE`.** `:488-499`
-    + `:175-188`. Calls `pick_datetime_entry` and reads
-    `dt.year/month/day` unconditionally. For a malformed event with
-    `DTSTART;VALUE=DATE:20240310` and
-    `DTEND;TZID=America/New_York:20240312T000000` (timed),
-    `pick_datetime_entry(Dtend)` selects the TZID-bearing entry (score
-    3 > no-VALUE timed). Returned date is the wall-clock date in source
-    TZ, off-by-one. Then `extract_vevent` writes `start + days * 86400`,
-    silently confusing two conventions. New test
-    `all_day_event_spanning_dst_keeps_exact_day_count` only covers the
-    well-formed both-`VALUE=DATE` case. Fix: in `extract_all_day_date`,
-    return `None` if the picked entry's `VALUE` parameter is not `DATE`,
-    falling through to the existing `_ => Some(end)` arm.
-
-22. **High** [bugs/codex #1] - **Recurring all-day events still get
-    DST-skewed durations after parsing.** `parse.rs:175,
-    calendar_sync.rs:442, calendars.rs:1189`. The CalDAV/Graph all-day
-    fix stores `end_time = start + days * 86400`. That fixes single
-    all-day events, but recurrence expansion now computes
-    `wall_duration` by converting those timestamps back into the event
-    timezone. Across spring-forward, `start + 86400` is often `01:00`
-    the next day locally → 25-hour wall duration. Fall-back → 23
-    hours. Repro: parse and expand
-    `DTSTART;VALUE=DATE:20260308`, `DTEND;VALUE=DATE:20260309`,
-    `RRULE:FREQ=WEEKLY;COUNT=2` in America/New_York. Existing weekly
-    all-day test uses true midnight-to-midnight timestamp built via
-    `from_local_datetime`, not via the parse path's
-    `start + days*86400`, so does not cover this shape.
 
 23. **Low** [perf/claude L13, arch/claude Low] -
     **`is_icalendar_resource` third-arm fallback ignores

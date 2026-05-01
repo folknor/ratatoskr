@@ -1271,10 +1271,38 @@ fn expand_recurrence_with_overrides(
     // so an all-day event ending at midnight stays at midnight on every
     // instance regardless of DST gaps - and a timed event stays the same
     // wall-clock length whether or not the master spanned DST.
+    //
+    // All-day events get a separate path: the parse layer already anchored
+    // end_time to `start + days*86400`, so when the master spans the
+    // spring-forward boundary `end_naive` lands at `01:00` the day after
+    // `end_date()`. A naive `end_naive - start_naive` then gives 25 hours,
+    // which propagated to every subsequent recurring instance shows them
+    // ending at 01:00 instead of midnight. Compute the duration from the
+    // date delta directly so 1 calendar day stays 1 calendar day across
+    // DST. Symmetric for fall-back (avoids 23h drift). (Round 3 #22.)
     let raw_duration = event.end_time - event.start_time;
-    let wall_duration = match (tz.naive(event.start_time), tz.naive(event.end_time)) {
-        (Some(s), Some(e)) => e.signed_duration_since(s),
-        _ => chrono::Duration::seconds(raw_duration),
+    let wall_duration = if event.all_day {
+        match (tz.naive(event.start_time), tz.naive(event.end_time)) {
+            (Some(s), Some(e)) => {
+                let mut days = e.date().signed_duration_since(s.date()).num_days();
+                // If end_naive landed before midnight (DST fall-back, where
+                // start+86400 sits at 23:00 the same day), the date delta
+                // would underreport by one. Round up so a 1-day event stays
+                // 1 day. The condition is: end_naive's clock sits past
+                // midnight relative to start_naive (i.e. raw seconds floor-
+                // divided by 86400 is at least one).
+                if days == 0 && raw_duration > 0 {
+                    days = 1;
+                }
+                chrono::Duration::days(days.max(0))
+            }
+            _ => chrono::Duration::seconds(raw_duration),
+        }
+    } else {
+        match (tz.naive(event.start_time), tz.naive(event.end_time)) {
+            (Some(s), Some(e)) => e.signed_duration_since(s),
+            _ => chrono::Duration::seconds(raw_duration),
+        }
     };
 
     // Default cap matches the 2-year fallback window emitted by
@@ -2697,6 +2725,59 @@ mod tests {
                 .expect("NY instant resolves");
             assert_eq!(local.naive_local().time().hour(), 9);
             assert_eq!(local.naive_local().time().minute(), 0);
+        }
+    }
+
+    #[test]
+    fn recurring_all_day_via_parse_path_keeps_one_day_across_dst() {
+        // Round 3 #22 regression guard. The CalDAV/Graph parse layer now
+        // anchors all-day DTEND to `start + days*86400` rather than
+        // resolving DTEND in chrono::Local. For a 1-day all-day event
+        // whose master spans the spring-forward boundary
+        // (2026-03-08 in America/New_York), the master's end_time lands
+        // at 01:00 NY the next day - 25 hours after start, not 24.
+        // Without the all-day branch in expand_recurrence the wall_duration
+        // would be 25 hours and every subsequent recurring instance would
+        // emit at "ends 01:00 the next day," shifting the displayed
+        // end-time by an hour for every week after the transition.
+        use chrono_tz::Tz;
+        let ny: Tz = "America/New_York".parse().expect("valid IANA");
+        let mar8 = ny
+            .from_local_datetime(
+                &chrono::NaiveDate::from_ymd_opt(2026, 3, 8)
+                    .expect("valid")
+                    .and_hms_opt(0, 0, 0)
+                    .expect("midnight"),
+            )
+            .single()
+            .expect("unambiguous")
+            .timestamp();
+        // Parse-path output: end = start + 86400 (the new anchor shape).
+        let raw_end = mar8 + 86_400;
+        let mut event = make_event(mar8, raw_end - mar8);
+        event.all_day = true;
+        event.timezone = Some("America/New_York".to_string());
+        event.end_time = raw_end;
+        let instances = expand_recurrence(&event, "FREQ=WEEKLY;COUNT=3");
+        assert_eq!(instances.len(), 3);
+        for (i, inst) in instances.iter().enumerate() {
+            let end_local = ny
+                .timestamp_opt(inst.end_time, 0)
+                .single()
+                .expect("NY end resolves");
+            // Instance i=0 is the master itself; its end may be 01:00 NY
+            // the next day because the parse-path anchor sits there. What
+            // matters is that subsequent instances (which expand from a
+            // 1-day wall_duration) land at midnight rather than 01:00.
+            if i == 0 {
+                continue;
+            }
+            assert_eq!(
+                end_local.naive_local().time().hour(),
+                0,
+                "post-DST instance {i} end_time was not midnight in NY"
+            );
+            assert_eq!(end_local.naive_local().time().minute(), 0);
         }
     }
 

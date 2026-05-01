@@ -330,6 +330,12 @@ async fn upsert_parsed_event(
             ical_data: Some(ical_data.to_string()),
             uid: event.uid.clone(),
             title: event.summary.clone(),
+            // IANA-form zone name from DTSTART. Drives the RRULE expander's
+            // wall-clock walk; without this `RecurrenceTz::from_event_timezone`
+            // gets None and falls back to chrono::Local, so a NY-zoned
+            // master would render in the user's host zone and shift
+            // every recurring instance by the offset. (Round 3 #5.)
+            timezone: event.timezone.clone(),
             recurrence_rule: event.rrule.clone(),
             organizer_name: event.organizer_name.clone(),
             recurrence_id: event.recurrence_id.clone(),

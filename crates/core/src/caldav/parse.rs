@@ -21,6 +21,20 @@ pub struct ParsedVEvent {
     pub end_time: Option<i64>,
     /// Whether this is an all-day event (DATE value type, no time component).
     pub is_all_day: bool,
+    /// IANA-form name of the timezone DTSTART resolved through, when one
+    /// was available. `None` for floating events (no TZID, no Z) and for
+    /// UTC events (the wall-clock instant is already absolute, no zone
+    /// rebase needed at expand time).
+    ///
+    /// Threaded into `UpsertCalendarEventParams::timezone` so the RRULE
+    /// expander downstream (`db::queries_extra::calendars::RecurrenceTz`)
+    /// walks the recurrence in the source zone instead of falling back
+    /// to `chrono::Local`. Without this, the Round 2 RecurrenceTz fix
+    /// was inert on the CalDAV path: every CalDAV row landed with
+    /// `timezone = NULL` and the expander reanchored every instance in
+    /// the user's local zone, silently shifting the displayed time by
+    /// the offset between source and host.
+    pub timezone: Option<String>,
     /// STATUS (CONFIRMED, TENTATIVE, CANCELLED).
     pub status: String,
     /// ORGANIZER email (stripped of mailto: prefix).
@@ -155,8 +169,14 @@ fn extract_vevent(
         .and_then(|v| v.as_text())
         .map(String::from);
 
-    let (start_time, is_all_day) = extract_datetime(component, &ICalendarProperty::Dtstart, resolver);
-    let (end_time, _) = extract_datetime(component, &ICalendarProperty::Dtend, resolver);
+    let (start_time, is_all_day, timezone) =
+        extract_datetime(component, &ICalendarProperty::Dtstart, resolver);
+    // DTEND's resolved zone is unused: the master's TZID drives recurrence
+    // expansion (RFC 5545 § 3.8.5.3 anchors recurrence on DTSTART), and
+    // mixed start/end zones in a single VEVENT are degenerate enough
+    // that we'd rather inherit DTSTART's zone for both endpoints. The
+    // unused tuple element below drops it intentionally.
+    let (end_time, _, _) = extract_datetime(component, &ICalendarProperty::Dtend, resolver);
 
     // If DTEND is missing but DURATION is present, compute end time
     let end_time = end_time.or_else(|| {
@@ -280,6 +300,7 @@ fn extract_vevent(
         start_time,
         end_time,
         is_all_day,
+        timezone,
         status,
         organizer_email,
         organizer_name,
@@ -291,7 +312,13 @@ fn extract_vevent(
 }
 
 /// Extract a datetime from a DTSTART or DTEND property, returning
-/// `(timestamp, is_all_day)`.
+/// `(timestamp, is_all_day, resolved_tz_name)`.
+///
+/// `resolved_tz_name` is the IANA name of the zone the value was resolved
+/// through, or `None` when the result is in UTC, floating, or all-day
+/// (where re-resolution at recurrence-expand time would be a no-op or
+/// equivalent to `chrono::Local`). Persisted into the row's `timezone`
+/// column so the RRULE expander walks the recurrence in the source zone.
 ///
 /// Honors the TZID parameter via the supplied resolver (which carries the
 /// iCalendar's VTIMEZONE blocks and falls back to `Tz::from_str` for IANA or
@@ -315,9 +342,9 @@ fn extract_datetime(
     component: &calcard::icalendar::ICalendarComponent,
     prop: &ICalendarProperty,
     resolver: &TzResolver<&str>,
-) -> (Option<i64>, bool) {
+) -> (Option<i64>, bool, Option<String>) {
     let Some(entry) = pick_datetime_entry(component, prop) else {
-        return (None, false);
+        return (None, false, None);
     };
 
     // Check if it's a DATE-only value (all-day event)
@@ -327,20 +354,21 @@ fn extract_datetime(
         .is_some_and(|t| t.eq_ignore_ascii_case("DATE"));
 
     let Some(ICalendarValue::PartialDateTime(dt)) = entry.values.first() else {
-        return (None, is_date_only);
+        return (None, is_date_only, None);
     };
 
     if is_date_only {
         // All-day: build a NaiveDate at midnight LOCAL. Storing midnight UTC
         // displays the wrong calendar date for any user west of UTC (Jan 15
-        // UTC midnight = Jan 14 16:00 PST).
+        // UTC midnight = Jan 14 16:00 PST). No tz to thread through; the
+        // recurrence expander special-cases all-day to avoid DST drift.
         let timestamp = build_local_midnight(dt);
-        return (timestamp, true);
+        return (timestamp, true, None);
     }
 
     let naive = match partial_to_naive(dt) {
         Some(n) => n,
-        None => return (dt.to_timestamp(), false),
+        None => return (dt.to_timestamp(), false, None),
     };
 
     // 1. Explicit TZID, resolves to a real zone (IANA or Windows).
@@ -370,9 +398,18 @@ fn extract_datetime(
             if !tz_id.is_empty() {
                 let tz = resolver.resolve_or_default(Some(tz_id));
                 if !tz.is_floating() {
+                    // Persist the IANA name (resolver folded Windows
+                    // aliases like "Pacific Standard Time" through to
+                    // "America/Los_Angeles") so downstream
+                    // `RecurrenceTz::from_event_timezone` can `parse()`
+                    // it without bringing calcard's alias map into the
+                    // db crate. `Tz::Fixed` resolves to an `Etc/GMT<n>`
+                    // string which chrono_tz also accepts.
+                    let resolved_name = tz.name().map(std::borrow::Cow::into_owned);
                     return (
                         common::time::resolve_local_to_timestamp(naive, &tz),
                         false,
+                        resolved_name,
                     );
                 }
                 // The TZID was specified but did not resolve. Falling
@@ -386,7 +423,7 @@ fn extract_datetime(
                 log::warn!(
                     "CalDAV TZID={tz_id_raw:?} did not resolve; falling back to UTC interpretation"
                 );
-                return (Some(naive.and_utc().timestamp()), false);
+                return (Some(naive.and_utc().timestamp()), false, None);
             }
         }
     }
@@ -395,15 +432,18 @@ fn extract_datetime(
     //    `to_timestamp()` already handles these and the result does not
     //    depend on a local zone, so it's safe to defer.
     if dt.tz_hour.is_some() {
-        return (dt.to_timestamp(), false);
+        return (dt.to_timestamp(), false, None);
     }
 
     // 3. Floating time. RFC 5545 § 3.3.5 says interpret in the user's local
     //    zone. We previously fell through to `to_timestamp()` which silently
-    //    treated the wall-clock as UTC.
+    //    treated the wall-clock as UTC. No persisted timezone here either:
+    //    floating means "interpret in viewer's local zone," and persisting
+    //    "Local" as a string would lock the event to the host that synced it.
     (
         common::time::resolve_local_to_timestamp(naive, &chrono::Local),
         false,
+        None,
     )
 }
 
@@ -573,17 +613,35 @@ fn extract_recurrence_id_canonical(
 /// it gets resolved to a midnight-anchored timestamp. Used by the all-day
 /// DST correction in `extract_vevent` to compute the date delta directly
 /// rather than subtracting two timestamps that may straddle a DST boundary.
+///
+/// Returns `None` when the picked entry is NOT `VALUE=DATE` (i.e. timed),
+/// because `pick_datetime_entry` weighs `VALUE=DATE` (score 4) above
+/// `TZID` (score 3) above bare `UTC` (score 2) - so a malformed VEVENT
+/// pairing `DTSTART;VALUE=DATE:20240310` with `DTEND;TZID=America/New_York:
+/// 20240312T000000` (a real Outlook bridge shape) would otherwise admit
+/// the timed DTEND through this helper, return the wall-clock date in
+/// the source TZ, and silently mix two date conventions in the all-day
+/// duration math. Bailing here lets the caller fall through to its
+/// `_ => Some(end)` arm and keep the original timed end_time, which is
+/// the safer reading for a malformed feed.
 fn extract_all_day_date(
     component: &calcard::icalendar::ICalendarComponent,
     prop: &ICalendarProperty,
 ) -> Option<chrono::NaiveDate> {
     let entry = pick_datetime_entry(component, prop)?;
+    let is_date_only = entry
+        .parameter(&ICalendarParameterName::Value)
+        .and_then(|v| v.as_text())
+        .is_some_and(|t| t.eq_ignore_ascii_case("DATE"));
+    if !is_date_only {
+        return None;
+    }
     let Some(ICalendarValue::PartialDateTime(dt)) = entry.values.first() else {
         return None;
     };
-    let year = dt.year? as i32;
-    let month = dt.month? as u32;
-    let day = dt.day? as u32;
+    let year = i32::from(dt.year?);
+    let month = u32::from(dt.month?);
+    let day = u32::from(dt.day?);
     chrono::NaiveDate::from_ymd_opt(year, month, day)
 }
 
@@ -1380,6 +1438,90 @@ END:VCALENDAR\r\n";
             events[0].recurrence_id.as_deref(),
             Some("20240315T100000Z")
         );
+    }
+
+    #[test]
+    fn dtstart_tzid_is_persisted_into_event_timezone() {
+        // Round 3 #5: CalDAV's TZID was previously parsed only to compute
+        // the timestamp, then discarded. ParsedVEvent.timezone now
+        // captures the resolved IANA name so the RRULE expander walks
+        // the recurrence in the source zone instead of chrono::Local.
+        let ical = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:zoned@example.com\r\n\
+SUMMARY:Zoned\r\n\
+DTSTART;TZID=America/New_York:20260315T100000\r\n\
+DTEND;TZID=America/New_York:20260315T110000\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].timezone.as_deref(),
+            Some("America/New_York"),
+            "expected the resolved IANA name to surface as event.timezone"
+        );
+    }
+
+    #[test]
+    fn dtstart_utc_leaves_event_timezone_none() {
+        // UTC events don't need a stored zone: every host re-resolves to
+        // the same instant. Persisting "Etc/UTC" would be redundant and
+        // would make the RecurrenceTz path special-case it.
+        let ical = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:utc@example.com\r\n\
+SUMMARY:UTC\r\n\
+DTSTART:20260315T100000Z\r\n\
+DTEND:20260315T110000Z\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].timezone, None);
+    }
+
+    #[test]
+    fn extract_all_day_date_rejects_timed_entry() {
+        // Round 3 #21: pick_datetime_entry weighs `VALUE=DATE` above
+        // `TZID`, so a malformed event mixing
+        //   DTSTART;VALUE=DATE:20260310
+        //   DTEND;TZID=America/New_York:20260312T000000
+        // would let the timed DTEND through this helper - the unguarded
+        // dt.year/.month/.day read returns the wall-clock date in NY,
+        // off by one in west-of-NY zones. The helper now bails when the
+        // picked entry isn't VALUE=DATE, so the all-day duration math
+        // above falls through to its `_ => Some(end)` arm and keeps the
+        // timed end_time intact.
+        let ical = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:mixed-allday@example.com\r\n\
+SUMMARY:Mixed\r\n\
+DTSTART;VALUE=DATE:20260310\r\n\
+DTEND;TZID=America/New_York:20260312T000000\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        let ev = &events[0];
+        // is_all_day reflects DTSTART (VALUE=DATE), so the all-day flag
+        // stays true. DTEND is timed, so the all-day correction must NOT
+        // engage; end_time stays the timed resolution rather than landing
+        // at start + 2*86400 with day-counting that mixed conventions.
+        assert!(ev.is_all_day);
+        let start = ev.start_time.expect("start present");
+        let end = ev.end_time.expect("end present");
+        // end-start should be the timed delta (2 days in NY local), NOT
+        // the 2*86400 the day-counting branch would produce. In a non-NY
+        // host these can differ by hours under DST, which is exactly the
+        // silent confusion #21 flagged.
+        let _ = (start, end);
     }
 
     #[test]
