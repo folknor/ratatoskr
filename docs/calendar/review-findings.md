@@ -43,10 +43,6 @@ All findings addressed. Lenses and targets:
 - **High** (flagged 2x) - YEARLY+ordinal BYDAY without explicit BYMONTH visits only `dt.month()` and asks for the n-th weekday of *that month*. Repro: `FREQ=YEARLY;BYDAY=20MO` (the 20th Monday of the year) emits nothing because no month has 20 Mondays. Fix scope: implement year-scope ordinal lookup, or reject ordinal BYDAY when FREQ=YEARLY and BYMONTH is unset.
 - **Low** - Sparse YEARLY rules (e.g. leap-day-only) silently truncate before COUNT cap; outer step is yearly with `RRULE_MAX_STEPS=12_000`, so `COUNT=10000` never realized for `BYMONTH=2;BYMONTHDAY=29`.
 
-### `crates/db/src/db/queries_extra/calendars.rs::expand_monthly` (1425, 1686)
-
-- **High** - `advance_months(current, interval)` skips months that don't contain the original day-of-month, even when explicit BYMONTHDAY/BYDAY supplies the actual candidates. Repro: `DTSTART=20260131T090000;RRULE:FREQ=MONTHLY;BYMONTHDAY=1,-1;COUNT=5` emits 2026-01-31, 2026-03-01, 2026-03-31, 2026-05-01, 2026-05-31 (Feb and April skipped because the anchor stays "31").
-
 ### `crates/db/src/db/queries_extra/calendars.rs::expand_weekly`
 
 - **Low** - WEEKLY+BYDAY excluding DTSTART silently drops DTSTART. Matches dateutil; deviates from the strict RFC 5545 reading that DTSTART is always in the recurrence set. No comment in code; worth a deliberate decision.

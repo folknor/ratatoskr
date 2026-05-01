@@ -1447,7 +1447,23 @@ fn expand_monthly(start: i64, rule: &Rrule) -> Vec<i64> {
     use chrono::TimeZone;
     let cap = rule.count.unwrap_or(120).min(RRULE_MAX_COUNT);
     let mut out = Vec::with_capacity(cap);
-    let mut current = start;
+    let Some(start_dt) = chrono::Local.timestamp_opt(start, 0).single() else {
+        return out;
+    };
+    let original_day = start_dt.day();
+
+    // Year+month cursors advance by `interval` calendar months per step. The
+    // previous shape stepped via `advance_months(current, interval)`, which
+    // walks forward to find a month containing `original_day` - correct
+    // for default-day MONTHLY (Jan 31 -> Mar 31, never Feb 28) but wrong
+    // when explicit BYMONTHDAY/BYDAY is set: e.g. `BYMONTHDAY=1,-1`
+    // starting Jan 31 wants Feb 1 / Feb 28 / Apr 1 / Apr 30, but
+    // `advance_months` skipped Feb and April entirely because they don't
+    // contain day 31. With a cursor we visit every interval-th month and
+    // the per-month `collect_monthly_days` / default-day check decides
+    // what (if anything) to emit there.
+    let mut year = start_dt.year();
+    let mut month = start_dt.month();
     // Step-bounded: filters that no visited month satisfies (e.g.
     // BYMONTHDAY=31 with INTERVAL=12 starting in February) would otherwise
     // never grow `out` and would loop forever.
@@ -1455,15 +1471,17 @@ fn expand_monthly(start: i64, rule: &Rrule) -> Vec<i64> {
         if out.len() >= cap {
             return out;
         }
-        let Some(dt) = chrono::Local.timestamp_opt(current, 0).single() else {
-            break;
-        };
-        let year = dt.year();
-        let month = dt.month();
 
         let mut day_candidates = if rule.byday.is_empty() && rule.bymonthday.is_empty() {
-            // Default: same day-of-month as start.
-            vec![dt.day()]
+            // Default: same day-of-month as start, only if it exists in
+            // this month. RFC 5545 § 3.3.10: Jan 31 monthly emits Jan 31,
+            // Mar 31, May 31 ... and skips short months entirely rather
+            // than clamping to day 28.
+            if days_in_month(year, month) >= original_day {
+                vec![original_day]
+            } else {
+                Vec::new()
+            }
         } else {
             collect_monthly_days(year, month, &rule.byday, &rule.bymonthday)
         };
@@ -1471,7 +1489,7 @@ fn expand_monthly(start: i64, rule: &Rrule) -> Vec<i64> {
         day_candidates.dedup();
 
         for day in day_candidates {
-            if let Some(ts) = with_day_of_month(current, day)
+            if let Some(ts) = with_year_month_day(start, year, month, day)
                 && ts >= start
             {
                 out.push(ts);
@@ -1480,7 +1498,16 @@ fn expand_monthly(start: i64, rule: &Rrule) -> Vec<i64> {
                 }
             }
         }
-        current = advance_months(current, rule.interval);
+
+        // Advance month cursor by `interval` calendar months.
+        let total = i64::from(month) - 1 + rule.interval;
+        let new_month = u32::try_from(total.rem_euclid(12) + 1).unwrap_or(1);
+        let year_step = i32::try_from(total.div_euclid(12)).unwrap_or(0);
+        year = match year.checked_add(year_step) {
+            Some(y) => y,
+            None => break,
+        };
+        month = new_month;
     }
     out
 }
@@ -1567,17 +1594,6 @@ fn nth_weekday_in_month(
     } else {
         None
     }
-}
-
-/// Like `set_day_of_month` but takes an unsigned, validated day. Used by
-/// `expand_monthly` after `collect_monthly_days` already checked existence.
-fn with_day_of_month(timestamp: i64, day: u32) -> Option<i64> {
-    use chrono::TimeZone;
-    let dt = chrono::Local.timestamp_opt(timestamp, 0).single()?;
-    let naive = dt.naive_local();
-    let new_date = chrono::NaiveDate::from_ymd_opt(naive.year(), naive.month(), day)?;
-    let new_naive = new_date.and_time(naive.time());
-    crate::db::time::resolve_local_to_timestamp(new_naive, &chrono::Local)
 }
 
 fn expand_yearly(start: i64, rule: &Rrule) -> Vec<i64> {
@@ -1731,53 +1747,6 @@ fn shift_to_weekday(
     };
     let new_naive = target_date.and_time(time_dt.time());
     crate::db::time::resolve_local_to_timestamp(new_naive, &chrono::Local).unwrap_or(week_anchor)
-}
-
-/// Advance a Unix timestamp by N months while preserving the original
-/// day-of-month.
-///
-/// `months` must be positive. RRULE expansion only walks forward.
-///
-/// RFC 5545 § 3.3.10 says that for `FREQ=MONTHLY` (and `YEARLY` with
-/// month-day semantics), an instance whose day-of-month doesn't exist in
-/// the target month is **skipped**, not clamped: a Jan 31 monthly recurrence
-/// produces Mar 31, May 31, ... - never Feb 28, Mar 28, .... The previous
-/// implementation clamped permanently and never recovered.
-///
-/// The signature still returns `i64` for callers that want a "next visit"
-/// candidate; `set_day_of_month` / `set_month` apply the actual day-existence
-/// check. The pair-returning `month` is preserved across calls so callers can
-/// detect "the original day didn't fit, walk one more month."
-fn advance_months(timestamp: i64, months: i64) -> i64 {
-    debug_assert!(months > 0, "advance_months only walks forward");
-    let months = months.max(1);
-    use chrono::TimeZone;
-    let Some(dt) = chrono::Local.timestamp_opt(timestamp, 0).single() else {
-        return timestamp + months * 30 * 86400;
-    };
-    let naive = dt.naive_local();
-    let original_day = naive.day();
-
-    // Walk forward `months` months, then keep walking until we land on a
-    // month that has a day at least as large as the original. Bound the loop
-    // so a wedged input cannot infinite-loop.
-    for extra in 0..120i64 {
-        let step = months + extra;
-        let total_months = naive.month() as i64 - 1 + step;
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let new_month = (total_months.rem_euclid(12) + 1) as u32;
-        #[allow(clippy::cast_possible_truncation)]
-        let new_year = naive.year() + total_months.div_euclid(12) as i32;
-        if days_in_month(new_year, new_month) >= original_day
-            && let Some(new_date) =
-                chrono::NaiveDate::from_ymd_opt(new_year, new_month, original_day)
-        {
-            let new_naive = new_date.and_time(naive.time());
-            return crate::db::time::resolve_local_to_timestamp(new_naive, &chrono::Local)
-                .unwrap_or(timestamp + step * 30 * 86400);
-        }
-    }
-    timestamp + months * 30 * 86400
 }
 
 /// Days in a given month.
@@ -2112,6 +2081,39 @@ mod tests {
                 dt.month()
             );
         }
+    }
+
+    #[test]
+    fn monthly_bymonthday_first_and_last_visits_short_months() {
+        // FREQ=MONTHLY;BYMONTHDAY=1,-1 means "first and last day of every
+        // month." Starting on Jan 31, the previous shape stepped via
+        // `advance_months` which walked forward looking for a month
+        // containing day 31 - so Feb (28 days) and April (30 days) were
+        // skipped entirely, missing the user's intended Feb 1 / Feb 28 /
+        // Apr 1 / Apr 30 emissions.
+        let start = local_ts(2026, 1, 31, 9, 0);
+        let event = make_event(start, 3600);
+        let instances = expand_recurrence(
+            &event,
+            "FREQ=MONTHLY;BYMONTHDAY=1,-1;COUNT=5",
+        );
+        assert_eq!(instances.len(), 5);
+        // Expected: Jan 31, Feb 1, Feb 28, Mar 1, Mar 31.
+        let dates: Vec<(u32, u32)> = instances
+            .iter()
+            .map(|e| {
+                let dt = chrono::Local
+                    .timestamp_opt(e.start_time, 0)
+                    .single()
+                    .expect("local")
+                    .naive_local();
+                (dt.month(), dt.day())
+            })
+            .collect();
+        assert_eq!(
+            dates,
+            vec![(1, 31), (2, 1), (2, 28), (3, 1), (3, 31)]
+        );
     }
 
     #[test]
