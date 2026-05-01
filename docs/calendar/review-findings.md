@@ -1,82 +1,8 @@
 # Calendar Code Review Findings
 
-Captured 2026-05-01 for Round 1, expanded 2026-05-01 with Round 2's open
-backlog, then again 2026-05-01 after Round 3. Round 3 was a per-lens
-fan-out via the `review` CLI (bugs / arch / perf, each addressed by both
-the Anthropic and OpenAI providers - six reviewer outputs total).
-Findings are tagged with the lens(es) and provider(s) that flagged them
-in `[bugs/claude, arch/codex, ...]` form; multi-tag entries are the
-highest-confidence signals.
+## Open
 
----
-
-## Round 1 (closed)
-
-All findings addressed. Lenses and targets:
-
-- **RRULE expansion** - `crates/db/src/db/queries_extra/calendars.rs::expand_recurrence` and helpers (`parse_rrule`, `parse_byday`, `expand_{daily,weekly,monthly,yearly}`, weekday/window helpers).
-- **TZID + Graph datetime resolution** - `crates/core/src/caldav/parse.rs::extract_datetime` (and the `parse_icalendar` / `extract_vevent` paths) plus `crates/graph/src/calendar_sync.rs::parse_graph_datetime` and `resolve_graph_tz`.
-- **CalDAV consolidation** - post-consolidation CalDAV stack: `crates/calendar/src/caldav/` delegating to `rtsk::caldav::client::CalDavClient` and `rtsk::caldav::sync`.
-- **Outside Reviewer A** - combined RRULE / TZ / CalDAV pass.
-
----
-
-## Round 2 (closed)
-
-Addressed in commits 4b5c6c97..5401618b. Topics, by area of fix:
-
-- RRULE expansion respects `event.timezone` end-to-end via the
-  `RecurrenceTz` enum; wall-clock duration replaces raw seconds. The
-  CalDAV producer now plumbs the resolved IANA name through into
-  `ParsedVEvent.timezone` and onto the row's `timezone` column, so the
-  expander walks recurrences in the source zone for CalDAV (matching
-  Graph's existing behavior).
-- All-day event end_time anchored to `start + days*86400` in CalDAV
-  parse and Graph map paths; recurring all-day duration computed in
-  event zone via a date-delta wall_duration so spring-forward weeks
-  don't inherit a 25-hour duration on every subsequent instance.
-- RECURRENCE-ID folded into the CalDAV sync key, with the canonical
-  wall-clock form as the discriminator. Override rows stay distinct from
-  the master, master expansion subtracts override slots at load time,
-  and abandoned overrides get reaped when a multi-VEVENT resource
-  shrinks. The canonical-form key is host-TZ-independent for floating
-  and all-day RECURRENCE-IDs.
-- `time.rs::resolve_local_to_timestamp` uses dual-walk gap-width
-  detection (1-min, 48h bound). Lord Howe 30-min and Pacific/Apia 24h
-  cases pass.
-- ETag handling: `prepare_if_match_etag` drops weak ETags from `If-Match`
-  per RFC 7232 § 2.3.2; `response_etag` recovers non-ASCII via lossy
-  UTF-8.
-- CalDAV discovery: `propfind_with_final_url` for redirect-aware
-  principal resolution; `ensure_collection_trailing_slash` for URL join
-  under collections; `relativize_for_multiget` for SOGo compat. *(See
-  Round 3 #30, #31, #32 - only the well-known path got the final-URL
-  fix; the base-URL probe and `list_calendars` resolution still resolve
-  against `base_url`.)*
-- CalDAV parse: reject sub-collections via `<D:resourcetype><D:collection/>`,
-  accept `application/calendar+xml`, strip query before `.ics` check,
-  fold Apple ARGB color to RGB. *(See Round 3 #23, #25 - third-arm
-  fallback still ignores query strings, self-closed empty privilege-set
-  flips can_edit=false.)*
-- `current-user-privilege-set` parsed; `DiscoveredCalendar.can_edit:
-  Option<bool>` honored by `sync_caldav_calendars`. *(See Round 3 #40 -
-  the calendar-crate facade `caldav_list_calendars_impl` still
-  hard-codes `can_edit: true`.)*
-- Graph fractional-second truncation preserves trailing offset.
-- `sync_caldav_calendar_account` retries with rediscovery on stale
-  persisted URLs. *(See Round 3 #32 - retry only fires when sync fails,
-  not when client construction fails on the persisted principal.)*
-- Misc lows: `parse_until_date` rejects years outside 1..=9999;
-  `YEARLY_MAX_STEPS=80_000`; explanatory comments on WEEKLY+BYDAY
-  DTSTART semantics and on the WKST/BYWEEKNO coupling.
-
----
-
-## Round 3 (open) - by code area
-
-Six reviewer outputs across three lenses. Findings are grouped by code
-area; each entry carries `[lens/provider]` tags showing who flagged it.
-Multi-tag entries are cross-flagged and the highest-confidence signals.
+Findings are grouped by code area.
 
 ### `crates/db/src/db/queries_extra/calendars.rs`
 
@@ -114,23 +40,6 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
     at `:1779` - `parse_rrule` already clamps interval to ≥1, so the
     `.max(1)` is unreachable.
 
-12. **Medium (perf)** [perf/claude M6] - **`expand_yearly` clones
-    `rule.bymonth` per year.** `:1797-1801`, inside the
-    80,000-iteration loop. Hoist; pass as `&[u32]`.
-
-13. **Medium (perf)** [perf/claude M7] - **`with_year_month_day`
-    recomputes `tz.naive(start)` every call.** `:1841-1852`. `start`
-    is the constant master timestamp, so `tz.naive(start)` is
-    invariant across the entire expansion. In `expand_yearly` it's
-    resolved up to 80k × 12 × ~30 = ~30M times. Compute the
-    wall-clock `time()` once before the year loop and pass it in.
-
-15. **Medium (perf)** [perf/claude M9] - **`expand_monthly` /
-    `expand_yearly` allocate a 1-element `vec![original_day]` per
-    iteration.** `:1640-1644, 1804-1810`. Default-day MONTHLY/YEARLY
-    allocates a 1-elem Vec, sorts, dedups, iterates. Inline the
-    single-day check.
-
 16. **Note (perf)** [perf/codex Medium implicit, perf/claude reference] -
     **`YEARLY_MAX_STEPS=80_000` is large but no longer a render-path
     concern.** Sparse YEARLY rules
@@ -148,8 +57,8 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
     `from_local_datetime` each step. ~1441 transition lookups for
     that one resolve. In recurrence loops only fires when an instance
     lands inside a gap (rare). Not a bug; flagged as a known cost.
-    Coarse pre-walk via binary search would shave to log time but the
-    simplicity is probably the right tradeoff.
+    Decided: keep the linear walk - simplicity is the right tradeoff
+    against the rarity of the gap path.
 
 ### `crates/core/src/caldav/parse.rs`
 
@@ -163,30 +72,7 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
     `is_date_only` flag, and have `extract_vevent` pass it into both
     downstream helpers.
 
-### `crates/core/src/caldav/sync.rs`
-
 ### `crates/core/src/caldav/client.rs`
-
-35. **Low (perf)** [perf/claude L12] -
-    **`extract_hrefs_property` allocates a `Vec<String>` for
-    single-href callers.** `:835-886`. `current-user-principal`
-    callers always do `.into_iter().next()`. Either return early when
-    the first href closes for the single-href case, or split into
-    `extract_first_href_property` / `extract_all_hrefs_property`.
-
-36. **Low (perf)** [perf/claude L15] - **`response_etag` ASCII fast
-    path makes an extra `to_string`.** `:1028-1043`. `to_str()`
-    returns `&str`, which is `to_string()`'d to `String`. Equivalent
-    to `val.to_str().ok().map(str::to_owned)`. Trivial; flagged
-    because the function is on every PUT/DELETE/GET response path.
-
-37. **Note** [arch/claude notes] - **Lossy ETag round-trip → If-Match
-    silently omitted.** `:1028-1043`. With non-ASCII bytes the lossy
-    String contains U+FFFD, which `HeaderValue::from_str` rejects, so
-    `If-Match` is silently omitted. Net behavior is correct (never
-    sends a corrupt validator), but the comment should be tightened:
-    "we may degrade concurrency" → "If-Match will be omitted on the
-    next write."
 
 38. **Note** [arch/claude notes] - **Weak ETag dropped from `If-Match`
     operational impact.** `:1050-1053`. Correct per RFC 7232 § 2.3.2,
@@ -225,8 +111,6 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
     calcard alias gap is the real fix. Repro: `2024-06-15T10:00:00`
     in `Africa/Juba` ("South Sudan Standard Time", not in calcard)
     becomes 10:00Z instead of 08:00Z (with a log line now).
-
-### Carry-overs from Round 2 still open
 
 45. **Medium** - **Inverted error signaling in `expand_recurrence`.**
     Malformed rules and rules using unsupported BY-rules now log a

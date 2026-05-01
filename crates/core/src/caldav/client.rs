@@ -258,7 +258,7 @@ impl CalDavClient {
         {
             Ok((_, final_url, body)) => {
                 if let Some(principal) =
-                    extract_hrefs_property(&body, "current-user-principal").into_iter().next()
+                    extract_first_href_property(&body, "current-user-principal")
                 {
                     return Ok(self.resolve_url_against(&final_url, &principal));
                 }
@@ -284,7 +284,7 @@ impl CalDavClient {
         {
             Ok((_, final_url, body)) => {
                 if let Some(principal) =
-                    extract_hrefs_property(&body, "current-user-principal").into_iter().next()
+                    extract_first_href_property(&body, "current-user-principal")
                 {
                     return Ok(self.resolve_url_against(&final_url, &principal));
                 }
@@ -872,6 +872,17 @@ const PROPFIND_CTAG: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 /// Both `Event::Text` and `Event::CData` are accumulated into the value
 /// buffer; some servers wrap href values in CDATA sections.
 fn extract_hrefs_property(xml: &str, property_name: &str) -> Vec<String> {
+    collect_hrefs(xml, property_name, usize::MAX)
+}
+
+/// Single-href fast path. Stops the parser at the first matching href close,
+/// avoiding a full scan + `Vec<String>` allocation for callers that only
+/// consume `.first()` (e.g. `current-user-principal`). (Round 4 #35.)
+fn extract_first_href_property(xml: &str, property_name: &str) -> Option<String> {
+    collect_hrefs(xml, property_name, 1).into_iter().next()
+}
+
+fn collect_hrefs(xml: &str, property_name: &str, limit: usize) -> Vec<String> {
     use quick_xml::Reader;
     use quick_xml::escape::unescape;
     use quick_xml::events::Event;
@@ -911,6 +922,9 @@ fn extract_hrefs_property(xml: &str, property_name: &str) -> Vec<String> {
                     let val = buf.trim().to_string();
                     if !val.is_empty() {
                         hrefs.push(val);
+                        if hrefs.len() >= limit {
+                            return hrefs;
+                        }
                     }
                 }
                 stack.pop();
@@ -1081,16 +1095,21 @@ fn relativize_for_multiget(request_url: &str, href: &str) -> String {
 fn response_etag(headers: &reqwest::header::HeaderMap) -> Option<String> {
     let val = headers.get("etag")?;
     if let Ok(s) = val.to_str() {
-        return Some(s.to_string());
+        return Some(s.to_owned());
     }
     let bytes = val.as_bytes();
     if bytes.is_empty() {
         return None;
     }
     let lossy = String::from_utf8_lossy(bytes).into_owned();
+    // Lossy bytes leave U+FFFD in the stored value; `HeaderValue::from_str`
+    // rejects those, so `prepare_if_match_etag` -> `parse::<HeaderValue>()`
+    // will fail and we'll skip the `If-Match` header on the next PUT/DELETE
+    // (last-write-wins for that one request, then self-correcting on the
+    // following sync round). (Round 4 #37.)
     log::warn!(
         "CalDAV ETag has non-ASCII bytes; storing lossy UTF-8 ({lossy:?}). \
-         Optimistic concurrency may be degraded on the next write."
+         If-Match will be omitted on the next write."
     );
     Some(lossy)
 }

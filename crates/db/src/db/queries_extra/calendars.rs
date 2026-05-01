@@ -1867,6 +1867,10 @@ fn expand_monthly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
         return out;
     };
     let original_day = start_dt.day();
+    // Hoist the wall-clock time out of the per-month loop. `with_ymd_time`
+    // takes the pre-resolved time so it doesn't redo `tz.naive(start)` per
+    // candidate. (Round 4 #13.)
+    let start_time = start_dt.time();
 
     // Year+month cursors advance by `interval` calendar months per step. The
     // previous shape stepped via `advance_months(current, interval)`, which
@@ -1888,29 +1892,34 @@ fn expand_monthly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
             return out;
         }
 
-        let mut day_candidates = if rule.byday.is_empty() && rule.bymonthday.is_empty() {
-            // Default: same day-of-month as start, only if it exists in
-            // this month. RFC 5545 § 3.3.10: Jan 31 monthly emits Jan 31,
-            // Mar 31, May 31 ... and skips short months entirely rather
-            // than clamping to day 28.
-            if days_in_month(year, month) >= original_day {
-                vec![original_day]
-            } else {
-                Vec::new()
-            }
-        } else {
-            collect_monthly_days(year, month, &rule.byday, &rule.bymonthday)
-        };
-        day_candidates.sort_unstable();
-        day_candidates.dedup();
-
-        for day in day_candidates {
-            if let Some(ts) = with_year_month_day(start, year, month, day, tz)
+        if rule.byday.is_empty() && rule.bymonthday.is_empty() {
+            // Default-day path: emit the start's day-of-month if this month
+            // has it (Jan 31 monthly emits Jan/Mar/May/... and skips short
+            // months rather than clamping). Inline the single candidate to
+            // skip the `vec![original_day]` allocation per iteration.
+            // (Round 4 #15.)
+            if days_in_month(year, month) >= original_day
+                && let Some(ts) = with_ymd_time(start_time, year, month, original_day, tz)
                 && ts >= start
             {
                 out.push(ts);
                 if out.len() >= cap {
                     return out;
+                }
+            }
+        } else {
+            let mut day_candidates =
+                collect_monthly_days(year, month, &rule.byday, &rule.bymonthday);
+            day_candidates.sort_unstable();
+            day_candidates.dedup();
+            for day in day_candidates {
+                if let Some(ts) = with_ymd_time(start_time, year, month, day, tz)
+                    && ts >= start
+                {
+                    out.push(ts);
+                    if out.len() >= cap {
+                        return out;
+                    }
                 }
             }
         }
@@ -2038,6 +2047,11 @@ fn expand_yearly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     };
     let original_month = start_dt.month();
     let original_day = start_dt.day();
+    // Hoist the wall-clock time. Without this, `expand_yearly` was paying
+    // ~80k * 12 * ~30 = ~30M `tz.naive(start)` resolves on the inner
+    // `with_year_month_day` call; the time is invariant across the whole
+    // expansion. (Round 4 #13.)
+    let start_time = start_dt.time();
 
     // Year cursor advances by `interval` years per step. Previous shape stepped
     // via `advance_months(current, interval * 12)`, which walks forward to
@@ -2053,6 +2067,15 @@ fn expand_yearly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     // bounds terminate.
     let interval_years: i32 = i32::try_from(rule.interval).unwrap_or(1).max(1);
     let mut year = start_dt.year();
+    // Hoist the months slice. The default path uses a single-element stack
+    // array; explicit BYMONTH borrows the rule's slice. Previously cloned a
+    // Vec<u32> per year inside the 80k-iteration loop. (Round 4 #12.)
+    let default_months = [original_month];
+    let months: &[u32] = if rule.bymonth.is_empty() {
+        &default_months
+    } else {
+        &rule.bymonth
+    };
     // Sparse YEARLY rules (e.g. `BYMONTH=2;BYMONTHDAY=29`, the leap-day-
     // only case) emit one instance every four calendar years walked. The
     // shared 12_000-step bound bottoms out at 3_000 emissions for those,
@@ -2067,38 +2090,33 @@ fn expand_yearly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
             return out;
         }
 
-        // Months to visit this year: explicit BYMONTH set, or the start's
-        // own month as the default.
-        let months: Vec<u32> = if rule.bymonth.is_empty() {
-            vec![original_month]
-        } else {
-            rule.bymonth.clone()
-        };
-
-        for month in &months {
-            let day_candidates = if rule.byday.is_empty() && rule.bymonthday.is_empty() {
-                // Default: same day-of-month as start, skipped if the target
+        for &month in months {
+            if rule.byday.is_empty() && rule.bymonthday.is_empty() {
+                // Default-day path: same DOM as start, skipped if the target
                 // month doesn't have that day (Feb 29 in non-leap years).
-                if days_in_month(year, *month) >= original_day {
-                    vec![original_day]
-                } else {
-                    Vec::new()
-                }
-            } else {
-                let mut days =
-                    collect_monthly_days(year, *month, &rule.byday, &rule.bymonthday);
-                days.sort_unstable();
-                days.dedup();
-                days
-            };
-
-            for day in day_candidates {
-                if let Some(ts) = with_year_month_day(start, year, *month, day, tz)
+                // Inline the single candidate to skip the `vec![original_day]`
+                // allocation per (year, month). (Round 4 #15.)
+                if days_in_month(year, month) >= original_day
+                    && let Some(ts) = with_ymd_time(start_time, year, month, original_day, tz)
                     && ts >= start
                 {
                     out.push(ts);
                     if out.len() >= cap {
                         return out;
+                    }
+                }
+            } else {
+                let mut days = collect_monthly_days(year, month, &rule.byday, &rule.bymonthday);
+                days.sort_unstable();
+                days.dedup();
+                for day in days {
+                    if let Some(ts) = with_ymd_time(start_time, year, month, day, tz)
+                        && ts >= start
+                    {
+                        out.push(ts);
+                        if out.len() >= cap {
+                            return out;
+                        }
                     }
                 }
             }
@@ -2111,19 +2129,22 @@ fn expand_yearly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     out
 }
 
-/// Resolve a wall-clock instant on a specific calendar date, preserving the
-/// time-of-day of the original timestamp in the event's recurrence zone.
-fn with_year_month_day(
-    timestamp: i64,
+/// Resolve a wall-clock instant on a specific calendar date, preserving a
+/// pre-computed time-of-day in the event's recurrence zone.
+///
+/// The caller hoists `tz.naive(start).time()` outside the expansion loop and
+/// passes it in. The previous shape (`with_year_month_day`) re-resolved the
+/// invariant start timestamp through `tz.naive(...)` per candidate; the
+/// YEARLY expander was paying ~30M of those for a single dense rule.
+fn with_ymd_time(
+    time: chrono::NaiveTime,
     year: i32,
     month: u32,
     day: u32,
     tz: RecurrenceTz,
 ) -> Option<i64> {
-    let naive = tz.naive(timestamp)?;
     let new_date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
-    let new_naive = new_date.and_time(naive.time());
-    tz.resolve(new_naive)
+    tz.resolve(new_date.and_time(time))
 }
 
 fn matches_weekday(timestamp: i64, days: &[chrono::Weekday], tz: RecurrenceTz) -> bool {
