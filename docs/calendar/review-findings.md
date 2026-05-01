@@ -80,9 +80,7 @@ All findings addressed. Lenses and targets:
 
 ### `crates/core/src/caldav/parse.rs::extract_vevent` / `parse_icalendar` (69-90, 98-121)
 
-- **Medium** (flagged 2x) - Multiple DTSTART silently first-wins via `component.property(&Dtstart)`; no log when more than one entry exists. Outlook bridges have been seen to emit two DTSTART lines for compatibility, and the user sees one of two times depending on which server they last synced.
-- **Medium** - VEVENT with no UID accepted; downstream sync may collide on dedup. Either generate a synthetic UID from the href or skip with a warning.
-- **Medium** - Empty SUMMARY / DESCRIPTION dropped via `.filter(|s| !s.is_empty())` and reported as `None`, indistinguishable from absent. User can't intentionally clear the title; merger keeps the previous one.
+- **Medium** (upstream) - Empty SUMMARY / DESCRIPTION / LOCATION are still indistinguishable from absent. Removed the local `.filter(|s| !s.is_empty())` step (forward-compat for any future calcard release that surfaces empty values), but calcard's parser drops `SUMMARY:` from the entries list before our chain sees it, so user-cleared-title support requires an upstream calcard change. Tracking here so the local code is ready when it lands.
 - **Medium** - Folded-line + CRLF handling depends on calcard. LF-only line endings (some Linux bridges) may fail to unfold; long DESCRIPTION lines get truncated. Worth a unit test covering LF-only + folded long line.
 - **Medium** - Missing or unparseable DTSTART/DTEND yields `start_time=0` (Unix epoch) downstream (`sync.rs:234`), not a logged parse failure. Users see broken events at epoch instead of skipped/diagnosed bad items.
 ### `crates/core/src/caldav/parse.rs::is_icalendar_resource` (711-720)

@@ -1,7 +1,7 @@
 use calcard::Parser;
 use calcard::icalendar::{
-    ICalendarComponentType, ICalendarParameterName, ICalendarProperty, ICalendarValue,
-    timezone::TzResolver,
+    ICalendarComponentType, ICalendarEntry, ICalendarParameterName, ICalendarProperty,
+    ICalendarValue, timezone::TzResolver,
 };
 
 /// Parsed event data extracted from an iCalendar VEVENT.
@@ -106,25 +106,32 @@ fn extract_vevent(
 ) -> ParsedVEvent {
     let uid = component.uid().map(String::from);
 
+    // The previous `.filter(|s| !s.is_empty())` step was redundant because
+    // calcard's parser already drops `SUMMARY:` (no value) from the
+    // entries list - empty TEXT-typed properties don't survive parsing
+    // far enough for our chain to see them. Keeping the chain unfiltered
+    // here is forward-compatible: if calcard later starts surfacing
+    // empty-but-present values, our merger will see the protocol
+    // distinction (Some("") for echoed-empty vs None for absent) without
+    // a code change. Today the practical effect is identical - calcard
+    // collapses both into None - so user-cleared-title support requires
+    // an upstream calcard change before it can land.
     let summary = component
         .property(&ICalendarProperty::Summary)
         .and_then(|e| e.values.first())
         .and_then(|v| v.as_text())
-        .filter(|s| !s.is_empty())
         .map(String::from);
 
     let description = component
         .property(&ICalendarProperty::Description)
         .and_then(|e| e.values.first())
         .and_then(|v| v.as_text())
-        .filter(|s| !s.is_empty())
         .map(String::from);
 
     let location = component
         .property(&ICalendarProperty::Location)
         .and_then(|e| e.values.first())
         .and_then(|v| v.as_text())
-        .filter(|s| !s.is_empty())
         .map(String::from);
 
     let (start_time, is_all_day) = extract_datetime(component, &ICalendarProperty::Dtstart, resolver);
@@ -247,7 +254,7 @@ fn extract_datetime(
     prop: &ICalendarProperty,
     resolver: &TzResolver<&str>,
 ) -> (Option<i64>, bool) {
-    let Some(entry) = component.property(prop) else {
+    let Some(entry) = pick_datetime_entry(component, prop) else {
         return (None, false);
     };
 
@@ -336,6 +343,77 @@ fn extract_datetime(
         common::time::resolve_local_to_timestamp(naive, &chrono::Local),
         false,
     )
+}
+
+/// Select the most-specific DTSTART/DTEND entry when a VEVENT carries more
+/// than one. RFC 5545 § 3.6.1 makes DTSTART MUST occur exactly once per
+/// VEVENT, but real emitters violate this: older Outlook bridges have been
+/// seen pairing a `DTSTART;TZID=...:20240315T100000` (the source-of-truth
+/// value) with a floating `DTSTART:20240315T100000` (a "compatibility"
+/// fallback for legacy clients). The previous `component.property(prop)`
+/// path returned whichever entry happened to come first - calcard's order
+/// isn't stable across emitters - so the same event could end up at two
+/// different displayed times depending on which server we'd last synced
+/// from.
+///
+/// Layered preference:
+///
+/// 1. `VALUE=DATE` (all-day) - explicitly tagged semantics win.
+/// 2. Explicit TZID parameter - the bridges' source-of-truth shape.
+/// 3. UTC offset (Z-suffix or `+HH:MM` numeric) - anchored, so the result
+///    is independent of the user's local zone.
+/// 4. Floating - lowest, used only when nothing better is offered.
+///
+/// On tie, calcard's iteration order wins (which is the same as the old
+/// "first wins" behavior, so the change is strictly more conservative for
+/// well-formed inputs).
+fn pick_datetime_entry<'c, 'p: 'c>(
+    component: &'c calcard::icalendar::ICalendarComponent,
+    prop: &'p ICalendarProperty,
+) -> Option<&'c ICalendarEntry> {
+    let mut iter = component.properties(prop);
+    let first = iter.next()?;
+    let mut best = first;
+    let mut best_score = score_datetime_candidate(best);
+    let mut count = 1;
+    for entry in iter {
+        count += 1;
+        let score = score_datetime_candidate(entry);
+        if score > best_score {
+            best = entry;
+            best_score = score;
+        }
+    }
+    if count > 1 {
+        log::warn!(
+            "VEVENT carries {count} entries for {prop:?} (RFC 5545 violation); selected by precedence: VALUE=DATE > TZID > UTC > floating"
+        );
+    }
+    Some(best)
+}
+
+fn score_datetime_candidate(entry: &ICalendarEntry) -> u8 {
+    let is_date_only = entry
+        .parameter(&ICalendarParameterName::Value)
+        .and_then(|v| v.as_text())
+        .is_some_and(|t| t.eq_ignore_ascii_case("DATE"));
+    if is_date_only {
+        return 4;
+    }
+    if entry
+        .tz_id()
+        .is_some_and(|s| !s.trim().is_empty())
+    {
+        return 3;
+    }
+    let has_offset = matches!(
+        entry.values.first(),
+        Some(ICalendarValue::PartialDateTime(dt)) if dt.tz_hour.is_some()
+    );
+    if has_offset {
+        return 2;
+    }
+    1
 }
 
 fn partial_to_naive(dt: &calcard::common::PartialDateTime) -> Option<chrono::NaiveDateTime> {
@@ -1147,6 +1225,47 @@ END:VCALENDAR\r\n";
         // Same instant as the un-padded `parse_event_with_named_tzid` test.
         assert_eq!(events[0].start_time, Some(1710511200));
         assert_eq!(events[0].end_time, Some(1710514800));
+    }
+
+    #[test]
+    fn parse_event_with_duplicate_dtstart_prefers_tzid_bearing() {
+        // RFC 5545 § 3.6.1 makes DTSTART MUST occur exactly once, but
+        // older Outlook bridges have been seen pairing a TZID-bearing
+        // value with a floating "compatibility" fallback. The picker
+        // should select the TZID entry regardless of which one calcard
+        // returns first.
+        let ical_tzid_first = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:dup-dtstart-1@example.com\r\n\
+SUMMARY:Outlook bridge dual DTSTART\r\n\
+DTSTART;TZID=America/New_York:20240315T100000\r\n\
+DTSTART:20240315T140000\r\n\
+DTEND;TZID=America/New_York:20240315T110000\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let events = parse_icalendar(ical_tzid_first).expect("should parse");
+        assert_eq!(events.len(), 1);
+        // 10:00 America/New_York = 14:00 UTC = epoch 1710511200.
+        assert_eq!(events[0].start_time, Some(1710511200));
+
+        // Same content, floating DTSTART listed first - picker must still
+        // select the TZID-bearing one.
+        let ical_floating_first = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:dup-dtstart-2@example.com\r\n\
+SUMMARY:Outlook bridge dual DTSTART (reversed)\r\n\
+DTSTART:20240315T140000\r\n\
+DTSTART;TZID=America/New_York:20240315T100000\r\n\
+DTEND;TZID=America/New_York:20240315T110000\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let events = parse_icalendar(ical_floating_first).expect("should parse");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].start_time, Some(1710511200));
     }
 
     #[test]

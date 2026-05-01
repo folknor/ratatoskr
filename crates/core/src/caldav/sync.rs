@@ -227,7 +227,20 @@ async fn upsert_parsed_event(
     ical_data: &str,
     event: &parse::ParsedVEvent,
 ) -> Result<(), String> {
-    let uid = event.uid.clone().unwrap_or_else(|| uri.to_string());
+    // RFC 5545 § 3.6.1 makes UID MUST. Real-world emitters violate this
+    // rarely but it does happen (some legacy bridges, ad-hoc scripts).
+    // Refusing to upsert UID-less events would drop user-visible data the
+    // server has, so we synthesize a stable dedup key from the resource
+    // href - imperfect across server-side renames, but better than the
+    // alternative. The href fallback collapses into the `caldav:{uri}`
+    // form below; logged so an operator chasing duplicate-after-rename
+    // surprises has a starting point.
+    let uid = event.uid.clone().unwrap_or_else(|| {
+        log::warn!(
+            "CalDAV VEVENT at {uri} has no UID (RFC 5545 violation); synthesizing dedup key from href"
+        );
+        uri.to_string()
+    });
     let google_event_id = make_google_event_id(&uid);
 
     // Serialize attendees as JSON
