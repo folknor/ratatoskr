@@ -12,6 +12,7 @@ pub struct CaldavAccountConfig {
     server_url: String,
     username: String,
     password: String,
+    principal_url: Option<String>,
     home_url: Option<String>,
 }
 
@@ -25,6 +26,9 @@ impl CaldavAccountConfig {
     pub fn password(&self) -> &str {
         &self.password
     }
+    pub fn principal_url(&self) -> Option<&str> {
+        self.principal_url.as_deref()
+    }
     pub fn home_url(&self) -> Option<&str> {
         self.home_url.as_deref()
     }
@@ -37,6 +41,15 @@ pub async fn caldav_list_calendars_impl(
 ) -> Result<Vec<CalendarInfoDto>, String> {
     let config = load_caldav_account_config(db, encryption_key, account_id).await?;
     let client = build_client(&config).await?;
+    if config.home_url().is_none() {
+        persist_discovery_results(
+            db,
+            account_id,
+            client.principal_url(),
+            client.calendar_home_url(),
+        )
+        .await;
+    }
     let discovered = client.list_calendars().await?;
 
     Ok(discovered
@@ -118,9 +131,16 @@ pub async fn load_caldav_account_config(
     let key = *encryption_key;
     let account_id = account_id.to_string();
     db.with_conn(move |conn| {
+        // `caldav_principal_url` is read alongside `caldav_home_url` so a
+        // previously discovered principal can be reused on cold-start sync.
+        // Without this the client redoes the principal-discovery PROPFIND
+        // every time, which is two extra round-trips and a regression on
+        // servers where principal discovery from the bare base URL fails
+        // (e.g. some DAViCal installs require the per-user path).
         let row = conn
             .query_row(
-                "SELECT email, caldav_url, caldav_username, caldav_password, caldav_home_url
+                "SELECT email, caldav_url, caldav_username, caldav_password,
+                        caldav_principal_url, caldav_home_url
                  FROM accounts WHERE id = ?1",
                 rusqlite::params![account_id],
                 |row| {
@@ -130,6 +150,7 @@ pub async fn load_caldav_account_config(
                         row.get::<_, Option<String>>(2)?,
                         row.get::<_, Option<String>>(3)?,
                         row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
                     ))
                 },
             )
@@ -159,7 +180,8 @@ pub async fn load_caldav_account_config(
             server_url,
             username,
             password,
-            home_url: row.4.filter(|value| !value.trim().is_empty()),
+            principal_url: row.4.filter(|value| !value.trim().is_empty()),
+            home_url: row.5.filter(|value| !value.trim().is_empty()),
         })
     })
     .await
@@ -172,12 +194,56 @@ async fn build_client(config: &CaldavAccountConfig) -> Result<CalDavClient, Stri
         &config.password,
         AuthMethod::Basic,
     );
+    // Hand persisted discovery results back to the client so `discover()`
+    // can skip whichever PROPFINDs are already covered. If neither is
+    // populated, full discovery runs.
+    if let Some(principal) = config.principal_url.as_deref() {
+        client.set_principal_url(principal);
+    }
     if let Some(home) = config.home_url.as_deref() {
         client.set_calendar_home_url(home);
-    } else {
+    }
+    if config.home_url.is_none() {
         client.discover().await?;
     }
     Ok(client)
+}
+
+/// Persist freshly discovered principal / home URLs back to the `accounts`
+/// table so the next sync can skip discovery. Called after `build_client`
+/// completes for accounts that didn't already have these cached.
+///
+/// This is best-effort: a write failure is logged but not propagated, since
+/// discovery already succeeded and the operation that triggered the build
+/// can proceed regardless.
+pub async fn persist_discovery_results(
+    db: &DbState,
+    account_id: &str,
+    principal_url: Option<&str>,
+    home_url: Option<&str>,
+) {
+    if principal_url.is_none() && home_url.is_none() {
+        return;
+    }
+    let account_id = account_id.to_string();
+    let principal = principal_url.map(String::from);
+    let home = home_url.map(String::from);
+    let result = db
+        .with_conn(move |conn| {
+            conn.execute(
+                "UPDATE accounts
+                    SET caldav_principal_url = COALESCE(?2, caldav_principal_url),
+                        caldav_home_url = COALESCE(?3, caldav_home_url)
+                  WHERE id = ?1",
+                rusqlite::params![account_id, principal, home],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+        })
+        .await;
+    if let Err(err) = result {
+        log::warn!("CalDAV: failed to persist discovery URLs for account: {err}");
+    }
 }
 
 async fn fetch_caldav_event(

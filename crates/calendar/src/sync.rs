@@ -344,10 +344,22 @@ async fn sync_caldav_calendar_account(
         config.password(),
         rtsk::caldav::client::AuthMethod::Basic,
     );
+    if let Some(principal) = config.principal_url() {
+        client.set_principal_url(principal);
+    }
     if let Some(home) = config.home_url() {
         client.set_calendar_home_url(home);
-    } else {
+    }
+    let needed_discovery = config.home_url().is_none();
+    if needed_discovery {
         client.discover().await?;
+        super::caldav::persist_discovery_results(
+            db,
+            account_id,
+            client.principal_url(),
+            client.calendar_home_url(),
+        )
+        .await;
     }
 
     rtsk::caldav::sync::sync_caldav_calendars(&client, db, account_id)

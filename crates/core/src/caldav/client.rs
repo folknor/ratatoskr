@@ -48,11 +48,26 @@ impl CalDavClient {
     /// Call [`discover`] after construction to auto-detect the principal and
     /// calendar-home-set URLs.
     pub fn new(base_url: &str, username: &str, password: &str, auth_method: AuthMethod) -> Self {
+        // Match reqwest's default redirect ceiling (10) rather than imposing a
+        // tighter `limited(5)`. Some hosted Zimbra and SSO-fronted Exchange
+        // installs chain six or seven hops through the IdP before landing on
+        // the DAV root; capping at 5 caused first-time discovery to fail on
+        // those deployments where the previous (default-config) client
+        // succeeded.
         let http = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::limited(5))
+            .redirect(reqwest::redirect::Policy::limited(10))
             .timeout(crate::constants::DAV_CLIENT_TIMEOUT)
             .build()
-            .unwrap_or_default();
+            .unwrap_or_else(|err| {
+                // `unwrap_or_default` would swap in `reqwest::Client::default()`,
+                // silently abandoning both the timeout and the redirect cap with
+                // no diagnostic. Log so an operator running into this can see
+                // the swap.
+                log::warn!(
+                    "CalDAV client builder failed ({err}); falling back to default reqwest client"
+                );
+                reqwest::Client::new()
+            });
 
         Self {
             http,
@@ -70,9 +85,22 @@ impl CalDavClient {
         self.calendar_home_url = Some(url.to_string());
     }
 
+    /// Override the principal URL so `discover()` can skip the
+    /// `current-user-principal` PROPFIND. Useful when the principal was
+    /// resolved on a previous sync and persisted to DB.
+    pub fn set_principal_url(&mut self, url: &str) {
+        self.principal_url = Some(url.to_string());
+    }
+
     /// Return the discovered (or manually set) calendar-home-set URL.
     pub fn calendar_home_url(&self) -> Option<&str> {
         self.calendar_home_url.as_deref()
+    }
+
+    /// Return the discovered (or manually set) principal URL. Useful for
+    /// callers that want to persist it for the next sync to reuse.
+    pub fn principal_url(&self) -> Option<&str> {
+        self.principal_url.as_deref()
     }
 
     // -----------------------------------------------------------------------
@@ -81,69 +109,101 @@ impl CalDavClient {
 
     /// Auto-discover the principal and calendar-home-set URLs.
     ///
-    /// 1. `GET {base_url}/.well-known/caldav` (follow redirects)
-    /// 2. `PROPFIND` for `current-user-principal`
-    /// 3. `PROPFIND` on the principal for `calendar-home-set`
-    /// 4. Store the discovered URLs
+    /// 1. PROPFIND `current-user-principal` against `base_url`.
+    /// 2. If that fails (or doesn't return a principal), retry against
+    ///    `{base_url}/.well-known/caldav` as a fallback hint.
+    /// 3. PROPFIND the principal for `calendar-home-set`.
+    ///
+    /// The base-URL-first ordering matters because many enterprise Exchange
+    /// front-ends respond `200 OK` with a normal HTML 404 page (or a redirect
+    /// to a login portal) for `/.well-known/caldav`. A naive "well-known
+    /// first" probe interprets that as a successful discovery with no
+    /// principal, then falls into a confusing retry loop. Probing the base
+    /// URL first makes the well-known probe a true fallback - we only hit it
+    /// when base-URL PROPFIND outright fails.
+    ///
+    /// Both `principal_url` and `calendar_home_url` may be set ahead of time
+    /// by `set_principal_url` / `set_calendar_home_url`; the corresponding
+    /// PROPFINDs are skipped when those are already populated.
     pub async fn discover(&mut self) -> Result<(), String> {
-        // Step 1: Try .well-known/caldav to find the DAV root
+        // Step 1: principal lookup. Skip if a caller already set it from a
+        // persisted value.
+        if self.principal_url.is_none() {
+            self.principal_url = Some(self.discover_principal().await?);
+        }
+
+        // Step 2: home-set lookup. Skip if already set.
+        if self.calendar_home_url.is_none() {
+            let principal = self
+                .principal_url
+                .as_ref()
+                .ok_or("No principal URL")?
+                .clone();
+
+            let (_, body) = self
+                .propfind_raw(&principal, "0", PROPFIND_CALENDAR_HOME)
+                .await
+                .map_err(|e| format!("PROPFIND for calendar-home-set failed: {e}"))?;
+
+            if let Some(home) = extract_href_property(&body, "calendar-home-set") {
+                self.calendar_home_url = Some(self.resolve_url(&home));
+            } else {
+                return Err("Could not discover calendar-home-set".to_string());
+            }
+        }
+
+        log::info!(
+            "CalDAV discovery complete: principal={}, calendar-home={}",
+            self.principal_url.as_deref().unwrap_or("?"),
+            self.calendar_home_url.as_deref().unwrap_or("?")
+        );
+
+        Ok(())
+    }
+
+    /// Resolve `current-user-principal` by probing `base_url` first and
+    /// `.well-known/caldav` only as a fallback. Returns the absolute principal
+    /// URL on success.
+    async fn discover_principal(&self) -> Result<String, String> {
+        // Try the base URL directly. This works for the vast majority of
+        // CalDAV endpoints (DAViCal, Radicale, SOGo, iCloud, Fastmail, ...).
+        let mut last_error = match self
+            .propfind_raw(&self.base_url, "0", PROPFIND_PRINCIPAL)
+            .await
+        {
+            Ok((_, body)) => {
+                if let Some(principal) = extract_href_property(&body, "current-user-principal") {
+                    return Ok(self.resolve_url(&principal));
+                }
+                "PROPFIND on base URL returned no current-user-principal".to_string()
+            }
+            Err(e) => format!("PROPFIND on base URL failed: {e}"),
+        };
+
+        // Fallback: probe `.well-known/caldav`. RFC 6764 § 6 recommends this
+        // as a discovery hint when the client doesn't know the DAV root. We
+        // only reach it if the base URL didn't yield a principal.
         let well_known_url = format!("{}/.well-known/caldav", self.base_url);
-        let dav_root = match self
+        match self
             .propfind_raw(&well_known_url, "0", PROPFIND_PRINCIPAL)
             .await
         {
             Ok((_, body)) => {
                 if let Some(principal) = extract_href_property(&body, "current-user-principal") {
-                    self.principal_url = Some(self.resolve_url(&principal));
-                    self.resolve_url(&principal)
-                } else {
-                    well_known_url.clone()
+                    return Ok(self.resolve_url(&principal));
                 }
+                last_error = format!(
+                    "{last_error}; .well-known/caldav also returned no current-user-principal"
+                );
             }
-            Err(_) => {
-                // .well-known not available, try the base URL directly
-                self.base_url.clone()
-            }
-        };
-
-        // Step 2: If we don't have a principal yet, PROPFIND on the DAV root
-        if self.principal_url.is_none() {
-            let (_, body) = self
-                .propfind_raw(&dav_root, "0", PROPFIND_PRINCIPAL)
-                .await
-                .map_err(|e| format!("PROPFIND for principal failed: {e}"))?;
-
-            if let Some(principal) = extract_href_property(&body, "current-user-principal") {
-                self.principal_url = Some(self.resolve_url(&principal));
-            } else {
-                return Err("Could not discover current-user-principal".to_string());
+            Err(e) => {
+                last_error = format!("{last_error}; .well-known/caldav also failed: {e}");
             }
         }
 
-        // Step 3: PROPFIND on the principal for calendar-home-set
-        let principal = self
-            .principal_url
-            .as_ref()
-            .ok_or("No principal URL")?
-            .clone();
-
-        let (_, body) = self
-            .propfind_raw(&principal, "0", PROPFIND_CALENDAR_HOME)
-            .await
-            .map_err(|e| format!("PROPFIND for calendar-home-set failed: {e}"))?;
-
-        if let Some(home) = extract_href_property(&body, "calendar-home-set") {
-            self.calendar_home_url = Some(self.resolve_url(&home));
-        } else {
-            return Err("Could not discover calendar-home-set".to_string());
-        }
-
-        log::info!(
-            "CalDAV discovery complete: calendar-home={}",
-            self.calendar_home_url.as_deref().unwrap_or("?")
-        );
-
-        Ok(())
+        Err(format!(
+            "Could not discover current-user-principal: {last_error}"
+        ))
     }
 
     // -----------------------------------------------------------------------
