@@ -8,9 +8,9 @@ The multi-window foundation is in place: `iced::daemon`, the
 `PopOut(window::Id, PopOutMessage)` dispatch wrapper all work. Message-view,
 compose, and calendar pop-outs all render, operate, and survive a session
 round-trip. What remains is a mix of unbuilt compose-window features
-(drag-drop overlay, attachment compression, emoji picker), the cross-cutting
-Print blocker, three stubbed attachment paths, and a handful of fidelity
-items called out in the product spec.
+(drag-drop overlay, attachment compression), the cross-cutting Print
+blocker, three stubbed attachment paths, and a handful of fidelity items
+called out in the product spec.
 
 This doc is the gating list. When everything below is resolved (or
 explicitly cancelled), `docs/pop-out-windows/` can be deleted.
@@ -50,18 +50,7 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
    No OS print dialog integration exists anywhere in the project (see
    Medium #11 for the cross-cutting Print blocker).
 
-4. **Formatting toolbar is missing the emoji picker.** Problem
-   statement §"Formatting Toolbar" calls the emoji-picker button
-   "required". The picker widget exists at
-   `crates/app/src/ui/widgets/pickers.rs::emoji_picker` but is never
-   instantiated; `crates/app/src/pop_out/compose/view.rs::formatting_toolbar`
-   ships Bold / Italic / Underline / Strikethrough / List / Link only.
-   Adding the picker requires per-window state (search query, selected
-   category, open flag), an `AnchoredOverlay`, and inserting the picked
-   emoji at the rich-text editor's cursor. See
-   `docs/emoji-picker/problem-statement.md`.
-
-5. **Recipient contact-pill hover affordance not implemented.** Problem
+4. **Recipient contact-pill hover affordance not implemented.** Problem
    statement §"Header Section" (and §"Recipient Fields" for compose):
    "Recipients in the To and Cc fields appear as plain text but become
    contact pills on hover - revealing the inline edit button from the
@@ -73,7 +62,7 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
 
 ## Medium
 
-6. **Rendering-mode picker location is unresolved.** Problem statement
+5. **Rendering-mode picker location is unresolved.** Problem statement
    §"Rendering Mode" and the implementation spec Phase 3 both draw the
    picker as a row of four chip-style buttons below the header, above
    the body. `pop_out/message_view.rs:493-502` instead places the four
@@ -83,7 +72,7 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
    Either revise the spec to bless the overflow-menu placement or move
    the picker out.
 
-7. **Original HTML mode does not actually fetch remote content.** Problem
+6. **Original HTML mode does not actually fetch remote content.** Problem
    statement §"Rendering Mode": Original HTML "renders the full HTML as
    sent, including remote images and original styles … subject to the
    app's remote-content and tracking-pixel controls". The remote-content
@@ -93,7 +82,7 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
    wired. Simple HTML and Original HTML render identically. Cross-ref:
    `TODO.md` "Pop out message viewer body rendering toggle buttons".
 
-8. **Source mode synthesizes a pseudo-`.eml` from parsed columns.**
+7. **Source mode synthesizes a pseudo-`.eml` from parsed columns.**
    Problem statement §"Rendering Mode" describes Source as "the raw email
    source (headers + MIME body, monospaced)". `handlers/pop_out/
    message_view.rs:96-139` builds a best-effort reconstruction from
@@ -106,14 +95,14 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
    per-provider fetch paths (Gmail `format=raw`, JMAP blob endpoint,
    Graph `/$value`, IMAP `BODY[]`).
 
-9. **Save As is missing `.pdf`.** Problem statement §"Actions" lists
+8. **Save As is missing `.pdf`.** Problem statement §"Actions" lists
    three formats: `.eml`, `.pdf`, `.txt`. Implementation spec Phase 6
    deliberately defers PDF ("requires rendering the message HTML
    faithfully to a paginated PDF"). `handlers/pop_out/save_as.rs:69-72`
    ships `.eml` and `.txt` only. Either implement HTML-to-paginated-PDF
    rendering or revise the product spec to drop `.pdf`.
 
-10. **Print is a no-op everywhere.** Both surfaces require it: message
+9. **Print is a no-op everywhere.** Both surfaces require it: message
     view overflow menu (problem statement §"Actions" overflow item) and
     compose header (problem statement §"Actions"). `pop_out/
     message_view.rs:85` falls into the trailing `Task::none()` arm and
@@ -121,7 +110,7 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
     platform-specific with no iced precedent. Cross-ref: `TODO.md`
     "Pop-out Print". Resolving this also closes High #3.
 
-11. **Attachment Open / Save / Save All in viewer are stubs.** The
+10. **Attachment Open / Save / Save All in viewer are stubs.** The
     compact attachment cards in `message_view.rs:717-784` render Save /
     Open buttons on hover and a Save All button in the panel header, but
     `handlers/pop_out/message_view.rs:68-79` handles all three with
@@ -130,7 +119,7 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
     `ui/reading_pane.rs:368-376` are also stubs - resolving these
     likely shares an attachment fetch + cache + write path.
 
-12. **Spell check decision deferred.** Problem statement §"Open Questions"
+11. **Spell check decision deferred.** Problem statement §"Open Questions"
     item 3: "OS-level spell check integration, or custom? Defer to
     implementation." No spell-check infrastructure exists in the editor
     pipeline. Either pick an approach or strike the open question.
@@ -279,8 +268,8 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
 - Rich text editor body (`rte` crate) with per-action `BodyChanged`
   dispatch (`pop_out/compose/view.rs:458-485`).
 - Formatting toolbar (Bold / Italic / Underline / Strikethrough / List
-  / Link); link dialog overlay; emoji picker still missing (see
-  High #4).
+  / Link / emoji picker); link dialog overlay; emoji picker anchored
+  via `AnchoredOverlay` and inserts via `EditAction::InsertText`.
 - Auto-resolved signature on open and on From-account change, inserted
   with a tracked separator index for reply quote placement
   (`handlers/pop_out/compose_signature.rs`).
