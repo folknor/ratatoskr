@@ -1049,6 +1049,19 @@ pub fn load_calendar_events_for_view_sync(
     Ok(expanded)
 }
 
+/// Hard cap on COUNT to bound allocation. Real-world recurring events stay
+/// well under this; a remote server emitting `COUNT=4294967295` cannot pin
+/// us to a multi-GB Vec.
+const RRULE_MAX_COUNT: usize = 10_000;
+
+/// Hard cap on iteration steps inside any single expander, regardless of how
+/// many instances actually get produced. Defends against the "BYDAY filter
+/// matches nothing" / "BYMONTHDAY=31 in only February" infinite-loop pattern
+/// where `out.len()` never grows. Set well above any legitimate workload:
+/// ~30 years of daily checks. If a real RRULE legitimately needs more, COUNT
+/// or UNTIL will terminate first.
+const RRULE_MAX_STEPS: usize = 12_000;
+
 /// Expand a recurring event into concrete instances based on its RRULE.
 ///
 /// Supports a useful subset of RFC 5545 RRULE:
@@ -1148,7 +1161,14 @@ fn parse_rrule(rrule_str: &str) -> Rrule {
         } else if let Some(val) = part.strip_prefix("INTERVAL=") {
             out.interval = val.parse().unwrap_or(1).max(1);
         } else if let Some(val) = part.strip_prefix("COUNT=") {
-            out.count = val.parse().ok();
+            // Clamp untrusted COUNT values to a sane upper bound so a remote
+            // server cannot trigger pathological allocation. Anything above
+            // RRULE_MAX_COUNT lands at the cap; legitimate recurring events
+            // never come close.
+            out.count = val
+                .parse::<usize>()
+                .ok()
+                .map(|n| n.min(RRULE_MAX_COUNT));
         } else if let Some(val) = part.strip_prefix("UNTIL=") {
             out.until = parse_until_date(val);
         } else if let Some(val) = part.strip_prefix("BYDAY=") {
@@ -1192,10 +1212,17 @@ fn parse_weekday(spec: &str) -> Option<chrono::Weekday> {
 }
 
 fn expand_daily(start: i64, rule: &Rrule) -> Vec<i64> {
-    let cap = rule.count.unwrap_or(366);
+    let cap = rule.count.unwrap_or(366).min(RRULE_MAX_COUNT);
     let mut out = Vec::with_capacity(cap);
     let mut current = start;
-    while out.len() < cap {
+    // Step-bounded iteration: a BYDAY filter can reject 6 of every 7
+    // candidates, and pathological filters (e.g. `BYDAY=TU` on a daily rule
+    // with `INTERVAL=7` starting on Monday) match nothing - without a step
+    // cap we spin forever.
+    for _ in 0..RRULE_MAX_STEPS {
+        if out.len() >= cap {
+            break;
+        }
         if rule.byday.is_empty() || matches_weekday(current, &rule.byday) {
             out.push(current);
         }
@@ -1205,7 +1232,7 @@ fn expand_daily(start: i64, rule: &Rrule) -> Vec<i64> {
 }
 
 fn expand_weekly(start: i64, rule: &Rrule) -> Vec<i64> {
-    let cap = rule.count.unwrap_or(366);
+    let cap = rule.count.unwrap_or(366).min(RRULE_MAX_COUNT);
     let mut out = Vec::with_capacity(cap);
     let week = 7 * 86400;
     let interval_secs = rule.interval * week;
@@ -1213,7 +1240,10 @@ fn expand_weekly(start: i64, rule: &Rrule) -> Vec<i64> {
     if rule.byday.is_empty() {
         // Plain weekly recurrence on the same weekday as the start.
         let mut current = start;
-        while out.len() < cap {
+        for _ in 0..RRULE_MAX_STEPS {
+            if out.len() >= cap {
+                break;
+            }
             out.push(current);
             current += interval_secs;
         }
@@ -1226,7 +1256,12 @@ fn expand_weekly(start: i64, rule: &Rrule) -> Vec<i64> {
 
     let week_start = start_of_week(start);
     let mut week_anchor = week_start;
-    while out.len() < cap {
+    // Step-bounded: each "step" is one anchored week. Same DoS guard
+    // rationale as `expand_daily`.
+    for _ in 0..RRULE_MAX_STEPS {
+        if out.len() >= cap {
+            break;
+        }
         for &wd in &days {
             let candidate = shift_to_weekday(week_anchor, wd, start);
             if candidate < start {
@@ -1243,10 +1278,17 @@ fn expand_weekly(start: i64, rule: &Rrule) -> Vec<i64> {
 }
 
 fn expand_monthly(start: i64, rule: &Rrule) -> Vec<i64> {
-    let cap = rule.count.unwrap_or(120);
+    let cap = rule.count.unwrap_or(120).min(RRULE_MAX_COUNT);
     let mut out = Vec::with_capacity(cap);
     let mut current = start;
-    while out.len() < cap {
+    // Step-bounded: `BYMONTHDAY=31` with `INTERVAL=12` starting in February
+    // (or any month-day combination that no visited month satisfies) would
+    // otherwise loop forever - `set_day_of_month` returns `None` on every
+    // visit and `out.len()` never grows.
+    for _ in 0..RRULE_MAX_STEPS {
+        if out.len() >= cap {
+            return out;
+        }
         if rule.bymonthday.is_empty() {
             out.push(current);
         } else {
@@ -1267,10 +1309,16 @@ fn expand_monthly(start: i64, rule: &Rrule) -> Vec<i64> {
 }
 
 fn expand_yearly(start: i64, rule: &Rrule) -> Vec<i64> {
-    let cap = rule.count.unwrap_or(60);
+    let cap = rule.count.unwrap_or(60).min(RRULE_MAX_COUNT);
     let mut out = Vec::with_capacity(cap);
     let mut current = start;
-    while out.len() < cap {
+    // Step-bounded for parity with the other expanders, even though yearly
+    // BYMONTH always yields output (every visited year emits at least one
+    // candidate per requested month).
+    for _ in 0..RRULE_MAX_STEPS {
+        if out.len() >= cap {
+            return out;
+        }
         if rule.bymonth.is_empty() {
             out.push(current);
         } else {
@@ -1545,6 +1593,48 @@ mod tests {
             expand_recurrence(&event, "FREQ=YEARLY;UNTIL=20280701T000000Z");
         assert_eq!(instances.len(), 3);
         assert_eq!(weekday_of(instances[0].start_time), weekday_of(start));
+    }
+
+    #[test]
+    fn daily_with_unsatisfiable_byday_terminates() {
+        // Reviewer A #1: Monday DTSTART with FREQ=DAILY;INTERVAL=7;BYDAY=TU
+        // can never match - the candidate weekday is always Monday. Without
+        // the step bound this spun forever. Confirm we return empty (or at
+        // least terminate) instead of looping.
+        let monday = local_ts(2026, 3, 9, 9, 0); // 2026-03-09 is a Monday
+        let event = make_event(monday, 3600);
+        let instances = expand_recurrence(
+            &event,
+            "FREQ=DAILY;INTERVAL=7;BYDAY=TU;COUNT=1",
+        );
+        // Implementation returns the original event when expansion produces
+        // zero matches (`instances.is_empty()` fallback). Either zero or one
+        // is acceptable here - what matters is that we returned at all.
+        assert!(instances.len() <= 1);
+    }
+
+    #[test]
+    fn monthly_with_unsatisfiable_bymonthday_terminates() {
+        // Reviewer A #2: February DTSTART with FREQ=MONTHLY;INTERVAL=12;
+        // BYMONTHDAY=31 - no visited month is February-with-day-31.
+        let feb = local_ts(2026, 2, 1, 9, 0);
+        let event = make_event(feb, 3600);
+        let instances = expand_recurrence(
+            &event,
+            "FREQ=MONTHLY;INTERVAL=12;BYMONTHDAY=31;COUNT=1",
+        );
+        assert!(instances.len() <= 1);
+    }
+
+    #[test]
+    fn count_clamped_to_max() {
+        // Untrusted COUNT must not pin allocation. RRULE_MAX_COUNT (10_000)
+        // is the cap; an upstream `COUNT=999999` should still expand only
+        // up to that many entries.
+        let start = local_ts(2026, 1, 1, 9, 0);
+        let event = make_event(start, 1800);
+        let instances = expand_recurrence(&event, "FREQ=DAILY;COUNT=999999");
+        assert!(instances.len() <= RRULE_MAX_COUNT);
     }
 
     #[test]

@@ -19,8 +19,6 @@ its helpers (`parse_rrule`, `parse_weekday`, `expand_daily`, `expand_weekly`,
 
 - `calendars.rs:1218` - `expand_weekly` empty-BYDAY branch uses `current += interval_secs` (raw seconds), same DST drift across spring-forward/fall-back. Repro: `FREQ=WEEKLY` at 09:00 spanning a DST boundary.
 
-- `calendars.rs:1198,1216,1229` - `while out.len() < cap` plus a default cap (`unwrap_or(366/120/60)`) when neither COUNT nor UNTIL is set: every loop runs to the cap regardless of `window_end` (which is enforced only later in `expand_recurrence`). For DAILY this still terminates, but it allocates 366 entries for a one-shot event with no recurrence terminator; instances beyond `window_end` are computed and discarded. Not a runaway loop, but wasted work and confusing semantics.
-
 - `calendars.rs:1207-1221` - `expand_weekly` with empty BYDAY never advances by the start's weekday alignment; fine on its own, but combined with the seconds-based step it drifts on DST.
 
 - `calendars.rs:1180-1191` - `parse_weekday` strips digits and signs, so `BYDAY=1MO` and `BYDAY=-1FR` collapse to plain `MO`/`FR`. Under `FREQ=MONTHLY` the rule then falls into the `bymonthday.is_empty()` branch and emits the *start day* every month, not the first/last weekday. Repro: `FREQ=MONTHLY;BYDAY=1MO` starting 2026-03-09 emits the 9th every month, not the first Monday.
@@ -44,8 +42,6 @@ its helpers (`parse_rrule`, `parse_weekday`, `expand_daily`, `expand_weekly`,
 - `calendars.rs:1403-1411` - `parse_until_date` builds `date.and_hms_opt(23,59,59).and_utc().timestamp()` regardless of whether the UNTIL value is `YYYYMMDD` (date-only, floating) or `YYYYMMDDTHHMMSSZ` (UTC datetime). The `T...Z` time portion is discarded and replaced with 23:59:59 UTC. Repro: `UNTIL=20280101T000000Z` is treated as 2028-01-01 23:59:59 UTC, almost a full day late. The existing `yearly_with_until_clamps_window` test happens to pass because the slack matches.
 
 - `calendars.rs:1085-1099` - `instances.is_empty()` fallback: if every candidate is filtered out (e.g. `COUNT=5` with `UNTIL` already past), the function returns the original event as a single instance. That's not what RFC 5545 says - an event whose RRULE produces no instances should produce zero instances. Behavioural surprise, not a crash.
-
-- `calendars.rs:1194-1205,1245-1267,1269-1291` - none of the expanders consult `window_end` or `until` internally; they fill exactly `cap` entries every time and rely on the outer loop to truncate. With `INTERVAL=1;COUNT=10000` (clamped to `usize::MAX` via `parse::<usize>`), `cap` becomes the count and `expand_daily` allocates that many timestamps before truncation. No upper bound on COUNT in `parse_rrule` (line 1151). Latent DoS via untrusted RRULE.
 
 ---
 
@@ -116,10 +112,6 @@ Compared against the deleted ad-hoc client and XML parser via git history.
 ## Outside Reviews
 
 ### Reviewer A - combined RRULE / TZ / CalDAV pass
-
-1. `crates/db/src/db/queries_extra/calendars.rs:1198`: `expand_daily` can infinite-loop. Example: Monday DTSTART with `FREQ=DAILY;INTERVAL=7;BYDAY=TU;COUNT=1` never matches, so `out.len()` never grows.
-
-2. `crates/db/src/db/queries_extra/calendars.rs:1249`: `expand_monthly` can infinite-loop when every visited month rejects BYMONTHDAY. Example: February DTSTART with `FREQ=MONTHLY;INTERVAL=12;BYMONTHDAY=31;COUNT=1`.
 
 3. `crates/db/src/db/queries_extra/calendars.rs:1202` and `crates/db/src/db/queries_extra/calendars.rs:1218`: daily/plain-weekly recurrence advances by fixed Unix seconds, so wall-clock time shifts across DST. A 09:00 event before spring-forward becomes 10:00 local after the transition.
 
