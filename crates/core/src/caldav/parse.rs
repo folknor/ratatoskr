@@ -332,19 +332,29 @@ pub struct CalDavEventEntry {
 
 /// Parse a PROPFIND Depth:1 response to extract calendar collections.
 ///
-/// Looks for responses that have `<D:resourcetype><C:calendar/></D:resourcetype>`.
+/// Looks for responses whose `<resourcetype>` contains a `<calendar>` marker
+/// (either self-closed `<C:calendar/>` or open-close `<C:calendar></C:calendar>`).
+///
+/// Field reads are scoped to the expected XML parent to avoid clobbering:
+/// `<href>` is read only as a direct child of `<response>`; `<displayname>`,
+/// `<getctag>`, and `<calendar-color>` are read only as direct children of
+/// `<prop>`. This keeps a `<href>` nested inside a `<privilege>` descriptor
+/// (returned by SOGo / Radicale alongside the prop block) from overwriting
+/// the calendar's own href.
+///
+/// Both `Event::Text` and `Event::CData` are accumulated into the field
+/// buffer, since some servers wrap `calendar-data` and other large text in
+/// CDATA sections.
 pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
     let mut reader = Reader::from_str(xml);
     let mut calendars = Vec::new();
 
-    let mut in_response = false;
-    let mut in_resourcetype = false;
+    let mut stack: Vec<String> = Vec::new();
     let mut is_calendar = false;
     let mut current_href = String::new();
     let mut current_displayname = String::new();
     let mut current_ctag = String::new();
     let mut current_color = String::new();
-    let mut current_tag = String::new();
     let mut buf = String::new();
 
     loop {
@@ -352,22 +362,24 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
             Ok(Event::Start(ref e)) => {
                 let name = local_name(e.name().as_ref());
                 if name == "response" {
-                    in_response = true;
                     current_href.clear();
                     current_displayname.clear();
                     current_ctag.clear();
                     current_color.clear();
                     is_calendar = false;
-                } else if name == "resourcetype" {
-                    in_resourcetype = true;
                 }
-                current_tag = name;
+                // Open-close `<calendar></calendar>` form, scoped to inside
+                // `<resourcetype>`.
+                if name == "calendar" && stack.iter().any(|s| s == "resourcetype") {
+                    is_calendar = true;
+                }
+                stack.push(name);
                 buf.clear();
             }
             Ok(Event::Empty(ref e)) => {
                 let name = local_name(e.name().as_ref());
-                // <C:calendar/> or <cal:calendar/> inside resourcetype
-                if in_resourcetype && name == "calendar" {
+                // Self-closed `<calendar/>` form.
+                if name == "calendar" && stack.iter().any(|s| s == "resourcetype") {
                     is_calendar = true;
                 }
             }
@@ -378,45 +390,51 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
                     buf.push_str(&text);
                 }
             }
+            Ok(Event::CData(ref e)) => {
+                if let Ok(text) = e.decode() {
+                    buf.push_str(&text);
+                }
+            }
             Ok(Event::End(ref e)) => {
                 let name = local_name(e.name().as_ref());
-                if name == "resourcetype" {
-                    in_resourcetype = false;
-                }
-                if in_response {
-                    match current_tag.as_str() {
-                        "href" => current_href = buf.trim().to_string(),
-                        "displayname" => current_displayname = buf.trim().to_string(),
-                        "getctag" => current_ctag = buf.trim().to_string(),
-                        "calendar-color" => current_color = buf.trim().to_string(),
-                        _ => {}
+                let parent = stack.iter().rev().nth(1).map(String::as_str);
+                match (parent, name.as_str()) {
+                    (Some("response"), "href") => {
+                        current_href = buf.trim().to_string();
                     }
-                }
-                if name == "response" {
-                    in_response = false;
-                    if is_calendar && !current_href.is_empty() {
-                        calendars.push(DiscoveredCalendar {
-                            href: current_href.clone(),
-                            display_name: if current_displayname.is_empty() {
-                                None
-                            } else {
-                                Some(current_displayname.clone())
-                            },
-                            color: if current_color.is_empty() {
-                                None
-                            } else {
-                                Some(current_color.clone())
-                            },
-                            ctag: if current_ctag.is_empty() {
-                                None
-                            } else {
-                                Some(current_ctag.clone())
-                            },
-                        });
+                    (Some("prop"), "displayname") => {
+                        current_displayname = buf.trim().to_string();
                     }
+                    (Some("prop"), "getctag") => {
+                        current_ctag = buf.trim().to_string();
+                    }
+                    (Some("prop"), "calendar-color") => {
+                        current_color = buf.trim().to_string();
+                    }
+                    _ => {}
                 }
+                if name == "response" && is_calendar && !current_href.is_empty() {
+                    calendars.push(DiscoveredCalendar {
+                        href: current_href.clone(),
+                        display_name: if current_displayname.is_empty() {
+                            None
+                        } else {
+                            Some(current_displayname.clone())
+                        },
+                        color: if current_color.is_empty() {
+                            None
+                        } else {
+                            Some(current_color.clone())
+                        },
+                        ctag: if current_ctag.is_empty() {
+                            None
+                        } else {
+                            Some(current_ctag.clone())
+                        },
+                    });
+                }
+                stack.pop();
                 buf.clear();
-                current_tag.clear();
             }
             Ok(Event::Eof) | Err(_) => break,
             _ => {}
@@ -427,15 +445,18 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
 }
 
 /// Parse a PROPFIND Depth:1 response to extract event URIs and ETags.
+///
+/// Field reads are parent-scoped (see `parse_propfind_calendars`) and CDATA
+/// sections are accumulated alongside text. ETag values are preserved verbatim
+/// including the RFC 7232 quotes / weak indicator.
 pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
     let mut reader = Reader::from_str(xml);
     let mut entries = Vec::new();
 
-    let mut in_response = false;
+    let mut stack: Vec<String> = Vec::new();
     let mut current_href = String::new();
     let mut current_etag = String::new();
     let mut current_content_type = String::new();
-    let mut current_tag = String::new();
     let mut buf = String::new();
 
     loop {
@@ -443,12 +464,11 @@ pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
             Ok(Event::Start(ref e)) => {
                 let name = local_name(e.name().as_ref());
                 if name == "response" {
-                    in_response = true;
                     current_href.clear();
                     current_etag.clear();
                     current_content_type.clear();
                 }
-                current_tag = name;
+                stack.push(name);
                 buf.clear();
             }
             Ok(Event::Text(ref e)) => {
@@ -458,41 +478,39 @@ pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
                     buf.push_str(&text);
                 }
             }
+            Ok(Event::CData(ref e)) => {
+                if let Ok(text) = e.decode() {
+                    buf.push_str(&text);
+                }
+            }
             Ok(Event::End(ref e)) => {
                 let name = local_name(e.name().as_ref());
-                if in_response {
-                    match current_tag.as_str() {
-                        "href" => current_href = buf.trim().to_string(),
-                        "getetag" => {
-                            // Preserve the ETag value verbatim. RFC 7232 ETags
-                            // are quoted strings ("abc") with an optional weak
-                            // indicator (W/"abc"); the surrounding quotes ARE
-                            // part of the value, not framing. Stripping them
-                            // here corrupts weak ETags into a malformed `W/abc`
-                            // shape that fails server-side `If-Match` validation
-                            // when the client re-quotes for the outgoing header.
-                            current_etag = buf.trim().to_string();
-                        }
-                        "getcontenttype" => {
-                            current_content_type = buf.trim().to_string();
-                        }
-                        _ => {}
+                let parent = stack.iter().rev().nth(1).map(String::as_str);
+                match (parent, name.as_str()) {
+                    (Some("response"), "href") => {
+                        current_href = buf.trim().to_string();
                     }
-                }
-                if name == "response" {
-                    in_response = false;
-                    if !current_href.is_empty()
-                        && !current_etag.is_empty()
-                        && is_icalendar_resource(&current_href, &current_content_type)
-                    {
-                        entries.push(CalDavEventEntry {
-                            uri: current_href.clone(),
-                            etag: current_etag.clone(),
-                        });
+                    (Some("prop"), "getetag") => {
+                        // ETag preserved verbatim - see RFC 7232.
+                        current_etag = buf.trim().to_string();
                     }
+                    (Some("prop"), "getcontenttype") => {
+                        current_content_type = buf.trim().to_string();
+                    }
+                    _ => {}
                 }
+                if name == "response"
+                    && !current_href.is_empty()
+                    && !current_etag.is_empty()
+                    && is_icalendar_resource(&current_href, &current_content_type)
+                {
+                    entries.push(CalDavEventEntry {
+                        uri: current_href.clone(),
+                        etag: current_etag.clone(),
+                    });
+                }
+                stack.pop();
                 buf.clear();
-                current_tag.clear();
             }
             Ok(Event::Eof) | Err(_) => break,
             _ => {}
@@ -503,15 +521,17 @@ pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
 }
 
 /// Parse a CTag from a PROPFIND response.
+///
+/// Scoped to direct child of `<prop>` and accumulates both Text and CData.
 pub fn parse_ctag(xml: &str) -> Option<String> {
     let mut reader = Reader::from_str(xml);
-    let mut current_tag = String::new();
+    let mut stack: Vec<String> = Vec::new();
     let mut buf = String::new();
 
     loop {
         match reader.read_event() {
             Ok(Event::Start(ref e)) => {
-                current_tag = local_name(e.name().as_ref());
+                stack.push(local_name(e.name().as_ref()));
                 buf.clear();
             }
             Ok(Event::Text(ref e)) => {
@@ -521,15 +541,22 @@ pub fn parse_ctag(xml: &str) -> Option<String> {
                     buf.push_str(&text);
                 }
             }
-            Ok(Event::End(_)) => {
-                if current_tag == "getctag" {
+            Ok(Event::CData(ref e)) => {
+                if let Ok(text) = e.decode() {
+                    buf.push_str(&text);
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                let name = local_name(e.name().as_ref());
+                let parent = stack.iter().rev().nth(1).map(String::as_str);
+                if parent == Some("prop") && name == "getctag" {
                     let val = buf.trim().to_string();
                     if !val.is_empty() {
                         return Some(val);
                     }
                 }
+                stack.pop();
                 buf.clear();
-                current_tag.clear();
             }
             Ok(Event::Eof) | Err(_) => break,
             _ => {}
@@ -541,15 +568,16 @@ pub fn parse_ctag(xml: &str) -> Option<String> {
 
 /// Parse a calendar-multiget or calendar-query REPORT response.
 ///
-/// Returns `Vec<(uri, ical_data)>`.
+/// Returns `Vec<(uri, ical_data)>`. `<calendar-data>` is the prime case where
+/// servers wrap large iCalendar payloads in `<![CDATA[...]]>`; we accumulate
+/// both Text and CData arms so either shape parses correctly.
 pub fn parse_multiget_report(xml: &str) -> Vec<(String, String)> {
     let mut reader = Reader::from_str(xml);
     let mut results = Vec::new();
 
-    let mut in_response = false;
+    let mut stack: Vec<String> = Vec::new();
     let mut current_href = String::new();
     let mut current_ical = String::new();
-    let mut current_tag = String::new();
     let mut buf = String::new();
 
     loop {
@@ -557,11 +585,10 @@ pub fn parse_multiget_report(xml: &str) -> Vec<(String, String)> {
             Ok(Event::Start(ref e)) => {
                 let name = local_name(e.name().as_ref());
                 if name == "response" {
-                    in_response = true;
                     current_href.clear();
                     current_ical.clear();
                 }
-                current_tag = name;
+                stack.push(name);
                 buf.clear();
             }
             Ok(Event::Text(ref e)) => {
@@ -571,23 +598,34 @@ pub fn parse_multiget_report(xml: &str) -> Vec<(String, String)> {
                     buf.push_str(&text);
                 }
             }
+            Ok(Event::CData(ref e)) => {
+                if let Ok(text) = e.decode() {
+                    buf.push_str(&text);
+                }
+            }
             Ok(Event::End(ref e)) => {
                 let name = local_name(e.name().as_ref());
-                if in_response {
-                    match current_tag.as_str() {
-                        "href" => current_href = buf.trim().to_string(),
-                        "calendar-data" => current_ical = buf.trim().to_string(),
-                        _ => {}
+                let parent = stack.iter().rev().nth(1).map(String::as_str);
+                match (parent, name.as_str()) {
+                    (Some("response"), "href") => {
+                        current_href = buf.trim().to_string();
                     }
-                }
-                if name == "response" {
-                    in_response = false;
-                    if !current_href.is_empty() && !current_ical.is_empty() {
-                        results.push((current_href.clone(), current_ical.clone()));
+                    (Some("prop"), "calendar-data") => {
+                        // calendar-data: trim only outer whitespace so that
+                        // intentional CRLF folding inside the iCal payload
+                        // is preserved.
+                        current_ical = buf.trim().to_string();
                     }
+                    _ => {}
                 }
+                if name == "response"
+                    && !current_href.is_empty()
+                    && !current_ical.is_empty()
+                {
+                    results.push((current_href.clone(), current_ical.clone()));
+                }
+                stack.pop();
                 buf.clear();
-                current_tag.clear();
             }
             Ok(Event::Eof) | Err(_) => break,
             _ => {}
@@ -855,6 +893,80 @@ END:VCALENDAR\r\n";
         assert_eq!(entries[0].etag, "\"etag-111\"");
         assert_eq!(entries[1].uri, "/calendars/user/personal/event2.ics");
         assert_eq!(entries[1].etag, "\"etag-222\"");
+    }
+
+    #[test]
+    fn parse_propfind_calendars_recognizes_open_close_calendar() {
+        // Some servers emit `<C:calendar></C:calendar>` rather than the
+        // self-closed `<C:calendar/>`. Both must mark the response as a
+        // calendar resource.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:response>
+    <D:href>/calendars/user/work/</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype><D:collection></D:collection><C:calendar></C:calendar></D:resourcetype>
+        <D:displayname>Work</D:displayname>
+      </D:prop>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+
+        let calendars = parse_propfind_calendars(xml);
+        assert_eq!(calendars.len(), 1);
+        assert_eq!(calendars[0].href, "/calendars/user/work/");
+        assert_eq!(calendars[0].display_name.as_deref(), Some("Work"));
+    }
+
+    #[test]
+    fn parse_propfind_calendars_ignores_nested_href() {
+        // SOGo / Radicale return privilege descriptors alongside the calendar
+        // prop block. A nested `<href>` inside `<privilege>` must not clobber
+        // the calendar's own `<href>`.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:response>
+    <D:href>/calendars/user/work/</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype><D:collection/><C:calendar/></D:resourcetype>
+        <D:displayname>Work</D:displayname>
+        <D:current-user-privilege-set>
+          <D:privilege><D:read/></D:privilege>
+          <D:owner><D:href>/principals/user/</D:href></D:owner>
+        </D:current-user-privilege-set>
+      </D:prop>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+
+        let calendars = parse_propfind_calendars(xml);
+        assert_eq!(calendars.len(), 1);
+        assert_eq!(calendars[0].href, "/calendars/user/work/");
+    }
+
+    #[test]
+    fn parse_multiget_report_handles_cdata() {
+        // Servers wrap large iCalendar payloads in CDATA. Without the
+        // Event::CData arm we'd silently drop the body.
+        let xml = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n\
+<D:multistatus xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\">\n\
+  <D:response>\n\
+    <D:href>/calendars/user/personal/event1.ics</D:href>\n\
+    <D:propstat>\n\
+      <D:prop>\n\
+        <D:getetag>\"etag-111\"</D:getetag>\n\
+        <C:calendar-data><![CDATA[BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:cdata-test@example.com\nSUMMARY:CDATA Event\nEND:VEVENT\nEND:VCALENDAR]]></C:calendar-data>\n\
+      </D:prop>\n\
+    </D:propstat>\n\
+  </D:response>\n\
+</D:multistatus>";
+
+        let results = parse_multiget_report(xml);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "/calendars/user/personal/event1.ics");
+        assert!(results[0].1.contains("CDATA Event"));
     }
 
     #[test]

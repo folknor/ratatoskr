@@ -153,6 +153,12 @@ impl CalDavClient {
     /// List all calendars in the calendar-home-set.
     ///
     /// Returns discovered calendars with their href, display name, color, and ctag.
+    ///
+    /// Calendar hrefs are resolved to absolute URLs against the calendar-home
+    /// URL before returning. Many servers emit path-only hrefs in PROPFIND
+    /// responses (RFC 5785 § 3); callers store the value as `remote_id` and
+    /// later parse it as a URL for create/update, so resolving here keeps
+    /// every downstream path simple.
     pub async fn list_calendars(&self) -> Result<Vec<DiscoveredCalendar>, String> {
         let url = self.require_calendar_home_url()?;
         let (_, body) = self
@@ -160,7 +166,11 @@ impl CalDavClient {
             .await
             .map_err(|e| format!("PROPFIND calendars failed: {e}"))?;
 
-        Ok(parse::parse_propfind_calendars(&body))
+        let mut calendars = parse::parse_propfind_calendars(&body);
+        for cal in &mut calendars {
+            cal.href = self.resolve_url(&cal.href);
+        }
+        Ok(calendars)
     }
 
     // -----------------------------------------------------------------------
@@ -168,6 +178,9 @@ impl CalDavClient {
     // -----------------------------------------------------------------------
 
     /// List all events in a calendar (URIs + ETags).
+    ///
+    /// Event URIs are resolved to absolute URLs against the calendar URL for
+    /// the same reason `list_calendars` does so for calendar hrefs.
     pub async fn list_events(&self, calendar_url: &str) -> Result<Vec<CalDavEventEntry>, String> {
         let url = self.resolve_url(calendar_url);
         let (_, body) = self
@@ -175,7 +188,11 @@ impl CalDavClient {
             .await
             .map_err(|e| format!("PROPFIND events failed: {e}"))?;
 
-        Ok(parse::parse_propfind_events(&body))
+        let mut entries = parse::parse_propfind_events(&body);
+        for entry in &mut entries {
+            entry.uri = self.resolve_url_against(&url, &entry.uri);
+        }
+        Ok(entries)
     }
 
     // -----------------------------------------------------------------------
@@ -473,15 +490,22 @@ impl CalDavClient {
 
     /// Resolve a possibly-relative URL against the base URL.
     fn resolve_url(&self, href: &str) -> String {
+        self.resolve_url_against(&self.base_url, href)
+    }
+
+    /// Resolve a possibly-relative URL against an arbitrary base. Used for
+    /// resolving event URIs against their containing calendar URL, which may
+    /// live at a different path than `self.base_url`.
+    fn resolve_url_against(&self, base: &str, href: &str) -> String {
         if href.starts_with("http://") || href.starts_with("https://") {
             return href.to_string();
         }
-        if let Ok(base) = url::Url::parse(&self.base_url)
-            && let Ok(resolved) = base.join(href)
+        if let Ok(base_url) = url::Url::parse(base)
+            && let Ok(resolved) = base_url.join(href)
         {
             return resolved.to_string();
         }
-        format!("{}{href}", self.base_url)
+        format!("{base}{href}")
     }
 
     /// Get the calendar-home-set URL or return an error.

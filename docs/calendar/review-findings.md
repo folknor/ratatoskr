@@ -89,8 +89,6 @@ Compared against the deleted ad-hoc client and XML parser via git history.
 
 - `crates/core/src/caldav/client.rs:88-107` - `discover()` first tries `/.well-known/caldav` and only falls back to `self.base_url` on a `propfind_raw` error. Many enterprise Exchange fronts return `200 OK` with a normal HTML 404 page (or a redirect to a login portal) for `/.well-known/caldav`, which means `propfind_raw` returns Ok, the `extract_href_property` finds no principal, and the code sets `dav_root = well_known_url` and proceeds to PROPFIND that URL again - wasting a round trip and leaving `principal_url == None` until the second PROPFIND on the broken URL fails. The OLD `resolve_caldav_home_url` issued PROPFIND directly on `config.server_url`, never probing `.well-known`.
 
-- `crates/core/src/caldav/parse.rs:336-427` (`parse_propfind_calendars`) - uses a single `current_tag`/`buf` pair, so any nested element with the same local name (e.g. `<href>` inside a privilege element nested inside a calendar response) overwrites the calendar's own `<href>`. The OLD `extract_first_tag_value` returned the first match and stopped. Realistic risk: SOGo and Radicale return privilege descriptors and supported-report-set elements alongside `displayname`; any of those that contain a tag named `href`, `displayname`, or `calendar-color` will clobber the parent's value.
-
 - `crates/core/src/caldav/parse.rs:594-600` (`local_name`) strips after the **last** `:`. Tag names with no namespace prefix work fine; namespaced tags like `D:href` work. But xml content with attributes like `xmlns:foo` will never appear as element names, so this is fine in practice. Note however that old `xml.rs` only matched local names whose namespace prefix was bound to one of four known DAV URIs - the new code matches `<href>` from ANY namespace. For mixed-namespace responses (unusual but legal), this could match an unrelated `xyz:href`. Low-risk regression but a tightness loss.
 
 - `crates/calendar/src/caldav/mod.rs:188-191` - `parse_icalendar` returns `Err` if the iCalendar payload has zero VEVENTs (parse.rs:85-87). For a freshly-created event the server occasionally returns the VCALENDAR wrapper with the VEVENT relocated to a VTIMEZONE-only response when the timezone is unrecognized; old `parse_caldav_ical_event` handled empty/partial VEVENTs gracefully by returning a stub DTO. New code surfaces this as a hard error to the user even though the PUT succeeded.
@@ -116,10 +114,6 @@ Compared against the deleted ad-hoc client and XML parser via git history.
 5. `crates/db/src/db/queries_extra/calendars.rs:1403`: `UNTIL=YYYYMMDDTHHMMSSZ` ignores the time and becomes 23:59:59 UTC for that date. Occurrences after the actual UNTIL time are incorrectly included.
 
 6. `crates/core/src/caldav/parse.rs:257` and `crates/graph/src/calendar_sync.rs:526`: DST gaps/ambiguous local times with a resolved timezone fall back to interpreting the naive local time as UTC. The same UTC fallback happens when TZID resolves to `Tz::Floating`.
-
-7. `crates/core/src/caldav/parse.rs:397`, `crates/calendar/src/caldav/mod.rs:51`, `crates/calendar/src/caldav/mod.rs:246`: CalDAV listed calendar hrefs are no longer resolved against the home URL. Servers returning path-only hrefs produce `remote_id` values that later fail create/update URL parsing.
-
-8. `crates/core/src/caldav/parse.rs:560`: consolidated CalDAV XML parsing lost the old nested-text/CDATA handling. `calendar-data` in CDATA is dropped, and nested display names lose text. `crates/core/src/caldav/parse.rs:367` also only recognizes `<calendar/>`, not `<calendar></calendar>`.
 
 9. `crates/calendar/src/caldav/mod.rs:123`: `caldav_principal_url` is no longer loaded or used. Accounts that had a stored principal URL but no home URL now must rediscover from `caldav_url`, which regresses servers where principal discovery from the base URL fails.
 
