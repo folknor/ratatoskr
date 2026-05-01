@@ -32,19 +32,6 @@ All findings addressed. Lenses and targets:
 ### `crates/db/src/db/queries_extra/calendars.rs::expand_yearly` (1525-1579)
 
 - **Medium** - YEARLY+ordinal BYDAY without explicit BYMONTH (e.g. `FREQ=YEARLY;BYDAY=20MO` = "20th Monday of the year") now WARN-logs and falls back to the master instance instead of silently emitting zero instances. Implementing the actual year-scope ordinal walk (n-th weekday of the year, walking across all 12 months) is the real fix and a follow-up.
-- **Low** - Sparse YEARLY rules (e.g. leap-day-only) silently truncate before COUNT cap; outer step is yearly with `RRULE_MAX_STEPS=12_000`, so `COUNT=10000` never realized for `BYMONTH=2;BYMONTHDAY=29`.
-
-### `crates/db/src/db/queries_extra/calendars.rs::expand_weekly`
-
-- **Low** - WEEKLY+BYDAY excluding DTSTART silently drops DTSTART. Matches dateutil; deviates from the strict RFC 5545 reading that DTSTART is always in the recurrence set. No comment in code; worth a deliberate decision.
-
-### `crates/db/src/db/queries_extra/calendars.rs::parse_rrule` (1200-1244)
-
-- **Latent** - WKST only consulted in WEEKLY path; YEARLY/MONTHLY ignore it. OK while BYWEEKNO is unsupported; will silently break if BYWEEKNO is added without plumbing WKST through.
-
-### Year-bounds sanity (multiple files)
-
-- **Low** - `chrono::NaiveDate::from_ymd_opt` accepts year 0 / 9999 / negative; `parse_until_date` accepts year 0 (UNTIL becomes a large negative timestamp; rule emits zero instances - bounded but surprising). YEARLY rule with `INTERVAL=10000` blows past chrono max-year, falls back to `start + 730*86400` (loop terminates safely).
 
 ---
 
@@ -82,7 +69,6 @@ All findings addressed. Lenses and targets:
 ### `crates/graph/src/calendar_sync.rs`
 
 - **Medium** - `resolve_graph_tz` falls through to `None` for unknown Windows zone names (`:574`); `parse_graph_datetime` then stores the naive wall clock as UTC (`:538`). The fallback now logs WARN with the offending zone name so an operator can see which payloads it's mis-anchoring; the underlying calcard alias gap is still the real fix. Repro: `2024-06-15T10:00:00` in `Africa/Juba` ("South Sudan Standard Time", not in calcard) becomes 10:00Z instead of 08:00Z (with a log line now).
-- **Low** - Brittle `'.' before 'T'` truncation logic. Sub-minute precision (`T10:00:00.5+02:00`) silently drops the offset; if Graph ever emits sub-minute precision, parsing silently corrupts the offset.
 
 ---
 

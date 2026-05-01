@@ -1308,6 +1308,14 @@ struct Rrule {
     /// Week-start day. `None` means "use the default" - we treat that as
     /// Monday (RFC 5545 § 3.3.10 default), which matches what most weekly
     /// recurrence views expect. Set explicitly via `WKST=SU` etc.
+    ///
+    /// Currently consumed only by `expand_weekly`; YEARLY and MONTHLY
+    /// ignore it. That's correct only as long as BYWEEKNO stays
+    /// unsupported. RFC 5545 § 3.3.10: BYWEEKNO numbers weeks of the year,
+    /// where the first week is the one containing the wkst's first
+    /// occurrence. Adding BYWEEKNO without plumbing wkst into the YEARLY
+    /// expander would silently shift week-1 anchoring by up to 6 days for
+    /// any rule that does not opt into the default WKST=MO.
     wkst: Option<chrono::Weekday>,
     /// RFC 5545 BY-rules we recognize but don't yet implement. Populated by
     /// `parse_rrule` so `expand_recurrence` can short-circuit instead of
@@ -1552,10 +1560,18 @@ fn expand_weekly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     }
 
     let wkst = rule.wkst.unwrap_or(chrono::Weekday::Mon);
-    // Sort weekdays so each week emits in chronological order, anchored to
-    // the week-start day. Without this, a week starting on Sunday would
-    // still emit Mon-first. WEEKLY ignores BYDAY ordinals (RFC 5545 §
-    // 3.3.10) so we only consider the bare weekday.
+    // RFC 5545 § 3.8.5.3 says DTSTART is always part of the recurrence set;
+    // a strict reading therefore requires the WEEKLY+BYDAY shape to emit
+    // DTSTART even when its weekday is not in BYDAY (e.g. a Tuesday DTSTART
+    // with BYDAY=MO,WE). dateutil drops DTSTART in that case and most
+    // operational calendars (Apple Calendar, Google Calendar, Outlook)
+    // match dateutil. The existing implementation matches that behavior
+    // by filtering candidates against `start` below; preserved deliberately
+    // here so the calendar matches what users see in the leading
+    // implementations.
+    // WEEKLY ignores BYDAY ordinals (RFC 5545 § 3.3.10) so we only
+    // consider the bare weekday. Sort by week-start anchored offset so
+    // each week emits in chronological order rather than Mon-first.
     let mut days: Vec<chrono::Weekday> = rule.byday.iter().map(|b| b.day).collect();
     days.sort_by_key(|d| {
         let wd = d.num_days_from_monday() as i64;
@@ -1762,7 +1778,16 @@ fn expand_yearly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     // bounds terminate.
     let interval_years: i32 = i32::try_from(rule.interval).unwrap_or(1).max(1);
     let mut year = start_dt.year();
-    for _ in 0..RRULE_MAX_STEPS {
+    // Sparse YEARLY rules (e.g. `BYMONTH=2;BYMONTHDAY=29`, the leap-day-
+    // only case) emit one instance every four calendar years walked. The
+    // shared 12_000-step bound bottoms out at 3_000 emissions for those,
+    // so a `COUNT=10000` request silently truncates before reaching the
+    // cap. Use a YEARLY-specific upper bound large enough that even the
+    // sparsest realistic rule (every 8 years for an 8-year-cycle holiday)
+    // can still hit RRULE_MAX_COUNT before this fires. Each step here is
+    // O(1) calendar arithmetic so the step bound is cheap to raise.
+    const YEARLY_MAX_STEPS: usize = 80_000;
+    for _ in 0..YEARLY_MAX_STEPS {
         if out.len() >= cap {
             return out;
         }
@@ -1942,6 +1967,17 @@ fn parse_until_date(val: &str) -> Option<i64> {
     let year: i32 = date_part.get(0..4)?.parse().ok()?;
     let month: u32 = date_part.get(4..6)?.parse().ok()?;
     let day: u32 = date_part.get(6..8)?.parse().ok()?;
+    // Reject obviously bogus calendar years. RFC 5545 § 3.3.5 doesn't fix a
+    // range, but iCalendar in practice carries only Gregorian dates and
+    // year 0 / negatives produce a deeply negative UTC instant - the rule
+    // then emits zero instances, which is bounded but a confusing way for
+    // a malformed UNTIL to manifest. 9999 is chrono's outer year for
+    // representable timestamps; values past that round-trip into chrono::
+    // MAX and silently land elsewhere.
+    if !(1..=9999).contains(&year) {
+        log::debug!("RRULE UNTIL year {year} outside 1..=9999; rejecting");
+        return None;
+    }
     let date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
 
     // DATE-only form: exactly 8 chars.

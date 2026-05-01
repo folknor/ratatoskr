@@ -543,18 +543,38 @@ fn parse_graph_datetime(
         return Ok(parsed.timestamp());
     }
 
-    // Graph usually returns "2024-01-15T10:00:00.0000000" - no offset.
-    // Defensively bound the fractional-seconds truncation: only treat a `.`
-    // as a fractional separator if it appears *after* the `T` time mark.
-    // A dot earlier in the string (`2024.01-15T...`) signals malformed input
-    // and we'd rather surface a parse error than truncate it into something
-    // that almost-parses.
+    // Graph usually returns "2024-01-15T10:00:00.0000000" - no offset, just
+    // a microsecond/100ns fraction past the seconds. We strip the fraction
+    // before naive parsing so chrono accepts it. Defensively bound the
+    // fractional-seconds truncation: only treat a `.` as a fractional
+    // separator if it appears *after* the `T` time mark. A dot earlier in
+    // the string (`2024.01-15T...`) signals malformed input and we'd
+    // rather surface a parse error than truncate it into something that
+    // almost-parses. Also preserve any trailing offset / `Z` after the
+    // fraction - if Graph ever emits "...10:00:00.5+02:00", dropping the
+    // tail entirely would silently lose the offset and re-anchor the
+    // wall-clock in the wrong zone.
     let t_pos = dt.date_time.find('T');
-    let clean = match (dt.date_time.find('.'), t_pos) {
-        (Some(dot), Some(t)) if dot > t => &dt.date_time[..dot],
-        _ => dt.date_time.as_str(),
+    let clean: std::borrow::Cow<'_, str> = match (dt.date_time.find('.'), t_pos) {
+        (Some(dot), Some(t)) if dot > t => {
+            let after_dot = &dt.date_time[dot + 1..];
+            let frac_end = after_dot
+                .char_indices()
+                .find(|(_, c)| !c.is_ascii_digit())
+                .map_or(after_dot.len(), |(i, _)| i);
+            let mut combined = String::with_capacity(dt.date_time.len() - frac_end - 1);
+            combined.push_str(&dt.date_time[..dot]);
+            combined.push_str(&after_dot[frac_end..]);
+            std::borrow::Cow::Owned(combined)
+        }
+        _ => std::borrow::Cow::Borrowed(dt.date_time.as_str()),
     };
-    let naive = chrono::NaiveDateTime::parse_from_str(clean, "%Y-%m-%dT%H:%M:%S")
+    // After truncation, `clean` may carry an offset; try RFC 3339 again before
+    // falling back to the naive parse.
+    if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(&clean) {
+        return Ok(parsed.timestamp());
+    }
+    let naive = chrono::NaiveDateTime::parse_from_str(&clean, "%Y-%m-%dT%H:%M:%S")
         .map_err(|e| format!("Invalid Graph {label} dateTime '{}': {e}", dt.date_time))?;
 
     if let Some(tz) = resolve_graph_tz(&dt.time_zone)
