@@ -680,14 +680,26 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
 /// preserved. Explicit non-2xx codes are honored: a `<propstat>` with status
 /// `HTTP/1.1 404 Not Found` no longer leaks its (empty/cached) prop values
 /// into the response-level state.
+///
+/// The status line per RFC 7230 § 3.1.2 is `HTTP/version SP code SP reason`;
+/// the code is exactly three ASCII digits. We parse it strictly here rather
+/// than the looser "second whitespace-separated token starts with '2'" so a
+/// crafted server can't slip e.g. `HTTP/1.1 2xx Custom` past the gate.
+/// Empty stays OK; anything that isn't an explicit 200..=299 falls through.
 fn propstat_status_is_ok(status: &str) -> bool {
     if status.is_empty() {
         return true;
     }
-    status
-        .split_whitespace()
-        .nth(1)
-        .is_some_and(|code| code.starts_with('2'))
+    let Some(code_token) = status.split_whitespace().nth(1) else {
+        return false;
+    };
+    if code_token.len() != 3 || !code_token.bytes().all(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    code_token
+        .parse::<u16>()
+        .ok()
+        .is_some_and(|n| (200..=299).contains(&n))
 }
 
 /// Status-line ok-ness for a top-level `<response><status>` element.

@@ -36,7 +36,7 @@ impl AddAccountWizard {
                 };
                 match self.manual_config.auth_method {
                     ManualAuthMethod::OAuth => {
-                        self.resolved_auth_method = "oauth".to_string();
+                        self.resolved_auth_method = "oauth2".to_string();
                         let task = self.start_reauth_oauth(Some(provider_id), None);
                         (task, None)
                     }
@@ -54,7 +54,7 @@ impl AddAccountWizard {
                 }
                 match self.manual_config.auth_method {
                     ManualAuthMethod::OAuth => {
-                        self.resolved_auth_method = "oauth".to_string();
+                        self.resolved_auth_method = "oauth2".to_string();
                         self.step = AddAccountStep::OAuthWaiting;
                         self.error = Some(
                             "JMAP OAuth is not yet supported for manual configuration. \

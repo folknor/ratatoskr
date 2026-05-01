@@ -628,22 +628,6 @@ CREATE TABLE IF NOT EXISTS calendar_reminders (
 );
 CREATE INDEX IF NOT EXISTS idx_calendar_reminders_event ON calendar_reminders(account_id, event_id);
 
--- CalDAV URI -> ETag map. Drives incremental sync: list_events returns
--- (uri, etag) pairs, we diff against the stored map to decide what to
--- fetch / update / delete. Keyed on (calendar_id, uri); calendar_id
--- cascades from `calendars`, so deleting an account cleans up the map
--- via the chain account -> calendars -> caldav_event_map. event_uid
--- duplicates the iCal UID so per-resource lookups can resolve back to
--- the calendar_events row without re-parsing the iCal payload.
-CREATE TABLE IF NOT EXISTS caldav_event_map (
-    uri TEXT NOT NULL,
-    calendar_id TEXT NOT NULL REFERENCES calendars(id) ON DELETE CASCADE,
-    event_uid TEXT NOT NULL,
-    etag TEXT NOT NULL,
-    PRIMARY KEY (calendar_id, uri)
-);
-CREATE INDEX IF NOT EXISTS idx_caldav_event_map_calendar ON caldav_event_map(calendar_id);
-
 -- ── Tasks ───────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -1136,6 +1120,40 @@ CREATE TABLE IF NOT EXISTS pinned_search_threads (
     account_id TEXT NOT NULL,
     PRIMARY KEY (pinned_search_id, thread_id, account_id)
 );
+"#,
+},
+Migration {
+    version: 102,
+    description: "Add caldav_event_map; canonicalize auth_method on existing rows",
+    sql: r#"
+-- CalDAV URI -> ETag map. Drives incremental sync: list_events returns
+-- (uri, etag) pairs, we diff against the stored map to decide what to
+-- fetch / update / delete. Keyed on (calendar_id, uri); calendar_id
+-- cascades from `calendars`, so deleting an account cleans up the map
+-- via the chain account -> calendars -> caldav_event_map. event_uid
+-- duplicates the iCal UID so per-resource lookups can resolve back to
+-- the calendar_events row without re-parsing the iCal payload.
+--
+-- The four references in `crates/db/src/db/queries_extra/caldav_sync.rs`
+-- predated the migration that should have created this table, so every
+-- CalDAV sync against a fresh DB hit `no such table: caldav_event_map`
+-- on `load_caldav_etags_sync`. Surfaced by the bugs review reviewers.
+CREATE TABLE IF NOT EXISTS caldav_event_map (
+    uri TEXT NOT NULL,
+    calendar_id TEXT NOT NULL REFERENCES calendars(id) ON DELETE CASCADE,
+    event_uid TEXT NOT NULL,
+    etag TEXT NOT NULL,
+    PRIMARY KEY (calendar_id, uri)
+);
+CREATE INDEX IF NOT EXISTS idx_caldav_event_map_calendar ON caldav_event_map(calendar_id);
+
+-- The add-account wizard previously persisted `auth_method = "oauth"` for
+-- OAuth flows, but the IMAP/SMTP/JMAP read sites match `"oauth2"` only.
+-- Existing rows with the old string would fall into password-auth with
+-- an empty password after the wizard write-side switches to `"oauth2"`,
+-- so canonicalize them in place. Idempotent: re-running the migration
+-- on a DB that already has only `"oauth2"` rows is a no-op.
+UPDATE accounts SET auth_method = 'oauth2' WHERE auth_method = 'oauth';
 "#,
 }];
 

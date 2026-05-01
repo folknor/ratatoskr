@@ -216,8 +216,6 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 - [ ] **Mail content stores not encrypted at rest** *(unverified - surfaced by codex security review 2026-05-01)* - `BodyStore` keeps compressed HTML/text bodies in `bodies.db` unencrypted (`crates/stores/src/body_store.rs:117`), inline images are raw SQLite blobs (`crates/stores/src/inline_image_store.rs:96`), and attachment cache files are raw bytes (`crates/stores/src/attachment_cache.rs:52`). Compression is not a security boundary. Either envelope-encrypt with AES-256-GCM, or document explicitly that content at rest relies on OS / full-disk encryption.
 
-- [ ] **IMAP OAuth `auth_method` string mismatch** *(unverified - surfaced by codex security review 2026-05-01)* - Add-account stores OAuth accounts with `auth_method = "oauth"` (`crates/app/src/ui/add_account/state.rs:601`), but IMAP config only recognizes `"oauth2"` (`crates/imap/src/account_config.rs:176`). IMAP OAuth accounts fall back into password-auth handling with an empty password, pushing users toward password / app-password flows while leaving raw OAuth tokens in the DB.
-
 - [ ] **Discovery URL validation is too string-based** *(unverified - surfaced by codex security review 2026-05-01)* - OIDC endpoint validation only checks `starts_with("https://")` (`crates/core/src/discovery/oidc.rs:68`); discovery domain extraction accepts anything after `@` with a dot (`crates/core/src/discovery/mod.rs:155`). Parse with `Url`, reject embedded credentials, validate ports / paths, and reject private / local hosts.
 
 ## Remaining Enhancements (other)

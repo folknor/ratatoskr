@@ -54,8 +54,34 @@ impl CalDavClient {
         // the DAV root; capping at 5 caused first-time discovery to fail on
         // those deployments where the previous (default-config) client
         // succeeded.
+        //
+        // Custom policy (vs the simpler `Policy::limited(10)`) for one
+        // additional invariant: refuse `https -> http` scheme downgrades.
+        // reqwest's default `remove_sensitive_headers` strips `Authorization`
+        // on host or *effective port* mismatch, but not on a same-port
+        // scheme change. A 301 from `https://host:8443/cal` to
+        // `http://host:8443/cal` (real failure mode for hosted Zimbra and
+        // some Exchange front-ends on non-default ports) would otherwise
+        // leak the Basic / Bearer credential in plaintext on the redirected
+        // request. Cross-origin same-scheme redirects stay allowed because
+        // legitimate hosted setups (Fastmail with caldav.fastmail.com,
+        // hosted Exchange + CalDAV bridges) rely on them; reqwest still
+        // strips Authorization on those hops.
         let http = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::limited(10))
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= 10 {
+                    return attempt.error("CalDAV redirect chain exceeded 10 hops");
+                }
+                if let Some(prev) = attempt.previous().last()
+                    && prev.scheme() == "https"
+                    && attempt.url().scheme() == "http"
+                {
+                    return attempt.error(
+                        "CalDAV refusing https -> http scheme downgrade redirect",
+                    );
+                }
+                attempt.follow()
+            }))
             .timeout(crate::constants::DAV_CLIENT_TIMEOUT)
             .build()
             .unwrap_or_else(|err| {

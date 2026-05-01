@@ -339,7 +339,7 @@ impl AddAccountWizard {
         wizard.resolved_provider = auth_info.provider;
         wizard.resolved_auth_method = auth_info.auth_method.clone();
 
-        let task = if auth_info.auth_method == "oauth" {
+        let task = if auth_info.auth_method == "oauth2" {
             wizard.start_reauth_oauth(
                 auth_info.oauth_provider.as_deref(),
                 auth_info.oauth_client_id.as_deref(),
@@ -598,7 +598,7 @@ impl AddAccountWizard {
                 scopes,
                 use_pkce,
             } => {
-                self.resolved_auth_method = "oauth".to_string();
+                self.resolved_auth_method = "oauth2".to_string();
                 self.step = AddAccountStep::OAuthWaiting;
                 self.error = None;
                 let generation = self.generation.next();
