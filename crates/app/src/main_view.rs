@@ -28,7 +28,7 @@ impl App {
                 PopOutWindow::Compose(state) => {
                     pop_out::compose::view_compose_window(window_id, state)
                 }
-                PopOutWindow::Calendar => ui::calendar::calendar_layout(&self.calendar)
+                PopOutWindow::Calendar(_) => ui::calendar::calendar_layout(&self.calendar)
                     .map(|m| Message::Calendar(Box::new(m))),
             };
         }

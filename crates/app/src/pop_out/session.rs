@@ -22,6 +22,11 @@ pub struct SessionState {
     /// the entry only needs to remember which draft to reopen and where.
     #[serde(default)]
     pub compose_windows: Vec<ComposeSessionEntry>,
+
+    /// Calendar pop-out window, if one was open. The calendar's view and
+    /// date persist via the main DB, so the entry only needs geometry.
+    #[serde(default)]
+    pub calendar_window: Option<CalendarSessionEntry>,
 }
 
 /// Minimal data needed to restore a message view window.
@@ -52,6 +57,15 @@ pub struct ComposeSessionEntry {
     pub y: Option<f32>,
 }
 
+/// Geometry needed to restore the calendar pop-out window.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CalendarSessionEntry {
+    pub width: f32,
+    pub height: f32,
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+}
+
 impl SessionState {
     /// Load from disk. Falls back gracefully:
     /// 1. Try `session.json`.
@@ -72,6 +86,7 @@ impl SessionState {
             main_window: window,
             message_views: Vec::new(),
             compose_windows: Vec::new(),
+            calendar_window: None,
         }
     }
 }

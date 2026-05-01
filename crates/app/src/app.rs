@@ -358,7 +358,7 @@ impl App {
                 format!("{subject} \u{2014} {sender}")
             }
             Some(PopOutWindow::Compose(state)) => state.window_title(),
-            Some(PopOutWindow::Calendar) => "Ratatoskr \u{2014} Calendar".to_string(),
+            Some(PopOutWindow::Calendar(_)) => "Ratatoskr \u{2014} Calendar".to_string(),
             None => "Ratatoskr".to_string(),
         }
     }

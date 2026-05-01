@@ -134,7 +134,10 @@ impl App {
                             state.width = size.width;
                             state.height = size.height;
                         }
-                        Some(PopOutWindow::Calendar) => {}
+                        Some(PopOutWindow::Calendar(geom)) => {
+                            geom.width = size.width;
+                            geom.height = size.height;
+                        }
                         None => {}
                     }
                 }
@@ -153,7 +156,11 @@ impl App {
                             state.x = Some(point.x);
                             state.y = Some(point.y);
                         }
-                        Some(PopOutWindow::Calendar) | None => {}
+                        Some(PopOutWindow::Calendar(geom)) => {
+                            geom.x = Some(point.x);
+                            geom.y = Some(point.y);
+                        }
+                        None => {}
                     }
                 }
                 Task::none()

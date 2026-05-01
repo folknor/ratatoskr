@@ -299,7 +299,7 @@ impl App {
         if let Some((&win_id, _)) = self
             .pop_out_windows
             .iter()
-            .find(|(_, w)| matches!(w, crate::pop_out::PopOutWindow::Calendar))
+            .find(|(_, w)| matches!(w, crate::pop_out::PopOutWindow::Calendar(_)))
         {
             return iced::window::gain_focus(win_id);
         }
@@ -313,7 +313,7 @@ impl App {
     pub(crate) fn calendar_pop_out_id(&self) -> Option<iced::window::Id> {
         self.pop_out_windows
             .iter()
-            .find(|(_, w)| matches!(w, PopOutWindow::Calendar))
+            .find(|(_, w)| matches!(w, PopOutWindow::Calendar(_)))
             .map(|(&id, _)| id)
     }
 
@@ -598,7 +598,7 @@ impl App {
                     .as_ref()
                     .is_some_and(|a| a.id == account_id),
                 PopOutWindow::MessageView(state) => state.account_id == account_id,
-                PopOutWindow::Calendar => false,
+                PopOutWindow::Calendar(_) => false,
             })
             .map(|(&id, _)| id)
             .collect();

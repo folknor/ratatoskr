@@ -3,8 +3,10 @@ use std::sync::Arc;
 use iced::{Point, Size, Task};
 
 use crate::pop_out::message_view::MessageViewState;
-use crate::pop_out::session::{ComposeSessionEntry, MessageViewSessionEntry, SessionState};
-use crate::pop_out::PopOutWindow;
+use crate::pop_out::session::{
+    CalendarSessionEntry, ComposeSessionEntry, MessageViewSessionEntry, SessionState,
+};
+use crate::pop_out::{CalendarPopOutGeometry, PopOutWindow};
 use crate::ui::layout::{
     COMPOSE_MIN_HEIGHT, COMPOSE_MIN_WIDTH, MESSAGE_VIEW_MIN_HEIGHT, MESSAGE_VIEW_MIN_WIDTH,
 };
@@ -17,6 +19,7 @@ impl App {
 
         let mut message_views = Vec::new();
         let mut compose_windows = Vec::new();
+        let mut calendar_window = None;
         for window in self.pop_out_windows.values() {
             match window {
                 PopOutWindow::MessageView(state) => {
@@ -39,7 +42,14 @@ impl App {
                         y: state.y,
                     });
                 }
-                PopOutWindow::Calendar => {}
+                PopOutWindow::Calendar(geom) => {
+                    calendar_window = Some(CalendarSessionEntry {
+                        width: geom.width,
+                        height: geom.height,
+                        x: geom.x,
+                        y: geom.y,
+                    });
+                }
             }
         }
 
@@ -47,6 +57,7 @@ impl App {
             main_window: self.window.clone(),
             message_views,
             compose_windows,
+            calendar_window,
         };
 
         let path = data_dir.join("session.json");
@@ -127,6 +138,26 @@ impl App {
 
             tasks.push(open_task.discard());
             tasks.push(load_task);
+        }
+
+        if let Some(entry) = &session.calendar_window {
+            let settings = iced::window::Settings {
+                size: Size::new(entry.width, entry.height),
+                position: position_for(entry.x, entry.y),
+                exit_on_close_request: false,
+                ..Default::default()
+            };
+            let (window_id, open_task) = iced::window::open(settings);
+            self.pop_out_windows.insert(
+                window_id,
+                PopOutWindow::Calendar(CalendarPopOutGeometry {
+                    width: entry.width,
+                    height: entry.height,
+                    x: entry.x,
+                    y: entry.y,
+                }),
+            );
+            tasks.push(open_task.discard());
         }
 
         tasks
