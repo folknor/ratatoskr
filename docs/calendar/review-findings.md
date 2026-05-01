@@ -53,14 +53,7 @@ All findings addressed. Lenses and targets:
 
 ### `crates/db/src/db/queries_extra/calendars.rs::parse_rrule` (1200-1244)
 
-- **Low** (flagged 2x) - `INTERVAL=0` silently clamped to 1 (RFC says >=1; defensible but no signal to caller).
-- **Low** (flagged 2x) - `BYMONTHDAY=32` / `BYMONTH=13` silently dropped, falls back to the default same-day-of-month / same-month-as-start (instead of zero-instance). User typing "32nd of month" gets a working monthly recurrence on the DTSTART day.
 - **Latent** - WKST only consulted in WEEKLY path; YEARLY/MONTHLY ignore it. OK while BYWEEKNO is unsupported; will silently break if BYWEEKNO is added without plumbing WKST through.
-- **Low** (flagged 2x) - COUNT capped at `RRULE_MAX_COUNT=10_000` with no signal to caller.
-
-### `crates/db/src/db/queries_extra/calendars.rs::parse_byday` (1266-1303)
-
-- **Trivial** - Ordinals > 53 (`BYDAY=99MO`) not rejected; `nth_weekday_in_month` returns `None` and the rule iterates 12000 times before bounding out (DoS-resistant by accident).
 
 ### Year-bounds sanity (multiple files)
 

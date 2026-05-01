@@ -1255,21 +1255,33 @@ fn parse_rrule(rrule_str: &str) -> Rrule {
         if let Some(val) = part.strip_prefix("FREQ=") {
             out.freq = val.to_string();
         } else if let Some(val) = part.strip_prefix("INTERVAL=") {
-            out.interval = val.parse().unwrap_or(1).max(1);
+            let raw = val.parse::<i64>().unwrap_or(1);
+            if raw < 1 {
+                log::debug!(
+                    "RRULE INTERVAL={raw} (RFC 5545 requires >=1); clamping to 1"
+                );
+            }
+            out.interval = raw.max(1);
         } else if let Some(val) = part.strip_prefix("COUNT=") {
             // Clamp untrusted COUNT values to a sane upper bound so a remote
             // server cannot trigger pathological allocation. Anything above
             // RRULE_MAX_COUNT lands at the cap; legitimate recurring events
             // never come close.
-            out.count = val
-                .parse::<usize>()
-                .ok()
-                .map(|n| n.min(RRULE_MAX_COUNT));
+            let raw = val.parse::<usize>().ok();
+            if let Some(n) = raw
+                && n > RRULE_MAX_COUNT
+            {
+                log::debug!(
+                    "RRULE COUNT={n} exceeds RRULE_MAX_COUNT={RRULE_MAX_COUNT}; truncating expansion"
+                );
+            }
+            out.count = raw.map(|n| n.min(RRULE_MAX_COUNT));
         } else if let Some(val) = part.strip_prefix("UNTIL=") {
             out.until = parse_until_date(val);
         } else if let Some(val) = part.strip_prefix("BYDAY=") {
             out.byday = val.split(',').filter_map(parse_byday).collect();
         } else if let Some(val) = part.strip_prefix("BYMONTHDAY=") {
+            let raw_count = val.split(',').count();
             out.bymonthday = val
                 .split(',')
                 .filter_map(|s| s.trim().parse::<i32>().ok())
@@ -1278,12 +1290,25 @@ fn parse_rrule(rrule_str: &str) -> Rrule {
                     (1..=31).contains(&mag)
                 })
                 .collect();
+            if out.bymonthday.len() != raw_count {
+                log::debug!(
+                    "RRULE BYMONTHDAY=`{val}` had {} of {raw_count} entries dropped (RFC 5545: magnitude must be 1..=31)",
+                    raw_count - out.bymonthday.len()
+                );
+            }
         } else if let Some(val) = part.strip_prefix("BYMONTH=") {
+            let raw_count = val.split(',').count();
             out.bymonth = val
                 .split(',')
                 .filter_map(|s| s.trim().parse::<u32>().ok())
                 .filter(|m| (1..=12).contains(m))
                 .collect();
+            if out.bymonth.len() != raw_count {
+                log::debug!(
+                    "RRULE BYMONTH=`{val}` had {} of {raw_count} entries dropped (RFC 5545: must be 1..=12)",
+                    raw_count - out.bymonth.len()
+                );
+            }
         } else if let Some(val) = part.strip_prefix("WKST=") {
             out.wkst = parse_weekday_code(val.trim());
         } else {
@@ -1357,11 +1382,17 @@ fn parse_byday(spec: &str) -> Option<ByDay> {
             .ok()?
             .parse::<i32>()
             .ok()?;
-        // RFC 5545 limits BYDAY ordinals to 1..=53 (or -53..=-1). We don't
-        // strictly enforce the upper end - chrono will just return None
-        // when looking up the 99th Monday of a month - but `0` is reserved
-        // and outright invalid.
+        // RFC 5545 § 3.3.10: BYDAY ordinal magnitude is 1..=53 (or
+        // -53..=-1). Out-of-range values produce no instances at expansion
+        // time anyway (no month has 99 Mondays), but the rule then bounds
+        // out via `RRULE_MAX_STEPS=12_000` after a noticeable amount of
+        // wasted work. Reject upfront with a debug log so the operator
+        // can attribute the dropped rule.
         if n == 0 {
+            return None;
+        }
+        if n.unsigned_abs() > 53 {
+            log::debug!("RRULE BYDAY ordinal {n} out of range (RFC 5545: 1..=53); dropping entry");
             return None;
         }
         Some(sign * n)
