@@ -29,6 +29,9 @@ pub struct MessageInsertRow {
     pub is_reaction: bool,
     pub imap_uid: Option<i64>,
     pub imap_folder: Option<String>,
+    pub has_meeting_invite: bool,
+    pub meeting_invite_method: Option<String>,
+    pub meeting_invite_uid: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,10 +57,11 @@ pub fn insert_messages(tx: &Transaction, rows: &[MessageInsertRow]) -> Result<()
               is_read, is_starred, raw_size, internal_date, \
               list_unsubscribe, list_unsubscribe_post, auth_results, \
               message_id_header, references_header, in_reply_to_header, body_cached, \
-              mdn_requested, is_reaction, imap_uid, imap_folder) \
+              mdn_requested, is_reaction, imap_uid, imap_folder, \
+              has_meeting_invite, meeting_invite_method, meeting_invite_uid) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
                      ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, \
-                     ?24, ?25, ?26, ?27)",
+                     ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
             params![
                 row.id,
                 row.account_id,
@@ -86,6 +90,9 @@ pub fn insert_messages(tx: &Transaction, rows: &[MessageInsertRow]) -> Result<()
                 if row.is_reaction { 1i64 } else { 0i64 },
                 row.imap_uid,
                 row.imap_folder,
+                if row.has_meeting_invite { 1i64 } else { 0i64 },
+                row.meeting_invite_method,
+                row.meeting_invite_uid,
             ],
         )
         .map_err(|e| format!("upsert message: {e}"))?;

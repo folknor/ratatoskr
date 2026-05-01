@@ -209,6 +209,18 @@ CREATE TABLE IF NOT EXISTS messages (
     mdn_requested INTEGER NOT NULL DEFAULT 0,
     is_reaction INTEGER NOT NULL DEFAULT 0,
     mdn_sent INTEGER NOT NULL DEFAULT 0,
+    -- Set to 1 when the message includes an iMIP / iCalendar (text/calendar)
+    -- payload. Drives meeting-invite UI affordances (calendar pill on the
+    -- thread card, RSVP buttons in the reading pane). Populated at message-
+    -- insert time from the attachment list.
+    has_meeting_invite INTEGER NOT NULL DEFAULT 0,
+    -- iCalendar METHOD parameter (REQUEST/REPLY/CANCEL/COUNTER). Useful for
+    -- the UI to differentiate fresh invitations from RSVP responses without
+    -- re-parsing the iCal payload.
+    meeting_invite_method TEXT,
+    -- iCalendar UID, used to match this message to a calendar event row
+    -- after CalDAV/Graph/JMAP/Gmail calendar sync stores the event.
+    meeting_invite_uid TEXT,
     PRIMARY KEY (account_id, id),
     FOREIGN KEY (account_id, thread_id) REFERENCES threads(account_id, id) ON DELETE CASCADE
 );
@@ -217,6 +229,8 @@ CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(account_id, date DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(from_address);
 CREATE INDEX IF NOT EXISTS idx_messages_imap_uid ON messages(account_id, imap_folder, imap_uid);
 CREATE INDEX IF NOT EXISTS idx_messages_message_id ON messages(message_id_header);
+CREATE INDEX IF NOT EXISTS idx_messages_invite_uid ON messages(account_id, meeting_invite_uid)
+    WHERE meeting_invite_uid IS NOT NULL;
 
 -- ── Attachments ─────────────────────────────────────────────
 
@@ -552,6 +566,11 @@ CREATE TABLE IF NOT EXISTS calendars (
     sort_order INTEGER NOT NULL DEFAULT 0,
     is_default INTEGER NOT NULL DEFAULT 0,
     provider_id TEXT,
+    -- 1 = the authenticated user has write access to this calendar.
+    -- 0 = read-only (shared/subscribed calendar without edit rights).
+    -- Source: Graph `canEdit`; mapped to 1 for owned Google/JMAP/CalDAV
+    -- calendars until provider sync paths plumb a permission signal.
+    can_edit INTEGER NOT NULL DEFAULT 1,
     UNIQUE(account_id, remote_id)
 );
 CREATE INDEX IF NOT EXISTS idx_calendars_account ON calendars(account_id);

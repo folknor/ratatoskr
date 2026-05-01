@@ -231,6 +231,7 @@ pub struct GraphCalendarInfo {
     pub display_name: String,
     pub color: Option<String>,
     pub is_primary: bool,
+    pub can_edit: bool,
 }
 
 /// Intermediate representation matching `CalendarEventDto` from the calendar crate.
@@ -284,6 +285,9 @@ pub async fn graph_list_calendars(
                 display_name: cal.name,
                 color,
                 is_primary: cal.is_default_calendar.unwrap_or(false),
+                // Graph omits canEdit for owned calendars; treat absence as
+                // editable. Shared/delegated calendars return false explicitly.
+                can_edit: cal.can_edit.unwrap_or(true),
             }
         })
         .collect())
@@ -479,6 +483,13 @@ fn map_graph_event(event: GraphEvent) -> Result<GraphCalendarEvent, String> {
 }
 
 /// Parse a Graph `dateTime` / `timeZone` pair to a Unix timestamp.
+///
+/// Graph returns a fractional-second naive datetime like "2024-01-15T10:00:00.0000000"
+/// alongside a separate `timeZone` field, which may be either an IANA name
+/// ("America/New_York") or a Windows display name ("Pacific Standard Time").
+/// We resolve both via calcard's `Tz::from_str`, which knows the Microsoft
+/// Windows zone mapping in addition to chrono_tz IANA names. Unknown or
+/// floating zones fall back to UTC interpretation.
 fn parse_graph_datetime(
     dt: &GraphDateTimeTimeZone,
     is_all_day: bool,
@@ -490,39 +501,48 @@ fn parse_graph_datetime(
         let date_part = dt.date_time.split('T').next().unwrap_or(&dt.date_time);
         let date = chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d")
             .map_err(|e| format!("Invalid Graph {label} date: {e}"))?;
-        Ok(date
+        return Ok(date
             .and_hms_opt(0, 0, 0)
             .ok_or_else(|| format!("Invalid all-day {label} time"))?
             .and_utc()
-            .timestamp())
-    } else {
-        // Try RFC 3339 first (with timezone offset)
-        if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(&dt.date_time) {
-            return Ok(parsed.timestamp());
-        }
-        // Graph usually returns "2024-01-15T10:00:00.0000000" - no offset.
-        // Parse as NaiveDateTime and apply the time zone.
-        // Truncate fractional seconds for parsing.
-        let clean = if let Some(dot_pos) = dt.date_time.find('.') {
-            &dt.date_time[..dot_pos]
-        } else {
-            &dt.date_time
-        };
-        let naive = chrono::NaiveDateTime::parse_from_str(clean, "%Y-%m-%dT%H:%M:%S")
-            .map_err(|e| format!("Invalid Graph {label} dateTime '{}': {e}", dt.date_time))?;
-
-        // If the time zone is "UTC" or similar, use UTC directly.
-        // For named time zones (e.g. "Pacific Standard Time"), we'd need a
-        // full IANA/Windows zone mapping. For now, treat as UTC - the calendar
-        // crate stores timestamps and the UI shows local time.
-        if dt.time_zone == "UTC" || dt.time_zone.is_empty() {
-            Ok(naive.and_utc().timestamp())
-        } else {
-            // Best-effort: treat as UTC. A full Windows→IANA mapping could be
-            // added later for higher fidelity.
-            Ok(naive.and_utc().timestamp())
-        }
+            .timestamp());
     }
+
+    // Try RFC 3339 first (with timezone offset)
+    if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(&dt.date_time) {
+        return Ok(parsed.timestamp());
+    }
+
+    // Graph usually returns "2024-01-15T10:00:00.0000000" - no offset.
+    // Truncate fractional seconds for parsing.
+    let clean = if let Some(dot_pos) = dt.date_time.find('.') {
+        &dt.date_time[..dot_pos]
+    } else {
+        &dt.date_time
+    };
+    let naive = chrono::NaiveDateTime::parse_from_str(clean, "%Y-%m-%dT%H:%M:%S")
+        .map_err(|e| format!("Invalid Graph {label} dateTime '{}': {e}", dt.date_time))?;
+
+    Ok(resolve_graph_tz(&dt.time_zone)
+        .and_then(|tz| {
+            use chrono::TimeZone;
+            tz.from_local_datetime(&naive)
+                .single()
+                .map(|aware| aware.timestamp())
+        })
+        .unwrap_or_else(|| naive.and_utc().timestamp()))
+}
+
+/// Resolve Graph's `timeZone` string to a `Tz`. Returns `None` for empty,
+/// "UTC", or floating zones - callers should fall back to UTC interpretation.
+fn resolve_graph_tz(name: &str) -> Option<calcard::common::timezone::Tz> {
+    use calcard::common::timezone::Tz;
+    use std::str::FromStr;
+
+    if name.is_empty() || name.eq_ignore_ascii_case("UTC") {
+        return None;
+    }
+    Tz::from_str(name).ok().filter(|tz| !tz.is_floating())
 }
 
 /// Map Graph event status fields to a simple status string.
@@ -570,6 +590,45 @@ mod tests {
         };
         let ts = parse_graph_datetime(&dt, false, "start");
         assert!(ts.is_ok());
+    }
+
+    #[test]
+    fn parse_timed_with_windows_tz_name() {
+        // 10:00 Pacific Standard Time on 2024-01-15 == 18:00 UTC == 1705341600.
+        // Pacific is PST (UTC-8) in January; calcard maps "Pacific Standard
+        // Time" to America/Los_Angeles which respects DST automatically.
+        let dt = GraphDateTimeTimeZone {
+            date_time: "2024-01-15T10:00:00.0000000".to_string(),
+            time_zone: "Pacific Standard Time".to_string(),
+        };
+        let ts = parse_graph_datetime(&dt, false, "start").expect("parses");
+        assert_eq!(ts, 1705341600);
+    }
+
+    #[test]
+    fn parse_timed_with_iana_name() {
+        // 10:00 America/New_York on 2024-03-15 == 14:00 UTC == 1710511200
+        let dt = GraphDateTimeTimeZone {
+            date_time: "2024-03-15T10:00:00.0000000".to_string(),
+            time_zone: "America/New_York".to_string(),
+        };
+        let ts = parse_graph_datetime(&dt, false, "start").expect("parses");
+        assert_eq!(ts, 1710511200);
+    }
+
+    #[test]
+    fn parse_timed_unknown_tz_falls_back_to_utc() {
+        let dt = GraphDateTimeTimeZone {
+            date_time: "2024-06-15T10:30:00.0000000".to_string(),
+            time_zone: "Some Bogus Zone".to_string(),
+        };
+        let ts = parse_graph_datetime(&dt, false, "start").expect("parses");
+        // Falls back to UTC: 10:30 UTC on 2024-06-15.
+        let expected = chrono::NaiveDate::from_ymd_opt(2024, 6, 15)
+            .and_then(|d| d.and_hms_opt(10, 30, 0))
+            .map(|d| d.and_utc().timestamp())
+            .expect("valid date");
+        assert_eq!(ts, expected);
     }
 
     #[test]

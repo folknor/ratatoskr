@@ -137,6 +137,13 @@ impl DbInsertData {
         )
         .map_err(|e| format!("upsert placeholder thread: {e}"))?;
 
+        let invite_idx = self.attachments.iter().position(|att| {
+            common::email_parsing::is_calendar_content_type(&att.mime_type)
+        });
+        let invite_method = invite_idx.and_then(|i| {
+            common::email_parsing::extract_imip_method(&self.attachments[i].mime_type)
+        });
+
         let message = MessageInsertRow {
             id: self.id.clone(),
             account_id: self.account_id.clone(),
@@ -165,6 +172,12 @@ impl DbInsertData {
             is_reaction: false,
             imap_uid: Some(i64::from(self.imap_uid)),
             imap_folder: Some(self.imap_folder.clone()),
+            has_meeting_invite: invite_idx.is_some(),
+            meeting_invite_method: invite_method,
+            // The iCalendar UID lives inside the attachment payload; populating
+            // it requires fetching + parsing the bytes. Deferred until the
+            // body/attachment cache is available at message-insert time.
+            meeting_invite_uid: None,
         };
         insert_messages(tx, &[message])?;
 

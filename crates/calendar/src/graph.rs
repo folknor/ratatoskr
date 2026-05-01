@@ -22,6 +22,7 @@ pub async fn graph_calendar_list_calendars_impl(
             display_name: cal.display_name,
             color: cal.color,
             is_primary: cal.is_primary,
+            can_edit: cal.can_edit,
         })
         .collect())
 }

@@ -265,6 +265,7 @@ impl_from_row!(DbCalendar {
     sort_order,
     is_default,
     provider_id,
+    can_edit,
 });
 
 // ── Calendar Event ──────────────────────────────────────────

@@ -16,6 +16,16 @@ pub struct CalendarInfoDto {
     pub display_name: String,
     pub color: Option<String>,
     pub is_primary: bool,
+    /// Whether the authenticated user can write to this calendar.
+    /// Defaults to `true` for providers that don't expose a permission
+    /// flag (Google personal, JMAP, CalDAV) - we currently only learn
+    /// `false` from Microsoft Graph's `canEdit`.
+    #[serde(default = "default_can_edit")]
+    pub can_edit: bool,
+}
+
+fn default_can_edit() -> bool {
+    true
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

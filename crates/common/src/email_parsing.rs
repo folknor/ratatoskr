@@ -6,6 +6,50 @@ pub fn is_amp_content_type(mime_type: &str) -> bool {
     mime_type.eq_ignore_ascii_case("text/x-amp-html")
 }
 
+/// Returns `true` if the MIME type represents an iMIP / iCalendar attachment.
+///
+/// Recognizes both `text/calendar` (RFC 5545 / RFC 6047) and the legacy
+/// `application/ics` form some clients still emit. Used at message-insert
+/// time to populate `messages.has_meeting_invite`.
+pub fn is_calendar_content_type(mime_type: &str) -> bool {
+    let lower = mime_type.trim().to_ascii_lowercase();
+    lower.starts_with("text/calendar") || lower.starts_with("application/ics")
+}
+
+/// Result of inspecting a list of attachment MIME types for an iMIP payload.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CalendarAttachmentInfo {
+    pub has_invite: bool,
+    /// `Some(...)` only when the MIME type carries a `method=` parameter.
+    pub method_index: Option<usize>,
+}
+
+/// Find the index of the first iMIP attachment in a slice of MIME-type
+/// strings. The MIME type may include parameters (`text/calendar; method=REQUEST`).
+/// Used by provider sync paths that already collect attachment metadata.
+pub fn find_calendar_attachment(mime_types: &[&str]) -> Option<usize> {
+    mime_types.iter().position(|mt| is_calendar_content_type(mt))
+}
+
+/// Extract the `method=` parameter from a `text/calendar` MIME type string.
+/// Returns the canonical uppercased token (e.g. `REQUEST`, `REPLY`, `CANCEL`)
+/// or `None` if the parameter isn't present.
+pub fn extract_imip_method(content_type: &str) -> Option<String> {
+    let lower = content_type.to_ascii_lowercase();
+    let idx = lower.find("method=")?;
+    let after = &content_type[idx + "method=".len()..];
+    let token = after
+        .split(|c: char| c == ';' || c.is_whitespace())
+        .next()?
+        .trim_matches('"')
+        .trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_ascii_uppercase())
+    }
+}
+
 pub fn parse_single_address_header(raw: Option<&str>) -> (Option<String>, Option<String>) {
     let Some(raw) = raw else {
         return (None, None);
@@ -92,6 +136,36 @@ mod tests {
         assert!(!is_amp_content_type("text/html"));
         assert!(!is_amp_content_type("text/plain"));
         assert!(!is_amp_content_type("application/x-amp-html"));
+    }
+
+    #[test]
+    fn detects_calendar_content_type() {
+        use super::is_calendar_content_type;
+        assert!(is_calendar_content_type("text/calendar"));
+        assert!(is_calendar_content_type("Text/Calendar; charset=utf-8"));
+        assert!(is_calendar_content_type("text/calendar; method=REQUEST"));
+        assert!(is_calendar_content_type("application/ics"));
+        assert!(!is_calendar_content_type("text/plain"));
+        assert!(!is_calendar_content_type("application/octet-stream"));
+    }
+
+    #[test]
+    fn extracts_imip_method() {
+        use super::extract_imip_method;
+        assert_eq!(
+            extract_imip_method("text/calendar; method=REQUEST"),
+            Some("REQUEST".to_string())
+        );
+        assert_eq!(
+            extract_imip_method("text/calendar; charset=utf-8; method=reply"),
+            Some("REPLY".to_string())
+        );
+        assert_eq!(
+            extract_imip_method("text/calendar; method=\"CANCEL\""),
+            Some("CANCEL".to_string())
+        );
+        assert_eq!(extract_imip_method("text/calendar"), None);
+        assert_eq!(extract_imip_method("application/octet-stream"), None);
     }
 
     #[test]

@@ -8,18 +8,6 @@ Audit date: 2026-03-30
 
 ### High
 
-1. ~~**New event creation appears broken.**~~ ✅ Fixed - editor now has a `pick_list` calendar selector dropdown populated from `state.calendars`. `EventField::CalendarId` updates the draft. Phase C of contract #11 will enforce blocking save when no calendar is selected.
-
-2. ~~**Calendar visibility toggles are mostly cosmetic.**~~ ✅ Fixed - event-loading query now filters by `is_visible = 1`. Side effect of `EventSaved` reuse on toggle still exists but is cosmetic.
-
-3. ~~**Calendar sync never triggered from the app.**~~ ✅ Fixed - `sync_calendars()` wired to SyncTick alongside email sync, pending ops, and GAL refresh. 60s timeout per account. The sync backend exists (`calendar_sync_account_impl()`, provider-specific sync in Graph/Gmail/CalDAV) but the iced app never calls it. Calendar data only appears if seeded externally. The read path works, the sync path works, but they are not connected.
-
-4. **Graph API timezone handling silently treats everything as UTC.** `parse_graph_datetime()` has "Best-effort: treat as UTC" for all non-UTC timezone names. Microsoft Graph returns Windows timezone names ("Pacific Standard Time") which are silently misinterpreted. Events will be off by hours for non-UTC users.
-
-5. **CalDAV iCalendar parser ignores VTIMEZONE / TZID parameters.** `extract_datetime()` calls `to_timestamp()` with no timezone handling. `DTSTART;TZID=America/New_York:20240315T100000` is treated as UTC.
-
-6. **Two competing CalDAV implementations, neither properly wired.** `crates/core/src/caldav/` has a full client with ctag/etag incremental sync and OAuth2 support. `crates/calendar/src/caldav/` is what actually runs but uses raw reqwest with basic auth only, always does full fetch (never incremental), and returns all events as "created." The core version's features (batched multiget, ctag/etag diffing, OAuth2) are unused.
-
 7. **No runtime reminder/notification system.** Reminders are synced and stored in `calendar_reminders`, displayed in event detail views. But no timer, scheduler, or notification fires reminders at the specified time. The app never alerts users about upcoming events.
 
 ### Medium - Interactions requiring custom iced widgets
@@ -58,7 +46,7 @@ Audit date: 2026-03-30
 
 22. **No "Email organizer" checkbox.** Depends on RSVP actions being wired.
 
-23. **No meeting invite detection.** Requires `text/calendar` MIME part parsing (RFC 5545) in the email rendering pipeline.
+23. **Meeting invite detection: backend done, UI pending.** `messages.has_meeting_invite` and `meeting_invite_method` are now populated at message-insert time across all four providers (Gmail/Graph/JMAP/IMAP) by inspecting the attachment list for `text/calendar` / `application/ics` MIME parts. `meeting_invite_uid` is still `NULL` (requires reading + parsing the iCal payload, which means a follow-up that fetches the attachment bytes during sync). UI affordances - calendar pill on thread cards, RSVP buttons in the reading pane, inline meeting summary - are not wired.
 
 24. **No inline RSVP in reading pane.** Depends on meeting invite detection + RSVP action wiring.
 
@@ -66,9 +54,9 @@ Audit date: 2026-03-30
 
 ### Medium - Other gaps
 
-26. **No shared calendar detection or permission-aware UI.** Graph API fetches `canEdit` but never uses it. No read-only mode for calendars where user lacks edit permission.
+26. **No permission-aware UI.** `canEdit` is now persisted on the `calendars` row (Graph populates it from `canEdit`; Google reads `accessRole`; CalDAV/JMAP default to editable until provider-specific permission probes land). UI gating on action buttons is still pending - actions are dispatched regardless of `can_edit`.
 
-27. **IMAP accounts have no calendar provider path.** `calendar_provider_kind()` handles "caldav", "gmail_api", and "graph" but not "imap". Many IMAP servers co-host CalDAV. No auto-discovery or UI to associate CalDAV with IMAP accounts.
+27. **IMAP accounts: no auto-discovery for co-hosted CalDAV.** Routing now treats any account with `calendar_provider = "caldav"` and a non-empty `caldav_url` as a CalDAV calendar account, regardless of mail provider. Auto-discovery (probing `/.well-known/caldav` on the mail server's domain) and the settings UI to associate CalDAV with an IMAP account are still missing.
 
 28. **Attendees not pre-filled from email participants.** "Create event from email" sets title and description but not attendees, despite a code comment saying "Pre-fill attendees from To/Cc addresses."
 
@@ -88,10 +76,8 @@ Audit date: 2026-03-30
 
 35. **ISO week number click does not switch to week view.** Only selects that row's first date. Spec says it should navigate to week view.
 
-36. ~~**`SELECT *` still exists in calendar code.**~~ ✅ Fixed - replaced with explicit 15-column list.
-
 37. **Unsaved-change detection incomplete.** Only checks title, description, location. Changes to time, all-day, timezone, recurrence, availability, visibility, or calendar assignment discarded without prompt.
 
-38. **Recurrence expansion only handles basic RRULE subset.** FREQ, INTERVAL, COUNT, UNTIL supported. Richer semantics (BYDAY, BYMONTH, EXDATE, etc.) not handled.
+38. **Recurrence expansion still incomplete.** FREQ, INTERVAL, COUNT, UNTIL, BYDAY (DAILY/WEEKLY), BYMONTHDAY, BYMONTH supported. Still missing: EXDATE (exception list - lives on a separate iCal property, not the RRULE string), BYSETPOS, BYWEEKNO, ordinal BYDAY (e.g. "the 3rd Wednesday" via `BYDAY=3WE`), WKST, RDATE.
 
 39. **Month-view "+X more" just selects the date.** Does not open a day-event popover/list as the spec describes.

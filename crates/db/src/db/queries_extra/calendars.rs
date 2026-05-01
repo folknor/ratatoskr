@@ -9,7 +9,7 @@ use rusqlite::params;
 const CALENDAR_COLS: &str = "\
     id, account_id, provider, remote_id, display_name, color, is_primary, \
     is_visible, sync_token, ctag, created_at, updated_at, sort_order, \
-    is_default, provider_id";
+    is_default, provider_id, can_edit";
 
 /// Explicit column list for `calendar_events` table queries.
 const EVENT_COLS: &str = "\
@@ -27,6 +27,7 @@ const ATTENDEE_COLS: &str = "\
 const REMINDER_COLS: &str = "\
     id, event_id, account_id, minutes_before, method";
 
+#[allow(clippy::too_many_arguments)]
 pub async fn db_upsert_calendar(
     db: &DbState,
     account_id: String,
@@ -35,15 +36,16 @@ pub async fn db_upsert_calendar(
     display_name: Option<String>,
     color: Option<String>,
     is_primary: bool,
+    can_edit: bool,
 ) -> Result<String, String> {
     db.with_conn(move |conn| {
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT INTO calendars (id, account_id, provider, remote_id, display_name, color, is_primary)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "INSERT INTO calendars (id, account_id, provider, remote_id, display_name, color, is_primary, can_edit)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT(account_id, remote_id) DO UPDATE SET
-                   display_name = ?5, color = ?6, is_primary = ?7, updated_at = unixepoch()",
-            params![id, account_id, provider, remote_id, display_name, color, is_primary as i64],
+                   display_name = ?5, color = ?6, is_primary = ?7, can_edit = ?8, updated_at = unixepoch()",
+            params![id, account_id, provider, remote_id, display_name, color, is_primary as i64, can_edit as i64],
         )
         .map_err(|e| e.to_string())?;
         let actual_id: String = conn
@@ -206,6 +208,7 @@ pub struct CalendarReminderWriteRow {
     pub method: Option<String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn upsert_calendar_sync(
     conn: &rusqlite::Connection,
     account_id: &str,
@@ -214,14 +217,15 @@ pub fn upsert_calendar_sync(
     display_name: Option<&str>,
     color: Option<&str>,
     is_primary: bool,
+    can_edit: bool,
 ) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO calendars (id, account_id, provider, remote_id, display_name, color, is_primary)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "INSERT INTO calendars (id, account_id, provider, remote_id, display_name, color, is_primary, can_edit)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(account_id, remote_id) DO UPDATE SET
-               display_name = ?5, color = ?6, is_primary = ?7, updated_at = unixepoch()",
-        params![id, account_id, provider, remote_id, display_name, color, is_primary as i64],
+               display_name = ?5, color = ?6, is_primary = ?7, can_edit = ?8, updated_at = unixepoch()",
+        params![id, account_id, provider, remote_id, display_name, color, is_primary as i64, can_edit as i64],
     )
     .map_err(|e| e.to_string())?;
 
@@ -1047,66 +1051,313 @@ pub fn load_calendar_events_for_view_sync(
 
 /// Expand a recurring event into concrete instances based on its RRULE.
 ///
-/// Supports DAILY, WEEKLY, MONTHLY, YEARLY frequencies with INTERVAL
-/// and COUNT/UNTIL. Generates instances for a ~2 year window from the
-/// event's original start time.
+/// Supports a useful subset of RFC 5545 RRULE:
+/// - FREQ: DAILY, WEEKLY, MONTHLY, YEARLY
+/// - INTERVAL, COUNT, UNTIL
+/// - BYDAY (e.g. `BYDAY=MO,WE,FR` on FREQ=WEEKLY/DAILY)
+/// - BYMONTHDAY (FREQ=MONTHLY, picks specific day-of-month)
+/// - BYMONTH (FREQ=YEARLY, picks specific month)
+///
+/// Generates instances within a ~2 year window from the event's original
+/// start time. EXDATE handling is not yet wired (EXDATE is stored on a
+/// separate iCal property, not part of the RRULE string).
 fn expand_recurrence(event: &CalendarViewEvent, rrule_str: &str) -> Vec<CalendarViewEvent> {
-    let rule = rrule_str.strip_prefix("RRULE:").unwrap_or(rrule_str);
-
-    let mut freq = "";
-    let mut interval: i64 = 1;
-    let mut count: Option<usize> = None;
-    let mut until: Option<i64> = None;
-
-    for part in rule.split(';') {
-        if let Some(val) = part.strip_prefix("FREQ=") {
-            freq = val;
-        } else if let Some(val) = part.strip_prefix("INTERVAL=") {
-            interval = val.parse().unwrap_or(1).max(1);
-        } else if let Some(val) = part.strip_prefix("COUNT=") {
-            count = val.parse().ok();
-        } else if let Some(val) = part.strip_prefix("UNTIL=") {
-            // Basic UNTIL parsing: YYYYMMDD or YYYYMMDDTHHMMSSZ
-            until = parse_until_date(val);
-        }
-    }
+    let rule = parse_rrule(rrule_str);
+    let Some(freq) = Freq::parse(&rule.freq) else {
+        return vec![event.clone()];
+    };
 
     let duration = event.end_time - event.start_time;
-    let max_instances = count.unwrap_or(365); // Cap at 365 instances if no COUNT.
-    let window_end = until.unwrap_or(event.start_time + 2 * 365 * 86400);
+    let max_instances = rule.count.unwrap_or(365).max(1);
+    let window_end = rule
+        .until
+        .unwrap_or(event.start_time + 2 * 365 * 86400);
 
-    let mut instances = vec![event.clone()]; // Include original.
-    let mut current_start = event.start_time;
-    let mut generated = 1usize;
+    let mut instances = Vec::with_capacity(max_instances);
 
-    loop {
-        if generated >= max_instances {
+    let candidate_starts = match freq {
+        Freq::Daily => expand_daily(event.start_time, &rule),
+        Freq::Weekly => expand_weekly(event.start_time, &rule),
+        Freq::Monthly => expand_monthly(event.start_time, &rule),
+        Freq::Yearly => expand_yearly(event.start_time, &rule),
+    };
+
+    for (idx, start) in candidate_starts.into_iter().enumerate() {
+        if start > window_end {
             break;
         }
-
-        let next_start = match freq {
-            "DAILY" => current_start + interval * 86400,
-            "WEEKLY" => current_start + interval * 7 * 86400,
-            "MONTHLY" => advance_months(current_start, interval),
-            "YEARLY" => advance_months(current_start, interval * 12),
-            _ => break, // Unknown frequency - don't expand.
-        };
-
-        if next_start > window_end {
+        if instances.len() >= max_instances {
             break;
         }
-
         let mut instance = event.clone();
-        instance.id = format!("{}__recur_{generated}", event.id);
-        instance.start_time = next_start;
-        instance.end_time = next_start + duration;
+        if idx > 0 {
+            instance.id = format!("{}__recur_{idx}", event.id);
+        }
+        instance.start_time = start;
+        instance.end_time = start + duration;
         instances.push(instance);
-
-        current_start = next_start;
-        generated += 1;
     }
 
+    if instances.is_empty() {
+        instances.push(event.clone());
+    }
     instances
+}
+
+/// Parsed pieces of an RRULE string. Unknown parts are ignored silently.
+#[derive(Debug, Default)]
+struct Rrule {
+    freq: String,
+    interval: i64,
+    count: Option<usize>,
+    until: Option<i64>,
+    byday: Vec<chrono::Weekday>,
+    bymonthday: Vec<i32>,
+    bymonth: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Freq {
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
+}
+
+impl Freq {
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "DAILY" => Some(Self::Daily),
+            "WEEKLY" => Some(Self::Weekly),
+            "MONTHLY" => Some(Self::Monthly),
+            "YEARLY" => Some(Self::Yearly),
+            _ => None,
+        }
+    }
+}
+
+fn parse_rrule(rrule_str: &str) -> Rrule {
+    let body = rrule_str.strip_prefix("RRULE:").unwrap_or(rrule_str);
+    let mut out = Rrule {
+        interval: 1,
+        ..Rrule::default()
+    };
+    for part in body.split(';') {
+        if let Some(val) = part.strip_prefix("FREQ=") {
+            out.freq = val.to_string();
+        } else if let Some(val) = part.strip_prefix("INTERVAL=") {
+            out.interval = val.parse().unwrap_or(1).max(1);
+        } else if let Some(val) = part.strip_prefix("COUNT=") {
+            out.count = val.parse().ok();
+        } else if let Some(val) = part.strip_prefix("UNTIL=") {
+            out.until = parse_until_date(val);
+        } else if let Some(val) = part.strip_prefix("BYDAY=") {
+            out.byday = val.split(',').filter_map(parse_weekday).collect();
+        } else if let Some(val) = part.strip_prefix("BYMONTHDAY=") {
+            out.bymonthday = val
+                .split(',')
+                .filter_map(|s| s.trim().parse::<i32>().ok())
+                .filter(|d| {
+                    let mag = d.unsigned_abs();
+                    (1..=31).contains(&mag)
+                })
+                .collect();
+        } else if let Some(val) = part.strip_prefix("BYMONTH=") {
+            out.bymonth = val
+                .split(',')
+                .filter_map(|s| s.trim().parse::<u32>().ok())
+                .filter(|m| (1..=12).contains(m))
+                .collect();
+        }
+    }
+    out
+}
+
+/// Parse an iCal weekday code, ignoring any leading +/-N ordinal prefix
+/// (BYDAY supports things like "1MO" or "-1FR" which we treat as plain MO/FR).
+fn parse_weekday(spec: &str) -> Option<chrono::Weekday> {
+    let trimmed = spec.trim();
+    let code = trimmed
+        .trim_start_matches(|c: char| c == '-' || c == '+' || c.is_ascii_digit());
+    match code {
+        "MO" => Some(chrono::Weekday::Mon),
+        "TU" => Some(chrono::Weekday::Tue),
+        "WE" => Some(chrono::Weekday::Wed),
+        "TH" => Some(chrono::Weekday::Thu),
+        "FR" => Some(chrono::Weekday::Fri),
+        "SA" => Some(chrono::Weekday::Sat),
+        "SU" => Some(chrono::Weekday::Sun),
+        _ => None,
+    }
+}
+
+fn expand_daily(start: i64, rule: &Rrule) -> Vec<i64> {
+    let cap = rule.count.unwrap_or(366);
+    let mut out = Vec::with_capacity(cap);
+    let mut current = start;
+    while out.len() < cap {
+        if rule.byday.is_empty() || matches_weekday(current, &rule.byday) {
+            out.push(current);
+        }
+        current += rule.interval * 86400;
+    }
+    out
+}
+
+fn expand_weekly(start: i64, rule: &Rrule) -> Vec<i64> {
+    let cap = rule.count.unwrap_or(366);
+    let mut out = Vec::with_capacity(cap);
+    let week = 7 * 86400;
+    let interval_secs = rule.interval * week;
+
+    if rule.byday.is_empty() {
+        // Plain weekly recurrence on the same weekday as the start.
+        let mut current = start;
+        while out.len() < cap {
+            out.push(current);
+            current += interval_secs;
+        }
+        return out;
+    }
+
+    // Sort weekdays so each week emits in chronological order.
+    let mut days = rule.byday.clone();
+    days.sort_by_key(chrono::Weekday::num_days_from_monday);
+
+    let week_start = start_of_week(start);
+    let mut week_anchor = week_start;
+    while out.len() < cap {
+        for &wd in &days {
+            let candidate = shift_to_weekday(week_anchor, wd, start);
+            if candidate < start {
+                continue;
+            }
+            out.push(candidate);
+            if out.len() >= cap {
+                break;
+            }
+        }
+        week_anchor += interval_secs;
+    }
+    out
+}
+
+fn expand_monthly(start: i64, rule: &Rrule) -> Vec<i64> {
+    let cap = rule.count.unwrap_or(120);
+    let mut out = Vec::with_capacity(cap);
+    let mut current = start;
+    while out.len() < cap {
+        if rule.bymonthday.is_empty() {
+            out.push(current);
+        } else {
+            for &day in &rule.bymonthday {
+                if let Some(ts) = set_day_of_month(current, day) {
+                    if ts >= start {
+                        out.push(ts);
+                    }
+                    if out.len() >= cap {
+                        return out;
+                    }
+                }
+            }
+        }
+        current = advance_months(current, rule.interval);
+    }
+    out
+}
+
+fn expand_yearly(start: i64, rule: &Rrule) -> Vec<i64> {
+    let cap = rule.count.unwrap_or(60);
+    let mut out = Vec::with_capacity(cap);
+    let mut current = start;
+    while out.len() < cap {
+        if rule.bymonth.is_empty() {
+            out.push(current);
+        } else {
+            for &month in &rule.bymonth {
+                if let Some(ts) = set_month(current, month) {
+                    if ts >= start {
+                        out.push(ts);
+                    }
+                    if out.len() >= cap {
+                        return out;
+                    }
+                }
+            }
+        }
+        current = advance_months(current, rule.interval * 12);
+    }
+    out
+}
+
+fn matches_weekday(timestamp: i64, days: &[chrono::Weekday]) -> bool {
+    use chrono::TimeZone;
+    let Some(dt) = chrono::Local.timestamp_opt(timestamp, 0).single() else {
+        return false;
+    };
+    let wd = dt.naive_local().date().weekday();
+    days.contains(&wd)
+}
+
+fn start_of_week(timestamp: i64) -> i64 {
+    use chrono::TimeZone;
+    let Some(dt) = chrono::Local.timestamp_opt(timestamp, 0).single() else {
+        return timestamp;
+    };
+    let weekday = dt.naive_local().date().weekday();
+    let days_back = weekday.num_days_from_monday() as i64;
+    timestamp - days_back * 86400
+}
+
+fn shift_to_weekday(week_anchor: i64, target: chrono::Weekday, time_source: i64) -> i64 {
+    use chrono::TimeZone;
+    let target_offset = target.num_days_from_monday() as i64;
+    let candidate_date = week_anchor + target_offset * 86400;
+    let Some(time_dt) = chrono::Local.timestamp_opt(time_source, 0).single() else {
+        return candidate_date;
+    };
+    let Some(date_dt) = chrono::Local.timestamp_opt(candidate_date, 0).single() else {
+        return candidate_date;
+    };
+    let new_naive = date_dt.naive_local().date().and_time(time_dt.time());
+    chrono::Local
+        .from_local_datetime(&new_naive)
+        .single()
+        .map_or(candidate_date, |dt| dt.timestamp())
+}
+
+fn set_day_of_month(timestamp: i64, day: i32) -> Option<i64> {
+    use chrono::TimeZone;
+    let dt = chrono::Local.timestamp_opt(timestamp, 0).single()?;
+    let naive = dt.naive_local();
+    let dim = days_in_month(naive.year(), naive.month());
+    #[allow(clippy::cast_possible_wrap)]
+    let dim_i = dim as i32;
+    let resolved_day = if day < 0 { dim_i + day + 1 } else { day };
+    if resolved_day < 1 || resolved_day > dim_i {
+        return None;
+    }
+    #[allow(clippy::cast_sign_loss)]
+    let new_date =
+        chrono::NaiveDate::from_ymd_opt(naive.year(), naive.month(), resolved_day as u32)?;
+    let new_naive = new_date.and_time(naive.time());
+    chrono::Local
+        .from_local_datetime(&new_naive)
+        .single()
+        .map(|d| d.timestamp())
+}
+
+fn set_month(timestamp: i64, month: u32) -> Option<i64> {
+    use chrono::TimeZone;
+    let dt = chrono::Local.timestamp_opt(timestamp, 0).single()?;
+    let naive = dt.naive_local();
+    let new_day = naive.day().min(days_in_month(naive.year(), month));
+    let new_date = chrono::NaiveDate::from_ymd_opt(naive.year(), month, new_day)?;
+    let new_naive = new_date.and_time(naive.time());
+    chrono::Local
+        .from_local_datetime(&new_naive)
+        .single()
+        .map(|d| d.timestamp())
 }
 
 /// Advance a Unix timestamp by N months.
@@ -1175,4 +1426,133 @@ pub async fn db_get_all_visible_calendars(db: &DbState) -> Result<Vec<DbCalendar
             .map_err(|e| e.to_string())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{TimeZone, Timelike};
+
+    fn local_ts(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> i64 {
+        let date = chrono::NaiveDate::from_ymd_opt(year, month, day)
+            .expect("valid date")
+            .and_hms_opt(hour, minute, 0)
+            .expect("valid time");
+        chrono::Local
+            .from_local_datetime(&date)
+            .single()
+            .expect("unambiguous")
+            .timestamp()
+    }
+
+    fn make_event(start: i64, duration: i64) -> CalendarViewEvent {
+        CalendarViewEvent {
+            id: "evt".to_string(),
+            title: String::new(),
+            start_time: start,
+            end_time: start + duration,
+            all_day: false,
+            color: String::new(),
+            calendar_name: None,
+            location: None,
+            recurrence_rule: None,
+            calendar_id: None,
+            account_id: String::new(),
+            organizer_name: None,
+            organizer_email: None,
+            rsvp_status: None,
+            description: None,
+            availability: None,
+            visibility: None,
+            timezone: None,
+        }
+    }
+
+    fn weekday_of(ts: i64) -> chrono::Weekday {
+        chrono::Local
+            .timestamp_opt(ts, 0)
+            .single()
+            .expect("local")
+            .naive_local()
+            .date()
+            .weekday()
+    }
+
+    #[test]
+    fn weekly_byday_emits_each_listed_day() {
+        // 2026-03-09 is a Monday. RRULE picks Monday/Wednesday/Friday for 6 weeks.
+        let start = local_ts(2026, 3, 9, 9, 0);
+        let event = make_event(start, 3600);
+        let instances = expand_recurrence(&event, "FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=6");
+        assert_eq!(instances.len(), 6);
+        let weekdays: Vec<_> = instances
+            .iter()
+            .map(|e| weekday_of(e.start_time))
+            .collect();
+        assert_eq!(
+            weekdays,
+            vec![
+                chrono::Weekday::Mon,
+                chrono::Weekday::Wed,
+                chrono::Weekday::Fri,
+                chrono::Weekday::Mon,
+                chrono::Weekday::Wed,
+                chrono::Weekday::Fri,
+            ]
+        );
+    }
+
+    #[test]
+    fn weekly_byday_preserves_time_of_day() {
+        // 2026-03-09 09:30 Mon. BYDAY=MO,WE - time-of-day must stay 09:30 on
+        // every emitted instance, even when the day shifts.
+        let start = local_ts(2026, 3, 9, 9, 30);
+        let event = make_event(start, 1800);
+        let instances = expand_recurrence(&event, "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4");
+        for inst in &instances {
+            let dt = chrono::Local
+                .timestamp_opt(inst.start_time, 0)
+                .single()
+                .expect("local");
+            assert_eq!(dt.naive_local().time().hour(), 9);
+            assert_eq!(dt.naive_local().time().minute(), 30);
+        }
+    }
+
+    #[test]
+    fn monthly_bymonthday_picks_specific_day() {
+        // FREQ=MONTHLY;BYMONTHDAY=15 starting on 2026-01-10 emits the 15th of
+        // Jan, Feb, Mar, ... not the 10th.
+        let start = local_ts(2026, 1, 10, 12, 0);
+        let event = make_event(start, 3600);
+        let instances = expand_recurrence(&event, "FREQ=MONTHLY;BYMONTHDAY=15;COUNT=3");
+        assert_eq!(instances.len(), 3);
+        for inst in &instances {
+            let dt = chrono::Local
+                .timestamp_opt(inst.start_time, 0)
+                .single()
+                .expect("local");
+            assert_eq!(dt.naive_local().date().day(), 15);
+        }
+    }
+
+    #[test]
+    fn yearly_with_until_clamps_window() {
+        // Annual on 2026-06-01, UNTIL 2028-06-01 -> 3 instances.
+        let start = local_ts(2026, 6, 1, 9, 0);
+        let event = make_event(start, 3600);
+        let instances =
+            expand_recurrence(&event, "FREQ=YEARLY;UNTIL=20280701T000000Z");
+        assert_eq!(instances.len(), 3);
+        assert_eq!(weekday_of(instances[0].start_time), weekday_of(start));
+    }
+
+    #[test]
+    fn unknown_freq_returns_single_instance() {
+        let start = local_ts(2026, 1, 1, 9, 0);
+        let event = make_event(start, 1800);
+        let instances = expand_recurrence(&event, "FREQ=BOGUS");
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].start_time, start);
+    }
 }

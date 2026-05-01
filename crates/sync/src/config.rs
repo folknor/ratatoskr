@@ -42,6 +42,14 @@ pub fn calendar_provider_kind(account: &SyncAccount) -> Option<&'static str> {
         return Some("google_api");
     }
 
+    if account.provider == "graph" {
+        return Some("graph");
+    }
+
+    // IMAP, JMAP, and any other mail provider can co-host CalDAV calendar:
+    // the per-account override `calendar_provider = "caldav"` plus a
+    // configured `caldav_url` is enough to enable CalDAV sync regardless of
+    // the underlying mail protocol.
     if account.calendar_provider.as_deref() == Some("caldav")
         && account
             .caldav_url

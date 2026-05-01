@@ -27,6 +27,10 @@ pub async fn sync_calendar_list(
 
     let mut result = Vec::with_capacity(entries.len());
     for entry in &entries {
+        let can_edit = entry
+            .access_role
+            .as_deref()
+            .is_none_or(|role| matches!(role, "owner" | "writer"));
         let local_id = storage::upsert_calendar(
             db,
             account_id,
@@ -34,6 +38,7 @@ pub async fn sync_calendar_list(
             entry.summary.as_deref(),
             entry.background_color.as_deref(),
             entry.primary.unwrap_or(false),
+            can_edit,
         )
         .await?;
 

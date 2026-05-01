@@ -17,6 +17,7 @@ use super::types::GoogleCalendarEvent;
 // ── Calendar CRUD ──────────────────────────────────────────
 
 /// Upsert a calendar entry. Returns the local UUID for the calendar.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn upsert_calendar(
     db: &DbState,
     account_id: &str,
@@ -24,13 +25,26 @@ pub(super) async fn upsert_calendar(
     display_name: Option<&str>,
     color: Option<&str>,
     is_primary: bool,
+    can_edit: bool,
 ) -> Result<String, String> {
     let aid = account_id.to_string();
     let rid = remote_id.to_string();
     let dname = display_name.map(String::from);
     let col = color.map(String::from);
 
-    db.with_conn(move |conn| upsert_calendar_sync(conn, &aid, "google", &rid, dname.as_deref(), col.as_deref(), is_primary)).await
+    db.with_conn(move |conn| {
+        upsert_calendar_sync(
+            conn,
+            &aid,
+            "google",
+            &rid,
+            dname.as_deref(),
+            col.as_deref(),
+            is_primary,
+            can_edit,
+        )
+    })
+    .await
 }
 
 /// Load the sync token for a calendar.

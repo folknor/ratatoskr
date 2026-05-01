@@ -8,7 +8,6 @@ pub mod graph;
 pub mod sync;
 pub mod types;
 
-pub(crate) const CALDAV_NS: &str = "urn:ietf:params:xml:ns:caldav";
 pub(crate) const GOOGLE_CALENDAR_API_BASE: &str = "https://www.googleapis.com/calendar/v3";
 pub(crate) const GOOGLE_CALENDAR_RETRY_CONFIG: RetryConfig = RetryConfig {
     max_attempts: 3,

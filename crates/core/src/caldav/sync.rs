@@ -50,7 +50,9 @@ pub async fn sync_caldav_calendars(
     let mut skipped_unchanged = 0;
 
     for cal in &discovered {
-        // Upsert the calendar record
+        // Upsert the calendar record. CalDAV doesn't return a per-calendar
+        // edit-rights flag - we treat discovered calendars as editable until
+        // PROPFIND on `<D:current-user-privilege-set>` is wired in.
         let calendar_id = db_upsert_calendar(
             db,
             account_id.to_string(),
@@ -59,6 +61,7 @@ pub async fn sync_caldav_calendars(
             cal.display_name.clone(),
             cal.color.clone(),
             false, // is_primary - CalDAV doesn't specify a "primary" calendar
+            true,  // can_edit
         )
         .await?;
 

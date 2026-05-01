@@ -143,6 +143,12 @@ fn upsert_messages(
         .iter()
         .map(|msg| {
             let b = &msg.base;
+            let invite_idx = msg.attachments.iter().position(|att| {
+                common::email_parsing::is_calendar_content_type(&att.mime_type)
+            });
+            let invite_method = invite_idx.and_then(|i| {
+                common::email_parsing::extract_imip_method(&msg.attachments[i].mime_type)
+            });
             MessageInsertRow {
                 id: b.id.clone(),
                 account_id: account_id.to_string(),
@@ -171,6 +177,9 @@ fn upsert_messages(
                 is_reaction: msg.is_reaction,
                 imap_uid: None,
                 imap_folder: None,
+                has_meeting_invite: invite_idx.is_some(),
+                meeting_invite_method: invite_method,
+                meeting_invite_uid: None,
             }
         })
         .collect();

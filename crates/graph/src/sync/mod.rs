@@ -494,15 +494,22 @@ async fn upsert_graph_calendars(
     calendars: &[super::calendar_sync::GraphCalendarInfo],
 ) -> Result<(), String> {
     let aid = account_id.to_string();
-    let data: Vec<(String, Option<String>, bool)> = calendars
+    let data: Vec<(String, Option<String>, bool, bool)> = calendars
         .iter()
-        .map(|c| (c.remote_id.clone(), c.color.clone(), c.is_primary))
+        .map(|c| {
+            (
+                c.remote_id.clone(),
+                c.color.clone(),
+                c.is_primary,
+                c.can_edit,
+            )
+        })
         .collect();
     let names: Vec<String> = calendars.iter().map(|c| c.display_name.clone()).collect();
 
     db.with_conn(move |conn| {
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-        for (i, (remote_id, color, is_primary)) in data.iter().enumerate() {
+        for (i, (remote_id, color, is_primary, can_edit)) in data.iter().enumerate() {
             upsert_calendar_sync(
                 &tx,
                 &aid,
@@ -511,6 +518,7 @@ async fn upsert_graph_calendars(
                 Some(names[i].as_str()),
                 color.as_deref(),
                 *is_primary,
+                *can_edit,
             )?;
         }
         tx.commit().map_err(|e| e.to_string())?;

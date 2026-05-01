@@ -1002,7 +1002,20 @@ async fn upsert_calendar(
     let col = color.map(String::from);
 
     db.with_conn(move |conn| {
-        upsert_calendar_sync(conn, &aid, "jmap", &rid, dname.as_deref(), col.as_deref(), is_primary)
+        // JMAP calendars discovered via Calendar/get are owned by the
+        // authenticated user; sharing/permissions land via JMAP Sharing
+        // (already wired for mailboxes) and would override this in a future
+        // pass.
+        upsert_calendar_sync(
+            conn,
+            &aid,
+            "jmap",
+            &rid,
+            dname.as_deref(),
+            col.as_deref(),
+            is_primary,
+            true,
+        )
     })
     .await
 }

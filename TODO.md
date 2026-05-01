@@ -97,7 +97,7 @@ Backend pipeline exists (parser, SQL builder, Tantivy, unified router). **29 dis
 
 ### Calendar - `docs/calendar/problem-statement.md`
 
-Views, editor, pop-out, sidebar all partially implemented. **39 discrepancies remain** - see `docs/calendar/discrepancies.md`. Critical: new event creation broken (no calendar selector), calendar sync never triggered from app, timezone handling treats everything as UTC, two competing CalDAV implementations. Also drag interactions, RSVP actions, reminder system, meeting invite detection.
+Views, editor, pop-out, sidebar all partially implemented. See `docs/calendar/discrepancies.md` for the live list. Backend now covers TZID/VTIMEZONE resolution (CalDAV) and Windows timezone names (Graph), CalDAV is consolidated on `rtsk::caldav` (calcard parser, ctag/etag incremental sync), `canEdit` flows from Graph/Google access roles to a `calendars.can_edit` column, and meeting-invite detection populates `messages.has_meeting_invite` / `meeting_invite_method` at insert time. RRULE expansion now handles BYDAY/BYMONTHDAY/BYMONTH on top of the FREQ/INTERVAL/COUNT/UNTIL baseline. Still open: drag interactions, RSVP actions, runtime reminder timer, meeting-invite UI affordances, permission gating on action buttons.
 
 **Calendar UI issues (observed 2026-04-04):**
 

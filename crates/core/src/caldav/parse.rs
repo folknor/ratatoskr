@@ -1,6 +1,7 @@
 use calcard::Parser;
 use calcard::icalendar::{
     ICalendarComponentType, ICalendarParameterName, ICalendarProperty, ICalendarValue,
+    timezone::TzResolver,
 };
 
 /// Parsed event data extracted from an iCalendar VEVENT.
@@ -68,9 +69,10 @@ pub fn parse_icalendar(ical_data: &str) -> Result<Vec<ParsedVEvent>, String> {
         let entry = parser.entry();
         match entry {
             calcard::Entry::ICalendar(ical) => {
+                let resolver = ical.build_tz_resolver();
                 for component in &ical.components {
                     if component.component_type == ICalendarComponentType::VEvent {
-                        events.push(extract_vevent(component, &ical));
+                        events.push(extract_vevent(component, &ical, &resolver));
                     }
                 }
             }
@@ -91,6 +93,7 @@ pub fn parse_icalendar(ical_data: &str) -> Result<Vec<ParsedVEvent>, String> {
 fn extract_vevent(
     component: &calcard::icalendar::ICalendarComponent,
     ical: &calcard::icalendar::ICalendar,
+    resolver: &TzResolver<&str>,
 ) -> ParsedVEvent {
     let uid = component.uid().map(String::from);
 
@@ -115,8 +118,8 @@ fn extract_vevent(
         .filter(|s| !s.is_empty())
         .map(String::from);
 
-    let (start_time, is_all_day) = extract_datetime(component, &ICalendarProperty::Dtstart);
-    let (end_time, _) = extract_datetime(component, &ICalendarProperty::Dtend);
+    let (start_time, is_all_day) = extract_datetime(component, &ICalendarProperty::Dtstart, resolver);
+    let (end_time, _) = extract_datetime(component, &ICalendarProperty::Dtend, resolver);
 
     // If DTEND is missing but DURATION is present, compute end time
     let end_time = end_time.or_else(|| {
@@ -211,9 +214,16 @@ fn extract_vevent(
 
 /// Extract a datetime from a DTSTART or DTEND property, returning
 /// `(timestamp, is_all_day)`.
+///
+/// Honors the TZID parameter via the supplied resolver, which is built from
+/// the iCalendar's VTIMEZONE blocks (and falls back to `Tz::from_str` for IANA
+/// or Windows zone names like "Pacific Standard Time"). UTC ('Z') and
+/// floating times still parse correctly. All-day DATE values are returned as
+/// midnight-UTC for storage stability.
 fn extract_datetime(
     component: &calcard::icalendar::ICalendarComponent,
     prop: &ICalendarProperty,
+    resolver: &TzResolver<&str>,
 ) -> (Option<i64>, bool) {
     let Some(entry) = component.property(prop) else {
         return (None, false);
@@ -225,31 +235,37 @@ fn extract_datetime(
         .and_then(|v| v.as_text())
         .is_some_and(|t| t.eq_ignore_ascii_case("DATE"));
 
-    let timestamp = entry.values.first().and_then(|v| match v {
-        ICalendarValue::PartialDateTime(dt) => dt.to_timestamp(),
-        _ => None,
-    });
+    let Some(ICalendarValue::PartialDateTime(dt)) = entry.values.first() else {
+        return (None, is_date_only);
+    };
 
-    // For DATE-only values without time, the PartialDateTime may not have
-    // hour/minute/second set. `to_timestamp()` handles this via `to_datetime()`
-    // which requires has_time(). For date-only values, we need to compute
-    // the timestamp from the date parts directly.
-    let timestamp = timestamp.or_else(|| {
-        entry.values.first().and_then(|v| match v {
-            ICalendarValue::PartialDateTime(dt) => {
-                // Build a NaiveDate from year/month/day and convert to timestamp at midnight UTC
-                let year = dt.year? as i32;
-                let month = dt.month? as u32;
-                let day = dt.day? as u32;
-                chrono::NaiveDate::from_ymd_opt(year, month, day)
-                    .and_then(|d| d.and_hms_opt(0, 0, 0))
-                    .map(|ndt| ndt.and_utc().timestamp())
-            }
-            _ => None,
-        })
-    });
+    if is_date_only {
+        // All-day: build a NaiveDate and treat as midnight UTC.
+        let timestamp = (|| {
+            let year = dt.year? as i32;
+            let month = dt.month? as u32;
+            let day = dt.day? as u32;
+            chrono::NaiveDate::from_ymd_opt(year, month, day)
+                .and_then(|d| d.and_hms_opt(0, 0, 0))
+                .map(|ndt| ndt.and_utc().timestamp())
+        })();
+        return (timestamp, true);
+    }
 
-    (timestamp, is_date_only)
+    // Resolve TZID: prefer the explicit parameter, fall back to whatever
+    // `to_timestamp()` infers (handles Z-suffixed UTC and embedded offsets).
+    if let Some(tz_id) = entry.tz_id() {
+        let tz = resolver.resolve_or_default(Some(tz_id));
+        if !tz.is_floating()
+            && let Some(timestamp) = dt
+                .to_date_time_with_tz(tz)
+                .map(|local| local.timestamp())
+        {
+            return (Some(timestamp), false);
+        }
+    }
+
+    (dt.to_timestamp(), false)
 }
 
 /// Extract VALARM reminders from the event's sub-components.
@@ -686,6 +702,51 @@ END:VCALENDAR\r\n";
         assert_eq!(events[0].reminders.len(), 1);
         assert_eq!(events[0].reminders[0].minutes_before, 15);
         assert_eq!(events[0].reminders[0].method.as_deref(), Some("DISPLAY"));
+    }
+
+    #[test]
+    fn parse_event_with_named_tzid() {
+        // 10:00 America/New_York = 14:00 UTC = epoch 1710518400 on 2024-03-15
+        let ical = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:tz-1@example.com\r\n\
+SUMMARY:NY meeting\r\n\
+DTSTART;TZID=America/New_York:20240315T100000\r\n\
+DTEND;TZID=America/New_York:20240315T110000\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].start_time, Some(1710511200));
+        assert_eq!(events[0].end_time, Some(1710514800));
+    }
+
+    #[test]
+    fn parse_event_with_vtimezone_block() {
+        // VTIMEZONE-defined TZID should resolve via the resolver, even if the
+        // name isn't a standard IANA zone.
+        let ical = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VTIMEZONE\r\n\
+TZID:Eastern Standard Time\r\n\
+X-LIC-LOCATION:America/New_York\r\n\
+END:VTIMEZONE\r\n\
+BEGIN:VEVENT\r\n\
+UID:tz-2@example.com\r\n\
+SUMMARY:VT meeting\r\n\
+DTSTART;TZID=Eastern Standard Time:20240315T100000\r\n\
+DTEND;TZID=Eastern Standard Time:20240315T110000\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].start_time, Some(1710511200));
+        assert_eq!(events[0].end_time, Some(1710514800));
     }
 
     #[test]

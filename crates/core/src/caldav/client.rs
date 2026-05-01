@@ -281,6 +281,41 @@ impl CalDavClient {
     // Write operations (for future use)
     // -----------------------------------------------------------------------
 
+    /// Fetch a single event's iCalendar payload via GET.
+    ///
+    /// Returns `(ical_text, etag)`. Useful for re-reading server canonicalization
+    /// after a PUT (e.g. for ETag refresh).
+    pub async fn get_event_ical(
+        &self,
+        event_url: &str,
+    ) -> Result<(String, Option<String>), String> {
+        let url = self.resolve_url(event_url);
+
+        let resp = self
+            .http
+            .get(&url)
+            .header(reqwest::header::ACCEPT, "text/calendar, application/calendar+xml, */*")
+            .headers(self.auth_headers())
+            .send()
+            .await
+            .map_err(|e| format!("GET {url}: {e}"))?;
+
+        let status = resp.status();
+        let etag = resp
+            .headers()
+            .get("etag")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.trim_matches('"').to_string());
+
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("GET {url} returned {status}: {text}"));
+        }
+
+        let body = resp.text().await.map_err(|e| format!("read body: {e}"))?;
+        Ok((body, etag))
+    }
+
     /// Create or update an event via PUT.
     ///
     /// If `etag` is provided, sends an `If-Match` header for conflict detection.

@@ -5,7 +5,6 @@ use graph::client::GraphState;
 use rtsk::db::DbState;
 use rtsk::db::types::DbCalendar;
 
-use super::caldav::{caldav_list_calendars_impl, caldav_sync_events_impl};
 use super::google::{google_calendar_list_calendars_impl, google_calendar_sync_events_impl};
 use super::graph::{graph_calendar_list_calendars_impl, graph_calendar_sync_events_impl};
 use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
@@ -35,6 +34,9 @@ pub async fn calendar_sync_account_impl(
                 .map_err(|e| e.to_string())
                 .map(|row| {
                     let (provider, calendar_provider, caldav_url) = row?;
+                    let has_caldav_url = caldav_url
+                        .as_deref()
+                        .is_some_and(|value| !value.trim().is_empty());
 
                     if calendar_provider.as_deref() == Some("google_api") || provider == "gmail_api"
                     {
@@ -42,10 +44,7 @@ pub async fn calendar_sync_account_impl(
                     } else if calendar_provider.as_deref() == Some("graph") || provider == "graph" {
                         Some("graph")
                     } else if calendar_provider.as_deref() == Some("caldav")
-                        || (provider == "caldav"
-                            && caldav_url
-                                .as_deref()
-                                .is_some_and(|value| !value.trim().is_empty()))
+                        || (provider == "caldav" && has_caldav_url)
                     {
                         Some("caldav")
                     } else {
@@ -103,10 +102,10 @@ pub async fn upsert_discovered_calendars_impl(
                 .map_err(|e| e.to_string())?;
             let id = existing_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
             tx.execute(
-                "INSERT INTO calendars (id, account_id, provider, remote_id, display_name, color, is_primary)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                "INSERT INTO calendars (id, account_id, provider, remote_id, display_name, color, is_primary, can_edit)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT(account_id, remote_id) DO UPDATE SET
-                   display_name = ?5, color = ?6, is_primary = ?7, updated_at = unixepoch()",
+                   display_name = ?5, color = ?6, is_primary = ?7, can_edit = ?8, updated_at = unixepoch()",
                 params![
                     &id,
                     &account_id,
@@ -115,6 +114,7 @@ pub async fn upsert_discovered_calendars_impl(
                     &calendar.display_name,
                     &calendar.color,
                     calendar.is_primary as i64,
+                    calendar.can_edit as i64,
                 ],
             )
             .map_err(|e| e.to_string())?;
@@ -247,7 +247,7 @@ pub async fn load_visible_calendars(
             .prepare(
                 "SELECT id, account_id, provider, remote_id, display_name, color, \
                         is_primary, is_visible, sync_token, ctag, created_at, \
-                        updated_at, sort_order, is_default, provider_id \
+                        updated_at, sort_order, is_default, provider_id, can_edit \
                  FROM calendars WHERE account_id = ?1 AND is_visible = 1 \
                  ORDER BY is_primary DESC, display_name ASC",
             )
@@ -277,6 +277,7 @@ fn row_to_db_calendar(row: &Row<'_>) -> rusqlite::Result<DbCalendar> {
         sort_order: row.get("sort_order")?,
         is_default: row.get("is_default")?,
         provider_id: row.get("provider_id")?,
+        can_edit: row.get("can_edit")?,
     })
 }
 
@@ -335,17 +336,23 @@ async fn sync_caldav_calendar_account(
     db: &DbState,
     encryption_key: &[u8; 32],
 ) -> Result<(), String> {
-    let calendars = caldav_list_calendars_impl(account_id, db, encryption_key).await?;
-    upsert_discovered_calendars_impl(db, account_id, "caldav", calendars).await?;
-    let visible_calendars = load_visible_calendars(db, account_id).await?;
-
-    for calendar in visible_calendars {
-        let sync_result =
-            caldav_sync_events_impl(account_id, &calendar.remote_id, db, encryption_key).await?;
-        apply_calendar_sync_result_impl(db, account_id, &calendar.remote_id, sync_result).await?;
+    let config =
+        super::caldav::load_caldav_account_config(db, encryption_key, account_id).await?;
+    let mut client = rtsk::caldav::client::CalDavClient::new(
+        config.server_url(),
+        config.username(),
+        config.password(),
+        rtsk::caldav::client::AuthMethod::Basic,
+    );
+    if let Some(home) = config.home_url() {
+        client.set_calendar_home_url(home);
+    } else {
+        client.discover().await?;
     }
 
-    Ok(())
+    rtsk::caldav::sync::sync_caldav_calendars(&client, db, account_id)
+        .await
+        .map(|_| ())
 }
 
 pub fn upsert_calendar_event(

@@ -16,6 +16,10 @@ struct GoogleCalendarListItem {
     background_color: Option<String>,
     #[serde(default)]
     primary: Option<bool>,
+    /// Google calendarList accessRole values: "owner", "writer", "reader",
+    /// "freeBusyReader". Only owner/writer permit event mutation.
+    #[serde(default)]
+    access_role: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -100,11 +104,18 @@ pub async fn google_calendar_list_calendars_impl(
     Ok(response
         .items
         .into_iter()
-        .map(|cal| CalendarInfoDto {
-            remote_id: cal.id,
-            display_name: cal.summary,
-            color: cal.background_color,
-            is_primary: cal.primary.unwrap_or(false),
+        .map(|cal| {
+            let can_edit = cal
+                .access_role
+                .as_deref()
+                .is_none_or(|role| matches!(role, "owner" | "writer"));
+            CalendarInfoDto {
+                remote_id: cal.id,
+                display_name: cal.summary,
+                color: cal.background_color,
+                is_primary: cal.primary.unwrap_or(false),
+                can_edit,
+            }
         })
         .collect())
 }

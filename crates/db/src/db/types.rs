@@ -396,6 +396,7 @@ pub struct DbCalendar {
     pub sort_order: i64,
     pub is_default: i64,
     pub provider_id: Option<String>,
+    pub can_edit: i64,
 }
 
 // ── Calendar Event ──────────────────────────────────────────
