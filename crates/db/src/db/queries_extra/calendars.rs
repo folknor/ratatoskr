@@ -1092,9 +1092,16 @@ fn expand_recurrence(event: &CalendarViewEvent, rrule_str: &str) -> Vec<Calendar
             "RRULE has both COUNT and UNTIL (mutually exclusive per RFC 5545); applying both as bounds"
         );
     }
-    let window_end = rule
-        .until
-        .unwrap_or_else(|| two_year_window_end(event.start_time));
+    // Window bounds:
+    // - UNTIL set: hard bound, applies regardless of COUNT.
+    // - COUNT set without UNTIL: no time bound; COUNT alone limits output.
+    // - Neither: synthesize a 2-year fallback window so an unbounded rule
+    //   doesn't run away.
+    let window_end = match (rule.until, rule.count) {
+        (Some(until), _) => until,
+        (None, Some(_)) => i64::MAX,
+        (None, None) => two_year_window_end(event.start_time),
+    };
 
     let mut instances = Vec::with_capacity(max_instances);
 
@@ -1141,6 +1148,19 @@ fn two_year_window_end(start: i64) -> i64 {
         .map_or(start + 730 * 86400, |dt| dt.timestamp())
 }
 
+/// A single BYDAY entry. The ordinal prefix (e.g. `1MO`, `-1FR`) is captured
+/// alongside the bare weekday so `FREQ=MONTHLY;BYDAY=1MO` ("first Monday of
+/// the month") and `FREQ=YEARLY;BYDAY=-1SU` ("last Sunday of the year")
+/// expand correctly. For DAILY/WEEKLY/UNTIL the ordinal is ignored (RFC 5545
+/// § 3.3.10 says it's only meaningful in MONTHLY/YEARLY).
+#[derive(Debug, Clone, Copy)]
+struct ByDay {
+    /// `None` means "every occurrence of `day` in the period", `Some(n)`
+    /// means "the n-th occurrence" (negative counts from the end).
+    ordinal: Option<i32>,
+    day: chrono::Weekday,
+}
+
 /// Parsed pieces of an RRULE string. Unknown parts are ignored silently.
 #[derive(Debug, Default)]
 struct Rrule {
@@ -1148,7 +1168,7 @@ struct Rrule {
     interval: i64,
     count: Option<usize>,
     until: Option<i64>,
-    byday: Vec<chrono::Weekday>,
+    byday: Vec<ByDay>,
     bymonthday: Vec<i32>,
     bymonth: Vec<u32>,
     /// Week-start day. `None` means "use the default" - we treat that as
@@ -1200,7 +1220,7 @@ fn parse_rrule(rrule_str: &str) -> Rrule {
         } else if let Some(val) = part.strip_prefix("UNTIL=") {
             out.until = parse_until_date(val);
         } else if let Some(val) = part.strip_prefix("BYDAY=") {
-            out.byday = val.split(',').filter_map(parse_weekday).collect();
+            out.byday = val.split(',').filter_map(parse_byday).collect();
         } else if let Some(val) = part.strip_prefix("BYMONTHDAY=") {
             out.bymonthday = val
                 .split(',')
@@ -1238,14 +1258,48 @@ fn parse_weekday_code(code: &str) -> Option<chrono::Weekday> {
     }
 }
 
-/// Parse an iCal weekday code, ignoring any leading +/-N ordinal prefix
-/// (BYDAY supports things like "1MO" or "-1FR" which we treat as plain MO/FR
-/// in the value-set; the ordinal is captured separately by `parse_byday`).
-fn parse_weekday(spec: &str) -> Option<chrono::Weekday> {
+/// Parse a BYDAY entry, including the optional ordinal prefix.
+///
+/// `MO` -> ordinal=None, day=Mon (every Monday in the period).
+/// `1MO` -> ordinal=Some(1), day=Mon (first Monday).
+/// `-1FR` -> ordinal=Some(-1), day=Fri (last Friday).
+fn parse_byday(spec: &str) -> Option<ByDay> {
     let trimmed = spec.trim();
-    let code = trimmed
-        .trim_start_matches(|c: char| c == '-' || c == '+' || c.is_ascii_digit());
-    parse_weekday_code(code)
+    let bytes = trimmed.as_bytes();
+    let mut idx = 0;
+    let sign: i32 = match bytes.first() {
+        Some(b'-') => {
+            idx += 1;
+            -1
+        }
+        Some(b'+') => {
+            idx += 1;
+            1
+        }
+        _ => 1,
+    };
+    let digit_start = idx;
+    while bytes.get(idx).is_some_and(u8::is_ascii_digit) {
+        idx += 1;
+    }
+    let ordinal = if idx > digit_start {
+        let n = std::str::from_utf8(&bytes[digit_start..idx])
+            .ok()?
+            .parse::<i32>()
+            .ok()?;
+        // RFC 5545 limits BYDAY ordinals to 1..=53 (or -53..=-1). We don't
+        // strictly enforce the upper end - chrono will just return None
+        // when looking up the 99th Monday of a month - but `0` is reserved
+        // and outright invalid.
+        if n == 0 {
+            return None;
+        }
+        Some(sign * n)
+    } else {
+        None
+    };
+    let code = std::str::from_utf8(&bytes[idx..]).ok()?;
+    parse_weekday_code(code).map(|day| ByDay { ordinal, day })
 }
 
 fn expand_daily(start: i64, rule: &Rrule) -> Vec<i64> {
@@ -1260,7 +1314,9 @@ fn expand_daily(start: i64, rule: &Rrule) -> Vec<i64> {
         if out.len() >= cap {
             break;
         }
-        if rule.byday.is_empty() || matches_weekday(current, &rule.byday) {
+        if rule.byday.is_empty()
+            || matches_weekday(current, &rule.byday.iter().map(|b| b.day).collect::<Vec<_>>())
+        {
             out.push(current);
         }
         // Advance in calendar days, not raw seconds, so wall-clock time is
@@ -1296,8 +1352,9 @@ fn expand_weekly(start: i64, rule: &Rrule) -> Vec<i64> {
     let wkst = rule.wkst.unwrap_or(chrono::Weekday::Mon);
     // Sort weekdays so each week emits in chronological order, anchored to
     // the week-start day. Without this, a week starting on Sunday would
-    // still emit Mon-first.
-    let mut days = rule.byday.clone();
+    // still emit Mon-first. WEEKLY ignores BYDAY ordinals (RFC 5545 §
+    // 3.3.10) so we only consider the bare weekday.
+    let mut days: Vec<chrono::Weekday> = rule.byday.iter().map(|b| b.day).collect();
     days.sort_by_key(|d| {
         let wd = d.num_days_from_monday() as i64;
         let from = wkst.num_days_from_monday() as i64;
@@ -1329,28 +1386,39 @@ fn expand_weekly(start: i64, rule: &Rrule) -> Vec<i64> {
 }
 
 fn expand_monthly(start: i64, rule: &Rrule) -> Vec<i64> {
+    use chrono::TimeZone;
     let cap = rule.count.unwrap_or(120).min(RRULE_MAX_COUNT);
     let mut out = Vec::with_capacity(cap);
     let mut current = start;
-    // Step-bounded: `BYMONTHDAY=31` with `INTERVAL=12` starting in February
-    // (or any month-day combination that no visited month satisfies) would
-    // otherwise loop forever - `set_day_of_month` returns `None` on every
-    // visit and `out.len()` never grows.
+    // Step-bounded: filters that no visited month satisfies (e.g.
+    // BYMONTHDAY=31 with INTERVAL=12 starting in February) would otherwise
+    // never grow `out` and would loop forever.
     for _ in 0..RRULE_MAX_STEPS {
         if out.len() >= cap {
             return out;
         }
-        if rule.bymonthday.is_empty() {
-            out.push(current);
+        let Some(dt) = chrono::Local.timestamp_opt(current, 0).single() else {
+            break;
+        };
+        let year = dt.year();
+        let month = dt.month();
+
+        let mut day_candidates = if rule.byday.is_empty() && rule.bymonthday.is_empty() {
+            // Default: same day-of-month as start.
+            vec![dt.day()]
         } else {
-            for &day in &rule.bymonthday {
-                if let Some(ts) = set_day_of_month(current, day) {
-                    if ts >= start {
-                        out.push(ts);
-                    }
-                    if out.len() >= cap {
-                        return out;
-                    }
+            collect_monthly_days(year, month, &rule.byday, &rule.bymonthday)
+        };
+        day_candidates.sort_unstable();
+        day_candidates.dedup();
+
+        for day in day_candidates {
+            if let Some(ts) = with_day_of_month(current, day)
+                && ts >= start
+            {
+                out.push(ts);
+                if out.len() >= cap {
+                    return out;
                 }
             }
         }
@@ -1359,25 +1427,146 @@ fn expand_monthly(start: i64, rule: &Rrule) -> Vec<i64> {
     out
 }
 
+/// Resolve a month's candidate day-of-month values from BYDAY + BYMONTHDAY.
+///
+/// - BYDAY without an ordinal: every occurrence of that weekday in the month.
+/// - BYDAY with an ordinal: only the n-th occurrence (positive: from start;
+///   negative: from end). Returns no days if the n-th doesn't exist.
+/// - BYMONTHDAY: explicit days (negative counts from end of month).
+/// - Both set: intersection (RFC 5545 § 3.3.10).
+fn collect_monthly_days(
+    year: i32,
+    month: u32,
+    byday: &[ByDay],
+    bymonthday: &[i32],
+) -> Vec<u32> {
+    let dim = days_in_month(year, month);
+
+    let byday_days: Vec<u32> = byday
+        .iter()
+        .flat_map(|b| match b.ordinal {
+            None => weekday_occurrences_in_month(year, month, b.day),
+            Some(n) => nth_weekday_in_month(year, month, b.day, n)
+                .into_iter()
+                .collect(),
+        })
+        .collect();
+
+    #[allow(clippy::cast_possible_wrap)]
+    let dim_i = dim as i32;
+    let bymonthday_days: Vec<u32> = bymonthday
+        .iter()
+        .filter_map(|d| {
+            let resolved = if *d < 0 { dim_i + d + 1 } else { *d };
+            if resolved < 1 || resolved > dim_i {
+                None
+            } else {
+                #[allow(clippy::cast_sign_loss)]
+                Some(resolved as u32)
+            }
+        })
+        .collect();
+
+    match (byday.is_empty(), bymonthday.is_empty()) {
+        (true, true) => Vec::new(),
+        (false, true) => byday_days,
+        (true, false) => bymonthday_days,
+        // Intersection: the day must satisfy both filters.
+        (false, false) => byday_days
+            .into_iter()
+            .filter(|d| bymonthday_days.contains(d))
+            .collect(),
+    }
+}
+
+/// All days-of-month within `year`/`month` that fall on `weekday`.
+fn weekday_occurrences_in_month(year: i32, month: u32, weekday: chrono::Weekday) -> Vec<u32> {
+    let dim = days_in_month(year, month);
+    (1..=dim)
+        .filter(|&d| {
+            chrono::NaiveDate::from_ymd_opt(year, month, d)
+                .map(|date| date.weekday())
+                == Some(weekday)
+        })
+        .collect()
+}
+
+/// The n-th occurrence of `weekday` in `year`/`month`. Positive `n` counts
+/// from the start of the month; negative counts from the end.
+fn nth_weekday_in_month(
+    year: i32,
+    month: u32,
+    weekday: chrono::Weekday,
+    n: i32,
+) -> Option<u32> {
+    let occurrences = weekday_occurrences_in_month(year, month, weekday);
+    if n > 0 {
+        let idx = usize::try_from(n - 1).ok()?;
+        occurrences.get(idx).copied()
+    } else if n < 0 {
+        let from_end = usize::try_from(-n - 1).ok()?;
+        occurrences.iter().rev().nth(from_end).copied()
+    } else {
+        None
+    }
+}
+
+/// Like `set_day_of_month` but takes an unsigned, validated day. Used by
+/// `expand_monthly` after `collect_monthly_days` already checked existence.
+fn with_day_of_month(timestamp: i64, day: u32) -> Option<i64> {
+    use chrono::TimeZone;
+    let dt = chrono::Local.timestamp_opt(timestamp, 0).single()?;
+    let naive = dt.naive_local();
+    let new_date = chrono::NaiveDate::from_ymd_opt(naive.year(), naive.month(), day)?;
+    let new_naive = new_date.and_time(naive.time());
+    crate::db::time::resolve_local_to_timestamp(new_naive, &chrono::Local)
+}
+
 fn expand_yearly(start: i64, rule: &Rrule) -> Vec<i64> {
+    use chrono::TimeZone;
     let cap = rule.count.unwrap_or(60).min(RRULE_MAX_COUNT);
     let mut out = Vec::with_capacity(cap);
     let mut current = start;
-    // Step-bounded for parity with the other expanders, even though yearly
-    // BYMONTH always yields output (every visited year emits at least one
-    // candidate per requested month).
     for _ in 0..RRULE_MAX_STEPS {
         if out.len() >= cap {
             return out;
         }
-        if rule.bymonth.is_empty() {
-            out.push(current);
+        let Some(dt) = chrono::Local.timestamp_opt(current, 0).single() else {
+            break;
+        };
+        let year = dt.year();
+
+        // Months to visit this year: explicit BYMONTH set, or the start's
+        // own month as the default.
+        let months: Vec<u32> = if rule.bymonth.is_empty() {
+            vec![dt.month()]
         } else {
-            for &month in &rule.bymonth {
-                if let Some(ts) = set_month(current, month) {
-                    if ts >= start {
-                        out.push(ts);
-                    }
+            rule.bymonth.clone()
+        };
+
+        for month in &months {
+            let day_candidates = if rule.byday.is_empty() && rule.bymonthday.is_empty() {
+                // Default: same day-of-month as start, clamped if missing
+                // (e.g. yearly Feb 29 in non-leap years simply skips).
+                let day = dt.day();
+                if days_in_month(year, *month) >= day {
+                    vec![day]
+                } else {
+                    Vec::new()
+                }
+            } else {
+                let mut days =
+                    collect_monthly_days(year, *month, &rule.byday, &rule.bymonthday);
+                days.sort_unstable();
+                days.dedup();
+                days
+            };
+
+            for day in day_candidates {
+                if let Some(ts) = with_year_month_day(current, year, *month, day)
+                    && ts >= start
+                {
+                    out.push(ts);
                     if out.len() >= cap {
                         return out;
                     }
@@ -1387,6 +1576,16 @@ fn expand_yearly(start: i64, rule: &Rrule) -> Vec<i64> {
         current = advance_months(current, rule.interval * 12);
     }
     out
+}
+
+/// Resolve a wall-clock instant on a specific calendar date, preserving the
+/// time-of-day of the original timestamp.
+fn with_year_month_day(timestamp: i64, year: i32, month: u32, day: u32) -> Option<i64> {
+    use chrono::TimeZone;
+    let dt = chrono::Local.timestamp_opt(timestamp, 0).single()?;
+    let new_date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
+    let new_naive = new_date.and_time(dt.naive_local().time());
+    crate::db::time::resolve_local_to_timestamp(new_naive, &chrono::Local)
 }
 
 fn matches_weekday(timestamp: i64, days: &[chrono::Weekday]) -> bool {
@@ -1457,39 +1656,6 @@ fn shift_to_weekday(
     };
     let new_naive = target_date.and_time(time_dt.time());
     crate::db::time::resolve_local_to_timestamp(new_naive, &chrono::Local).unwrap_or(week_anchor)
-}
-
-fn set_day_of_month(timestamp: i64, day: i32) -> Option<i64> {
-    use chrono::TimeZone;
-    let dt = chrono::Local.timestamp_opt(timestamp, 0).single()?;
-    let naive = dt.naive_local();
-    let dim = days_in_month(naive.year(), naive.month());
-    #[allow(clippy::cast_possible_wrap)]
-    let dim_i = dim as i32;
-    // RFC 5545 § 3.3.10: BYMONTHDAY values that resolve to days that don't
-    // exist in the visited month are silently skipped (returned as `None`),
-    // not clamped to the last valid day. `BYMONTHDAY=-31` in February is
-    // therefore correct to drop here - callers walk forward to the next
-    // month.
-    let resolved_day = if day < 0 { dim_i + day + 1 } else { day };
-    if resolved_day < 1 || resolved_day > dim_i {
-        return None;
-    }
-    #[allow(clippy::cast_sign_loss)]
-    let new_date =
-        chrono::NaiveDate::from_ymd_opt(naive.year(), naive.month(), resolved_day as u32)?;
-    let new_naive = new_date.and_time(naive.time());
-    crate::db::time::resolve_local_to_timestamp(new_naive, &chrono::Local)
-}
-
-fn set_month(timestamp: i64, month: u32) -> Option<i64> {
-    use chrono::TimeZone;
-    let dt = chrono::Local.timestamp_opt(timestamp, 0).single()?;
-    let naive = dt.naive_local();
-    let new_day = naive.day().min(days_in_month(naive.year(), month));
-    let new_date = chrono::NaiveDate::from_ymd_opt(naive.year(), month, new_day)?;
-    let new_naive = new_date.and_time(naive.time());
-    crate::db::time::resolve_local_to_timestamp(new_naive, &chrono::Local)
 }
 
 /// Advance a Unix timestamp by N months while preserving the original
@@ -1788,6 +1954,85 @@ mod tests {
             })
             .collect();
         assert_eq!(days, vec![31, 31, 31, 31]);
+    }
+
+    #[test]
+    fn monthly_byday_first_monday_emits_first_monday() {
+        // FREQ=MONTHLY;BYDAY=1MO -> the first Monday of each month.
+        // Starting in March 2026 (March 9, 2026 is a Monday and the second
+        // Monday; the first Monday of March is March 2).
+        let start = local_ts(2026, 3, 9, 9, 0);
+        let event = make_event(start, 3600);
+        let instances = expand_recurrence(&event, "FREQ=MONTHLY;BYDAY=1MO;COUNT=4");
+        let dates: Vec<(i32, u32, u32)> = instances
+            .iter()
+            .map(|e| {
+                let dt = chrono::Local
+                    .timestamp_opt(e.start_time, 0)
+                    .single()
+                    .expect("local")
+                    .naive_local();
+                (dt.year(), dt.month(), dt.day())
+            })
+            .collect();
+        // Apr 6, May 4, Jun 1, Jul 6 - Mar is omitted because the first
+        // Monday (Mar 2) is before DTSTART (Mar 9). The four results all
+        // sit on a Monday.
+        assert_eq!(instances.len(), 4);
+        for (_, _, day) in &dates {
+            assert!(*day <= 7, "day {day} should be in the first week of the month");
+        }
+        for inst in &instances {
+            assert_eq!(weekday_of(inst.start_time), chrono::Weekday::Mon);
+        }
+    }
+
+    #[test]
+    fn monthly_byday_last_friday_emits_last_friday() {
+        // FREQ=MONTHLY;BYDAY=-1FR -> last Friday of each month.
+        // Start: 2026-03-27 (a Friday, the last of March 2026).
+        let start = local_ts(2026, 3, 27, 9, 0);
+        let event = make_event(start, 3600);
+        let instances = expand_recurrence(&event, "FREQ=MONTHLY;BYDAY=-1FR;COUNT=4");
+        assert_eq!(instances.len(), 4);
+        // Confirm they're all on Friday and within the last 7 days of the
+        // month (>= dim - 6).
+        for inst in &instances {
+            let dt = chrono::Local
+                .timestamp_opt(inst.start_time, 0)
+                .single()
+                .expect("local")
+                .naive_local();
+            let dim = days_in_month(dt.year(), dt.month());
+            assert_eq!(dt.weekday(), chrono::Weekday::Fri);
+            assert!(
+                dt.day() >= dim - 6,
+                "day {} not in last week of {}/{}",
+                dt.day(),
+                dt.year(),
+                dt.month()
+            );
+        }
+    }
+
+    #[test]
+    fn yearly_byday_first_monday_of_march() {
+        // FREQ=YEARLY;BYMONTH=3;BYDAY=1MO -> first Monday of March each year.
+        let start = local_ts(2026, 3, 2, 9, 0); // 2026-03-02 is the first Monday of March
+        let event = make_event(start, 3600);
+        let instances =
+            expand_recurrence(&event, "FREQ=YEARLY;BYMONTH=3;BYDAY=1MO;COUNT=3");
+        assert_eq!(instances.len(), 3);
+        for inst in &instances {
+            let dt = chrono::Local
+                .timestamp_opt(inst.start_time, 0)
+                .single()
+                .expect("local")
+                .naive_local();
+            assert_eq!(dt.month(), 3);
+            assert_eq!(dt.weekday(), chrono::Weekday::Mon);
+            assert!(dt.day() <= 7);
+        }
     }
 
     #[test]

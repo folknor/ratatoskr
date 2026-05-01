@@ -15,8 +15,6 @@ its helpers (`parse_rrule`, `parse_weekday`, `expand_daily`, `expand_weekly`,
 `shift_to_weekday`, `set_day_of_month`, `set_month`, `advance_months`,
 `days_in_month`, `parse_until_date`).
 
-- `calendars.rs:1180-1191` - `parse_weekday` strips digits and signs, so `BYDAY=1MO` and `BYDAY=-1FR` collapse to plain `MO`/`FR`. Under `FREQ=MONTHLY` the rule then falls into the `bymonthday.is_empty()` branch and emits the *start day* every month, not the first/last weekday. Repro: `FREQ=MONTHLY;BYDAY=1MO` starting 2026-03-09 emits the 9th every month, not the first Monday.
-
 ---
 
 ## Review 2 - TZID + Graph datetime resolution (Opus, bugs lens)
@@ -56,6 +54,4 @@ Compared against the deleted ad-hoc client and XML parser via git history.
 ## Outside Reviews
 
 ### Reviewer A - combined RRULE / TZ / CalDAV pass
-
-4. `crates/db/src/db/queries_extra/calendars.rs:1176`: ordinal BYDAY is stripped to a plain weekday, and `crates/db/src/db/queries_extra/calendars.rs:1250` / `crates/db/src/db/queries_extra/calendars.rs:1274` expansion ignores BYDAY anyway. `FREQ=MONTHLY;BYDAY=1MO` emits the DTSTART day-of-month, not the first Monday.
 
