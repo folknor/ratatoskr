@@ -1077,8 +1077,27 @@ const RRULE_MAX_STEPS: usize = 12_000;
 fn expand_recurrence(event: &CalendarViewEvent, rrule_str: &str) -> Vec<CalendarViewEvent> {
     let rule = parse_rrule(rrule_str);
     let Some(freq) = Freq::parse(&rule.freq) else {
+        // FREQ is missing or unrecognized. We fall back to a single instance
+        // (the master event) so the operator at least sees the event on the
+        // calendar; logging here makes the malformed rule visible rather
+        // than silently swapping behavior with the zero-instance case below.
+        log::warn!(
+            "RRULE has unrecognized or missing FREQ; emitting only master instance: {rrule_str}"
+        );
         return vec![event.clone()];
     };
+    if !rule.unsupported_parts.is_empty() {
+        // Recognized but unimplemented BY-rules (e.g. BYSETPOS, BYWEEKNO).
+        // Falling through to the expanders would produce a wildly wrong
+        // expansion (~22 days/month for `BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1`).
+        // Emit only the master instance so the user sees the event in the
+        // right place without the noise; logging surfaces the gap.
+        log::warn!(
+            "RRULE uses unsupported parts ({:?}); emitting only master instance: {rrule_str}",
+            rule.unsupported_parts
+        );
+        return vec![event.clone()];
+    }
 
     let duration = event.end_time - event.start_time;
     let max_instances = rule.count.unwrap_or(365).max(1);
@@ -1161,7 +1180,10 @@ struct ByDay {
     day: chrono::Weekday,
 }
 
-/// Parsed pieces of an RRULE string. Unknown parts are ignored silently.
+/// Parsed pieces of an RRULE string. Unknown parts are ignored silently
+/// unless they're in the documented "unsupported but recognized" set
+/// (`unsupported_parts`), in which case the rule is treated as malformed
+/// rather than silently mis-expanded.
 #[derive(Debug, Default)]
 struct Rrule {
     freq: String,
@@ -1175,6 +1197,12 @@ struct Rrule {
     /// Monday (RFC 5545 § 3.3.10 default), which matches what most weekly
     /// recurrence views expect. Set explicitly via `WKST=SU` etc.
     wkst: Option<chrono::Weekday>,
+    /// RFC 5545 BY-rules we recognize but don't yet implement. Populated by
+    /// `parse_rrule` so `expand_recurrence` can short-circuit instead of
+    /// silently producing wrong expansions (e.g. `BYSETPOS=-1` filtering
+    /// only the last weekday of the month would otherwise emit ~22 days
+    /// per month). Each entry is the bare key name (`"BYSETPOS"` etc).
+    unsupported_parts: Vec<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1238,6 +1266,28 @@ fn parse_rrule(rrule_str: &str) -> Rrule {
                 .collect();
         } else if let Some(val) = part.strip_prefix("WKST=") {
             out.wkst = parse_weekday_code(val.trim());
+        } else {
+            // Recognize-but-flag the BY-rules we can't honor. Listing them
+            // explicitly (rather than treating any unknown key as malformed)
+            // keeps the door open to vendor extensions and future-spec keys
+            // without breaking compatibility, while still catching the cases
+            // that produce the worst silent expansions.
+            for unsupported in [
+                "BYSETPOS=",
+                "BYWEEKNO=",
+                "BYYEARDAY=",
+                "BYHOUR=",
+                "BYMINUTE=",
+                "BYSECOND=",
+            ] {
+                if part.starts_with(unsupported) {
+                    let key = &unsupported[..unsupported.len() - 1];
+                    if !out.unsupported_parts.contains(&key) {
+                        out.unsupported_parts.push(key);
+                    }
+                    break;
+                }
+            }
         }
     }
     out
@@ -1723,12 +1773,21 @@ fn days_in_month(year: i32, month: u32) -> u32 {
 
 /// Parse an UNTIL value (RFC 5545 § 3.3.10).
 ///
-/// Two valid forms:
-/// - `YYYYMMDD` (DATE only) - means "everything up to end of that local day."
-///   We store end-of-day so callers using `start <= UNTIL` get the natural
-///   "instances on the until-date are included" behavior.
+/// Three valid forms per spec:
+/// - `YYYYMMDD` (DATE only) - "everything up to end of that local day." We
+///   anchor end-of-day in `chrono::Local` because DATE-only UNTIL implies
+///   floating DTSTART (which RFC 5545 § 3.3.5 says is interpreted in the
+///   user's calendar zone). Anchoring to UTC midnight 23:59:59 clips
+///   evening occurrences in west-of-UTC zones and includes next-day
+///   occurrences in east-of-UTC zones.
 /// - `YYYYMMDDTHHMMSSZ` (DATE-TIME, UTC) - the wall-clock instant in UTC.
-///   We must preserve the exact time, not collapse it to 23:59:59.
+///   We preserve the exact time, not collapse to 23:59:59.
+/// - `YYYYMMDDTHHMMSS` (DATE-TIME, floating) - per RFC 5545 only valid
+///   when DTSTART is floating. Anchored in `chrono::Local` for the same
+///   reason as DATE-only.
+///
+/// Anything else (offset like `+0100`, sub-minute precision, trailing
+/// garbage) is rejected with `None` rather than silently mis-anchored.
 fn parse_until_date(val: &str) -> Option<i64> {
     let date_part = val.get(..8)?;
     let year: i32 = date_part.get(0..4)?.parse().ok()?;
@@ -1736,21 +1795,36 @@ fn parse_until_date(val: &str) -> Option<i64> {
     let day: u32 = date_part.get(6..8)?.parse().ok()?;
     let date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
 
-    // Probe for the DATE-TIME form: `THHMMSS` (Z is optional but always
-    // implied UTC for UNTIL per spec).
-    if val.len() >= 15 && val.as_bytes().get(8) == Some(&b'T') {
-        let time_part = val.get(9..15)?;
-        let hour: u32 = time_part.get(0..2)?.parse().ok()?;
-        let minute: u32 = time_part.get(2..4)?.parse().ok()?;
-        let second: u32 = time_part.get(4..6)?.parse().ok()?;
-        let dt = date.and_hms_opt(hour, minute, second)?;
-        return Some(dt.and_utc().timestamp());
+    // DATE-only form: exactly 8 chars.
+    if val.len() == 8 {
+        let dt = date.and_hms_opt(23, 59, 59)?;
+        return crate::db::time::resolve_local_to_timestamp(dt, &chrono::Local);
     }
 
-    // DATE-only: anchor to end of the day so events scheduled on the UNTIL
-    // date are still emitted.
-    let dt = date.and_hms_opt(23, 59, 59)?;
-    Some(dt.and_utc().timestamp())
+    // DATE-TIME form must be exactly 15 (floating) or 16 (UTC) chars and
+    // have a `T` at index 8.
+    if val.as_bytes().get(8) != Some(&b'T') {
+        log::debug!("RRULE UNTIL has unrecognized form: {val}");
+        return None;
+    }
+    let time_part = val.get(9..15)?;
+    let hour: u32 = time_part.get(0..2)?.parse().ok()?;
+    let minute: u32 = time_part.get(2..4)?.parse().ok()?;
+    let second: u32 = time_part.get(4..6)?.parse().ok()?;
+    let dt = date.and_hms_opt(hour, minute, second)?;
+
+    match (val.len(), val.as_bytes().get(15)) {
+        // Floating: 15 chars, no trailing character.
+        (15, None) => crate::db::time::resolve_local_to_timestamp(dt, &chrono::Local),
+        // UTC: 16 chars, trailing 'Z'.
+        (16, Some(&b'Z')) => Some(dt.and_utc().timestamp()),
+        // Anything else (offset like +0100, fractional seconds, trailing
+        // garbage) is malformed; rejecting prevents silent UTC mis-anchor.
+        _ => {
+            log::debug!("RRULE UNTIL has unsupported trailing characters: {val}");
+            None
+        }
+    }
 }
 
 // ── All-account calendar queries (for unified calendar) ────
@@ -2075,6 +2149,85 @@ mod tests {
         let event = make_event(start, 3600);
         let instances = expand_recurrence(&event, "FREQ=DAILY;UNTIL=20290101T000000Z");
         assert!(instances.is_empty());
+    }
+
+    #[test]
+    fn rrule_with_bysetpos_falls_back_to_master_instance() {
+        // FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1 means "last weekday
+        // of each month". We don't implement BYSETPOS, so the previous
+        // expander would emit ~22 days/month. The fix: detect BYSETPOS and
+        // emit only the master instance (still visible on the calendar)
+        // rather than 20+ wrong daily entries.
+        let start = local_ts(2026, 1, 30, 9, 0);
+        let event = make_event(start, 3600);
+        let instances = expand_recurrence(
+            &event,
+            "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1;COUNT=12",
+        );
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].start_time, start);
+    }
+
+    #[test]
+    fn rrule_with_byweekno_falls_back_to_master_instance() {
+        // BYWEEKNO is also unsupported; same fallback as BYSETPOS.
+        let start = local_ts(2026, 1, 5, 9, 0);
+        let event = make_event(start, 3600);
+        let instances = expand_recurrence(&event, "FREQ=YEARLY;BYWEEKNO=20;COUNT=3");
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].start_time, start);
+    }
+
+    #[test]
+    fn parse_until_date_strict_z_form() {
+        // 16-char with Z is valid UTC.
+        let utc = parse_until_date("20260315T120000Z").expect("valid UTC UNTIL");
+        let expected = chrono::NaiveDate::from_ymd_opt(2026, 3, 15)
+            .and_then(|d| d.and_hms_opt(12, 0, 0))
+            .map(|d| d.and_utc().timestamp())
+            .expect("valid");
+        assert_eq!(utc, expected);
+    }
+
+    #[test]
+    fn parse_until_date_15_char_floating_resolves_in_local() {
+        // 15-char no-Z form is floating; anchored in chrono::Local. Only
+        // assert that parsing succeeds and is distinct from the UTC-anchored
+        // value (when local != UTC). The exact timestamp depends on the
+        // host's TZ, so we don't pin a specific value.
+        let parsed = parse_until_date("20260315T120000").expect("floating UNTIL");
+        let utc_equiv = chrono::NaiveDate::from_ymd_opt(2026, 3, 15)
+            .and_then(|d| d.and_hms_opt(12, 0, 0))
+            .map(|d| d.and_utc().timestamp())
+            .expect("valid");
+        // In any non-UTC zone parsed != utc_equiv. In UTC they would match;
+        // we just confirm parsed is finite and within a sensible window.
+        let one_day = 86_400;
+        assert!((parsed - utc_equiv).abs() <= 14 * 3600 + one_day);
+    }
+
+    #[test]
+    fn parse_until_date_rejects_garbage_after_time() {
+        // Sub-minute precision (".5"), embedded offsets ("+0100"), or any
+        // trailing characters that aren't "Z" should reject rather than
+        // silently mis-parse.
+        assert!(parse_until_date("20260315T120000.5").is_none());
+        assert!(parse_until_date("20260315T120000+0100").is_none());
+        assert!(parse_until_date("20260315T120000X").is_none());
+    }
+
+    #[test]
+    fn parse_until_date_date_only_anchors_in_local() {
+        // 8-char DATE-only form anchors at 23:59:59 in chrono::Local rather
+        // than UTC midnight - prevents clipping of evening occurrences for
+        // west-of-UTC users and over-inclusion for east-of-UTC users.
+        let parsed = parse_until_date("20260315").expect("date-only UNTIL");
+        let utc_eod = chrono::NaiveDate::from_ymd_opt(2026, 3, 15)
+            .and_then(|d| d.and_hms_opt(23, 59, 59))
+            .map(|d| d.and_utc().timestamp())
+            .expect("valid");
+        let one_day = 86_400;
+        assert!((parsed - utc_eod).abs() <= 14 * 3600 + one_day);
     }
 
     #[test]

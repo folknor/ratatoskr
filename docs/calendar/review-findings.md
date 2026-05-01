@@ -59,7 +59,6 @@ All findings addressed. Lenses and targets:
 
 ### `crates/db/src/db/queries_extra/calendars.rs::parse_rrule` (1200-1244)
 
-- **High** (flagged 2x) - BYSETPOS, BYWEEKNO, BYYEARDAY, BYHOUR, BYMINUTE, BYSECOND silently dropped. Repro: `FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1` (last weekday of month) ignores BYSETPOS and emits ~22 days/month instead of 1. No validation that the rule contains BY-rules the expander cannot honor.
 - **Low** (flagged 2x) - `INTERVAL=0` silently clamped to 1 (RFC says >=1; defensible but no signal to caller).
 - **Low** (flagged 2x) - `BYMONTHDAY=32` / `BYMONTH=13` silently dropped, falls back to the default same-day-of-month / same-month-as-start (instead of zero-instance). User typing "32nd of month" gets a working monthly recurrence on the DTSTART day.
 - **Latent** - WKST only consulted in WEEKLY path; YEARLY/MONTHLY ignore it. OK while BYWEEKNO is unsupported; will silently break if BYWEEKNO is added without plumbing WKST through.
@@ -68,12 +67,6 @@ All findings addressed. Lenses and targets:
 ### `crates/db/src/db/queries_extra/calendars.rs::parse_byday` (1266-1303)
 
 - **Trivial** - Ordinals > 53 (`BYDAY=99MO`) not rejected; `nth_weekday_in_month` returns `None` and the rule iterates 12000 times before bounding out (DoS-resistant by accident).
-
-### `crates/db/src/db/queries_extra/calendars.rs::parse_until_date` (1732-1753)
-
-- **High** - UNTIL without trailing `Z` silently treated as UTC. RFC 5545 §3.3.10: floating-DTSTART must have floating UNTIL; local-with-TZID DTSTART must have UTC UNTIL. Repro: floating `DTSTART` with `UNTIL=20260315T235900` (no `Z`) on `Pacific/Kiritimati` (UTC+14) terminates ~10 hours early on the final day.
-- **Medium** (flagged 2x) - DATE-only UNTIL (`UNTIL=20260315`) anchored to UTC midnight 23:59:59, not the local zone. Repro: US Pacific user with `FREQ=DAILY;UNTIL=20260315` on a 22:00-local event excludes the UNTIL day's evening occurrence; Kiritimati user with the same rule includes a Jan 2 occurrence. Fix: anchor to the event's TZID (or `chrono::Local`) instead of UTC.
-- **Low** - Fractional seconds and non-UTC offsets (`+0100`) silently mis-parsed: 8-byte date + optional `T` + 6-byte time, no validation of trailing characters.
 
 ### Year-bounds sanity (multiple files)
 
