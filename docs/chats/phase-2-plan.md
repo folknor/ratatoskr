@@ -14,25 +14,29 @@ No sidebar changes yet - this phase is activated by calling `get_chat_timeline()
 
 Calendar uses `AppMode::Calendar` which replaces the entire layout including sidebar. Chat is different - the sidebar stays (it will hold the CHATS section in Phase 3). Chat view is a **mail route** - a subview within `AppMode::Mail`.
 
-Use `NavigationTarget::Chat { email: String }` (already planned in the Phase 1 overview) to enter chat view. When the navigation target is `Chat`, the mail layout renders sidebar + chat timeline (instead of sidebar + thread list + reading pane).
+`NavigationTarget::Chat { email: String }` (already planned in the Phase 1 overview) is the **dispatch event** for entering chat view; it is not stored on the App. The actual source of truth is `App::active_chat: Option<String>` (mirrored on `Sidebar::active_chat`), populated by `enter_chat_view` and cleared by `reset_view_state`. This matches the existing pattern in the codebase: other view modes are individual fields on App (`app_mode`, `selected_scope`, etc.), not derived from a single stored `navigation_target`.
 
-No `active_chat: Option<String>` field. The navigation target IS the source of truth. All existing navigation machinery (`reset_view_state`, generation counters, keyboard routing) works through the same channel.
+The view layer branches on `active_chat.is_some()`, and command-dispatch reads the same field to derive `ViewType::Chat`. Generation counters, keyboard routing, and the rest of the navigation machinery work through the same channel as the other modes.
 
 ```rust
-// NavigationTarget variant (in command_dispatch.rs)
+// NavigationTarget variant (in command_dispatch.rs) - dispatch only,
+// not stored.
 Chat { email: String },
+
+// App state (in app.rs).
+pub(crate) active_chat: Option<String>,
 ```
 
 ### Layout in view()
 
-Inside the `AppMode::Mail` branch, check the navigation target:
+Inside the `AppMode::Mail` branch, check `active_chat`:
 
 ```rust
-let is_chat = matches!(self.navigation_target, Some(NavigationTarget::Chat { .. }));
+let is_chat = self.active_chat.is_some();
 
 if is_chat {
     // Sidebar + chat timeline (full width of remaining space)
-    let chat_view = self.chat_timeline.view().map(Message::Chat);
+    let chat_view = self.chat_timeline.view().map(Message::ChatTimeline);
     row![sidebar, divider_sidebar, chat_view].height(Length::Fill)
 } else {
     // Normal: sidebar + thread list + divider + reading pane + right sidebar
@@ -243,35 +247,34 @@ Per UI.md: feature logic in handlers, not main.rs. New handler file:
 
 ```rust
 impl App {
-    pub(crate) fn enter_chat_view(&mut self, email: String) -> Task<Message> {
-        self.navigation_target = Some(NavigationTarget::Chat { email: email.clone() });
+    pub(crate) fn enter_chat_view(&mut self, email: &str) -> Task<Message> {
+        let email = email.to_lowercase();
+        self.clear_search_state();
+        self.clear_pinned_search_context();
+        self.active_chat = Some(email.clone());
+        self.sidebar.active_chat = Some(email.clone());
         self.clear_thread_selection();
-        self.chat_timeline = ChatTimeline::new(email.clone());
+        self.chat_timeline = Some(ChatTimeline::new(email.clone()));
 
-        let db = Arc::clone(&self.db);
-        let body_store = self.body_store.clone();
+        let db_state = self.db.read_db_state();
         let user_emails = self.user_emails();
         let token = self.chat_generation.next();
 
-        // Load timeline + mark read in parallel
-        Task::batch([
-            // Timeline load
-            Task::perform(
-                async move { load_chat_timeline(db, body_store, email, user_emails, 50, None).await },
-                move |result| Message::Chat(ChatTimelineMessage::TimelineLoaded(token, result)),
-            ),
-            // Mark read (fire-and-forget, non-blocking)
-            self.mark_chat_read(&email),
-        ])
-    }
-
-    pub(crate) fn exit_chat_view(&mut self) {
-        self.navigation_target = None;
-        // Don't call reset_view_state - just clear the target.
-        // The next navigation action will set its own target.
+        // Mark-read first (fire-and-forget) so its task doesn't borrow
+        // `email` through the timeline-load closure.
+        let mark_read_task = self.mark_chat_read(&email);
+        let timeline_load = Task::perform(
+            async move {
+                rtsk::chat::get_chat_timeline(/* ... */).await
+            },
+            move |result| Message::ChatTimelineLoaded(token, result),
+        );
+        Task::batch([timeline_load, mark_read_task])
     }
 }
 ```
+
+There is no separate `exit_chat_view`; `reset_view_state` clears `active_chat` (along with thread selection and search state) before any subsequent navigation, which is the only way to leave chat view.
 
 ### Mark Read on Enter
 

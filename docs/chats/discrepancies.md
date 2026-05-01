@@ -28,23 +28,6 @@ Phase legend (rough): `1` data model + queries, `2` timeline view,
 
 ## Medium
 
-6. **`ChatTimeline.contact_email` is the local-DB lowercased form.** Both
-   `enter_chat_view` and the contact list pass through `email.to_lowercase()`
-   inside the core layer, but the App-side `active_chat` and the Sidebar
-   `active_chat` mirror are populated from the *user-facing* string. If
-   chat contacts ever display mixed-case email (e.g. from contacts table
-   with original casing), the active-row highlight in the sidebar will
-   compare-fail. Today this is benign because dev-seed lowercases.
-
-7. **`active_chat` deviates from the Phase 2 plan.** `phase-2-plan.md`
-   §"Layout Architecture" calls for `NavigationTarget::Chat` to be the
-   single source of truth - "no `active_chat: Option<String>` field". The
-   shipped App stores `active_chat` on both `App` and `Sidebar`, and the
-   view layer / command-dispatch / update path branches on
-   `active_chat.is_some()`. There is no `navigation_target` field; the
-   `NavigationTarget::Chat` variant is only ever used as a transient
-   dispatch argument. Functionally equivalent, structurally diverged.
-
 8. **No "view as email" toggle.** Spec calls for a per-conversation
    affordance to switch back to the threaded reading-pane view without
    undesignating the contact. No route, no menu, no command. (Phase 6
@@ -55,13 +38,6 @@ Phase legend (rough): `1` data model + queries, `2` timeline view,
    `messages` row's address fields. The dev workflow doesn't need it
    (dev-seed wipes and reseeds), but the production-launch checklist
    relies on it. Not yet written. (Phase 1 deferred.)
-
-10. **`get_chat_timeline` does not deduplicate cross-account messages.**
-    The cursor is `(date, message_id)` per spec, but the timeline never
-    deduplicates messages that arrive via cross-account aggregation
-    (e.g. the same Message-ID seen on both Gmail and a forwarding alias).
-    Phase 6 explicitly calls this out, but it's worth flagging now
-    because dev-seed does not exercise multi-account duplicates.
 
 ## Implemented (Phase 1)
 
@@ -119,6 +95,11 @@ Phase legend (rough): `1` data model + queries, `2` timeline view,
   anything, and flips between cleaned and full on
   `ChatTimelineMessage::ToggleExpand(message_id)`.
 - "Load older" button at top → cursor-based paginated load.
+- Cross-account dedup in `core::chat::get_chat_timeline`: rows arrive
+  newest-first from SQL; we walk them once and keep only the first
+  occurrence of each non-empty `message_id_header`, so the same RFC
+  Message-ID delivered to two accounts (forwarding alias, shared
+  mailbox) renders once. Empty / NULL headers stay distinct.
 - Mark-read on chat entry: `mark_chat_read_local` flips `messages.is_read`,
   `threads.is_read`, and `chat_contacts.unread_count` in one transaction;
   `mark_chat_read_remote` then dispatches `provider.mark_read` per affected

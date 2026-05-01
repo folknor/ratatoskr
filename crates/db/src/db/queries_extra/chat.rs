@@ -25,6 +25,11 @@ pub struct DbChatMessage {
     pub date: i64,
     pub subject: Option<String>,
     pub is_read: bool,
+    /// RFC-822 Message-ID header. Used by the chat timeline to dedup the
+    /// same message arriving via multiple accounts (forwarding aliases,
+    /// shared mailboxes). `None` when the message had no header at sync
+    /// time (rare but possible for malformed / IMAP-keywordless mail).
+    pub message_id_header: Option<String>,
 }
 
 /// Inline image attachment row for chat rendering.
@@ -285,7 +290,7 @@ pub fn get_chat_timeline_sync(
         if let Some((before_ts, before_id)) = before {
             (
                 "SELECT m.id, m.account_id, m.thread_id, m.from_address, m.from_name, \
-                    m.date, m.is_read, m.subject \
+                    m.date, m.is_read, m.subject, m.message_id_header \
                  FROM messages m \
                  INNER JOIN threads t ON t.id = m.thread_id AND t.account_id = m.account_id \
                  INNER JOIN thread_participants tp \
@@ -305,7 +310,7 @@ pub fn get_chat_timeline_sync(
         } else {
             (
                 "SELECT m.id, m.account_id, m.thread_id, m.from_address, m.from_name, \
-                    m.date, m.is_read, m.subject \
+                    m.date, m.is_read, m.subject, m.message_id_header \
                  FROM messages m \
                  INNER JOIN threads t ON t.id = m.thread_id AND t.account_id = m.account_id \
                  INNER JOIN thread_participants tp \
@@ -335,6 +340,7 @@ pub fn get_chat_timeline_sync(
             date: row.get("date")?,
             subject: row.get("subject")?,
             is_read: row.get::<_, i64>("is_read")? != 0,
+            message_id_header: row.get("message_id_header")?,
         })
     })
     .map_err(|e| e.to_string())?

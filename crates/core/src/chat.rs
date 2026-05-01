@@ -221,6 +221,19 @@ pub async fn get_chat_timeline(
             let rows = crate::db::queries_extra::chat::get_chat_timeline_sync(
                 conn, &email, limit, before,
             )?;
+            // Cross-account dedup: the same RFC Message-ID can land in two
+            // accounts (forwarding alias, shared mailbox). Walk the rows
+            // newest-first (the order SQL returned them) and keep only the
+            // first occurrence of each header. Empty / NULL headers stay
+            // distinct - we have nothing to compare.
+            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let rows: Vec<_> = rows
+                .into_iter()
+                .filter(|row| match row.message_id_header.as_deref() {
+                    Some(h) if !h.is_empty() => seen.insert(h.to_string()),
+                    _ => true,
+                })
+                .collect();
             let message_ids: Vec<String> =
                 rows.iter().map(|r| r.message_id.clone()).collect();
             let images = crate::db::queries_extra::chat::get_chat_inline_images_sync(

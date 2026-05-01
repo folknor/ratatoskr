@@ -8,12 +8,17 @@ use crate::{App, Message};
 impl App {
     /// Enter chat view for a contact.
     pub(crate) fn enter_chat_view(&mut self, email: &str) -> Task<Message> {
+        // Lowercase at the boundary so the active-row highlight in the
+        // sidebar always matches the lowercased rows from the contact
+        // list. The core layer also lowercases internally, so callers
+        // can pass any casing.
+        let email = email.to_lowercase();
         self.clear_search_state();
         self.clear_pinned_search_context();
-        self.active_chat = Some(email.to_string());
-        self.sidebar.active_chat = Some(email.to_string());
+        self.active_chat = Some(email.clone());
+        self.sidebar.active_chat = Some(email.clone());
         self.clear_thread_selection();
-        self.chat_timeline = Some(ChatTimeline::new(email.to_string()));
+        self.chat_timeline = Some(ChatTimeline::new(email.clone()));
 
         let db_state = self.db.read_db_state();
         let user_emails = self.user_emails();
@@ -29,7 +34,8 @@ impl App {
             return self.fire_chat_contacts_load(chat_list_token);
         };
 
-        let email_for_timeline = email.to_string();
+        let mark_read_task = self.mark_chat_read(&email);
+        let email_for_timeline = email;
         let timeline_load = Task::perform(
             async move {
                 rtsk::chat::get_chat_timeline(
@@ -49,7 +55,6 @@ impl App {
         // on the active row. The mark-read task fires a second reload after
         // its local transaction commits.
         let contacts_reload = self.fire_chat_contacts_load(chat_list_token);
-        let mark_read_task = self.mark_chat_read(email);
         Task::batch([timeline_load, contacts_reload, mark_read_task])
     }
 
