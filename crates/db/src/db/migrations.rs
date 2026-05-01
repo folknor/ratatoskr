@@ -628,6 +628,22 @@ CREATE TABLE IF NOT EXISTS calendar_reminders (
 );
 CREATE INDEX IF NOT EXISTS idx_calendar_reminders_event ON calendar_reminders(account_id, event_id);
 
+-- CalDAV URI -> ETag map. Drives incremental sync: list_events returns
+-- (uri, etag) pairs, we diff against the stored map to decide what to
+-- fetch / update / delete. Keyed on (calendar_id, uri); calendar_id
+-- cascades from `calendars`, so deleting an account cleans up the map
+-- via the chain account -> calendars -> caldav_event_map. event_uid
+-- duplicates the iCal UID so per-resource lookups can resolve back to
+-- the calendar_events row without re-parsing the iCal payload.
+CREATE TABLE IF NOT EXISTS caldav_event_map (
+    uri TEXT NOT NULL,
+    calendar_id TEXT NOT NULL REFERENCES calendars(id) ON DELETE CASCADE,
+    event_uid TEXT NOT NULL,
+    etag TEXT NOT NULL,
+    PRIMARY KEY (calendar_id, uri)
+);
+CREATE INDEX IF NOT EXISTS idx_caldav_event_map_calendar ON caldav_event_map(calendar_id);
+
 -- ── Tasks ───────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS tasks (
