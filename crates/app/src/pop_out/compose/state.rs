@@ -44,6 +44,12 @@ pub struct ComposeState {
     // Status message (e.g. "Send not yet wired")
     pub status: Option<String>,
 
+    /// Inline validation error shown directly under the To row when the
+    /// user tries to send with no recipients. Cleared as soon as any
+    /// recipient is added so the message disappears the moment the
+    /// problem is fixed - no separate "dismiss" UI needed.
+    pub recipients_error: Option<String>,
+
     // Discard confirmation
     pub discard_confirm_open: bool,
 
@@ -117,6 +123,7 @@ impl ComposeState {
             reply_thread_id: None,
             reply_message_id: None,
             status: None,
+            recipients_error: None,
             discard_confirm_open: false,
             autocomplete: AutocompleteState::new(),
             context_menu: None,
@@ -194,6 +201,7 @@ impl ComposeState {
             reply_thread_id: draft.thread_id.clone(),
             reply_message_id: draft.reply_to_message_id.clone(),
             status: None,
+            recipients_error: None,
             discard_confirm_open: false,
             autocomplete: AutocompleteState::new(),
             context_menu: None,

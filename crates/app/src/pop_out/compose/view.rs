@@ -111,6 +111,20 @@ fn compose_header<'a>(
 
     fields = fields.push(build_to_row(window_id, state));
 
+    if let Some(err) = state.recipients_error.as_deref() {
+        // Inline validation error directly under the recipient rows.
+        // Indented to line up with the field column (skipping the label
+        // gutter) so it visually belongs to the To/Cc/Bcc cluster
+        // rather than floating loose at the bottom of the form.
+        fields = fields.push(
+            row![
+                Space::new().width(COMPOSE_LABEL_WIDTH),
+                text(err).size(TEXT_SM).style(text::danger),
+            ]
+            .spacing(SPACE_XS),
+        );
+    }
+
     if state.show_cc {
         fields = fields.push(build_cc_row(window_id, state));
     }

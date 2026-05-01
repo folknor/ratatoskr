@@ -50,9 +50,11 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
                 || !state.cc.tokens.is_empty()
                 || !state.bcc.tokens.is_empty();
             if !has_recipients {
-                state.status = Some("Add at least one recipient".to_string());
+                state.recipients_error =
+                    Some("Add at least one recipient.".to_string());
                 return;
             }
+            state.recipients_error = None;
             state.status = Some("Send not yet wired".to_string());
         }
         ComposeMessage::Discard => {
@@ -526,5 +528,16 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             state.active_signature_id = signature_id;
             state.draft_dirty = true;
         }
+    }
+
+    // After every update, if a recipients-error is showing and any
+    // recipient now exists, clear it so the inline error disappears the
+    // moment the problem is fixed.
+    if state.recipients_error.is_some()
+        && (!state.to.tokens.is_empty()
+            || !state.cc.tokens.is_empty()
+            || !state.bcc.tokens.is_empty())
+    {
+        state.recipients_error = None;
     }
 }
