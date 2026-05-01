@@ -182,6 +182,26 @@ pub fn get_chat_contacts_sync(conn: &Connection) -> Result<Vec<DbChatContactSumm
     .map_err(|e| e.to_string())
 }
 
+/// Fetch the plain-text body of every user signature across all accounts.
+///
+/// Used by the chat timeline to apply Layer-3 signature stripping to
+/// outbound messages: each row is a candidate exact-suffix match.
+/// Empty / NULL `body_text` rows are skipped - we have no usable suffix
+/// without them. Total volume is tiny (~accounts * a few sigs) so we
+/// always fetch all of them.
+pub fn get_user_signature_texts_sync(conn: &Connection) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT body_text FROM signatures \
+             WHERE body_text IS NOT NULL AND TRIM(body_text) <> ''",
+        )
+        .map_err(|e| e.to_string())?;
+    stmt.query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
 /// Mark all messages in a contact's chat threads as read in one transaction.
 ///
 /// Flips `messages.is_read = 1` for every unread row in any thread where the

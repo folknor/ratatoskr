@@ -34,9 +34,14 @@ pub struct ChatMessage {
     pub subject: Option<String>,
     pub is_read: bool,
     pub is_from_user: bool,
-    /// Plain-text body, loaded from the body store. `None` if the body store
+    /// Plain-text body, loaded from the body store and run through
+    /// signature stripping + quote collapsing. `None` if the body store
     /// has no row for this message (shouldn't happen for seeded data).
     pub body_text: Option<String>,
+    /// The original plain-text body before stripping. Used to render the
+    /// "Show full message" expanded view; identical to `body_text` when
+    /// the strippers found nothing to remove.
+    pub body_text_full: Option<String>,
     /// Inline image attachments to render alongside the body.
     pub inline_images: Vec<ChatInlineImage>,
 }
@@ -209,8 +214,9 @@ pub async fn get_chat_timeline(
     let email = email.to_lowercase();
     let user_emails: Vec<String> = user_emails.iter().map(|e| e.to_lowercase()).collect();
 
-    // Phase 1: messages + inline-image rows from main DB.
-    let (mut messages, inline_rows) = db
+    // Phase 1: messages + inline-image rows + user-signature texts from
+    // main DB. The signatures power Layer-3 of the strip pipeline below.
+    let (mut messages, inline_rows, user_signatures) = db
         .with_conn(move |conn| {
             let rows = crate::db::queries_extra::chat::get_chat_timeline_sync(
                 conn, &email, limit, before,
@@ -221,6 +227,8 @@ pub async fn get_chat_timeline(
                 conn,
                 &message_ids,
             )?;
+            let signatures =
+                crate::db::queries_extra::chat::get_user_signature_texts_sync(conn)?;
 
             let mut messages: Vec<ChatMessage> = rows
                 .into_iter()
@@ -239,12 +247,13 @@ pub async fn get_chat_timeline(
                         is_read: row.is_read,
                         is_from_user,
                         body_text: None,
+                        body_text_full: None,
                         inline_images: Vec::new(),
                     }
                 })
                 .collect();
             messages.reverse();
-            Ok::<_, String>((messages, images))
+            Ok::<_, String>((messages, images, signatures))
         })
         .await?;
 
@@ -252,8 +261,8 @@ pub async fn get_chat_timeline(
         return Ok(messages);
     }
 
-    // Phase 2: bodies. Plain text only - HTML rendering and signature
-    // stripping are deferred to the Phase 5 polish work.
+    // Phase 2: bodies. Plain text only - HTML rendering is a future
+    // chat-bubble enhancement; today we render `body_text` directly.
     let message_ids: Vec<String> = messages.iter().map(|m| m.message_id.clone()).collect();
     let bodies = body_store.get_batch(message_ids).await?;
     let mut body_map: HashMap<String, Option<String>> = HashMap::new();
@@ -288,9 +297,20 @@ pub async fn get_chat_timeline(
         .map_err(|e| format!("spawn_blocking: {e}"))??
     };
 
+    // The strip pipeline takes &[&str], so realise borrowing once.
+    let user_sig_refs: Vec<&str> = user_signatures.iter().map(String::as_str).collect();
+
     for msg in &mut messages {
-        if let Some(text) = body_map.remove(&msg.message_id).flatten() {
-            msg.body_text = Some(text);
+        if let Some(raw) = body_map.remove(&msg.message_id).flatten() {
+            // Layer-3 (user signature) only applies to outbound mail.
+            let layer3: &[&str] = if msg.is_from_user {
+                &user_sig_refs
+            } else {
+                &[]
+            };
+            let stripped = chat_strip_body(&raw, layer3);
+            msg.body_text = Some(stripped);
+            msg.body_text_full = Some(raw);
         }
         if let Some(rows) = by_message.get(&msg.message_id) {
             for row in rows {
@@ -305,4 +325,24 @@ pub async fn get_chat_timeline(
     }
 
     Ok(messages)
+}
+
+/// Run quote-collapsing then signature-stripping over a plain-text body.
+///
+/// Falls back to the raw body if stripping leaves nothing - a message
+/// that's *entirely* quote + signature is more usefully shown verbatim
+/// than as a blank bubble. The caller still keeps the original on
+/// `ChatMessage::body_text_full` for the "show full message" toggle.
+fn chat_strip_body(raw: &str, user_signatures: &[&str]) -> String {
+    let after_quotes = common::signature_strip::collapse_quotes(raw, false);
+    let after_sig = common::signature_strip::strip_signature(
+        &after_quotes,
+        false,
+        user_signatures,
+    );
+    if after_sig.trim().is_empty() {
+        raw.to_string()
+    } else {
+        after_sig
+    }
 }

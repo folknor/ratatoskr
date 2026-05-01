@@ -3,8 +3,8 @@
 Audit date: 2026-05-01
 
 Phase 1 backend, Phase 2 timeline rendering, and Phase 3 sidebar integration
-are largely in place. Designation, signature handling, compose, and the
-polish phase are still missing or partial.
+are largely in place. Designation, compose, and the polish phase are still
+missing.
 
 Phase legend (rough): `1` data model + queries, `2` timeline view,
 `3` sidebar, `4` compose, `5` signature-stripping refinement, `6` polish.
@@ -20,21 +20,6 @@ Phase legend (rough): `1` data model + queries, `2` timeline view,
    Users cannot create or remove chat contacts at runtime - the sidebar
    CHATS section only ever shows what dev-seed wrote. (Phase 1 / Phase 3
    gap.)
-
-3. **No signature stripping or quote collapsing.** `phase-2-plan.md`
-   specifies a reusable `crates/common/src/signature_strip.rs` module with
-   `strip_signature` (layers 1-3) and `collapse_quotes`. Neither function
-   nor module exists. `chat_bubble` renders the raw `body_text` from the
-   body store verbatim, so signatures and quoted reply chains both leak
-   into the bubble UI. (Phase 2 gap; Phase 5 not started.)
-
-4. **"Show full message" affordance is dead code.** `ChatTimeline` owns an
-   `expanded: HashSet<String>` and a `ChatTimelineMessage::ToggleExpand`
-   variant; `update()` toggles the set; `chat_bubble` receives the
-   per-message expanded flag as `_expanded` (unused). No element in the
-   bubble emits `ToggleExpand`, so the toggle path is unreachable from the
-   UI. Once stripping lands this needs to render a "show full message"
-   affordance and switch the body source on expansion. (Phase 2 gap.)
 
 5. **Inline chat compose missing.** No inline composer at the bottom of
    the timeline, no Enter-to-send, no per-thread reply targeting, no emoji
@@ -118,7 +103,21 @@ Phase legend (rough): `1` data model + queries, `2` timeline view,
   indicators (with Re:/Fwd: prefix normalisation), inline-image bubbles
   with stable image handles.
 - Body text rendered from `BodyStoreState::get_batch` (plain text only -
-  no HTML rendering yet, no stripping).
+  no HTML rendering yet).
+- Signature stripping + quote collapsing (`common::signature_strip`):
+  plain-text Layer 2 (RFC 3676 `-- `) and Layer 3 (user signatures, exact
+  suffix on outbound only); plain-text quote collapse on Gmail-style
+  "On ... wrote:" attribution lines and trailing `>` blocks; HTML mode
+  removes `gmail_signature` / `moz-cite-prefix` / `gmail_quote` /
+  `gmail_extra` / `yahoo_quoted` / `<blockquote type="cite">` via
+  `lol_html`. `core::chat::get_chat_timeline` runs collapse-then-strip
+  on every body, falls back to the raw body if stripping leaves an empty
+  string, and stores both the cleaned form (`body_text`) and the
+  original (`body_text_full`) on `ChatMessage`.
+- "Show full message" affordance: `chat_bubble` defaults to the cleaned
+  body, renders a Ghost-styled toggle button when stripping changed
+  anything, and flips between cleaned and full on
+  `ChatTimelineMessage::ToggleExpand(message_id)`.
 - "Load older" button at top → cursor-based paginated load.
 - Mark-read on chat entry: `mark_chat_read_local` flips `messages.is_read`,
   `threads.is_read`, and `chat_contacts.unread_count` in one transaction;

@@ -11,6 +11,7 @@ pub mod label_flags;
 pub mod ops;
 pub mod parsed_message;
 pub mod signature_images;
+pub mod signature_strip;
 pub mod state;
 pub mod text;
 pub mod token;

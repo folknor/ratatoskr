@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use iced::widget::{Space, column, container, image, row, scrollable, text};
+use iced::widget::{Space, button, column, container, image, row, scrollable, text};
 use iced::{Alignment, Element, Length};
 
 use crate::component::Component;
@@ -191,23 +191,58 @@ impl Component for ChatTimeline {
 fn chat_bubble<'a>(
     msg: &'a ChatMessage,
     image_handles: &'a HashMap<(String, usize), image::Handle>,
-    _expanded: bool,
+    expanded: bool,
 ) -> Element<'a, ChatTimelineMessage> {
-    let body = msg
+    let stripped = msg
         .body_text
         .as_deref()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| msg.subject.clone())
-        .unwrap_or_else(|| "(no content)".to_string());
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let full = msg
+        .body_text_full
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    // Stripping changed the body if both forms exist and differ. We use
+    // the trimmed lengths here as a fast inequality check; if the lengths
+    // match, the content is identical (we only ever shorten, never
+    // rewrite, so a length-equal stripped output is necessarily the same
+    // text byte-for-byte).
+    let was_stripped = matches!((stripped, full), (Some(s), Some(f)) if s.len() != f.len());
 
-    let content = column![
-        text(body).size(TEXT_MD),
+    let body = if expanded {
+        full.or(stripped)
+    } else {
+        stripped.or(full)
+    }
+    .map(str::to_string)
+    .or_else(|| msg.subject.clone())
+    .unwrap_or_else(|| "(no content)".to_string());
+
+    let mut content = column![text(body).size(TEXT_MD)].spacing(SPACE_XXXS);
+
+    if was_stripped {
+        let toggle_label = if expanded {
+            "Show less"
+        } else {
+            "Show full message"
+        };
+        let toggle = button(
+            text(toggle_label)
+                .size(TEXT_SM)
+                .style(theme::TextClass::Muted.style()),
+        )
+        .on_press(ChatTimelineMessage::ToggleExpand(msg.message_id.clone()))
+        .style(theme::ButtonClass::Ghost.style())
+        .padding(0);
+        content = content.push(toggle);
+    }
+
+    content = content.push(
         text(format_time(msg.date))
             .size(TEXT_SM)
             .style(theme::TextClass::Muted.style()),
-    ]
-    .spacing(SPACE_XXXS);
+    );
 
     let style = if msg.is_from_user {
         theme::ContainerClass::ChatBubbleSent.style()
