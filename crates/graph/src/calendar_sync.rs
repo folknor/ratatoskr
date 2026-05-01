@@ -432,6 +432,28 @@ fn map_graph_event(event: GraphEvent) -> Result<GraphCalendarEvent, String> {
     let start_time = parse_graph_datetime(&event.start, is_all_day, "start")?;
     let end_time = parse_graph_datetime(&event.end, is_all_day, "end")?;
 
+    // All-day DST correction. The all-day branch of `parse_graph_datetime`
+    // resolves both DTSTART and DTEND through chrono::Local independently,
+    // so a 2-day event spanning a DST springing day stores end-start as
+    // 47*3600s. Downstream consumers that compute (end-start)/86400 to
+    // get the duration in days then truncate to 1 and re-emit as `P1D`.
+    // Anchor end_time to start_time + Δdate*86400 to keep the duration
+    // exact regardless of where the host's DST falls.
+    let end_time = if is_all_day {
+        match (
+            parse_graph_all_day_date(&event.start),
+            parse_graph_all_day_date(&event.end),
+        ) {
+            (Some(start_date), Some(end_date)) => {
+                let days = end_date.signed_duration_since(start_date).num_days();
+                start_time + days * 86400
+            }
+            _ => end_time,
+        }
+    } else {
+        end_time
+    };
+
     let description = event.body.map(|b| {
         if b.content_type.eq_ignore_ascii_case("text") {
             b.content
@@ -555,6 +577,14 @@ fn parse_graph_datetime(
     Ok(naive.and_utc().timestamp())
 }
 
+/// Extract the calendar date from an all-day Graph datetime. Used by
+/// `map_graph_event` to compute the date delta directly rather than
+/// subtracting two timestamps that may straddle a DST boundary.
+fn parse_graph_all_day_date(dt: &GraphDateTimeTimeZone) -> Option<chrono::NaiveDate> {
+    let date_part = dt.date_time.split('T').next().unwrap_or(&dt.date_time);
+    chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d").ok()
+}
+
 /// Resolve Graph's `timeZone` string to a `Tz`. Returns `None` for empty,
 /// "UTC", or unrecognized zones - callers fall back to UTC interpretation.
 ///
@@ -624,6 +654,37 @@ mod tests {
         };
         let ts = parse_graph_datetime(&dt, true, "start");
         assert!(ts.is_ok());
+    }
+
+    #[test]
+    fn map_event_all_day_spanning_dst_keeps_exact_day_count() {
+        // 2024-03-10 is the US spring-forward boundary. A 2-day all-day
+        // event spanning it (start=Mar 10, end=Mar 12 per Graph's
+        // exclusive-end semantics) used to resolve both endpoints
+        // through chrono::Local independently, leaving end-start as
+        // 47*3600s. The fix anchors end_time to start + Δdate*86400 so
+        // the duration is exactly 2 days regardless of the host's DST.
+        let event_json = r#"{
+            "id": "abc",
+            "subject": "Two-day off",
+            "start": {"dateTime": "2024-03-10T00:00:00.0000000", "timeZone": "Eastern Standard Time"},
+            "end": {"dateTime": "2024-03-12T00:00:00.0000000", "timeZone": "Eastern Standard Time"},
+            "isAllDay": true
+        }"#;
+        let event: GraphEvent = serde_json::from_str(event_json).expect("parses");
+        let mapped = map_graph_event(event).expect("maps");
+        assert!(mapped.is_all_day);
+        assert_eq!(mapped.end_time - mapped.start_time, 2 * 86400);
+    }
+
+    #[test]
+    fn parse_graph_all_day_date_extracts_calendar_date() {
+        let dt = GraphDateTimeTimeZone {
+            date_time: "2024-03-10T00:00:00.0000000".to_string(),
+            time_zone: "Eastern Standard Time".to_string(),
+        };
+        let date = parse_graph_all_day_date(&dt).expect("parses");
+        assert_eq!(date, chrono::NaiveDate::from_ymd_opt(2024, 3, 10).expect("valid"));
     }
 
     #[test]

@@ -55,10 +55,6 @@ All findings addressed. Lenses and targets:
 
 ---
 
-### `crates/core/src/caldav/parse.rs::extract_datetime` (236-305)
-
-- **High** (flagged 2x) - All-day events spanning DST get the wrong duration. `build_local_midnight` resolves both DTSTART/DTEND midnights through `chrono::Local`, so a Mar 9 -> Mar 11 EST/EDT-spanning all-day event has 23h instead of 48h, breaking `(end-start)/86400` consumers. Same root cause in `graph/calendar_sync.rs:508-517`.
-
 ### `crates/core/src/caldav/parse.rs::extract_vevent` / `parse_icalendar` (69-90, 98-121)
 
 - **Medium** (upstream) - Empty SUMMARY / DESCRIPTION / LOCATION are still indistinguishable from absent. Removed the local `.filter(|s| !s.is_empty())` step (forward-compat for any future calcard release that surfaces empty values), but calcard's parser drops `SUMMARY:` from the entries list before our chain sees it, so user-cleared-title support requires an upstream calcard change. Tracking here so the local code is ready when it lands.
@@ -120,7 +116,6 @@ All findings addressed. Lenses and targets:
 
 ### `crates/graph/src/calendar_sync.rs`
 
-- **High** (flagged 2x) - All-day events spanning DST get 23h duration in `parse_graph_datetime` all-day branch (`:508-517`). Same root cause and fix as CalDAV `extract_datetime` / `build_local_midnight`.
 - **Medium** - `resolve_graph_tz` falls through to `None` for unknown Windows zone names (`:574`); `parse_graph_datetime` then stores the naive wall clock as UTC (`:538`). The fallback now logs WARN with the offending zone name so an operator can see which payloads it's mis-anchoring; the underlying calcard alias gap is still the real fix. Repro: `2024-06-15T10:00:00` in `Africa/Juba` ("South Sudan Standard Time", not in calcard) becomes 10:00Z instead of 08:00Z (with a log line now).
 - **Low** - Brittle `'.' before 'T'` truncation logic. Sub-minute precision (`T10:00:00.5+02:00`) silently drops the offset; if Graph ever emits sub-minute precision, parsing silently corrupts the offset.
 

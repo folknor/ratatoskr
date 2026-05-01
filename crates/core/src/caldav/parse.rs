@@ -150,6 +150,36 @@ fn extract_vevent(
         Some(start + duration)
     });
 
+    // All-day DST correction. DTSTART and DTEND for `VALUE=DATE` both pass
+    // through `build_local_midnight`, so independently resolving DTEND in
+    // chrono::Local on a DST-springing day shifts it by ±1 hour: a 2-day
+    // all-day event spanning the spring-forward boundary stores end-start
+    // as 47*3600s, and `(end - start) / 86400` rounds down to 1 day. JMAP
+    // emit at jmap/calendar_sync.rs:810 then re-serializes the event as
+    // `P1D`, propagating the truncation to every server-side consumer.
+    //
+    // Anchor end_time to start_time + Δdate*86400 so the duration is
+    // exactly the number of calendar days the source iCal asked for,
+    // independent of where DST sits relative to the span. start_time keeps
+    // its display-correct local-midnight value; end_time may not land on
+    // local midnight in a zone that springs forward inside the span (it
+    // sits at 01:00 local instead) but downstream code already special-
+    // cases is_all_day, so this is invisible to display.
+    let end_time = if is_all_day && let (Some(start), Some(end)) = (start_time, end_time) {
+        match (
+            extract_all_day_date(component, &ICalendarProperty::Dtstart),
+            extract_all_day_date(component, &ICalendarProperty::Dtend),
+        ) {
+            (Some(start_date), Some(end_date)) => {
+                let days = end_date.signed_duration_since(start_date).num_days();
+                Some(start + days * 86400)
+            }
+            _ => Some(end),
+        }
+    } else {
+        end_time
+    };
+
     let status = component
         .property(&ICalendarProperty::Status)
         .and_then(|e| e.values.first())
@@ -432,6 +462,24 @@ fn build_local_midnight(dt: &calcard::common::PartialDateTime) -> Option<i64> {
     let day = dt.day? as u32;
     let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)?.and_hms_opt(0, 0, 0)?;
     common::time::resolve_local_to_timestamp(naive, &chrono::Local)
+}
+
+/// Extract the underlying calendar date for a `VALUE=DATE` property, before
+/// it gets resolved to a midnight-anchored timestamp. Used by the all-day
+/// DST correction in `extract_vevent` to compute the date delta directly
+/// rather than subtracting two timestamps that may straddle a DST boundary.
+fn extract_all_day_date(
+    component: &calcard::icalendar::ICalendarComponent,
+    prop: &ICalendarProperty,
+) -> Option<chrono::NaiveDate> {
+    let entry = pick_datetime_entry(component, prop)?;
+    let Some(ICalendarValue::PartialDateTime(dt)) = entry.values.first() else {
+        return None;
+    };
+    let year = dt.year? as i32;
+    let month = dt.month? as u32;
+    let day = dt.day? as u32;
+    chrono::NaiveDate::from_ymd_opt(year, month, day)
 }
 
 /// Extract VALARM reminders from the event's sub-components.
@@ -1092,6 +1140,37 @@ END:VCALENDAR\r\n";
         assert!(events[0].is_all_day);
         assert!(events[0].start_time.is_some());
         assert!(events[0].end_time.is_some());
+    }
+
+    #[test]
+    fn all_day_event_spanning_dst_keeps_exact_day_count() {
+        // 2024-03-10 is the US spring-forward boundary. A 2-day all-day
+        // event spanning it (DTSTART=Mar 10, DTEND=Mar 12 per iCal's
+        // "exclusive end" semantics) used to resolve both endpoints
+        // through chrono::Local independently, leaving end-start as
+        // 47*3600s. (end - start) / 86400 = 1 day, so JMAP re-emit
+        // serialized the event back to the server as `P1D`. The fix
+        // anchors end_time to start_time + Δdate*86400, keeping the
+        // duration exact regardless of where the host's DST falls.
+        let ical = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:allday-dst@example.com\r\n\
+SUMMARY:Two-day holiday\r\n\
+DTSTART;VALUE=DATE:20240310\r\n\
+DTEND;VALUE=DATE:20240312\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        let ev = &events[0];
+        assert!(ev.is_all_day);
+        let start = ev.start_time.expect("start");
+        let end = ev.end_time.expect("end");
+        // Δ should be exactly 2 days, irrespective of host DST.
+        assert_eq!(end - start, 2 * 86400);
     }
 
     #[test]
