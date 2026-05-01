@@ -438,28 +438,51 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
     let mut calendars = Vec::new();
 
     let mut stack: Vec<String> = Vec::new();
-    let mut is_calendar = false;
-    let mut current_href = String::new();
-    let mut current_displayname = String::new();
-    let mut current_ctag = String::new();
-    let mut current_color = String::new();
     let mut buf = String::new();
+
+    // Response-level state, populated only from 2xx propstats and emitted at
+    // </response> if the response itself isn't an error.
+    let mut response_href = String::new();
+    let mut response_status = String::new();
+    let mut response_is_calendar = false;
+    let mut response_displayname = String::new();
+    let mut response_ctag = String::new();
+    let mut response_color = String::new();
+
+    // Per-propstat pending state, committed to response-level state only when
+    // the closing `<status>` says 2xx. Mixed propstat blocks (one 200 OK for
+    // the props the server can serve, one 404 Not Found for the ones it
+    // can't) are handled by this commit gate; the previous shape merged
+    // values from both blocks regardless of status.
+    let mut propstat_status = String::new();
+    let mut pending_is_calendar = false;
+    let mut pending_displayname: Option<String> = None;
+    let mut pending_ctag: Option<String> = None;
+    let mut pending_color: Option<String> = None;
 
     loop {
         match reader.read_event() {
             Ok(Event::Start(ref e)) => {
                 let name = local_name(e.name().as_ref());
                 if name == "response" {
-                    current_href.clear();
-                    current_displayname.clear();
-                    current_ctag.clear();
-                    current_color.clear();
-                    is_calendar = false;
+                    response_href.clear();
+                    response_status.clear();
+                    response_is_calendar = false;
+                    response_displayname.clear();
+                    response_ctag.clear();
+                    response_color.clear();
+                }
+                if name == "propstat" {
+                    propstat_status.clear();
+                    pending_is_calendar = false;
+                    pending_displayname = None;
+                    pending_ctag = None;
+                    pending_color = None;
                 }
                 // Open-close `<calendar></calendar>` form, scoped to inside
                 // `<resourcetype>`.
                 if name == "calendar" && stack.iter().any(|s| s == "resourcetype") {
-                    is_calendar = true;
+                    pending_is_calendar = true;
                 }
                 stack.push(name);
                 buf.clear();
@@ -468,7 +491,7 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
                 let name = local_name(e.name().as_ref());
                 // Self-closed `<calendar/>` form.
                 if name == "calendar" && stack.iter().any(|s| s == "resourcetype") {
-                    is_calendar = true;
+                    pending_is_calendar = true;
                 }
             }
             Ok(Event::Text(ref e)) => {
@@ -479,8 +502,9 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
                 }
             }
             Ok(Event::CData(ref e)) => {
-                if let Ok(text) = e.decode() {
-                    buf.push_str(&text);
+                match e.decode() {
+                    Ok(text) => buf.push_str(&text),
+                    Err(err) => log::warn!("CalDAV PROPFIND CDATA decode failed: {err}"),
                 }
             }
             Ok(Event::End(ref e)) => {
@@ -488,36 +512,74 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
                 let parent = stack.iter().rev().nth(1).map(String::as_str);
                 match (parent, name.as_str()) {
                     (Some("response"), "href") => {
-                        current_href = buf.trim().to_string();
+                        response_href = buf.trim().to_string();
+                    }
+                    (Some("response"), "status") => {
+                        // Top-level <status> sibling of <propstat> applies
+                        // to the whole resource (e.g. a 404 for a resource
+                        // that vanished between PROPFIND and REPORT).
+                        response_status = buf.trim().to_string();
+                    }
+                    (Some("propstat"), "status") => {
+                        propstat_status = buf.trim().to_string();
                     }
                     (Some("prop"), "displayname") => {
-                        current_displayname = buf.trim().to_string();
+                        pending_displayname = Some(buf.trim().to_string());
                     }
                     (Some("prop"), "getctag") => {
-                        current_ctag = buf.trim().to_string();
+                        pending_ctag = Some(buf.trim().to_string());
                     }
                     (Some("prop"), "calendar-color") => {
-                        current_color = buf.trim().to_string();
+                        pending_color = Some(buf.trim().to_string());
                     }
                     _ => {}
                 }
-                if name == "response" && is_calendar && !current_href.is_empty() {
+                if name == "propstat" {
+                    if propstat_status_is_ok(&propstat_status) {
+                        if pending_is_calendar {
+                            response_is_calendar = true;
+                        }
+                        if let Some(v) = pending_displayname.take() {
+                            response_displayname = v;
+                        }
+                        if let Some(v) = pending_ctag.take() {
+                            response_ctag = v;
+                        }
+                        if let Some(v) = pending_color.take() {
+                            response_color = v;
+                        }
+                    } else {
+                        log::debug!(
+                            "Skipping propstat with non-2xx status: {propstat_status}"
+                        );
+                    }
+                    propstat_status.clear();
+                    pending_is_calendar = false;
+                    pending_displayname = None;
+                    pending_ctag = None;
+                    pending_color = None;
+                }
+                if name == "response"
+                    && response_is_calendar
+                    && !response_href.is_empty()
+                    && response_status_is_ok(&response_status)
+                {
                     calendars.push(DiscoveredCalendar {
-                        href: current_href.clone(),
-                        display_name: if current_displayname.is_empty() {
+                        href: response_href.clone(),
+                        display_name: if response_displayname.is_empty() {
                             None
                         } else {
-                            Some(current_displayname.clone())
+                            Some(response_displayname.clone())
                         },
-                        color: if current_color.is_empty() {
+                        color: if response_color.is_empty() {
                             None
                         } else {
-                            Some(current_color.clone())
+                            Some(response_color.clone())
                         },
-                        ctag: if current_ctag.is_empty() {
+                        ctag: if response_ctag.is_empty() {
                             None
                         } else {
-                            Some(current_ctag.clone())
+                            Some(response_ctag.clone())
                         },
                     });
                 }
@@ -532,6 +594,35 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
     calendars
 }
 
+/// Status-line ok-ness for a `<propstat><status>` element.
+///
+/// Lenient on absence: some servers omit the status line entirely when it
+/// would be 200 OK (RFC 4918 violation but real). We treat absence as OK so
+/// pre-existing parser behavior on test fixtures and well-behaved servers is
+/// preserved. Explicit non-2xx codes are honored: a `<propstat>` with status
+/// `HTTP/1.1 404 Not Found` no longer leaks its (empty/cached) prop values
+/// into the response-level state.
+fn propstat_status_is_ok(status: &str) -> bool {
+    if status.is_empty() {
+        return true;
+    }
+    status
+        .split_whitespace()
+        .nth(1)
+        .is_some_and(|code| code.starts_with('2'))
+}
+
+/// Status-line ok-ness for a top-level `<response><status>` element.
+///
+/// Used by the multiget parser to skip resources that returned an error at
+/// the response level (e.g. a 404 for a resource that vanished between
+/// PROPFIND and REPORT, or a 500 from SOGo on a resource that failed to
+/// parse server-side). Same lenient-on-absence semantics as
+/// `propstat_status_is_ok`.
+fn response_status_is_ok(status: &str) -> bool {
+    propstat_status_is_ok(status)
+}
+
 /// Parse a PROPFIND Depth:1 response to extract event URIs and ETags.
 ///
 /// Field reads are parent-scoped (see `parse_propfind_calendars`) and CDATA
@@ -542,19 +633,31 @@ pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
     let mut entries = Vec::new();
 
     let mut stack: Vec<String> = Vec::new();
-    let mut current_href = String::new();
-    let mut current_etag = String::new();
-    let mut current_content_type = String::new();
     let mut buf = String::new();
+
+    let mut response_href = String::new();
+    let mut response_status = String::new();
+    let mut response_etag = String::new();
+    let mut response_content_type = String::new();
+
+    let mut propstat_status = String::new();
+    let mut pending_etag: Option<String> = None;
+    let mut pending_content_type: Option<String> = None;
 
     loop {
         match reader.read_event() {
             Ok(Event::Start(ref e)) => {
                 let name = local_name(e.name().as_ref());
                 if name == "response" {
-                    current_href.clear();
-                    current_etag.clear();
-                    current_content_type.clear();
+                    response_href.clear();
+                    response_status.clear();
+                    response_etag.clear();
+                    response_content_type.clear();
+                }
+                if name == "propstat" {
+                    propstat_status.clear();
+                    pending_etag = None;
+                    pending_content_type = None;
                 }
                 stack.push(name);
                 buf.clear();
@@ -567,8 +670,9 @@ pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
                 }
             }
             Ok(Event::CData(ref e)) => {
-                if let Ok(text) = e.decode() {
-                    buf.push_str(&text);
+                match e.decode() {
+                    Ok(text) => buf.push_str(&text),
+                    Err(err) => log::warn!("CalDAV PROPFIND CDATA decode failed: {err}"),
                 }
             }
             Ok(Event::End(ref e)) => {
@@ -576,25 +680,49 @@ pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
                 let parent = stack.iter().rev().nth(1).map(String::as_str);
                 match (parent, name.as_str()) {
                     (Some("response"), "href") => {
-                        current_href = buf.trim().to_string();
+                        response_href = buf.trim().to_string();
+                    }
+                    (Some("response"), "status") => {
+                        response_status = buf.trim().to_string();
+                    }
+                    (Some("propstat"), "status") => {
+                        propstat_status = buf.trim().to_string();
                     }
                     (Some("prop"), "getetag") => {
                         // ETag preserved verbatim - see RFC 7232.
-                        current_etag = buf.trim().to_string();
+                        pending_etag = Some(buf.trim().to_string());
                     }
                     (Some("prop"), "getcontenttype") => {
-                        current_content_type = buf.trim().to_string();
+                        pending_content_type = Some(buf.trim().to_string());
                     }
                     _ => {}
                 }
+                if name == "propstat" {
+                    if propstat_status_is_ok(&propstat_status) {
+                        if let Some(v) = pending_etag.take() {
+                            response_etag = v;
+                        }
+                        if let Some(v) = pending_content_type.take() {
+                            response_content_type = v;
+                        }
+                    } else {
+                        log::debug!(
+                            "Skipping propstat with non-2xx status: {propstat_status}"
+                        );
+                    }
+                    propstat_status.clear();
+                    pending_etag = None;
+                    pending_content_type = None;
+                }
                 if name == "response"
-                    && !current_href.is_empty()
-                    && !current_etag.is_empty()
-                    && is_icalendar_resource(&current_href, &current_content_type)
+                    && response_status_is_ok(&response_status)
+                    && !response_href.is_empty()
+                    && !response_etag.is_empty()
+                    && is_icalendar_resource(&response_href, &response_content_type)
                 {
                     entries.push(CalDavEventEntry {
-                        uri: current_href.clone(),
-                        etag: current_etag.clone(),
+                        uri: response_href.clone(),
+                        etag: response_etag.clone(),
                     });
                 }
                 stack.pop();
@@ -664,17 +792,27 @@ pub fn parse_multiget_report(xml: &str) -> Vec<(String, String)> {
     let mut results = Vec::new();
 
     let mut stack: Vec<String> = Vec::new();
-    let mut current_href = String::new();
-    let mut current_ical = String::new();
     let mut buf = String::new();
+
+    let mut response_href = String::new();
+    let mut response_status = String::new();
+    let mut response_ical = String::new();
+
+    let mut propstat_status = String::new();
+    let mut pending_ical: Option<String> = None;
 
     loop {
         match reader.read_event() {
             Ok(Event::Start(ref e)) => {
                 let name = local_name(e.name().as_ref());
                 if name == "response" {
-                    current_href.clear();
-                    current_ical.clear();
+                    response_href.clear();
+                    response_status.clear();
+                    response_ical.clear();
+                }
+                if name == "propstat" {
+                    propstat_status.clear();
+                    pending_ical = None;
                 }
                 stack.push(name);
                 buf.clear();
@@ -687,8 +825,9 @@ pub fn parse_multiget_report(xml: &str) -> Vec<(String, String)> {
                 }
             }
             Ok(Event::CData(ref e)) => {
-                if let Ok(text) = e.decode() {
-                    buf.push_str(&text);
+                match e.decode() {
+                    Ok(text) => buf.push_str(&text),
+                    Err(err) => log::warn!("CalDAV multiget CDATA decode failed: {err}"),
                 }
             }
             Ok(Event::End(ref e)) => {
@@ -696,21 +835,57 @@ pub fn parse_multiget_report(xml: &str) -> Vec<(String, String)> {
                 let parent = stack.iter().rev().nth(1).map(String::as_str);
                 match (parent, name.as_str()) {
                     (Some("response"), "href") => {
-                        current_href = buf.trim().to_string();
+                        response_href = buf.trim().to_string();
+                    }
+                    (Some("response"), "status") => {
+                        // Top-level status: applies to the whole resource.
+                        // SOGo's failure mode is to emit a 500 here while
+                        // also echoing stale calendar-data inside a 200
+                        // propstat - the response-level rejection here is
+                        // what blocks the stale data from landing locally.
+                        response_status = buf.trim().to_string();
+                    }
+                    (Some("propstat"), "status") => {
+                        propstat_status = buf.trim().to_string();
                     }
                     (Some("prop"), "calendar-data") => {
                         // calendar-data: trim only outer whitespace so that
                         // intentional CRLF folding inside the iCal payload
                         // is preserved.
-                        current_ical = buf.trim().to_string();
+                        pending_ical = Some(buf.trim().to_string());
                     }
                     _ => {}
                 }
+                if name == "propstat" {
+                    if propstat_status_is_ok(&propstat_status) {
+                        if let Some(v) = pending_ical.take() {
+                            response_ical = v;
+                        }
+                    } else {
+                        log::debug!(
+                            "Skipping multiget propstat with non-2xx status: {propstat_status}"
+                        );
+                    }
+                    propstat_status.clear();
+                    pending_ical = None;
+                }
                 if name == "response"
-                    && !current_href.is_empty()
-                    && !current_ical.is_empty()
+                    && response_status_is_ok(&response_status)
+                    && !response_href.is_empty()
+                    && !response_ical.is_empty()
                 {
-                    results.push((current_href.clone(), current_ical.clone()));
+                    results.push((response_href.clone(), response_ical.clone()));
+                } else if name == "response"
+                    && !response_status_is_ok(&response_status)
+                    && !response_href.is_empty()
+                {
+                    // Response had an explicit non-2xx status. Log the
+                    // resource so an operator chasing "this event silently
+                    // disappeared from sync" can see which entries were
+                    // dropped.
+                    log::debug!(
+                        "Multiget response for {response_href} returned non-2xx status: {response_status}; dropping"
+                    );
                 }
                 stack.pop();
                 buf.clear();
@@ -1248,5 +1423,146 @@ END:VCALENDAR</C:calendar-data>
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, "/calendars/user/personal/event1.ics");
         assert!(results[0].1.contains("Test Event"));
+    }
+
+    #[test]
+    fn parse_propfind_calendars_skips_404_propstat_values() {
+        // Mixed propstat block: one 200 OK with the resourcetype + display
+        // name, one 404 Not Found with a stale ctag echoed by the server.
+        // The previous parser merged values from both; the propstat-status
+        // gate should now pull only from the 200 block and ignore the 404.
+        let xml = r#"<?xml version="1.0"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"
+               xmlns:CS="http://calendarserver.org/ns/">
+  <D:response>
+    <D:href>/calendars/user/personal/</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype><D:collection/><C:calendar/></D:resourcetype>
+        <D:displayname>Personal</D:displayname>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+    <D:propstat>
+      <D:prop>
+        <CS:getctag>stale-ctag-from-cache</CS:getctag>
+      </D:prop>
+      <D:status>HTTP/1.1 404 Not Found</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+
+        let calendars = parse_propfind_calendars(xml);
+        assert_eq!(calendars.len(), 1);
+        assert_eq!(calendars[0].href, "/calendars/user/personal/");
+        assert_eq!(calendars[0].display_name.as_deref(), Some("Personal"));
+        // The 404 propstat's stale ctag must NOT leak through.
+        assert!(calendars[0].ctag.is_none());
+    }
+
+    #[test]
+    fn parse_propfind_events_skips_response_level_500() {
+        // A 207 response can carry per-resource error responses with a
+        // top-level <status> sibling of <propstat>. Those entries used to
+        // be filtered out only when they had no etag, so an etag-bearing
+        // 500 entry could leak through.
+        let xml = r#"<?xml version="1.0"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/calendars/user/personal/event1.ics</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:getetag>"etag-111"</D:getetag>
+        <D:getcontenttype>text/calendar</D:getcontenttype>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+  <D:response>
+    <D:href>/calendars/user/personal/event2.ics</D:href>
+    <D:status>HTTP/1.1 500 Internal Server Error</D:status>
+  </D:response>
+</D:multistatus>"#;
+
+        let entries = parse_propfind_events(xml);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].uri, "/calendars/user/personal/event1.ics");
+    }
+
+    #[test]
+    fn parse_multiget_report_skips_response_level_500_with_stale_data() {
+        // The SOGo failure shape: response-level 500 alongside a 200
+        // propstat that echoes stale calendar-data from the cache. The
+        // previous parser would emit the stale data; the response-status
+        // gate now drops it.
+        let xml = r#"<?xml version="1.0"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:response>
+    <D:href>/calendars/user/personal/good.ics</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:getetag>"etag-111"</D:getetag>
+        <C:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:good@example.com
+SUMMARY:Good Event
+DTSTART:20240315T100000Z
+DTEND:20240315T110000Z
+END:VEVENT
+END:VCALENDAR</C:calendar-data>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+  <D:response>
+    <D:href>/calendars/user/personal/broken.ics</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:getetag>"etag-stale"</D:getetag>
+        <C:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:stale@example.com
+SUMMARY:STALE DATA
+DTSTART:20240314T100000Z
+DTEND:20240314T110000Z
+END:VEVENT
+END:VCALENDAR</C:calendar-data>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+    <D:status>HTTP/1.1 500 Internal Server Error</D:status>
+  </D:response>
+</D:multistatus>"#;
+
+        let results = parse_multiget_report(xml);
+        assert_eq!(results.len(), 1, "stale 500 response must not be emitted");
+        assert_eq!(results[0].0, "/calendars/user/personal/good.ics");
+        assert!(results[0].1.contains("Good Event"));
+        // The stale data from the 500-response was dropped, so it must not
+        // appear anywhere in the results.
+        for (_, ical) in &results {
+            assert!(!ical.contains("STALE DATA"));
+        }
+    }
+
+    #[test]
+    fn parse_multiget_report_skips_per_resource_404() {
+        // Per-resource 404 with no calendar-data (resource deleted between
+        // PROPFIND and REPORT). Should be naturally dropped by the existing
+        // emission gate (no calendar-data) AND by the new response-status
+        // check, but the new path also catches the case where the server
+        // emits the empty propstat block alongside the 404.
+        let xml = r#"<?xml version="1.0"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:response>
+    <D:href>/calendars/user/personal/missing.ics</D:href>
+    <D:status>HTTP/1.1 404 Not Found</D:status>
+  </D:response>
+</D:multistatus>"#;
+
+        let results = parse_multiget_report(xml);
+        assert!(results.is_empty());
     }
 }
