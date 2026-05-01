@@ -262,7 +262,17 @@ async fn upsert_parsed_event(
         serde_json::to_string(&attendees).ok()
     };
 
-    let start_time = event.start_time.unwrap_or(0);
+    // Refuse to persist events that have no DTSTART. The previous
+    // `unwrap_or(0)` fallback rendered them in the calendar at the Unix
+    // epoch (1970-01-01 00:00 UTC) - a confusing artefact rather than
+    // diagnosable data. Logging the URI so an operator chasing a missing
+    // event can find the dropped resource.
+    let Some(start_time) = event.start_time else {
+        log::warn!(
+            "CalDAV VEVENT at {uri} has no usable DTSTART; refusing to persist as epoch event"
+        );
+        return Ok(());
+    };
     let end_time = event.end_time.unwrap_or(start_time);
 
     db_upsert_calendar_event(

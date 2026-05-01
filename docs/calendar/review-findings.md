@@ -76,7 +76,6 @@ All findings addressed. Lenses and targets:
 
 - **Medium** (upstream) - Empty SUMMARY / DESCRIPTION / LOCATION are still indistinguishable from absent. Removed the local `.filter(|s| !s.is_empty())` step (forward-compat for any future calcard release that surfaces empty values), but calcard's parser drops `SUMMARY:` from the entries list before our chain sees it, so user-cleared-title support requires an upstream calcard change. Tracking here so the local code is ready when it lands.
 - **Medium** - Folded-line + CRLF handling depends on calcard. LF-only line endings (some Linux bridges) may fail to unfold; long DESCRIPTION lines get truncated. Worth a unit test covering LF-only + folded long line.
-- **Medium** - Missing or unparseable DTSTART/DTEND yields `start_time=0` (Unix epoch) downstream (`sync.rs:234`), not a logged parse failure. Users see broken events at epoch instead of skipped/diagnosed bad items.
 ### `crates/core/src/caldav/parse.rs::is_icalendar_resource` (711-720)
 
 - **Medium** - Sub-collection URIs without trailing slash treated as event resources via the third-arm fallback (Davical, Bedework, old Zimbra emit collection URIs without `/`). Triggers REPORT 403 on the collection, which can fail the whole batch.
@@ -103,7 +102,6 @@ All findings addressed. Lenses and targets:
 ### `crates/core/src/caldav/client.rs::discover` / `discover_principal` (128-207)
 
 - **Medium** - Relative principal/home hrefs returned by a redirected `.well-known/caldav` are resolved against the original base URL, not the redirect target.
-- **Medium** - Scheme-downgrade redirect risk: depends on reqwest's version stripping `Authorization` on cross-origin redirects. Verify in `Cargo.toml`.
 - **Medium** - `build_client_from_config` (`mod.rs:294-300`) replays persisted principal/home; if home is present, discovery is skipped entirely. No rediscovery fallback when persisted URLs go stale (server migration, principal deletion, etc.).
 
 ### `crates/core/src/caldav/client.rs::fetch_events` multiget body (278-292)
@@ -122,7 +120,6 @@ All findings addressed. Lenses and targets:
 
 - **Medium** - Empty remote set is now guarded against wiping the local cache (`sync_calendar_events` skips the deletion phase when remote returns 0 entries against a non-empty local cache). Still open: when the *initial* sync of a calendar legitimately starts empty and the server later begins returning entries, the heuristic doesn't mis-fire (remote=0 with stored=0 is a no-op). The remaining failure mode is the propstat-status-not-inspected case below, where individual entries get filtered out as "absent" mid-batch even though the response was 207-OK overall.
 - **High** - Sync key is `caldav:{UID}` (`:212, :289`); master + override VEVENTs collide on `(account_id, google_event_id)`. Need RECURRENCE-ID folded into the key.
-- **Medium** - Missing or unparseable DTSTART stores `start_time=0` (`:234`); user sees an epoch event.
 - **Low** - `can_edit=true` hard-coded on upsert (`:53, :64`); read-only calendars from iCloud / Fastmail / SOGo show edit affordances and 403 on PUT/DELETE.
 
 ---
