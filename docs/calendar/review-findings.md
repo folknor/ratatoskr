@@ -151,7 +151,7 @@ All findings addressed. Lenses and targets:
 ### `crates/graph/src/calendar_sync.rs`
 
 - **High** (flagged 2x) - All-day events spanning DST get 23h duration in `parse_graph_datetime` all-day branch (`:508-517`). Same root cause and fix as CalDAV `extract_datetime` / `build_local_midnight`.
-- **Medium** - `resolve_graph_tz` falls through to `None` for unknown Windows zone names (`:574`); `parse_graph_datetime` then stores the naive wall clock as UTC (`:538`). Repro: `2024-06-15T10:00:00` in `Africa/Juba` ("South Sudan Standard Time", not in calcard) becomes 10:00Z instead of 08:00Z. "GMT Standard Time" maps fine.
+- **Medium** - `resolve_graph_tz` falls through to `None` for unknown Windows zone names (`:574`); `parse_graph_datetime` then stores the naive wall clock as UTC (`:538`). The fallback now logs WARN with the offending zone name so an operator can see which payloads it's mis-anchoring; the underlying calcard alias gap is still the real fix. Repro: `2024-06-15T10:00:00` in `Africa/Juba` ("South Sudan Standard Time", not in calcard) becomes 10:00Z instead of 08:00Z (with a log line now).
 - **Low** - Brittle `'.' before 'T'` truncation logic. Sub-minute precision (`T10:00:00.5+02:00`) silently drops the offset; if Graph ever emits sub-minute precision, parsing silently corrupts the offset.
 
 ---

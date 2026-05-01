@@ -535,9 +535,24 @@ fn parse_graph_datetime(
     let naive = chrono::NaiveDateTime::parse_from_str(clean, "%Y-%m-%dT%H:%M:%S")
         .map_err(|e| format!("Invalid Graph {label} dateTime '{}': {e}", dt.date_time))?;
 
-    Ok(resolve_graph_tz(&dt.time_zone)
-        .and_then(|tz| common::time::resolve_local_to_timestamp(naive, &tz))
-        .unwrap_or_else(|| naive.and_utc().timestamp()))
+    if let Some(tz) = resolve_graph_tz(&dt.time_zone)
+        && let Some(ts) = common::time::resolve_local_to_timestamp(naive, &tz)
+    {
+        return Ok(ts);
+    }
+    // Fall back to wall-clock-as-UTC. This is also what we do for missing
+    // / "UTC" / "tzone://Microsoft/Custom/..." values, so the no-log path
+    // would mask zones that calcard doesn't yet map (e.g. "South Sudan
+    // Standard Time"). Distinguish the two cases at log time so an
+    // operator running with debug logs can tell why an event is showing
+    // up at the wall-clock-as-UTC instant rather than the intended one.
+    if !(dt.time_zone.is_empty() || dt.time_zone.eq_ignore_ascii_case("UTC")) {
+        log::warn!(
+            "Graph timeZone {:?} did not resolve to a known zone; treating wall clock as UTC",
+            dt.time_zone
+        );
+    }
+    Ok(naive.and_utc().timestamp())
 }
 
 /// Resolve Graph's `timeZone` string to a `Tz`. Returns `None` for empty,
