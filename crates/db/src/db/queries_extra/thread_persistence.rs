@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use mail_parser::MessageParser;
-use rusqlite::Transaction;
+use rusqlite::{Connection, Transaction};
 
 use crate::db::lookups;
 
@@ -637,6 +637,64 @@ fn repair_thread_after_message_reassignment(
     rebuild_thread_participants(tx, account_id, thread_id)?;
     maybe_update_chat_state(tx, account_id, thread_id, user_emails)?;
     Ok(())
+}
+
+/// One-shot backfill that rebuilds `thread_participants` for every thread
+/// in an account.
+///
+/// Pre-launch users who synced before this code was deployed will have
+/// `messages` rows but no `thread_participants` data. Without that data,
+/// chat designation cannot resolve which threads are 1:1 with the
+/// contact, so `is_chat_thread` never flips and the timeline stays
+/// empty. The backfill walks every thread once, parses the address
+/// fields off existing messages, populates `thread_participants`, and
+/// then re-evaluates `is_chat_thread` per thread (a no-op when the
+/// account has no chat contacts yet, but correct for users who had
+/// designated contacts before the participants table was added).
+///
+/// Idempotent: returns early when an account already has any
+/// participants row, on the assumption that sync has been keeping it
+/// in step (rebuild during sync is the steady-state path). Callers
+/// should run this on boot, fire-and-forget; subsequent boots after
+/// the first successful run skip the work entirely.
+pub fn backfill_thread_participants_for_account_sync(
+    conn: &Connection,
+    account_id: &str,
+    user_emails: &[String],
+) -> Result<usize, String> {
+    let already_done: i64 = conn
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM thread_participants WHERE account_id = ?1 LIMIT 1)",
+            rusqlite::params![account_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("check existing participants: {e}"))?;
+    if already_done != 0 {
+        return Ok(0);
+    }
+
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("begin: {e}"))?;
+
+    let thread_ids: Vec<String> = {
+        let mut stmt = tx
+            .prepare("SELECT id FROM threads WHERE account_id = ?1")
+            .map_err(|e| format!("prepare threads: {e}"))?;
+        stmt.query_map(rusqlite::params![account_id], |row| row.get::<_, String>(0))
+            .map_err(|e| format!("query threads: {e}"))?
+            .filter_map(Result::ok)
+            .collect()
+    };
+
+    let count = thread_ids.len();
+    for tid in &thread_ids {
+        rebuild_thread_participants(&tx, account_id, tid)?;
+        maybe_update_chat_state(&tx, account_id, tid, user_emails)?;
+    }
+
+    tx.commit().map_err(|e| format!("commit: {e}"))?;
+    Ok(count)
 }
 
 fn rebuild_thread_participants(

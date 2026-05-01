@@ -26,14 +26,6 @@ Phase legend (rough): `1` data model + queries, `2` timeline view,
    shortcode translation, no signature-hide-in-own-view treatment. (Phase 4
    not started.)
 
-## Medium
-
-9. **No production backfill for `thread_participants`.** Implementation
-   phases plan a "post-migration fixup" that parses every existing
-   `messages` row's address fields. The dev workflow doesn't need it
-   (dev-seed wipes and reseeds), but the production-launch checklist
-   relies on it. Not yet written. (Phase 1 deferred.)
-
 ## Implemented (Phase 1)
 
 - Schema: `thread_participants`, `chat_contacts`, `threads.is_chat_thread`,
@@ -58,6 +50,12 @@ Phase legend (rough): `1` data model + queries, `2` timeline view,
   `queries.rs`, and `navigation.rs` (15 sites) - chat threads excluded
   from inbox / folder / smart-folder / unread-count queries.
 - `Chat` and `ChatList` generation brands in `core/src/generation.rs`.
+- `backfill_thread_participants_for_account_sync` runs once per account
+  on boot (idempotent: returns early when an account already has any
+  participants row). Rebuilds `thread_participants` from existing
+  `messages` address fields and re-evaluates `is_chat_thread` per
+  thread, so users who synced before the participants table was added
+  pick up the data on first launch of the new code without re-syncing.
 
 ## Implemented (Phase 2)
 

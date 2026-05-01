@@ -931,13 +931,61 @@ impl App {
         let sync_task = self.sync_all_accounts();
         let push_task = self.start_jmap_push();
         let auto_reply_task = self.check_auto_reply_status();
+        let backfill_task = self.backfill_thread_participants_task();
         Task::batch([
             self.load_navigation_and_threads(),
             sig_task,
             sync_task,
             push_task,
             auto_reply_task,
+            backfill_task,
         ])
+    }
+
+    /// Fire-and-forget per-account backfill of `thread_participants`.
+    ///
+    /// The shared-table participants data was added after the project's
+    /// initial sync paths landed; users who synced before this code was
+    /// deployed need a one-time fixup so chat designation can resolve
+    /// their existing threads. The helper itself is idempotent (returns
+    /// early when an account already has participants), so this is safe
+    /// to call on every boot.
+    fn backfill_thread_participants_task(&self) -> Task<Message> {
+        let db_state = self.db.read_db_state();
+        let user_emails = self.user_emails();
+        let account_ids: Vec<String> =
+            self.sidebar.accounts.iter().map(|a| a.id.clone()).collect();
+        Task::perform(
+            async move {
+                let user_emails: Vec<String> =
+                    user_emails.iter().map(|e| e.to_lowercase()).collect();
+                for aid in &account_ids {
+                    let aid = aid.clone();
+                    let user_emails = user_emails.clone();
+                    let db_state = db_state.clone();
+                    let _ = db_state
+                        .with_conn(move |conn| {
+                            rtsk::db::queries_extra::backfill_thread_participants_for_account_sync(
+                                conn,
+                                &aid,
+                                &user_emails,
+                            )
+                        })
+                        .await
+                        .map(|count| {
+                            if count > 0 {
+                                log::info!(
+                                    "[chat] thread_participants backfill rebuilt {count} threads"
+                                );
+                            }
+                        })
+                        .map_err(|e| {
+                            log::warn!("[chat] thread_participants backfill failed: {e}");
+                        });
+                }
+            },
+            |()| Message::Noop,
+        )
     }
 
     pub(crate) fn update_thread_list_context_from_sidebar(&mut self) {
