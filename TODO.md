@@ -22,7 +22,9 @@
 
 - [ ] **Settings/Composing: Signatures** - This section needs work.
 
-- [ ] **Standardized popup/dropdown/modal** - Currently setting dropdowns, various modal dialogs (the Settings slide-in, Add Account modal, etc) use various methods to dim/control/disable/dismiss. We need standardized controls for all this. For example the Add Account modal currently dims the background (rest of the window), but it doesn't prevent interaction with any controls - even controls that are actually directly below it can still be interacted with. We need the same treatment as the Settings slide-in that does in fact disable things behind it. See `docs/ui/overlay-standardization-plan.md` for the implementation plan.
+- [ ] **Standardized popup/dropdown/modal** - Structural primitives are done (`modal_overlay`, `AnchoredOverlay`; see `docs/ui/overlay-standardization-plan.md`). The modal blocker now absorbs left/right/middle clicks, double clicks, and scroll so widgets behind the dimmed area no longer respond. The Add Account modal and confirm/form dialogs all share `ContainerClass::DialogCard` for visual consistency. Remaining gaps:
+  - **Focus trapping** is still unsupported by iced (tracked separately below).
+  - **Settings dropdowns** (the in-tab `select` widgets) close on outside click via their own `AnchoredOverlay::on_dismiss`, but that's per-widget rather than a unified contract; verify all `select` instances dismiss consistently.
 
 - [ ] **Focus trapping for modals and sheets** - iced does not natively support focus trapping. Modal and Sheet surfaces should trap Tab/Shift-Tab focus within their content, but currently focus can escape to widgets behind the blocker. If iced adds focus trapping support, `modal_overlay()` (see `docs/ui/overlay-standardization-plan.md`) is the single place to wire it in. Until then, this is a known contract gap.
 

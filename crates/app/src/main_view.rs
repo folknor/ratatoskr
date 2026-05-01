@@ -200,11 +200,15 @@ impl App {
 
         let modal_content = wizard.view().map(Message::AddAccount);
 
+        // `DialogCard` matches the alert/form dialogs from `ui::dialog`:
+        // opaque window-like surface with a soft drop shadow, so the
+        // wizard reads as a peer of the GNOME-HIG-style confirmation
+        // dialogs rather than a generic Elevated card.
         let modal = container(modal_content)
             .width(Length::Fixed(ACCOUNT_MODAL_WIDTH))
             .max_height(ACCOUNT_MODAL_MAX_HEIGHT)
             .padding(ui::layout::PAD_SETTINGS_CONTENT)
-            .style(ui::theme::ContainerClass::Elevated.style());
+            .style(ui::theme::ContainerClass::DialogCard.style());
 
         ui::modal_overlay::modal_overlay(
             base_layout,
