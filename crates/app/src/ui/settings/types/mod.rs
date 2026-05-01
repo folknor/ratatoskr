@@ -222,6 +222,19 @@ pub struct Settings {
     pub confirm_delete_group: Option<String>,
     // Contact import wizard
     pub import_wizard: Option<ImportWizardState>,
+    /// Deferred dismissal target awaiting "Discard unsaved changes?" confirmation.
+    /// `Some` while the confirm dialog is visible; `None` otherwise.
+    pub pending_discard: Option<PendingDiscard>,
+}
+
+/// What dismissal action the user requested while an editor was dirty.
+/// Applied verbatim once the user confirms via the discard-changes dialog.
+#[derive(Debug, Clone)]
+pub enum PendingDiscard {
+    /// Close the slide-in sheet entirely (Back button, Escape, etc.).
+    CloseSheet,
+    /// Switch to a different settings tab.
+    SwitchTab(Tab),
 }
 
 impl Settings {
@@ -411,6 +424,52 @@ impl Default for Settings {
             group_editor: None,
             confirm_delete_group: None,
             import_wizard: None,
+            pending_discard: None,
+        }
+    }
+}
+
+impl Settings {
+    /// Returns `true` if any of the slide-in editor sheets has unsaved
+    /// changes (the `dirty` flag on its state). Used by the dismissal
+    /// chokepoint to decide whether to pop the discard-confirmation dialog.
+    pub fn any_editor_dirty(&self) -> bool {
+        self.contact_editor.as_ref().is_some_and(|e| e.dirty)
+            || self.group_editor.as_ref().is_some_and(|e| e.dirty)
+            || self.signature_editor.as_ref().is_some_and(|e| e.dirty)
+            || self.editing_account.as_ref().is_some_and(|e| e.dirty)
+    }
+
+    /// Apply a dismissal target unconditionally (no dirty check).
+    pub(crate) fn apply_dismissal(&mut self, target: PendingDiscard) {
+        // Both targets share the same editor teardown; only their final
+        // state diverges.
+        self.active_sheet = None;
+        self.sheet_anim
+            .go_mut(false, iced::time::Instant::now());
+        self.signature_editor = None;
+        self.editing_account = None;
+        self.contact_editor = None;
+        self.group_editor = None;
+        match target {
+            PendingDiscard::CloseSheet => {
+                self.import_wizard = None;
+            }
+            PendingDiscard::SwitchTab(tab) => {
+                self.active_tab = tab;
+                self.hovered_help = None;
+            }
+        }
+    }
+
+    /// Single chokepoint for any "leave the active editor" request.
+    /// If an editor is dirty, defers the action behind a confirm dialog
+    /// (`pending_discard`). Otherwise applies immediately.
+    pub(crate) fn try_dismiss_editor(&mut self, target: PendingDiscard) {
+        if self.any_editor_dirty() {
+            self.pending_discard = Some(target);
+        } else {
+            self.apply_dismissal(target);
         }
     }
 }

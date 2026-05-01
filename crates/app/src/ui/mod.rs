@@ -5,6 +5,7 @@ pub mod calendar;
 pub mod calendar_month;
 pub mod calendar_time_grid;
 pub mod chat_timeline;
+pub mod dialog;
 pub mod emoji_picker;
 pub mod html_render;
 pub mod layout;

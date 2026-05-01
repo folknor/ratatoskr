@@ -43,6 +43,15 @@ pub enum ButtonClass {
     Experiment { variant: usize },
     /// Experimental semantic variant (success/warning/danger).
     ExperimentSemantic { variant: usize },
+    /// Filled red button for destructive dialog actions
+    /// (libadwaita "destructive-action" style).
+    Destructive,
+    /// Filled accent button for suggested dialog actions
+    /// (libadwaita "suggested-action" style). Visually identical to
+    /// Primary today; named separately so dialog code reads as
+    /// libadwaita-aligned and so the two can diverge later without a
+    /// global rename.
+    Suggested,
 }
 
 impl ButtonClass {
@@ -73,7 +82,23 @@ impl ButtonClass {
             Self::ColorSwatchSelected => style_color_swatch_selected_button(theme, status),
             Self::Experiment { variant } => style_exp_btn(theme, status, variant),
             Self::ExperimentSemantic { variant } => style_exp_semantic_btn(theme, status, variant),
+            Self::Destructive => style_destructive_button(theme, status),
+            Self::Suggested => style_primary_button(theme, status),
         }
+    }
+}
+
+fn style_destructive_button(theme: &Theme, status: button::Status) -> button::Style {
+    let p = theme.palette();
+    let bg = match status {
+        button::Status::Hovered => mix(p.danger.base.color, p.background.base.color, 0.15),
+        _ => p.danger.base.color,
+    };
+    button::Style {
+        background: Some(bg.into()),
+        text_color: p.danger.base.text,
+        border: border::rounded(RADIUS_LG),
+        ..Default::default()
     }
 }
 

@@ -82,6 +82,12 @@ pub enum SettingsMessage {
     OpenSheet(SettingsSheetPage),
     CloseSheet,
     SheetAnimTick(iced::time::Instant),
+    /// User confirmed discarding pending editor changes via the
+    /// "Discard unsaved changes?" dialog. Applies whatever dismissal
+    /// target was deferred (close-sheet, switch-tab, ...).
+    ConfirmDiscardEditorChanges,
+    /// User declined to discard, dismissing the confirm dialog.
+    CancelDiscardEditorChanges,
     // Accounts tab
     AddAccountFromSettings,
     AccountCardClicked(String),

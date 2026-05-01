@@ -3,6 +3,7 @@ use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length};
 
 use crate::icon;
+use crate::ui::dialog::{DialogAction, alert_dialog};
 use crate::ui::layout::*;
 use crate::ui::settings::types::*;
 use crate::ui::theme;
@@ -110,12 +111,23 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
 
         let offset = ((1.0 - sheet_t) * 2000.0).round();
 
-        crate::ui::modal_overlay::modal_overlay(
+        let with_sheet = crate::ui::modal_overlay::modal_overlay(
             content_area,
             sheet_panel,
             crate::ui::modal_overlay::ModalSurface::Sheet { offset },
             SettingsMessage::Noop,
-        )
+        );
+
+        if state.pending_discard.is_some() {
+            crate::ui::modal_overlay::modal_overlay(
+                with_sheet,
+                discard_changes_dialog(),
+                crate::ui::modal_overlay::ModalSurface::Modal,
+                SettingsMessage::Noop,
+            )
+        } else {
+            with_sheet
+        }
     } else {
         content_area.into()
     };
@@ -126,6 +138,24 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
         main_content,
     ]
     .into()
+}
+
+fn discard_changes_dialog<'a>() -> Element<'a, SettingsMessage> {
+    alert_dialog(
+        "Discard unsaved changes?",
+        "Your edits to this item will be lost.",
+        vec![
+            DialogAction::default_action(
+                "Keep editing",
+                SettingsMessage::CancelDiscardEditorChanges,
+            ),
+            DialogAction::destructive(
+                "Discard",
+                SettingsMessage::ConfirmDiscardEditorChanges,
+            ),
+        ],
+        None,
+    )
 }
 
 fn tab_nav(active: Tab) -> Element<'static, SettingsMessage> {

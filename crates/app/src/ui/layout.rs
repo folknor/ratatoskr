@@ -392,6 +392,13 @@ pub const PALETTE_KEYBINDING_WIDTH: f32 = 100.0;
 
 // ── Status bar ──────────────────────────────────────────
 
+// ── Dialog (alert / form) ──────────────────────────────
+
+/// Default width for `alert_dialog` (title + text body + actions).
+pub const DIALOG_CONFIRM_WIDTH: f32 = 380.0;
+/// Default width for `form_dialog` (title + form body + actions).
+pub const DIALOG_FORM_WIDTH: f32 = 480.0;
+
 // ── Account modal ───────────────────────────────────────
 
 /// Add Account modal width

@@ -80,6 +80,11 @@ pub enum ContainerClass {
     RadioCircleUnselected,
     /// Radio circle inner filled disk (rendered only when selected).
     RadioCircleInner,
+    /// Modal `Modal` surface card. Window-like opaque background, generous
+    /// rounding, and a soft drop shadow so the dialog reads as a discrete
+    /// surface above the dimmed backdrop. Used by the `alert_dialog` /
+    /// `form_dialog` primitives in `ui/dialog.rs`.
+    DialogCard,
 }
 
 impl ContainerClass {
@@ -117,6 +122,7 @@ impl ContainerClass {
             Self::ChordIndicator => style_chord_indicator_container,
             Self::ChatBubbleSent => style_chat_bubble_sent,
             Self::ChatBubbleReceived => style_chat_bubble_received,
+            Self::DialogCard => style_dialog_card_container,
             Self::RadioCircleSelected => style_radio_circle_selected,
             Self::RadioCircleUnselected => style_radio_circle_unselected,
             Self::RadioCircleInner => style_radio_circle_inner,
@@ -384,6 +390,24 @@ fn style_palette_selected_row_container(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(p.primary.weak.color.into()),
         border: border::rounded(RADIUS_SM),
+        ..Default::default()
+    }
+}
+
+fn style_dialog_card_container(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        background: Some(p.background.base.color.into()),
+        border: iced::Border {
+            color: p.background.strongest.color.scale_alpha(0.2),
+            width: 1.0,
+            radius: RADIUS_LG.into(),
+        },
+        shadow: iced::Shadow {
+            color: Color::BLACK.scale_alpha(0.35),
+            offset: iced::Vector::new(0.0, 4.0),
+            blur_radius: 24.0,
+        },
         ..Default::default()
     }
 }

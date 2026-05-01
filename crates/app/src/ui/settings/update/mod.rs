@@ -146,6 +146,10 @@ impl Component for Settings {
                 return self.handle_account_drag_end();
             }
             SettingsMessage::SelectTab(Tab::People) => {
+                if self.active_sheet.is_some() && self.any_editor_dirty() {
+                    self.pending_discard = Some(PendingDiscard::SwitchTab(Tab::People));
+                    return (Task::none(), None);
+                }
                 self.active_tab = Tab::People;
                 self.active_sheet = None;
                 self.sheet_anim.go_mut(false, Instant::now());
@@ -365,6 +369,10 @@ impl Settings {
                 }
             }
             SettingsMessage::SelectTab(tab) => {
+                if self.active_sheet.is_some() && self.any_editor_dirty() {
+                    self.pending_discard = Some(PendingDiscard::SwitchTab(tab));
+                    return;
+                }
                 self.active_tab = tab;
                 self.hovered_help = None;
                 self.active_sheet = None;
@@ -658,13 +666,15 @@ impl Settings {
                 self.sheet_anim.go_mut(true, Instant::now());
             }
             SettingsMessage::CloseSheet => {
-                self.active_sheet = None;
-                self.sheet_anim.go_mut(false, Instant::now());
-                self.signature_editor = None;
-                self.editing_account = None;
-                self.contact_editor = None;
-                self.group_editor = None;
-                self.import_wizard = None;
+                self.try_dismiss_editor(PendingDiscard::CloseSheet);
+            }
+            SettingsMessage::ConfirmDiscardEditorChanges => {
+                if let Some(target) = self.pending_discard.take() {
+                    self.apply_dismissal(target);
+                }
+            }
+            SettingsMessage::CancelDiscardEditorChanges => {
+                self.pending_discard = None;
             }
             SettingsMessage::ContactsLoaded(Ok(contacts)) => {
                 self.contacts = contacts;

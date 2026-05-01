@@ -4,6 +4,7 @@ use iced::{Alignment, Element, Length};
 use crate::Message;
 use crate::font;
 use crate::icon;
+use crate::ui::dialog::{DialogAction, alert_dialog, form_dialog};
 use crate::ui::layout::*;
 use crate::ui::theme;
 
@@ -119,41 +120,11 @@ pub(super) fn save_as_group_dialog<'a>(
         .size(TEXT_MD)
         .padding(PAD_INPUT);
 
-    let cancel_btn = button(text("Cancel").size(TEXT_MD))
-        .style(theme::ButtonClass::Ghost.style())
-        .on_press(Message::PopOut(
-            window_id,
-            PopOutMessage::Compose(ComposeMessage::GroupSaveCancel),
-        ))
-        .padding(PAD_BUTTON);
-
-    let save_disabled =
-        state.save_group_name.trim().is_empty() || state.save_group_in_flight;
-
-    let save_label = if state.save_group_in_flight {
-        "Saving..."
-    } else {
-        "Save"
-    };
-    let mut save_btn = button(text(save_label).size(TEXT_MD).font(font::text_semibold()))
-        .style(theme::ButtonClass::Primary.style())
-        .padding(PAD_BUTTON);
-    if !save_disabled {
-        save_btn = save_btn.on_press(Message::PopOut(
-            window_id,
-            PopOutMessage::Compose(ComposeMessage::GroupSaveConfirm),
-        ));
-    }
-
-    let mut col = column![
-        text("Save as contact group")
-            .size(TEXT_TITLE)
-            .font(font::text_semibold())
-            .style(text::base),
+    let mut body = column![
         text(format!(
             "{count} addresses will be saved as a new contact group."
         ))
-        .size(TEXT_SM)
+        .size(TEXT_MD)
         .style(text::secondary),
         column![
             text("Group name").size(TEXT_SM).style(text::secondary),
@@ -164,20 +135,39 @@ pub(super) fn save_as_group_dialog<'a>(
     .spacing(SPACE_SM);
 
     if let Some(ref err) = state.save_group_error {
-        col = col.push(text(err.as_str()).size(TEXT_SM).style(text::danger));
+        body = body.push(text(err.as_str()).size(TEXT_SM).style(text::danger));
     }
 
-    col = col.push(
-        row![cancel_btn, save_btn]
-            .spacing(SPACE_SM)
-            .align_y(Alignment::Center),
-    );
+    let save_disabled =
+        state.save_group_name.trim().is_empty() || state.save_group_in_flight;
+    let save_label = if state.save_group_in_flight {
+        "Saving..."
+    } else {
+        "Save"
+    };
 
-    container(col)
-        .padding(PAD_CONTENT)
-        .style(theme::ContainerClass::Elevated.style())
-        .width(Length::Fixed(state.width * 0.8))
-        .into()
+    form_dialog(
+        "Save as contact group",
+        body,
+        vec![
+            DialogAction::default_action(
+                "Cancel",
+                Message::PopOut(
+                    window_id,
+                    PopOutMessage::Compose(ComposeMessage::GroupSaveCancel),
+                ),
+            ),
+            DialogAction::suggested(
+                save_label,
+                Message::PopOut(
+                    window_id,
+                    PopOutMessage::Compose(ComposeMessage::GroupSaveConfirm),
+                ),
+            )
+            .disabled_when(save_disabled),
+        ],
+        None,
+    )
 }
 
 pub(super) fn token_context_menu<'a>(
@@ -265,43 +255,23 @@ pub(super) fn token_context_menu<'a>(
 }
 
 pub(super) fn discard_confirmation<'a>(window_id: iced::window::Id) -> Element<'a, Message> {
-    let confirm_btn = button(text("Discard").size(TEXT_MD).font(font::text_semibold()))
-        .style(theme::ButtonClass::Ghost.style())
-        .on_press(Message::PopOut(
-            window_id,
-            PopOutMessage::Compose(ComposeMessage::Discard),
-        ))
-        .padding(PAD_BUTTON);
-
-    let cancel_btn = button(text("Keep editing").size(TEXT_MD))
-        .style(theme::ButtonClass::Primary.style())
-        .on_press(Message::PopOut(
-            window_id,
-            PopOutMessage::Compose(ComposeMessage::ToggleDiscardConfirm),
-        ))
-        .padding(PAD_BUTTON);
-
-    container(
-        column![
-            text("Discard this draft?")
-                .size(TEXT_TITLE)
-                .font(font::text_semibold())
-                .style(text::base),
-            text("Your unsaved changes will be lost.")
-                .size(TEXT_MD)
-                .style(text::secondary),
-            row![confirm_btn, cancel_btn]
-                .spacing(SPACE_SM)
-                .align_y(Alignment::Center),
-        ]
-        .spacing(SPACE_SM)
-        .align_x(Alignment::Center),
+    let cancel_msg = Message::PopOut(
+        window_id,
+        PopOutMessage::Compose(ComposeMessage::ToggleDiscardConfirm),
+    );
+    let discard_msg = Message::PopOut(
+        window_id,
+        PopOutMessage::Compose(ComposeMessage::Discard),
+    );
+    alert_dialog(
+        "Discard this draft?",
+        "Your unsaved changes will be lost.",
+        vec![
+            DialogAction::default_action("Keep editing", cancel_msg),
+            DialogAction::destructive("Discard", discard_msg),
+        ],
+        None,
     )
-    .padding(PAD_CONTENT)
-    .style(theme::ContainerClass::Elevated.style())
-    .width(Length::Shrink)
-    .max_width(420.0)
-    .into()
 }
 
 pub(super) fn attachment_list<'a>(
@@ -429,43 +399,39 @@ pub(super) fn link_dialog<'a>(
         .size(TEXT_MD)
         .padding(PAD_INPUT);
 
-    let cancel_btn = button(text("Cancel").size(TEXT_MD))
-        .style(theme::ButtonClass::Ghost.style())
-        .on_press(Message::PopOut(
-            window_id,
-            PopOutMessage::Compose(ComposeMessage::ToggleLinkDialog),
-        ))
-        .padding(PAD_BUTTON);
-
-    let insert_btn = button(text("Insert").size(TEXT_MD).font(font::text_semibold()))
-        .style(theme::ButtonClass::Primary.style())
-        .on_press(Message::PopOut(
-            window_id,
-            PopOutMessage::Compose(ComposeMessage::LinkInsert),
-        ))
-        .padding(PAD_BUTTON);
-
-    container(
-        column![
-            text("Insert Link")
-                .size(TEXT_TITLE)
-                .font(font::text_semibold())
-                .style(text::base),
-            column![text("URL").size(TEXT_SM).style(text::secondary), url_input,]
-                .spacing(SPACE_XXS),
-            column![
-                text("Display text").size(TEXT_SM).style(text::secondary),
-                text_input_field,
-            ]
+    let body = column![
+        column![text("URL").size(TEXT_SM).style(text::secondary), url_input,]
             .spacing(SPACE_XXS),
-            row![cancel_btn, insert_btn]
-                .spacing(SPACE_SM)
-                .align_y(Alignment::Center),
+        column![
+            text("Display text").size(TEXT_SM).style(text::secondary),
+            text_input_field,
         ]
-        .spacing(SPACE_SM),
+        .spacing(SPACE_XXS),
+    ]
+    .spacing(SPACE_SM);
+
+    let insert_disabled = state.link_url.trim().is_empty();
+
+    form_dialog(
+        "Insert link",
+        body,
+        vec![
+            DialogAction::default_action(
+                "Cancel",
+                Message::PopOut(
+                    window_id,
+                    PopOutMessage::Compose(ComposeMessage::ToggleLinkDialog),
+                ),
+            ),
+            DialogAction::suggested(
+                "Insert",
+                Message::PopOut(
+                    window_id,
+                    PopOutMessage::Compose(ComposeMessage::LinkInsert),
+                ),
+            )
+            .disabled_when(insert_disabled),
+        ],
+        None,
     )
-    .padding(PAD_CONTENT)
-    .style(theme::ContainerClass::Elevated.style())
-    .width(Length::Fill)
-    .into()
 }
