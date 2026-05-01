@@ -301,11 +301,14 @@ impl CalDavClient {
             .map_err(|e| format!("GET {url}: {e}"))?;
 
         let status = resp.status();
+        // Store the ETag verbatim. See `parse.rs::parse_propfind_events` for
+        // the rationale - the quotes (and the optional `W/` weak indicator)
+        // are part of the value per RFC 7232, not framing we can strip.
         let etag = resp
             .headers()
             .get("etag")
             .and_then(|v| v.to_str().ok())
-            .map(|s| s.trim_matches('"').to_string());
+            .map(str::to_string);
 
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -336,7 +339,7 @@ impl CalDavClient {
             .body(ical_data.to_string());
 
         if let Some(etag_val) = etag
-            && let Ok(val) = format!("\"{etag_val}\"").parse::<reqwest::header::HeaderValue>()
+            && let Ok(val) = normalize_if_match_etag(etag_val).parse::<reqwest::header::HeaderValue>()
         {
             req = req.header(IF_MATCH, val);
         }
@@ -349,12 +352,13 @@ impl CalDavClient {
             return Err(format!("PUT {url} returned {status}: {text}"));
         }
 
-        // Extract ETag from response headers
+        // Extract ETag from response headers verbatim (see PROPFIND parsing
+        // for the rationale).
         let new_etag = resp
             .headers()
             .get("etag")
             .and_then(|v| v.to_str().ok())
-            .map(|s| s.trim_matches('"').to_string());
+            .map(str::to_string);
 
         Ok(new_etag)
     }
@@ -368,7 +372,7 @@ impl CalDavClient {
         let mut req = self.http.delete(&url).headers(self.auth_headers());
 
         if let Some(etag_val) = etag
-            && let Ok(val) = format!("\"{etag_val}\"").parse::<reqwest::header::HeaderValue>()
+            && let Ok(val) = normalize_if_match_etag(etag_val).parse::<reqwest::header::HeaderValue>()
         {
             req = req.header(IF_MATCH, val);
         }
@@ -594,5 +598,54 @@ fn local_name(raw: &[u8]) -> String {
     match full.rfind(':') {
         Some(idx) => full[idx + 1..].to_string(),
         None => full.to_string(),
+    }
+}
+
+/// Format a stored ETag value for the `If-Match` header.
+///
+/// New code stores ETags verbatim including quotes (`"abc"`, `W/"abc"`), so the
+/// fast path is to send the value through unchanged. We tolerate two legacy
+/// shapes for backwards compatibility with rows written before this fix:
+///
+/// - **Bare strong ETag** (`abc`): stored without RFC 7232 quotes by the old
+///   `trim_matches('"')` path. Wrap into `"abc"` so the server accepts it.
+/// - **Corrupted weak ETag** (`W/abc`): the old code stripped the inner quote;
+///   we cannot reliably reconstruct the original, but wrapping the whole token
+///   produces `"W/abc"` which the server will reject - triggering a 412
+///   response, an automatic re-fetch, and recovery to a clean verbatim ETag on
+///   next sync. Better than silently sending malformed headers.
+fn normalize_if_match_etag(stored: &str) -> String {
+    let s = stored.trim();
+    if s.starts_with('"') || s.starts_with("W/\"") {
+        s.to_string()
+    } else {
+        format!("\"{s}\"")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_if_match_etag;
+
+    #[test]
+    fn preserves_already_quoted_strong_etag() {
+        assert_eq!(normalize_if_match_etag("\"abc\""), "\"abc\"");
+    }
+
+    #[test]
+    fn preserves_already_quoted_weak_etag() {
+        assert_eq!(normalize_if_match_etag("W/\"abc\""), "W/\"abc\"");
+    }
+
+    #[test]
+    fn wraps_legacy_bare_etag() {
+        // Pre-fix rows have unquoted strong ETags. Wrap them so they conform
+        // to RFC 7232 before going on the wire.
+        assert_eq!(normalize_if_match_etag("abc"), "\"abc\"");
+    }
+
+    #[test]
+    fn trims_surrounding_whitespace() {
+        assert_eq!(normalize_if_match_etag("  \"abc\"  "), "\"abc\"");
     }
 }

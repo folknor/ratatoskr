@@ -93,10 +93,6 @@ Compared against the deleted ad-hoc client and XML parser via git history.
 
 - `crates/core/src/caldav/parse.rs:594-600` (`local_name`) strips after the **last** `:`. Tag names with no namespace prefix work fine; namespaced tags like `D:href` work. But xml content with attributes like `xmlns:foo` will never appear as element names, so this is fine in practice. Note however that old `xml.rs` only matched local names whose namespace prefix was bound to one of four known DAV URIs - the new code matches `<href>` from ANY namespace. For mixed-namespace responses (unusual but legal), this could match an unrelated `xyz:href`. Low-risk regression but a tightness loss.
 
-- `crates/core/src/caldav/parse.rs:467` - `<getetag>` value is trimmed and stripped of surrounding double quotes. RFC 7232 ETags can be weak (`W/"abc"`) - the old `xml::extract_first_tag_value` returned the raw value (e.g. `W/"abc"`), the new code strips only `"`, leaving `W/abc`. A subsequent `If-Match` against this stripped form will fail server-side validation on any server that issued weak ETags (Apple iCloud occasionally does). Same issue at `crates/core/src/caldav/client.rs:307-308` (`get_event_ical`) and `:355-357` (`put_event`).
-
-- `crates/core/src/caldav/client.rs:338-342, 370-374` - when sending `If-Match`, the code wraps the stored etag with `format!("\"{etag_val}\"")`, blindly re-quoting. Combined with the strip-quote-on-receive above, a weak ETag round-trips as `"W/abc"` (broken - quote inside the W/ form). OLD code used `request.header("If-Match", etag_value)` with the raw stored value, preserving format.
-
 - `crates/calendar/src/caldav/mod.rs:188-191` - `parse_icalendar` returns `Err` if the iCalendar payload has zero VEVENTs (parse.rs:85-87). For a freshly-created event the server occasionally returns the VCALENDAR wrapper with the VEVENT relocated to a VTIMEZONE-only response when the timezone is unrecognized; old `parse_caldav_ical_event` handled empty/partial VEVENTs gracefully by returning a stub DTO. New code surfaces this as a hard error to the user even though the PUT succeeded.
 
 - `crates/core/src/caldav/client.rs:302, 344, 376` - error messages include the full URL but not the request body or response headers. OLD `caldav_request_with_headers:485` returned `format!("CalDAV error: {status} {body}")` truncated to body only. New format `"PUT {url} returned {status}: {text}"` is comparable; no regression in diagnosability, slight improvement.
@@ -127,4 +123,3 @@ Compared against the deleted ad-hoc client and XML parser via git history.
 
 9. `crates/calendar/src/caldav/mod.rs:123`: `caldav_principal_url` is no longer loaded or used. Accounts that had a stored principal URL but no home URL now must rediscover from `caldav_url`, which regresses servers where principal discovery from the base URL fails.
 
-10. `crates/core/src/caldav/client.rs:338` and `crates/core/src/caldav/client.rs:370`: `If-Match` always wraps the supplied ETag in quotes. Existing stored CalDAV ETags from the old path may already include quotes, producing invalid double-quoted headers.

@@ -464,7 +464,14 @@ pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
                     match current_tag.as_str() {
                         "href" => current_href = buf.trim().to_string(),
                         "getetag" => {
-                            current_etag = buf.trim().trim_matches('"').to_string();
+                            // Preserve the ETag value verbatim. RFC 7232 ETags
+                            // are quoted strings ("abc") with an optional weak
+                            // indicator (W/"abc"); the surrounding quotes ARE
+                            // part of the value, not framing. Stripping them
+                            // here corrupts weak ETags into a malformed `W/abc`
+                            // shape that fails server-side `If-Match` validation
+                            // when the client re-quotes for the outgoing header.
+                            current_etag = buf.trim().to_string();
                         }
                         "getcontenttype" => {
                             current_content_type = buf.trim().to_string();
@@ -844,9 +851,31 @@ END:VCALENDAR\r\n";
         let entries = parse_propfind_events(xml);
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].uri, "/calendars/user/personal/event1.ics");
-        assert_eq!(entries[0].etag, "etag-111");
+        // ETag values are preserved verbatim, including the RFC 7232 quotes.
+        assert_eq!(entries[0].etag, "\"etag-111\"");
         assert_eq!(entries[1].uri, "/calendars/user/personal/event2.ics");
-        assert_eq!(entries[1].etag, "etag-222");
+        assert_eq!(entries[1].etag, "\"etag-222\"");
+    }
+
+    #[test]
+    fn parse_propfind_events_preserves_weak_etag() {
+        // RFC 7232 weak ETag round-trip: the `W/"..."` form must survive
+        // parsing untouched so it can be sent back verbatim in If-Match.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/calendars/user/personal/weak.ics</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:getetag>W/"weak-etag-111"</D:getetag>
+        <D:getcontenttype>text/calendar</D:getcontenttype>
+      </D:prop>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+        let entries = parse_propfind_events(xml);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].etag, "W/\"weak-etag-111\"");
     }
 
     #[test]
