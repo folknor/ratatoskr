@@ -673,7 +673,7 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
                         pending_ctag = Some(buf.trim().to_string());
                     }
                     (Some("prop"), "calendar-color") => {
-                        pending_color = Some(buf.trim().to_string());
+                        pending_color = Some(normalize_calendar_color(buf.trim()));
                     }
                     _ => {}
                 }
@@ -794,10 +794,12 @@ pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
     let mut response_status = String::new();
     let mut response_etag = String::new();
     let mut response_content_type = String::new();
+    let mut response_is_collection = false;
 
     let mut propstat_status = String::new();
     let mut pending_etag: Option<String> = None;
     let mut pending_content_type: Option<String> = None;
+    let mut pending_is_collection = false;
 
     loop {
         match reader.read_event() {
@@ -808,14 +810,38 @@ pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
                     response_status.clear();
                     response_etag.clear();
                     response_content_type.clear();
+                    response_is_collection = false;
                 }
                 if name == "propstat" {
                     propstat_status.clear();
                     pending_etag = None;
                     pending_content_type = None;
+                    pending_is_collection = false;
+                }
+                // RFC 4918 § 14.10: <D:resourcetype><D:collection/></D:resourcetype>
+                // marks a CalDAV sub-collection. Davical, Bedework, and old
+                // Zimbra emit collection URIs without a trailing slash and may
+                // also expose a getetag, so without this guard the
+                // is_icalendar_resource third-arm fallback would admit them
+                // as event resources. The follow-up REPORT then 403s on the
+                // collection and can fail the whole batch.
+                if name == "collection"
+                    && stack.iter().rev().any(|n| n == "resourcetype")
+                {
+                    pending_is_collection = true;
                 }
                 stack.push(name);
                 buf.clear();
+            }
+            Ok(Event::Empty(ref e)) => {
+                // Self-closing form: <D:collection/> shows up here, not in
+                // the Start branch.
+                let name = local_name(e.name().as_ref());
+                if name == "collection"
+                    && stack.iter().rev().any(|n| n == "resourcetype")
+                {
+                    pending_is_collection = true;
+                }
             }
             Ok(Event::Text(ref e)) => {
                 if let Ok(raw) = std::str::from_utf8(e.as_ref())
@@ -860,6 +886,9 @@ pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
                         if let Some(v) = pending_content_type.take() {
                             response_content_type = v;
                         }
+                        if pending_is_collection {
+                            response_is_collection = true;
+                        }
                     } else {
                         log::debug!(
                             "Skipping propstat with non-2xx status: {propstat_status}"
@@ -868,11 +897,13 @@ pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
                     propstat_status.clear();
                     pending_etag = None;
                     pending_content_type = None;
+                    pending_is_collection = false;
                 }
                 if name == "response"
                     && response_status_is_ok(&response_status)
                     && !response_href.is_empty()
                     && !response_etag.is_empty()
+                    && !response_is_collection
                     && is_icalendar_resource(&response_href, &response_content_type)
                 {
                     entries.push(CalDavEventEntry {
@@ -1078,13 +1109,49 @@ fn local_name(raw: &[u8]) -> String {
 /// callers used to silently skip every event resource on those servers.
 /// `.ics` matching ignores case for the same reason - servers occasionally
 /// emit `.ICS` upstream and we shouldn't second-guess that.
+/// Normalize a `calendar-color` value to a `#RRGGBB` form.
+///
+/// Apple Calendar emits an ARGB form (`#RRGGBBAA`, e.g. `#0000FFFF` for
+/// fully-opaque blue), but most other servers emit `#RRGGBB`. UI consumers
+/// then have to handle both shapes; rather than divergent handling at
+/// every render site, fold the alpha at parse time. Bytes outside the
+/// well-known 7- and 9-character forms pass through verbatim - vendors
+/// have shipped names (`blue`) and uncommon-length hex strings, and
+/// silently rewriting those would be worse than leaving them as-is.
+fn normalize_calendar_color(raw: &str) -> String {
+    let s = raw.trim();
+    if s.len() == 9
+        && s.starts_with('#')
+        && s.bytes().skip(1).all(|b| b.is_ascii_hexdigit())
+    {
+        // Apple ARGB form: drop the trailing alpha pair. We could also
+        // honor opacity by multiplying RGB into the background, but the
+        // user-visible UI treats labels as opaque so the rest of the
+        // stack already assumes RGB.
+        return s[..7].to_string();
+    }
+    s.to_string()
+}
+
 fn is_icalendar_resource(href: &str, content_type: &str) -> bool {
     let ct_lower = content_type.to_ascii_lowercase();
     if ct_lower.contains("text/calendar") {
         return true;
     }
-    let href_lower_tail = href.to_ascii_lowercase();
-    if href_lower_tail.ends_with(".ics") {
+    // RFC 6321 (xCal): the CalDAV-XML form is also a valid event
+    // representation. Some servers emit `application/calendar+xml`; without
+    // matching it here we'd silently skip those events and the listing
+    // would come up short.
+    if ct_lower.contains("application/calendar+xml") {
+        return true;
+    }
+    // Strip a query string before looking at the extension. Some servers
+    // append revision tokens or auth parameters to event hrefs
+    // (`/cal/event.ics?revision=42`); without trimming the query the path
+    // ends with neither `.ics` nor `/` and falls through to the third-arm
+    // fallback only if the content-type was also empty.
+    let path_tail = href.split(['?', '#']).next().unwrap_or(href);
+    if path_tail.to_ascii_lowercase().ends_with(".ics") {
         return true;
     }
     // Accept entries with an etag but no content type info
@@ -1505,7 +1572,10 @@ END:VCALENDAR\r\n";
         assert_eq!(calendars[0].href, "/calendars/user/personal/");
         assert_eq!(calendars[0].display_name.as_deref(), Some("Personal"));
         assert_eq!(calendars[0].ctag.as_deref(), Some("ctag-abc-123"));
-        assert_eq!(calendars[0].color.as_deref(), Some("#0000FFFF"));
+        // Apple emits the ARGB form (`#RRGGBBAA`); we fold the alpha at
+        // parse time so UI consumers see the same `#RRGGBB` as servers
+        // that emit a 7-char value directly.
+        assert_eq!(calendars[0].color.as_deref(), Some("#0000FF"));
         assert_eq!(calendars[1].href, "/calendars/user/work/");
         assert_eq!(calendars[1].display_name.as_deref(), Some("Work"));
         assert!(calendars[1].color.is_none());
@@ -1624,6 +1694,74 @@ END:VCALENDAR\r\n";
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0, "/calendars/user/personal/event1.ics");
         assert!(results[0].1.contains("CDATA Event"));
+    }
+
+    #[test]
+    fn parse_propfind_events_skips_collection_with_etag() {
+        // Davical / Bedework / old Zimbra emit a sub-collection without a
+        // trailing slash and with a getetag - the third-arm fallback in
+        // is_icalendar_resource would have admitted it as an event resource.
+        // Inspecting <resourcetype><collection/></resourcetype> rejects the
+        // entry instead, so the follow-up REPORT doesn't 403 on it.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:response>
+    <D:href>/calendars/user/work-subcollection</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype><D:collection/><C:calendar/></D:resourcetype>
+        <D:getetag>"collection-etag-123"</D:getetag>
+      </D:prop>
+    </D:propstat>
+  </D:response>
+  <D:response>
+    <D:href>/calendars/user/work/event1.ics</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:getetag>"etag-111"</D:getetag>
+        <D:getcontenttype>text/calendar</D:getcontenttype>
+      </D:prop>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+        let entries = parse_propfind_events(xml);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].uri, "/calendars/user/work/event1.ics");
+    }
+
+    #[test]
+    fn is_icalendar_resource_accepts_calendar_xml() {
+        // RFC 6321 xCal: application/calendar+xml is a valid event form
+        // alongside text/calendar. The previous shape silently skipped it.
+        assert!(is_icalendar_resource(
+            "/cal/event.xml",
+            "application/calendar+xml; charset=utf-8"
+        ));
+    }
+
+    #[test]
+    fn is_icalendar_resource_handles_query_string_on_ics() {
+        // /cal/event.ics?revision=42 ends with neither `.ics` nor `/`,
+        // so the bare extension check missed it. Strip query/fragment
+        // before the extension check.
+        assert!(is_icalendar_resource(
+            "/cal/event.ics?revision=42",
+            ""
+        ));
+    }
+
+    #[test]
+    fn normalize_calendar_color_folds_apple_argb() {
+        use super::normalize_calendar_color;
+        assert_eq!(normalize_calendar_color("#0000FFFF"), "#0000FF");
+        assert_eq!(normalize_calendar_color("#abcdef00"), "#abcdef");
+    }
+
+    #[test]
+    fn normalize_calendar_color_passes_rgb_through() {
+        use super::normalize_calendar_color;
+        assert_eq!(normalize_calendar_color("#0000FF"), "#0000FF");
+        assert_eq!(normalize_calendar_color("blue"), "blue");
     }
 
     #[test]

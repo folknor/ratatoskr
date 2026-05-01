@@ -52,15 +52,9 @@ All findings addressed. Lenses and targets:
 
 - **Medium** (upstream) - Empty SUMMARY / DESCRIPTION / LOCATION are still indistinguishable from absent. Removed the local `.filter(|s| !s.is_empty())` step (forward-compat for any future calcard release that surfaces empty values), but calcard's parser drops `SUMMARY:` from the entries list before our chain sees it, so user-cleared-title support requires an upstream calcard change. Tracking here so the local code is ready when it lands.
 - **Medium** - Folded-line + CRLF handling depends on calcard. LF-only line endings (some Linux bridges) may fail to unfold; long DESCRIPTION lines get truncated. Worth a unit test covering LF-only + folded long line.
-### `crates/core/src/caldav/parse.rs::is_icalendar_resource` (711-720)
-
-- **Medium** - Sub-collection URIs without trailing slash treated as event resources via the third-arm fallback (Davical, Bedework, old Zimbra emit collection URIs without `/`). Triggers REPORT 403 on the collection, which can fail the whole batch.
-- **Low** - Hrefs with query strings (`/cal/event.ics?revision=42`) end with neither `.ics` nor `/`; pass third arm only with empty content-type. CalDAV-XML form (`application/calendar+xml`, RFC 6321) silently skipped.
-
 ### `crates/core/src/caldav/parse.rs::parse_propfind_calendars` / `parse_propfind_events` / `parse_multiget_report` (402-690)
 
 - **Medium** - 207 with zero `<response>` children returns empty Vec with no log; indistinguishable from "no calendars provisioned" / first-login race / server-side error misreported as 207.
-- **Low** - `parse_propfind_calendars` reads `calendar-color` verbatim and doesn't normalize Apple's ARGB form (`#0000FFFF`) to RGB hex (`#0000FF`) that most other servers emit. UI code consuming the color sees two different formats and must handle both. Either normalize at parse time or document the divergence at the UI consumer.
 
 ---
 
