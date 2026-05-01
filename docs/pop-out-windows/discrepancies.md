@@ -146,7 +146,7 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
 
 ## Implemented
 
-### Phase 1 — multi-window architecture
+### Phase 1 - multi-window architecture
 
 - `iced::application` → `iced::daemon` migration in `main.rs:110`.
 - `App.main_window_id` (`app.rs:70`) plus
@@ -168,7 +168,7 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
 - Escape closes pop-out windows (and dismisses compose modals first)
   via `handlers/keyboard.rs:18-48`.
 
-### Phase 2 — message view window
+### Phase 2 - message view window
 
 - `MessageViewState`, `MessageViewMessage`, `RenderingMode` in
   `pop_out/message_view.rs`.
@@ -188,7 +188,7 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
   `handlers/pop_out/message_view.rs:14-45`).
 - Body card scrolls; header pinned; attachments panel pinned at bottom.
 
-### Phase 3 — rendering modes
+### Phase 3 - rendering modes
 
 - Plain text, Simple HTML, Original HTML (via `html_render`), Source
   (synthesized) all render (`message_view.rs:579-637`).
@@ -205,7 +205,7 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
 - Per-window mode override is transient (not persisted in
   `MessageViewSessionEntry`).
 
-### Phase 4 — action buttons
+### Phase 4 - action buttons
 
 - Reply / Reply All / Forward in the header row open a compose pop-out
   pre-filled from the message view's headers and body
@@ -227,7 +227,7 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
   scope, gated on `may_submit` rights
   (`handlers/pop_out/window_lifecycle.rs:76-87`).
 
-### Phase 5 — session restore (partial; see High #5)
+### Phase 5 - session restore (partial; see High #5)
 
 - `SessionState` with `MessageViewSessionEntry` serialized to
   `session.json`; falls back to legacy `window.json`
@@ -244,7 +244,7 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
 - Compose drafts persist across sessions via the `local_drafts` table
   even though compose windows do not auto-reopen.
 
-### Phase 6 — Save As (partial; see Medium #10)
+### Phase 6 - Save As (partial; see Medium #10)
 
 - `rfd::AsyncFileDialog` with format filters for `.eml` and `.txt`
   (`handlers/pop_out/save_as.rs:66-93`).
