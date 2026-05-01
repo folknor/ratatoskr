@@ -192,18 +192,6 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
 
 ### `crates/core/src/caldav/parse.rs`
 
-23. **Low** [perf/claude L13, arch/claude Low] -
-    **`is_icalendar_resource` third-arm fallback ignores
-    query/fragment.** `:1196-1199`. The `.ics` check now strips
-    `?…`/`#…` (good), but the fallback at `:1198-1199` still inspects
-    raw `href`: `content_type.is_empty() && !href.ends_with('/')`. A
-    collection URL with a query string (`/cal/folder/?revision=1`)
-    doesn't end with `/`, so it falls through to "accept" if no
-    content-type. The new collection-resourcetype gate at `:869-872`
-    catches typical Davical / Bedework, but a server emitting no
-    `<resourcetype>` and a query string still leaks. Same trim before
-    suffix check would close it.
-
 24. **Low (perf)** [perf/claude L16] - **`pick_datetime_entry` runs
     twice per all-day endpoint.** `:144-145, 175-188`.
     `extract_datetime(Dtstart)` calls `pick_datetime_entry(Dtstart)`,
@@ -213,17 +201,6 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
     `pick_datetime_entry` return the picked entry alongside an
     `is_date_only` flag, and have `extract_vevent` pass it into both
     downstream helpers.
-
-25. **Low** [arch/claude Low] - **`pending_privilege_set_seen` flips
-    `can_edit=false` on a self-closed empty privilege set.**
-    `:663-666`. `<D:current-user-privilege-set/>` (self-closed, no
-    children) is unusual but real (some test mocks emit it for
-    "unknown ACL") and lands the calendar at `can_edit=Some(false)`.
-    The sync layer then suppresses edit affordances. The
-    `<privilege>` ancestor check at `:669-673` doesn't help if a
-    server emits privileges without the wrapper. Fix: only set
-    `pending_privilege_set_seen` after observing at least one
-    `<privilege>` child.
 
 ### `crates/core/src/caldav/sync.rs`
 
@@ -252,54 +229,6 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
     Cheap fix: distinct synthesized form, e.g. `caldav:href={uri}`.
 
 ### `crates/core/src/caldav/client.rs`
-
-30. **Medium** [bugs/claude M2] - **`discover_principal`'s base-URL try
-    doesn't capture the final URL.** `:243-259`. The well-known
-    fallback path uses `propfind_with_final_url` and resolves the
-    principal href against the post-redirect URL (the b8398928 fix).
-    The base-URL try at `:246-258` still uses `propfind_raw` and
-    `self.resolve_url(&principal)`, which resolves against
-    `self.base_url`. If the base-URL PROPFIND gets host-redirected
-    (Apple sometimes 30x's per-shard, hosted Exchange bridges rewrite
-    to per-tenant DAV root) and the principal href is relative, the
-    next PROPFIND lands on the original host. Fix: replace
-    `propfind_raw(&self.base_url, ...)` with `propfind_with_final_url`
-    and resolve via `resolve_url_against(&final_url, &principal)`.
-
-31. **Medium** [arch/codex Medium] - **`list_calendars` resolves
-    calendar hrefs against `base_url`, not `calendar_home_url`.**
-    `:318` + `:726`. Loads `calendar_home_url` then calls
-    `self.resolve_url(&cal.href)` which uses `self.base_url`. For
-    hosts where the home-set lives on a different host than the base
-    URL (Fastmail's `caldav.fastmail.com`, hosted Exchange bridges,
-    redirect from `login.example/dav` to `cal.example/calendars/`),
-    stored calendar URLs point at the wrong host. Later event
-    PROPFIND/PUT/DELETE hit the wrong origin or path.
-
-32. **Medium** [arch/codex Medium] - **CalDAV rediscovery retry doesn't
-    cover stale persisted principal URLs.** `sync.rs:342, :364` +
-    `mod.rs:294` + `client.rs:166`. `sync_caldav_calendar_account`
-    calls `build_client_from_config(&config).await?` *before* the
-    retry block, and the retry is gated on `!needed_discovery`.
-    `build_client_from_config` seeds a persisted principal,
-    `discover()` skips principal discovery when one is already set.
-    Repro: DB has stale `caldav_principal_url` and
-    `caldav_home_url=NULL`. `build_client_from_config` runs
-    `discover()` (because home is None), which fails on the stale
-    principal PROPFIND, `?` propagates from before the retry block,
-    and `clear_persisted_caldav_urls` is never reached.
-
-33. **Low** [arch/claude Low] - **`ensure_collection_trailing_slash`
-    correctly slashes the path, but the subsequent `Url::join` drops
-    query strings.** `:733-755` + `Url::parse(...).join(href)`. The
-    helper handles a base with `?q=x` by inserting the slash before
-    the query, but the very next `base_url.join(href)` drops the
-    base's query per RFC 3986 § 5.3 unless `href` overrides it. A
-    calendar URL of `https://h/cal/?token=auth` joined with
-    `event.ics` resolves to `https://h/cal/event.ics`, no token.
-    CalDAV usually authenticates via the `Authorization` header so
-    this is rarely the failure mode in practice - but silent if a
-    host *is* relying on a query token.
 
 34. **Medium (perf)** [perf/claude M10] - **`relativize_for_multiget`
     re-parses the request URL per href.** `:996-1016`. `fetch_events`
@@ -342,14 +271,6 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
 
 ### `crates/calendar/src/caldav/mod.rs`
 
-40. **Medium** [arch/codex Medium] - **CalDAV listing adapter discards
-    parsed editability.** Parser records
-    `current-user-privilege-set` at `parse.rs:729`, but
-    `caldav_list_calendars_impl` hard-codes `can_edit: true` at
-    `mod.rs:68`. If that DTO is passed to the shared upsert path at
-    `sync.rs:105`, read-only calendars are persisted as editable.
-    UI / action layer sees `can_edit=true` and later gets 403/405 on
-    PUT/DELETE.
 
 41. **Low** (carry-over from Round 2) - `join_calendar_path`
     (`:413-424`) drops query strings from calendar URLs via

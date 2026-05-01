@@ -789,7 +789,18 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
                 if name == "calendar" && stack.iter().any(|s| s == "resourcetype") {
                     pending_is_calendar = true;
                 }
-                if name == "current-user-privilege-set" {
+                // We deliberately do NOT mark `pending_privilege_set_seen`
+                // when the `<current-user-privilege-set>` element opens.
+                // Some test mocks and a handful of real servers emit a
+                // self-closed empty privilege-set as the "unknown ACL"
+                // sentinel, which the previous shape interpreted as
+                // "explicit empty -> no privileges granted -> read-only"
+                // and silently flipped can_edit to false. Anchor the
+                // signal on the first `<privilege>` ancestor we see
+                // instead, so a privilege-set with no children stays as
+                // "unknown" (which the sync layer treats as editable for
+                // compatibility with older servers). (Round 3 #25.)
+                if name == "privilege" {
                     pending_privilege_set_seen = true;
                 }
                 if (name == "write" || name == "write-content" || name == "all")
@@ -806,8 +817,10 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
                 if name == "calendar" && stack.iter().any(|s| s == "resourcetype") {
                     pending_is_calendar = true;
                 }
-                if name == "current-user-privilege-set" {
-                    // Empty privilege set = no privileges granted.
+                // Self-closed `<privilege/>` (rare but legal: the server
+                // is asserting the privilege block exists without
+                // enumerating sub-elements). Same anchor as above.
+                if name == "privilege" {
                     pending_privilege_set_seen = true;
                 }
                 // Self-closed `<D:write/>`, `<D:write-content/>`, or `<D:all/>`
@@ -1341,8 +1354,16 @@ fn is_icalendar_resource(href: &str, content_type: &str) -> bool {
     if path_tail.to_ascii_lowercase().ends_with(".ics") {
         return true;
     }
-    // Accept entries with an etag but no content type info
-    content_type.is_empty() && !href.ends_with('/')
+    // Accept entries with an etag but no content type info. Test the
+    // *path tail* (already query/fragment-stripped above), not the raw
+    // href: a collection URL like `/cal/folder/?revision=1` doesn't
+    // end with `/` once the query is in the way, so the previous
+    // `!href.ends_with('/')` admitted collections through this arm
+    // when the server emitted no content-type. The
+    // `<resourcetype><collection/>` gate at the parser level catches
+    // most of these, but a server that omits resourcetype entirely and
+    // a query string in the URL slipped through. (Round 3 #23.)
+    content_type.is_empty() && !path_tail.ends_with('/')
 }
 
 // ---------------------------------------------------------------------------
@@ -2032,6 +2053,37 @@ END:VCALENDAR\r\n";
         let calendars = parse_propfind_calendars(xml);
         assert_eq!(calendars.len(), 1);
         assert_eq!(calendars[0].can_edit, None);
+    }
+
+    #[test]
+    fn parse_propfind_calendars_empty_privilege_set_leaves_can_edit_none() {
+        // Round 3 #25 regression guard. Some test mocks (and a handful of
+        // real servers handling unknown ACL gracefully) emit a self-closed
+        // `<current-user-privilege-set/>` with no children. The previous
+        // shape interpreted that as "explicit empty -> read-only" and
+        // flipped can_edit=Some(false), suppressing edit affordances even
+        // though no privilege information was actually conveyed. Anchor
+        // the signal on the first `<privilege>` ancestor instead, so an
+        // empty set stays "unknown" (None -> sync layer assumes editable).
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:response>
+    <D:href>/calendars/user/empty-priv/</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype><D:collection/><C:calendar/></D:resourcetype>
+        <D:displayname>Empty Priv</D:displayname>
+        <D:current-user-privilege-set/>
+      </D:prop>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+        let calendars = parse_propfind_calendars(xml);
+        assert_eq!(calendars.len(), 1);
+        assert_eq!(
+            calendars[0].can_edit, None,
+            "empty privilege-set should leave can_edit=None (treated as editable), not Some(false)"
+        );
     }
 
     #[test]

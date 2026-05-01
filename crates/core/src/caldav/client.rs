@@ -243,15 +243,24 @@ impl CalDavClient {
     async fn discover_principal(&self) -> Result<String, String> {
         // Try the base URL directly. This works for the vast majority of
         // CalDAV endpoints (DAViCal, Radicale, SOGo, iCloud, Fastmail, ...).
+        //
+        // Capture the final URL after redirects: hosted Exchange bridges
+        // and Apple iCloud occasionally redirect the base URL to a
+        // per-tenant or per-shard host (`caldav.icloud.com`, etc.). A
+        // relative `current-user-principal` href in that response must
+        // resolve against the redirect target, not the original base URL,
+        // or the next PROPFIND lands on the wrong host. The well-known
+        // fallback below has had this fix since b8398928; bringing it to
+        // the base-URL try closes the matching gap. (Round 3 #30.)
         let mut last_error = match self
-            .propfind_raw(&self.base_url, "0", PROPFIND_PRINCIPAL)
+            .propfind_with_final_url(&self.base_url, "0", PROPFIND_PRINCIPAL)
             .await
         {
-            Ok((_, body)) => {
+            Ok((_, final_url, body)) => {
                 if let Some(principal) =
                     extract_hrefs_property(&body, "current-user-principal").into_iter().next()
                 {
-                    return Ok(self.resolve_url(&principal));
+                    return Ok(self.resolve_url_against(&final_url, &principal));
                 }
                 "PROPFIND on base URL returned no current-user-principal".to_string()
             }
@@ -315,7 +324,16 @@ impl CalDavClient {
 
         let mut calendars = parse::parse_propfind_calendars(&body);
         for cal in &mut calendars {
-            cal.href = self.resolve_url(&cal.href);
+            // Resolve calendar hrefs against the home-set URL we just
+            // PROPFIND'd, not against `self.base_url`. Fastmail
+            // (caldav.fastmail.com vs the API host), hosted Exchange
+            // bridges, and any setup where login-host and DAV-host
+            // differ have a calendar-home-set living on a different
+            // origin than base_url. Resolving against base_url silently
+            // rebuilt the calendar URL on the wrong host and every
+            // event PROPFIND/PUT/DELETE thereafter went to the wrong
+            // origin or 404'd. (Round 3 #31.)
+            cal.href = self.resolve_url_against(&url, &cal.href);
         }
         if calendars.is_empty() {
             // Distinguish "user has no calendars provisioned" from "server
@@ -747,8 +765,24 @@ impl CalDavClient {
         // relative href lands underneath the collection.
         let join_base = ensure_collection_trailing_slash(base, href);
         if let Ok(base_url) = url::Url::parse(join_base.as_ref())
-            && let Ok(resolved) = base_url.join(href)
+            && let Ok(mut resolved) = base_url.join(href)
         {
+            // RFC 3986 § 5.3 drops the base's query when the reference
+            // is relative and carries no query of its own. CalDAV
+            // typically authenticates through the Authorization header,
+            // so this is rarely a practical failure mode - but
+            // shared-hosting front-ends occasionally pass a routing or
+            // session token through `?token=...` on the calendar URL
+            // and silently dropping that token sends event
+            // PROPFINDs/PUTs to a tenant-less route. Re-attach the
+            // base's query when the href didn't supply one. (Round 3
+            // #33.)
+            if resolved.query().is_none()
+                && let Some(base_query) = base_url.query()
+                && !base_query.is_empty()
+            {
+                resolved.set_query(Some(base_query));
+            }
             return resolved.to_string();
         }
         format!("{base}{href}")

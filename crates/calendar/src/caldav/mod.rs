@@ -62,10 +62,16 @@ pub async fn caldav_list_calendars_impl(
             color: cal.color,
             is_primary: idx == 0,
             remote_id: cal.href,
-            // CalDAV doesn't return per-calendar privileges in the standard
-            // PROPFIND we issue; assume editable until we wire
-            // <D:current-user-privilege-set>.
-            can_edit: true,
+            // Honor what the parser saw on `<D:current-user-privilege-set>`.
+            // `None` (block absent on the server response) defaults to
+            // editable so older servers without the privilege block keep
+            // the pre-fix behavior; explicit `Some(false)` (read-only
+            // shared calendars on iCloud / Fastmail / SOGo) is preserved
+            // here so the action layer doesn't later 403/405 on a PUT
+            // it never should have offered. The `caldav_list_calendars`
+            // path in `core::caldav::sync::sync_caldav_calendars` already
+            // does the same; this DTO conversion now matches. (Round 3 #40.)
+            can_edit: cal.can_edit.unwrap_or(true),
         })
         .collect())
 }

@@ -338,9 +338,45 @@ async fn sync_caldav_calendar_account(
 ) -> Result<(), String> {
     let config =
         super::caldav::load_caldav_account_config(db, encryption_key, account_id).await?;
-    let needed_discovery = config.home_url().is_none();
-    let client = super::caldav::build_client_from_config(&config).await?;
-    if needed_discovery {
+    let used_persisted = !(config.home_url().is_none() && config.principal_url().is_none());
+
+    // Both the client construction and the actual sync can fail when the
+    // persisted URLs (`caldav_principal_url`, `caldav_home_url`) point at
+    // a stale endpoint. Stale principal alone is enough: with persisted
+    // principal + no home, `build_client_from_config` runs `discover()`
+    // which skips principal discovery (since it's already set) and tries
+    // a calendar-home PROPFIND against the stale principal, which 404s
+    // and propagates here. The retry block below covers BOTH failure
+    // sites - construction *and* sync - so a stale principal doesn't
+    // wedge the account permanently. (Round 3 #32.)
+    let needs_discovery_now = config.home_url().is_none();
+    let attempt = run_caldav_sync_attempt(account_id, db, &config, needs_discovery_now).await;
+    match attempt {
+        Ok(()) => Ok(()),
+        Err(err) if used_persisted => {
+            log::warn!(
+                "CalDAV sync for {account_id} failed with persisted URLs ({err}); \
+                 clearing principal/home and rediscovering"
+            );
+            super::caldav::clear_persisted_caldav_urls(db, account_id).await;
+            let refreshed = super::caldav::load_caldav_account_config(db, encryption_key, account_id)
+                .await?;
+            // After clearing, both URLs are None so this branch always runs
+            // discovery; pass `true` to persist the freshly discovered values.
+            run_caldav_sync_attempt(account_id, db, &refreshed, true).await
+        }
+        Err(err) => Err(err),
+    }
+}
+
+async fn run_caldav_sync_attempt(
+    account_id: &str,
+    db: &DbState,
+    config: &super::caldav::CaldavAccountConfig,
+    persist_after_build: bool,
+) -> Result<(), String> {
+    let client = super::caldav::build_client_from_config(config).await?;
+    if persist_after_build {
         super::caldav::persist_discovery_results(
             db,
             account_id,
@@ -349,40 +385,9 @@ async fn sync_caldav_calendar_account(
         )
         .await;
     }
-
-    let first_attempt = rtsk::caldav::sync::sync_caldav_calendars(&client, db, account_id).await;
-
-    // If we used persisted URLs and the sync failed, the URLs may be
-    // stale (server migration, principal renamed, hosting provider
-    // shuffled the user's calendar root). Run discovery once more with
-    // the persisted values cleared, persist the new ones, and retry.
-    // The second-attempt error - whether it succeeds or surfaces a
-    // genuinely fatal problem - is what the caller sees, so we don't
-    // mask real failures behind perpetual rediscovery loops.
-    match first_attempt {
-        Ok(_) => Ok(()),
-        Err(err) if !needed_discovery => {
-            log::warn!(
-                "CalDAV sync for {account_id} failed with persisted URLs ({err}); \
-                 clearing principal/home and rediscovering"
-            );
-            super::caldav::clear_persisted_caldav_urls(db, account_id).await;
-            let refreshed = super::caldav::load_caldav_account_config(db, encryption_key, account_id)
-                .await?;
-            let client = super::caldav::build_client_from_config(&refreshed).await?;
-            super::caldav::persist_discovery_results(
-                db,
-                account_id,
-                client.principal_url(),
-                client.calendar_home_url(),
-            )
-            .await;
-            rtsk::caldav::sync::sync_caldav_calendars(&client, db, account_id)
-                .await
-                .map(|_| ())
-        }
-        Err(err) => Err(err),
-    }
+    rtsk::caldav::sync::sync_caldav_calendars(&client, db, account_id)
+        .await
+        .map(|_| ())
 }
 
 pub fn upsert_calendar_event(
