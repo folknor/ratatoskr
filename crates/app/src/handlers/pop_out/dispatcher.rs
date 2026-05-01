@@ -84,6 +84,10 @@ impl App {
             (PopOutWindow::Compose(_), PopOutMessage::Compose(ComposeMessage::Send)) => {
                 self.handle_compose_send(window_id)
             }
+            // Compose manual save - flush draft immediately
+            (PopOutWindow::Compose(_), PopOutMessage::Compose(ComposeMessage::SaveDraftNow)) => {
+                self.save_compose_draft(window_id)
+            }
             // Compose from-account changed - swap signature for new account
             (
                 PopOutWindow::Compose(_),

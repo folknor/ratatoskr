@@ -53,6 +53,9 @@ pub enum ComposeMessage {
     CcTokenInput(TokenInputMessage),
     BccTokenInput(TokenInputMessage),
     Send,
+    /// Manual save request from the Save button - flushes the current draft
+    /// state immediately rather than waiting for the next auto-save tick.
+    SaveDraftNow,
     Discard,
     /// Toggle discard confirmation dialog.
     ToggleDiscardConfirm,

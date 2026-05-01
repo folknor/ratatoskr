@@ -60,6 +60,10 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         ComposeMessage::Discard => {
             // Handled by the caller (close window)
         }
+        ComposeMessage::SaveDraftNow => {
+            // Handled by the caller (dispatches async save). The reducer
+            // does nothing - the dispatcher reuses the auto-save path.
+        }
         ComposeMessage::ToggleDiscardConfirm => {
             state.link_dialog_open = false;
             state.context_menu = None;

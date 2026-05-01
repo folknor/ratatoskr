@@ -537,9 +537,25 @@ fn compose_footer<'a>(
     ))
     .padding(PAD_BUTTON);
 
+    let save_btn = button(
+        row![
+            icon::download().size(ICON_LG),
+            text("Save").size(TEXT_LG),
+        ]
+        .spacing(SPACE_XXS)
+        .align_y(Alignment::Center),
+    )
+    .style(theme::ButtonClass::Action.style())
+    .on_press(Message::PopOut(
+        window_id,
+        PopOutMessage::Compose(ComposeMessage::SaveDraftNow),
+    ))
+    .padding(PAD_BUTTON);
+
     let footer_row = row![
         discard_btn,
         attach_btn,
+        save_btn,
         Space::new().width(Length::Fill),
         send_btn,
     ]

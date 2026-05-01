@@ -90,8 +90,8 @@ impl App {
     }
 
     /// Save a single compose window's state as a local draft (async).
-    /// Used by the periodic auto-save timer.
-    fn save_compose_draft(&mut self, window_id: iced::window::Id) -> Task<Message> {
+    /// Used by the periodic auto-save timer and the manual Save button.
+    pub(crate) fn save_compose_draft(&mut self, window_id: iced::window::Id) -> Task<Message> {
         let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id) else {
             return Task::none();
         };
