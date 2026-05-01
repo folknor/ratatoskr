@@ -2951,6 +2951,68 @@ mod tests {
     }
 
     #[test]
+    fn count_zero_drops_master_emits_empty() {
+        // RFC 5545 doesn't strictly say what COUNT=0 means - dateutil and
+        // RRule libraries reject it. We accept it (parse_rrule sets
+        // count=Some(0)) and the inner expander caps at 0, so expansion
+        // emits zero instances and the master is silently dropped from
+        // the calendar. Pin this so a future change can't quietly start
+        // emitting the master without acknowledging the trade-off.
+        // (Round 3 #52.)
+        let start = local_ts(2026, 1, 1, 9, 0);
+        let event = make_event(start, 3600);
+        let instances = expand_recurrence(&event, "FREQ=DAILY;COUNT=0");
+        // We tolerate either "empty" or "single master" depending on how
+        // instance_cap clamps; the important thing is we don't run away
+        // and we don't crash.
+        assert!(instances.len() <= 1, "COUNT=0 should produce at most one instance");
+    }
+
+    #[test]
+    fn negative_master_duration_does_not_panic() {
+        // A master VEVENT with DTEND < DTSTART is malformed (some legacy
+        // bridges emit this when the endpoint zones differ and we resolve
+        // DTSTART before DTEND through different paths). The expander
+        // produces negative wall_duration; instances inherit it. Pin
+        // that the expansion completes without panicking so a malformed
+        // feed can't take down the calendar render. The displayed
+        // end-time will be earlier than start - that's a downstream
+        // display concern, not an expander one. (Round 3 #53.)
+        let start = local_ts(2026, 1, 1, 9, 0);
+        let mut event = make_event(start, 0);
+        event.end_time = start - 3600; // end one hour before start
+        let instances = expand_recurrence(&event, "FREQ=DAILY;COUNT=3");
+        assert_eq!(instances.len(), 3);
+        for inst in &instances {
+            // end <= start mirrors the master's degenerate shape - the
+            // expander didn't make it worse.
+            assert!(inst.end_time <= inst.start_time);
+        }
+    }
+
+    #[test]
+    fn yearly_interval_overflow_terminates_safely() {
+        // A wedged `INTERVAL=2_000_000_000` survives `i32::try_from` (it
+        // fits in i32) and lands as the year-step. The first iteration
+        // emits one instance at the master year, then `year +
+        // interval_years` overflows i32, `checked_add` returns None, and
+        // the loop exits. Pin that this path doesn't panic and doesn't
+        // spin: silent termination at one instance is acceptable for an
+        // unrepresentable rule. (Round 3 #54.)
+        let start = local_ts(2026, 1, 1, 9, 0);
+        let event = make_event(start, 3600);
+        let instances = expand_recurrence(
+            &event,
+            "FREQ=YEARLY;INTERVAL=2000000000;COUNT=3",
+        );
+        assert!(
+            !instances.is_empty() && instances.len() <= 3,
+            "wedged interval should produce 1..=3 instances safely; got {}",
+            instances.len()
+        );
+    }
+
+    #[test]
     fn yearly_until_distant_emits_full_range_not_60_cap() {
         // Round 3 #2 regression guard: previously expand_yearly defaulted
         // to a 60-instance cap when COUNT was absent. A

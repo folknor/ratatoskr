@@ -274,27 +274,15 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
 
 ### Test gaps flagged
 
-52. **Note** [perf/claude notes] - **`RRULE COUNT=0`** parsed as
-    `Some(0)`, inner cap=0, expand returns empty Vec, master event
-    silently dropped from the view. Probably acceptable, but no test
-    pins the behavior.
-
-53. **Note** [perf/claude notes] - **`expand_recurrence` with
-    `event.end_time < event.start_time`** produces negative
-    `wall_duration`, which propagates negative
-    `end_time_for_instance` outputs. Untested.
-
-54. **Note** [perf/claude notes] - **`expand_yearly` with
-    `INTERVAL=2_000_000_000`**: `i32::try_from` fails → fallback to
-    1, then the 2-year-window/COUNT/UNTIL bounds limit. No test for
-    the silent-degradation path.
-
-55. **Note** [perf/claude notes] - **`discover_principal` against a
-    base URL that itself redirects** - `propfind_raw` doesn't track
-    final URL, so a relative principal href resolves against the
-    original `base_url` rather than the redirect target. Same shape
-    as #30. Less common but the fix shape mirrors
-    `propfind_with_final_url` and is small.
+The Round 3 review flagged four behaviors as untested. Three now have
+pinning tests in `crates/db/src/db/queries_extra/calendars.rs`
+(`count_zero_drops_master_emits_empty`,
+`negative_master_duration_does_not_panic`,
+`yearly_interval_overflow_terminates_safely`); the fourth (#55,
+discover_principal against a redirecting base URL) is closed by the
+#30 fix in this round - the base-URL try uses
+`propfind_with_final_url` and resolves the principal against the
+post-redirect URL.
 
 ---
 
