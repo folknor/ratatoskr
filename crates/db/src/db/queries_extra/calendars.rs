@@ -1082,9 +1082,19 @@ fn expand_recurrence(event: &CalendarViewEvent, rrule_str: &str) -> Vec<Calendar
 
     let duration = event.end_time - event.start_time;
     let max_instances = rule.count.unwrap_or(365).max(1);
+    if rule.count.is_some() && rule.until.is_some() {
+        // RFC 5545 § 3.3.10: COUNT and UNTIL are mutually exclusive. Some
+        // emitters send both anyway; we apply BOTH as upper bounds (the
+        // intersection is always a subset of either, so the result stays
+        // within the more permissive interpretation either rule alone would
+        // permit). Logged so an operator can spot misbehaving servers.
+        log::debug!(
+            "RRULE has both COUNT and UNTIL (mutually exclusive per RFC 5545); applying both as bounds"
+        );
+    }
     let window_end = rule
         .until
-        .unwrap_or(event.start_time + 2 * 365 * 86400);
+        .unwrap_or_else(|| two_year_window_end(event.start_time));
 
     let mut instances = Vec::with_capacity(max_instances);
 
@@ -1111,10 +1121,24 @@ fn expand_recurrence(event: &CalendarViewEvent, rrule_str: &str) -> Vec<Calendar
         instances.push(instance);
     }
 
-    if instances.is_empty() {
-        instances.push(event.clone());
-    }
+    // Note: when the RRULE produces zero instances (e.g. UNTIL is in the
+    // past, or every BYxxx filter rejects every visited candidate), we
+    // return an empty Vec rather than synthesizing the original event.
+    // The previous fallback hid genuine "this rule expires in the past"
+    // states from the caller.
     instances
+}
+
+/// Compute the 2-year window-end timestamp using calendar arithmetic so
+/// leap years are accounted for. Falls back to a 730-day approximation if
+/// the start timestamp is somehow out of chrono's representable range.
+fn two_year_window_end(start: i64) -> i64 {
+    use chrono::TimeZone;
+    chrono::Local
+        .timestamp_opt(start, 0)
+        .single()
+        .and_then(|dt| dt.with_year(dt.year() + 2))
+        .map_or(start + 730 * 86400, |dt| dt.timestamp())
 }
 
 /// Parsed pieces of an RRULE string. Unknown parts are ignored silently.
@@ -1127,6 +1151,10 @@ struct Rrule {
     byday: Vec<chrono::Weekday>,
     bymonthday: Vec<i32>,
     bymonth: Vec<u32>,
+    /// Week-start day. `None` means "use the default" - we treat that as
+    /// Monday (RFC 5545 § 3.3.10 default), which matches what most weekly
+    /// recurrence views expect. Set explicitly via `WKST=SU` etc.
+    wkst: Option<chrono::Weekday>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1188,17 +1216,16 @@ fn parse_rrule(rrule_str: &str) -> Rrule {
                 .filter_map(|s| s.trim().parse::<u32>().ok())
                 .filter(|m| (1..=12).contains(m))
                 .collect();
+        } else if let Some(val) = part.strip_prefix("WKST=") {
+            out.wkst = parse_weekday_code(val.trim());
         }
     }
     out
 }
 
-/// Parse an iCal weekday code, ignoring any leading +/-N ordinal prefix
-/// (BYDAY supports things like "1MO" or "-1FR" which we treat as plain MO/FR).
-fn parse_weekday(spec: &str) -> Option<chrono::Weekday> {
-    let trimmed = spec.trim();
-    let code = trimmed
-        .trim_start_matches(|c: char| c == '-' || c == '+' || c.is_ascii_digit());
+/// Parse a bare iCal weekday token (no ordinal prefix). Used for `WKST=`
+/// and as a helper for the BYDAY parser.
+fn parse_weekday_code(code: &str) -> Option<chrono::Weekday> {
     match code {
         "MO" => Some(chrono::Weekday::Mon),
         "TU" => Some(chrono::Weekday::Tue),
@@ -1209,6 +1236,16 @@ fn parse_weekday(spec: &str) -> Option<chrono::Weekday> {
         "SU" => Some(chrono::Weekday::Sun),
         _ => None,
     }
+}
+
+/// Parse an iCal weekday code, ignoring any leading +/-N ordinal prefix
+/// (BYDAY supports things like "1MO" or "-1FR" which we treat as plain MO/FR
+/// in the value-set; the ordinal is captured separately by `parse_byday`).
+fn parse_weekday(spec: &str) -> Option<chrono::Weekday> {
+    let trimmed = spec.trim();
+    let code = trimmed
+        .trim_start_matches(|c: char| c == '-' || c == '+' || c.is_ascii_digit());
+    parse_weekday_code(code)
 }
 
 fn expand_daily(start: i64, rule: &Rrule) -> Vec<i64> {
@@ -1256,11 +1293,18 @@ fn expand_weekly(start: i64, rule: &Rrule) -> Vec<i64> {
         return out;
     }
 
-    // Sort weekdays so each week emits in chronological order.
+    let wkst = rule.wkst.unwrap_or(chrono::Weekday::Mon);
+    // Sort weekdays so each week emits in chronological order, anchored to
+    // the week-start day. Without this, a week starting on Sunday would
+    // still emit Mon-first.
     let mut days = rule.byday.clone();
-    days.sort_by_key(chrono::Weekday::num_days_from_monday);
+    days.sort_by_key(|d| {
+        let wd = d.num_days_from_monday() as i64;
+        let from = wkst.num_days_from_monday() as i64;
+        (wd - from).rem_euclid(7)
+    });
 
-    let week_start = start_of_week(start);
+    let week_start = start_of_week(start, wkst);
     let mut week_anchor = week_start;
     // Step-bounded: each "step" is one anchored week. Same DoS guard
     // rationale as `expand_daily`.
@@ -1269,7 +1313,7 @@ fn expand_weekly(start: i64, rule: &Rrule) -> Vec<i64> {
             break;
         }
         for &wd in &days {
-            let candidate = shift_to_weekday(week_anchor, wd, start);
+            let candidate = shift_to_weekday(week_anchor, wd, wkst, start);
             if candidate < start {
                 continue;
             }
@@ -1367,19 +1411,34 @@ fn add_days_local(timestamp: i64, days: i64) -> Option<i64> {
     crate::db::time::resolve_local_to_timestamp(new_naive, &chrono::Local)
 }
 
-fn start_of_week(timestamp: i64) -> i64 {
+fn start_of_week(timestamp: i64, week_start: chrono::Weekday) -> i64 {
     use chrono::TimeZone;
     let Some(dt) = chrono::Local.timestamp_opt(timestamp, 0).single() else {
         return timestamp;
     };
-    let weekday = dt.naive_local().date().weekday();
-    let days_back = weekday.num_days_from_monday() as i64;
+    let current = dt.naive_local().date().weekday();
+    // Modular distance from `week_start` to `current`, walking forward
+    // through the week (so a Sun-anchored week with current=Sat -> 6 days
+    // back, and a Mon-anchored week with current=Sun -> 6 days back).
+    let from = week_start.num_days_from_monday() as i64;
+    let to = current.num_days_from_monday() as i64;
+    let days_back = (to - from).rem_euclid(7);
     add_days_local(timestamp, -days_back).unwrap_or(timestamp)
 }
 
-fn shift_to_weekday(week_anchor: i64, target: chrono::Weekday, time_source: i64) -> i64 {
+fn shift_to_weekday(
+    week_anchor: i64,
+    target: chrono::Weekday,
+    week_start: chrono::Weekday,
+    time_source: i64,
+) -> i64 {
     use chrono::TimeZone;
-    let target_offset = target.num_days_from_monday() as i64;
+    // Modular offset from `week_start` to `target`, so that within a
+    // Sunday-anchored week the offset for Saturday is 6 (not -1) and for
+    // Monday is 1 (not 0).
+    let to = target.num_days_from_monday() as i64;
+    let from = week_start.num_days_from_monday() as i64;
+    let target_offset = (to - from).rem_euclid(7);
     let Some(anchor_dt) = chrono::Local.timestamp_opt(week_anchor, 0).single() else {
         return week_anchor;
     };
@@ -1496,13 +1555,34 @@ fn days_in_month(year: i32, month: u32) -> u32 {
     }
 }
 
-/// Parse an UNTIL date string (YYYYMMDD or YYYYMMDDTHHMMSSZ) to Unix timestamp.
+/// Parse an UNTIL value (RFC 5545 § 3.3.10).
+///
+/// Two valid forms:
+/// - `YYYYMMDD` (DATE only) - means "everything up to end of that local day."
+///   We store end-of-day so callers using `start <= UNTIL` get the natural
+///   "instances on the until-date are included" behavior.
+/// - `YYYYMMDDTHHMMSSZ` (DATE-TIME, UTC) - the wall-clock instant in UTC.
+///   We must preserve the exact time, not collapse it to 23:59:59.
 fn parse_until_date(val: &str) -> Option<i64> {
-    let date_part = &val[..val.len().min(8)];
+    let date_part = val.get(..8)?;
     let year: i32 = date_part.get(0..4)?.parse().ok()?;
     let month: u32 = date_part.get(4..6)?.parse().ok()?;
     let day: u32 = date_part.get(6..8)?.parse().ok()?;
     let date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
+
+    // Probe for the DATE-TIME form: `THHMMSS` (Z is optional but always
+    // implied UTC for UNTIL per spec).
+    if val.len() >= 15 && val.as_bytes().get(8) == Some(&b'T') {
+        let time_part = val.get(9..15)?;
+        let hour: u32 = time_part.get(0..2)?.parse().ok()?;
+        let minute: u32 = time_part.get(2..4)?.parse().ok()?;
+        let second: u32 = time_part.get(4..6)?.parse().ok()?;
+        let dt = date.and_hms_opt(hour, minute, second)?;
+        return Some(dt.and_utc().timestamp());
+    }
+
+    // DATE-only: anchor to end of the day so events scheduled on the UNTIL
+    // date are still emitted.
     let dt = date.and_hms_opt(23, 59, 59)?;
     Some(dt.and_utc().timestamp())
 }
@@ -1717,5 +1797,64 @@ mod tests {
         let instances = expand_recurrence(&event, "FREQ=BOGUS");
         assert_eq!(instances.len(), 1);
         assert_eq!(instances[0].start_time, start);
+    }
+
+    #[test]
+    fn until_with_time_preserves_time_portion() {
+        // UNTIL=20260315T120000Z means "stop at 12:00 UTC on 2026-03-15".
+        // The previous parser collapsed this to 23:59:59 UTC, which kept
+        // afternoon instances that should have been excluded.
+        let start = local_ts(2026, 3, 15, 9, 0);
+        let event = make_event(start, 3600);
+        let until = chrono::NaiveDate::from_ymd_opt(2026, 3, 15)
+            .and_then(|d| d.and_hms_opt(12, 0, 0))
+            .map(|d| d.and_utc().timestamp())
+            .expect("valid");
+        let instances =
+            expand_recurrence(&event, "FREQ=DAILY;UNTIL=20260315T120000Z");
+        assert!(!instances.is_empty());
+        for inst in &instances {
+            assert!(
+                inst.start_time <= until,
+                "instance {} > UNTIL {until}",
+                inst.start_time
+            );
+        }
+    }
+
+    #[test]
+    fn empty_expansion_returns_empty_not_original() {
+        // UNTIL is in the past relative to the start: zero instances should
+        // be emitted, not a single fallback copy of the original event.
+        let start = local_ts(2030, 1, 1, 9, 0);
+        let event = make_event(start, 3600);
+        let instances = expand_recurrence(&event, "FREQ=DAILY;UNTIL=20290101T000000Z");
+        assert!(instances.is_empty());
+    }
+
+    #[test]
+    fn wkst_sunday_anchors_week_to_sunday() {
+        // 2026-03-08 is a Sunday. With WKST=SU and BYDAY=SU,WE, a recurrence
+        // starting on the prior Wednesday should emit the Wednesday first
+        // (within the first week) and the following Sunday next - chronological
+        // order anchored to the Sunday-week.
+        let wed = local_ts(2026, 3, 4, 9, 0); // 2026-03-04 is a Wednesday
+        let event = make_event(wed, 3600);
+        let instances = expand_recurrence(&event, "FREQ=WEEKLY;BYDAY=SU,WE;WKST=SU;COUNT=4");
+        assert_eq!(instances.len(), 4);
+        let weekdays: Vec<_> = instances
+            .iter()
+            .map(|e| weekday_of(e.start_time))
+            .collect();
+        // Sunday-anchored week: Wed -> Sun -> Wed -> Sun
+        assert_eq!(
+            weekdays,
+            vec![
+                chrono::Weekday::Wed,
+                chrono::Weekday::Sun,
+                chrono::Weekday::Wed,
+                chrono::Weekday::Sun,
+            ]
+        );
     }
 }

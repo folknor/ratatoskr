@@ -17,16 +17,6 @@ its helpers (`parse_rrule`, `parse_weekday`, `expand_daily`, `expand_weekly`,
 
 - `calendars.rs:1180-1191` - `parse_weekday` strips digits and signs, so `BYDAY=1MO` and `BYDAY=-1FR` collapse to plain `MO`/`FR`. Under `FREQ=MONTHLY` the rule then falls into the `bymonthday.is_empty()` branch and emits the *start day* every month, not the first/last weekday. Repro: `FREQ=MONTHLY;BYDAY=1MO` starting 2026-03-09 emits the 9th every month, not the first Monday.
 
-- `calendars.rs:1085-1099` - COUNT and UNTIL coexist: `max_instances = count` and `window_end = until` both apply, so the loop stops at whichever is tighter. RFC 5545 forbids both being set; we silently AND them rather than rejecting. Minor, but a correctness deviation.
-
-- `calendars.rs:1072-1074` - `window_end = start + 2*365*86400` ignores leap years; a 2-year window starting 2024-01-01 ends 2025-12-31 (not 2026-01-01). The check at line 1086 is `start > window_end` (strict `>`) so an instance landing exactly on `window_end` is included - minor off-by-one mostly invisible in practice.
-
-- `calendars.rs:1302-1310` - `start_of_week` hardcodes Monday (`num_days_from_monday`); RFC 5545 `WKST` is not parsed. For weekly rules where the user expects Sunday-anchored weeks (US default `WKST=SU`), the first emitted week can be off by one when start-of-week lands on Sun and BYDAY includes earlier days. Note rather than bug.
-
-- `calendars.rs:1403-1411` - `parse_until_date` builds `date.and_hms_opt(23,59,59).and_utc().timestamp()` regardless of whether the UNTIL value is `YYYYMMDD` (date-only, floating) or `YYYYMMDDTHHMMSSZ` (UTC datetime). The `T...Z` time portion is discarded and replaced with 23:59:59 UTC. Repro: `UNTIL=20280101T000000Z` is treated as 2028-01-01 23:59:59 UTC, almost a full day late. The existing `yearly_with_until_clamps_window` test happens to pass because the slack matches.
-
-- `calendars.rs:1085-1099` - `instances.is_empty()` fallback: if every candidate is filtered out (e.g. `COUNT=5` with `UNTIL` already past), the function returns the original event as a single instance. That's not what RFC 5545 says - an event whose RRULE produces no instances should produce zero instances. Behavioural surprise, not a crash.
-
 ---
 
 ## Review 2 - TZID + Graph datetime resolution (Opus, bugs lens)
@@ -68,6 +58,4 @@ Compared against the deleted ad-hoc client and XML parser via git history.
 ### Reviewer A - combined RRULE / TZ / CalDAV pass
 
 4. `crates/db/src/db/queries_extra/calendars.rs:1176`: ordinal BYDAY is stripped to a plain weekday, and `crates/db/src/db/queries_extra/calendars.rs:1250` / `crates/db/src/db/queries_extra/calendars.rs:1274` expansion ignores BYDAY anyway. `FREQ=MONTHLY;BYDAY=1MO` emits the DTSTART day-of-month, not the first Monday.
-
-5. `crates/db/src/db/queries_extra/calendars.rs:1403`: `UNTIL=YYYYMMDDTHHMMSSZ` ignores the time and becomes 23:59:59 UTC for that date. Occurrences after the actual UNTIL time are incorrectly included.
 
