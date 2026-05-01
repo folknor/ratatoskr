@@ -116,7 +116,7 @@ These are verified, adopted project-wide, and should be followed for all new wor
 
 **Generational load tracking** - 9 branded `GenerationCounter<T>` instances across App and component levels. See "Generation counters for async safety" above.
 
-**Component trait** - 7 components: Sidebar, ThreadList, ReadingPane, Settings, StatusBar, AddAccountWizard, Palette. Non-components (Compose, Calendar, Pop-out windows) use free functions + App handler methods.
+**Component trait** - 8 components: Sidebar, ThreadList, ReadingPane, Settings, StatusBar, AddAccountWizard, Palette, ChatTimeline. Non-components (Compose, Calendar, Pop-out windows) use free functions + App handler methods.
 
 **Token-to-Catalog theming** - All styling goes through the theme catalog. No inline color closures. Exceptions: rich text editor (builder methods), token input (renderer.fill_quad).
 
@@ -125,6 +125,8 @@ These are verified, adopted project-wide, and should be followed for all new wor
 **`ProgressReporter` trait** - All event emission from core goes through `&dyn ProgressReporter`. The app provides its own implementation.
 
 **State types are `Clone`** - `DbState`, `BodyStoreState`, `InlineImageStoreState`, `SearchState`, `AppCryptoState` all wrap `Arc<Mutex<_>>` and implement `Clone`.
+
+**DOM-to-widget pipeline** - V1 in `html_render.rs`. Supports links, CID images, inline formatting (bold/italic/underline/strike/code via `iced::widget::rich_text`), block structure. Complexity heuristic (table depth >5, style tags >2) falls back to plain text. Used in both the reading pane and the pop-out message view (Simple HTML / Original HTML modes). Remaining gaps: remote image loading with consent, table rendering, image caching - tracked in TODO.md.
 
 ## Current Exceptions
 

@@ -212,6 +212,14 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 - [ ] **Microsoft ID token not signature-verified** - JWT payload is base64-decoded and trusted for email/name claims without verifying the signature. Token comes over TLS from Microsoft, but a MITM or compromised endpoint could inject arbitrary identity claims.
 
+- [ ] **Account secrets stored plaintext in `accounts` table** *(unverified - surfaced by codex security review 2026-05-01)* - `CreateAccountParams` builds raw OAuth tokens and IMAP/SMTP passwords (`crates/app/src/ui/add_account/identity.rs:46`), then `create_account_sync` inserts them directly (`crates/db/src/db/queries_extra/accounts_crud.rs:73`). Reauth has the same issue for passwords (`crates/app/src/ui/add_account/state.rs:480`) and OAuth tokens (`crates/app/src/ui/add_account/oauth.rs:137`); CalDAV password updates also write raw values (`crates/app/src/ui/settings/update/accounts.rs:126`). The bug is masked because provider clients tolerate plaintext via `decrypt_or_raw` / `decrypt_if_needed` (`crates/common/src/crypto.rs:141`). Fix: encrypt at the DB boundary; assert in regression tests that stored values never equal the raw token/password.
+
+- [ ] **Mail content stores not encrypted at rest** *(unverified - surfaced by codex security review 2026-05-01)* - `BodyStore` keeps compressed HTML/text bodies in `bodies.db` unencrypted (`crates/stores/src/body_store.rs:117`), inline images are raw SQLite blobs (`crates/stores/src/inline_image_store.rs:96`), and attachment cache files are raw bytes (`crates/stores/src/attachment_cache.rs:52`). Compression is not a security boundary. Either envelope-encrypt with AES-256-GCM, or document explicitly that content at rest relies on OS / full-disk encryption.
+
+- [ ] **IMAP OAuth `auth_method` string mismatch** *(unverified - surfaced by codex security review 2026-05-01)* - Add-account stores OAuth accounts with `auth_method = "oauth"` (`crates/app/src/ui/add_account/state.rs:601`), but IMAP config only recognizes `"oauth2"` (`crates/imap/src/account_config.rs:176`). IMAP OAuth accounts fall back into password-auth handling with an empty password, pushing users toward password / app-password flows while leaving raw OAuth tokens in the DB.
+
+- [ ] **Discovery URL validation is too string-based** *(unverified - surfaced by codex security review 2026-05-01)* - OIDC endpoint validation only checks `starts_with("https://")` (`crates/core/src/discovery/oidc.rs:68`); discovery domain extraction accepts anything after `@` with a dot (`crates/core/src/discovery/mod.rs:155`). Parse with `Url`, reject embedded credentials, validate ports / paths, and reject private / local hosts.
+
 ## Remaining Enhancements (other)
 
 - [ ] **iced_drop for cross-container DnD** - Custom DragState works for list reorder. iced_drop needed for: compose token DnD, label drag-to-file, calendar event dragging, attachment drag zones (the compose-window two-zone overlay - see `docs/pop-out-windows/discrepancies.md` High #1).
@@ -267,6 +275,16 @@ Flagged inline as `TODO(refactor)` with `#[allow(clippy::too_many_arguments)]` o
 - [ ] address-row 4-tuples of `Option<String>` (two call sites) - `crates/db/src/db/queries_extra/thread_persistence.rs:447, 665` -> `AddressRow` struct
 - [ ] compressed-body batches `(String, Option<Vec<u8>>, Option<Vec<u8>>)` (two call sites) - `crates/stores/src/body_store.rs:152, 241` -> `CompressedBody` struct
 
+**Split oversized files (>1000 lines, snapshot 2026-05-01):**
+- [ ] `crates/app/src/ui/emoji_picker.rs` (2946 lines) -> extract emoji catalog/data into a separate module (likely generated); keep widget logic in `emoji_picker.rs`
+- [ ] `crates/db/src/db/queries_extra/calendars.rs` (2105 lines) -> split RRULE expansion/parsing helpers (`parse_rrule`, `parse_byday`, `parse_until_date`, `expand_*`) from event-query CRUD
+- [ ] `crates/app/src/ui/sidebar.rs` (1277 lines) -> split by sidebar section (accounts / labels / smart folders / public folders / shared mailboxes)
+- [ ] `crates/imap/src/imap_delta.rs` (1189 lines) -> phase-based split (fetch / parse / persist) or feature-based (mailbox vs flags vs UIDVALIDITY recovery)
+- [ ] `crates/core/src/caldav/parse.rs` (1155 lines) -> separate XML multistatus parsers (`parse_propfind_*`, `parse_multiget_report`) from iCal extraction (`extract_datetime`, `extract_vevent`, `parse_icalendar`)
+- [ ] `crates/smart-folder/src/parser.rs` (1097 lines) -> consider splitting lexer / tokenizer from parser if boundaries are clean
+- [ ] `crates/app/src/handlers/core.rs` (1035 lines) -> extract focused handler subsystems out of the catch-all
+- [ ] `crates/app/src/pop_out/message_view.rs` (1012 lines) -> follow the `pop_out/compose/*` pattern (helpers / messages / modals / state / token_handlers / types / update / view)
+
 ## Needs Visual Review
 
 Completed features that need to be visually verified in the running app.
@@ -280,14 +298,4 @@ Completed features that need to be visually verified in the running app.
 
 ## Cross-Cutting Architecture Patterns
 
-Living reference - follow these patterns as features are built. Keep until 1.0.
-
-- **Generational load tracking** - 9 branded `GenerationCounter<T>` instances across App and component levels. See `docs/architecture.md`.
-
-- **Component trait** - 8 components: Sidebar, ThreadList, ReadingPane, Settings, StatusBar, AddAccountWizard, Palette, ChatTimeline. Non-components use free functions + App handler methods: Compose, Calendar, Pop-out windows.
-
-- **Token-to-Catalog theming** - Zero inline closure violations. Exceptions: rich text editor (builder methods), token input (renderer.fill_quad).
-
-- **Config shadow pattern** - Formal: `PreferencesState`. Implicit (clone-on-open): Account editor, Contact editor, Group editor, Calendar event editor, Signature editor. Editors work on a shadow copy and commit on save.
-
-- **DOM-to-widget pipeline** - V1 in `html_render.rs`. Supports links, CID images, inline formatting (bold/italic/underline/strike/code via `iced::widget::rich_text`), block structure. Complexity heuristic (table depth >5, style tags >2) falls back to plain text. Used in both the reading pane and the pop-out message view (Simple HTML / Original HTML modes). Remaining: remote image loading with consent, table rendering, image caching.
+See `docs/architecture.md` § "Settled Patterns" for the living reference.

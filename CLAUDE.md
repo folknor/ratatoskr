@@ -2,8 +2,6 @@
 
 **Subagents must always be launched in the foreground** (never use `run_in_background: true`) so the user can approve tool requests.
 
-**Never use the auto-memory system on this project.** Do not read, write, or update memories. Do not suggest saving things to memory. Durable context belongs in CLAUDE.md or the relevant docs, not in per-session memory files.
-
 Pure Rust desktop email client targeting enterprise users currently locked into Outlook/Microsoft 365. Three non-negotiable constraints shape the project:
 
 1. **Exchange + Calendar** - no free client at scale supports both.
@@ -24,6 +22,44 @@ Cargo workspace (19 crates). Key crates:
 - **`types`** (`crates/types/`) - Lightweight shared types (`FolderId`, `TagId`, `SidebarSelection`). Minimal deps (serde only).
 - **`dev-seed`** (`crates/dev-seed/`) - Deterministic test database generator. See dev-seed section below.
 - **Providers**: `gmail`, `jmap`, `graph`, `imap` - each in `crates/{name}/`.
+
+## Required reading
+
+Read the doc before starting work in its area. Subagents launched for these tasks must include the relevant doc in their required-reading list.
+
+- **Any UI work** - `UI.md` at the repo root.
+- **Architectural decisions, crate boundaries, new email actions, generation counters, scope wiring, calendar workflow layering, provider trait additions** - `docs/architecture.md`.
+- **Anything touching folders, labels, the `labels` table, `thread_labels`, `label_kind`, system folder IDs (`INBOX`, `TRASH`, `SPAM`, `SENT`, `DRAFT`, `archive`, `STARRED`), or provider folder/label sync** - `docs/glossary/folders-labels.md`.
+- **Adding or refactoring tooltips, dropdowns, context menus, popovers, modals, sheets, or any new overlay-like surface** - `docs/glossary/overlay-surfaces.md`.
+
+## Rules
+
+### General rules
+
+- Don't use gremlins! Em-dash, en-dash, strange quotes, whatever - they're all verboten.
+- Don't remind the user of CLAUDE.md rules. They wrote them, so they know them.
+
+### Memory rules
+
+Do not use your Memory functionality. Do not read, write, or update memories. Do not suggest saving things to memory. Durable context belongs in CLAUDE.md or the relevant docs, not in per-session memory files - this project is developed across several hosts and users, and memory does not transfer between them; CLAUDE.md does.
+
+### Bash rules
+
+- Never use `sed`, `find`, `awk`, `head`, `tail`, or complex bash commands.
+- Never chain commands with `&&`.
+- Never chain commands with `;`.
+- Never chain/pipe commands with `|`. Exception: piping into `review` is allowed (writing scratch prompt files is wasteful).
+- Never capture stdout into env vars (`UUID=$(...)`).
+- Never read or write from `/tmp`. All data lives in the project.
+- Never run raw `cargo`, `curl`, `pkill`. Use `brokkr`.
+
+### git commit rules
+
+- Never commit markdown changes alone. Bundle them with upcoming code commits.
+- When committing other changes: always tag along markdown files if dirty.
+- Write substantive engineering-focused commit messages.
+- Has `Cargo.lock` changed? Commit it.
+- Never `git push` unless the user explicitly asks. Stop after the commit.
 
 ## Commands
 
@@ -134,29 +170,26 @@ These are non-obvious behaviors of the `jmap-client` crate that will matter if t
 
 ## Code Review (`review`)
 
-`review` is a CLI tool that fans out code review requests to persistent AI sessions. Each session is a long-lived Claude or Codex conversation that has already been onboarded with project context for a specific review lens. Configuration lives in `.review.toml` at the repo root.
+`review` is a CLI tool that fans out code review requests to anchored AI sessions. Each archetype has a stored prime prompt (in `.review.toml` under `[_prime].<archetype>`) that defines the review lens. Configuration lives in `.review.toml` at the repo root.
 
-Four archetypes are configured: `security`, `bugs`, `perf`, `arch`. The `sweep` group fans out to all four in parallel.
+Four archetypes: `security`, `bugs`, `perf`, `arch`. The `sweep` group fans out to all four in parallel.
 
-Instructions are piped via stdin. The agents fetch code themselves - just tell them what to look at:
+**Default to `--oneshot`.** Anthropic's prompt cache is ~1 hour, so starting a fresh session for each unrelated review is cheaper than resuming a long-lived one. `--oneshot` starts a fresh session, prepends the stored prime prompt, runs the query, and prints the session ID to stdout.
+
+**Follow-ups:** within the cache window, resume the same session with `--session <id>` (using the ID printed by the previous `--oneshot`). The cache stays warm; only the new query and reply are billed. `--session` requires `--provider` and is mutually exclusive with `--oneshot`.
 
 ```bash
-echo "check the new sync logic" | review bugs
-echo "review this change" | review arch,perf
+echo "review the new sync code" | review bugs --oneshot
+# session: 019de...
+# <findings>
+
+echo "follow up on the second finding" | review bugs --provider claude --session 019de...
+# <answer>
 ```
 
-Without `--anchor`, stdin goes directly to the session - the sessions are already onboarded with project context and their review focus. Use `--anchor` for the first review in a session or to re-anchor a stale session. When using `--anchor`, reinforce the session's identity in your piped instructions:
+Don't reach for a second `--oneshot` to follow up - that creates a different fresh session with no memory of the first. Use `--session` for continuity within a thread, `--oneshot` for new threads.
 
-- **security**: "Remember: you're our security auditor for ratatoskr."
-- **bugs**: "Remember: you're our QA engineer embedded on ratatoskr."
-- **perf**: "Remember: you're our performance engineer reviewing ratatoskr."
-- **arch**: "Remember: you're our software architect reviewing ratatoskr."
-
-## Commit rules
-
-- Don't commit pure markdown changes on their own. Bundle them with the code change they relate to, or skip them. Unless the markdown update is substantive.
-- Has Cargo.lock changed? Commit it.
-- Never `git push` unless the user explicitly asks. Stop after the commit.
+To update the prime prompt for an archetype, pipe new content to `review prime <archetype> --provider <p>`. The prompt is stored once per archetype and shared across providers; once stored, prime any other provider with no stdin to reuse it.
 
 ## Encryption
 
