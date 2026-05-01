@@ -765,20 +765,22 @@ const PROPFIND_CTAG: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 // XML response extraction helpers
 // ---------------------------------------------------------------------------
 
-/// Collect every `<href>` value found anywhere inside the property element.
+/// Collect every `<href>` value that is a direct child of the named property.
 ///
-/// RFC 4791 § 6.2.1 explicitly allows multi-href properties (notably
-/// `<calendar-home-set>` for delegation / shared-account setups on Apple
-/// Calendar Server, Kerio, and Exchange-bridged servers). Returning a
-/// `Vec<String>` rather than `Option<String>` lets callers see the full
-/// shape; single-href callers (`current-user-principal`) take `.first()`,
-/// and multi-href ones can warn or enumerate.
+/// RFC 4791 § 6.2.1 specifies hrefs as immediate children of the property
+/// element. Restricting the match to direct-parent (rather than "any
+/// ancestor on the stack matches") filters out nested descriptor hrefs
+/// that some bridges emit - notably Davical's delegation mode, which
+/// includes `<owner><href>/principals/admin/</href></owner>` alongside
+/// the real hrefs. With any-ancestor matching the descriptor href ended
+/// up first in the returned vec; since discovery currently consumes
+/// `.first()`, that mis-routed discovery to the admin's principal URL.
 ///
-/// Stack-based matching: an `<href>` is collected if any ancestor in the
-/// element stack matches `property_name`. The previous "first href after
-/// entering the property" approach silently picked up nested hrefs in
-/// `<owner>` / `<group>` descriptors that some bridges emit alongside the
-/// real hrefs.
+/// Returning a `Vec<String>` rather than `Option<String>` lets callers
+/// see all the legitimate top-level hrefs (delegation / shared-account
+/// setups on Apple Calendar Server, Kerio, and Exchange-bridged servers
+/// emit multiple). Single-href callers (`current-user-principal`) take
+/// `.first()`, and multi-href ones can warn or enumerate.
 ///
 /// Both `Event::Text` and `Event::CData` are accumulated into the value
 /// buffer; some servers wrap href values in CDATA sections.
@@ -812,9 +814,13 @@ fn extract_hrefs_property(xml: &str, property_name: &str) -> Vec<String> {
                 }
             }
             Ok(Event::End(_)) => {
-                let inside_property = stack.iter().any(|n| n == property_name);
+                let parent_is_property = stack
+                    .iter()
+                    .rev()
+                    .nth(1)
+                    .is_some_and(|n| n == property_name);
                 let is_href_close = stack.last().is_some_and(|n| n == "href");
-                if inside_property && is_href_close {
+                if parent_is_property && is_href_close {
                     let val = buf.trim().to_string();
                     if !val.is_empty() {
                         hrefs.push(val);
@@ -987,11 +993,14 @@ mod tests {
     }
 
     #[test]
-    fn extract_hrefs_ignores_nested_href_in_owner_descriptor() {
+    fn extract_hrefs_filters_out_nested_owner_href() {
         // Some bridges (Davical in delegation mode) emit `<owner><href/></owner>`
-        // alongside the real hrefs inside `<calendar-home-set>`. The previous
-        // matcher used `current_tag` without a stack and would misattribute
-        // the owner href to the home-set property.
+        // alongside the real hrefs inside `<calendar-home-set>`. The matcher
+        // requires `<href>` to be a *direct child* of the property element, so
+        // the owner's nested href is filtered out and only the real home-set
+        // href is collected. Without this filter the owner href - lexically
+        // first in the document - would be picked up as the home and mis-route
+        // discovery to the admin's principal URL.
         let xml = r#"<?xml version="1.0"?>
 <D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
   <D:response>
@@ -1009,22 +1018,8 @@ mod tests {
     </D:propstat>
   </D:response>
 </D:multistatus>"#;
-        // The stack-based matcher matches *every* href inside the home-set
-        // subtree, including the `<owner>` descriptor's. That's intentional:
-        // RFC 4791 § 6.2.1 doesn't forbid descriptors and we'd rather over-
-        // collect at this layer (the caller can dedupe) than miss legitimate
-        // multi-home returns. The old matcher's "false positives from nested
-        // descriptors" concern still gets the worst of both worlds (only the
-        // first href is kept and it might be the owner's). Stack matching
-        // gives us a complete picture; downstream URL dedup keeps it honest.
         let hrefs = extract_hrefs_property(xml, "calendar-home-set");
-        assert_eq!(
-            hrefs,
-            vec![
-                "/principals/users/admin/".to_string(),
-                "/calendars/alice/".to_string(),
-            ]
-        );
+        assert_eq!(hrefs, vec!["/calendars/alice/".to_string()]);
     }
 
     #[test]

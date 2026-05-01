@@ -65,9 +65,33 @@ fn detect_public_client(auth_methods: &[String]) -> bool {
     auth_methods.iter().any(|m| m == "none")
 }
 
-/// Validate that a URL is non-empty and uses HTTPS.
+/// Validate that an OIDC endpoint URL is suitable to send credentials to.
+///
+/// Per OIDC Discovery (RFC 8414) the endpoints in the discovery document
+/// MUST use HTTPS. The previous `starts_with("https://")` check accepted
+/// any string that began with the literal prefix - including
+/// `https://attacker.example/?@victim.example` (URL-confusion via embedded
+/// userinfo) and `https:///path` (no host). Parse the URL properly and
+/// require: HTTPS scheme, a host present, no embedded userinfo (so a
+/// crafted issuer can't bypass our notion of which host the user authorized),
+/// no fragment.
 fn is_valid_https_url(url: &str) -> bool {
-    url.starts_with("https://") && url.len() > "https://".len()
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    if parsed.scheme() != "https" {
+        return false;
+    }
+    if !parsed.has_host() {
+        return false;
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return false;
+    }
+    if parsed.fragment().is_some() {
+        return false;
+    }
+    true
 }
 
 /// Probe `https://{domain}/.well-known/openid-configuration` for OIDC support.
@@ -87,7 +111,14 @@ pub async fn probe_issuer(issuer_url: &str) -> Option<OidcEndpoints> {
     let normalized_issuer = issuer_url.trim_end_matches('/');
     let url = format!("{normalized_issuer}/.well-known/openid-configuration");
 
+    // OIDC discovery is required to be HTTPS end-to-end. `https_only(true)`
+    // rejects any redirect or initial request that would land on a non-HTTPS
+    // URL, so the .well-known probe can't be silently downgraded to plaintext
+    // by a misconfigured (or hostile) IdP. Combined with the 3-hop redirect
+    // cap, this also bounds an attacker's ability to redirect-walk the
+    // probe through a chain of internal hosts.
     let client = reqwest::Client::builder()
+        .https_only(true)
         .timeout(crate::constants::DISCOVERY_HTTP_TIMEOUT)
         .redirect(reqwest::redirect::Policy::limited(3))
         .user_agent("Ratatoskr/1.0")
@@ -223,5 +254,22 @@ mod tests {
         assert!(!is_valid_https_url("http://auth.example.com/authorize"));
         assert!(!is_valid_https_url(""));
         assert!(!is_valid_https_url("https://"));
+    }
+
+    #[test]
+    fn https_url_rejects_userinfo_and_other_schemes() {
+        // Embedded credentials in the issuer's endpoint URL would let the
+        // server bypass our notion of "which host the user authorized."
+        assert!(!is_valid_https_url("https://attacker@victim.example/path"));
+        assert!(!is_valid_https_url(
+            "https://user:pass@victim.example/path"
+        ));
+        // Non-HTTPS schemes are rejected (RFC 8414 mandates HTTPS).
+        assert!(!is_valid_https_url("javascript:alert(1)"));
+        assert!(!is_valid_https_url("data:text/plain,foo"));
+        assert!(!is_valid_https_url("file:///etc/passwd"));
+        // Fragment identifiers don't make sense on an OIDC endpoint and
+        // their presence is a red flag.
+        assert!(!is_valid_https_url("https://example.com/auth#token=stolen"));
     }
 }
