@@ -486,26 +486,34 @@ fn map_graph_event(event: GraphEvent) -> Result<GraphCalendarEvent, String> {
 ///
 /// Graph returns a fractional-second naive datetime like "2024-01-15T10:00:00.0000000"
 /// alongside a separate `timeZone` field, which may be either an IANA name
-/// ("America/New_York") or a Windows display name ("Pacific Standard Time").
-/// We resolve both via calcard's `Tz::from_str`, which knows the Microsoft
-/// Windows zone mapping in addition to chrono_tz IANA names. Unknown or
-/// floating zones fall back to UTC interpretation.
+/// ("America/New_York"), a Windows display name ("Pacific Standard Time"),
+/// or a Windows daylight-name variant ("Pacific Daylight Time"). We resolve
+/// all three via calcard's `Tz::from_str`, with a small alias map filling in
+/// the daylight forms calcard misses.
+///
+/// DST handling: ambiguous (fall-back) and non-existent (spring-forward)
+/// local times are resolved through `common::time::resolve_local_to_timestamp`.
+/// Unknown / floating zones treat the wall clock as UTC, matching the legacy
+/// behavior so an unrecognized zone string never silently slides events by
+/// the user's UTC offset.
+///
+/// All-day events store **local** midnight of the date in the user's zone,
+/// not UTC midnight - the latter shifts the displayed date for any user not
+/// on UTC.
 fn parse_graph_datetime(
     dt: &GraphDateTimeTimeZone,
     is_all_day: bool,
     label: &str,
 ) -> Result<i64, String> {
     if is_all_day {
-        // All-day events: dateTime is like "2024-01-15T00:00:00.0000000"
-        // Parse as naive date and convert to UTC midnight
         let date_part = dt.date_time.split('T').next().unwrap_or(&dt.date_time);
         let date = chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d")
             .map_err(|e| format!("Invalid Graph {label} date: {e}"))?;
-        return Ok(date
+        let naive = date
             .and_hms_opt(0, 0, 0)
-            .ok_or_else(|| format!("Invalid all-day {label} time"))?
-            .and_utc()
-            .timestamp());
+            .ok_or_else(|| format!("Invalid all-day {label} time"))?;
+        return Ok(common::time::resolve_local_to_timestamp(naive, &chrono::Local)
+            .unwrap_or_else(|| naive.and_utc().timestamp()));
     }
 
     // Try RFC 3339 first (with timezone offset)
@@ -514,27 +522,33 @@ fn parse_graph_datetime(
     }
 
     // Graph usually returns "2024-01-15T10:00:00.0000000" - no offset.
-    // Truncate fractional seconds for parsing.
-    let clean = if let Some(dot_pos) = dt.date_time.find('.') {
-        &dt.date_time[..dot_pos]
-    } else {
-        &dt.date_time
+    // Defensively bound the fractional-seconds truncation: only treat a `.`
+    // as a fractional separator if it appears *after* the `T` time mark.
+    // A dot earlier in the string (`2024.01-15T...`) signals malformed input
+    // and we'd rather surface a parse error than truncate it into something
+    // that almost-parses.
+    let t_pos = dt.date_time.find('T');
+    let clean = match (dt.date_time.find('.'), t_pos) {
+        (Some(dot), Some(t)) if dot > t => &dt.date_time[..dot],
+        _ => dt.date_time.as_str(),
     };
     let naive = chrono::NaiveDateTime::parse_from_str(clean, "%Y-%m-%dT%H:%M:%S")
         .map_err(|e| format!("Invalid Graph {label} dateTime '{}': {e}", dt.date_time))?;
 
     Ok(resolve_graph_tz(&dt.time_zone)
-        .and_then(|tz| {
-            use chrono::TimeZone;
-            tz.from_local_datetime(&naive)
-                .single()
-                .map(|aware| aware.timestamp())
-        })
+        .and_then(|tz| common::time::resolve_local_to_timestamp(naive, &tz))
         .unwrap_or_else(|| naive.and_utc().timestamp()))
 }
 
 /// Resolve Graph's `timeZone` string to a `Tz`. Returns `None` for empty,
-/// "UTC", or floating zones - callers should fall back to UTC interpretation.
+/// "UTC", or unrecognized zones - callers fall back to UTC interpretation.
+///
+/// calcard's `Tz::from_str` covers IANA names and the Microsoft "Standard
+/// Time" forms (e.g. "Pacific Standard Time"). Microsoft also emits the
+/// "Daylight Time" variants (e.g. "Pacific Daylight Time") in some payloads,
+/// which calcard does not currently map; we patch the gap with a small
+/// alias table. Both forms point at the same IANA zone (chrono_tz handles
+/// the actual standard-vs-daylight resolution per-instant).
 fn resolve_graph_tz(name: &str) -> Option<calcard::common::timezone::Tz> {
     use calcard::common::timezone::Tz;
     use std::str::FromStr;
@@ -542,7 +556,22 @@ fn resolve_graph_tz(name: &str) -> Option<calcard::common::timezone::Tz> {
     if name.is_empty() || name.eq_ignore_ascii_case("UTC") {
         return None;
     }
-    Tz::from_str(name).ok().filter(|tz| !tz.is_floating())
+    if let Ok(tz) = Tz::from_str(name)
+        && !tz.is_floating()
+    {
+        return Some(tz);
+    }
+    // Daylight-name fallback. Map to the same IANA zone as the corresponding
+    // Standard Time, then let calcard / chrono_tz figure out the offset for
+    // the actual instant.
+    let normalized = name.replace("Daylight Time", "Standard Time");
+    if normalized != name
+        && let Ok(tz) = Tz::from_str(&normalized)
+        && !tz.is_floating()
+    {
+        return Some(tz);
+    }
+    None
 }
 
 /// Map Graph event status fields to a simple status string.
@@ -614,6 +643,57 @@ mod tests {
         };
         let ts = parse_graph_datetime(&dt, false, "start").expect("parses");
         assert_eq!(ts, 1710511200);
+    }
+
+    #[test]
+    fn parse_timed_with_windows_daylight_name() {
+        // Microsoft sometimes emits the "Daylight Time" form even when DST
+        // isn't in effect. calcard's alias map only knows the "Standard
+        // Time" forms, so we fall back through the Daylight->Standard
+        // substitution to land on the same IANA zone.
+        // 10:00 PDT on 2024-07-15 (DST in effect) = 17:00 UTC.
+        let dt = GraphDateTimeTimeZone {
+            date_time: "2024-07-15T10:00:00.0000000".to_string(),
+            time_zone: "Pacific Daylight Time".to_string(),
+        };
+        let ts = parse_graph_datetime(&dt, false, "start").expect("parses");
+        let expected = chrono::NaiveDate::from_ymd_opt(2024, 7, 15)
+            .and_then(|d| d.and_hms_opt(17, 0, 0))
+            .map(|d| d.and_utc().timestamp())
+            .expect("valid");
+        assert_eq!(ts, expected);
+    }
+
+    #[test]
+    fn parse_timed_dst_spring_forward_shifts_past_gap() {
+        // 2024-03-10 02:30 America/New_York doesn't exist. The wall-clock
+        // minute is preserved by shifting to 03:30 EDT = 07:30 UTC.
+        let dt = GraphDateTimeTimeZone {
+            date_time: "2024-03-10T02:30:00.0000000".to_string(),
+            time_zone: "Eastern Standard Time".to_string(),
+        };
+        let ts = parse_graph_datetime(&dt, false, "start").expect("parses");
+        let expected = chrono::NaiveDate::from_ymd_opt(2024, 3, 10)
+            .and_then(|d| d.and_hms_opt(7, 30, 0))
+            .map(|d| d.and_utc().timestamp())
+            .expect("valid");
+        assert_eq!(ts, expected);
+    }
+
+    #[test]
+    fn parse_timed_dst_fall_back_picks_earlier_instant() {
+        // 2024-11-03 01:30 America/New_York is ambiguous. The earlier
+        // instant is 05:30 UTC (still EDT).
+        let dt = GraphDateTimeTimeZone {
+            date_time: "2024-11-03T01:30:00.0000000".to_string(),
+            time_zone: "Eastern Standard Time".to_string(),
+        };
+        let ts = parse_graph_datetime(&dt, false, "start").expect("parses");
+        let expected = chrono::NaiveDate::from_ymd_opt(2024, 11, 3)
+            .and_then(|d| d.and_hms_opt(5, 30, 0))
+            .map(|d| d.and_utc().timestamp())
+            .expect("valid");
+        assert_eq!(ts, expected);
     }
 
     #[test]

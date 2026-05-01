@@ -8,6 +8,7 @@ pub mod pinned_searches;
 pub mod queries;
 pub mod queries_extra;
 pub mod sql_fragments;
+pub mod time;
 pub mod types;
 pub use from_row::{FromRow, query_as, query_one};
 pub use rusqlite::Connection;

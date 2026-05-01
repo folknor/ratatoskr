@@ -1226,7 +1226,11 @@ fn expand_daily(start: i64, rule: &Rrule) -> Vec<i64> {
         if rule.byday.is_empty() || matches_weekday(current, &rule.byday) {
             out.push(current);
         }
-        current += rule.interval * 86400;
+        // Advance in calendar days, not raw seconds, so wall-clock time is
+        // preserved across DST transitions. A 09:00 daily event spans the
+        // spring-forward gap as 09:00 each day, not 10:00 from the
+        // transition forward.
+        current = add_days_local(current, rule.interval).unwrap_or(current + rule.interval * 86400);
     }
     out
 }
@@ -1234,8 +1238,7 @@ fn expand_daily(start: i64, rule: &Rrule) -> Vec<i64> {
 fn expand_weekly(start: i64, rule: &Rrule) -> Vec<i64> {
     let cap = rule.count.unwrap_or(366).min(RRULE_MAX_COUNT);
     let mut out = Vec::with_capacity(cap);
-    let week = 7 * 86400;
-    let interval_secs = rule.interval * week;
+    let interval_days = rule.interval * 7;
 
     if rule.byday.is_empty() {
         // Plain weekly recurrence on the same weekday as the start.
@@ -1245,7 +1248,10 @@ fn expand_weekly(start: i64, rule: &Rrule) -> Vec<i64> {
                 break;
             }
             out.push(current);
-            current += interval_secs;
+            // Calendar-day arithmetic (not raw seconds) so the wall-clock
+            // time stays put across DST transitions.
+            current = add_days_local(current, interval_days)
+                .unwrap_or(current + interval_days * 86400);
         }
         return out;
     }
@@ -1272,7 +1278,8 @@ fn expand_weekly(start: i64, rule: &Rrule) -> Vec<i64> {
                 break;
             }
         }
-        week_anchor += interval_secs;
+        week_anchor =
+            add_days_local(week_anchor, interval_days).unwrap_or(week_anchor + interval_days * 86400);
     }
     out
 }
@@ -1347,6 +1354,19 @@ fn matches_weekday(timestamp: i64, days: &[chrono::Weekday]) -> bool {
     days.contains(&wd)
 }
 
+/// Advance `timestamp` by `days` calendar days, preserving wall-clock time
+/// across DST transitions. Returns `None` only if the resulting NaiveDateTime
+/// or zone resolution overflows (essentially unreachable for any plausible
+/// recurrence window).
+fn add_days_local(timestamp: i64, days: i64) -> Option<i64> {
+    use chrono::TimeZone;
+    let dt = chrono::Local.timestamp_opt(timestamp, 0).single()?;
+    let new_naive = dt
+        .naive_local()
+        .checked_add_signed(chrono::Duration::days(days))?;
+    crate::db::time::resolve_local_to_timestamp(new_naive, &chrono::Local)
+}
+
 fn start_of_week(timestamp: i64) -> i64 {
     use chrono::TimeZone;
     let Some(dt) = chrono::Local.timestamp_opt(timestamp, 0).single() else {
@@ -1354,24 +1374,30 @@ fn start_of_week(timestamp: i64) -> i64 {
     };
     let weekday = dt.naive_local().date().weekday();
     let days_back = weekday.num_days_from_monday() as i64;
-    timestamp - days_back * 86400
+    add_days_local(timestamp, -days_back).unwrap_or(timestamp)
 }
 
 fn shift_to_weekday(week_anchor: i64, target: chrono::Weekday, time_source: i64) -> i64 {
     use chrono::TimeZone;
     let target_offset = target.num_days_from_monday() as i64;
-    let candidate_date = week_anchor + target_offset * 86400;
+    let Some(anchor_dt) = chrono::Local.timestamp_opt(week_anchor, 0).single() else {
+        return week_anchor;
+    };
     let Some(time_dt) = chrono::Local.timestamp_opt(time_source, 0).single() else {
-        return candidate_date;
+        return week_anchor;
     };
-    let Some(date_dt) = chrono::Local.timestamp_opt(candidate_date, 0).single() else {
-        return candidate_date;
+    // Day arithmetic in calendar units, not raw seconds. Then reattach the
+    // intended wall-clock time and re-resolve in the local zone, falling
+    // through gap/ambiguous via `resolve_local_to_timestamp`.
+    let Some(target_date) = anchor_dt
+        .naive_local()
+        .date()
+        .checked_add_signed(chrono::Duration::days(target_offset))
+    else {
+        return week_anchor;
     };
-    let new_naive = date_dt.naive_local().date().and_time(time_dt.time());
-    chrono::Local
-        .from_local_datetime(&new_naive)
-        .single()
-        .map_or(candidate_date, |dt| dt.timestamp())
+    let new_naive = target_date.and_time(time_dt.time());
+    crate::db::time::resolve_local_to_timestamp(new_naive, &chrono::Local).unwrap_or(week_anchor)
 }
 
 fn set_day_of_month(timestamp: i64, day: i32) -> Option<i64> {
@@ -1381,6 +1407,11 @@ fn set_day_of_month(timestamp: i64, day: i32) -> Option<i64> {
     let dim = days_in_month(naive.year(), naive.month());
     #[allow(clippy::cast_possible_wrap)]
     let dim_i = dim as i32;
+    // RFC 5545 § 3.3.10: BYMONTHDAY values that resolve to days that don't
+    // exist in the visited month are silently skipped (returned as `None`),
+    // not clamped to the last valid day. `BYMONTHDAY=-31` in February is
+    // therefore correct to drop here - callers walk forward to the next
+    // month.
     let resolved_day = if day < 0 { dim_i + day + 1 } else { day };
     if resolved_day < 1 || resolved_day > dim_i {
         return None;
@@ -1389,10 +1420,7 @@ fn set_day_of_month(timestamp: i64, day: i32) -> Option<i64> {
     let new_date =
         chrono::NaiveDate::from_ymd_opt(naive.year(), naive.month(), resolved_day as u32)?;
     let new_naive = new_date.and_time(naive.time());
-    chrono::Local
-        .from_local_datetime(&new_naive)
-        .single()
-        .map(|d| d.timestamp())
+    crate::db::time::resolve_local_to_timestamp(new_naive, &chrono::Local)
 }
 
 fn set_month(timestamp: i64, month: u32) -> Option<i64> {
@@ -1402,33 +1430,54 @@ fn set_month(timestamp: i64, month: u32) -> Option<i64> {
     let new_day = naive.day().min(days_in_month(naive.year(), month));
     let new_date = chrono::NaiveDate::from_ymd_opt(naive.year(), month, new_day)?;
     let new_naive = new_date.and_time(naive.time());
-    chrono::Local
-        .from_local_datetime(&new_naive)
-        .single()
-        .map(|d| d.timestamp())
+    crate::db::time::resolve_local_to_timestamp(new_naive, &chrono::Local)
 }
 
-/// Advance a Unix timestamp by N months.
+/// Advance a Unix timestamp by N months while preserving the original
+/// day-of-month.
+///
+/// `months` must be positive. RRULE expansion only walks forward.
+///
+/// RFC 5545 § 3.3.10 says that for `FREQ=MONTHLY` (and `YEARLY` with
+/// month-day semantics), an instance whose day-of-month doesn't exist in
+/// the target month is **skipped**, not clamped: a Jan 31 monthly recurrence
+/// produces Mar 31, May 31, ... - never Feb 28, Mar 28, .... The previous
+/// implementation clamped permanently and never recovered.
+///
+/// The signature still returns `i64` for callers that want a "next visit"
+/// candidate; `set_day_of_month` / `set_month` apply the actual day-existence
+/// check. The pair-returning `month` is preserved across calls so callers can
+/// detect "the original day didn't fit, walk one more month."
 fn advance_months(timestamp: i64, months: i64) -> i64 {
+    debug_assert!(months > 0, "advance_months only walks forward");
+    let months = months.max(1);
     use chrono::TimeZone;
     let Some(dt) = chrono::Local.timestamp_opt(timestamp, 0).single() else {
-        return timestamp + months * 30 * 86400; // Fallback.
-    };
-    let naive = dt.naive_local();
-    let total_months = naive.month() as i64 - 1 + months;
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let new_month = ((total_months % 12) + 1) as u32;
-    #[allow(clippy::cast_possible_truncation)]
-    let new_year = naive.year() + (total_months / 12) as i32;
-    let new_day = naive.day().min(days_in_month(new_year, new_month));
-    let Some(new_date) = chrono::NaiveDate::from_ymd_opt(new_year, new_month, new_day) else {
         return timestamp + months * 30 * 86400;
     };
-    let new_naive = new_date.and_time(naive.time());
-    chrono::Local
-        .from_local_datetime(&new_naive)
-        .single()
-        .map_or(timestamp + months * 30 * 86400, |dt| dt.timestamp())
+    let naive = dt.naive_local();
+    let original_day = naive.day();
+
+    // Walk forward `months` months, then keep walking until we land on a
+    // month that has a day at least as large as the original. Bound the loop
+    // so a wedged input cannot infinite-loop.
+    for extra in 0..120i64 {
+        let step = months + extra;
+        let total_months = naive.month() as i64 - 1 + step;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let new_month = (total_months.rem_euclid(12) + 1) as u32;
+        #[allow(clippy::cast_possible_truncation)]
+        let new_year = naive.year() + total_months.div_euclid(12) as i32;
+        if days_in_month(new_year, new_month) >= original_day
+            && let Some(new_date) =
+                chrono::NaiveDate::from_ymd_opt(new_year, new_month, original_day)
+        {
+            let new_naive = new_date.and_time(naive.time());
+            return crate::db::time::resolve_local_to_timestamp(new_naive, &chrono::Local)
+                .unwrap_or(timestamp + step * 30 * 86400);
+        }
+    }
+    timestamp + months * 30 * 86400
 }
 
 /// Days in a given month.
@@ -1635,6 +1684,30 @@ mod tests {
         let event = make_event(start, 1800);
         let instances = expand_recurrence(&event, "FREQ=DAILY;COUNT=999999");
         assert!(instances.len() <= RRULE_MAX_COUNT);
+    }
+
+    #[test]
+    fn monthly_jan_31_skips_short_months_not_clamps() {
+        // RFC 5545 § 3.3.10: a Jan 31 monthly recurrence emits Jan 31, then
+        // Mar 31, May 31, ... - never Feb 28, Mar 28, .... Previously we
+        // clamped to the last valid day and never recovered, so every
+        // subsequent instance landed on the 28th.
+        let start = local_ts(2026, 1, 31, 9, 0);
+        let event = make_event(start, 3600);
+        let instances = expand_recurrence(&event, "FREQ=MONTHLY;COUNT=4");
+        let days: Vec<u32> = instances
+            .iter()
+            .map(|e| {
+                chrono::Local
+                    .timestamp_opt(e.start_time, 0)
+                    .single()
+                    .expect("local")
+                    .naive_local()
+                    .date()
+                    .day()
+            })
+            .collect();
+        assert_eq!(days, vec![31, 31, 31, 31]);
     }
 
     #[test]

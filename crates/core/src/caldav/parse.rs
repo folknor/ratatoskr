@@ -215,11 +215,24 @@ fn extract_vevent(
 /// Extract a datetime from a DTSTART or DTEND property, returning
 /// `(timestamp, is_all_day)`.
 ///
-/// Honors the TZID parameter via the supplied resolver, which is built from
-/// the iCalendar's VTIMEZONE blocks (and falls back to `Tz::from_str` for IANA
-/// or Windows zone names like "Pacific Standard Time"). UTC ('Z') and
-/// floating times still parse correctly. All-day DATE values are returned as
-/// midnight-UTC for storage stability.
+/// Honors the TZID parameter via the supplied resolver (which carries the
+/// iCalendar's VTIMEZONE blocks and falls back to `Tz::from_str` for IANA or
+/// Windows zone names). UTC ('Z') and floating times also work.
+///
+/// DST handling: ambiguous (fall-back) and non-existent (spring-forward) wall
+/// clocks are resolved through `common::time::resolve_local_to_timestamp` -
+/// fall-back picks the earlier instant, spring-forward shifts past the gap.
+/// Both used to silently fall through to a naive-as-UTC interpretation, off
+/// by the zone's full offset.
+///
+/// Floating times (TZID resolves to `Tz::Floating`, or no TZID at all) are
+/// interpreted in `chrono::Local` per RFC 5545 § 3.3.5: "the time is to be
+/// associated with the calendar in which the event is stored." For a single-
+/// user desktop client that means the user's system zone.
+///
+/// All-day DATE values are stored as **local** midnight of the date in the
+/// user's zone, not UTC midnight - the latter shifts the displayed calendar
+/// date for any user not on UTC.
 fn extract_datetime(
     component: &calcard::icalendar::ICalendarComponent,
     prop: &ICalendarProperty,
@@ -240,32 +253,61 @@ fn extract_datetime(
     };
 
     if is_date_only {
-        // All-day: build a NaiveDate and treat as midnight UTC.
-        let timestamp = (|| {
-            let year = dt.year? as i32;
-            let month = dt.month? as u32;
-            let day = dt.day? as u32;
-            chrono::NaiveDate::from_ymd_opt(year, month, day)
-                .and_then(|d| d.and_hms_opt(0, 0, 0))
-                .map(|ndt| ndt.and_utc().timestamp())
-        })();
+        // All-day: build a NaiveDate at midnight LOCAL. Storing midnight UTC
+        // displays the wrong calendar date for any user west of UTC (Jan 15
+        // UTC midnight = Jan 14 16:00 PST).
+        let timestamp = build_local_midnight(dt);
         return (timestamp, true);
     }
 
-    // Resolve TZID: prefer the explicit parameter, fall back to whatever
-    // `to_timestamp()` infers (handles Z-suffixed UTC and embedded offsets).
+    let naive = match partial_to_naive(dt) {
+        Some(n) => n,
+        None => return (dt.to_timestamp(), false),
+    };
+
+    // 1. Explicit TZID, resolves to a real zone (IANA or Windows).
     if let Some(tz_id) = entry.tz_id() {
         let tz = resolver.resolve_or_default(Some(tz_id));
-        if !tz.is_floating()
-            && let Some(timestamp) = dt
-                .to_date_time_with_tz(tz)
-                .map(|local| local.timestamp())
-        {
-            return (Some(timestamp), false);
+        if !tz.is_floating() {
+            return (
+                common::time::resolve_local_to_timestamp(naive, &tz),
+                false,
+            );
         }
     }
 
-    (dt.to_timestamp(), false)
+    // 2. UTC offset embedded in the value (Z-suffix or +HH:MM). calcard's
+    //    `to_timestamp()` already handles these - and the result does not
+    //    depend on a local zone, so it's safe to defer.
+    if dt.tz_hour.is_some() {
+        return (dt.to_timestamp(), false);
+    }
+
+    // 3. Floating time. RFC 5545 § 3.3.5 says interpret in the user's local
+    //    zone. We previously fell through to `to_timestamp()` which silently
+    //    treated the wall-clock as UTC.
+    (
+        common::time::resolve_local_to_timestamp(naive, &chrono::Local),
+        false,
+    )
+}
+
+fn partial_to_naive(dt: &calcard::common::PartialDateTime) -> Option<chrono::NaiveDateTime> {
+    let year = dt.year? as i32;
+    let month = dt.month? as u32;
+    let day = dt.day? as u32;
+    let hour = dt.hour.unwrap_or(0) as u32;
+    let minute = dt.minute.unwrap_or(0) as u32;
+    let second = dt.second.unwrap_or(0) as u32;
+    chrono::NaiveDate::from_ymd_opt(year, month, day)?.and_hms_opt(hour, minute, second)
+}
+
+fn build_local_midnight(dt: &calcard::common::PartialDateTime) -> Option<i64> {
+    let year = dt.year? as i32;
+    let month = dt.month? as u32;
+    let day = dt.day? as u32;
+    let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)?.and_hms_opt(0, 0, 0)?;
+    common::time::resolve_local_to_timestamp(naive, &chrono::Local)
 }
 
 /// Extract VALARM reminders from the event's sub-components.
@@ -792,6 +834,55 @@ END:VCALENDAR\r\n";
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].start_time, Some(1710511200));
         assert_eq!(events[0].end_time, Some(1710514800));
+    }
+
+    #[test]
+    fn parse_event_with_dst_spring_forward_shifts_past_gap() {
+        // 2024-03-10 02:30 America/New_York doesn't exist (clock springs
+        // forward at 02:00 EST -> 03:00 EDT). The wall-clock minute is
+        // preserved by shifting to 03:30 EDT = 07:30 UTC.
+        let ical = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:dst-gap@example.com\r\n\
+SUMMARY:During the gap\r\n\
+DTSTART;TZID=America/New_York:20240310T023000\r\n\
+DTEND;TZID=America/New_York:20240310T033000\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        let expected = chrono::NaiveDate::from_ymd_opt(2024, 3, 10)
+            .and_then(|d| d.and_hms_opt(7, 30, 0))
+            .map(|d| d.and_utc().timestamp())
+            .expect("valid");
+        assert_eq!(events[0].start_time, Some(expected));
+    }
+
+    #[test]
+    fn parse_event_with_dst_fall_back_picks_earlier_instant() {
+        // 2024-11-03 01:30 America/New_York is ambiguous (it occurs once
+        // in EDT and once in EST). The earlier instant is 05:30 UTC.
+        let ical = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:dst-fallback@example.com\r\n\
+SUMMARY:Ambiguous hour\r\n\
+DTSTART;TZID=America/New_York:20241103T013000\r\n\
+DTEND;TZID=America/New_York:20241103T023000\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        let expected = chrono::NaiveDate::from_ymd_opt(2024, 11, 3)
+            .and_then(|d| d.and_hms_opt(5, 30, 0))
+            .map(|d| d.and_utc().timestamp())
+            .expect("valid");
+        assert_eq!(events[0].start_time, Some(expected));
     }
 
     #[test]

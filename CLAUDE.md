@@ -44,6 +44,8 @@ Use `brokkr` (not `cargo`) for check/test. It runs a gremlins scan (banned Unico
 
 Fall back to raw `cargo check`/`cargo test` only when you need to bypass clippy gating for a targeted run.
 
+**Never run `cargo fmt`.** Formatting is the user's call - leave whitespace, line breaks, and import ordering as written.
+
 ## Dev-Seed
 
 `crates/dev-seed/` generates a deterministic test database from scratch. Config lives in `dev-seed.toml` at the repo root (thread count, account count, locale, RNG seed). When the app is built with `--features dev-seed`, it **wipes the entire dev data directory and re-seeds on every launch** - there is no persistence between runs. Schema comes from `crates/db/src/db/migrations.rs` (a single v100 migration). Dev-seed does not use DB migrations for schema changes - just update the CREATE TABLE in migrations.rs and re-run.

@@ -24,6 +24,9 @@ uuid = { version = "1.23.1", features = ["v4"] }
 log = "0.4"
 hotpath = { workspace = true, optional = true }
 
+[dev-dependencies]
+chrono-tz = "0.10"
+
 [features]
 hotpath = ["dep:hotpath", "hotpath/hotpath"]
 hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]

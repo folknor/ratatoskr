@@ -14,6 +14,7 @@ pub mod signature_images;
 pub mod signature_strip;
 pub mod state;
 pub mod text;
+pub mod time;
 pub mod token;
 pub mod tracking_pixels;
 pub mod typed_ids;

@@ -15,27 +15,11 @@ its helpers (`parse_rrule`, `parse_weekday`, `expand_daily`, `expand_weekly`,
 `shift_to_weekday`, `set_day_of_month`, `set_month`, `advance_months`,
 `days_in_month`, `parse_until_date`).
 
-- `calendars.rs:1202` - `expand_daily` adds `interval * 86400` to a Unix timestamp; on DST-transition days the resulting instance's local clock-time shifts by ±1h. Repro: `FREQ=DAILY` event at 09:00 spanning 2026-03-08 (US spring-forward) yields a 10:00 instance on 2026-03-09.
-
-- `calendars.rs:1218` - `expand_weekly` empty-BYDAY branch uses `current += interval_secs` (raw seconds), same DST drift across spring-forward/fall-back. Repro: `FREQ=WEEKLY` at 09:00 spanning a DST boundary.
-
-- `calendars.rs:1207-1221` - `expand_weekly` with empty BYDAY never advances by the start's weekday alignment; fine on its own, but combined with the seconds-based step it drifts on DST.
-
 - `calendars.rs:1180-1191` - `parse_weekday` strips digits and signs, so `BYDAY=1MO` and `BYDAY=-1FR` collapse to plain `MO`/`FR`. Under `FREQ=MONTHLY` the rule then falls into the `bymonthday.is_empty()` branch and emits the *start day* every month, not the first/last weekday. Repro: `FREQ=MONTHLY;BYDAY=1MO` starting 2026-03-09 emits the 9th every month, not the first Monday.
 
 - `calendars.rs:1085-1099` - COUNT and UNTIL coexist: `max_instances = count` and `window_end = until` both apply, so the loop stops at whichever is tighter. RFC 5545 forbids both being set; we silently AND them rather than rejecting. Minor, but a correctness deviation.
 
-- `calendars.rs:1316-1326` - `shift_to_weekday` on a DST-transition day: when the candidate date is the spring-forward day and the original time is in the lost hour (02:00-03:00 US), `from_local_datetime(...).single()` returns `None` and the code falls back to `candidate_date` - a midnight UTC-derived timestamp, not the intended local time. Silent wrong answer. Repro: weekly event at 02:30 local that shifts onto 2026-03-08.
-
-- `calendars.rs:1329-1348` - `set_day_of_month`: same `.single()` failure mode; on a DST day the function returns `None` and the instance is *skipped entirely*, not retried with a valid hour. Repro: `BYMONTHDAY=8` event at 02:30 in March 2026 (US).
-
-- `calendars.rs:1336` - negative-day arithmetic: `dim + day + 1`. For `day=-1` in a 31-day month: `31 + (-1) + 1 = 31` ✓. For `day=-31` in February (28 days): `28 + (-31) + 1 = -2` → fails the `< 1` guard and returns `None`, silently dropping the instance instead of falling back per RFC 5545's "skip" semantics. Behavior is consistent with skip, but pre-filter at parse time accepts mag ≤ 31, so users get silent misses in short months.
-
 - `calendars.rs:1072-1074` - `window_end = start + 2*365*86400` ignores leap years; a 2-year window starting 2024-01-01 ends 2025-12-31 (not 2026-01-01). The check at line 1086 is `start > window_end` (strict `>`) so an instance landing exactly on `window_end` is included - minor off-by-one mostly invisible in practice.
-
-- `calendars.rs:1364-1384` - `advance_months` clamps `new_day = day.min(days_in_month(...))` and never recovers: a Jan-31 monthly event becomes Feb-28, then Mar-28 (not Mar-31), Apr-28, etc. RFC 5545 says skip months where the day doesn't exist; we instead permanently degrade. Repro: `FREQ=MONTHLY` starting 2026-01-31 emits Feb 28, Mar 28, Apr 28, ... rather than Jan 31, Mar 31, May 31, ...
-
-- `calendars.rs:1364-1373` - `advance_months` modulo math: `total_months = month-1 + months`. For negative `months` (not currently used, but the signature accepts `i64`), `total_months % 12` is negative in Rust, so `new_month` and `new_year` go wrong. Unconfirmed in current call sites (only positive intervals are passed) but a latent bug.
 
 - `calendars.rs:1302-1310` - `start_of_week` hardcodes Monday (`num_days_from_monday`); RFC 5545 `WKST` is not parsed. For weekly rules where the user expects Sunday-anchored weeks (US default `WKST=SU`), the first emitted week can be off by one when start-of-week lands on Sun and BYDAY includes earlier days. Note rather than bug.
 
@@ -51,25 +35,7 @@ Targets:
 - `crates/core/src/caldav/parse.rs::extract_datetime` (and the `parse_icalendar` / `extract_vevent` paths that feed it).
 - `crates/graph/src/calendar_sync.rs::parse_graph_datetime` and `resolve_graph_tz`.
 
-- `crates/core/src/caldav/parse.rs:260-268` - Spring-forward DST: when TZID resolves to a non-floating IANA zone but the wall-clock falls in the spring-forward gap, `to_date_time_with_tz` returns `None` (chrono's `LocalResult::None` -> `.single() = None`); the code then falls through to `dt.to_timestamp()` which interprets the wall-clock as UTC, producing a timestamp wrong by the zone's full offset. Repro: `DTSTART;TZID=America/New_York:20240310T023000` returns naive-as-UTC instead of the correct gap resolution.
-
-- `crates/core/src/caldav/parse.rs:260-268` - Fall-back DST ambiguity: for ambiguous local times, `chrono::Tz::from_local_datetime` returns `Ambiguous(early, late)`, `.single()` returns None, and `extract_datetime` again falls through to `dt.to_timestamp()` (treats as UTC). Repro: `DTSTART;TZID=America/New_York:20241103T013000` produces `01:30 UTC` instead of either of the two valid EDT/EST instants (1 hour wrong).
-
-- `crates/core/src/caldav/parse.rs:257-268` - Floating-fallthrough silently treats wall-clock as UTC: when TZID is set but resolves to `Tz::Floating` (unknown zone, no VTIMEZONE) the `if !tz.is_floating()` guard sends control to `dt.to_timestamp()`; with no `tz_hour` set on the PartialDateTime, calcard/mail-parser interpret the naive wall-clock as UTC. Repro: `DTSTART;TZID=Bogus/Zone:20240315T100000` returns `2024-03-15T10:00 UTC`, off by the user's true local offset.
-
-- `crates/core/src/caldav/parse.rs:242-253` - All-day DATE values are forced to midnight UTC: round-tripping into a non-UTC user view will display the wrong calendar date for users west of UTC and any time-window query against an all-day event misaligns with the user's local day. Repro: an all-day "Holiday" on `20240101` viewed in `America/Los_Angeles` shows as 2023-12-31.
-
-- `crates/graph/src/calendar_sync.rs:498-509` - Graph all-day midnight-as-UTC: `parse_graph_datetime` discards `time_zone` for all-day events and stores midnight UTC, so any user not on UTC gets a date shift on display/queries. Repro: a Graph all-day event with `dateTime=2024-01-15T00:00:00.0000000`, `timeZone=America/Los_Angeles`, `is_all_day=true` becomes `2024-01-15T00:00 UTC` (= 2024-01-14 16:00 LA local), shifting the displayed date back one day for any LA user.
-
-- `crates/graph/src/calendar_sync.rs:526-533` - Graph fall-back ambiguity returns wrong UTC: `tz.from_local_datetime(&naive).single()` is `None` for ambiguous local times, so the `unwrap_or_else` fallback interprets the wall-clock as UTC. Repro: `dateTime=2024-11-03T01:30:00.0000000`, `timeZone=Pacific Standard Time` returns `01:30 UTC` instead of one of the two valid LA instants.
-
-- `crates/graph/src/calendar_sync.rs:526-533` - Graph spring-forward gap returns wrong UTC: same `.single()` -> None pattern for non-existent local times falls back to naive-as-UTC. Repro: `dateTime=2024-03-10T02:30:00.0000000`, `timeZone=Eastern Standard Time` returns `02:30 UTC`, ~5 hours off.
-
-- `crates/graph/src/calendar_sync.rs:538-546` - "Pacific Daylight Time" / "Eastern Daylight Time" not in calcard's alias map: `Tz::from_str` only matches the "Standard Time" forms (parse.rs:496), so `resolve_graph_tz` returns None for daylight names and the code falls back to UTC. Repro: a Graph event emitted with `time_zone="Pacific Daylight Time"` (in any month, including summer) parses as if UTC-naive - 7-8 hours off.
-
 - `crates/core/src/caldav/parse.rs:257-265` - Z-suffix + TZID combination: with both, parsing yields `tz_hour: Some(0)`, and `to_date_time_with_tz` correctly uses the embedded UTC offset and ignores the resolved Tz - but if the resolved Tz is non-floating, the result silently reports UTC even though TZID claimed otherwise; if a server intended the value to be local in the named zone (a known Apple/Outlook bug), Ratatoskr quietly stores the UTC interpretation. Repro: `DTSTART;TZID=America/New_York:20240315T100000Z` is stored as 10:00 UTC, not 10:00 NY.
-
-- `crates/graph/src/calendar_sync.rs:518-522` - Truncation by `find('.')` is fine when the dot belongs to fractional seconds, but does not validate position; an unexpected pre-`T` dot (e.g., a malformed input like `2024.01-15T...`) would silently truncate too early and produce a misleading parse error rather than a clear validation failure. Repro: feed any `dateTime` with a stray `.` before the time portion.
 
 ---
 
@@ -101,11 +67,7 @@ Compared against the deleted ad-hoc client and XML parser via git history.
 
 ### Reviewer A - combined RRULE / TZ / CalDAV pass
 
-3. `crates/db/src/db/queries_extra/calendars.rs:1202` and `crates/db/src/db/queries_extra/calendars.rs:1218`: daily/plain-weekly recurrence advances by fixed Unix seconds, so wall-clock time shifts across DST. A 09:00 event before spring-forward becomes 10:00 local after the transition.
-
 4. `crates/db/src/db/queries_extra/calendars.rs:1176`: ordinal BYDAY is stripped to a plain weekday, and `crates/db/src/db/queries_extra/calendars.rs:1250` / `crates/db/src/db/queries_extra/calendars.rs:1274` expansion ignores BYDAY anyway. `FREQ=MONTHLY;BYDAY=1MO` emits the DTSTART day-of-month, not the first Monday.
 
 5. `crates/db/src/db/queries_extra/calendars.rs:1403`: `UNTIL=YYYYMMDDTHHMMSSZ` ignores the time and becomes 23:59:59 UTC for that date. Occurrences after the actual UNTIL time are incorrectly included.
-
-6. `crates/core/src/caldav/parse.rs:257` and `crates/graph/src/calendar_sync.rs:526`: DST gaps/ambiguous local times with a resolved timezone fall back to interpreting the naive local time as UTC. The same UTC fallback happens when TZID resolves to `Tz::Floating`.
 
