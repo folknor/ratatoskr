@@ -34,9 +34,7 @@ All findings addressed. Lenses and targets:
 
 ### `crates/db/src/db/queries_extra/calendars.rs::expand_recurrence` (1052-1136)
 
-- **High** (flagged 4x) - Expansion uses `chrono::Local` everywhere; `event.timezone` is never read. Repro: `DTSTART;TZID=Pacific/Kiritimati:20260101T090000` with `FREQ=MONTHLY` on an Oslo machine emits Jan 1, Feb 1, Apr 1, Jun 1 (Oslo sees DTSTART as Dec 31; `advance_months` preserves day 31 and skips short months). Daily TZID-anchored events also drift across DST.
 - **Medium** - Inverted error signaling: malformed rule (unknown FREQ, empty FREQ field) and rules using unsupported BY-rules (BYSETPOS, BYWEEKNO, BYYEARDAY, BYHOUR, BYMINUTE, BYSECOND) now log a WARN and return `vec![event.clone()]` (single instance); well-formed-but-zero-instance rules (UNTIL in past, BYDAY excludes everything) still return `vec![]`. The malformed-vs-zero-instance signaling is no longer silent on the malformed side, but the caller still can't tell the two apart at the data level. Surfacing a "broken rule" indicator to the UI would close this fully.
-- **Medium** (flagged 2x) - Recurring all-day events store duration as raw elapsed seconds (`:1083`); the first occurrence spanning DST is 47h or 23h and that wrong duration propagates. Repro: all-day weekly `DTSTART;VALUE=DATE:20240331;DTEND;VALUE=DATE:20240402;RRULE:FREQ=WEEKLY;COUNT=2` in a DST-springing zone emits the next instance ending 23:00 local instead of midnight.
 
 ### `crates/db/src/db/queries_extra/calendars.rs::expand_yearly` (1525-1579)
 

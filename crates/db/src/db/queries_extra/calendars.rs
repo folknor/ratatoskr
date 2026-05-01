@@ -1062,6 +1062,68 @@ const RRULE_MAX_COUNT: usize = 10_000;
 /// or UNTIL will terminate first.
 const RRULE_MAX_STEPS: usize = 12_000;
 
+/// The wall-clock zone an event recurs in. RFC 5545 § 3.3.10: recurring
+/// events keep their wall-clock time across DST transitions and across
+/// instances - 09:00 every day means 09:00 *in that zone*, not 09:00 in
+/// `chrono::Local` (the previous behavior, which silently shifted every
+/// recurring event by the user's UTC offset relative to its source zone).
+///
+/// `Iana` covers any TZID we can resolve via `chrono_tz`. `Local` covers
+/// floating events (no TZID stored) and any TZID we couldn't parse - notably
+/// Windows zone names like "Pacific Standard Time" that the parse layer
+/// resolves at sync time but stores in `event.timezone` as-is. Threading
+/// calcard's resolver into expansion would honor those, but that pulls
+/// calcard into the db crate; the warn-and-fall-back path keeps the previous
+/// behavior for the unresolved tail without infecting the dep graph.
+#[derive(Debug, Clone, Copy)]
+enum RecurrenceTz {
+    Iana(chrono_tz::Tz),
+    Local,
+}
+
+impl RecurrenceTz {
+    fn from_event_timezone(event_tz: Option<&str>) -> Self {
+        let Some(raw) = event_tz else {
+            return Self::Local;
+        };
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Self::Local;
+        }
+        match trimmed.parse::<chrono_tz::Tz>() {
+            Ok(tz) => Self::Iana(tz),
+            Err(_) => {
+                log::debug!(
+                    "RRULE expansion: event.timezone={trimmed:?} did not parse as IANA; \
+                     falling back to local zone"
+                );
+                Self::Local
+            }
+        }
+    }
+
+    fn naive(self, timestamp: i64) -> Option<chrono::NaiveDateTime> {
+        use chrono::TimeZone;
+        match self {
+            Self::Iana(tz) => tz
+                .timestamp_opt(timestamp, 0)
+                .single()
+                .map(|d| d.naive_local()),
+            Self::Local => chrono::Local
+                .timestamp_opt(timestamp, 0)
+                .single()
+                .map(|d| d.naive_local()),
+        }
+    }
+
+    fn resolve(self, naive: chrono::NaiveDateTime) -> Option<i64> {
+        match self {
+            Self::Iana(tz) => crate::db::time::resolve_local_to_timestamp(naive, &tz),
+            Self::Local => crate::db::time::resolve_local_to_timestamp(naive, &chrono::Local),
+        }
+    }
+}
+
 /// Expand a recurring event into concrete instances based on its RRULE.
 ///
 /// Supports a useful subset of RFC 5545 RRULE:
@@ -1076,6 +1138,7 @@ const RRULE_MAX_STEPS: usize = 12_000;
 /// separate iCal property, not part of the RRULE string).
 fn expand_recurrence(event: &CalendarViewEvent, rrule_str: &str) -> Vec<CalendarViewEvent> {
     let rule = parse_rrule(rrule_str);
+    let tz = RecurrenceTz::from_event_timezone(event.timezone.as_deref());
     let Some(freq) = Freq::parse(&rule.freq) else {
         // FREQ is missing or unrecognized. We fall back to a single instance
         // (the master event) so the operator at least sees the event on the
@@ -1115,7 +1178,20 @@ fn expand_recurrence(event: &CalendarViewEvent, rrule_str: &str) -> Vec<Calendar
         return vec![event.clone()];
     }
 
-    let duration = event.end_time - event.start_time;
+    // Wall-clock duration in the event's zone, not raw UTC seconds. Captures
+    // the user's intent ("the meeting is 1 hour long") rather than the UTC
+    // span of the master instance ("the meeting is 0 or 2 hours long if it
+    // happens to span the DST transition"). Each recurring instance then
+    // resolves end_time = start_naive + wall_duration in the event's zone,
+    // so an all-day event ending at midnight stays at midnight on every
+    // instance regardless of DST gaps - and a timed event stays the same
+    // wall-clock length whether or not the master spanned DST.
+    let raw_duration = event.end_time - event.start_time;
+    let wall_duration = match (tz.naive(event.start_time), tz.naive(event.end_time)) {
+        (Some(s), Some(e)) => e.signed_duration_since(s),
+        _ => chrono::Duration::seconds(raw_duration),
+    };
+
     // Default cap matches the 2-year fallback window emitted by
     // `two_year_window_end` when no COUNT/UNTIL is set. The previous 365
     // silently truncated unbounded DAILY rules to ~1 year (the time bound
@@ -1139,16 +1215,16 @@ fn expand_recurrence(event: &CalendarViewEvent, rrule_str: &str) -> Vec<Calendar
     let window_end = match (rule.until, rule.count) {
         (Some(until), _) => until,
         (None, Some(_)) => i64::MAX,
-        (None, None) => two_year_window_end(event.start_time),
+        (None, None) => two_year_window_end(event.start_time, tz),
     };
 
     let mut instances = Vec::with_capacity(max_instances);
 
     let candidate_starts = match freq {
-        Freq::Daily => expand_daily(event.start_time, &rule),
-        Freq::Weekly => expand_weekly(event.start_time, &rule),
-        Freq::Monthly => expand_monthly(event.start_time, &rule),
-        Freq::Yearly => expand_yearly(event.start_time, &rule),
+        Freq::Daily => expand_daily(event.start_time, &rule, tz),
+        Freq::Weekly => expand_weekly(event.start_time, &rule, tz),
+        Freq::Monthly => expand_monthly(event.start_time, &rule, tz),
+        Freq::Yearly => expand_yearly(event.start_time, &rule, tz),
     };
 
     for (idx, start) in candidate_starts.into_iter().enumerate() {
@@ -1163,7 +1239,7 @@ fn expand_recurrence(event: &CalendarViewEvent, rrule_str: &str) -> Vec<Calendar
             instance.id = format!("{}__recur_{idx}", event.id);
         }
         instance.start_time = start;
-        instance.end_time = start + duration;
+        instance.end_time = end_time_for_instance(start, wall_duration, tz, raw_duration);
         instances.push(instance);
     }
 
@@ -1175,16 +1251,32 @@ fn expand_recurrence(event: &CalendarViewEvent, rrule_str: &str) -> Vec<Calendar
     instances
 }
 
+/// Compute end_time for a recurring instance by walking `wall_duration` in
+/// the event's wall-clock zone, falling back to raw-seconds arithmetic if
+/// the wall-clock walk overflows or hits a non-resolvable zone state. The
+/// fallback is the previous behavior; the new path prevents an all-day
+/// recurring event whose master spans DST from inheriting a 23h/47h
+/// duration on every subsequent instance.
+fn end_time_for_instance(
+    start: i64,
+    wall_duration: chrono::Duration,
+    tz: RecurrenceTz,
+    raw_duration: i64,
+) -> i64 {
+    tz.naive(start)
+        .and_then(|n| n.checked_add_signed(wall_duration))
+        .and_then(|n| tz.resolve(n))
+        .unwrap_or(start + raw_duration)
+}
+
 /// Compute the 2-year window-end timestamp using calendar arithmetic so
 /// leap years are accounted for. Falls back to a 730-day approximation if
 /// the start timestamp is somehow out of chrono's representable range.
-fn two_year_window_end(start: i64) -> i64 {
-    use chrono::TimeZone;
-    chrono::Local
-        .timestamp_opt(start, 0)
-        .single()
-        .and_then(|dt| dt.with_year(dt.year() + 2))
-        .map_or(start + 730 * 86400, |dt| dt.timestamp())
+fn two_year_window_end(start: i64, tz: RecurrenceTz) -> i64 {
+    tz.naive(start)
+        .and_then(|n| n.with_year(n.year() + 2))
+        .and_then(|n| tz.resolve(n))
+        .unwrap_or(start + 730 * 86400)
 }
 
 /// A single BYDAY entry. The ordinal prefix (e.g. `1MO`, `-1FR`) is captured
@@ -1403,7 +1495,7 @@ fn parse_byday(spec: &str) -> Option<ByDay> {
     parse_weekday_code(code).map(|day| ByDay { ordinal, day })
 }
 
-fn expand_daily(start: i64, rule: &Rrule) -> Vec<i64> {
+fn expand_daily(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     // Default cap matches the 2-year fallback window in
     // `expand_recurrence::two_year_window_end`. The previous 366 silently
     // truncated unbounded DAILY rules to one year, which then got further
@@ -1420,7 +1512,11 @@ fn expand_daily(start: i64, rule: &Rrule) -> Vec<i64> {
             break;
         }
         if rule.byday.is_empty()
-            || matches_weekday(current, &rule.byday.iter().map(|b| b.day).collect::<Vec<_>>())
+            || matches_weekday(
+                current,
+                &rule.byday.iter().map(|b| b.day).collect::<Vec<_>>(),
+                tz,
+            )
         {
             out.push(current);
         }
@@ -1428,12 +1524,13 @@ fn expand_daily(start: i64, rule: &Rrule) -> Vec<i64> {
         // preserved across DST transitions. A 09:00 daily event spans the
         // spring-forward gap as 09:00 each day, not 10:00 from the
         // transition forward.
-        current = add_days_local(current, rule.interval).unwrap_or(current + rule.interval * 86400);
+        current =
+            add_days_in_zone(current, rule.interval, tz).unwrap_or(current + rule.interval * 86400);
     }
     out
 }
 
-fn expand_weekly(start: i64, rule: &Rrule) -> Vec<i64> {
+fn expand_weekly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     let cap = rule.count.unwrap_or(366).min(RRULE_MAX_COUNT);
     let mut out = Vec::with_capacity(cap);
     let interval_days = rule.interval * 7;
@@ -1448,7 +1545,7 @@ fn expand_weekly(start: i64, rule: &Rrule) -> Vec<i64> {
             out.push(current);
             // Calendar-day arithmetic (not raw seconds) so the wall-clock
             // time stays put across DST transitions.
-            current = add_days_local(current, interval_days)
+            current = add_days_in_zone(current, interval_days, tz)
                 .unwrap_or(current + interval_days * 86400);
         }
         return out;
@@ -1466,7 +1563,7 @@ fn expand_weekly(start: i64, rule: &Rrule) -> Vec<i64> {
         (wd - from).rem_euclid(7)
     });
 
-    let week_start = start_of_week(start, wkst);
+    let week_start = start_of_week(start, wkst, tz);
     let mut week_anchor = week_start;
     // Step-bounded: each "step" is one anchored week. Same DoS guard
     // rationale as `expand_daily`.
@@ -1475,7 +1572,7 @@ fn expand_weekly(start: i64, rule: &Rrule) -> Vec<i64> {
             break;
         }
         for &wd in &days {
-            let candidate = shift_to_weekday(week_anchor, wd, wkst, start);
+            let candidate = shift_to_weekday(week_anchor, wd, wkst, start, tz);
             if candidate < start {
                 continue;
             }
@@ -1484,17 +1581,16 @@ fn expand_weekly(start: i64, rule: &Rrule) -> Vec<i64> {
                 break;
             }
         }
-        week_anchor =
-            add_days_local(week_anchor, interval_days).unwrap_or(week_anchor + interval_days * 86400);
+        week_anchor = add_days_in_zone(week_anchor, interval_days, tz)
+            .unwrap_or(week_anchor + interval_days * 86400);
     }
     out
 }
 
-fn expand_monthly(start: i64, rule: &Rrule) -> Vec<i64> {
-    use chrono::TimeZone;
+fn expand_monthly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     let cap = rule.count.unwrap_or(120).min(RRULE_MAX_COUNT);
     let mut out = Vec::with_capacity(cap);
-    let Some(start_dt) = chrono::Local.timestamp_opt(start, 0).single() else {
+    let Some(start_dt) = tz.naive(start) else {
         return out;
     };
     let original_day = start_dt.day();
@@ -1536,7 +1632,7 @@ fn expand_monthly(start: i64, rule: &Rrule) -> Vec<i64> {
         day_candidates.dedup();
 
         for day in day_candidates {
-            if let Some(ts) = with_year_month_day(start, year, month, day)
+            if let Some(ts) = with_year_month_day(start, year, month, day, tz)
                 && ts >= start
             {
                 out.push(ts);
@@ -1643,11 +1739,10 @@ fn nth_weekday_in_month(
     }
 }
 
-fn expand_yearly(start: i64, rule: &Rrule) -> Vec<i64> {
-    use chrono::TimeZone;
+fn expand_yearly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     let cap = rule.count.unwrap_or(60).min(RRULE_MAX_COUNT);
     let mut out = Vec::with_capacity(cap);
-    let Some(start_dt) = chrono::Local.timestamp_opt(start, 0).single() else {
+    let Some(start_dt) = tz.naive(start) else {
         return out;
     };
     let original_month = start_dt.month();
@@ -1698,7 +1793,7 @@ fn expand_yearly(start: i64, rule: &Rrule) -> Vec<i64> {
             };
 
             for day in day_candidates {
-                if let Some(ts) = with_year_month_day(start, year, *month, day)
+                if let Some(ts) = with_year_month_day(start, year, *month, day, tz)
                     && ts >= start
                 {
                     out.push(ts);
@@ -1717,61 +1812,61 @@ fn expand_yearly(start: i64, rule: &Rrule) -> Vec<i64> {
 }
 
 /// Resolve a wall-clock instant on a specific calendar date, preserving the
-/// time-of-day of the original timestamp.
-fn with_year_month_day(timestamp: i64, year: i32, month: u32, day: u32) -> Option<i64> {
-    use chrono::TimeZone;
-    let dt = chrono::Local.timestamp_opt(timestamp, 0).single()?;
+/// time-of-day of the original timestamp in the event's recurrence zone.
+fn with_year_month_day(
+    timestamp: i64,
+    year: i32,
+    month: u32,
+    day: u32,
+    tz: RecurrenceTz,
+) -> Option<i64> {
+    let naive = tz.naive(timestamp)?;
     let new_date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
-    let new_naive = new_date.and_time(dt.naive_local().time());
-    crate::db::time::resolve_local_to_timestamp(new_naive, &chrono::Local)
+    let new_naive = new_date.and_time(naive.time());
+    tz.resolve(new_naive)
 }
 
-fn matches_weekday(timestamp: i64, days: &[chrono::Weekday]) -> bool {
-    use chrono::TimeZone;
-    let Some(dt) = chrono::Local.timestamp_opt(timestamp, 0).single() else {
+fn matches_weekday(timestamp: i64, days: &[chrono::Weekday], tz: RecurrenceTz) -> bool {
+    let Some(naive) = tz.naive(timestamp) else {
         return false;
     };
-    let wd = dt.naive_local().date().weekday();
+    let wd = naive.date().weekday();
     days.contains(&wd)
 }
 
-/// Advance `timestamp` by `days` calendar days, preserving wall-clock time
-/// across DST transitions. Returns `None` only if the resulting NaiveDateTime
-/// or zone resolution overflows (essentially unreachable for any plausible
-/// recurrence window).
-fn add_days_local(timestamp: i64, days: i64) -> Option<i64> {
-    use chrono::TimeZone;
-    let dt = chrono::Local.timestamp_opt(timestamp, 0).single()?;
-    let new_naive = dt
-        .naive_local()
-        .checked_add_signed(chrono::Duration::days(days))?;
-    crate::db::time::resolve_local_to_timestamp(new_naive, &chrono::Local)
+/// Advance `timestamp` by `days` calendar days in the event's recurrence
+/// zone, preserving wall-clock time across DST transitions. Returns `None`
+/// only if the resulting NaiveDateTime or zone resolution overflows
+/// (essentially unreachable for any plausible recurrence window).
+fn add_days_in_zone(timestamp: i64, days: i64, tz: RecurrenceTz) -> Option<i64> {
+    let naive = tz.naive(timestamp)?;
+    let new_naive = naive.checked_add_signed(chrono::Duration::days(days))?;
+    tz.resolve(new_naive)
 }
 
-fn start_of_week(timestamp: i64, week_start: chrono::Weekday) -> i64 {
-    use chrono::TimeZone;
-    let Some(dt) = chrono::Local.timestamp_opt(timestamp, 0).single() else {
+fn start_of_week(timestamp: i64, week_start: chrono::Weekday, tz: RecurrenceTz) -> i64 {
+    let Some(naive) = tz.naive(timestamp) else {
         return timestamp;
     };
-    let current = dt.naive_local().date().weekday();
+    let current = naive.date().weekday();
     // Modular distance from `week_start` to `current`, walking forward
     // through the week (so a Sun-anchored week with current=Sat -> 6 days
     // back, and a Mon-anchored week with current=Sun -> 6 days back).
     let from = week_start.num_days_from_monday() as i64;
     let to = current.num_days_from_monday() as i64;
     let days_back = (to - from).rem_euclid(7);
-    add_days_local(timestamp, -days_back).unwrap_or_else(|| {
-        // `add_days_local` only returns None when the resulting NaiveDateTime
-        // or zone resolution overflows - in practice that requires walking
-        // back across a 24-hour-skipped day (Pacific/Apia Dec 30 2011).
-        // Falling back to the un-walked timestamp lets the weekly expander
-        // continue to emit instances anchored on the original day-of-week
-        // rather than emitting nothing; the alternative (returning the
-        // un-walked timestamp silently) was the previous behavior. Logged
-        // so the operator can attribute "weekly instances are off by some
-        // days" to a zone-skip event.
+    add_days_in_zone(timestamp, -days_back, tz).unwrap_or_else(|| {
+        // `add_days_in_zone` only returns None when the resulting
+        // NaiveDateTime or zone resolution overflows - in practice that
+        // requires walking back across a 24-hour-skipped day (Pacific/Apia
+        // Dec 30 2011). Falling back to the un-walked timestamp lets the
+        // weekly expander continue to emit instances anchored on the
+        // original day-of-week rather than emitting nothing; the
+        // alternative (returning the un-walked timestamp silently) was the
+        // previous behavior. Logged so the operator can attribute "weekly
+        // instances are off by some days" to a zone-skip event.
         log::debug!(
-            "start_of_week: add_days_local(-{days_back}) failed (likely walking through a 24h-skipped day); falling back to un-shifted anchor"
+            "start_of_week: add_days_in_zone(-{days_back}) failed (likely walking through a 24h-skipped day); falling back to un-shifted anchor"
         );
         timestamp
     })
@@ -1782,32 +1877,31 @@ fn shift_to_weekday(
     target: chrono::Weekday,
     week_start: chrono::Weekday,
     time_source: i64,
+    tz: RecurrenceTz,
 ) -> i64 {
-    use chrono::TimeZone;
     // Modular offset from `week_start` to `target`, so that within a
     // Sunday-anchored week the offset for Saturday is 6 (not -1) and for
     // Monday is 1 (not 0).
     let to = target.num_days_from_monday() as i64;
     let from = week_start.num_days_from_monday() as i64;
     let target_offset = (to - from).rem_euclid(7);
-    let Some(anchor_dt) = chrono::Local.timestamp_opt(week_anchor, 0).single() else {
+    let Some(anchor_naive) = tz.naive(week_anchor) else {
         return week_anchor;
     };
-    let Some(time_dt) = chrono::Local.timestamp_opt(time_source, 0).single() else {
+    let Some(time_naive) = tz.naive(time_source) else {
         return week_anchor;
     };
     // Day arithmetic in calendar units, not raw seconds. Then reattach the
-    // intended wall-clock time and re-resolve in the local zone, falling
+    // intended wall-clock time and re-resolve in the event's zone, falling
     // through gap/ambiguous via `resolve_local_to_timestamp`.
-    let Some(target_date) = anchor_dt
-        .naive_local()
+    let Some(target_date) = anchor_naive
         .date()
         .checked_add_signed(chrono::Duration::days(target_offset))
     else {
         return week_anchor;
     };
-    let new_naive = target_date.and_time(time_dt.time());
-    crate::db::time::resolve_local_to_timestamp(new_naive, &chrono::Local).unwrap_or(week_anchor)
+    let new_naive = target_date.and_time(time_naive.time());
+    tz.resolve(new_naive).unwrap_or(week_anchor)
 }
 
 /// Days in a given month.
@@ -2358,6 +2452,123 @@ mod tests {
             .expect("valid");
         let one_day = 86_400;
         assert!((parsed - utc_eod).abs() <= 14 * 3600 + one_day);
+    }
+
+    #[test]
+    fn monthly_with_event_timezone_anchors_in_event_zone() {
+        // Repro from the review findings: a monthly event with
+        // TZID=Pacific/Kiritimati at 09:00 on the 1st of the month must
+        // emit the 1st of every month *in Pacific/Kiritimati* regardless
+        // of the host's local zone. The pre-fix expander resolved the
+        // master timestamp through chrono::Local: on a UTC- or west-of-UTC
+        // host the wall-clock date silently shifted to Dec 31 (Kiritimati
+        // is UTC+14), original_day became 31, and the rule emitted only
+        // months containing day 31.
+        use chrono_tz::Tz;
+        let kiritimati: Tz = "Pacific/Kiritimati".parse().expect("valid IANA");
+        let dt = chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
+            .and_then(|d| d.and_hms_opt(9, 0, 0))
+            .expect("valid");
+        let start = kiritimati
+            .from_local_datetime(&dt)
+            .single()
+            .expect("unambiguous")
+            .timestamp();
+        let mut event = make_event(start, 3600);
+        event.timezone = Some("Pacific/Kiritimati".to_string());
+        let instances = expand_recurrence(&event, "FREQ=MONTHLY;COUNT=12");
+        assert_eq!(instances.len(), 12);
+        for (i, inst) in instances.iter().enumerate() {
+            let local = kiritimati
+                .timestamp_opt(inst.start_time, 0)
+                .single()
+                .expect("kiritimati instant resolves");
+            assert_eq!(
+                local.naive_local().date().day(),
+                1,
+                "instance {i} not on the 1st of its month in Pacific/Kiritimati"
+            );
+            assert_eq!(local.naive_local().time().hour(), 9);
+        }
+    }
+
+    #[test]
+    fn daily_with_event_timezone_preserves_wall_clock_across_dst() {
+        // Daily event at 09:00 America/New_York spanning the spring-forward
+        // transition (2026-03-08 02:00 EST -> 03:00 EDT). Each instance
+        // must remain at 09:00 in NY local time, so the UTC offset between
+        // consecutive days varies by exactly one hour across the boundary.
+        // Pre-fix expansion went through chrono::Local on a non-NY host -
+        // the daylight-saving boundary the user actually experiences
+        // depends on the host, not the event, so the 09:00-in-NY invariant
+        // was silently violated for any user not in the eastern US.
+        use chrono_tz::Tz;
+        let ny: Tz = "America/New_York".parse().expect("valid IANA");
+        let dt = chrono::NaiveDate::from_ymd_opt(2026, 3, 6)
+            .and_then(|d| d.and_hms_opt(9, 0, 0))
+            .expect("valid");
+        let start = ny
+            .from_local_datetime(&dt)
+            .single()
+            .expect("unambiguous")
+            .timestamp();
+        let mut event = make_event(start, 3600);
+        event.timezone = Some("America/New_York".to_string());
+        // Cover a window that includes the 2026-03-08 transition.
+        let instances = expand_recurrence(&event, "FREQ=DAILY;COUNT=7");
+        assert_eq!(instances.len(), 7);
+        for inst in &instances {
+            let local = ny
+                .timestamp_opt(inst.start_time, 0)
+                .single()
+                .expect("NY instant resolves");
+            assert_eq!(local.naive_local().time().hour(), 9);
+            assert_eq!(local.naive_local().time().minute(), 0);
+        }
+    }
+
+    #[test]
+    fn weekly_all_day_in_event_timezone_keeps_24h_duration() {
+        // Recurring all-day event whose master spans the spring-forward
+        // transition. The wall-clock duration in the event's zone is 24h
+        // (midnight to midnight), but the raw-seconds delta is 23h. The
+        // pre-fix expander cached the raw delta and propagated 23h to
+        // every subsequent instance, so the displayed end-time drifted to
+        // 23:00 the day before. Threading event.timezone through the walk
+        // and computing wall-clock duration fixes both at once.
+        use chrono_tz::Tz;
+        let ny: Tz = "America/New_York".parse().expect("valid IANA");
+        let day = chrono::NaiveDate::from_ymd_opt(2026, 3, 8).expect("valid");
+        let next = chrono::NaiveDate::from_ymd_opt(2026, 3, 9).expect("valid");
+        let start = ny
+            .from_local_datetime(&day.and_hms_opt(0, 0, 0).expect("midnight"))
+            .single()
+            .expect("unambiguous")
+            .timestamp();
+        let end = ny
+            .from_local_datetime(&next.and_hms_opt(0, 0, 0).expect("midnight"))
+            .single()
+            .expect("unambiguous")
+            .timestamp();
+        let mut event = make_event(start, end - start);
+        event.timezone = Some("America/New_York".to_string());
+        // Override the duration directly to capture the 23h master span,
+        // then verify subsequent instances still resolve to midnight.
+        event.end_time = end;
+        let instances = expand_recurrence(&event, "FREQ=WEEKLY;COUNT=3");
+        assert_eq!(instances.len(), 3);
+        for (i, inst) in instances.iter().enumerate() {
+            let end_local = ny
+                .timestamp_opt(inst.end_time, 0)
+                .single()
+                .expect("NY end resolves");
+            assert_eq!(
+                end_local.naive_local().time().hour(),
+                0,
+                "instance {i} end_time hour was not midnight in NY"
+            );
+            assert_eq!(end_local.naive_local().time().minute(), 0);
+        }
     }
 
     #[test]

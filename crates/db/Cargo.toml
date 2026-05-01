@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 chrono.workspace = true
+chrono-tz = "0.10"
 flate2 = "1"
 label-colors = { path = "../label-colors" }
 lol_html = "2"
@@ -24,8 +25,6 @@ uuid = { version = "1.23.1", features = ["v4"] }
 log = "0.4"
 hotpath = { workspace = true, optional = true }
 
-[dev-dependencies]
-chrono-tz = "0.10"
 
 [features]
 hotpath = ["dep:hotpath", "hotpath/hotpath"]
