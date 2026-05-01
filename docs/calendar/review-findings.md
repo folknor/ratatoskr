@@ -25,13 +25,6 @@ All findings addressed. Lenses and targets:
 
 ## Round 2 (open) - by code area
 
-### `crates/db/src/db/time.rs::resolve_local_to_timestamp` (42-58)
-
-- **Low** (flagged 2x) - Spring-forward walker tries `+60min` first; lands wrong for sub-hour DST gaps. Repro: `Australia/Lord_Howe`, input `02:15` on the 30-minute spring-forward day returns `03:15 LHST` instead of `02:45 LHDT`.
-- **Low** - Tied ambiguous result on the minute-by-minute walk picks the pre-fall-back instant. Triggered by zones with double transitions in close sequence (Antarctica/Casey 2009-10).
-- **Medium** (flagged 2x) - Returns `None` for 24-hour skipped days; callers fall back to raw-seconds arithmetic. Repro: `Pacific/Apia` Dec 30 2011 in `add_days_local` for the weekly anchor (`calendars.rs:1346, 1383`) silently emits instances 24h offset.
-- **Latent** - Same raw-seconds fallback path: any DST-gap day where `add_days_local` returns `None` causes daily wall-clock-preserving events to slip from 09:00 to 10:00 from that day forward (`calendars.rs:1326`).
-
 ### `crates/db/src/db/queries_extra/calendars.rs::expand_recurrence` (1052-1136)
 
 - **Medium** - Inverted error signaling: malformed rule (unknown FREQ, empty FREQ field) and rules using unsupported BY-rules (BYSETPOS, BYWEEKNO, BYYEARDAY, BYHOUR, BYMINUTE, BYSECOND) now log a WARN and return `vec![event.clone()]` (single instance); well-formed-but-zero-instance rules (UNTIL in past, BYDAY excludes everything) still return `vec![]`. The malformed-vs-zero-instance signaling is no longer silent on the malformed side, but the caller still can't tell the two apart at the data level. Surfacing a "broken rule" indicator to the UI would close this fully.

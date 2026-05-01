@@ -23,9 +23,10 @@ use chrono::{Duration, LocalResult, NaiveDateTime, TimeZone};
 
 /// Convert a wall-clock `NaiveDateTime` in `tz` to a Unix timestamp.
 ///
-/// Returns `None` only when the date itself is invalid (something like a
-/// fictional 02:30 that remains in a gap even after a full hour shift; this
-/// is essentially unreachable for any real IANA zone).
+/// Returns `None` only when the gap surrounding `naive` is wider than the
+/// 48-hour walk bound below. That covers Pacific/Apia's 2011-12-30 24-hour
+/// skip; the only realistic input it cannot handle is a hypothetical
+/// multi-day skip not present in any TZ database.
 pub fn resolve_local_to_timestamp<Tz: TimeZone>(naive: NaiveDateTime, tz: &Tz) -> Option<i64> {
     match tz.from_local_datetime(&naive) {
         LocalResult::Single(t) => Some(t.timestamp()),
@@ -34,29 +35,74 @@ pub fn resolve_local_to_timestamp<Tz: TimeZone>(naive: NaiveDateTime, tz: &Tz) -
         // Apple Calendar all do, and it preserves "first occurrence wins"
         // ordering for events that get scheduled near the transition.
         LocalResult::Ambiguous(early, _late) => Some(early.timestamp()),
-        // Spring-forward: shift forward by the gap duration so the user's
-        // intended wall-clock minute is preserved (02:30 -> 03:30, not
-        // 03:00). DST gaps are 60 min in nearly every zone; Lord Howe
-        // Island runs a 30 min DST. Try +60, then +30, then walk
-        // minute-by-minute as a defense against unusual TZ data.
-        LocalResult::None => {
-            for try_offset in [Duration::hours(1), Duration::minutes(30)] {
-                match tz.from_local_datetime(&(naive + try_offset)) {
-                    LocalResult::Single(t) => return Some(t.timestamp()),
-                    LocalResult::Ambiguous(early, _) => return Some(early.timestamp()),
-                    LocalResult::None => {}
-                }
-            }
-            for offset in 1..=120 {
-                let probe = naive + Duration::minutes(offset);
-                match tz.from_local_datetime(&probe) {
-                    LocalResult::Single(t) => return Some(t.timestamp()),
-                    LocalResult::Ambiguous(early, _) => return Some(early.timestamp()),
-                    LocalResult::None => {}
-                }
-            }
-            None
+        // Spring-forward / day-skip: shift forward by the gap width so the
+        // user's intended wall-clock minute is preserved past the gap. The
+        // gap width is detected by walking back to the last valid wall
+        // clock and forward to the first valid wall clock - so the
+        // 60-minute gap of US/Europe DST, the 30-minute gap of Lord Howe,
+        // and the 24-hour skip of Pacific/Apia 2011-12-30 all produce the
+        // same shape of answer:
+        //
+        //   gap_width ≈ backward + forward - 1   (minute resolution)
+        //   output = resolve(naive + gap_width)
+        //
+        // The previous shape tried +60 first, then +30, then walked
+        // minute-by-minute and accepted the first valid hit. That picked
+        // the WRONG answer for sub-hour gaps (Lord Howe 02:15 -> 03:15
+        // LHST instead of 02:45 LHDT) and bailed entirely on 24-hour
+        // skips, leaving callers (`calendars.rs::add_days_in_zone` etc) to
+        // fall back to raw-seconds arithmetic that silently shifts every
+        // subsequent recurring instance by the gap offset.
+        LocalResult::None => resolve_through_gap(naive, tz),
+    }
+}
+
+fn resolve_through_gap<Tz: TimeZone>(naive: NaiveDateTime, tz: &Tz) -> Option<i64> {
+    // 48 hours each way: enough headroom for the 24h Pacific/Apia skip
+    // plus a safety margin for any double-transition that might land us in
+    // a second gap during the walk. Probe resolution is 1 minute, matching
+    // the smallest DST step IANA carries.
+    const MAX_PROBE_MINUTES: i64 = 60 * 48;
+
+    let mut backward = 0i64;
+    let gap_start_offset = loop {
+        backward += 1;
+        if backward > MAX_PROBE_MINUTES {
+            return None;
         }
+        match tz.from_local_datetime(&(naive - Duration::minutes(backward))) {
+            LocalResult::None => continue,
+            _ => break backward,
+        }
+    };
+
+    let mut forward = 0i64;
+    let gap_end_offset = loop {
+        forward += 1;
+        if forward > MAX_PROBE_MINUTES {
+            return None;
+        }
+        match tz.from_local_datetime(&(naive + Duration::minutes(forward))) {
+            LocalResult::None => continue,
+            _ => break forward,
+        }
+    };
+
+    // gap_width is the number of minutes the wall clock skipped - if naive
+    // sits k minutes into the gap, post-gap output should be at the same
+    // post-gap offset, i.e. naive + gap_width preserves the wall-clock
+    // minute past the gap.
+    let gap_width = gap_start_offset + gap_end_offset - 1;
+    let shifted = naive.checked_add_signed(Duration::minutes(gap_width))?;
+    match tz.from_local_datetime(&shifted) {
+        LocalResult::Single(t) => Some(t.timestamp()),
+        // If the post-gap instant is itself ambiguous (a spring-forward gap
+        // chained into a fall-back within the walk window), pick the LATER
+        // instant so the result lies past every transition the walk
+        // observed, preserving the "shift forward through all transitions"
+        // intent. Antarctica/Casey 2009-10 is the documented case.
+        LocalResult::Ambiguous(_early, late) => Some(late.timestamp()),
+        LocalResult::None => None,
     }
 }
 
@@ -115,6 +161,44 @@ mod tests {
             .expect("resolves");
         let expected = NaiveDate::from_ymd_opt(2024, 6, 15)
             .and_then(|d| d.and_hms_opt(10, 30, 0))
+            .map(|d| d.and_utc().timestamp())
+            .expect("valid");
+        assert_eq!(ts, expected);
+    }
+
+    #[test]
+    fn lord_howe_30min_gap_preserves_wall_clock_minute() {
+        // Lord Howe Island runs a 30-minute DST. Spring-forward 2024 was
+        // 2024-10-06: 02:00 LHST jumps to 02:30 LHDT, so 02:15 is in the
+        // gap. The pre-fix walker tried +60 first, landed on 03:15 LHDT,
+        // and silently shifted the user's intended minute by 30 minutes
+        // past where they wrote it down. Width-based shift puts 02:15 at
+        // 02:45 LHDT (= 02:15 + 30 min gap width).
+        let ts = resolve_local_to_timestamp(naive(2024, 10, 6, 2, 15), &Tz::Australia__Lord_Howe)
+            .expect("resolves through gap");
+        // 02:45 LHDT = (02:45 - 11:00) UTC = 15:45 UTC the previous day.
+        let expected = NaiveDate::from_ymd_opt(2024, 10, 5)
+            .and_then(|d| d.and_hms_opt(15, 45, 0))
+            .map(|d| d.and_utc().timestamp())
+            .expect("valid");
+        assert_eq!(ts, expected);
+    }
+
+    #[test]
+    fn pacific_apia_24h_skip_resolves_at_post_skip_instant() {
+        // Pacific/Apia skipped 2011-12-30 entirely (jumped from
+        // 2011-12-29 23:59:59 -10:00 to 2011-12-31 00:00:00 +14:00). A
+        // wall clock anywhere on Dec 30 is in a 24-hour gap. The pre-fix
+        // walker capped probes at 120 minutes and returned None for the
+        // whole day, leaving callers to fall back to raw-seconds
+        // arithmetic that silently mis-anchored every subsequent
+        // recurring instance. With the wider walk, the returned instant
+        // is the same wall-clock-of-day on Dec 31.
+        let ts = resolve_local_to_timestamp(naive(2011, 12, 30, 12, 0), &Tz::Pacific__Apia)
+            .expect("24h-skipped day resolves");
+        // 2011-12-31 12:00 +14:00 = 2011-12-30 22:00 UTC.
+        let expected = NaiveDate::from_ymd_opt(2011, 12, 30)
+            .and_then(|d| d.and_hms_opt(22, 0, 0))
             .map(|d| d.and_utc().timestamp())
             .expect("valid");
         assert_eq!(ts, expected);
