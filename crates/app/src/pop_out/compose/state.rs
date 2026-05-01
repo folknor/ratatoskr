@@ -1,6 +1,7 @@
 use rte::EditorState;
 
 use crate::db;
+use crate::ui::emoji_picker::EmojiCategory;
 use crate::ui::layout::{COMPOSE_DEFAULT_HEIGHT, COMPOSE_DEFAULT_WIDTH};
 use crate::ui::token_input::{self, TokenId, TokenInputValue};
 
@@ -80,6 +81,11 @@ pub struct ComposeState {
     pub save_group_error: Option<String>,
     pub save_group_in_flight: bool,
 
+    // Emoji picker (toolbar overlay)
+    pub emoji_picker_open: bool,
+    pub emoji_picker_query: String,
+    pub emoji_picker_category: EmojiCategory,
+
     // Window geometry
     pub width: f32,
     pub height: f32,
@@ -140,6 +146,9 @@ impl ComposeState {
             save_group_name: String::new(),
             save_group_error: None,
             save_group_in_flight: false,
+            emoji_picker_open: false,
+            emoji_picker_query: String::new(),
+            emoji_picker_category: EmojiCategory::Smileys,
             active_signature_id: None,
             signature_separator_index: None,
             width: COMPOSE_DEFAULT_WIDTH,
@@ -220,6 +229,9 @@ impl ComposeState {
             save_group_name: String::new(),
             save_group_error: None,
             save_group_in_flight: false,
+            emoji_picker_open: false,
+            emoji_picker_query: String::new(),
+            emoji_picker_category: EmojiCategory::Smileys,
             active_signature_id: draft.signature_id.clone(),
             signature_separator_index,
             width: COMPOSE_DEFAULT_WIDTH,

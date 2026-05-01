@@ -24,7 +24,7 @@ pub fn view_compose_window<'a>(
     state: &'a ComposeState,
 ) -> Element<'a, Message> {
     let header = compose_header(window_id, state);
-    let toolbar = formatting_toolbar(window_id);
+    let toolbar = formatting_toolbar(window_id, state);
     let body = compose_body(window_id, state);
     let footer = compose_footer(window_id, state);
 
@@ -431,7 +431,10 @@ fn build_recipient_row_inner<'a>(
     .into()
 }
 
-fn formatting_toolbar<'a>(window_id: iced::window::Id) -> Element<'a, Message> {
+fn formatting_toolbar<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
     let fmt_btn = |ico: iced::widget::Text<'a>, msg: ComposeMessage| {
         button(ico.size(ICON_SM).style(text::secondary))
             .on_press(Message::PopOut(window_id, PopOutMessage::Compose(msg)))
@@ -446,6 +449,7 @@ fn formatting_toolbar<'a>(window_id: iced::window::Id) -> Element<'a, Message> {
         fmt_btn(icon::strikethrough(), ComposeMessage::FormatStrikethrough),
         fmt_btn(icon::list(), ComposeMessage::FormatList),
         fmt_btn(icon::link(), ComposeMessage::FormatLink),
+        emoji_toolbar_button(window_id, state),
     ]
     .spacing(SPACE_XXS)
     .align_y(Alignment::Center);
@@ -453,6 +457,58 @@ fn formatting_toolbar<'a>(window_id: iced::window::Id) -> Element<'a, Message> {
     container(toolbar)
         .padding(PAD_TOOLBAR)
         .width(Length::Fill)
+        .into()
+}
+
+/// The emoji-picker toolbar button. Anchored as an overlay so the picker
+/// drops down beneath the trigger when open. Lives next to the formatting
+/// toolbar but on the right edge so the long Bold/Italic/... row doesn't
+/// have to reflow.
+fn emoji_toolbar_button<'a>(
+    window_id: iced::window::Id,
+    state: &'a ComposeState,
+) -> Element<'a, Message> {
+    let trigger = button(icon::smile().size(ICON_SM).style(text::secondary))
+        .on_press(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::ToggleEmojiPicker),
+        ))
+        .padding(PAD_ICON_BTN)
+        .style(theme::ButtonClass::BareIcon.style());
+
+    if !state.emoji_picker_open {
+        return trigger.into();
+    }
+
+    let picker = crate::ui::widgets::emoji_picker(
+        &state.emoji_picker_query,
+        state.emoji_picker_category,
+        move |emoji| {
+            Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::EmojiPickerSelected(emoji.to_string())),
+            )
+        },
+        move |cat| {
+            Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::EmojiPickerCategoryChanged(cat)),
+            )
+        },
+        move |q| {
+            Message::PopOut(
+                window_id,
+                PopOutMessage::Compose(ComposeMessage::EmojiPickerSearchChanged(q)),
+            )
+        },
+    );
+
+    crate::ui::anchored_overlay::anchored_overlay(trigger)
+        .popup(picker)
+        .on_dismiss(Message::PopOut(
+            window_id,
+            PopOutMessage::Compose(ComposeMessage::ToggleEmojiPicker),
+        ))
         .into()
 }
 

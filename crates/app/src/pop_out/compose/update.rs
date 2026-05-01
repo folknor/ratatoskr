@@ -471,6 +471,27 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             )));
             state.draft_dirty = true;
         }
+        ComposeMessage::ToggleEmojiPicker => {
+            state.emoji_picker_open = !state.emoji_picker_open;
+            if !state.emoji_picker_open {
+                state.emoji_picker_query.clear();
+            }
+        }
+        ComposeMessage::EmojiPickerSearchChanged(q) => {
+            state.emoji_picker_query = q;
+        }
+        ComposeMessage::EmojiPickerCategoryChanged(cat) => {
+            state.emoji_picker_category = cat;
+            state.emoji_picker_query.clear();
+        }
+        ComposeMessage::EmojiPickerSelected(emoji) => {
+            state
+                .body
+                .perform(RteAction::Edit(EditAction::InsertText(emoji)));
+            state.emoji_picker_open = false;
+            state.emoji_picker_query.clear();
+            state.draft_dirty = true;
+        }
         ComposeMessage::FormatLink | ComposeMessage::ToggleLinkDialog => {
             if !state.link_dialog_open {
                 state.link_text = state.body.selection_text();

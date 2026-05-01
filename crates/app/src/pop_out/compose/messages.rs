@@ -2,6 +2,7 @@ use iced::Point;
 use rte::Action as RteAction;
 
 use crate::db::ContactMatch;
+use crate::ui::emoji_picker::EmojiCategory;
 use crate::ui::token_input::{TokenId, TokenInputMessage};
 
 use super::types::{AccountInfo, ComposeAttachment, GroupSaveSuccess, RecipientField};
@@ -79,6 +80,16 @@ pub enum ComposeMessage {
     FormatList,
     /// Open the link insertion dialog.
     FormatLink,
+    /// Toggle the emoji-picker overlay anchored at the toolbar button.
+    ToggleEmojiPicker,
+    /// Search-input change inside the emoji picker.
+    EmojiPickerSearchChanged(String),
+    /// Category-tab change inside the emoji picker.
+    EmojiPickerCategoryChanged(EmojiCategory),
+    /// User clicked an emoji - insert at the editor cursor and close the
+    /// picker. The string is owned because messages are `Clone` and need
+    /// `'static`-friendly types.
+    EmojiPickerSelected(String),
     // ── Attachments ──
     /// User clicked the attach button - opens file picker.
     AttachFiles,
