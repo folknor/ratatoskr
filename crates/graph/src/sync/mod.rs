@@ -601,6 +601,12 @@ async fn persist_graph_calendar_events(
                     rsvp_status: None,
                     availability: None,
                     visibility: None,
+                    // Graph's calendarView returns master + exception events
+                    // as separate `singleInstance`/`exception` types; this
+                    // sync path doesn't yet plumb the override discriminator
+                    // through. Leave None - the master row stands alone
+                    // until that work lands.
+                    recurrence_id: None,
                 },
             )?;
         }

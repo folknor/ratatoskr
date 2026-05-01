@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use chrono::Datelike;
 
 use super::super::DbState;
@@ -12,12 +14,17 @@ const CALENDAR_COLS: &str = "\
     is_default, provider_id, can_edit";
 
 /// Explicit column list for `calendar_events` table queries.
+///
+/// `recurrence_id` is the canonical wall-clock form of an override's
+/// RECURRENCE-ID (see `migrations.rs` for the form). Selected with the
+/// rest of the row so the load path can subtract phantom master instances
+/// without a second query.
 const EVENT_COLS: &str = "\
     id, account_id, google_event_id, summary, description, location, \
     start_time, end_time, is_all_day, status, organizer_email, attendees_json, \
     html_link, updated_at, calendar_id, remote_event_id, etag, ical_data, uid, \
     title, timezone, recurrence_rule, organizer_name, rsvp_status, created_at, \
-    availability, visibility";
+    availability, visibility, recurrence_id";
 
 /// Explicit column list for `calendar_attendees` table queries.
 const ATTENDEE_COLS: &str = "\
@@ -192,6 +199,10 @@ pub struct UpsertCalendarEventParams {
     pub rsvp_status: Option<String>,
     pub availability: Option<String>,
     pub visibility: Option<String>,
+    /// Canonical, host-TZ-independent RECURRENCE-ID for override rows.
+    /// `None` for master rows. See the schema column comment for the
+    /// canonical forms.
+    pub recurrence_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -276,16 +287,16 @@ pub fn upsert_calendar_event_sync(
              location, start_time, end_time, is_all_day, status, organizer_email, \
              attendees_json, html_link, calendar_id, remote_event_id, etag, ical_data, uid, \
              title, timezone, recurrence_rule, organizer_name, rsvp_status, created_at, \
-             availability, visibility)
+             availability, visibility, recurrence_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
-                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, unixepoch(), ?24, ?25)
+                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, unixepoch(), ?24, ?25, ?26)
              ON CONFLICT(account_id, google_event_id) DO UPDATE SET
                summary = ?4, description = ?5, location = ?6, start_time = ?7, end_time = ?8,
                is_all_day = ?9, status = ?10, organizer_email = ?11, attendees_json = ?12,
                html_link = ?13, calendar_id = ?14, remote_event_id = ?15, etag = ?16,
                ical_data = ?17, uid = ?18, title = ?19, timezone = ?20, recurrence_rule = ?21,
                organizer_name = ?22, rsvp_status = ?23, availability = ?24, visibility = ?25,
-               updated_at = unixepoch()",
+               recurrence_id = ?26, updated_at = unixepoch()",
         params![
             id,
             p.account_id,
@@ -311,7 +322,8 @@ pub fn upsert_calendar_event_sync(
             p.organizer_name,
             p.rsvp_status,
             p.availability,
-            p.visibility
+            p.visibility,
+            p.recurrence_id
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -425,16 +437,16 @@ pub async fn db_upsert_calendar_event(
                  location, start_time, end_time, is_all_day, status, organizer_email, \
                  attendees_json, html_link, calendar_id, remote_event_id, etag, ical_data, uid, \
                  title, timezone, recurrence_rule, organizer_name, rsvp_status, created_at, \
-                 availability, visibility)
+                 availability, visibility, recurrence_id)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
-                         ?17, ?18, ?19, ?20, ?21, ?22, ?23, unixepoch(), ?24, ?25)
+                         ?17, ?18, ?19, ?20, ?21, ?22, ?23, unixepoch(), ?24, ?25, ?26)
                  ON CONFLICT(account_id, google_event_id) DO UPDATE SET
                    summary = ?4, description = ?5, location = ?6, start_time = ?7, end_time = ?8,
                    is_all_day = ?9, status = ?10, organizer_email = ?11, attendees_json = ?12,
                    html_link = ?13, calendar_id = ?14, remote_event_id = ?15, etag = ?16,
                    ical_data = ?17, uid = ?18, title = ?19, timezone = ?20, recurrence_rule = ?21,
                    organizer_name = ?22, rsvp_status = ?23, availability = ?24, visibility = ?25,
-                   updated_at = unixepoch()",
+                   recurrence_id = ?26, updated_at = unixepoch()",
             params![
                 id,
                 p.account_id,
@@ -460,7 +472,8 @@ pub async fn db_upsert_calendar_event(
                 p.organizer_name,
                 p.rsvp_status,
                 p.availability,
-                p.visibility
+                p.visibility,
+                p.recurrence_id
             ],
         )
         .map_err(|e| {
@@ -980,9 +993,26 @@ pub struct CalendarViewEvent {
     pub availability: Option<String>,
     pub visibility: Option<String>,
     pub timezone: Option<String>,
+    /// VEVENT UID. The load path uses `(account_id, uid)` to subtract
+    /// override slots from the master's RRULE expansion - master and
+    /// overrides share UID by construction (RFC 5545 § 3.8.4.4).
+    pub uid: Option<String>,
+    /// Canonical RECURRENCE-ID for override rows. `None` for master rows.
+    /// Carries the wall-clock string from the iCal source (see schema
+    /// comment) so the dedup decision is independent of the host's local
+    /// zone. Format-equality with the same canonicalization the master
+    /// expansion produces is what makes phantom dedup possible.
+    pub recurrence_id_canonical: Option<String>,
 }
 
 /// Load all calendar events with resolved calendar colors (synchronous).
+///
+/// Recurring events are expanded into concrete instances; rows that
+/// override a specific instance via RECURRENCE-ID are emitted in place
+/// of the corresponding master expansion slot. Without that subtraction,
+/// a master series with one moved instance would render as N+1 events
+/// (the original slot AND the override) - exactly the phantom-override
+/// regression review #1 surfaced after the storage-key fix in Round 2.
 pub fn load_calendar_events_for_view_sync(
     conn: &rusqlite::Connection,
 ) -> Result<Vec<CalendarViewEvent>, String> {
@@ -993,7 +1023,8 @@ pub fn load_calendar_events_for_view_sync(
                     c.display_name AS calendar_name, e.location,
                     e.recurrence_rule, e.calendar_id, e.account_id,
                     e.organizer_name, e.organizer_email, e.rsvp_status,
-                    e.description, e.availability, e.visibility, e.timezone
+                    e.description, e.availability, e.visibility, e.timezone,
+                    e.uid, e.recurrence_id
              FROM calendar_events e
              LEFT JOIN calendars c
                ON c.account_id = e.account_id AND c.id = e.calendar_id
@@ -1028,6 +1059,8 @@ pub fn load_calendar_events_for_view_sync(
                 availability: row.get("availability")?,
                 visibility: row.get("visibility")?,
                 timezone: row.get("timezone")?,
+                uid: row.get("uid")?,
+                recurrence_id_canonical: row.get("recurrence_id")?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -1035,11 +1068,37 @@ pub fn load_calendar_events_for_view_sync(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
+    // Build a (account_id, uid) -> set of override canonical strings index
+    // before expansion. The master row carries `recurrence_id_canonical =
+    // None` and the RRULE; each override row carries its own
+    // `recurrence_id_canonical = Some(...)`. While walking the master we
+    // canonicalise each candidate timestamp with the same shape and skip
+    // it when it lands in this set.
+    let mut overrides_by_series: HashMap<(String, String), HashSet<String>> = HashMap::new();
+    for ev in &base_events {
+        if let (Some(uid), Some(canonical)) =
+            (ev.uid.as_ref(), ev.recurrence_id_canonical.as_ref())
+        {
+            overrides_by_series
+                .entry((ev.account_id.clone(), uid.clone()))
+                .or_default()
+                .insert(canonical.clone());
+        }
+    }
+
     // Expand recurring events into concrete instances.
     let mut expanded = Vec::with_capacity(base_events.len());
     for ev in base_events {
         if let Some(ref rrule) = ev.recurrence_rule {
-            let mut instances = expand_recurrence(&ev, rrule);
+            let overrides = ev
+                .uid
+                .as_ref()
+                .and_then(|uid| {
+                    overrides_by_series.get(&(ev.account_id.clone(), uid.clone()))
+                })
+                .cloned()
+                .unwrap_or_default();
+            let mut instances = expand_recurrence_with_overrides(&ev, rrule, &overrides);
             expanded.append(&mut instances);
         } else {
             expanded.push(ev);
@@ -1136,7 +1195,33 @@ impl RecurrenceTz {
 /// Generates instances within a ~2 year window from the event's original
 /// start time. EXDATE handling is not yet wired (EXDATE is stored on a
 /// separate iCal property, not part of the RRULE string).
+///
+/// Convenience wrapper for tests that don't need to subtract override
+/// slots; routes through `expand_recurrence_with_overrides` with an
+/// empty set. Production callers go through the `_with_overrides` form
+/// directly so the override set the load-path built actually flows in.
+#[cfg(test)]
 fn expand_recurrence(event: &CalendarViewEvent, rrule_str: &str) -> Vec<CalendarViewEvent> {
+    expand_recurrence_with_overrides(event, rrule_str, &HashSet::new())
+}
+
+/// Expand a recurring event into concrete instances, subtracting slots
+/// already claimed by RECURRENCE-ID override rows.
+///
+/// `overrides` carries the canonical wall-clock RECURRENCE-ID strings of
+/// the override rows for this UID. For each candidate timestamp produced
+/// by the master expansion, we re-canonicalise the candidate using the
+/// master's `event.timezone` and `event.all_day` and drop it when the
+/// resulting string sits in the override set. The override row itself
+/// already exists as a separate non-recurring row (its own start_time
+/// drives display), so without this subtraction the user sees both the
+/// untouched master slot AND the moved override - the phantom-duplication
+/// regression flagged as #1 in the calendar review findings.
+fn expand_recurrence_with_overrides(
+    event: &CalendarViewEvent,
+    rrule_str: &str,
+    overrides: &HashSet<String>,
+) -> Vec<CalendarViewEvent> {
     let rule = parse_rrule(rrule_str);
     let tz = RecurrenceTz::from_event_timezone(event.timezone.as_deref());
     let Some(freq) = Freq::parse(&rule.freq) else {
@@ -1234,12 +1319,28 @@ fn expand_recurrence(event: &CalendarViewEvent, rrule_str: &str) -> Vec<Calendar
         if instances.len() >= max_instances {
             break;
         }
+        // Phantom-override dedup: when a stored row carries a
+        // RECURRENCE-ID matching this candidate's wall-clock slot, the
+        // override row will render in its place (its own start_time drives
+        // the displayed time). Emitting the master candidate too produces
+        // two events for the same slot - the user sees the original *and*
+        // the moved instance.
+        if !overrides.is_empty() {
+            let canonical = canonical_recurrence_slot(start, tz, event.all_day);
+            if overrides.contains(&canonical) {
+                continue;
+            }
+        }
         let mut instance = event.clone();
         if idx > 0 {
             instance.id = format!("{}__recur_{idx}", event.id);
         }
         instance.start_time = start;
         instance.end_time = end_time_for_instance(start, wall_duration, tz, raw_duration);
+        // Recurring instances inherit the master's identity; never their
+        // own override key. Stash uid alongside so that future code paths
+        // (e.g. clicking through to an instance) keep the master link.
+        instance.recurrence_id_canonical = None;
         instances.push(instance);
     }
 
@@ -1249,6 +1350,40 @@ fn expand_recurrence(event: &CalendarViewEvent, rrule_str: &str) -> Vec<Calendar
     // The previous fallback hid genuine "this rule expires in the past"
     // states from the caller.
     instances
+}
+
+/// Format a master expansion candidate the same way an override's
+/// RECURRENCE-ID is canonicalised at parse time, so the two strings
+/// compare equal and the load-path can subtract phantoms.
+///
+/// The format must match `parse::extract_recurrence_id_canonical` exactly:
+///   - all-day  -> `YYYYMMDD`
+///   - zoned    -> `YYYYMMDDTHHMMSS;TZID=<id>`
+///   - floating -> `YYYYMMDDTHHMMSS`
+///
+/// We intentionally don't emit the `Z` form here: master expansion
+/// candidates were resolved through the master's TZID context (whatever
+/// `event.timezone` was set to). When the iCal source carried a UTC
+/// DTSTART (no TZID), `event.timezone` is None and the master walks in
+/// `chrono::Local` - producing a wall-clock candidate that lines up with
+/// a floating-form override, which is the convention sane emitters use
+/// across master/override pairs anyway. UTC-form override + non-UTC
+/// master is a malformed feed; we don't try to dedup that combination.
+fn canonical_recurrence_slot(timestamp: i64, tz: RecurrenceTz, all_day: bool) -> String {
+    let Some(naive) = tz.naive(timestamp) else {
+        // Resolution failed (timestamp out of chrono's range). Return a
+        // sentinel that won't collide with any real iCal canonical form;
+        // the worst case is one missed dedup on a pathological event.
+        return format!("__unresolvable_slot_{timestamp}");
+    };
+    if all_day {
+        return naive.format("%Y%m%d").to_string();
+    }
+    let body = naive.format("%Y%m%dT%H%M%S").to_string();
+    match tz {
+        RecurrenceTz::Iana(zone) => format!("{body};TZID={}", zone.name()),
+        RecurrenceTz::Local => body,
+    }
 }
 
 /// Compute end_time for a recurring instance by walking `wall_duration` in
@@ -2067,6 +2202,8 @@ mod tests {
             availability: None,
             visibility: None,
             timezone: None,
+            uid: None,
+            recurrence_id_canonical: None,
         }
     }
 
@@ -2605,6 +2742,75 @@ mod tests {
             );
             assert_eq!(end_local.naive_local().time().minute(), 0);
         }
+    }
+
+    #[test]
+    fn override_slot_is_subtracted_from_master_expansion() {
+        // Regression guard for review #1: the master series and an override
+        // row coexist on `(account_id, uid)` in the database. Without
+        // subtracting the override slot from the master expansion the
+        // calendar shows BOTH the original Mar 11 09:00 instance AND the
+        // moved override - two events for one slot.
+        //
+        // Use a NY-zoned event so the canonical form on the override side
+        // (`YYYYMMDDTHHMMSS;TZID=America/New_York`) lines up with what
+        // `canonical_recurrence_slot` emits during expansion.
+        use chrono_tz::Tz;
+        let ny: Tz = "America/New_York".parse().expect("valid IANA");
+        let dt = chrono::NaiveDate::from_ymd_opt(2026, 3, 9)
+            .and_then(|d| d.and_hms_opt(9, 0, 0))
+            .expect("valid");
+        let start = ny
+            .from_local_datetime(&dt)
+            .single()
+            .expect("unambiguous")
+            .timestamp();
+        let mut event = make_event(start, 3600);
+        event.timezone = Some("America/New_York".to_string());
+        let mut overrides = HashSet::new();
+        // Override pins the Wed 2026-03-11 09:00 NY slot - matching the
+        // canonical form the master expansion will produce for that day.
+        overrides.insert("20260311T090000;TZID=America/New_York".to_string());
+        let instances = expand_recurrence_with_overrides(
+            &event,
+            "FREQ=DAILY;COUNT=5",
+            &overrides,
+        );
+        // 5 candidates (Mon-Fri), 1 phantom subtracted -> 4 emitted.
+        assert_eq!(instances.len(), 4);
+        // None of the kept instances may sit at the Wed 09:00 slot.
+        for inst in &instances {
+            let local = ny
+                .timestamp_opt(inst.start_time, 0)
+                .single()
+                .expect("NY instant resolves");
+            assert!(
+                local.naive_local().date()
+                    != chrono::NaiveDate::from_ymd_opt(2026, 3, 11).expect("valid"),
+                "phantom override slot was not subtracted"
+            );
+        }
+    }
+
+    #[test]
+    fn override_dedup_skipped_when_uid_missing() {
+        // Defensive: when the master row's `uid` is None (legacy data, or a
+        // provider that doesn't surface UID), there's nothing to key the
+        // override set on. Expansion proceeds as if no overrides existed.
+        let start = local_ts(2026, 3, 9, 9, 0);
+        let event = make_event(start, 3600);
+        // event.uid is already None from make_event.
+        let mut overrides = HashSet::new();
+        overrides.insert("20260311T090000".to_string());
+        // Explicit empty set - this is what the load-path passes when uid
+        // is missing - so the dedup path doesn't engage.
+        let instances = expand_recurrence_with_overrides(
+            &event,
+            "FREQ=DAILY;COUNT=5",
+            &HashSet::new(),
+        );
+        assert_eq!(instances.len(), 5, "dedup must not engage without uid");
+        let _ = overrides;
     }
 
     #[test]

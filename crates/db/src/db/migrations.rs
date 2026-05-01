@@ -603,10 +603,28 @@ CREATE TABLE IF NOT EXISTS calendar_events (
     created_at INTEGER,
     availability TEXT,
     visibility TEXT,
+    -- RECURRENCE-ID for VEVENTs that override a single instance of a master
+    -- recurring event (RFC 5545 sec 3.8.4.4). Stored in canonical wall-clock
+    -- form so the value is independent of the host's local timezone:
+    --   YYYYMMDD                         all-day (VALUE=DATE)
+    --   YYYYMMDDTHHMMSSZ                  UTC (Z-suffix)
+    --   YYYYMMDDTHHMMSS                   floating (no TZID, no Z)
+    --   YYYYMMDDTHHMMSS;TZID=<id>         zoned
+    -- Resolving to a Unix timestamp at upsert time (the previous behavior)
+    -- silently re-parsed floating and all-day RECURRENCE-IDs through
+    -- chrono::Local, making the storage key host-dependent: a sync run on
+    -- UTC and another on a non-UTC host produced two distinct keys for the
+    -- same override, leaving an orphan row on TZ change. Master rows leave
+    -- this NULL.
+    recurrence_id TEXT,
     UNIQUE(account_id, google_event_id)
 );
 CREATE INDEX IF NOT EXISTS idx_cal_events_time ON calendar_events(account_id, start_time, end_time);
 CREATE INDEX IF NOT EXISTS idx_cal_events_calendar ON calendar_events(calendar_id);
+-- Load-path phantom-dedup walks (account_id, uid) groups to subtract
+-- override slots from master expansion. Without this index that becomes a
+-- table scan on every calendar render.
+CREATE INDEX IF NOT EXISTS idx_cal_events_uid ON calendar_events(account_id, uid);
 
 CREATE TABLE IF NOT EXISTS calendar_attendees (
     event_id TEXT NOT NULL,

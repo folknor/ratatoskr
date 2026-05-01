@@ -135,6 +135,11 @@ pub(super) async fn upsert_event(
                 rsvp_status: None,
                 availability: None,
                 visibility: None,
+                // Gmail's CalDAV-via-Calendar-API path doesn't surface
+                // RECURRENCE-ID overrides separately - master and exceptions
+                // are folded into the master event's recurrence properties.
+                // Leave None until the API exposes the override slot.
+                recurrence_id: None,
             },
         )?;
 

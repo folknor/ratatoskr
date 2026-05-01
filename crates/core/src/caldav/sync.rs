@@ -183,17 +183,42 @@ async fn sync_calendar_events(
     let uri_refs: Vec<&str> = fetch_uris.iter().map(String::as_str).collect();
     let fetched_icals = client.fetch_events(calendar_href, &uri_refs).await?;
 
-    // Parse and upsert events
+    // Parse and upsert events.
+    //
+    // A single CalDAV resource (`uri`) carries a master VEVENT plus zero or
+    // more RECURRENCE-ID overrides for the same UID. After upserting the
+    // VEVENTs we see in this fetch, we prune any rows for the same resource
+    // whose storage key isn't in the seen set - that reaps abandoned
+    // overrides when the user removes an exception via the web UI but the
+    // resource itself stays alive (so the URI-deletion path at the top of
+    // this function never fires for it).
     let mut upserted = 0;
     for (uri, ical_data) in &fetched_icals {
         let etag = etag_map.get(uri.as_str()).unwrap_or(&"").to_string();
 
         match parse::parse_icalendar(ical_data) {
             Ok(events) => {
+                let mut seen_keys: Vec<String> = Vec::with_capacity(events.len());
                 for event in &events {
-                    upsert_parsed_event(db, account_id, calendar_id, uri, &etag, ical_data, event)
-                        .await?;
+                    let key = upsert_parsed_event(
+                        db, account_id, calendar_id, uri, &etag, ical_data, event,
+                    )
+                    .await?;
+                    seen_keys.push(key);
                     upserted += 1;
+                }
+                if !seen_keys.is_empty() {
+                    let cal_id_owned = calendar_id.to_string();
+                    let uri_owned = uri.clone();
+                    db.with_conn(move |conn| {
+                        crate::db::queries_extra::caldav_sync::reap_orphan_overrides_sync(
+                            conn,
+                            &cal_id_owned,
+                            &uri_owned,
+                            &seen_keys,
+                        )
+                    })
+                    .await?;
                 }
             }
             Err(e) => {
@@ -220,7 +245,10 @@ async fn sync_calendar_events(
     Ok((upserted, deleted_count))
 }
 
-/// Upsert a single parsed event into the database.
+/// Upsert a single parsed event into the database. Returns the storage key
+/// (`google_event_id`) the row was upserted under, so the caller can
+/// distinguish overrides from masters when reaping abandoned overrides
+/// after a multi-VEVENT resource shrinks.
 async fn upsert_parsed_event(
     db: &DbState,
     account_id: &str,
@@ -229,7 +257,7 @@ async fn upsert_parsed_event(
     etag: &str,
     ical_data: &str,
     event: &parse::ParsedVEvent,
-) -> Result<(), String> {
+) -> Result<String, String> {
     // RFC 5545 § 3.6.1 makes UID MUST. Real-world emitters violate this
     // rarely but it does happen (some legacy bridges, ad-hoc scripts).
     // Refusing to upsert UID-less events would drop user-visible data the
@@ -244,7 +272,7 @@ async fn upsert_parsed_event(
         );
         uri.to_string()
     });
-    let google_event_id = make_google_event_id(&uid, event.recurrence_id);
+    let google_event_id = make_google_event_id(&uid, event.recurrence_id.as_deref());
 
     // Serialize attendees as JSON
     let attendees_json = if event.attendees.is_empty() {
@@ -274,7 +302,10 @@ async fn upsert_parsed_event(
         log::warn!(
             "CalDAV VEVENT at {uri} has no usable DTSTART; refusing to persist as epoch event"
         );
-        return Ok(());
+        // We still return the synthesized key so the caller's reap-orphans
+        // step doesn't delete an in-flight override row simply because we
+        // chose to skip its persist this round.
+        return Ok(google_event_id);
     };
     let end_time = event.end_time.unwrap_or(start_time);
 
@@ -301,6 +332,7 @@ async fn upsert_parsed_event(
             title: event.summary.clone(),
             recurrence_rule: event.rrule.clone(),
             organizer_name: event.organizer_name.clone(),
+            recurrence_id: event.recurrence_id.clone(),
             ..UpsertCalendarEventParams::default()
         },
     )
@@ -326,7 +358,7 @@ async fn upsert_parsed_event(
     sync_event_attendees(db, account_id, &google_event_id, event).await?;
     sync_event_reminders(db, account_id, &google_event_id, event).await?;
 
-    Ok(())
+    Ok(google_event_id)
 }
 
 /// Build the `google_event_id` key from a CalDAV UID, folding in the
@@ -335,10 +367,17 @@ async fn upsert_parsed_event(
 /// one VEVENT per override instance, all sharing the same UID. Without
 /// the RECURRENCE-ID discriminator, master + override would collide on
 /// `(account_id, google_event_id)` and one would silently overwrite the
-/// other on every sync. We use the resolved Unix timestamp so different
-/// emitters' formats for the same instant (UTC vs TZID-anchored) collapse
-/// onto the same key.
-fn make_google_event_id(uid: &str, recurrence_id: Option<i64>) -> String {
+/// other on every sync.
+///
+/// The key carries the wall-clock canonical form rather than a resolved
+/// Unix timestamp - resolving floating and all-day RECURRENCE-IDs at
+/// upsert time silently re-anchors them in `chrono::Local`, so a sync
+/// run on a UTC host and another on a NY host would mint two distinct
+/// storage keys for the same override and orphan the previous row on TZ
+/// change. The string form preserves the exact bytes the iCal source
+/// carried; matching emitters (Apple, Google, Outlook) keep the form
+/// stable across syncs by construction.
+fn make_google_event_id(uid: &str, recurrence_id: Option<&str>) -> String {
     match recurrence_id {
         Some(rid) => format!("caldav:{uid}::recurrence-id={rid}"),
         None => format!("caldav:{uid}"),
@@ -482,10 +521,37 @@ mod tests {
         // the two rows collide on (account_id, google_event_id) and the
         // last-written silently overwrites the other.
         let master = make_google_event_id("uid-123@example.com", None);
-        let override_a = make_google_event_id("uid-123@example.com", Some(1_710_511_200));
-        let override_b = make_google_event_id("uid-123@example.com", Some(1_711_120_800));
+        let override_a =
+            make_google_event_id("uid-123@example.com", Some("20260315T100000Z"));
+        let override_b =
+            make_google_event_id("uid-123@example.com", Some("20260322T100000Z"));
         assert_ne!(master, override_a);
         assert_ne!(master, override_b);
         assert_ne!(override_a, override_b);
+    }
+
+    #[test]
+    fn make_google_event_id_keys_are_host_tz_independent() {
+        // Regression guard for review #19/#20: the previous key shape used a
+        // resolved Unix timestamp, so a floating RECURRENCE-ID synced on a
+        // UTC host and the same one synced on a NY host produced two
+        // distinct keys (one row per host). The wall-clock string form is
+        // identical regardless of where the parser ran.
+        let floating =
+            make_google_event_id("uid-1@example.com", Some("20260315T100000"));
+        let all_day =
+            make_google_event_id("uid-1@example.com", Some("20260315"));
+        // Both forms must yield ASCII keys that have nothing to do with the
+        // host's local zone (no offset arithmetic baked in).
+        assert!(
+            floating
+                .strip_prefix("caldav:uid-1@example.com::recurrence-id=")
+                .is_some_and(|tail| tail == "20260315T100000")
+        );
+        assert!(
+            all_day
+                .strip_prefix("caldav:uid-1@example.com::recurrence-id=")
+                .is_some_and(|tail| tail == "20260315")
+        );
     }
 }

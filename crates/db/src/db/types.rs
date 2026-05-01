@@ -430,6 +430,10 @@ pub struct DbCalendarEvent {
     pub created_at: Option<i64>,
     pub availability: Option<String>,
     pub visibility: Option<String>,
+    /// Canonical RECURRENCE-ID for override VEVENTs. See the column comment
+    /// in `migrations.rs` for the form. `None` for master rows and for any
+    /// non-CalDAV provider that doesn't yet plumb overrides through.
+    pub recurrence_id: Option<String>,
 }
 
 // ── Calendar Attendee ──────────────────────────────────────

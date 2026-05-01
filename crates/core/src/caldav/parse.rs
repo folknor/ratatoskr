@@ -33,13 +33,27 @@ pub struct ParsedVEvent {
     pub rrule: Option<String>,
     /// VALARM reminders extracted as minutes-before values.
     pub reminders: Vec<ParsedReminder>,
-    /// RECURRENCE-ID resolved to a Unix timestamp when present. RFC 5545
-    /// § 3.8.4.4: identifies a single instance of a recurring event being
-    /// overridden or cancelled. The same UID can recur in a calendar with
-    /// distinct RECURRENCE-IDs (master + N overrides); the storage key
-    /// must include this discriminator or the master and overrides
+    /// RECURRENCE-ID in canonical wall-clock form (RFC 5545 § 3.8.4.4),
+    /// when present. Identifies a single instance of a recurring event
+    /// being overridden or cancelled; the same UID recurs in a calendar
+    /// with distinct RECURRENCE-IDs (master + N overrides) and the
+    /// storage key must include this discriminator or master and overrides
     /// collapse onto one row.
-    pub recurrence_id: Option<i64>,
+    ///
+    /// Forms (deliberately string, not Unix timestamp):
+    /// - `YYYYMMDD` for `VALUE=DATE` (all-day) overrides
+    /// - `YYYYMMDDTHHMMSSZ` for `Z`-suffixed UTC datetimes (and any
+    ///   numeric offset, normalized to UTC)
+    /// - `YYYYMMDDTHHMMSS;TZID=<id>` for zoned datetimes
+    /// - `YYYYMMDDTHHMMSS` for floating datetimes (no TZID, no offset)
+    ///
+    /// Resolving floating and all-day forms to a Unix timestamp at parse
+    /// time silently re-anchored them in `chrono::Local`, so a sync run
+    /// on a UTC host and another on a NY host produced two distinct
+    /// storage keys for the same override - master + override collapsed
+    /// to a single row on TZ change. Carrying the wall-clock string
+    /// keeps the key host-independent.
+    pub recurrence_id: Option<String>,
 }
 
 /// A single attendee parsed from a VEVENT.
@@ -249,13 +263,14 @@ fn extract_vevent(
     let reminders = extract_reminders(component, ical);
 
     // Extract RECURRENCE-ID if this VEVENT is an override/cancellation of a
-    // specific instance of the master series. Same property semantics as
-    // DTSTART (TZID, UTC, floating, all-day variants), so we route through
-    // the same resolver path. The resolved timestamp becomes part of the
-    // storage key in `caldav/sync.rs::upsert_parsed_event`, keeping the
-    // master row distinct from each override on `(account_id, key)`.
-    let (recurrence_id, _) =
-        extract_datetime(component, &ICalendarProperty::RecurrenceId, resolver);
+    // specific instance of the master series. We capture the wall-clock
+    // form rather than resolving to a Unix timestamp here: floating and
+    // all-day RECURRENCE-IDs would otherwise re-anchor in `chrono::Local`
+    // at parse time (different host TZ -> different timestamp -> different
+    // storage key), so the same iCal override would yield distinct rows on
+    // UTC vs NY hosts. The string form is what the iCal source carried;
+    // the storage key in `caldav/sync.rs` uses it directly.
+    let recurrence_id = extract_recurrence_id_canonical(component);
 
     ParsedVEvent {
         uid,
@@ -479,6 +494,79 @@ fn build_local_midnight(dt: &calcard::common::PartialDateTime) -> Option<i64> {
     let day = dt.day? as u32;
     let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)?.and_hms_opt(0, 0, 0)?;
     common::time::resolve_local_to_timestamp(naive, &chrono::Local)
+}
+
+/// Build the canonical wall-clock storage form for a VEVENT's RECURRENCE-ID.
+///
+/// Returns `None` when the property is absent or carries no usable
+/// `PartialDateTime` (an empty `RECURRENCE-ID:` value). The four forms
+/// directly reflect the four iCal serialisations RFC 5545 § 3.8.4.4
+/// permits, so two emitters that disagree on whether a TZID is present
+/// produce distinct keys (the alternative would silently collide their
+/// overrides). Numeric UTC offsets normalise to `Z` so an emitter that
+/// sends `+0000` and one that sends `Z` agree.
+///
+/// We deliberately do NOT resolve to a Unix timestamp here - that path
+/// makes the key host-TZ-dependent for floating and all-day RECURRENCE-IDs,
+/// which is exactly the regression the wall-clock form fixes.
+fn extract_recurrence_id_canonical(
+    component: &calcard::icalendar::ICalendarComponent,
+) -> Option<String> {
+    let entry = pick_datetime_entry(component, &ICalendarProperty::RecurrenceId)?;
+    let Some(ICalendarValue::PartialDateTime(dt)) = entry.values.first() else {
+        return None;
+    };
+    // year is `Option<u16>` upstream so the value is always representable
+    // as i32 - From is the right conversion. The `try_from` shape would
+    // never fail for a parsed iCal but tripped a clippy::unnecessary_
+    // fallible_conversions warning.
+    let year = i32::from(dt.year?);
+    let month = u32::from(dt.month?);
+    let day = u32::from(dt.day?);
+
+    let is_date_only = entry
+        .parameter(&ICalendarParameterName::Value)
+        .and_then(|v| v.as_text())
+        .is_some_and(|t| t.eq_ignore_ascii_case("DATE"));
+    if is_date_only {
+        return Some(format!("{year:04}{month:02}{day:02}"));
+    }
+
+    let hour = u32::from(dt.hour.unwrap_or(0));
+    let minute = u32::from(dt.minute.unwrap_or(0));
+    let second = u32::from(dt.second.unwrap_or(0));
+    let body = format!("{year:04}{month:02}{day:02}T{hour:02}{minute:02}{second:02}");
+
+    // RFC 5545 § 3.3.5 forbids combining TZID with a UTC offset, but real
+    // emitters violate this. The DTSTART path (extract_datetime) already
+    // chose to honor the offset over TZID; we mirror that here so the
+    // master and override resolve consistently within a malformed feed.
+    if dt.tz_hour.is_some() {
+        // Z-suffix or numeric offset. Both are absolute; normalise the
+        // numeric form to UTC so `+0000` and `Z` produce the same key.
+        if let Some(naive) = partial_to_naive(dt)
+            && (dt.tz_hour != Some(0) || dt.tz_minute.unwrap_or(0) != 0 || dt.tz_minus)
+        {
+            let secs = i32::from(dt.tz_hour.unwrap_or(0)) * 3600
+                + i32::from(dt.tz_minute.unwrap_or(0)) * 60;
+            let offset_secs = if dt.tz_minus { -secs } else { secs };
+            // Subtract the offset to land on UTC wall-clock, then format.
+            let utc_naive = naive
+                .checked_sub_signed(chrono::Duration::seconds(i64::from(offset_secs)))
+                .unwrap_or(naive);
+            return Some(format!("{}Z", utc_naive.format("%Y%m%dT%H%M%S")));
+        }
+        return Some(format!("{body}Z"));
+    }
+
+    if let Some(tz_id_raw) = entry.tz_id() {
+        let tz_id = tz_id_raw.trim();
+        if !tz_id.is_empty() {
+            return Some(format!("{body};TZID={tz_id}"));
+        }
+    }
+
+    Some(body)
 }
 
 /// Extract the underlying calendar date for a `VALUE=DATE` property, before
@@ -1286,8 +1374,81 @@ END:VCALENDAR\r\n";
 
         let events = parse_icalendar(ical).expect("should parse");
         assert_eq!(events.len(), 1);
-        // 2024-03-15T10:00:00Z = 1710496800
-        assert_eq!(events[0].recurrence_id, Some(1_710_496_800));
+        // Canonical wall-clock form, not a Unix timestamp - keeps the storage
+        // key host-TZ-independent across syncs (see ParsedVEvent docs).
+        assert_eq!(
+            events[0].recurrence_id.as_deref(),
+            Some("20240315T100000Z")
+        );
+    }
+
+    #[test]
+    fn recurrence_id_floating_uses_wall_clock_form() {
+        // Floating RECURRENCE-ID (no TZID, no Z): the previous shape resolved
+        // through chrono::Local at parse time, so the same VEVENT keyed
+        // differently on UTC vs NY hosts and the storage key drifted on TZ
+        // change. We capture the wall-clock string directly so the key is
+        // independent of where the parser is running.
+        let ical = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:floating-override@example.com\r\n\
+SUMMARY:Override\r\n\
+DTSTART:20260315T100000\r\n\
+RECURRENCE-ID:20260315T100000\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].recurrence_id.as_deref(),
+            Some("20260315T100000")
+        );
+    }
+
+    #[test]
+    fn recurrence_id_all_day_uses_date_form() {
+        // VALUE=DATE RECURRENCE-ID was previously resolved to chrono::Local
+        // midnight, so the storage key shifted by the host's UTC offset.
+        // Capturing YYYYMMDD directly keeps the override identity stable.
+        let ical = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:allday-override@example.com\r\n\
+SUMMARY:Override\r\n\
+DTSTART;VALUE=DATE:20260315\r\n\
+RECURRENCE-ID;VALUE=DATE:20260315\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].recurrence_id.as_deref(), Some("20260315"));
+    }
+
+    #[test]
+    fn recurrence_id_zoned_includes_tzid() {
+        // Zoned RECURRENCE-ID keeps the TZID alongside the wall-clock string
+        // so master and override resolve consistently within the source
+        // timezone. Two distinct TZIDs at the same wall-clock produce
+        // distinct keys.
+        let ical = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:zoned-override@example.com\r\n\
+SUMMARY:Override\r\n\
+DTSTART;TZID=America/New_York:20260315T100000\r\n\
+RECURRENCE-ID;TZID=America/New_York:20260315T100000\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].recurrence_id.as_deref(),
+            Some("20260315T100000;TZID=America/New_York")
+        );
     }
 
     #[test]

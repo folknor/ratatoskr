@@ -298,6 +298,7 @@ impl_from_row!(DbCalendarEvent {
     created_at,
     availability,
     visibility,
+    recurrence_id,
 });
 
 // ── Calendar Attendee ──────────────────────────────────────

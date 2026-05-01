@@ -193,6 +193,92 @@ pub fn load_caldav_etags_sync(
     Ok(map)
 }
 
+/// Drop calendar_event rows for a CalDAV resource whose storage key isn't
+/// in the seen set, plus their attendees and reminders.
+///
+/// Reaps abandoned RECURRENCE-ID overrides when a single iCal resource
+/// shrinks - a series that arrived as `master + override-A + override-B`
+/// and then comes back as `master + override-A` would otherwise leave
+/// override-B's row behind indefinitely. The whole-resource deletion in
+/// `delete_caldav_events_sync` only fires when the entire URI vanishes
+/// from the server's listing, so it doesn't catch in-resource shrinkage.
+///
+/// Bounded by `seen_keys` plus the existing `(calendar_id, uri)` index, so
+/// the cost stays proportional to the number of overrides that resource
+/// actually carried (typically zero or single digits).
+pub fn reap_orphan_overrides_sync(
+    conn: &Connection,
+    calendar_id: &str,
+    uri: &str,
+    seen_keys: &[String],
+) -> Result<(), String> {
+    if seen_keys.is_empty() {
+        // Defensive: no seen keys means we'd delete every row for this
+        // resource. The caller's iCal parse must have failed midway; in
+        // that case the URI-deletion path is the right place to drop the
+        // resource, not here.
+        return Ok(());
+    }
+
+    // Build a list of seen keys with sql placeholders. All keys are
+    // ASCII-only `caldav:...` strings so there's no escape concern, but
+    // bind them as parameters anyway to keep this analogous to other
+    // dynamic-IN queries in the crate.
+    let placeholders = seen_keys
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!("?{}", i + 3))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let select_sql = format!(
+        "SELECT id FROM calendar_events \
+         WHERE calendar_id = ?1 AND remote_event_id = ?2 \
+           AND google_event_id NOT IN ({placeholders})"
+    );
+
+    let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::with_capacity(seen_keys.len() + 2);
+    bind.push(Box::new(calendar_id.to_string()));
+    bind.push(Box::new(uri.to_string()));
+    for k in seen_keys {
+        bind.push(Box::new(k.clone()));
+    }
+    let bind_refs: Vec<&dyn rusqlite::types::ToSql> = bind.iter().map(AsRef::as_ref).collect();
+
+    let mut stmt = conn
+        .prepare(&select_sql)
+        .map_err(|e| format!("prepare reap-overrides: {e}"))?;
+    let orphan_ids: Vec<String> = stmt
+        .query_map(bind_refs.as_slice(), |row| row.get::<_, String>(0))
+        .map_err(|e| format!("query orphan overrides: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("collect orphan ids: {e}"))?;
+
+    for id in &orphan_ids {
+        // Cascade attendees and reminders before the row itself; matches
+        // the manual cascade in `delete_event_by_remote_id_sync`.
+        conn.execute(
+            "DELETE FROM calendar_attendees WHERE event_id = ?1",
+            params![id],
+        )
+        .map_err(|e| format!("reap orphan attendees: {e}"))?;
+        conn.execute(
+            "DELETE FROM calendar_reminders WHERE event_id = ?1",
+            params![id],
+        )
+        .map_err(|e| format!("reap orphan reminders: {e}"))?;
+        conn.execute("DELETE FROM calendar_events WHERE id = ?1", params![id])
+            .map_err(|e| format!("reap orphan event: {e}"))?;
+    }
+
+    if !orphan_ids.is_empty() {
+        log::debug!(
+            "CalDAV: reaped {} orphan override row(s) for resource {uri}",
+            orphan_ids.len()
+        );
+    }
+    Ok(())
+}
+
 /// Clear the event map for a calendar (used during full resync).
 pub fn clear_caldav_event_map_sync(
     conn: &Connection,

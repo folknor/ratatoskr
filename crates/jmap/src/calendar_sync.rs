@@ -515,6 +515,11 @@ async fn persist_jmap_event(
                 rsvp_status: None,
                 availability: None,
                 visibility: None,
+                // JMAP's CalendarEvent type carries `recurrenceOverrides` as
+                // a JSCalendar map keyed by RECURRENCE-ID; the sync path
+                // currently flattens those into the master row. Leave None
+                // until the override-as-row path lands here too.
+                recurrence_id: None,
             },
         )?;
 
