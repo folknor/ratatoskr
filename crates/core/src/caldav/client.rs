@@ -357,8 +357,19 @@ impl CalDavClient {
                 .await
                 .map_err(|e| format!("REPORT multiget failed: {e}"))?;
 
-            let parsed = parse::parse_multiget_report(&response_body);
-            all_results.extend(parsed);
+            // Normalize response hrefs the same way `list_events` does its
+            // listing-side hrefs. Many servers echo relative hrefs in
+            // multiget responses even when the listing side returned
+            // absolute, and others vary their absolute forms (default port
+            // stripping, trailing slash). Without this normalization, the
+            // (uri, etag) lookup in `sync_calendar_events::etag_map` misses
+            // and the sync layer treats the path-only uri as a new entry,
+            // which then fails to delete cleanly on the next pass. Same
+            // `resolve_url_against` both halves use keeps them byte-equal.
+            for (uri, ical) in parse::parse_multiget_report(&response_body) {
+                let normalized = self.resolve_url_against(&resolved_calendar_url, &uri);
+                all_results.push((normalized, ical));
+            }
         }
 
         Ok(all_results)
@@ -397,7 +408,12 @@ impl CalDavClient {
             .await
             .map_err(|e| format!("REPORT calendar-query failed: {e}"))?;
 
-        Ok(parse::parse_multiget_report(&response_body))
+        // Same listing-shape href normalization as `fetch_events`; see the
+        // comment there.
+        Ok(parse::parse_multiget_report(&response_body)
+            .into_iter()
+            .map(|(uri, ical)| (self.resolve_url_against(&resolved_url, &uri), ical))
+            .collect())
     }
 
     // -----------------------------------------------------------------------
