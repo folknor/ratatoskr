@@ -18,12 +18,6 @@
 
 - [ ] **Codebase-wide chevron unification** - The chevron icon should be unified across the codebase; we use different chevron icons in different places (dropdowns, accordions, popovers, etc.). Audit all chevron uses and standardize on one icon set + sizing scale.
 
-- [ ] **Compose account dropdown + Cc/Bcc toggle hover styling** - The account dropdown and Cc/Bcc toggle buttons in the compose window still need proper hover effects matching the rest of the compose toolbar.
-
-- [ ] **Compose autocomplete dropdown styling** - The richer two-line name+email layout and group icon+member count are not actually showing in the autocomplete dropdown - only the name (or email) is showing. The render code at `compose.rs::autocomplete_dropdown` does branch on `entry.is_group` and `entry.display_name`, but in practice neither the second-line email nor the group icon/`(N)` suffix renders. Investigation should start at the data source: verify `ContactMatch.display_name`, `is_group`, and `member_count` are populated (and not `None`/`false`/`0`) in the search result fed into `state.autocomplete.results` - if the fields are empty, the render falls through to the bare `text(&entry.email)` branch.
-
-- [ ] **Calendar editor Delete button non-functional** - The Delete button for existing events in the calendar editor is rendered but clicking it does nothing. Needs wiring to actually delete the event.
-
 - [ ] **Attachment saving** - Should remember last folder. Ideally last folder per thread ID.
 
 - [ ] **Collapse individual expanded messages** - Chevron now points up (fixed: added `icon::chevron_up()` at U+E070, swapped in `widgets::expanded_message_card`). Remaining: the button needs a new place to live - probably a very long, thin button that stretches across the entire horizontal space at the top of the message frame. This needs to be unified with the Attachments panel collapsing, which is currently taking up too much vertical space; also too much padding above the Attachments section.
@@ -52,7 +46,7 @@
 
 - [ ] **Pop out message viewer body rendering** - The current pills for selecting Plain/Simple/Original/Source need to move. The spec currently doesn't say clearly where they should go. This needs to be resolved first.
 
-- [ ] **Pop out message viewer body rendering toggle buttons** - The current pills for selecting Plain/Simple/Original/Source have zero effect, and the "Source" button just shows a generic "error" about message bodies being in a separate database. Even with dev-seed.
+- [ ] **Pop out message viewer body rendering toggle buttons** - Plain / Simple HTML / Original HTML still all render the plain-text body identically because `html_render.rs` isn't wired into the pop-out yet (tracked under "Pop-out HTML rendering" below). Source mode now synthesizes a usable pseudo-`.eml` from headers + body so it's no longer a "(raw source not available)" stub, but the original on-the-wire MIME framing isn't preserved anywhere - real raw source needs sync to capture and store it before Source can be RFC-faithful.
 
 - [ ] **Message box / toast notification system** - Generic modal message box and/or toast notification infrastructure for the app. Needed for: compose draft save failure on close (currently silently aborts the close with no user feedback), action service retry exhaustion warnings, and any future error/confirmation flows. Should support at least: transient toasts (auto-dismiss), persistent error banners, and modal confirmation dialogs.
 
@@ -229,7 +223,14 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **Pop-out HTML rendering** - SimpleHtml/OriginalHtml modes in message view pop-out fall back to plain text. Depends on the DOM-to-widget pipeline (`html_render.rs`) being wired into the pop-out view. Tracked separately in the HTML rendering section above.
 - [ ] **Pop-out Print** - OS print dialog integration for message view and compose pop-out windows. Platform-specific, no iced precedent. Needs investigation.
 - [ ] **Signature: per-account default dropdown in Account Settings** - Account editor overlay has no signature dropdown for selecting the default signature for an account.
-- [ ] **Compose: improve "Discard this draft?" modal contents** - General polish pass on layout/copy/buttons.
+- [ ] **Modal dialog content unification (GNOME HIG / libadwaita)** - Modal cards across the app (compose: discard, link, save-as-group; calendar: delete-event, discard-changes; settings: delete-account, delete-signature, delete-group, delete-contact; main: add-account, first-launch) all roll their own card structure with inconsistent backgrounds (Elevated vs ad-hoc), button styles (Ghost/Action/Primary/Nav { active: true } picked at random), button placements, text colors, and paddings. The structural overlay primitives (`modal_overlay`, `AnchoredOverlay`) are unified per `docs/ui/overlay-standardization-plan.md`, but the *contents* of the cards aren't. Target style: GNOME HIG / libadwaita `AdwAlertDialog` semantics. Needs a `confirm_dialog`/`modal_card` builder in `ui/` that locks down:
+  - Card background + border + radius (window-like surface, opaque, distinct from the dimmed backdrop).
+  - Title: TEXT_HEADING semibold.
+  - Body: TEXT_MD, secondary text color.
+  - Button row: right-aligned. Cancel/dismiss on the LEFT (default appearance). Destructive action on the RIGHT (text::danger / destructive-action style). Suggested actions on the RIGHT with Primary/suggested-action style. Never put the destructive button on the left.
+  - Padding: PAD_CARD.
+  - Fixed/max widths sized per content (confirms ~360, forms ~440).
+  Then migrate every site above to use it.
 
 - [ ] **Compose: surface "Add at least one recipient" properly** - Sending with no recipients sets `state.status = "Add at least one recipient"` (`pop_out/compose.rs::Send`), which renders as a small status line at the bottom of the form. Should be a real validation surface - inline error near the To field, a toast, or a focus-and-shake on the empty field. Same path also covers the placeholder "Send not yet wired" message and any future send-failure feedback; depends on the toast/notification system in the main TODO list.
 

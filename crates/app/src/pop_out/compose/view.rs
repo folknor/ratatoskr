@@ -181,7 +181,7 @@ fn build_from_row<'a>(
     if !state.show_cc {
         from_row = from_row.push(
             button(text("Cc").size(TEXT_SM))
-                .style(theme::ButtonClass::Action.style())
+                .style(theme::ButtonClass::BareIcon.style())
                 .on_press(Message::PopOut(
                     window_id,
                     PopOutMessage::Compose(ComposeMessage::ShowCc),
@@ -192,7 +192,7 @@ fn build_from_row<'a>(
     if !state.show_bcc {
         from_row = from_row.push(
             button(text("Bcc").size(TEXT_SM))
-                .style(theme::ButtonClass::Action.style())
+                .style(theme::ButtonClass::BareIcon.style())
                 .on_press(Message::PopOut(
                     window_id,
                     PopOutMessage::Compose(ComposeMessage::ShowBcc),
@@ -260,7 +260,7 @@ fn from_account_picker<'a>(
         ))
         .padding(PAD_INPUT)
         .width(Length::Fill)
-        .style(theme::ButtonClass::Action.style());
+        .style(theme::ButtonClass::BareIcon.style());
 
     if !state.from_dropdown_open {
         return trigger.into();

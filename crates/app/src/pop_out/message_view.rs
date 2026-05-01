@@ -40,8 +40,6 @@ pub enum MessageViewMessage {
         rtsk::generation::GenerationToken<rtsk::generation::PopOut>,
         Result<Vec<MessageViewAttachment>, String>,
     ),
-    /// Raw source loaded (for Source rendering mode).
-    RawSourceLoaded(Result<String, String>),
     /// User changed the rendering mode toggle.
     SetRenderingMode(RenderingMode),
     /// Reply/Reply All/Forward button pressed.

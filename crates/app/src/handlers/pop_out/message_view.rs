@@ -43,14 +43,6 @@ pub(super) fn handle_message_view_update(
             eprintln!("Pop-out attachments load failed: {e}");
             Task::none()
         }
-        MessageViewMessage::RawSourceLoaded(Ok(source)) => {
-            state.raw_source = Some(source);
-            Task::none()
-        }
-        MessageViewMessage::RawSourceLoaded(Err(_)) => {
-            state.raw_source = Some("(failed to load source)".to_string());
-            Task::none()
-        }
         MessageViewMessage::SetRenderingMode(mode) => {
             state.rendering_mode = mode;
             // Mode picker lives inside the overflow menu; close it on select.
@@ -94,6 +86,56 @@ pub(super) fn handle_message_view_update(
         | MessageViewMessage::SaveAs
         | MessageViewMessage::Noop => Task::none(),
     }
+}
+
+/// Build a best-effort pseudo `.eml` for the Source view from the headers and
+/// body already on `MessageViewState`. Not a faithful RFC 822 reconstruction -
+/// the original MIME boundaries, transfer encodings, and Received headers are
+/// long gone - but it gives users a useful "underlying content" view in place
+/// of the previous "(raw source not available)" stub.
+fn synthesize_pseudo_source(state: &MessageViewState) -> String {
+    let mut out = String::new();
+
+    let from = match (&state.from_name, &state.from_address) {
+        (Some(name), Some(addr)) if !name.is_empty() => format!("{name} <{addr}>"),
+        (_, Some(addr)) => addr.clone(),
+        (Some(name), None) => name.clone(),
+        (None, None) => String::new(),
+    };
+    if !from.is_empty() {
+        out.push_str(&format!("From: {from}\n"));
+    }
+    if let Some(to) = &state.to_addresses
+        && !to.is_empty()
+    {
+        out.push_str(&format!("To: {to}\n"));
+    }
+    if let Some(cc) = &state.cc_addresses
+        && !cc.is_empty()
+    {
+        out.push_str(&format!("Cc: {cc}\n"));
+    }
+    if let Some(subject) = &state.subject
+        && !subject.is_empty()
+    {
+        out.push_str(&format!("Subject: {subject}\n"));
+    }
+    if let Some(ts) = state.date
+        && let Some(dt) = chrono::DateTime::from_timestamp(ts, 0)
+    {
+        out.push_str(&format!("Date: {}\n", dt.to_rfc2822()));
+    }
+
+    let (body, content_type) = match (state.body_html.as_deref(), state.body_text.as_deref()) {
+        (Some(html), _) if !html.trim().is_empty() => (html, "text/html; charset=utf-8"),
+        (_, Some(text)) if !text.trim().is_empty() => (text, "text/plain; charset=utf-8"),
+        _ => ("(empty body)", "text/plain; charset=utf-8"),
+    };
+    out.push_str(&format!("Content-Type: {content_type}\n"));
+    out.push('\n');
+    out.push_str(body);
+
+    out
 }
 
 impl App {
@@ -148,33 +190,25 @@ impl App {
         ])
     }
 
-    /// Handle switching to Source rendering mode - lazy-loads raw source if needed.
+    /// Handle switching to Source rendering mode.
+    ///
+    /// True raw source (the .eml as it arrived) isn't stored anywhere right
+    /// now - bodies live in the body store, headers live in `messages`, and
+    /// neither preserves the original MIME framing. Until that's available
+    /// we synthesize a best-effort pseudo-source from the headers and body
+    /// already on `MessageViewState`, which is far more useful than the
+    /// previous "(raw source not available)" placeholder.
     pub(crate) fn handle_set_source_mode(&mut self, window_id: iced::window::Id) -> Task<Message> {
         let Some(PopOutWindow::MessageView(state)) = self.pop_out_windows.get_mut(&window_id)
         else {
             return Task::none();
         };
 
-        let needs_source = state.raw_source.is_none();
         state.rendering_mode = RenderingMode::Source;
-
-        if needs_source {
-            let db = Arc::clone(&self.db);
-            let account_id = state.account_id.clone();
-            let message_id = state.message_id.clone();
-
-            Task::perform(
-                async move { db.load_raw_source(account_id, message_id).await },
-                move |result| {
-                    Message::PopOut(
-                        window_id,
-                        PopOutMessage::MessageView(MessageViewMessage::RawSourceLoaded(result)),
-                    )
-                },
-            )
-        } else {
-            Task::none()
+        if state.raw_source.is_none() {
+            state.raw_source = Some(synthesize_pseudo_source(state));
         }
+        Task::none()
     }
 
     /// Dispatch an action-service operation for the thread shown in a pop-out
