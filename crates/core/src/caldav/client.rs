@@ -362,9 +362,18 @@ impl CalDavClient {
         for chunk in uris.chunks(MULTIGET_BATCH_SIZE) {
             let mut href_elements = String::new();
             for uri in chunk {
+                // Older SOGo (and a handful of niche CalDAV servers) reject
+                // multiget bodies that name absolute hrefs not sharing
+                // scheme+host with the request URL. After a redirect from
+                // http -> https or one canonical hostname to another, our
+                // stored URIs and the live request URL drift apart even
+                // though they target the same resource. Re-relativize
+                // absolute hrefs that share an origin with the request, so
+                // strict servers see the path-only form they expect.
+                let body_href = relativize_for_multiget(&resolved_calendar_url, uri);
                 href_elements.push_str(&format!(
                     "  <D:href>{}</D:href>\n",
-                    xml_escape_text(uri)
+                    xml_escape_text(&body_href)
                 ));
             }
 
@@ -693,7 +702,19 @@ impl CalDavClient {
         if href.starts_with("http://") || href.starts_with("https://") {
             return href.to_string();
         }
-        if let Ok(base_url) = url::Url::parse(base)
+        // RFC 3986 § 5.2 relative-reference resolution treats the base path's
+        // last segment as a "file" and replaces it when the reference is
+        // path-relative. For a calendar listed without trailing slash
+        // (`https://host/cal/user/work`) and an event href like `event.ics`
+        // that drops `work` and produces `https://host/cal/user/event.ics`.
+        // CalDAV collections are conceptually directories regardless of any
+        // server's trailing-slash discipline; some servers (Davical,
+        // Bedework, old Zimbra, some shared-hosting frontends) emit
+        // collection URIs without one and then return event hrefs relative
+        // to them. Append `/` to the base path before joining so the
+        // relative href lands underneath the collection.
+        let join_base = ensure_collection_trailing_slash(base, href);
+        if let Ok(base_url) = url::Url::parse(join_base.as_ref())
             && let Ok(resolved) = base_url.join(href)
         {
             return resolved.to_string();
@@ -903,6 +924,64 @@ fn xml_escape_text(s: &str) -> std::borrow::Cow<'_, str> {
 ///
 /// **Bare strong ETag** (`abc`, no quotes) is still wrapped into `"abc"`:
 /// stored before the verbatim-storage fix landed, recoverable.
+/// Append a trailing slash to a CalDAV collection base URL when the path
+/// lacks one and the relative reference about to be joined would otherwise
+/// drop the last path segment. See `resolve_url_against` for context.
+fn ensure_collection_trailing_slash<'a>(base: &'a str, href: &str) -> std::borrow::Cow<'a, str> {
+    if href.starts_with('/') || href.is_empty() {
+        return std::borrow::Cow::Borrowed(base);
+    }
+    if href.starts_with('#') || href.starts_with('?') {
+        return std::borrow::Cow::Borrowed(base);
+    }
+    let parsed = url::Url::parse(base).ok();
+    let path_ends_with_slash = match &parsed {
+        Some(u) => u.path().ends_with('/'),
+        None => base.ends_with('/'),
+    };
+    if path_ends_with_slash {
+        return std::borrow::Cow::Borrowed(base);
+    }
+    // Insert '/' before any query/fragment so `https://host/path?x=1` ->
+    // `https://host/path/?x=1` rather than `https://host/path?x=1/`.
+    if let Some(parsed) = parsed
+        && (parsed.query().is_some() || parsed.fragment().is_some())
+        && let Ok(mut u) = url::Url::parse(base)
+    {
+        u.set_path(&format!("{}/", u.path()));
+        return std::borrow::Cow::Owned(u.to_string());
+    }
+    let mut owned = base.to_string();
+    owned.push('/');
+    std::borrow::Cow::Owned(owned)
+}
+
+/// Re-relativize an absolute href against the request URL when the two
+/// share an origin. Used by `fetch_events` to defend against strict
+/// servers (older SOGo) that 400 multiget bodies whose hrefs don't share
+/// scheme+host with the URL the REPORT was POSTed to.
+fn relativize_for_multiget(request_url: &str, href: &str) -> String {
+    if !(href.starts_with("http://") || href.starts_with("https://")) {
+        return href.to_string();
+    }
+    let (Ok(req_url), Ok(href_url)) = (url::Url::parse(request_url), url::Url::parse(href)) else {
+        return href.to_string();
+    };
+    if req_url.scheme() == href_url.scheme()
+        && req_url.host_str() == href_url.host_str()
+        && req_url.port_or_known_default() == href_url.port_or_known_default()
+    {
+        let mut path = href_url.path().to_string();
+        if let Some(q) = href_url.query() {
+            path.push('?');
+            path.push_str(q);
+        }
+        path
+    } else {
+        href.to_string()
+    }
+}
+
 /// Extract a server-supplied ETag from a response header map. ETags are
 /// supposed to be ASCII (RFC 7232 BNF allows only printable ASCII inside
 /// the opaque-tag), but Yahoo / Kerio / Zimbra have been seen emitting
@@ -947,7 +1026,10 @@ fn prepare_if_match_etag(stored: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_hrefs_property, prepare_if_match_etag, response_etag, xml_escape_text};
+    use super::{
+        ensure_collection_trailing_slash, extract_hrefs_property, prepare_if_match_etag,
+        relativize_for_multiget, response_etag, xml_escape_text,
+    };
 
     #[test]
     fn preserves_already_quoted_strong_etag() {
@@ -993,6 +1075,63 @@ mod tests {
     fn empty_or_whitespace_etag_returns_none() {
         assert_eq!(prepare_if_match_etag(""), None);
         assert_eq!(prepare_if_match_etag("   "), None);
+    }
+
+    #[test]
+    fn ensure_trailing_slash_appends_when_path_missing_one() {
+        // Calendar URL has no trailing slash and href is path-relative:
+        // append `/` so Url::join lands under the collection rather than
+        // replacing its last segment.
+        let got = ensure_collection_trailing_slash("https://h/cal/user/work", "event.ics");
+        assert_eq!(got, "https://h/cal/user/work/");
+    }
+
+    #[test]
+    fn ensure_trailing_slash_preserves_existing_slash() {
+        let got = ensure_collection_trailing_slash("https://h/cal/user/work/", "event.ics");
+        assert_eq!(got, "https://h/cal/user/work/");
+    }
+
+    #[test]
+    fn ensure_trailing_slash_skips_for_absolute_href() {
+        // When the href is absolute-path or absolute-URL, RFC 3986 resolution
+        // doesn't drop the base segment - leave the base as-is.
+        let got = ensure_collection_trailing_slash("https://h/cal/user/work", "/cal/event.ics");
+        assert_eq!(got, "https://h/cal/user/work");
+    }
+
+    #[test]
+    fn ensure_trailing_slash_handles_query_strings() {
+        // For a base with a query string, slash must go before the `?`.
+        let got = ensure_collection_trailing_slash("https://h/cal/user/work?token=x", "event.ics");
+        assert!(got.contains("/work/"));
+        assert!(got.contains("token=x"));
+    }
+
+    #[test]
+    fn relativize_multiget_strips_origin_when_shared() {
+        // Older SOGo rejects absolute hrefs that don't match the request
+        // URL's scheme+host. Same-origin absolute hrefs collapse to path.
+        let got = relativize_for_multiget(
+            "https://cal.example/cal/user/work/",
+            "https://cal.example/cal/user/work/event.ics",
+        );
+        assert_eq!(got, "/cal/user/work/event.ics");
+    }
+
+    #[test]
+    fn relativize_multiget_keeps_cross_origin_absolute() {
+        let got = relativize_for_multiget(
+            "https://cal.example/cal/user/work/",
+            "https://other.example/cal/event.ics",
+        );
+        assert_eq!(got, "https://other.example/cal/event.ics");
+    }
+
+    #[test]
+    fn relativize_multiget_passes_through_relative() {
+        let got = relativize_for_multiget("https://cal.example/cal/", "event.ics");
+        assert_eq!(got, "event.ics");
     }
 
     #[test]

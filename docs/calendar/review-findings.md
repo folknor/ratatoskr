@@ -73,14 +73,6 @@ All findings addressed. Lenses and targets:
 - **Medium** - Relative principal/home hrefs returned by a redirected `.well-known/caldav` are resolved against the original base URL, not the redirect target.
 - **Medium** - `build_client_from_config` (`mod.rs:294-300`) replays persisted principal/home; if home is present, discovery is skipped entirely. No rediscovery fallback when persisted URLs go stale (server migration, principal deletion, etc.).
 
-### `crates/core/src/caldav/client.rs::fetch_events` multiget body (278-292)
-
-- **Medium** - Absolute hrefs in the multiget body when the calendar URL went through a host/scheme redirect; older SOGo rejects absolute hrefs that don't share scheme+host with the request URL. Re-relativize before chunking.
-
-### `crates/core/src/caldav/client.rs::resolve_url_against` (566)
-
-- **Medium** - `Url::join` against a collection href without a trailing slash drops the last segment. Repro: calendar listed as `https://host/cal/user/work` and event hrefs as `event.ics` resolves to `https://host/cal/user/event.ics`, not `.../work/event.ics`. Some servers are loose about trailing slashes.
-
 ---
 
 ### `crates/core/src/caldav/sync.rs`
