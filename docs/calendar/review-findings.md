@@ -68,12 +68,6 @@ All findings addressed. Lenses and targets:
 
 - **Medium** - Multi-href delegation home-sets are now collected (function returns `Vec<String>`), but only the first is currently consumed by the discovery flow. Reaching the rest requires plumbing `Vec<String>` through `CalDavClient::calendar_home_url` (single `Option<String>` today), the persisted home_url DB column, and `list_calendars` (currently iterates one home). When a multi-href home-set is encountered the `discover` path now logs a WARN so an operator can see the delegation case is hitting; full delegation support is a follow-up.
 
-### `crates/core/src/caldav/client.rs` ETag handling (391-395, 441-445, 708-715)
-
-- **Medium** (flagged 2x) - `normalize_if_match_etag` mangles the legacy weak-ETag form. Stored value `W/abc` (no inner quote) gets wrapped to `"W/abc"` (literal characters); strict servers 412 on every update; user retries hit the same 412 because the stored value never refreshes without a full resync. Better: drop `If-Match` when the stored value matches `W/[^"]`.
-- **Medium** - Servers emitting weak ETags (`W/"..."`) and enforcing RFC strong comparison for `If-Match` reject every update/delete with 412.
-- **Medium** - ETags with non-ASCII bytes silently dropped via `to_str()` (Yahoo, Kerio, Zimbra). Causes an extra GET round-trip on save and breaks optimistic concurrency on the next PUT.
-
 ### `crates/core/src/caldav/client.rs::discover` / `discover_principal` (128-207)
 
 - **Medium** - Relative principal/home hrefs returned by a redirected `.well-known/caldav` are resolved against the original base URL, not the redirect target.

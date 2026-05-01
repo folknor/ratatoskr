@@ -491,11 +491,7 @@ impl CalDavClient {
         // Store the ETag verbatim. See `parse.rs::parse_propfind_events` for
         // the rationale - the quotes (and the optional `W/` weak indicator)
         // are part of the value per RFC 7232, not framing we can strip.
-        let etag = resp
-            .headers()
-            .get("etag")
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_string);
+        let etag = response_etag(resp.headers());
 
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -526,7 +522,8 @@ impl CalDavClient {
             .body(ical_data.to_string());
 
         if let Some(etag_val) = etag
-            && let Ok(val) = normalize_if_match_etag(etag_val).parse::<reqwest::header::HeaderValue>()
+            && let Some(prepared) = prepare_if_match_etag(etag_val)
+            && let Ok(val) = prepared.parse::<reqwest::header::HeaderValue>()
         {
             req = req.header(IF_MATCH, val);
         }
@@ -541,11 +538,7 @@ impl CalDavClient {
 
         // Extract ETag from response headers verbatim (see PROPFIND parsing
         // for the rationale).
-        let new_etag = resp
-            .headers()
-            .get("etag")
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_string);
+        let new_etag = response_etag(resp.headers());
 
         Ok(new_etag)
     }
@@ -559,7 +552,8 @@ impl CalDavClient {
         let mut req = self.http.delete(&url).headers(self.auth_headers());
 
         if let Some(etag_val) = etag
-            && let Ok(val) = normalize_if_match_etag(etag_val).parse::<reqwest::header::HeaderValue>()
+            && let Some(prepared) = prepare_if_match_etag(etag_val)
+            && let Ok(val) = prepared.parse::<reqwest::header::HeaderValue>()
         {
             req = req.header(IF_MATCH, val);
         }
@@ -881,52 +875,141 @@ fn xml_escape_text(s: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(out)
 }
 
-/// Format a stored ETag value for the `If-Match` header.
+/// Format a stored ETag value for the `If-Match` header. Returns `None`
+/// when the stored ETag is not in a shape RFC 7232 allows on `If-Match`,
+/// telling the caller to skip the header entirely (last-write-wins for
+/// this request, with self-correction on the next sync round).
 ///
-/// New code stores ETags verbatim including quotes (`"abc"`, `W/"abc"`), so the
-/// fast path is to send the value through unchanged. We tolerate two legacy
-/// shapes for backwards compatibility with rows written before this fix:
+/// New code stores ETags verbatim including quotes (`"abc"`, `W/"abc"`),
+/// so the fast path is to pass the value through unchanged. We also
+/// handle two corner cases the review found:
 ///
-/// - **Bare strong ETag** (`abc`): stored without RFC 7232 quotes by the old
-///   `trim_matches('"')` path. Wrap into `"abc"` so the server accepts it.
-/// - **Corrupted weak ETag** (`W/abc`): the old code stripped the inner quote;
-///   we cannot reliably reconstruct the original, but wrapping the whole token
-///   produces `"W/abc"` which the server will reject - triggering a 412
-///   response, an automatic re-fetch, and recovery to a clean verbatim ETag on
-///   next sync. Better than silently sending malformed headers.
-fn normalize_if_match_etag(stored: &str) -> String {
-    let s = stored.trim();
-    if s.starts_with('"') || s.starts_with("W/\"") {
-        s.to_string()
-    } else {
-        format!("\"{s}\"")
+/// - **Weak ETag** (`W/"..."`). RFC 7232 § 3.1 / § 2.3.2: weak validators
+///   "cannot be used in If-Match". Strict servers (some Apache mod_dav
+///   builds, Cyrus, Cyrus-derived) reject every PUT/DELETE with 412 when
+///   the request carries a weak ETag in If-Match. The retry sees the same
+///   stored value and 412s again, so the client gets stuck until the row
+///   refreshes via a full re-sync. Dropping If-Match for weak ETags lets
+///   the request through; concurrent edits become last-write-wins for
+///   that one request, which is the standard treatment when only weak
+///   validators are available.
+/// - **Corrupted weak ETag** (`W/abc`, no inner quote). Pre-fix rows
+///   written by an earlier `trim_matches('"')` path lost the inner quote
+///   and cannot be reconstructed. The previous shape wrapped the whole
+///   token into `"W/abc"` (a strong ETag with `W/` as part of its
+///   opaque-tag) which the server then 412s on every retry. Drop
+///   If-Match for these and recover via a clean verbatim ETag on next
+///   write.
+///
+/// **Bare strong ETag** (`abc`, no quotes) is still wrapped into `"abc"`:
+/// stored before the verbatim-storage fix landed, recoverable.
+/// Extract a server-supplied ETag from a response header map. ETags are
+/// supposed to be ASCII (RFC 7232 BNF allows only printable ASCII inside
+/// the opaque-tag), but Yahoo / Kerio / Zimbra have been seen emitting
+/// non-ASCII bytes. The previous shape called `to_str().ok()` and silently
+/// dropped those, breaking optimistic concurrency on the next PUT and
+/// triggering an extra GET round-trip for the next save. Use lossy UTF-8
+/// so the byte content survives (any subsequent `If-Match` round-trips
+/// through `prepare_if_match_etag`'s `parse::<HeaderValue>()` which
+/// re-validates), and log when bytes get replaced so an operator chasing
+/// "stuck on save" symptoms has a starting point.
+fn response_etag(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    let val = headers.get("etag")?;
+    if let Ok(s) = val.to_str() {
+        return Some(s.to_string());
     }
+    let bytes = val.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    let lossy = String::from_utf8_lossy(bytes).into_owned();
+    log::warn!(
+        "CalDAV ETag has non-ASCII bytes; storing lossy UTF-8 ({lossy:?}). \
+         Optimistic concurrency may be degraded on the next write."
+    );
+    Some(lossy)
+}
+
+fn prepare_if_match_etag(stored: &str) -> Option<String> {
+    let s = stored.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if s.starts_with("W/") {
+        // Weak ETag: RFC 7232 forbids strong-comparison use, so don't send.
+        return None;
+    }
+    if s.starts_with('"') {
+        return Some(s.to_string());
+    }
+    Some(format!("\"{s}\""))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_hrefs_property, normalize_if_match_etag, xml_escape_text};
+    use super::{extract_hrefs_property, prepare_if_match_etag, response_etag, xml_escape_text};
 
     #[test]
     fn preserves_already_quoted_strong_etag() {
-        assert_eq!(normalize_if_match_etag("\"abc\""), "\"abc\"");
+        assert_eq!(
+            prepare_if_match_etag("\"abc\""),
+            Some("\"abc\"".to_string())
+        );
     }
 
     #[test]
-    fn preserves_already_quoted_weak_etag() {
-        assert_eq!(normalize_if_match_etag("W/\"abc\""), "W/\"abc\"");
+    fn drops_weak_etag_per_rfc_7232() {
+        // RFC 7232 § 2.3.2: weak validators cannot be used in If-Match.
+        // Strict servers reject every PUT/DELETE with 412 if the request
+        // includes a weak ETag. Drop If-Match entirely instead.
+        assert_eq!(prepare_if_match_etag("W/\"abc\""), None);
+    }
+
+    #[test]
+    fn drops_legacy_corrupted_weak_etag() {
+        // Pre-fix rows had `W/` followed by an opaque-tag with the inner
+        // quote stripped. The previous wrapper produced "W/abc" (a strong
+        // ETag whose opaque text is `W/abc`) which strict servers 412'd
+        // on every retry. Drop If-Match instead of sending nonsense.
+        assert_eq!(prepare_if_match_etag("W/abc"), None);
     }
 
     #[test]
     fn wraps_legacy_bare_etag() {
         // Pre-fix rows have unquoted strong ETags. Wrap them so they conform
         // to RFC 7232 before going on the wire.
-        assert_eq!(normalize_if_match_etag("abc"), "\"abc\"");
+        assert_eq!(prepare_if_match_etag("abc"), Some("\"abc\"".to_string()));
     }
 
     #[test]
     fn trims_surrounding_whitespace() {
-        assert_eq!(normalize_if_match_etag("  \"abc\"  "), "\"abc\"");
+        assert_eq!(
+            prepare_if_match_etag("  \"abc\"  "),
+            Some("\"abc\"".to_string())
+        );
+    }
+
+    #[test]
+    fn empty_or_whitespace_etag_returns_none() {
+        assert_eq!(prepare_if_match_etag(""), None);
+        assert_eq!(prepare_if_match_etag("   "), None);
+    }
+
+    #[test]
+    fn response_etag_recovers_non_ascii_bytes() {
+        // Yahoo / Kerio / Zimbra have been seen emitting ETags with
+        // non-ASCII bytes. The previous shape silently dropped those via
+        // `to_str().ok()`; the lossy fallback preserves enough of the
+        // value for it to round-trip through If-Match on the next write.
+        let mut headers = reqwest::header::HeaderMap::new();
+        let bytes: &[u8] = b"\"abc\xff\xff\"";
+        headers.insert(
+            "etag",
+            reqwest::header::HeaderValue::from_bytes(bytes).expect("valid header bytes"),
+        );
+        let etag = response_etag(&headers).expect("recovered");
+        assert!(etag.starts_with('"'));
+        assert!(etag.ends_with('"'));
     }
 
     #[test]
