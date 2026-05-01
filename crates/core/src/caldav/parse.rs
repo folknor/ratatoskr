@@ -33,6 +33,13 @@ pub struct ParsedVEvent {
     pub rrule: Option<String>,
     /// VALARM reminders extracted as minutes-before values.
     pub reminders: Vec<ParsedReminder>,
+    /// RECURRENCE-ID resolved to a Unix timestamp when present. RFC 5545
+    /// § 3.8.4.4: identifies a single instance of a recurring event being
+    /// overridden or cancelled. The same UID can recur in a calendar with
+    /// distinct RECURRENCE-IDs (master + N overrides); the storage key
+    /// must include this discriminator or the master and overrides
+    /// collapse onto one row.
+    pub recurrence_id: Option<i64>,
 }
 
 /// A single attendee parsed from a VEVENT.
@@ -241,6 +248,15 @@ fn extract_vevent(
     // Extract VALARM reminders from sub-components
     let reminders = extract_reminders(component, ical);
 
+    // Extract RECURRENCE-ID if this VEVENT is an override/cancellation of a
+    // specific instance of the master series. Same property semantics as
+    // DTSTART (TZID, UTC, floating, all-day variants), so we route through
+    // the same resolver path. The resolved timestamp becomes part of the
+    // storage key in `caldav/sync.rs::upsert_parsed_event`, keeping the
+    // master row distinct from each override on `(account_id, key)`.
+    let (recurrence_id, _) =
+        extract_datetime(component, &ICalendarProperty::RecurrenceId, resolver);
+
     ParsedVEvent {
         uid,
         summary,
@@ -255,6 +271,7 @@ fn extract_vevent(
         attendees,
         rrule,
         reminders,
+        recurrence_id,
     }
 }
 
@@ -1140,6 +1157,48 @@ END:VCALENDAR\r\n";
         assert!(events[0].is_all_day);
         assert!(events[0].start_time.is_some());
         assert!(events[0].end_time.is_some());
+    }
+
+    #[test]
+    fn recurrence_id_extracted_when_present() {
+        // VEVENT with RECURRENCE-ID is an override of one instance of a
+        // recurring series. Without extracting it, master + override sharing
+        // a UID collapse onto one storage row in caldav/sync.rs.
+        let ical = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:recurring-1@example.com\r\n\
+SUMMARY:Override\r\n\
+DTSTART:20240315T100000Z\r\n\
+DTEND:20240315T110000Z\r\n\
+RECURRENCE-ID:20240315T100000Z\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        // 2024-03-15T10:00:00Z = 1710496800
+        assert_eq!(events[0].recurrence_id, Some(1_710_496_800));
+    }
+
+    #[test]
+    fn recurrence_id_absent_for_master_event() {
+        let ical = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:recurring-1@example.com\r\n\
+SUMMARY:Master\r\n\
+DTSTART:20240315T100000Z\r\n\
+DTEND:20240315T110000Z\r\n\
+RRULE:FREQ=DAILY;COUNT=10\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].recurrence_id, None);
     }
 
     #[test]

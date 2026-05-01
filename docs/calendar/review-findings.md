@@ -66,7 +66,6 @@ All findings addressed. Lenses and targets:
 
 ### `crates/core/src/caldav/parse.rs::parse_propfind_calendars` / `parse_propfind_events` / `parse_multiget_report` (402-690)
 
-- **High** - Recurring resources with master + override VEVENTs collapse: sync key is `caldav:{UID}` (`sync.rs:212, 289`); same-UID different-RECURRENCE-ID instances overwrite each other. User sees only one occurrence or the exception replacing the master. Fold RECURRENCE-ID into the key.
 - **Medium** - 207 with zero `<response>` children returns empty Vec with no log; indistinguishable from "no calendars provisioned" / first-login race / server-side error misreported as 207.
 - **Low** - `parse_propfind_calendars` reads `calendar-color` verbatim and doesn't normalize Apple's ARGB form (`#0000FFFF`) to RGB hex (`#0000FF`) that most other servers emit. UI code consuming the color sees two different formats and must handle both. Either normalize at parse time or document the divergence at the UI consumer.
 
@@ -102,7 +101,6 @@ All findings addressed. Lenses and targets:
 (Issues here are downstream of the parse.rs / client.rs findings above; listed for fix-sequencing visibility.)
 
 - **Medium** - Empty remote set is now guarded against wiping the local cache (`sync_calendar_events` skips the deletion phase when remote returns 0 entries against a non-empty local cache). Still open: when the *initial* sync of a calendar legitimately starts empty and the server later begins returning entries, the heuristic doesn't mis-fire (remote=0 with stored=0 is a no-op). The remaining failure mode is the propstat-status-not-inspected case below, where individual entries get filtered out as "absent" mid-batch even though the response was 207-OK overall.
-- **High** - Sync key is `caldav:{UID}` (`:212, :289`); master + override VEVENTs collide on `(account_id, google_event_id)`. Need RECURRENCE-ID folded into the key.
 - **Low** - `can_edit=true` hard-coded on upsert (`:53, :64`); read-only calendars from iCloud / Fastmail / SOGo show edit affordances and 403 on PUT/DELETE.
 
 ---

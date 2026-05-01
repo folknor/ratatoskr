@@ -241,7 +241,7 @@ async fn upsert_parsed_event(
         );
         uri.to_string()
     });
-    let google_event_id = make_google_event_id(&uid);
+    let google_event_id = make_google_event_id(&uid, event.recurrence_id);
 
     // Serialize attendees as JSON
     let attendees_json = if event.attendees.is_empty() {
@@ -326,9 +326,20 @@ async fn upsert_parsed_event(
     Ok(())
 }
 
-/// Build the `google_event_id` key from a CalDAV UID.
-fn make_google_event_id(uid: &str) -> String {
-    format!("caldav:{uid}")
+/// Build the `google_event_id` key from a CalDAV UID, folding in the
+/// RECURRENCE-ID for override instances. RFC 5545 § 3.8.4.4: a recurring
+/// event series can ship with a master VEVENT (no RECURRENCE-ID) plus
+/// one VEVENT per override instance, all sharing the same UID. Without
+/// the RECURRENCE-ID discriminator, master + override would collide on
+/// `(account_id, google_event_id)` and one would silently overwrite the
+/// other on every sync. We use the resolved Unix timestamp so different
+/// emitters' formats for the same instant (UTC vs TZID-anchored) collapse
+/// onto the same key.
+fn make_google_event_id(uid: &str, recurrence_id: Option<i64>) -> String {
+    match recurrence_id {
+        Some(rid) => format!("caldav:{uid}::recurrence-id={rid}"),
+        None => format!("caldav:{uid}"),
+    }
 }
 
 /// Sync attendees for an event.
@@ -449,4 +460,29 @@ pub async fn full_resync_calendar(
 
     // Now do a fresh sync
     sync_calendar_events(client, db, account_id, calendar_id, calendar_href).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn make_google_event_id_master_uses_uid_only() {
+        let key = make_google_event_id("uid-123@example.com", None);
+        assert_eq!(key, "caldav:uid-123@example.com");
+    }
+
+    #[test]
+    fn make_google_event_id_override_includes_recurrence_id() {
+        // RFC 5545 § 3.8.4.4: master + override VEVENTs share UID and are
+        // discriminated by RECURRENCE-ID. Storage key must reflect that or
+        // the two rows collide on (account_id, google_event_id) and the
+        // last-written silently overwrites the other.
+        let master = make_google_event_id("uid-123@example.com", None);
+        let override_a = make_google_event_id("uid-123@example.com", Some(1_710_511_200));
+        let override_b = make_google_event_id("uid-123@example.com", Some(1_711_120_800));
+        assert_ne!(master, override_a);
+        assert_ne!(master, override_b);
+        assert_ne!(override_a, override_b);
+    }
 }
