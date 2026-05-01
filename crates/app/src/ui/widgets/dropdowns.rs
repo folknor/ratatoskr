@@ -148,8 +148,12 @@ pub fn select<'a, M: Clone + 'a>(
         row![
             Space::new().width(Length::Fill),
             container(text(selected).size(TEXT_MD).style(text::base)).align_y(Alignment::Center),
-            container(icon::chevron_down().size(ICON_MD).style(text::secondary))
-                .align_y(Alignment::Center),
+            container(
+                icon::chevron_down()
+                    .size(ICON_SM)
+                    .style(theme::TextClass::Tertiary.style()),
+            )
+            .align_y(Alignment::Center),
         ]
         .spacing(SPACE_XS)
         .align_y(Alignment::Center),

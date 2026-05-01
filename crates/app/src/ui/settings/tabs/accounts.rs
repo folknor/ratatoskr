@@ -126,8 +126,12 @@ fn account_card<'a>(
         grip_slot,
         left,
         right,
-        container(icon::chevron_right().size(ICON_XL).style(text::secondary))
-            .align_y(Alignment::Center),
+        container(
+            icon::chevron_right()
+                .size(ICON_SM)
+                .style(theme::TextClass::Tertiary.style()),
+        )
+        .align_y(Alignment::Center),
     ]
     .spacing(SPACE_SM)
     .align_y(Alignment::Center);

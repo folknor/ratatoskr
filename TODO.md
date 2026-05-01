@@ -16,8 +16,6 @@
 
 - [ ] **Settings/Accounts: Edit Account** - This section needs rework.
 
-- [ ] **Codebase-wide chevron unification** - The chevron icon should be unified across the codebase; we use different chevron icons in different places (dropdowns, accordions, popovers, etc.). Audit all chevron uses and standardize on one icon set + sizing scale.
-
 - [ ] **Attachment saving** - Should remember last folder. Ideally last folder per thread ID.
 
 - [ ] **Collapse individual expanded messages** - Chevron now points up (fixed: added `icon::chevron_up()` at U+E070, swapped in `widgets::expanded_message_card`). Remaining: the button needs a new place to live - probably a very long, thin button that stretches across the entire horizontal space at the top of the message frame. This needs to be unified with the Attachments panel collapsing, which is currently taking up too much vertical space; also too much padding above the Attachments section.
