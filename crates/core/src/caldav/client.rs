@@ -252,16 +252,23 @@ impl CalDavClient {
         // Fallback: probe `.well-known/caldav`. RFC 6764 § 6 recommends this
         // as a discovery hint when the client doesn't know the DAV root. We
         // only reach it if the base URL didn't yield a principal.
+        //
+        // Capture the final URL after redirects: providers (Apple iCloud,
+        // some hosted Exchange bridges) redirect this to a different host
+        // (e.g. `caldav.icloud.com`). A relative principal href in the
+        // response must resolve against the redirect target, not the
+        // original base URL - otherwise the next PROPFIND lands on the
+        // wrong host and 404s.
         let well_known_url = format!("{}/.well-known/caldav", self.base_url);
         match self
-            .propfind_raw(&well_known_url, "0", PROPFIND_PRINCIPAL)
+            .propfind_with_final_url(&well_known_url, "0", PROPFIND_PRINCIPAL)
             .await
         {
-            Ok((_, body)) => {
+            Ok((_, final_url, body)) => {
                 if let Some(principal) =
                     extract_hrefs_property(&body, "current-user-principal").into_iter().next()
                 {
-                    return Ok(self.resolve_url(&principal));
+                    return Ok(self.resolve_url_against(&final_url, &principal));
                 }
                 last_error = format!(
                     "{last_error}; .well-known/caldav also returned no current-user-principal"
@@ -589,6 +596,21 @@ impl CalDavClient {
         depth: &str,
         body: &str,
     ) -> Result<(StatusCode, String), String> {
+        let (status, _final_url, text) = self.propfind_with_final_url(url, depth, body).await?;
+        Ok((status, text))
+    }
+
+    /// Variant that also returns the URL the response actually came from.
+    /// Used by the well-known fallback in `discover_principal`: a server
+    /// that redirects `/.well-known/caldav` to a different host would
+    /// otherwise have its relative principal href resolved against the
+    /// original `base_url`, landing the next PROPFIND on the wrong host.
+    async fn propfind_with_final_url(
+        &self,
+        url: &str,
+        depth: &str,
+        body: &str,
+    ) -> Result<(StatusCode, String, String), String> {
         let resp = self
             .http
             .request(
@@ -604,6 +626,7 @@ impl CalDavClient {
             .map_err(|e| format!("PROPFIND {url}: {e}"))?;
 
         let status = resp.status();
+        let final_url = resp.url().to_string();
         let content_type = response_content_type(&resp);
         let text = resp.text().await.map_err(|e| format!("read body: {e}"))?;
 
@@ -625,7 +648,7 @@ impl CalDavClient {
         }
 
         if status.is_success() || status == StatusCode::MULTI_STATUS {
-            Ok((status, text))
+            Ok((status, final_url, text))
         } else {
             Err(format!("PROPFIND {url} returned {status}: {text}"))
         }

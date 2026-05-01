@@ -350,9 +350,39 @@ async fn sync_caldav_calendar_account(
         .await;
     }
 
-    rtsk::caldav::sync::sync_caldav_calendars(&client, db, account_id)
-        .await
-        .map(|_| ())
+    let first_attempt = rtsk::caldav::sync::sync_caldav_calendars(&client, db, account_id).await;
+
+    // If we used persisted URLs and the sync failed, the URLs may be
+    // stale (server migration, principal renamed, hosting provider
+    // shuffled the user's calendar root). Run discovery once more with
+    // the persisted values cleared, persist the new ones, and retry.
+    // The second-attempt error - whether it succeeds or surfaces a
+    // genuinely fatal problem - is what the caller sees, so we don't
+    // mask real failures behind perpetual rediscovery loops.
+    match first_attempt {
+        Ok(_) => Ok(()),
+        Err(err) if !needed_discovery => {
+            log::warn!(
+                "CalDAV sync for {account_id} failed with persisted URLs ({err}); \
+                 clearing principal/home and rediscovering"
+            );
+            super::caldav::clear_persisted_caldav_urls(db, account_id).await;
+            let refreshed = super::caldav::load_caldav_account_config(db, encryption_key, account_id)
+                .await?;
+            let client = super::caldav::build_client_from_config(&refreshed).await?;
+            super::caldav::persist_discovery_results(
+                db,
+                account_id,
+                client.principal_url(),
+                client.calendar_home_url(),
+            )
+            .await;
+            rtsk::caldav::sync::sync_caldav_calendars(&client, db, account_id)
+                .await
+                .map(|_| ())
+        }
+        Err(err) => Err(err),
+    }
 }
 
 pub fn upsert_calendar_event(

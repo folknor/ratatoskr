@@ -303,6 +303,32 @@ pub async fn build_client_from_config(
     Ok(client)
 }
 
+/// Clear the persisted principal / home URLs for an account, forcing the
+/// next `build_client_from_config` call to run full RFC 6764 discovery.
+/// Used by the sync layer as a recovery step when persisted URLs go stale
+/// (server migration, principal deletion, the user moving to a new
+/// hosting provider that kept the same credentials but changed the DAV
+/// root). Best-effort: a write failure is logged and swallowed so the
+/// caller can still attempt rediscovery in-memory.
+pub async fn clear_persisted_caldav_urls(db: &DbState, account_id: &str) {
+    let account_id = account_id.to_string();
+    let result = db
+        .with_conn(move |conn| {
+            conn.execute(
+                "UPDATE accounts
+                    SET caldav_principal_url = NULL,
+                        caldav_home_url = NULL
+                  WHERE id = ?1",
+                rusqlite::params![account_id],
+            )
+            .map_err(|e| e.to_string())
+        })
+        .await;
+    if let Err(e) = result {
+        log::warn!("Failed to clear persisted CalDAV URLs: {e}");
+    }
+}
+
 /// Persist freshly discovered principal / home URLs back to the `accounts`
 /// table so the next sync can skip discovery. Called after `build_client`
 /// completes for accounts that didn't already have these cached.
