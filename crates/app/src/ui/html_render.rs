@@ -1024,7 +1024,7 @@ fn decode_entities(s: &str) -> String {
                 Some(c) => result.push(c),
                 None => {
                     result.push('&');
-                    result.push_str(&entity);
+                    result.push_str(entity);
                     result.push(';');
                 }
             }

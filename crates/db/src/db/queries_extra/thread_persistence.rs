@@ -252,6 +252,11 @@ pub fn maybe_update_chat_state(
         )
         .ok();
 
+    // chat_contacts is keyed by email globally - it persists across all
+    // threads with that contact, and is only torn down via the explicit
+    // undesignate flow. The early-return paths here just clear the
+    // per-thread flag.
+
     let Some(ref chat_email) = chat_email else {
         tx.execute(
             "UPDATE threads SET is_chat_thread = 0 \
@@ -259,11 +264,6 @@ pub fn maybe_update_chat_state(
             rusqlite::params![account_id, thread_id],
         )
         .map_err(|e| format!("clear chat flag: {e}"))?;
-        tx.execute(
-            "DELETE FROM chat_contacts WHERE account_id = ?1 AND thread_id = ?2",
-            rusqlite::params![account_id, thread_id],
-        )
-        .map_err(|e| format!("clear stale chat_contacts: {e}"))?;
         return Ok(());
     };
 
@@ -274,11 +274,6 @@ pub fn maybe_update_chat_state(
             rusqlite::params![account_id, thread_id],
         )
         .map_err(|e| format!("clear chat flag (self-contact): {e}"))?;
-        tx.execute(
-            "DELETE FROM chat_contacts WHERE account_id = ?1 AND thread_id = ?2",
-            rusqlite::params![account_id, thread_id],
-        )
-        .map_err(|e| format!("clear stale chat_contacts (self-contact): {e}"))?;
         return Ok(());
     }
 
@@ -424,11 +419,8 @@ pub fn delete_messages_and_cleanup_threads(
                 rusqlite::params![tid, account_id],
             )
             .map_err(|e| format!("delete orphan thread participants: {e}"))?;
-            tx.execute(
-                "DELETE FROM chat_contacts WHERE thread_id = ?1 AND account_id = ?2",
-                rusqlite::params![tid, account_id],
-            )
-            .map_err(|e| format!("delete orphan chat_contacts: {e}"))?;
+            // chat_contacts is keyed by email and survives thread deletion -
+            // it's only removed via undesignate_chat_contact_sync.
         } else {
             let aggregate = compute_thread_aggregate(tx, account_id, tid)?;
             upsert_thread_aggregate(tx, account_id, tid, &aggregate, None, None)?;
