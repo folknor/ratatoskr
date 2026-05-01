@@ -76,8 +76,6 @@ All findings addressed. Lenses and targets:
 
 ### `crates/core/src/caldav/parse.rs::extract_datetime` (236-305)
 
-- **High** (flagged 3x) - Unresolved or unrecognized TZID falls through `resolver.resolve_or_default` to `Tz::Floating`, then the `if !tz.is_floating()` guard at `:281-288` sends it into `chrono::Local` reinterpretation. Should fall back to UTC like `graph/calendar_sync.rs:540` does. Repro: `TZID="Eastern Std Tyme"` (typo) for a Norway-based user reading a US event silently anchors the wall clock to Oslo.
-- **High** - TZID with leading or trailing whitespace bypasses both the HashMap lookup and the first `chrono_tz::Tz::from_str` attempt (only the proprietary-alias fallback trims). Same downstream consequence as the unresolved-TZID case. Repro: `TZID="America/New_York "` (trailing space) for an Oslo-based user shifts the displayed time by 9 hours.
 - **High** (flagged 2x) - All-day events spanning DST get the wrong duration. `build_local_midnight` resolves both DTSTART/DTEND midnights through `chrono::Local`, so a Mar 9 -> Mar 11 EST/EDT-spanning all-day event has 23h instead of 48h, breaking `(end-start)/86400` consumers. Same root cause in `graph/calendar_sync.rs:508-517`.
 
 ### `crates/core/src/caldav/parse.rs::extract_vevent` / `parse_icalendar` (69-90, 98-121)

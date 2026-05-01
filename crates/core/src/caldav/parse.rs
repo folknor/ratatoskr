@@ -266,7 +266,7 @@ fn extract_datetime(
     };
 
     // 1. Explicit TZID, resolves to a real zone (IANA or Windows).
-    if let Some(tz_id) = entry.tz_id() {
+    if let Some(tz_id_raw) = entry.tz_id() {
         // RFC 5545 § 3.3.5 says a property value with a TZID parameter MUST
         // NOT also be UTC ("Z"-suffix). Some real-world emitters (older
         // Outlook, some WebDAV bridges) violate this. When both are present
@@ -275,15 +275,40 @@ fn extract_datetime(
         // misbehaving server.
         if dt.tz_hour.is_some() {
             log::debug!(
-                "CalDAV property has both TZID={tz_id} and a UTC offset; honoring the offset per common practice"
+                "CalDAV property has both TZID={tz_id_raw} and a UTC offset; honoring the offset per common practice"
             );
         } else {
-            let tz = resolver.resolve_or_default(Some(tz_id));
-            if !tz.is_floating() {
-                return (
-                    common::time::resolve_local_to_timestamp(naive, &tz),
-                    false,
+            // Trim the TZID before lookup. calcard's resolver returns the
+            // raw text from the iCal payload, but real servers occasionally
+            // emit `TZID="America/New_York "` (trailing space) or similar.
+            // The first `chrono_tz::Tz::from_str` attempt inside
+            // `resolve_or_default` is byte-exact and won't match, and the
+            // proprietary-alias fallback only trims for *its* lookup. The
+            // net result without a trim here is a silent fall-through to
+            // floating mode, which then re-anchors the wall-clock in
+            // `chrono::Local` - shifting the event by hours for users
+            // whose local zone differs from the (intended) TZID.
+            let tz_id = tz_id_raw.trim();
+            if !tz_id.is_empty() {
+                let tz = resolver.resolve_or_default(Some(tz_id));
+                if !tz.is_floating() {
+                    return (
+                        common::time::resolve_local_to_timestamp(naive, &tz),
+                        false,
+                    );
+                }
+                // The TZID was specified but did not resolve. Falling
+                // through would silently re-anchor in `chrono::Local`,
+                // making the event appear at the user's wall-clock time
+                // instead of the (intended-but-unknown) source zone. UTC
+                // is the safer default here: it matches the graph crate's
+                // behavior at `parse_graph_datetime` and at least keeps
+                // the displayed time consistent across machines, even if
+                // it's offset from what the source meant.
+                log::warn!(
+                    "CalDAV TZID={tz_id_raw:?} did not resolve; falling back to UTC interpretation"
                 );
+                return (Some(naive.and_utc().timestamp()), false);
             }
         }
     }
@@ -901,6 +926,61 @@ END:VCALENDAR\r\n";
         assert_eq!(events.len(), 1);
         let expected = chrono::NaiveDate::from_ymd_opt(2024, 11, 3)
             .and_then(|d| d.and_hms_opt(5, 30, 0))
+            .map(|d| d.and_utc().timestamp())
+            .expect("valid");
+        assert_eq!(events[0].start_time, Some(expected));
+    }
+
+    #[test]
+    fn parse_event_with_trailing_whitespace_in_tzid_resolves() {
+        // `TZID="America/New_York "` (trailing space) used to silently fall
+        // through both the resolver's HashMap lookup and the proprietary-
+        // alias trim path, ending up as `Tz::Floating` and re-anchored to
+        // the user's local zone. After trimming inside the parser, the
+        // event resolves correctly to the same instant as the un-padded
+        // form.
+        let ical = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:tz-trim@example.com\r\n\
+SUMMARY:Trimmed TZID\r\n\
+DTSTART;TZID=America/New_York :20240315T100000\r\n\
+DTEND;TZID=America/New_York :20240315T110000\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        // Same instant as the un-padded `parse_event_with_named_tzid` test.
+        assert_eq!(events[0].start_time, Some(1710511200));
+        assert_eq!(events[0].end_time, Some(1710514800));
+    }
+
+    #[test]
+    fn parse_event_with_unresolved_tzid_falls_back_to_utc() {
+        // `TZID="Eastern Std Tyme"` (typo) doesn't resolve to any IANA
+        // zone or proprietary alias. Previously the code fell through to
+        // `chrono::Local`, silently re-anchoring to the user's system
+        // zone. Now we fall back to UTC interpretation (matches the
+        // graph crate's behavior) so the timestamp is consistent across
+        // machines, even if it's not what the source intended.
+        let ical = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:tz-typo@example.com\r\n\
+SUMMARY:Typo TZID\r\n\
+DTSTART;TZID=Eastern Std Tyme:20240315T100000\r\n\
+DTEND;TZID=Eastern Std Tyme:20240315T110000\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+        let events = parse_icalendar(ical).expect("should parse");
+        assert_eq!(events.len(), 1);
+        // 10:00 UTC on 2024-03-15 (the wall-clock value, treated as UTC).
+        let expected = chrono::NaiveDate::from_ymd_opt(2024, 3, 15)
+            .and_then(|d| d.and_hms_opt(10, 0, 0))
             .map(|d| d.and_utc().timestamp())
             .expect("valid");
         assert_eq!(events[0].start_time, Some(expected));
