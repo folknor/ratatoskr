@@ -82,20 +82,6 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
 
 #### `expand_recurrence` / load path
 
-6. **Medium** [bugs/claude M1] - **Windows zone names fall through to
-   `chrono::Local`.** `RecurrenceTz::from_event_timezone` (`:1085-1103`)
-   only resolves IANA via `chrono_tz::Tz::from_str`. Microsoft display
-   names ("Pacific Standard Time") that the CalDAV/Graph parse layer
-   resolves at parse time get stored as the verbatim string in
-   `event.timezone`, and recurrence expansion then falls back to
-   `RecurrenceTz::Local`. For a Mon-Fri 09:00 series with
-   `event.timezone="Pacific Standard Time"` viewed from a NY-based
-   user: series start anchored correctly, but daily expansion advances
-   in NY local; across the staggered DST transitions of NY vs PST the
-   wall-clock-in-PST drifts by an hour. Fix: route through the graph
-   crate's `resolve_graph_tz` or pull calcard's alias map into the db
-   crate.
-
 7. **Low** [arch/claude Low] - **`parse_until_date` ignores the event's
    RecurrenceTz.** `:1965-2013`. `expand_recurrence` threads
    `RecurrenceTz` through every helper, but `parse_until_date` is
@@ -128,11 +114,6 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
     at `:1779` - `parse_rrule` already clamps interval to ≥1, so the
     `.max(1)` is unreachable.
 
-11. **Medium (perf)** [perf/claude M5] - **`expand_daily` allocates a
-    fresh `Vec<Weekday>` per iteration.** `:1518-1530`. Up to 12,000
-    Vec allocations per `expand_daily`. Hoist the `Vec<Weekday>` (or
-    change `matches_weekday` to take `&[ByDay]`) before the loop.
-
 12. **Medium (perf)** [perf/claude M6] - **`expand_yearly` clones
     `rule.bymonth` per year.** `:1797-1801`, inside the
     80,000-iteration loop. Hoist; pass as `&[u32]`.
@@ -143,12 +124,6 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
     invariant across the entire expansion. In `expand_yearly` it's
     resolved up to 80k × 12 × ~30 = ~30M times. Compute the
     wall-clock `time()` once before the year loop and pass it in.
-
-14. **Medium (perf)** [perf/claude M8] - **`weekday_occurrences_in_month`
-    does ≤31 `from_ymd_opt` per call.** `:1727-1735`. Replace with:
-    compute the weekday of day 1 once, then iterate
-    `(1..=dim).filter(|d| target == day_1_weekday + (d-1) mod 7)`.
-    Drops 30 date constructions per month-with-BYDAY.
 
 15. **Medium (perf)** [perf/claude M9] - **`expand_monthly` /
     `expand_yearly` allocate a 1-element `vec![original_day]` per
@@ -163,20 +138,6 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
     the count cap fires; expansion now runs off the connection mutex via
     `expand_view_events`, so this only burns a CPU thread for a single
     pathological row rather than blocking sync workers and IPC.
-
-17. **Low** [bugs/claude L1] - **`start_of_week` fallback returns the
-    un-walked timestamp; `shift_to_weekday` then trusts that anchor.**
-    `time.rs:65 + calendars.rs:1872-1898 + :1900-1930`. For a
-    Sunday-anchored week (`WKST=SU`) where `start_of_week` fell back
-    to its Wednesday input, `shift_to_weekday(anchor=Wed, target=SU,
-    wkst=SU)` computes `target_offset=0` and returns Wednesday - silent
-    weekday-emission error. Trigger requires a 24h-skipped day in the
-    walk path; less likely after the time.rs gap-walk fix, but the
-    fallback shape is now silently *more* wrong than the previous
-    "weekly instances are off by some days" behavior. Fix: return
-    `None` from `start_of_week` and skip the iteration, or have
-    `shift_to_weekday` recompute offset from the actual weekday of
-    the anchor.
 
 ### `crates/db/src/db/time.rs`
 
@@ -204,38 +165,7 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
 
 ### `crates/core/src/caldav/sync.rs`
 
-27. **Medium** [bugs/codex #3] - **CalDAV attendee/reminder removals
-    are ignored when the new lists are empty.** `:355, :394` +
-    `caldav_sync.rs:78, :136`. The DB helpers implement replacement
-    semantics by deleting existing attendees/reminders before
-    inserting the new list, but the sync layer returns early when the
-    parsed list is empty. A remote update that removes all `ATTENDEE`
-    or `VALARM` entries leaves stale local rows.
-
-28. **Medium (perf)** [perf/claude M11] - **Multi-VEVENT iCal:
-    redundant URI→ETag map writes per resource.** `:191-203,
-    309-323`. For a recurring series shipped as one href with K
-    VEVENTs (master + N overrides), `upsert_parsed_event` runs K
-    times for the same URI, calling `upsert_caldav_event_map_sync` K
-    times with the same `(uri, cal_id, uid, etag)` tuple. Lift the
-    map upsert out of `upsert_parsed_event` and call it once after
-    `for event in &events` in `sync_calendar_events`.
-
-29. **Low** [perf/claude L14] - **`make_google_event_id` synthesized-
-    from-URI path collides with UID-shaped-as-URI.** `:241-246`.
-    `let uid = event.uid.clone().unwrap_or_else(|| uri.to_string())`
-    then `caldav:{uid}`. If a real UID equaled another resource's URI,
-    keys collide. No emitter does this but the type system permits.
-    Cheap fix: distinct synthesized form, e.g. `caldav:href={uri}`.
-
 ### `crates/core/src/caldav/client.rs`
-
-34. **Medium (perf)** [perf/claude M10] - **`relativize_for_multiget`
-    re-parses the request URL per href.** `:996-1016`. `fetch_events`
-    calls it for every URI in a 50-element batch; each call does
-    `url::Url::parse(request_url)`. Parse the request URL once
-    outside the inner `for uri in chunk` loop and pass the parsed
-    `&Url` in.
 
 35. **Low (perf)** [perf/claude L12] -
     **`extract_hrefs_property` allocates a `Vec<String>` for

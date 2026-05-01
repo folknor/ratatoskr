@@ -251,6 +251,17 @@ pub struct GraphCalendarEvent {
     pub attendees_json: Option<String>,
     pub html_link: Option<String>,
     pub ical_data: Option<String>,
+    /// IANA-form name of the zone DTSTART resolved through, when one was
+    /// available. `None` for all-day events, UTC, and unrecognized
+    /// `timeZone` values - the recurrence expander treats `None` as
+    /// floating (interpret in `chrono::Local`), which matches what the
+    /// timestamp itself was anchored against in those branches.
+    /// Threading this through `UpsertCalendarEventParams::timezone`
+    /// keeps RRULE expansion in the source zone for Graph events the
+    /// same way the CalDAV path does. Without it,
+    /// `RecurrenceTz::from_event_timezone` saw None and re-anchored
+    /// every recurring instance in the user's host zone. (Round 3 #6.)
+    pub timezone: Option<String>,
 }
 
 /// Result of a calendar event sync (delta or full).
@@ -486,6 +497,18 @@ fn map_graph_event(event: GraphEvent) -> Result<GraphCalendarEvent, String> {
         event.show_as.as_deref(),
     );
 
+    // Resolve DTSTART's zone for downstream RRULE expansion. We mirror
+    // `parse_graph_datetime`'s logic: empty / "UTC" / unrecognized fall
+    // back to None so `RecurrenceTz::from_event_timezone` treats the
+    // event as floating (which matches the wall-clock-as-UTC fallback
+    // the timestamp was anchored against).
+    let timezone = if is_all_day {
+        None
+    } else {
+        resolve_graph_tz(&event.start.time_zone)
+            .and_then(|tz| tz.name().map(std::borrow::Cow::into_owned))
+    };
+
     Ok(GraphCalendarEvent {
         remote_event_id: event.id,
         uid: event.i_cal_uid,
@@ -501,6 +524,7 @@ fn map_graph_event(event: GraphEvent) -> Result<GraphCalendarEvent, String> {
         attendees_json,
         html_link: event.web_link,
         ical_data: None,
+        timezone,
     })
 }
 

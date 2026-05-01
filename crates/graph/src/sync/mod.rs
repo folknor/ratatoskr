@@ -595,7 +595,10 @@ async fn persist_graph_calendar_events(
                     ical_data: event.ical_data.clone(),
                     uid: event.uid.clone(),
                     title: None,
-                    timezone: None,
+                    // Resolved IANA name from `parse_graph_datetime`, so
+                    // the RRULE expander walks recurrences in the source
+                    // zone instead of the user's host zone. (Round 3 #6.)
+                    timezone: event.timezone.clone(),
                     recurrence_rule: None,
                     organizer_name: None,
                     rsvp_status: None,

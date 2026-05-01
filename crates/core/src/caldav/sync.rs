@@ -192,6 +192,10 @@ async fn sync_calendar_events(
     // overrides when the user removes an exception via the web UI but the
     // resource itself stays alive (so the URI-deletion path at the top of
     // this function never fires for it).
+    //
+    // The (uri, calendar_id, uid, etag) map row is the same for every
+    // VEVENT in the resource (same href, same etag), so we lift the map
+    // upsert out of the per-VEVENT loop and write it once. (Round 3 #28.)
     let mut upserted = 0;
     for (uri, ical_data) in &fetched_icals {
         let etag = etag_map.get(uri.as_str()).unwrap_or(&"").to_string();
@@ -199,13 +203,37 @@ async fn sync_calendar_events(
         match parse::parse_icalendar(ical_data) {
             Ok(events) => {
                 let mut seen_keys: Vec<String> = Vec::with_capacity(events.len());
+                let mut representative_uid: Option<String> = None;
                 for event in &events {
                     let key = upsert_parsed_event(
                         db, account_id, calendar_id, uri, &etag, ical_data, event,
                     )
                     .await?;
+                    if representative_uid.is_none() {
+                        representative_uid = Some(
+                            event
+                                .uid
+                                .clone()
+                                .unwrap_or_else(|| href_synthetic_uid(uri)),
+                        );
+                    }
                     seen_keys.push(key);
                     upserted += 1;
+                }
+                if let Some(uid_for_map) = representative_uid {
+                    let cal_id_for_map = calendar_id.to_string();
+                    let uri_for_map = uri.clone();
+                    let etag_for_map = etag.clone();
+                    db.with_conn(move |conn| {
+                        crate::db::queries_extra::caldav_sync::upsert_caldav_event_map_sync(
+                            conn,
+                            &uri_for_map,
+                            &cal_id_for_map,
+                            &uid_for_map,
+                            &etag_for_map,
+                        )
+                    })
+                    .await?;
                 }
                 if !seen_keys.is_empty() {
                     let cal_id_owned = calendar_id.to_string();
@@ -262,15 +290,18 @@ async fn upsert_parsed_event(
     // rarely but it does happen (some legacy bridges, ad-hoc scripts).
     // Refusing to upsert UID-less events would drop user-visible data the
     // server has, so we synthesize a stable dedup key from the resource
-    // href - imperfect across server-side renames, but better than the
-    // alternative. The href fallback collapses into the `caldav:{uri}`
-    // form below; logged so an operator chasing duplicate-after-rename
-    // surprises has a starting point.
+    // href.
+    //
+    // The synthetic UID is namespaced (`href={uri}` rather than just
+    // `{uri}`) so it cannot collide with a real UID that happens to be
+    // shaped like another resource's href. (Round 3 #29.) No emitter
+    // does this in practice but the type system allowed it; the
+    // namespace prefix closes the door for free.
     let uid = event.uid.clone().unwrap_or_else(|| {
         log::warn!(
             "CalDAV VEVENT at {uri} has no UID (RFC 5545 violation); synthesizing dedup key from href"
         );
-        uri.to_string()
+        href_synthetic_uid(uri)
     });
     let google_event_id = make_google_event_id(&uid, event.recurrence_id.as_deref());
 
@@ -344,27 +375,23 @@ async fn upsert_parsed_event(
     )
     .await?;
 
-    // Track URI -> ETag mapping for incremental sync
-    let cal_id = calendar_id.to_string();
-    let uri_owned = uri.to_string();
-    let etag_owned = etag.to_string();
-    let uid_for_map = uid.clone();
-    db.with_conn(move |conn| {
-        crate::db::queries_extra::caldav_sync::upsert_caldav_event_map_sync(
-            conn,
-            &uri_owned,
-            &cal_id,
-            &uid_for_map,
-            &etag_owned,
-        )
-    })
-    .await?;
+    // The URI -> ETag map row is identical for every VEVENT in the same
+    // resource, so the caller writes it once after this loop completes
+    // (see `sync_calendar_events`). (Round 3 #28.)
 
     // Sync attendees and reminders
     sync_event_attendees(db, account_id, &google_event_id, event).await?;
     sync_event_reminders(db, account_id, &google_event_id, event).await?;
 
     Ok(google_event_id)
+}
+
+/// Build a synthetic UID for a VEVENT that has no UID. The `href=` prefix
+/// keeps the result distinct from any real UID that might happen to
+/// equal another resource's href - the previous shape collided keys
+/// silently in that pathological case. (Round 3 #29.)
+fn href_synthetic_uid(uri: &str) -> String {
+    format!("href={uri}")
 }
 
 /// Build the `google_event_id` key from a CalDAV UID, folding in the
@@ -391,16 +418,19 @@ fn make_google_event_id(uid: &str, recurrence_id: Option<&str>) -> String {
 }
 
 /// Sync attendees for an event.
+///
+/// We never short-circuit on an empty input list. The DB helper deletes
+/// the existing attendees before inserting the new set, so an empty
+/// remote attendee list is the signal "the event no longer has
+/// attendees" and the local rows must be removed. The previous early-
+/// return left stale local attendee rows behind whenever a remote
+/// update cleared the list. (Round 3 #27.)
 async fn sync_event_attendees(
     db: &DbState,
     account_id: &str,
     google_event_id: &str,
     event: &parse::ParsedVEvent,
 ) -> Result<(), String> {
-    if event.attendees.is_empty() {
-        return Ok(());
-    }
-
     let aid = account_id.to_string();
     let geid = google_event_id.to_string();
     let db_attendees: Vec<crate::db::queries_extra::caldav_sync::CalDavAttendee> = event
@@ -430,16 +460,17 @@ async fn sync_event_attendees(
 }
 
 /// Sync reminders for an event.
+///
+/// Like `sync_event_attendees`, we never short-circuit on an empty input
+/// list: the DB helper implements replacement semantics (delete-then-
+/// insert), so an empty list is what removes stale local VALARM rows
+/// after a remote update clears them. (Round 3 #27.)
 async fn sync_event_reminders(
     db: &DbState,
     account_id: &str,
     google_event_id: &str,
     event: &parse::ParsedVEvent,
 ) -> Result<(), String> {
-    if event.reminders.is_empty() {
-        return Ok(());
-    }
-
     let aid = account_id.to_string();
     let geid = google_event_id.to_string();
     let db_reminders: Vec<crate::db::queries_extra::caldav_sync::CalDavReminder> = event

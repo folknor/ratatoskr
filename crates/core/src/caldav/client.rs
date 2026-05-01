@@ -391,6 +391,11 @@ impl CalDavClient {
         }
 
         let resolved_calendar_url = self.resolve_url(calendar_url);
+        // Parse the request URL once for the entire batch. The previous
+        // shape parsed it inside `relativize_for_multiget` for every URI;
+        // for a 50-URI batch that's 50 redundant `url::Url::parse`
+        // calls per REPORT. (Round 3 #34.)
+        let parsed_request_url = url::Url::parse(&resolved_calendar_url).ok();
         let mut all_results = Vec::new();
 
         for chunk in uris.chunks(MULTIGET_BATCH_SIZE) {
@@ -404,7 +409,7 @@ impl CalDavClient {
                 // though they target the same resource. Re-relativize
                 // absolute hrefs that share an origin with the request, so
                 // strict servers see the path-only form they expect.
-                let body_href = relativize_for_multiget(&resolved_calendar_url, uri);
+                let body_href = relativize_for_multiget_parsed(parsed_request_url.as_ref(), uri);
                 href_elements.push_str(&format!(
                     "  <D:href>{}</D:href>\n",
                     xml_escape_text(&body_href)
@@ -1023,15 +1028,20 @@ fn ensure_collection_trailing_slash<'a>(base: &'a str, href: &str) -> std::borro
     std::borrow::Cow::Owned(owned)
 }
 
-/// Re-relativize an absolute href against the request URL when the two
-/// share an origin. Used by `fetch_events` to defend against strict
-/// servers (older SOGo) that 400 multiget bodies whose hrefs don't share
-/// scheme+host with the URL the REPORT was POSTed to.
-fn relativize_for_multiget(request_url: &str, href: &str) -> String {
+/// Re-relativize an absolute href against an already-parsed request URL.
+///
+/// Used by `fetch_events` to defend against strict servers (older SOGo)
+/// that 400 multiget bodies whose hrefs don't share scheme+host with the
+/// URL the REPORT was POSTed to. The parsed-URL variant lets the caller
+/// hoist parsing out of the per-href loop. (Round 3 #34.)
+fn relativize_for_multiget_parsed(request_url: Option<&url::Url>, href: &str) -> String {
     if !(href.starts_with("http://") || href.starts_with("https://")) {
         return href.to_string();
     }
-    let (Ok(req_url), Ok(href_url)) = (url::Url::parse(request_url), url::Url::parse(href)) else {
+    let Some(req_url) = request_url else {
+        return href.to_string();
+    };
+    let Ok(href_url) = url::Url::parse(href) else {
         return href.to_string();
     };
     if req_url.scheme() == href_url.scheme()
@@ -1047,6 +1057,15 @@ fn relativize_for_multiget(request_url: &str, href: &str) -> String {
     } else {
         href.to_string()
     }
+}
+
+/// Compatibility wrapper retained for tests. Production callers use
+/// `relativize_for_multiget_parsed` and parse the request URL once per
+/// batch (see `fetch_events`).
+#[cfg(test)]
+fn relativize_for_multiget(request_url: &str, href: &str) -> String {
+    let parsed = url::Url::parse(request_url).ok();
+    relativize_for_multiget_parsed(parsed.as_ref(), href)
 }
 
 /// Extract a server-supplied ETag from a response header map. ETags are

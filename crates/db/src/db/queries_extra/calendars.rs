@@ -1760,6 +1760,11 @@ fn expand_daily(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     let cap = instance_cap(rule, 800);
     let mut out = Vec::with_capacity(cap);
     let mut current = start;
+    // Hoist the weekday filter out of the loop. The previous shape
+    // collected `rule.byday.iter().map(|b| b.day)` per iteration -
+    // RRULE_MAX_STEPS=12_000 allocations of a single Vec for every daily
+    // expansion, all carrying the same content. (Round 3 #11.)
+    let byday_filter: Vec<chrono::Weekday> = rule.byday.iter().map(|b| b.day).collect();
     // Step-bounded iteration: a BYDAY filter can reject 6 of every 7
     // candidates, and pathological filters (e.g. `BYDAY=TU` on a daily rule
     // with `INTERVAL=7` starting on Monday) match nothing - without a step
@@ -1768,13 +1773,7 @@ fn expand_daily(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
         if out.len() >= cap {
             break;
         }
-        if rule.byday.is_empty()
-            || matches_weekday(
-                current,
-                &rule.byday.iter().map(|b| b.day).collect::<Vec<_>>(),
-                tz,
-            )
-        {
+        if byday_filter.is_empty() || matches_weekday(current, &byday_filter, tz) {
             out.push(current);
         }
         // Advance in calendar days, not raw seconds, so wall-clock time is
@@ -1982,13 +1981,23 @@ fn collect_monthly_days(
 }
 
 /// All days-of-month within `year`/`month` that fall on `weekday`.
+///
+/// Computes the weekday of day-1 once, then walks day-of-month with
+/// modular arithmetic instead of constructing a NaiveDate per day. The
+/// outer YEARLY expander can call this up to ~30 times per month per
+/// year per BYDAY entry; the previous shape paid 30 `from_ymd_opt`s per
+/// call for what is fundamentally a `(d - 1) % 7` check.
 fn weekday_occurrences_in_month(year: i32, month: u32, weekday: chrono::Weekday) -> Vec<u32> {
     let dim = days_in_month(year, month);
+    let Some(day1) = chrono::NaiveDate::from_ymd_opt(year, month, 1) else {
+        return Vec::new();
+    };
+    let day1_weekday = day1.weekday().num_days_from_monday();
+    let target = weekday.num_days_from_monday();
     (1..=dim)
         .filter(|&d| {
-            chrono::NaiveDate::from_ymd_opt(year, month, d)
-                .map(|date| date.weekday())
-                == Some(weekday)
+            let offset = (d - 1) % 7;
+            (day1_weekday + offset) % 7 == target
         })
         .collect()
 }
@@ -2150,14 +2159,18 @@ fn start_of_week(timestamp: i64, week_start: chrono::Weekday, tz: RecurrenceTz) 
         // `add_days_in_zone` only returns None when the resulting
         // NaiveDateTime or zone resolution overflows - in practice that
         // requires walking back across a 24-hour-skipped day (Pacific/Apia
-        // Dec 30 2011). Falling back to the un-walked timestamp lets the
-        // weekly expander continue to emit instances anchored on the
-        // original day-of-week rather than emitting nothing; the
-        // alternative (returning the un-walked timestamp silently) was the
-        // previous behavior. Logged so the operator can attribute "weekly
-        // instances are off by some days" to a zone-skip event.
+        // Dec 30 2011). Returning the un-walked timestamp here used to
+        // silently mis-anchor `shift_to_weekday`: that helper computes
+        // `target_offset` from the SUPPLIED week_start, but the un-walked
+        // input is on `current` (a Wednesday in the Apia case), so for
+        // `WKST=SU` and `target=SU`, `target_offset=0` resolved to
+        // Wednesday and the rule emitted Wed instances every "Sunday."
+        // Logged so the operator can attribute the weird emission to a
+        // zone-skip; the recovery is now in `shift_to_weekday` which
+        // falls back to a current-anchor offset rather than trusting
+        // this anchor. (Round 3 #17.)
         log::debug!(
-            "start_of_week: add_days_in_zone(-{days_back}) failed (likely walking through a 24h-skipped day); falling back to un-shifted anchor"
+            "start_of_week: add_days_in_zone(-{days_back}) failed (likely walking through a 24h-skipped day); shift_to_weekday will recompute from the un-walked anchor"
         );
         timestamp
     })
@@ -2170,18 +2183,27 @@ fn shift_to_weekday(
     time_source: i64,
     tz: RecurrenceTz,
 ) -> i64 {
-    // Modular offset from `week_start` to `target`, so that within a
-    // Sunday-anchored week the offset for Saturday is 6 (not -1) and for
-    // Monday is 1 (not 0).
-    let to = target.num_days_from_monday() as i64;
-    let from = week_start.num_days_from_monday() as i64;
-    let target_offset = (to - from).rem_euclid(7);
     let Some(anchor_naive) = tz.naive(week_anchor) else {
         return week_anchor;
     };
     let Some(time_naive) = tz.naive(time_source) else {
         return week_anchor;
     };
+    // Modular offset from `week_anchor`'s actual weekday to `target`.
+    // Computing from `week_start` instead silently mis-anchors when
+    // `start_of_week` fell back to its un-walked input (a 24h-skipped
+    // day in the Apia case): `target_offset` against the assumed
+    // anchor was 0 for the start-day even though anchor was on a
+    // different weekday entirely. (Round 3 #17.)
+    let anchor_weekday = anchor_naive.date().weekday().num_days_from_monday() as i64;
+    let target_to = target.num_days_from_monday() as i64;
+    let target_offset = (target_to - anchor_weekday).rem_euclid(7);
+    // `week_start` is no longer used for the offset math - kept in the
+    // signature for caller compatibility, since week_anchor is supposed
+    // to *be* the start-of-week and the two should agree on
+    // well-resolved inputs. The rebuilt offset above is the safe
+    // fallback when they don't.
+    let _ = week_start;
     // Day arithmetic in calendar units, not raw seconds. Then reattach the
     // intended wall-clock time and re-resolve in the event's zone, falling
     // through gap/ambiguous via `resolve_local_to_timestamp`.
