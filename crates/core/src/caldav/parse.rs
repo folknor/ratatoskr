@@ -693,6 +693,14 @@ fn extract_reminders(
 // ---------------------------------------------------------------------------
 // XML parsing helpers for CalDAV PROPFIND/REPORT responses
 // ---------------------------------------------------------------------------
+//
+// reviewed (R3 verified non-issue): every `Event::Text` handler in this
+// module funnels through `quick_xml::escape::unescape`, which decodes the
+// full XML entity set (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`, plus
+// numeric `&#x2014;` / `&#8212;` for em-dash etc). Display names, ETags,
+// and href values that arrive entity-encoded come out as plain text. CDATA
+// sections are accumulated into the same `buf` as text via the parallel
+// `Event::CData` arm, so CDATA-wrapped values round-trip too.
 
 use quick_xml::Reader;
 use quick_xml::escape::unescape;
@@ -748,6 +756,13 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
     // the props the server can serve, one 404 Not Found for the ones it
     // can't) are handled by this commit gate; the previous shape merged
     // values from both blocks regardless of status.
+    //
+    // reviewed (R3 verified non-issue): the parser doesn't accumulate values
+    // across multiple `<propstat>` blocks at the data-structure level, but
+    // it doesn't need to -- response-level fields are reset at `<response>`
+    // and each `<prop>` only overwrites the fields it actually contains
+    // (via the `(Some("prop"), name)` matches below). With the 2xx commit
+    // gate, that's exactly the RFC 4918 behavior.
     let mut propstat_status = String::new();
     let mut pending_is_calendar = false;
     let mut pending_displayname: Option<String> = None;
@@ -1071,6 +1086,11 @@ pub fn parse_propfind_events(xml: &str) -> Vec<CalDavEventEntry> {
                     }
                     (Some("prop"), "getetag") => {
                         // ETag preserved verbatim - see RFC 7232.
+                        // reviewed (R3 verified non-issue): RFC 7232 allows
+                        // arbitrary opaque-tag content inside the quotes,
+                        // including `:` and `/` (e.g. `"abc/def:1"`). We do
+                        // no further parsing on the storage path, so those
+                        // round-trip cleanly through `If-Match`.
                         pending_etag = Some(buf.trim().to_string());
                     }
                     (Some("prop"), "getcontenttype") => {

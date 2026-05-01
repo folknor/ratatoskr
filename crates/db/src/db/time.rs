@@ -28,6 +28,11 @@ use chrono::{Duration, LocalResult, NaiveDateTime, TimeZone};
 /// skip; the only realistic input it cannot handle is a hypothetical
 /// multi-day skip not present in any TZ database.
 pub fn resolve_local_to_timestamp<Tz: TimeZone>(naive: NaiveDateTime, tz: &Tz) -> Option<i64> {
+    // reviewed (R3 verified non-issue): fixed-offset zones (chrono::FixedOffset,
+    // chrono_tz::Tz fixed entries, anything constructed from VTIMEZONE
+    // STANDARD-only blocks) only ever return LocalResult::Single -- they have
+    // no DST so the Ambiguous and None arms below cannot fire. The generic
+    // path is correct; do not special-case Fixed.
     match tz.from_local_datetime(&naive) {
         LocalResult::Single(t) => Some(t.timestamp()),
         // Fall-back: pick the earlier instant. RFC 5545 Section 3.3.5 doesn't

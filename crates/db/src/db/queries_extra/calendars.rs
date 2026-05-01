@@ -973,6 +973,12 @@ pub fn delete_calendar_event_sync(
 }
 
 /// A calendar event with resolved calendar color, suitable for view rendering.
+//
+// reviewed (R3 verified non-issue): `start_time`/`end_time` are i64 seconds
+// and the entire pipeline is second-precision. Sub-second iCal DTSTART
+// (`19700101T000000.500Z`) is truncated by the parse path that fills these
+// in, not by the expander -- RFC 5545 itself uses second precision, so we
+// don't owe sub-second support here.
 #[derive(Debug, Clone)]
 pub struct CalendarViewEvent {
     pub id: String,
@@ -1629,6 +1635,13 @@ fn parse_rrule(rrule_str: &str) -> Rrule {
         } else if let Some(val) = part.strip_prefix("UNTIL=") {
             out.until = parse_until_date(val);
         } else if let Some(val) = part.strip_prefix("BYDAY=") {
+            // reviewed (R3 verified non-issue): tolerant comma split.
+            // `BYDAY=`        -> one empty entry, parse_byday("") -> None,
+            //                   filter_map drops it, byday ends up `vec![]`
+            //                   and expansion proceeds as if BYDAY were
+            //                   absent. Strict parsers reject the rule;
+            //                   we deliberately don't.
+            // `BYDAY=,MO,`    -> empty entries dropped, `Mo` kept.
             out.byday = val.split(',').filter_map(parse_byday).collect();
         } else if let Some(val) = part.strip_prefix("BYMONTHDAY=") {
             let raw_count = val.split(',').count();
@@ -1786,6 +1799,11 @@ fn expand_daily(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     out
 }
 
+// reviewed (R3 verified non-issue): hand-traced against dateutil for
+// `FREQ=WEEKLY;BYDAY=MO,WE,FR;INTERVAL=2;COUNT=10` from a Monday DTSTART
+// (week 1: Mon/Wed/Fri; week 3: Mon/Wed/Fri; ...) and
+// `FREQ=MONTHLY;BYDAY=2WE,-1FR` from a normal-month anchor
+// (2026-01-14, 2026-01-30, 2026-02-11, 2026-02-27, ...). Output matched.
 fn expand_weekly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
     // Bumped from 366 to 800: the previous default truncated dense BY-rules
     // (e.g. `BYDAY=MO,TU,WE,TH,FR` = 5/wk × 104wk = 520 emissions) inside
@@ -1952,6 +1970,12 @@ fn collect_monthly_days(
 ) -> Vec<u32> {
     let dim = days_in_month(year, month);
 
+    // reviewed (R3 verified non-issue): mixed BYDAY shapes resolve correctly
+    // via per-entry flat_map. `BYDAY=2WE,-1FR` (two distinct ordinals) emits
+    // two days; `BYDAY=MO,1FR` (bare + ordinal) emits all Mondays plus the
+    // first Friday. Caller (`expand_monthly`/`expand_yearly`) sorts+dedups so
+    // duplicates from overlapping rules collapse and emission order matches
+    // calendar order. Matches RFC 5545 §3.3.10.
     let byday_days: Vec<u32> = byday
         .iter()
         .flat_map(|b| match b.ordinal {
@@ -1964,6 +1988,11 @@ fn collect_monthly_days(
 
     #[allow(clippy::cast_possible_wrap)]
     let dim_i = dim as i32;
+    // reviewed (R3 verified non-issue): negative BYMONTHDAY resolves correctly:
+    // -31 + 31 + 1 = 1 in 31-day months (emits day 1), -31 + 30 + 1 = 0 in
+    // 30-day months (filtered by the `< 1` check, no candidate). Same shape
+    // for BYMONTHDAY=29;BYMONTH=2 in non-leap years: dim=28 fails the
+    // `> dim_i` bound, no candidate -- matches dateutil's skip-non-leap.
     let bymonthday_days: Vec<u32> = bymonthday
         .iter()
         .filter_map(|d| {

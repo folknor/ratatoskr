@@ -172,46 +172,17 @@ post-redirect URL.
 
 ## Verified non-issues
 
-Behaviors that look bug-like in review but were checked and found correct.
-Listed here so they don't get re-flagged on every future pass; each is a
-candidate for a brief `// reviewed: ...` code comment at the call site.
+Each of these was checked and found correct in Round 3. The notes are now
+inline at the call site as `// reviewed (R3 verified non-issue): ...` so
+future passes can attribute them without consulting this doc. Search the
+tree for `reviewed (R3` to enumerate.
 
-### `crates/db/src/db/time.rs::resolve_local_to_timestamp`
-
-- `Tz::Fixed` (fixed-offset zones from VTIMEZONE) routes through the generic resolver correctly: `Tz::Fixed` never produces `LocalResult::None` or `LocalResult::Ambiguous`, so the gap/ambiguous fallbacks never engage.
-
-### `crates/db/src/db/queries_extra/calendars.rs::collect_monthly_days` (1457-1468)
-
-- `BYMONTHDAY` negative values: `dim_i + d + 1` correctly resolves `-31` to day 1 in 31-day months and to `<1` (filtered out at `:1461`) in shorter months. MONTHLY-only emission in 31-day months is the intended behavior.
-- `BYMONTHDAY=29;BYMONTH=2` (leap day): `days_in_month(non-leap, 2) = 28` makes the bound check at `:1461` fail, no candidate emitted - matches dateutil's skip-non-leap behavior. Default-day path at `:1551-1556` handles Feb 29 starts the same way.
-
-### `crates/db/src/db/queries_extra/calendars.rs::parse_byday` (1266-1303)
-
-- Empty `BYDAY=` value: `val.split(',')` yields one empty string, `parse_byday("")` returns `None`, `filter_map` discards it; `out.byday` ends up `vec![]` and rule expansion proceeds as if BYDAY were absent. Tolerant - strict parsers would reject the rule entirely.
-- `BYDAY=,MO,` (leading/trailing commas) silently drops the empty entries and keeps `Mo`.
-
-### `crates/db/src/db/queries_extra/calendars.rs` BYDAY mixing
-
-- `BYDAY=2WE,-1FR` (two distinct ordinals): each entry is independently resolved in `collect_monthly_days` (`:1445-1453`); `sort_unstable + dedup` (`:1412-1413`) keeps both in calendar order.
-- `BYDAY=MO,1FR` (bare + ordinal mixed): bare `MO` flat-maps to all Mondays, `1FR` resolves to the first Friday only. Matches RFC 5545.
-
-### `crates/db/src/db/queries_extra/calendars.rs::expand_weekly` complex traces
-
-- `FREQ=WEEKLY;BYDAY=MO,WE,FR;INTERVAL=2;COUNT=10` from a Monday DTSTART traces correctly: emits Mon/Wed/Fri of the start week, then advances `week_anchor` by 14 days, etc. Matches dateutil.
-- `FREQ=MONTHLY;BYDAY=2WE,-1FR` with a normal month anchor traces correctly (e.g. 2026-01-14, 2026-01-30, 2026-02-11, 2026-02-27).
-
-### Schema-level: sub-second DTSTART (i64 timestamps)
-
-- `CalendarViewEvent.start_time` is `i64` seconds and the entire pipeline operates at second precision. Sub-second DTSTART (`19700101T000000.500Z`) is truncated by the field carrying it in; not an expander concern. RFC 5545 itself uses second precision throughout.
-
-### `crates/core/src/caldav/parse.rs::parse_propfind_calendars` (multi-`<propstat>`)
-
-- The parser doesn't accumulate across multiple `<propstat>` blocks at the data-structure level, but on second read this works because each `<prop>` block overwrites only the `current_*` fields it contains, all initialized at `<response>`. The real concern is the missing `<status>` inspection - captured under the High-severity finding above.
-
-### `crates/core/src/caldav/parse.rs::parse_propfind_events` ETag content
-
-- ETags with embedded colons and slashes (`"abc/def:1"`) are preserved verbatim including the surrounding quotes. RFC 7232 allows these as long as the quote is preserved; the storage path doesn't try to re-parse, so they round-trip correctly.
-
-### `crates/core/src/caldav/parse.rs` HTML entity handling
-
-- `unescape()` on `Event::Text` correctly decodes `&amp;`, `&#x2014;` (em dash), and other XML entities for display names and other text fields. CDATA-wrapped element content is also handled.
+- `time.rs::resolve_local_to_timestamp` - fixed-offset zones never hit gap/ambiguous arms.
+- `calendars.rs::collect_monthly_days` - negative BYMONTHDAY and Feb 29 in non-leap years.
+- `calendars.rs::parse_rrule` BYDAY split - empty / leading-trailing commas tolerantly dropped.
+- `calendars.rs::collect_monthly_days` - mixed bare + ordinal BYDAY resolves per-entry, caller dedups.
+- `calendars.rs::expand_weekly` - complex WEEKLY and MONTHLY-with-ordinal traces verified against dateutil.
+- `calendars.rs::CalendarViewEvent` - second-precision i64 timestamps; sub-second DTSTART truncated upstream.
+- `caldav/parse.rs::parse_propfind_calendars` - multi-`<propstat>` works via per-prop overwrite + 2xx commit gate.
+- `caldav/parse.rs::parse_propfind_events` - ETag opaque-tag content (colons, slashes) round-trips verbatim.
+- `caldav/parse.rs` text decoding - `unescape()` handles full XML entity set; CDATA goes through the parallel arm.
