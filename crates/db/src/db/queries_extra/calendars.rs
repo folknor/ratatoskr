@@ -1100,7 +1100,11 @@ fn expand_recurrence(event: &CalendarViewEvent, rrule_str: &str) -> Vec<Calendar
     }
 
     let duration = event.end_time - event.start_time;
-    let max_instances = rule.count.unwrap_or(365).max(1);
+    // Default cap matches the 2-year fallback window emitted by
+    // `two_year_window_end` when no COUNT/UNTIL is set. The previous 365
+    // silently truncated unbounded DAILY rules to ~1 year (the time bound
+    // would happily accept the second year, but the count cap fired first).
+    let max_instances = rule.count.unwrap_or(800).max(1);
     if rule.count.is_some() && rule.until.is_some() {
         // RFC 5545 § 3.3.10: COUNT and UNTIL are mutually exclusive. Some
         // emitters send both anyway; we apply BOTH as upper bounds (the
@@ -1353,7 +1357,11 @@ fn parse_byday(spec: &str) -> Option<ByDay> {
 }
 
 fn expand_daily(start: i64, rule: &Rrule) -> Vec<i64> {
-    let cap = rule.count.unwrap_or(366).min(RRULE_MAX_COUNT);
+    // Default cap matches the 2-year fallback window in
+    // `expand_recurrence::two_year_window_end`. The previous 366 silently
+    // truncated unbounded DAILY rules to one year, which then got further
+    // capped by the outer `max_instances` default of 365.
+    let cap = rule.count.unwrap_or(800).min(RRULE_MAX_COUNT);
     let mut out = Vec::with_capacity(cap);
     let mut current = start;
     // Step-bounded iteration: a BYDAY filter can reject 6 of every 7
@@ -1576,31 +1584,45 @@ fn expand_yearly(start: i64, rule: &Rrule) -> Vec<i64> {
     use chrono::TimeZone;
     let cap = rule.count.unwrap_or(60).min(RRULE_MAX_COUNT);
     let mut out = Vec::with_capacity(cap);
-    let mut current = start;
+    let Some(start_dt) = chrono::Local.timestamp_opt(start, 0).single() else {
+        return out;
+    };
+    let original_month = start_dt.month();
+    let original_day = start_dt.day();
+
+    // Year cursor advances by `interval` years per step. Previous shape stepped
+    // via `advance_months(current, interval * 12)`, which walks forward to
+    // find a month that contains the original day-of-month - correct for
+    // MONTHLY (Jan 31 -> Mar 31) but wrong for YEARLY (Feb 29 -> March 29
+    // of the next non-leap year). With a year cursor and the per-iteration
+    // `days_in_month` check below, Feb 29 yearly correctly skips non-leap
+    // years and emits only on real leap years.
+    // RRULE INTERVAL is bounded above by what callers can plausibly emit; an
+    // i32 is more than enough for any real recurrence and `try_from` keeps a
+    // wedged INTERVAL=2_000_000_000 from silently casting to a negative
+    // step. On overflow we step by 1 year and let the COUNT/UNTIL/RRULE_MAX
+    // bounds terminate.
+    let interval_years: i32 = i32::try_from(rule.interval).unwrap_or(1).max(1);
+    let mut year = start_dt.year();
     for _ in 0..RRULE_MAX_STEPS {
         if out.len() >= cap {
             return out;
         }
-        let Some(dt) = chrono::Local.timestamp_opt(current, 0).single() else {
-            break;
-        };
-        let year = dt.year();
 
         // Months to visit this year: explicit BYMONTH set, or the start's
         // own month as the default.
         let months: Vec<u32> = if rule.bymonth.is_empty() {
-            vec![dt.month()]
+            vec![original_month]
         } else {
             rule.bymonth.clone()
         };
 
         for month in &months {
             let day_candidates = if rule.byday.is_empty() && rule.bymonthday.is_empty() {
-                // Default: same day-of-month as start, clamped if missing
-                // (e.g. yearly Feb 29 in non-leap years simply skips).
-                let day = dt.day();
-                if days_in_month(year, *month) >= day {
-                    vec![day]
+                // Default: same day-of-month as start, skipped if the target
+                // month doesn't have that day (Feb 29 in non-leap years).
+                if days_in_month(year, *month) >= original_day {
+                    vec![original_day]
                 } else {
                     Vec::new()
                 }
@@ -1613,7 +1635,7 @@ fn expand_yearly(start: i64, rule: &Rrule) -> Vec<i64> {
             };
 
             for day in day_candidates {
-                if let Some(ts) = with_year_month_day(current, year, *month, day)
+                if let Some(ts) = with_year_month_day(start, year, *month, day)
                     && ts >= start
                 {
                     out.push(ts);
@@ -1623,7 +1645,10 @@ fn expand_yearly(start: i64, rule: &Rrule) -> Vec<i64> {
                 }
             }
         }
-        current = advance_months(current, rule.interval * 12);
+        year = match year.checked_add(interval_years) {
+            Some(y) => y,
+            None => break,
+        };
     }
     out
 }
@@ -2086,6 +2111,34 @@ mod tests {
                 dt.year(),
                 dt.month()
             );
+        }
+    }
+
+    #[test]
+    fn yearly_feb_29_skips_non_leap_years() {
+        // FREQ=YEARLY on a Feb 29 DTSTART previously stepped via
+        // `advance_months(current, 12)`, which walked forward to a month
+        // containing day 29 - landing on March 29 of the next non-leap year
+        // instead of correctly waiting until the next leap year. Both
+        // dateutil and RFC 5545 (clamping non-existent dates within a
+        // FREQ=YEARLY default) say to skip non-leap years entirely.
+        let start = local_ts(2024, 2, 29, 9, 0);
+        let event = make_event(start, 3600);
+        let instances = expand_recurrence(&event, "FREQ=YEARLY;COUNT=3");
+        assert_eq!(instances.len(), 3);
+        // Each instance must be Feb 29 in a leap year. Convert each instance
+        // back to local date and verify month/day; the expected sequence is
+        // 2024, 2028, 2032 (every 4th year while the leap rule applies).
+        let mut expected_years = [2024, 2028, 2032].iter();
+        for inst in &instances {
+            let dt = chrono::Local
+                .timestamp_opt(inst.start_time, 0)
+                .single()
+                .expect("local")
+                .naive_local();
+            assert_eq!(dt.month(), 2);
+            assert_eq!(dt.day(), 29);
+            assert_eq!(dt.year(), *expected_years.next().expect("3 leap years"));
         }
     }
 
