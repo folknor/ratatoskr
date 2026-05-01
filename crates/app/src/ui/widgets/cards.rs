@@ -215,7 +215,7 @@ pub fn expanded_message_card<'a, M: Clone + 'a>(
     first_message_date: Option<i64>,
     search_highlight_terms: &'a [String],
     cached_html: Option<&'a crate::ui::html_render::CachedHtmlBody>,
-    inline_images: &'a std::collections::HashMap<String, Vec<u8>>,
+    inline_images: &'a std::collections::HashMap<String, iced::widget::image::Handle>,
     on_toggle: impl Fn(usize) -> M,
     on_pop_out: impl Fn(usize) -> M,
     on_reply: impl Fn(usize) -> M,

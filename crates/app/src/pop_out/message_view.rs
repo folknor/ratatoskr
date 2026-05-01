@@ -100,7 +100,7 @@ pub struct MessageViewState {
     /// Inline (CID-referenced) image bytes for the rendered HTML. Empty
     /// until pop-out wires up the inline image store; the HTML pipeline
     /// just falls back to alt text for unknown CIDs.
-    pub inline_images: std::collections::HashMap<String, Vec<u8>>,
+    pub inline_images: std::collections::HashMap<String, iced::widget::image::Handle>,
 
     // ── Attachments ──
     pub attachments: Vec<MessageViewAttachment>,

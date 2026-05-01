@@ -40,19 +40,44 @@ pub fn assess_complexity(html: &str) -> HtmlComplexity {
     let mut i = 0;
 
     while i < len {
-        if bytes[i] == b'<' {
-            if starts_with_at(&lower, i, "<table") {
-                table_depth += 1;
-                if table_depth > max_table_depth {
-                    max_table_depth = table_depth;
-                }
-            } else if starts_with_at(&lower, i, "</table") {
-                table_depth = table_depth.saturating_sub(1);
-            } else if starts_with_at(&lower, i, "<style") {
-                style_tag_count += 1;
-            }
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
         }
-        i += 1;
+
+        let Some(tag_end) = find_tag_end(&lower, i) else {
+            break;
+        };
+        let tag_content = lower[i + 1..tag_end].trim();
+        if tag_content.starts_with('!') || tag_content.starts_with('?') {
+            i = tag_end + 1;
+            continue;
+        }
+
+        let (tag_name, is_closing) = tag_name_from_content(tag_content);
+        match (tag_name, is_closing) {
+            ("table", false) => {
+                table_depth += 1;
+                max_table_depth = max_table_depth.max(table_depth);
+            }
+            ("table", true) => table_depth = table_depth.saturating_sub(1),
+            ("style", false) => {
+                style_tag_count += 1;
+                if let Some(close_end) = find_close_tag_end(&lower, tag_end + 1, "style") {
+                    i = close_end + 1;
+                    continue;
+                }
+            }
+            ("script", false) => {
+                if let Some(close_end) = find_close_tag_end(&lower, tag_end + 1, "script") {
+                    i = close_end + 1;
+                    continue;
+                }
+            }
+            _ => {}
+        }
+
+        i = tag_end + 1;
     }
 
     if max_table_depth > COMPLEXITY_TABLE_DEPTH_THRESHOLD || style_tag_count > 2 {
@@ -62,12 +87,10 @@ pub fn assess_complexity(html: &str) -> HtmlComplexity {
     }
 }
 
-fn starts_with_at(haystack: &str, pos: usize, prefix: &str) -> bool {
-    haystack.get(pos..).is_some_and(|s| s.starts_with(prefix))
-}
-
 /// Pre-parsed HTML body, cached to avoid re-parsing on every view cycle.
-pub(super) enum CachedHtmlBody {
+pub(crate) struct CachedHtmlBody(CachedHtmlBodyKind);
+
+enum CachedHtmlBodyKind {
     /// HTML was too complex; render as plain text fallback.
     Complex,
     /// Parsed block structure ready for rendering.
@@ -83,13 +106,13 @@ pub(super) enum CachedHtmlBody {
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub(super) fn preparse_html(html: &str) -> CachedHtmlBody {
     if assess_complexity(html) == HtmlComplexity::Complex {
-        return CachedHtmlBody::Complex;
+        return CachedHtmlBody(CachedHtmlBodyKind::Complex);
     }
     let blocks = parse_html_to_blocks(html);
     if blocks.is_empty() {
-        CachedHtmlBody::Empty
+        CachedHtmlBody(CachedHtmlBodyKind::Empty)
     } else {
-        CachedHtmlBody::Blocks(blocks)
+        CachedHtmlBody(CachedHtmlBodyKind::Blocks(blocks))
     }
 }
 
@@ -100,24 +123,24 @@ pub fn render_cached_html<'a, M: Clone + 'a>(
     cached: &CachedHtmlBody,
     fallback_text: Option<&str>,
     on_link_click: impl Fn(String) -> M + 'a,
-    inline_images: &'a HashMap<String, Vec<u8>>,
+    inline_images: &'a HashMap<String, image::Handle>,
 ) -> Element<'a, M> {
-    match cached {
-        CachedHtmlBody::Complex => {
+    match &cached.0 {
+        CachedHtmlBodyKind::Complex => {
             let display = fallback_text.unwrap_or("(complex HTML email - plain text unavailable)");
             text(display.to_string())
                 .size(TEXT_LG)
                 .style(text::secondary)
                 .into()
         }
-        CachedHtmlBody::Empty => {
+        CachedHtmlBodyKind::Empty => {
             let display = fallback_text.unwrap_or("(empty message)");
             text(display.to_string())
                 .size(TEXT_LG)
                 .style(text::secondary)
                 .into()
         }
-        CachedHtmlBody::Blocks(blocks) => {
+        CachedHtmlBodyKind::Blocks(blocks) => {
             let on_link: std::rc::Rc<dyn Fn(String) -> M + 'a> = std::rc::Rc::new(on_link_click);
             let mut col = column![].spacing(SPACE_XS).width(Length::Fill);
             for block in blocks {
@@ -136,7 +159,7 @@ pub fn render_html<'a, M: Clone + 'a>(
     html: &str,
     fallback_text: Option<&str>,
     on_link_click: impl Fn(String) -> M + 'a,
-    inline_images: &'a HashMap<String, Vec<u8>>,
+    inline_images: &'a HashMap<String, image::Handle>,
 ) -> Element<'a, M> {
     if assess_complexity(html) == HtmlComplexity::Complex {
         let display = fallback_text.unwrap_or("(complex HTML email - plain text unavailable)");
@@ -297,7 +320,7 @@ fn make_span<'a>(
 fn render_block_ref<'a, M: Clone + 'a>(
     block: &Block,
     on_link_click: std::rc::Rc<dyn Fn(String) -> M + 'a>,
-    inline_images: &'a HashMap<String, Vec<u8>>,
+    inline_images: &'a HashMap<String, image::Handle>,
 ) -> Element<'a, M> {
     match block {
         Block::Paragraph(spans) => render_spans(spans, &on_link_click),
@@ -357,7 +380,7 @@ fn render_block_ref<'a, M: Clone + 'a>(
 pub(super) fn render_block<'a, M: Clone + 'a>(
     block: Block,
     on_link_click: std::rc::Rc<dyn Fn(String) -> M + 'a>,
-    inline_images: &'a HashMap<String, Vec<u8>>,
+    inline_images: &'a HashMap<String, image::Handle>,
 ) -> Element<'a, M> {
     // Delegate to the by-ref version - the block is consumed but
     // render_block_ref only clones the inner strings anyway.
@@ -368,13 +391,12 @@ pub(super) fn render_block<'a, M: Clone + 'a>(
 fn render_cid_image<'a, M: 'a>(
     cid: &str,
     alt: &str,
-    inline_images: &'a HashMap<String, Vec<u8>>,
+    inline_images: &'a HashMap<String, image::Handle>,
 ) -> Element<'a, M> {
     if let Some(data) = inline_images.get(cid) {
-        let handle = image::Handle::from_bytes(data.clone());
-        image(handle)
+        image(data.clone())
             .content_fit(iced::ContentFit::ScaleDown)
-            .width(Length::Shrink)
+            .width(Length::Fill)
             .into()
     } else if !alt.is_empty() {
         text(format!("[{alt}]"))
@@ -419,7 +441,9 @@ struct HtmlParser<'a> {
     blockquote_text: String,
     list_stack: Vec<ListKind>,
     list_counters: Vec<usize>,
-    skip_content: bool,
+    list_item_depth: usize,
+    table_depth: usize,
+    skip_stack: Vec<&'static str>,
 }
 
 #[derive(Default)]
@@ -484,7 +508,9 @@ impl<'a> HtmlParser<'a> {
             blockquote_text: String::new(),
             list_stack: Vec::new(),
             list_counters: Vec::new(),
-            skip_content: false,
+            list_item_depth: 0,
+            table_depth: 0,
+            skip_stack: Vec::new(),
         }
     }
 
@@ -505,6 +531,10 @@ impl<'a> HtmlParser<'a> {
 
     fn parse(&mut self, blocks: &mut Vec<Block>) {
         while self.pos < self.source.len() {
+            if !self.skip_stack.is_empty() {
+                self.skip_ignored_content();
+                continue;
+            }
             if self.source.as_bytes()[self.pos] == b'<' {
                 self.handle_tag(blocks);
             } else {
@@ -515,16 +545,6 @@ impl<'a> HtmlParser<'a> {
     }
 
     fn consume_text(&mut self) {
-        if self.skip_content {
-            // Advance past non-tag content
-            if let Some(idx) = self.source[self.pos..].find('<') {
-                self.pos += idx;
-            } else {
-                self.pos = self.source.len();
-            }
-            return;
-        }
-
         let start = self.pos;
         while self.pos < self.source.len() && self.source.as_bytes()[self.pos] != b'<' {
             self.pos += 1;
@@ -543,13 +563,35 @@ impl<'a> HtmlParser<'a> {
         }
     }
 
+    fn skip_ignored_content(&mut self) {
+        let Some(tag_name) = self.skip_stack.last().copied() else {
+            return;
+        };
+        let lower_rest = self.source[self.pos..].to_ascii_lowercase();
+        let close = format!("</{tag_name}");
+        let Some(close_rel) = lower_rest.find(&close) else {
+            self.pos = self.source.len();
+            return;
+        };
+        let close_start = self.pos + close_rel;
+        if let Some(tag_end) = find_tag_end(self.source, close_start) {
+            self.pos = tag_end + 1;
+        } else {
+            self.pos = self.source.len();
+        }
+        self.skip_stack.pop();
+    }
+
     fn handle_tag(&mut self, blocks: &mut Vec<Block>) {
-        let _tag_start = self.pos;
-        // Find end of tag
-        if let Some(end_offset) = self.source[self.pos..].find('>') {
-            let tag_end = self.pos + end_offset + 1;
-            let tag_content = &self.source[self.pos + 1..self.pos + end_offset];
-            self.pos = tag_end;
+        if let Some(tag_end) = find_tag_end(self.source, self.pos) {
+            if self.source[self.pos..].starts_with("<!--")
+                || self.source[self.pos..].starts_with("<![CDATA[")
+            {
+                self.pos = tag_end + 1;
+                return;
+            }
+            let tag_content = &self.source[self.pos + 1..tag_end];
+            self.pos = tag_end + 1;
             self.process_tag(tag_content, blocks);
         } else {
             // Malformed - skip the '<'
@@ -561,6 +603,9 @@ impl<'a> HtmlParser<'a> {
     fn process_tag(&mut self, tag_content: &str, blocks: &mut Vec<Block>) {
         let tag_content = tag_content.trim();
         if tag_content.is_empty() {
+            return;
+        }
+        if tag_content.starts_with('!') || tag_content.starts_with('?') {
             return;
         }
 
@@ -587,7 +632,13 @@ impl<'a> HtmlParser<'a> {
 
     fn handle_open_tag(&mut self, tag_name: &str, _full_tag: &str, blocks: &mut Vec<Block>) {
         match tag_name {
-            "p" | "div" => self.flush_text(blocks),
+            "p" | "div" => {
+                if self.list_item_depth > 0 || self.table_depth > 0 {
+                    self.push_soft_separator();
+                } else {
+                    self.flush_text(blocks);
+                }
+            }
             "br" => {
                 // Insert a newline within the current block rather than
                 // flushing to a new paragraph. This preserves mid-paragraph
@@ -617,20 +668,35 @@ impl<'a> HtmlParser<'a> {
             }
             "li" => {
                 self.flush_text(blocks);
+                self.list_item_depth += 1;
             }
+            "table" => {
+                self.flush_text(blocks);
+                self.table_depth += 1;
+            }
+            "tr" => {
+                if self.table_depth > 0 {
+                    self.flush_text(blocks);
+                }
+            }
+            "td" | "th" => {}
             "hr" => {
                 self.flush_text(blocks);
                 blocks.push(Block::HorizontalRule);
             }
             "style" | "script" | "head" => {
-                self.skip_content = true;
+                self.skip_stack.push(match tag_name {
+                    "style" => "style",
+                    "script" => "script",
+                    _ => "head",
+                });
             }
             "img" => {
                 let alt = extract_attr(_full_tag, "alt").unwrap_or_default();
                 let src = extract_attr(_full_tag, "src").unwrap_or_default();
 
                 // Check for CID-referenced inline image.
-                if let Some(cid) = src.strip_prefix("cid:") {
+                if let Some(cid) = strip_cid_prefix(&src) {
                     self.flush_text(blocks);
                     blocks.push(Block::InlineImage {
                         cid: cid.to_string(),
@@ -645,11 +711,12 @@ impl<'a> HtmlParser<'a> {
             "a" => {
                 // Flush accumulated plain text as a Text span before the link.
                 self.flush_text_span();
-                let href = extract_attr(_full_tag, "href").unwrap_or_default();
-                self.current_link_href = Some(href);
+                self.current_link_href = extract_attr(_full_tag, "href");
             }
             other => {
-                if let Some(flag) = style_flag_for_tag(other) {
+                if !self.in_pre
+                    && let Some(flag) = style_flag_for_tag(other)
+                {
                     // Flush text accumulated under the OLD style first, then
                     // bump the counter so subsequent text is captured with
                     // the new style on top.
@@ -663,13 +730,21 @@ impl<'a> HtmlParser<'a> {
 
     fn handle_close_tag(&mut self, tag_name: &str, blocks: &mut Vec<Block>) {
         match tag_name {
-            "p" | "div" => self.flush_text(blocks),
+            "p" | "div" => {
+                if self.list_item_depth > 0 || self.table_depth > 0 {
+                    self.push_soft_separator();
+                } else {
+                    self.flush_text(blocks);
+                }
+            }
             "h1" => self.flush_heading(blocks, 1),
             "h2" => self.flush_heading(blocks, 2),
             "h3" => self.flush_heading(blocks, 3),
             "h4" | "h5" | "h6" => self.flush_heading(blocks, 4),
             "pre" => {
-                let pre_text = std::mem::take(&mut self.current_text);
+                self.flush_text_span();
+                self.current_link_href.take();
+                let pre_text = spans_to_plain_text(&std::mem::take(&mut self.current_spans));
                 self.in_pre = false;
                 if !pre_text.trim().is_empty() {
                     blocks.push(Block::Preformatted(pre_text));
@@ -691,52 +766,36 @@ impl<'a> HtmlParser<'a> {
                 self.list_counters.pop();
             }
             "li" => {
-                let spans = self.take_spans();
-                if !spans.is_empty() {
-                    let prefix = match self.list_stack.last() {
-                        Some(ListKind::Unordered) => "\u{2022}".to_string(),
-                        Some(ListKind::Ordered) => {
-                            if let Some(counter) = self.list_counters.last_mut() {
-                                *counter += 1;
-                                format!("{counter}.")
-                            } else {
-                                "\u{2022}".to_string()
-                            }
-                        }
-                        None => "\u{2022}".to_string(),
-                    };
-                    blocks.push(Block::ListItem {
-                        prefix,
-                        content: spans,
-                    });
+                self.flush_text(blocks);
+                self.list_item_depth = self.list_item_depth.saturating_sub(1);
+            }
+            "td" | "th" => {
+                if self.table_depth > 0 {
+                    self.push_cell_separator();
                 }
+            }
+            "tr" => {
+                if self.table_depth > 0 {
+                    self.flush_text(blocks);
+                }
+            }
+            "table" => {
+                self.flush_text(blocks);
+                self.table_depth = self.table_depth.saturating_sub(1);
             }
             "a" => {
-                // Close the link span: take the accumulated text as the link display text.
-                let link_text = std::mem::take(&mut self.current_text);
-                let trimmed = link_text.trim().to_string();
-                let style = self.style_counts.current();
-                if let Some(href) = self.current_link_href.take() {
-                    if !trimmed.is_empty() {
-                        self.current_spans.push(InlineSpan::Link {
-                            display: trimmed,
-                            href,
-                            style,
-                        });
-                    }
-                } else if !trimmed.is_empty() {
-                    // Orphaned </a> - treat text as plain.
-                    self.current_spans.push(InlineSpan::Text {
-                        content: trimmed,
-                        style,
-                    });
-                }
+                self.flush_text_span();
+                self.current_link_href.take();
             }
             "style" | "script" | "head" => {
-                self.skip_content = false;
+                if self.skip_stack.last().is_some_and(|open| *open == tag_name) {
+                    self.skip_stack.pop();
+                }
             }
             other => {
-                if let Some(flag) = style_flag_for_tag(other) {
+                if !self.in_pre
+                    && let Some(flag) = style_flag_for_tag(other)
+                {
                     // Flush the styled text under this tag, then drop the
                     // counter so subsequent text loses the style.
                     self.flush_text_span();
@@ -753,10 +812,23 @@ impl<'a> HtmlParser<'a> {
     fn flush_text_span(&mut self) {
         let text = std::mem::take(&mut self.current_text);
         if !text.is_empty() {
-            self.current_spans.push(InlineSpan::Text {
-                content: text,
-                style: self.style_counts.current(),
-            });
+            let style = self.style_counts.current();
+            if let Some(href) = self
+                .current_link_href
+                .as_ref()
+                .filter(|href| !href.is_empty())
+            {
+                self.current_spans.push(InlineSpan::Link {
+                    display: text,
+                    href: href.clone(),
+                    style,
+                });
+            } else {
+                self.current_spans.push(InlineSpan::Text {
+                    content: text,
+                    style,
+                });
+            }
         }
     }
 
@@ -788,21 +860,114 @@ impl<'a> HtmlParser<'a> {
                 self.blockquote_text.push(' ');
             }
             self.blockquote_text.push_str(&plain);
+        } else if self.list_item_depth > 0 {
+            self.push_list_item(blocks, spans);
         } else {
             blocks.push(Block::Paragraph(spans));
         }
     }
 
     fn flush_heading(&mut self, blocks: &mut Vec<Block>, level: u8) {
-        let text = std::mem::take(&mut self.current_text);
-        let trimmed = text.trim().to_string();
+        let spans = self.take_spans();
+        let trimmed = spans_to_plain_text(&spans).trim().to_string();
         if !trimmed.is_empty() {
             blocks.push(Block::Heading(trimmed, level));
+        }
+    }
+
+    fn push_list_item(&mut self, blocks: &mut Vec<Block>, content: Vec<InlineSpan>) {
+        let prefix = match self.list_stack.last() {
+            Some(ListKind::Unordered) => "\u{2022}".to_string(),
+            Some(ListKind::Ordered) => {
+                if let Some(counter) = self.list_counters.last_mut() {
+                    *counter += 1;
+                    format!("{counter}.")
+                } else {
+                    "\u{2022}".to_string()
+                }
+            }
+            None => "\u{2022}".to_string(),
+        };
+        blocks.push(Block::ListItem { prefix, content });
+    }
+
+    fn has_pending_inline(&self) -> bool {
+        !self.current_text.is_empty() || !self.current_spans.is_empty()
+    }
+
+    fn push_soft_separator(&mut self) {
+        if self.has_pending_inline()
+            && !self
+                .current_text
+                .chars()
+                .last()
+                .is_some_and(char::is_whitespace)
+        {
+            self.current_text.push(' ');
+        }
+    }
+
+    fn push_cell_separator(&mut self) {
+        if self.has_pending_inline() {
+            self.current_text.push_str("  ");
         }
     }
 }
 
 // ── Helpers ─────────────────────────────────────────────
+
+fn find_tag_end(source: &str, start: usize) -> Option<usize> {
+    let rest = source.get(start..)?;
+    if rest.starts_with("<!--") {
+        return rest.find("-->").map(|idx| start + idx + 2);
+    }
+    if rest.starts_with("<![CDATA[") {
+        return rest.find("]]>").map(|idx| start + idx + 2);
+    }
+
+    let bytes = source.as_bytes();
+    let mut quote = None;
+    let mut i = start + 1;
+    while i < bytes.len() {
+        match quote {
+            Some(q) if bytes[i] == q => quote = None,
+            Some(_) => {}
+            None => match bytes[i] {
+                b'\'' | b'"' => quote = Some(bytes[i]),
+                b'>' => return Some(i),
+                _ => {}
+            },
+        }
+        i += 1;
+    }
+    None
+}
+
+fn find_close_tag_end(source: &str, from: usize, tag_name: &str) -> Option<usize> {
+    let needle = format!("</{tag_name}");
+    let close_start = from + source.get(from..)?.find(&needle)?;
+    find_tag_end(source, close_start)
+}
+
+fn tag_name_from_content(tag_content: &str) -> (&str, bool) {
+    let tag_content = tag_content.trim();
+    let is_closing = tag_content.starts_with('/');
+    let tag_content = if is_closing {
+        tag_content[1..].trim_start()
+    } else {
+        tag_content
+    };
+    let end = tag_content
+        .find(|c: char| c.is_whitespace() || c == '/' || c == '>')
+        .unwrap_or(tag_content.len());
+    (&tag_content[..end], is_closing)
+}
+
+fn strip_cid_prefix(src: &str) -> Option<&str> {
+    src.get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("cid:"))
+        .then(|| &src[4..])
+}
 
 /// Collapse runs of whitespace to single spaces.
 fn collapse_whitespace(s: &str) -> String {
@@ -825,35 +990,26 @@ fn collapse_whitespace(s: &str) -> String {
 /// Decode HTML entities: named entities, decimal (`&#123;`), and hex (`&#x7B;`).
 fn decode_entities(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
+    let mut pos = 0;
 
-    while let Some(ch) = chars.next() {
-        if ch != '&' {
+    while pos < s.len() {
+        let rest = &s[pos..];
+        if !rest.starts_with('&') {
+            let ch = rest.chars().next().expect("pos is within string");
             result.push(ch);
+            pos += ch.len_utf8();
             continue;
         }
-        // Collect entity up to `;` (max 10 chars to avoid runaway)
-        let mut entity = String::new();
-        let mut found_semi = false;
-        for _ in 0..10 {
-            match chars.peek() {
-                Some(&';') => {
-                    chars.next();
-                    found_semi = true;
-                    break;
-                }
-                Some(_) => entity.push(chars.next().expect("peeked")),
-                None => break,
-            }
-        }
-        if !found_semi {
-            // Not a valid entity - emit as literal
+
+        let after_amp = &s[pos + 1..];
+        let Some(semi) = after_amp.find(';').filter(|semi| *semi <= 64) else {
             result.push('&');
-            result.push_str(&entity);
+            pos += 1;
             continue;
-        }
-        // Decode
-        if let Some(decoded) = decode_named_entity(&entity) {
+        };
+
+        let entity = &after_amp[..semi];
+        if let Some(decoded) = decode_named_entity(entity) {
             result.push_str(decoded);
         } else if let Some(stripped) = entity.strip_prefix('#') {
             let codepoint = if let Some(hex) = stripped
@@ -874,9 +1030,10 @@ fn decode_entities(s: &str) -> String {
             }
         } else {
             result.push('&');
-            result.push_str(&entity);
+            result.push_str(entity);
             result.push(';');
         }
+        pos += semi + 2;
     }
     result
 }
@@ -919,6 +1076,8 @@ fn decode_named_entity(name: &str) -> Option<&'static str> {
         "thinsp" => "\u{2009}",
         "zwnj" => "\u{200C}",
         "zwj" => "\u{200D}",
+        "thetasym" => "\u{03D1}",
+        "blacktriangle" => "\u{25B4}",
         _ => return None,
     })
 }
@@ -941,43 +1100,118 @@ fn spans_to_plain_text(spans: &[InlineSpan]) -> String {
 /// Spans between the edges keep their internal whitespace intact so
 /// `Hello <b>world</b>` doesn't lose the space between the runs.
 fn trim_span_edges(spans: &mut Vec<InlineSpan>) {
-    if let Some(first) = spans.first_mut()
-        && let InlineSpan::Text { content, .. } = first
-    {
-        *content = content.trim_start().to_string();
+    loop {
+        let Some(first) = spans.first_mut() else {
+            return;
+        };
+        trim_span_start(first);
+        if span_is_empty(first) {
+            spans.remove(0);
+        } else {
+            break;
+        }
     }
-    if let Some(last) = spans.last_mut()
-        && let InlineSpan::Text { content, .. } = last
-    {
-        *content = content.trim_end().to_string();
+
+    while let Some(last) = spans.last_mut() {
+        trim_span_end(last);
+        if span_is_empty(last) {
+            spans.pop();
+        } else {
+            break;
+        }
     }
-    spans.retain(|span| match span {
-        InlineSpan::Text { content, .. } => !content.is_empty(),
-        InlineSpan::Link { display, .. } => !display.is_empty(),
-    });
+}
+
+fn trim_span_start(span: &mut InlineSpan) {
+    match span {
+        InlineSpan::Text { content, .. } => *content = content.trim_start().to_string(),
+        InlineSpan::Link { display, .. } => *display = display.trim_start().to_string(),
+    }
+}
+
+fn trim_span_end(span: &mut InlineSpan) {
+    match span {
+        InlineSpan::Text { content, .. } => *content = content.trim_end().to_string(),
+        InlineSpan::Link { display, .. } => *display = display.trim_end().to_string(),
+    }
+}
+
+fn span_is_empty(span: &InlineSpan) -> bool {
+    match span {
+        InlineSpan::Text { content, .. } => content.is_empty(),
+        InlineSpan::Link { display, .. } => display.is_empty(),
+    }
 }
 
 /// Extract an attribute value from a raw tag string.
 fn extract_attr(tag: &str, attr_name: &str) -> Option<String> {
-    let lower = tag.to_lowercase();
-    let pattern = format!("{attr_name}=\"");
-    if let Some(start) = lower.find(&pattern) {
-        let value_start = start + pattern.len();
-        let rest = &tag[value_start..];
-        if let Some(end) = rest.find('"') {
-            return Some(rest[..end].to_string());
+    let bytes = tag.as_bytes();
+    let mut pos = 0;
+
+    while pos < bytes.len() && !is_ascii_space(bytes[pos]) && bytes[pos] != b'/' {
+        pos += 1;
+    }
+
+    while pos < bytes.len() {
+        while pos < bytes.len() && is_ascii_space(bytes[pos]) {
+            pos += 1;
+        }
+        if pos >= bytes.len() || bytes[pos] == b'/' || bytes[pos] == b'>' {
+            break;
+        }
+
+        let name_start = pos;
+        while pos < bytes.len()
+            && !is_ascii_space(bytes[pos])
+            && bytes[pos] != b'='
+            && bytes[pos] != b'/'
+            && bytes[pos] != b'>'
+        {
+            pos += 1;
+        }
+        let name = &tag[name_start..pos];
+
+        while pos < bytes.len() && is_ascii_space(bytes[pos]) {
+            pos += 1;
+        }
+
+        let mut value = "";
+        if pos < bytes.len() && bytes[pos] == b'=' {
+            pos += 1;
+            while pos < bytes.len() && is_ascii_space(bytes[pos]) {
+                pos += 1;
+            }
+
+            if pos < bytes.len() && (bytes[pos] == b'"' || bytes[pos] == b'\'') {
+                let quote = bytes[pos];
+                pos += 1;
+                let value_start = pos;
+                while pos < bytes.len() && bytes[pos] != quote {
+                    pos += 1;
+                }
+                value = &tag[value_start..pos];
+                if pos < bytes.len() {
+                    pos += 1;
+                }
+            } else {
+                let value_start = pos;
+                while pos < bytes.len() && !is_ascii_space(bytes[pos]) && bytes[pos] != b'>' {
+                    pos += 1;
+                }
+                value = &tag[value_start..pos];
+            }
+        }
+
+        if name.eq_ignore_ascii_case(attr_name) {
+            return Some(decode_entities(value));
         }
     }
-    // Try single quotes
-    let pattern_sq = format!("{attr_name}='");
-    if let Some(start) = lower.find(&pattern_sq) {
-        let value_start = start + pattern_sq.len();
-        let rest = &tag[value_start..];
-        if let Some(end) = rest.find('\'') {
-            return Some(rest[..end].to_string());
-        }
-    }
+
     None
+}
+
+fn is_ascii_space(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\n' | b'\r' | b'\t' | 0x0c)
 }
 
 #[cfg(test)]
@@ -987,6 +1221,13 @@ mod tests {
     /// Helper: extract the plain text from a span list (for test assertions).
     fn spans_text(spans: &[InlineSpan]) -> String {
         spans_to_plain_text(spans)
+    }
+
+    fn paragraph_text(block: &Block) -> String {
+        match block {
+            Block::Paragraph(spans) => spans_text(spans),
+            _ => panic!("expected paragraph"),
+        }
     }
 
     #[test]
@@ -1112,6 +1353,30 @@ mod tests {
     }
 
     #[test]
+    fn styled_link_remains_clickable() {
+        let blocks = parse_html_to_blocks(
+            "<p><a href=\"https://example.com\"><strong><em>Example</em></strong></a></p>",
+        );
+        let Block::Paragraph(spans) = &blocks[0] else {
+            panic!("expected paragraph");
+        };
+        assert_eq!(spans.len(), 1);
+        match &spans[0] {
+            InlineSpan::Link {
+                display,
+                href,
+                style,
+            } => {
+                assert_eq!(display, "Example");
+                assert_eq!(href, "https://example.com");
+                assert!(style.bold);
+                assert!(style.italic);
+            }
+            _ => panic!("expected styled link span"),
+        }
+    }
+
+    #[test]
     fn bold_and_italic_inline_styles() {
         let blocks =
             parse_html_to_blocks("<p>plain <b>bold</b> <i>italic</i> <b><i>both</i></b></p>");
@@ -1130,9 +1395,21 @@ mod tests {
             .collect();
         // The exact whitespace runs are sensitive to the parser's whitespace
         // collapsing; assert the styled fragments appear with the right flags.
-        assert!(summary.iter().any(|(t, b, i)| t.contains("bold") && *b && !*i));
-        assert!(summary.iter().any(|(t, b, i)| t.contains("italic") && !*b && *i));
-        assert!(summary.iter().any(|(t, b, i)| t.contains("both") && *b && *i));
+        assert!(
+            summary
+                .iter()
+                .any(|(t, b, i)| t.contains("bold") && *b && !*i)
+        );
+        assert!(
+            summary
+                .iter()
+                .any(|(t, b, i)| t.contains("italic") && !*b && *i)
+        );
+        assert!(
+            summary
+                .iter()
+                .any(|(t, b, i)| t.contains("both") && *b && *i)
+        );
     }
 
     #[test]
@@ -1197,6 +1474,133 @@ mod tests {
     }
 
     #[test]
+    fn nested_list_preserves_outer_item() {
+        let blocks = parse_html_to_blocks("<ol><li>outer<ul><li>inner</li></ul>after</li></ol>");
+        assert_eq!(blocks.len(), 3);
+        match &blocks[0] {
+            Block::ListItem { prefix, content } => {
+                assert_eq!(prefix, "1.");
+                assert_eq!(spans_text(content), "outer");
+            }
+            _ => panic!("expected outer list item"),
+        }
+        match &blocks[1] {
+            Block::ListItem { prefix, content } => {
+                assert_eq!(prefix, "\u{2022}");
+                assert_eq!(spans_text(content), "inner");
+            }
+            _ => panic!("expected nested list item"),
+        }
+        match &blocks[2] {
+            Block::ListItem { prefix, content } => {
+                assert_eq!(prefix, "2.");
+                assert_eq!(spans_text(content), "after");
+            }
+            _ => panic!("expected trailing outer list item"),
+        }
+    }
+
+    #[test]
+    fn blocky_list_item_stays_list_item() {
+        let blocks = parse_html_to_blocks("<ul><li><p>text</p></li></ul>");
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            Block::ListItem { prefix, content } => {
+                assert_eq!(prefix, "\u{2022}");
+                assert_eq!(spans_text(content), "text");
+            }
+            _ => panic!("expected list item"),
+        }
+    }
+
+    #[test]
+    fn simple_table_keeps_cell_and_row_boundaries() {
+        let blocks =
+            parse_html_to_blocks("<table><tr><td>A</td><td>B</td></tr><tr><td>C</td></tr></table>");
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(paragraph_text(&blocks[0]), "A  B");
+        assert_eq!(paragraph_text(&blocks[1]), "C");
+    }
+
+    #[test]
+    fn pre_code_stays_preformatted() {
+        let blocks = parse_html_to_blocks("<pre><code>  fn main() {\n  }</code></pre>");
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            Block::Preformatted(text) => {
+                assert!(text.contains("fn main()"));
+                assert!(text.starts_with("  "));
+            }
+            _ => panic!("expected preformatted block"),
+        }
+    }
+
+    #[test]
+    fn heading_with_inline_markup_stays_heading() {
+        let blocks = parse_html_to_blocks("<h1>Hello <em>world</em></h1>");
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            Block::Heading(text, 1) => assert_eq!(text, "Hello world"),
+            _ => panic!("expected h1"),
+        }
+    }
+
+    #[test]
+    fn comments_and_conditionals_do_not_leak_text() {
+        let blocks = parse_html_to_blocks(
+            "<p>a</p><!--[if mso]>hidden<![endif]--><!-- foo > bar --><p>b</p>",
+        );
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(paragraph_text(&blocks[0]), "a");
+        assert_eq!(paragraph_text(&blocks[1]), "b");
+    }
+
+    #[test]
+    fn head_style_and_script_content_stays_hidden() {
+        let blocks = parse_html_to_blocks(
+            "<head><style>a > b { color: red; }</style><title>x</title></head><script>if (a > b) {}</script><p>visible</p>",
+        );
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(paragraph_text(&blocks[0]), "visible");
+    }
+
+    #[test]
+    fn attribute_parser_handles_exact_names_spacing_unquoted_and_entities() {
+        let blocks = parse_html_to_blocks(
+            "<p><a data-href=\"wrong\" href = \"https://x.test?a=1&amp;b=2\">one</a> <a href=https://y.test?a=1&amp;b=2>two</a></p>",
+        );
+        let Block::Paragraph(spans) = &blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let links: Vec<(&str, &str)> = spans
+            .iter()
+            .filter_map(|span| match span {
+                InlineSpan::Link { display, href, .. } => Some((display.as_str(), href.as_str())),
+                InlineSpan::Text { .. } => None,
+            })
+            .collect();
+        assert_eq!(
+            links,
+            vec![
+                ("one", "https://x.test?a=1&b=2"),
+                ("two", "https://y.test?a=1&b=2")
+            ]
+        );
+    }
+
+    #[test]
+    fn long_entities_decode() {
+        let blocks = parse_html_to_blocks("<p>&thetasym; &blacktriangle; &#x0001F600;</p>");
+        assert_eq!(paragraph_text(&blocks[0]), "\u{03D1} \u{25B4} \u{1F600}");
+    }
+
+    #[test]
+    fn br_preserves_hard_line_break() {
+        let blocks = parse_html_to_blocks("<p>line<br>break</p>");
+        assert_eq!(paragraph_text(&blocks[0]), "line\nbreak");
+    }
+
+    #[test]
     fn complex_detection() {
         let simple = "<p>Hello</p><table><tr><td>A</td></tr></table>";
         assert_eq!(assess_complexity(simple), HtmlComplexity::Simple);
@@ -1208,5 +1612,9 @@ mod tests {
                         </td></tr></table></td></tr></table>\
                         </td></tr></table></td></tr></table>";
         assert_eq!(assess_complexity(complex), HtmlComplexity::Complex);
+
+        let commented =
+            "<p>Hello</p><!-- <table><table><table><table><table><table> --><p>world</p>";
+        assert_eq!(assess_complexity(commented), HtmlComplexity::Simple);
     }
 }

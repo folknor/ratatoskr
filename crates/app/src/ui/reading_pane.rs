@@ -121,7 +121,7 @@ pub struct ReadingPane {
     cached_html: Vec<Option<super::html_render::CachedHtmlBody>>,
     /// Pre-loaded inline images for CID resolution in HTML bodies.
     /// Maps Content-ID to image bytes.
-    inline_images: HashMap<String, Vec<u8>>,
+    inline_images: HashMap<String, iced::widget::image::Handle>,
 }
 
 /// Minimal reference to the currently selected thread for display purposes.

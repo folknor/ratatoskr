@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use iced::widget::image;
 use rtsk::body_store::BodyStoreState;
 use rtsk::db::queries_extra::set_attachments_collapsed;
 use rtsk::db::queries_extra::thread_detail::{
@@ -41,7 +42,7 @@ pub struct AppThreadDetail {
     pub attachments: Vec<ThreadAttachment>,
     pub attachments_collapsed: bool,
     /// Pre-loaded CID-to-image-bytes map for inline `<img src="cid:...">` resolution.
-    pub inline_images: HashMap<String, Vec<u8>>,
+    pub inline_images: HashMap<String, image::Handle>,
 }
 
 /// Convert core's ThreadDetail into app display types.
@@ -148,12 +149,15 @@ pub async fn load_thread_detail(
             fetch_thread_bodies(&bs, &db_data.messages)?
         };
 
-        let inline_images = if let Some(ref iis_conn) = iis_conn {
+        let inline_images: HashMap<String, image::Handle> = if let Some(ref iis_conn) = iis_conn {
             if !cid_hashes.is_empty() {
                 let iis = iis_conn
                     .lock()
                     .map_err(|e| format!("inline image store lock: {e}"))?;
                 InlineImageStoreState::get_batch_sync(&iis, &cid_hashes)?
+                    .into_iter()
+                    .map(|(cid, bytes)| (cid, image::Handle::from_bytes(bytes)))
+                    .collect()
             } else {
                 HashMap::new()
             }
