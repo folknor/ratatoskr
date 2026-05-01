@@ -258,6 +258,19 @@ impl CalDavClient {
         for cal in &mut calendars {
             cal.href = self.resolve_url(&cal.href);
         }
+        if calendars.is_empty() {
+            // Distinguish "user has no calendars provisioned" from "server
+            // returned a parseable but content-free multistatus" (which
+            // can happen on first-login races, server-side errors mis-
+            // reported as 207, or a parser limitation we haven't seen
+            // yet). Log so an operator chasing "where did my calendars
+            // go" has a starting point. The caller still gets Ok(empty)
+            // - this is informational, not an error.
+            log::warn!(
+                "CalDAV list_calendars at {url} returned 0 calendars from a {} byte response",
+                body.len()
+            );
+        }
         Ok(calendars)
     }
 
