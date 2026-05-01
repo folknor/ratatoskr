@@ -229,7 +229,7 @@ pub struct Settings {
 
 /// What dismissal action the user requested while an editor was dirty.
 /// Applied verbatim once the user confirms via the discard-changes dialog.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum PendingDiscard {
     /// Close the slide-in sheet entirely (Back button, Escape, etc.).
     CloseSheet,

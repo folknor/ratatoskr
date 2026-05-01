@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use iced::widget::{Space, button, column, container, image, row, text};
+use iced::widget::{Space, column, container, image, row, text};
 use iced::{Element, Length, Padding};
 
 use crate::ui::layout::*;
@@ -165,13 +165,50 @@ pub fn render_html<'a, M: Clone + 'a>(
 
 // ── Block model ─────────────────────────────────────────
 
+/// Per-span inline formatting flags. Combinations are derived from any
+/// inline tags that are open at the moment a text run is captured
+/// (`<b><i>x</i></b>` produces a span with both `bold` and `italic`).
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub(super) struct InlineStyle {
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
+    /// Inline `<code>` / `<tt>` / `<kbd>` / `<samp>`. Renders in a monospace
+    /// font; we don't currently apply the boxed background that browsers do.
+    pub code: bool,
+}
+
+impl InlineStyle {
+    fn font(self) -> iced::Font {
+        if self.code {
+            return crate::font::monospace();
+        }
+        match (self.bold, self.italic) {
+            (true, true) => crate::font::text_bold_italic(),
+            (true, false) => crate::font::text_bold(),
+            (false, true) => crate::font::text_italic(),
+            (false, false) => crate::font::text(),
+        }
+    }
+}
+
 /// An inline segment within a paragraph or list item.
 #[derive(Clone)]
 pub(super) enum InlineSpan {
-    /// Plain text.
-    Text(String),
-    /// A hyperlink with display text and target URL.
-    Link { display: String, href: String },
+    /// Styled text.
+    Text {
+        content: String,
+        style: InlineStyle,
+    },
+    /// A hyperlink with display text, target URL, and any inline styling
+    /// that was active inside the `<a>...</a>` (so a bold link still
+    /// renders bold).
+    Link {
+        display: String,
+        href: String,
+        style: InlineStyle,
+    },
 }
 
 pub(super) enum Block {
@@ -192,54 +229,66 @@ pub(super) enum Block {
     },
 }
 
-/// Render inline spans as a row of text and link widgets.
-///
-/// When the spans contain only a single `Text` span, emits a plain text widget.
-/// When links are present, wraps everything in a wrapping row.
+/// Render inline spans using `iced::widget::rich_text` so per-span fonts,
+/// underline, strikethrough, and link clicks all flow through one shaper
+/// pass with proper wrapping.
 fn render_spans<'a, M: Clone + 'a>(
     spans: &[InlineSpan],
     on_link_click: &std::rc::Rc<dyn Fn(String) -> M + 'a>,
 ) -> Element<'a, M> {
-    // Fast path: single text-only span (the common case).
+    // Fast path: single unstyled text span (still the most common email
+    // shape) - skip rich_text entirely.
     if spans.len() == 1
-        && let InlineSpan::Text(txt) = &spans[0]
+        && let InlineSpan::Text { content, style } = &spans[0]
+        && *style == InlineStyle::default()
     {
-        return text(txt.clone())
+        return text(content.clone())
             .size(TEXT_LG)
             .style(text::secondary)
             .into();
     }
 
-    let mut elements: Vec<Element<'a, M>> = Vec::with_capacity(spans.len());
+    let on_click = std::rc::Rc::clone(on_link_click);
+    let mut iced_spans: Vec<iced::widget::text::Span<'_, String>> =
+        Vec::with_capacity(spans.len());
     for span in spans {
         match span {
-            InlineSpan::Text(txt) => {
-                elements.push(
-                    text(txt.clone())
-                        .size(TEXT_LG)
-                        .style(text::secondary)
-                        .into(),
-                );
+            InlineSpan::Text { content, style } => {
+                iced_spans.push(make_span(content.clone(), *style, None));
             }
-            InlineSpan::Link { display, href } => {
-                let url = href.clone();
-                let on_click = std::rc::Rc::clone(on_link_click);
-                elements.push(
-                    button(
-                        text(display.clone())
-                            .size(TEXT_LG)
-                            .style(theme::TextClass::Accent.style()),
-                    )
-                    .on_press_with(move || (on_click)(url.clone()))
-                    .padding(0)
-                    .style(theme::ButtonClass::BareTransparent.style())
-                    .into(),
-                );
+            InlineSpan::Link {
+                display,
+                href,
+                style,
+            } => {
+                let mut link_style = *style;
+                // Underline links by default so they're visually
+                // distinguishable even when the accent color is subtle.
+                link_style.underline = true;
+                iced_spans.push(make_span(display.clone(), link_style, Some(href.clone())));
             }
         }
     }
 
-    iced::widget::row(elements).spacing(0).wrap().into()
+    iced::widget::rich_text(iced_spans)
+        .size(TEXT_LG)
+        .on_link_click(move |url: String| (on_click)(url))
+        .into()
+}
+
+fn make_span<'a>(
+    content: String,
+    style: InlineStyle,
+    link: Option<String>,
+) -> iced::widget::text::Span<'a, String> {
+    let mut span = iced::widget::span(content)
+        .font(style.font())
+        .underline(style.underline)
+        .strikethrough(style.strikethrough);
+    if let Some(href) = link {
+        span = span.link(href);
+    }
+    span
 }
 
 /// Render a block by reference (for cached rendering). Clones the owned
@@ -360,12 +409,59 @@ struct HtmlParser<'a> {
     current_spans: Vec<InlineSpan>,
     /// When inside `<a href="...">`, holds the href URL.
     current_link_href: Option<String>,
+    /// Reference counts for each style flag. Incremented on opening tag,
+    /// decremented on close. `current_style()` projects nonzero counts to
+    /// `true`, which handles arbitrary nesting (`<b><b>x</b>y</b>`) and
+    /// interleaved styles correctly.
+    style_counts: StyleCounts,
     in_pre: bool,
     in_blockquote: bool,
     blockquote_text: String,
     list_stack: Vec<ListKind>,
     list_counters: Vec<usize>,
     skip_content: bool,
+}
+
+#[derive(Default)]
+struct StyleCounts {
+    bold: u32,
+    italic: u32,
+    underline: u32,
+    strikethrough: u32,
+    code: u32,
+}
+
+impl StyleCounts {
+    fn current(&self) -> InlineStyle {
+        InlineStyle {
+            bold: self.bold > 0,
+            italic: self.italic > 0,
+            underline: self.underline > 0,
+            strikethrough: self.strikethrough > 0,
+            code: self.code > 0,
+        }
+    }
+}
+
+/// Map an HTML tag name to which style flag it toggles, if any.
+fn style_flag_for_tag(tag: &str) -> Option<StyleFlag> {
+    match tag {
+        "b" | "strong" => Some(StyleFlag::Bold),
+        "i" | "em" | "cite" | "var" => Some(StyleFlag::Italic),
+        "u" | "ins" => Some(StyleFlag::Underline),
+        "s" | "strike" | "del" => Some(StyleFlag::Strikethrough),
+        "code" | "tt" | "kbd" | "samp" => Some(StyleFlag::Code),
+        _ => None,
+    }
+}
+
+#[derive(Clone, Copy)]
+enum StyleFlag {
+    Bold,
+    Italic,
+    Underline,
+    Strikethrough,
+    Code,
 }
 
 #[derive(Clone, Copy)]
@@ -382,12 +478,28 @@ impl<'a> HtmlParser<'a> {
             current_text: String::new(),
             current_spans: Vec::new(),
             current_link_href: None,
+            style_counts: StyleCounts::default(),
             in_pre: false,
             in_blockquote: false,
             blockquote_text: String::new(),
             list_stack: Vec::new(),
             list_counters: Vec::new(),
             skip_content: false,
+        }
+    }
+
+    fn bump_style(&mut self, flag: StyleFlag, delta: i32) {
+        let counter = match flag {
+            StyleFlag::Bold => &mut self.style_counts.bold,
+            StyleFlag::Italic => &mut self.style_counts.italic,
+            StyleFlag::Underline => &mut self.style_counts.underline,
+            StyleFlag::Strikethrough => &mut self.style_counts.strikethrough,
+            StyleFlag::Code => &mut self.style_counts.code,
+        };
+        if delta > 0 {
+            *counter += 1;
+        } else {
+            *counter = counter.saturating_sub(1);
         }
     }
 
@@ -536,7 +648,16 @@ impl<'a> HtmlParser<'a> {
                 let href = extract_attr(_full_tag, "href").unwrap_or_default();
                 self.current_link_href = Some(href);
             }
-            _ => {} // span, strong, b, em, i, etc. - inline, just consume text
+            other => {
+                if let Some(flag) = style_flag_for_tag(other) {
+                    // Flush text accumulated under the OLD style first, then
+                    // bump the counter so subsequent text is captured with
+                    // the new style on top.
+                    self.flush_text_span();
+                    self.bump_style(flag, 1);
+                }
+                // Other inline tags (span, font, ...) are passthrough.
+            }
         }
     }
 
@@ -594,45 +715,64 @@ impl<'a> HtmlParser<'a> {
                 // Close the link span: take the accumulated text as the link display text.
                 let link_text = std::mem::take(&mut self.current_text);
                 let trimmed = link_text.trim().to_string();
+                let style = self.style_counts.current();
                 if let Some(href) = self.current_link_href.take() {
                     if !trimmed.is_empty() {
                         self.current_spans.push(InlineSpan::Link {
                             display: trimmed,
                             href,
+                            style,
                         });
                     }
                 } else if !trimmed.is_empty() {
                     // Orphaned </a> - treat text as plain.
-                    self.current_spans.push(InlineSpan::Text(trimmed));
+                    self.current_spans.push(InlineSpan::Text {
+                        content: trimmed,
+                        style,
+                    });
                 }
             }
             "style" | "script" | "head" => {
                 self.skip_content = false;
             }
-            _ => {}
+            other => {
+                if let Some(flag) = style_flag_for_tag(other) {
+                    // Flush the styled text under this tag, then drop the
+                    // counter so subsequent text loses the style.
+                    self.flush_text_span();
+                    self.bump_style(flag, -1);
+                }
+            }
         }
     }
 
-    /// Flush accumulated plain text into `current_spans` as a `Text` span.
-    /// Called before starting a link, so prior text is preserved.
+    /// Flush accumulated plain text into `current_spans`, tagged with the
+    /// currently-open inline style. Called whenever style or link state
+    /// changes mid-paragraph, so we deliberately preserve internal spaces -
+    /// trimming at edges happens once at block boundaries (`take_spans`).
     fn flush_text_span(&mut self) {
         let text = std::mem::take(&mut self.current_text);
-        let trimmed = text.trim().to_string();
-        if !trimmed.is_empty() {
-            self.current_spans.push(InlineSpan::Text(trimmed));
+        if !text.is_empty() {
+            self.current_spans.push(InlineSpan::Text {
+                content: text,
+                style: self.style_counts.current(),
+            });
         }
     }
 
     /// Collect all pending spans (and any trailing text) into a completed
-    /// span list, draining the parser's inline state.
+    /// span list, draining the parser's inline state. Trims leading
+    /// whitespace from the first span and trailing whitespace from the
+    /// last so block boundaries don't accumulate stray spaces, while
+    /// preserving the internal spacing between styled runs.
     fn take_spans(&mut self) -> Vec<InlineSpan> {
-        // Flush any trailing plain text into a span.
         self.flush_text_span();
-        // Also close any unclosed link (treat as plain text).
         if let Some(_href) = self.current_link_href.take() {
-            // Link was never closed - the text was already flushed above.
+            // Link was never closed; its text already flushed as a Text span.
         }
-        std::mem::take(&mut self.current_spans)
+        let mut spans = std::mem::take(&mut self.current_spans);
+        trim_span_edges(&mut spans);
+        spans
     }
 
     fn flush_text(&mut self, blocks: &mut Vec<Block>) {
@@ -789,11 +929,32 @@ fn spans_to_plain_text(spans: &[InlineSpan]) -> String {
     let mut out = String::new();
     for span in spans {
         match span {
-            InlineSpan::Text(t) => out.push_str(t),
+            InlineSpan::Text { content, .. } => out.push_str(content),
             InlineSpan::Link { display, .. } => out.push_str(display),
         }
     }
     out
+}
+
+/// Trim leading whitespace from the first text span and trailing
+/// whitespace from the last; drop spans that go empty as a result.
+/// Spans between the edges keep their internal whitespace intact so
+/// `Hello <b>world</b>` doesn't lose the space between the runs.
+fn trim_span_edges(spans: &mut Vec<InlineSpan>) {
+    if let Some(first) = spans.first_mut()
+        && let InlineSpan::Text { content, .. } = first
+    {
+        *content = content.trim_start().to_string();
+    }
+    if let Some(last) = spans.last_mut()
+        && let InlineSpan::Text { content, .. } = last
+    {
+        *content = content.trim_end().to_string();
+    }
+    spans.retain(|span| match span {
+        InlineSpan::Text { content, .. } => !content.is_empty(),
+        InlineSpan::Link { display, .. } => !display.is_empty(),
+    });
 }
 
 /// Extract an attribute value from a raw tag string.
@@ -912,18 +1073,18 @@ mod tests {
             Block::Paragraph(spans) => {
                 assert_eq!(spans.len(), 3);
                 match &spans[0] {
-                    InlineSpan::Text(t) => assert_eq!(t, "Click"),
+                    InlineSpan::Text { content, .. } => assert_eq!(content.trim(), "Click"),
                     _ => panic!("expected text span"),
                 }
                 match &spans[1] {
-                    InlineSpan::Link { display, href } => {
+                    InlineSpan::Link { display, href, .. } => {
                         assert_eq!(display, "here");
                         assert_eq!(href, "https://example.com");
                     }
                     _ => panic!("expected link span"),
                 }
                 match &spans[2] {
-                    InlineSpan::Text(t) => assert_eq!(t, "for more."),
+                    InlineSpan::Text { content, .. } => assert_eq!(content.trim(), "for more."),
                     _ => panic!("expected text span"),
                 }
             }
@@ -939,7 +1100,7 @@ mod tests {
             Block::Paragraph(spans) => {
                 assert_eq!(spans.len(), 1);
                 match &spans[0] {
-                    InlineSpan::Link { display, href } => {
+                    InlineSpan::Link { display, href, .. } => {
                         assert_eq!(display, "Example");
                         assert_eq!(href, "https://example.com");
                     }
@@ -951,6 +1112,71 @@ mod tests {
     }
 
     #[test]
+    fn bold_and_italic_inline_styles() {
+        let blocks =
+            parse_html_to_blocks("<p>plain <b>bold</b> <i>italic</i> <b><i>both</i></b></p>");
+        let Block::Paragraph(spans) = &blocks[0] else {
+            panic!("expected paragraph");
+        };
+        // Pull out (content, bold, italic) for each text span.
+        let summary: Vec<(&str, bool, bool)> = spans
+            .iter()
+            .filter_map(|s| match s {
+                InlineSpan::Text { content, style } => {
+                    Some((content.as_str(), style.bold, style.italic))
+                }
+                InlineSpan::Link { .. } => None,
+            })
+            .collect();
+        // The exact whitespace runs are sensitive to the parser's whitespace
+        // collapsing; assert the styled fragments appear with the right flags.
+        assert!(summary.iter().any(|(t, b, i)| t.contains("bold") && *b && !*i));
+        assert!(summary.iter().any(|(t, b, i)| t.contains("italic") && !*b && *i));
+        assert!(summary.iter().any(|(t, b, i)| t.contains("both") && *b && *i));
+    }
+
+    #[test]
+    fn underline_and_strikethrough_styles() {
+        let blocks = parse_html_to_blocks("<p><u>up</u> <s>out</s></p>");
+        let Block::Paragraph(spans) = &blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let mut underlined = false;
+        let mut struck = false;
+        for span in spans {
+            if let InlineSpan::Text { content, style } = span {
+                if content.contains("up") && style.underline {
+                    underlined = true;
+                }
+                if content.contains("out") && style.strikethrough {
+                    struck = true;
+                }
+            }
+        }
+        assert!(underlined, "expected an underlined span");
+        assert!(struck, "expected a strikethrough span");
+    }
+
+    #[test]
+    fn nested_styles_pop_correctly() {
+        let blocks = parse_html_to_blocks("<p><b>x<b>y</b>z</b>t</p>");
+        let Block::Paragraph(spans) = &blocks[0] else {
+            panic!("expected paragraph");
+        };
+        // 't' must be unstyled - both <b>s are closed by then.
+        let last_text = spans
+            .iter()
+            .rev()
+            .find_map(|s| match s {
+                InlineSpan::Text { content, style } => Some((content, style)),
+                InlineSpan::Link { .. } => None,
+            })
+            .expect("a final text span");
+        assert_eq!(last_text.0.trim(), "t");
+        assert!(!last_text.1.bold, "trailing 't' should not be bold");
+    }
+
+    #[test]
     fn list_item_with_link() {
         let blocks =
             parse_html_to_blocks("<ul><li>See <a href=\"https://example.com\">this</a></li></ul>");
@@ -959,7 +1185,7 @@ mod tests {
             Block::ListItem { content, .. } => {
                 assert_eq!(content.len(), 2);
                 match &content[1] {
-                    InlineSpan::Link { display, href } => {
+                    InlineSpan::Link { display, href, .. } => {
                         assert_eq!(display, "this");
                         assert_eq!(href, "https://example.com");
                     }

@@ -206,7 +206,6 @@ Phases 1-2 complete. Phase 3 blocked on upstream.
 ## Remaining Enhancements (HTML rendering)
 
 The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has significant fidelity gaps. Remaining:
-- [ ] **Inline text formatting** - `<strong>`, `<b>`, `<em>`, `<i>`, `<u>`, `<s>`, `<code>` (inline) all ignored. Everything renders as plain text. Needs a `Vec<Span>` model per block or `iced::widget::rich_text`.
 - [ ] Remote image loading with user consent (`block_remote_images` setting exists but disconnected from `render_html` - function signature needs context parameter)
 - [ ] Table rendering (table-for-layout is the hardest - no `<table>`/`<tr>`/`<td>` handling at all)
 - [ ] Image caching (`HashMap<String, image::Handle>`) - no `iced::widget::image` usage in app crate
