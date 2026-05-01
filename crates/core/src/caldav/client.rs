@@ -37,6 +37,15 @@ pub struct DiscoveredCalendar {
     pub display_name: Option<String>,
     pub color: Option<String>,
     pub ctag: Option<String>,
+    /// Whether the authenticated user has write/write-content privileges on
+    /// this calendar. `None` means the server didn't emit a
+    /// `<current-user-privilege-set>` block - older servers commonly omit
+    /// it; the sync layer treats `None` as "assume editable" to preserve
+    /// pre-fix behavior on those. `Some(false)` is reserved for calendars
+    /// that explicitly lack write privileges (iCloud / Fastmail / SOGo
+    /// shared-read-only calendars), and the sync layer uses it to suppress
+    /// edit affordances at the UI.
+    pub can_edit: Option<bool>,
 }
 
 /// Batch size for calendar-multiget REPORT requests.
@@ -781,6 +790,7 @@ const PROPFIND_CALENDARS: &str = r#"<?xml version="1.0" encoding="utf-8"?>
     <D:displayname/>
     <CS:getctag/>
     <IC:calendar-color/>
+    <D:current-user-privilege-set/>
   </D:prop>
 </D:propfind>"#;
 

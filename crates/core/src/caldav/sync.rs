@@ -50,9 +50,12 @@ pub async fn sync_caldav_calendars(
     let mut skipped_unchanged = 0;
 
     for cal in &discovered {
-        // Upsert the calendar record. CalDAV doesn't return a per-calendar
-        // edit-rights flag - we treat discovered calendars as editable until
-        // PROPFIND on `<D:current-user-privilege-set>` is wired in.
+        // Honor the server's current-user-privilege-set when present: any
+        // of `<write/>`, `<write-content/>`, or `<all/>` inside a granted
+        // privilege flips us to editable. When the block is absent (older
+        // servers, some Exchange CalDAV bridges) we default to editable
+        // for compatibility - the previous unconditional `true` behavior.
+        let can_edit = cal.can_edit.unwrap_or(true);
         let calendar_id = db_upsert_calendar(
             db,
             account_id.to_string(),
@@ -61,7 +64,7 @@ pub async fn sync_caldav_calendars(
             cal.display_name.clone(),
             cal.color.clone(),
             false, // is_primary - CalDAV doesn't specify a "primary" calendar
-            true,  // can_edit
+            can_edit,
         )
         .await?;
 

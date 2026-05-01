@@ -591,6 +591,11 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
     let mut response_displayname = String::new();
     let mut response_ctag = String::new();
     let mut response_color = String::new();
+    // None when the server didn't emit current-user-privilege-set; Some
+    // when we observed the block and could decide. The sync layer treats
+    // None as "assume editable" for compatibility with older servers that
+    // don't surface privileges.
+    let mut response_can_edit: Option<bool> = None;
 
     // Per-propstat pending state, committed to response-level state only when
     // the closing `<status>` says 2xx. Mixed propstat blocks (one 200 OK for
@@ -602,6 +607,14 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
     let mut pending_displayname: Option<String> = None;
     let mut pending_ctag: Option<String> = None;
     let mut pending_color: Option<String> = None;
+    // Tracks whether we observed a current-user-privilege-set block at all
+    // (privilege_set_seen) and whether it included a write-class privilege
+    // (write_seen). RFC 3744 § 5.3: we look for `write`, `write-content`,
+    // or `all` - any of those imply write access. The full enumeration
+    // (write-properties, write-acl, etc) doesn't matter for our edit-or-
+    // not decision.
+    let mut pending_privilege_set_seen = false;
+    let mut pending_write_seen = false;
 
     loop {
         match reader.read_event() {
@@ -614,6 +627,7 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
                     response_displayname.clear();
                     response_ctag.clear();
                     response_color.clear();
+                    response_can_edit = None;
                 }
                 if name == "propstat" {
                     propstat_status.clear();
@@ -621,11 +635,21 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
                     pending_displayname = None;
                     pending_ctag = None;
                     pending_color = None;
+                    pending_privilege_set_seen = false;
+                    pending_write_seen = false;
                 }
                 // Open-close `<calendar></calendar>` form, scoped to inside
                 // `<resourcetype>`.
                 if name == "calendar" && stack.iter().any(|s| s == "resourcetype") {
                     pending_is_calendar = true;
+                }
+                if name == "current-user-privilege-set" {
+                    pending_privilege_set_seen = true;
+                }
+                if (name == "write" || name == "write-content" || name == "all")
+                    && stack.iter().any(|s| s == "privilege")
+                {
+                    pending_write_seen = true;
                 }
                 stack.push(name);
                 buf.clear();
@@ -635,6 +659,17 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
                 // Self-closed `<calendar/>` form.
                 if name == "calendar" && stack.iter().any(|s| s == "resourcetype") {
                     pending_is_calendar = true;
+                }
+                if name == "current-user-privilege-set" {
+                    // Empty privilege set = no privileges granted.
+                    pending_privilege_set_seen = true;
+                }
+                // Self-closed `<D:write/>`, `<D:write-content/>`, or `<D:all/>`
+                // inside `<D:privilege>`.
+                if (name == "write" || name == "write-content" || name == "all")
+                    && stack.iter().any(|s| s == "privilege")
+                {
+                    pending_write_seen = true;
                 }
             }
             Ok(Event::Text(ref e)) => {
@@ -691,6 +726,9 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
                         if let Some(v) = pending_color.take() {
                             response_color = v;
                         }
+                        if pending_privilege_set_seen {
+                            response_can_edit = Some(pending_write_seen);
+                        }
                     } else {
                         log::debug!(
                             "Skipping propstat with non-2xx status: {propstat_status}"
@@ -701,6 +739,8 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
                     pending_displayname = None;
                     pending_ctag = None;
                     pending_color = None;
+                    pending_privilege_set_seen = false;
+                    pending_write_seen = false;
                 }
                 if name == "response"
                     && response_is_calendar
@@ -724,6 +764,7 @@ pub fn parse_propfind_calendars(xml: &str) -> Vec<DiscoveredCalendar> {
                         } else {
                             Some(response_ctag.clone())
                         },
+                        can_edit: response_can_edit,
                     });
                 }
                 stack.pop();
@@ -1620,6 +1661,74 @@ END:VCALENDAR\r\n";
         assert_eq!(entries[0].etag, "\"etag-111\"");
         assert_eq!(entries[1].uri, "/calendars/user/personal/event2.ics");
         assert_eq!(entries[1].etag, "\"etag-222\"");
+    }
+
+    #[test]
+    fn parse_propfind_calendars_extracts_can_edit_from_privileges() {
+        // iCloud / Fastmail / SOGo emit current-user-privilege-set on
+        // shared calendars. A read-only delegation block should mark the
+        // calendar as can_edit=false; a writable one as can_edit=true.
+        let read_only = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:response>
+    <D:href>/calendars/user/shared-readonly/</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype><D:collection/><C:calendar/></D:resourcetype>
+        <D:displayname>Shared (read-only)</D:displayname>
+        <D:current-user-privilege-set>
+          <D:privilege><D:read/></D:privilege>
+          <D:privilege><D:read-current-user-privilege-set/></D:privilege>
+        </D:current-user-privilege-set>
+      </D:prop>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+        let calendars = parse_propfind_calendars(read_only);
+        assert_eq!(calendars.len(), 1);
+        assert_eq!(calendars[0].can_edit, Some(false));
+
+        let writable = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:response>
+    <D:href>/calendars/user/personal/</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype><D:collection/><C:calendar/></D:resourcetype>
+        <D:displayname>Personal</D:displayname>
+        <D:current-user-privilege-set>
+          <D:privilege><D:read/></D:privilege>
+          <D:privilege><D:write-content/></D:privilege>
+          <D:privilege><D:write/></D:privilege>
+        </D:current-user-privilege-set>
+      </D:prop>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+        let calendars = parse_propfind_calendars(writable);
+        assert_eq!(calendars.len(), 1);
+        assert_eq!(calendars[0].can_edit, Some(true));
+    }
+
+    #[test]
+    fn parse_propfind_calendars_can_edit_none_when_block_absent() {
+        // Servers that don't emit current-user-privilege-set leave can_edit
+        // at None; sync layer interprets None as "editable" for back-compat.
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:response>
+    <D:href>/calendars/user/old-server/</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype><D:collection/><C:calendar/></D:resourcetype>
+        <D:displayname>Old Server</D:displayname>
+      </D:prop>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+        let calendars = parse_propfind_calendars(xml);
+        assert_eq!(calendars.len(), 1);
+        assert_eq!(calendars[0].can_edit, None);
     }
 
     #[test]

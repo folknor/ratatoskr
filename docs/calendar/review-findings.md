@@ -69,13 +69,12 @@ All findings addressed. Lenses and targets:
 (Issues here are downstream of the parse.rs / client.rs findings above; listed for fix-sequencing visibility.)
 
 - **Medium** - Empty remote set is now guarded against wiping the local cache (`sync_calendar_events` skips the deletion phase when remote returns 0 entries against a non-empty local cache). Still open: when the *initial* sync of a calendar legitimately starts empty and the server later begins returning entries, the heuristic doesn't mis-fire (remote=0 with stored=0 is a no-op). The remaining failure mode is the propstat-status-not-inspected case below, where individual entries get filtered out as "absent" mid-batch even though the response was 207-OK overall.
-- **Low** - `can_edit=true` hard-coded on upsert (`:53, :64`); read-only calendars from iCloud / Fastmail / SOGo show edit affordances and 403 on PUT/DELETE.
 
 ---
 
 ### `crates/calendar/src/caldav/mod.rs`
 
-- **Low** - `caldav_list_calendars_impl` hard-codes `can_edit: true` (`:65`); CalDAV `<privilege>` inspection not implemented.
+- **Low** - `caldav_list_calendars_impl` hard-codes `can_edit: true` (`:65`); CalDAV `<privilege>` inspection not implemented in this layer (the rtsk core parses it but this façade does not surface it). Diverges from `crates/core/src/caldav/sync.rs::sync_caldav_calendars` which now honors privileges.
 - **Low** - `join_calendar_path` (`:413-424`) drops query strings from calendar URLs via `Url::join` semantics. Edge case for shared-hosting CalDAV servers requiring routing query parameters.
 
 ---
