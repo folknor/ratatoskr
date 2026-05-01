@@ -140,15 +140,43 @@ impl CalDavClient {
                 .ok_or("No principal URL")?
                 .clone();
 
-            let (_, body) = self
+            let body_result = self
                 .propfind_raw(&principal, "0", PROPFIND_CALENDAR_HOME)
                 .await
-                .map_err(|e| format!("PROPFIND for calendar-home-set failed: {e}"))?;
+                .map_err(|e| format!("PROPFIND for calendar-home-set failed: {e}"));
 
-            if let Some(home) = extract_href_property(&body, "calendar-home-set") {
-                self.calendar_home_url = Some(self.resolve_url(&home));
-            } else {
-                return Err("Could not discover calendar-home-set".to_string());
+            match body_result {
+                Ok((_, body)) => {
+                    // Resolve the returned href against the principal URL,
+                    // not `self.base_url`. Hosted setups (Fastmail with a
+                    // separate caldav.fastmail.com, hosted Exchange + CalDAV
+                    // bridges) put the principal and DAV root on different
+                    // hosts; resolving against base_url quietly rebuilds the
+                    // home-set URL on the wrong host and the next
+                    // PROPFIND lands on a different account or 404s.
+                    if let Some(home) = extract_href_property(&body, "calendar-home-set") {
+                        self.calendar_home_url =
+                            Some(self.resolve_url_against(&principal, &home));
+                    } else {
+                        // The principal returned a valid 207 but no
+                        // home-set. Either the persisted principal is
+                        // stale (the server moved it) or the server
+                        // genuinely has no calendars provisioned for
+                        // this user. Clear the in-memory principal so
+                        // the next discover() call starts from scratch
+                        // rather than re-attempting step 2 with the
+                        // same dead value (the previous "stuck loop"
+                        // pattern). Persisted state is the caller's
+                        // responsibility - they see Err and can decide
+                        // whether to clear it from the DB and retry.
+                        self.principal_url = None;
+                        return Err("Could not discover calendar-home-set".to_string());
+                    }
+                }
+                Err(e) => {
+                    self.principal_url = None;
+                    return Err(e);
+                }
             }
         }
 
@@ -278,7 +306,10 @@ impl CalDavClient {
         for chunk in uris.chunks(MULTIGET_BATCH_SIZE) {
             let mut href_elements = String::new();
             for uri in chunk {
-                href_elements.push_str(&format!("  <D:href>{uri}</D:href>\n"));
+                href_elements.push_str(&format!(
+                    "  <D:href>{}</D:href>\n",
+                    xml_escape_text(uri)
+                ));
             }
 
             let body = format!(
@@ -692,6 +723,31 @@ fn local_name(raw: &[u8]) -> String {
     }
 }
 
+/// Escape `&`, `<`, and `>` for safe inclusion in XML element content.
+///
+/// Per RFC 3986 a URI cannot contain a literal `<` or `>`, but `&` is legal
+/// in query strings and we have seen real-world CalDAV servers (notably
+/// Exchange OWA's CalDAV bridge) emit hrefs containing `&` (typically from
+/// query-string filter params on the server side). Splatting such an href
+/// directly into a multiget request body produces invalid XML and the
+/// server 400s the entire batch. This helper guards the multiget request
+/// body against that.
+fn xml_escape_text(s: &str) -> std::borrow::Cow<'_, str> {
+    if !s.bytes().any(|b| matches!(b, b'&' | b'<' | b'>')) {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            other => out.push(other),
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 /// Format a stored ETag value for the `If-Match` header.
 ///
 /// New code stores ETags verbatim including quotes (`"abc"`, `W/"abc"`), so the
@@ -716,7 +772,7 @@ fn normalize_if_match_etag(stored: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_if_match_etag;
+    use super::{normalize_if_match_etag, xml_escape_text};
 
     #[test]
     fn preserves_already_quoted_strong_etag() {
@@ -738,5 +794,28 @@ mod tests {
     #[test]
     fn trims_surrounding_whitespace() {
         assert_eq!(normalize_if_match_etag("  \"abc\"  "), "\"abc\"");
+    }
+
+    #[test]
+    fn xml_escape_passes_through_safe_strings() {
+        // Safe inputs should not allocate.
+        assert!(matches!(
+            xml_escape_text("/cal/event.ics"),
+            std::borrow::Cow::Borrowed(_)
+        ));
+        assert_eq!(xml_escape_text("/cal/event.ics"), "/cal/event.ics");
+    }
+
+    #[test]
+    fn xml_escape_amps_lt_gt() {
+        // `&` shows up in real-world hrefs (Exchange OWA bridge in particular)
+        // and must be escaped or the entire multiget batch 400s on the
+        // server side as malformed XML.
+        assert_eq!(xml_escape_text("/cal/a&b.ics"), "/cal/a&amp;b.ics");
+        assert_eq!(xml_escape_text("/cal/a<b>.ics"), "/cal/a&lt;b&gt;.ics");
+        assert_eq!(
+            xml_escape_text("/cal/a&b<c>d.ics"),
+            "/cal/a&amp;b&lt;c&gt;d.ics"
+        );
     }
 }

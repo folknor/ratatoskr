@@ -120,8 +120,6 @@ All findings addressed. Lenses and targets:
 
 ### `crates/core/src/caldav/client.rs::discover` / `discover_principal` (128-207)
 
-- **High** (flagged 2x) - Home-set href resolved against `self.base_url` instead of `principal_url` (`:146-152`). In setups where principal and DAV root live on different hosts (hosted Exchange + CalDAV bridges, Fastmail with separate `caldav.fastmail.com`), discovery completes "successfully" but `list_calendars` PROPFINDs the wrong host - returns 404 or a different account's calendars. `resolve_url_against` exists for exactly this case; `list_events:253` uses it correctly.
-- **High** (flagged 2x) - Principal URL pointing to a 404 home-set leaves `principal_url` set in the DB; subsequent `discover()` skips step 1 and re-runs step 2, same failure. Stuck loop. Mitigation: clear `self.principal_url` (and the DB column) on home-set discovery failure, then retry base/well-known.
 - **Medium** - Relative principal/home hrefs returned by a redirected `.well-known/caldav` are resolved against the original base URL, not the redirect target.
 - **Medium** - 200-OK-with-HTML accepted; can't distinguish "not CalDAV" from "CalDAV but principal missing." Add XML content-type + `<multistatus>` root check.
 - **Medium** - Scheme-downgrade redirect risk: depends on reqwest's version stripping `Authorization` on cross-origin redirects. Verify in `Cargo.toml`.
@@ -129,7 +127,6 @@ All findings addressed. Lenses and targets:
 
 ### `crates/core/src/caldav/client.rs::fetch_events` multiget body (278-292)
 
-- **High** (flagged 2x) - Hrefs splatted into the multiget request XML without escaping. `&` in an href (Exchange OWA bridge has been seen to emit `&` in event hrefs) forms invalid XML, server 400s, kills the whole batch of 50.
 - **Medium** - Absolute hrefs in the multiget body when the calendar URL went through a host/scheme redirect; older SOGo rejects absolute hrefs that don't share scheme+host with the request URL. Re-relativize before chunking.
 
 ### `crates/core/src/caldav/client.rs::resolve_url_against` (566)
