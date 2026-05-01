@@ -5,11 +5,12 @@ Audit date: 2026-05-01
 The multi-window foundation is in place: `iced::daemon`, the
 `pop_out_windows: HashMap<window::Id, PopOutWindow>` registry, per-window
 `view`/`title`/resize/move/close routing, Escape-closes-pop-out, and the
-`PopOut(window::Id, PopOutMessage)` dispatch wrapper all work. Message-view
-pop-outs and compose pop-outs both render and operate. What remains is a
-mix of unbuilt compose-window features, session-restore gaps, two stubbed
-attachment paths, and a handful of fidelity items called out in the
-product spec.
+`PopOut(window::Id, PopOutMessage)` dispatch wrapper all work. Message-view,
+compose, and calendar pop-outs all render, operate, and survive a session
+round-trip. What remains is a mix of unbuilt compose-window features
+(drag-drop overlay, attachment compression, emoji picker), the cross-cutting
+Print blocker, three stubbed attachment paths, and a handful of fidelity
+items called out in the product spec.
 
 This doc is the gating list. When everything below is resolved (or
 explicitly cancelled), `docs/pop-out-windows/` can be deleted.
@@ -43,36 +44,24 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
    Zero `squeeze` calls in `pop_out/compose/` or
    `handlers/pop_out/compose_*`. Attachments are sent as-is.
 
-3. **Compose header is missing Print and Save buttons.** Problem statement
-   §"Actions" lists `[📎 Attach][🖨 Print][💾 Save][Send]`. The footer in
-   `crates/app/src/pop_out/compose/view.rs:539-545` ships only Discard,
-   Attach, and Send. There is no Print button (no OS print dialog
-   integration anywhere in the project) and no explicit manual-Save
-   button. Drafts auto-save every 30s via the `ComposeDraftTick`
-   subscription, but a user who wants to flush immediately has no UI
-   path.
+3. **Compose header is missing a Print button.** Problem statement
+   §"Actions" lists `[📎 Attach][🖨 Print][💾 Save][Send]`. The footer
+   ships Discard, Attach, Save, and Send - Print is the remaining gap.
+   No OS print dialog integration exists anywhere in the project (see
+   Medium #11 for the cross-cutting Print blocker).
 
-4. **Formatting toolbar missing emoji picker and strikethrough.** Problem
-   statement §"Formatting Toolbar" calls the emoji-picker button "required"
-   and lists strikethrough among the expected formatting options.
-   `view.rs:434-456` builds the toolbar with Bold / Italic / Underline /
-   List / Link only. `ComposeMessage::FormatStrikethrough` is defined in
-   `messages.rs:74` but no toolbar button emits it. There is no emoji
-   picker integration even though the shared
-   `docs/emoji-picker/problem-statement.md` exists.
+4. **Formatting toolbar is missing the emoji picker.** Problem
+   statement §"Formatting Toolbar" calls the emoji-picker button
+   "required". The picker widget exists at
+   `crates/app/src/ui/widgets/pickers.rs::emoji_picker` but is never
+   instantiated; `crates/app/src/pop_out/compose/view.rs::formatting_toolbar`
+   ships Bold / Italic / Underline / Strikethrough / List / Link only.
+   Adding the picker requires per-window state (search query, selected
+   category, open flag), an `AnchoredOverlay`, and inserting the picked
+   emoji at the rich-text editor's cursor. See
+   `docs/emoji-picker/problem-statement.md`.
 
-5. **Session restore covers only message-view pop-outs.** Problem
-   statement §"Window Rules" promises restoration of "main window …
-   calendar pop-out (if it was open, with position, size, view, date) …
-   all message view windows … and all compose windows (position, size,
-   draft state)". `crates/app/src/pop_out/session.rs:11-19` defines
-   `SessionState { main_window, message_views }` only. `handlers/pop_out/
-   session.rs:14-29` filters out `PopOutWindow::Compose` and
-   `PopOutWindow::Calendar` when serializing. Compose drafts persist via
-   the `local_drafts` table but the windows themselves do not reopen on
-   launch; an open Calendar pop-out is lost on restart.
-
-6. **Recipient contact-pill hover affordance not implemented.** Problem
+5. **Recipient contact-pill hover affordance not implemented.** Problem
    statement §"Header Section" (and §"Recipient Fields" for compose):
    "Recipients in the To and Cc fields appear as plain text but become
    contact pills on hover - revealing the inline edit button from the
@@ -84,7 +73,7 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
 
 ## Medium
 
-7. **Rendering-mode picker location is unresolved.** Problem statement
+6. **Rendering-mode picker location is unresolved.** Problem statement
    §"Rendering Mode" and the implementation spec Phase 3 both draw the
    picker as a row of four chip-style buttons below the header, above
    the body. `pop_out/message_view.rs:493-502` instead places the four
@@ -94,7 +83,7 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
    Either revise the spec to bless the overflow-menu placement or move
    the picker out.
 
-8. **Original HTML mode does not actually fetch remote content.** Problem
+7. **Original HTML mode does not actually fetch remote content.** Problem
    statement §"Rendering Mode": Original HTML "renders the full HTML as
    sent, including remote images and original styles … subject to the
    app's remote-content and tracking-pixel controls". The remote-content
@@ -104,7 +93,7 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
    wired. Simple HTML and Original HTML render identically. Cross-ref:
    `TODO.md` "Pop out message viewer body rendering toggle buttons".
 
-9. **Source mode synthesizes a pseudo-`.eml` from parsed columns.**
+8. **Source mode synthesizes a pseudo-`.eml` from parsed columns.**
    Problem statement §"Rendering Mode" describes Source as "the raw email
    source (headers + MIME body, monospaced)". `handlers/pop_out/
    message_view.rs:96-139` builds a best-effort reconstruction from
@@ -117,29 +106,31 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
    per-provider fetch paths (Gmail `format=raw`, JMAP blob endpoint,
    Graph `/$value`, IMAP `BODY[]`).
 
-10. **Save As is missing `.pdf`.** Problem statement §"Actions" lists
-    three formats: `.eml`, `.pdf`, `.txt`. Implementation spec Phase 6
-    deliberately defers PDF ("requires rendering the message HTML
-    faithfully to a paginated PDF"). `handlers/pop_out/save_as.rs:69-72`
-    ships `.eml` and `.txt` only. Either implement HTML-to-paginated-PDF
-    rendering or revise the product spec to drop `.pdf`.
+9. **Save As is missing `.pdf`.** Problem statement §"Actions" lists
+   three formats: `.eml`, `.pdf`, `.txt`. Implementation spec Phase 6
+   deliberately defers PDF ("requires rendering the message HTML
+   faithfully to a paginated PDF"). `handlers/pop_out/save_as.rs:69-72`
+   ships `.eml` and `.txt` only. Either implement HTML-to-paginated-PDF
+   rendering or revise the product spec to drop `.pdf`.
 
-11. **Print is a no-op everywhere.** Both surfaces require it: message
+10. **Print is a no-op everywhere.** Both surfaces require it: message
     view overflow menu (problem statement §"Actions" overflow item) and
     compose header (problem statement §"Actions"). `pop_out/
     message_view.rs:85` falls into the trailing `Task::none()` arm and
     no compose-side Print exists at all. OS print-dialog integration is
     platform-specific with no iced precedent. Cross-ref: `TODO.md`
-    "Pop-out Print".
+    "Pop-out Print". Resolving this also closes High #3.
 
-12. **Attachment Open / Save / Save All in viewer are stubs.** The
+11. **Attachment Open / Save / Save All in viewer are stubs.** The
     compact attachment cards in `message_view.rs:717-784` render Save /
     Open buttons on hover and a Save All button in the panel header, but
     `handlers/pop_out/message_view.rs:68-79` handles all three with
     `log::info!("not yet implemented")`. The buttons exist and are
-    clickable; nothing happens.
+    clickable; nothing happens. The reading-pane equivalents in
+    `ui/reading_pane.rs:368-376` are also stubs - resolving these
+    likely shares an attachment fetch + cache + write path.
 
-13. **Spell check decision deferred.** Problem statement §"Open Questions"
+12. **Spell check decision deferred.** Problem statement §"Open Questions"
     item 3: "OS-level spell check integration, or custom? Defer to
     implementation." No spell-check infrastructure exists in the editor
     pipeline. Either pick an approach or strike the open question.
@@ -227,29 +218,35 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
   scope, gated on `may_submit` rights
   (`handlers/pop_out/window_lifecycle.rs:76-87`).
 
-### Phase 5 - session restore (partial; see High #5)
+### Phase 5 - session restore
 
-- `SessionState` with `MessageViewSessionEntry` serialized to
-  `session.json`; falls back to legacy `window.json`
-  (`pop_out/session.rs`).
-- Save on main-window close; restore at boot reopens message-view
-  windows and re-dispatches body/attachment loads
+- `SessionState` with `MessageViewSessionEntry`, `ComposeSessionEntry`,
+  and `Option<CalendarSessionEntry>` serialized to `session.json`;
+  falls back to legacy `window.json` (`pop_out/session.rs`).
+- Save on main-window close; restore at boot reopens message-view,
+  compose, and calendar pop-out windows
   (`handlers/pop_out/session.rs`,
   `handlers/core.rs:770-799`,
   `app.rs:222,302,346`).
-- `BodyLoaded(Err)` sets `error_banner` so a deleted-message restore
+- Message view: re-dispatches body/attachment loads.
+  `BodyLoaded(Err)` sets `error_banner` so a deleted-message restore
   surfaces "This message is no longer available"
-  (`handlers/pop_out/message_view.rs:24-32`,
-  `pop_out/message_view.rs:240-248`).
-- Compose drafts persist across sessions via the `local_drafts` table
-  even though compose windows do not auto-reopen.
+  (`handlers/pop_out/message_view.rs:24-32`).
+- Compose: persists `draft_id` only; on restore, opens the window with
+  saved geometry and async-loads the draft from `local_drafts` via
+  `Message::RestoredComposeLoaded`. If the draft row is gone the
+  window closes itself.
+- Calendar: `PopOutWindow::Calendar(CalendarPopOutGeometry)` carries
+  width/height/x/y, populated from `WindowResized` / `WindowMoved`
+  and persisted via `CalendarSessionEntry`. View and date come from
+  the existing `CalendarState` on `App`.
 
-### Phase 6 - Save As (partial; see Medium #10)
+### Phase 6 - Save As (partial; see Medium #9)
 
 - `rfd::AsyncFileDialog` with format filters for `.eml` and `.txt`
   (`handlers/pop_out/save_as.rs:66-93`).
 - `.eml` writes raw source from `Db::load_raw_source` (currently
-  synthesized; see Medium #9).
+  synthesized; see Medium #8).
 - `.txt` writes plain-text body from `Db::load_message_body`.
 - Subject sanitized to a safe filename
   (`handlers/pop_out/save_as.rs:38-55`).
@@ -281,9 +278,9 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
   (`pop_out/compose/view.rs:114-126`).
 - Rich text editor body (`rte` crate) with per-action `BodyChanged`
   dispatch (`pop_out/compose/view.rs:458-485`).
-- Formatting toolbar (Bold / Italic / Underline / List / Link); link
-  dialog overlay; emoji picker and strikethrough button missing
-  (see High #4).
+- Formatting toolbar (Bold / Italic / Underline / Strikethrough / List
+  / Link); link dialog overlay; emoji picker still missing (see
+  High #4).
 - Auto-resolved signature on open and on From-account change, inserted
   with a tracked separator index for reply quote placement
   (`handlers/pop_out/compose_signature.rs`).
@@ -296,7 +293,8 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
   (`handlers/pop_out/dispatcher.rs:341-380`).
 - Attachment compression NOT wired (see High #2).
 - Auto-save: 30s `ComposeDraftTick` writes dirty drafts to
-  `local_drafts`; main-window close flushes synchronously before
+  `local_drafts`; manual `Save` button in the footer triggers the
+  same path on demand; main-window close flushes synchronously before
   destroying compose windows (`handlers/pop_out/compose_draft.rs`,
   `subscription.rs:74-79`).
 - Discard confirmation modal when closing a compose window with user
@@ -310,11 +308,12 @@ Spec references are to `docs/pop-out-windows/problem-statement.md`
 
 ### Calendar pop-out
 
-- `PopOutWindow::Calendar` variant; calendar mode-toggle focuses the
-  pop-out instead of switching the main window when one exists
-  (`handlers/calendar.rs:355-369`, `handlers/core.rs:300-316`,
-  `update.rs:317-362`).
+- `PopOutWindow::Calendar(CalendarPopOutGeometry)` variant; calendar
+  mode-toggle focuses the pop-out instead of switching the main
+  window when one exists (`handlers/calendar.rs:355-369`,
+  `handlers/core.rs:300-316`, `update.rs:317-362`).
 - Calendar UI renders in the pop-out via the same
   `ui::calendar::calendar_layout` used in the main window
   (`main_view.rs:31-33`).
-- NOT session-restored (see High #5).
+- Geometry tracked from `WindowResized` / `WindowMoved` and persisted
+  via `CalendarSessionEntry`; restored at boot.
