@@ -97,6 +97,10 @@ pub struct MessageViewState {
     pub snippet: Option<String>,
     /// Raw email source (headers + MIME), loaded lazily on Source mode.
     pub raw_source: Option<String>,
+    /// Inline (CID-referenced) image bytes for the rendered HTML. Empty
+    /// until pop-out wires up the inline image store; the HTML pipeline
+    /// just falls back to alt text for unknown CIDs.
+    pub inline_images: std::collections::HashMap<String, Vec<u8>>,
 
     // ── Attachments ──
     pub attachments: Vec<MessageViewAttachment>,
@@ -149,6 +153,7 @@ impl MessageViewState {
             body_html: None,
             snippet: msg.snippet.clone(),
             raw_source: None,
+            inline_images: std::collections::HashMap::new(),
             attachments: Vec::new(),
             hovered_attachment_id: None,
             rendering_mode: default_rendering_mode,
@@ -185,6 +190,7 @@ impl MessageViewState {
             body_html: None,
             snippet: None,
             raw_source: None,
+            inline_images: std::collections::HashMap::new(),
             attachments: Vec::new(),
             hovered_attachment_id: None,
             rendering_mode: default_rendering_mode,
@@ -567,7 +573,7 @@ fn context_menu_radio_item<'a>(
 // ── Body ───────────────────────────────────────────────
 
 fn message_view_body<'a>(
-    _window_id: iced::window::Id,
+    window_id: iced::window::Id,
     state: &'a MessageViewState,
 ) -> Element<'a, Message> {
     let body_content: Element<'_, Message> = match state.rendering_mode {
@@ -584,17 +590,40 @@ fn message_view_body<'a>(
                 .into()
         }
         RenderingMode::SimpleHtml | RenderingMode::OriginalHtml => {
-            // Phase 3 placeholder: fall back to plain text until HTML pipeline exists
-            let txt = state
-                .body_text
-                .as_deref()
-                .or(state.snippet.as_deref())
-                .unwrap_or("(no content)");
-            text(txt)
-                .size(TEXT_LG)
-                .style(text::secondary)
-                .width(Length::Fill)
-                .into()
+            // Route through `html_render` so the pop-out body picks up inline
+            // text formatting, links, lists, blockquotes, headings, and CID
+            // image alt-text - the same primitive the reading pane uses.
+            // OriginalHtml differs from SimpleHtml only in remote-image
+            // policy; the actual remote-image fetch isn't wired here yet, so
+            // both modes render identically until that lands. Falls back to
+            // plain text when the message has no HTML body, and the renderer
+            // itself falls back to plain text for HTML it considers
+            // structurally too complex.
+            if let Some(html) = state.body_html.as_deref() {
+                let on_link = move |_url: String| {
+                    Message::PopOut(
+                        window_id,
+                        PopOutMessage::MessageView(MessageViewMessage::Noop),
+                    )
+                };
+                crate::ui::html_render::render_html(
+                    html,
+                    state.body_text.as_deref(),
+                    on_link,
+                    &state.inline_images,
+                )
+            } else {
+                let txt = state
+                    .body_text
+                    .as_deref()
+                    .or(state.snippet.as_deref())
+                    .unwrap_or("(no content)");
+                text(txt)
+                    .size(TEXT_LG)
+                    .style(text::secondary)
+                    .width(Length::Fill)
+                    .into()
+            }
         }
         RenderingMode::Source => {
             let src = state.raw_source.as_deref().unwrap_or("Loading source...");

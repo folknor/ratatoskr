@@ -44,7 +44,7 @@
 
 - [ ] **Pop out message viewer body rendering** - The current pills for selecting Plain/Simple/Original/Source need to move. The spec currently doesn't say clearly where they should go. This needs to be resolved first.
 
-- [ ] **Pop out message viewer body rendering toggle buttons** - Plain / Simple HTML / Original HTML still all render the plain-text body identically because `html_render.rs` isn't wired into the pop-out yet (tracked under "Pop-out HTML rendering" below). Source mode synthesizes a usable pseudo-`.eml` from headers + body, but the original on-the-wire MIME framing is lost - faithful Source needs the "Raw message source store" entry below.
+- [ ] **Pop out message viewer body rendering toggle buttons** - Plain text uses the plain body; Simple HTML / Original HTML now both route through `html_render.rs` so inline formatting, links, lists, blockquotes, and CID image alt-text all show. Original differs from Simple only in remote-image policy, which still isn't enforced (the `block_remote_images` setting isn't plumbed through the pop-out path yet, so both modes are equivalent until that lands - tracked under "Remote image loading with user consent" in the HTML rendering section). Source mode synthesizes a usable pseudo-`.eml`; faithful Source needs the "Raw message source store" entry below.
 
 - [ ] **Message box / toast notification system** - Generic modal message box and/or toast notification infrastructure for the app. Needed for: compose draft save failure on close (currently silently aborts the close with no user feedback), action service retry exhaustion warnings, and any future error/confirmation flows. Should support at least: transient toasts (auto-dismiss), persistent error banners, and modal confirmation dialogs.
 
@@ -219,7 +219,6 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **Inline image store eviction UI** - Settings control for store size (128 MB hardcoded).
 
 - [ ] **Provider push notifications (remaining)** - JMAP WebSocket push is wired. Still missing: IMAP IDLE (persistent connection per folder), Graph/Gmail (poll-based, needs tuning - true push requires cloud infrastructure).
-- [ ] **Pop-out HTML rendering** - SimpleHtml/OriginalHtml modes in message view pop-out fall back to plain text. Depends on the DOM-to-widget pipeline (`html_render.rs`) being wired into the pop-out view. Tracked separately in the HTML rendering section above.
 - [ ] **Pop-out Print** - OS print dialog integration for message view and compose pop-out windows. Platform-specific, no iced precedent. Needs investigation.
 - [ ] **Signature: per-account default dropdown in Account Settings** - Account editor overlay has no signature dropdown for selecting the default signature for an account.
 - [ ] **Modal dialog content unification (GNOME HIG / libadwaita)** - The `alert_dialog` / `form_dialog` primitives in `ui/dialog.rs` now lock down GNOME HIG / `AdwAlertDialog` semantics (window-like card via `ContainerClass::DialogCard`, `TEXT_HEADING` title, `TEXT_MD` secondary body, right-aligned button row, libadwaita action appearances via `ButtonClass::Suggested` / `ButtonClass::Destructive`). Migrated: compose discard / link / save-as-group, calendar delete-event / discard-changes. Remaining work:
@@ -281,4 +280,4 @@ Living reference - follow these patterns as features are built. Keep until 1.0.
 
 - **Config shadow pattern** - Formal: `PreferencesState`. Implicit (clone-on-open): Account editor, Contact editor, Group editor, Calendar event editor, Signature editor. Editors work on a shadow copy and commit on save.
 
-- **DOM-to-widget pipeline** - V1 in `html_render.rs`. Supports links, CID images, block structure. Complexity heuristic (table depth >5, style tags >2) falls back to plain text. Used in reading pane only (NOT in pop-out message view). Remaining: inline formatting, remote images, tables.
+- **DOM-to-widget pipeline** - V1 in `html_render.rs`. Supports links, CID images, inline formatting (bold/italic/underline/strike/code via `iced::widget::rich_text`), block structure. Complexity heuristic (table depth >5, style tags >2) falls back to plain text. Used in both the reading pane and the pop-out message view (Simple HTML / Original HTML modes). Remaining: remote image loading with consent, table rendering, image caching.
