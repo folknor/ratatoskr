@@ -3,8 +3,8 @@
 Audit date: 2026-05-01
 
 Phase 1 backend, Phase 2 timeline rendering, and Phase 3 sidebar integration
-are largely in place. Designation, mark-read, signature handling, compose,
-and the polish phase are still missing or partial.
+are largely in place. Designation, signature handling, compose, and the
+polish phase are still missing or partial.
 
 Phase legend (rough): `1` data model + queries, `2` timeline view,
 `3` sidebar, `4` compose, `5` signature-stripping refinement, `6` polish.
@@ -20,13 +20,6 @@ Phase legend (rough): `1` data model + queries, `2` timeline view,
    Users cannot create or remove chat contacts at runtime - the sidebar
    CHATS section only ever shows what dev-seed wrote. (Phase 1 / Phase 3
    gap.)
-
-2. **Entering a chat does not mark it read.** `enter_chat_view`
-   (`handlers/chat.rs`) loads the timeline and refreshes the contacts list
-   only. `Message::ChatReadMarked` is dispatched in `update.rs` but resolves
-   to `Task::none()`. The spec's `mark_chat_read_local` /
-   `mark_chat_read_remote` helpers do not exist anywhere. Unread counts on
-   the sidebar stay stuck after opening a chat. (Phase 2 gap.)
 
 3. **No signature stripping or quote collapsing.** `phase-2-plan.md`
    specifies a reusable `crates/common/src/signature_strip.rs` module with
@@ -127,6 +120,13 @@ Phase legend (rough): `1` data model + queries, `2` timeline view,
 - Body text rendered from `BodyStoreState::get_batch` (plain text only -
   no HTML rendering yet, no stripping).
 - "Load older" button at top → cursor-based paginated load.
+- Mark-read on chat entry: `mark_chat_read_local` flips `messages.is_read`,
+  `threads.is_read`, and `chat_contacts.unread_count` in one transaction;
+  `mark_chat_read_remote` then dispatches `provider.mark_read` per affected
+  thread (one provider per account, reused), enqueuing a pending op on
+  failure. Bypasses the action-service action_completion path - no toast,
+  no undo, no completion handler. Sidebar refreshes once the local
+  transaction commits (`Message::ChatReadMarked`).
 - Snap-to-end scroll on initial load via
   `iced::widget::operation::snap_to_end`.
 - Generation counter (`Chat`) discards stale timeline loads.

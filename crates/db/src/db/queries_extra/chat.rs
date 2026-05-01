@@ -182,6 +182,77 @@ pub fn get_chat_contacts_sync(conn: &Connection) -> Result<Vec<DbChatContactSumm
     .map_err(|e| e.to_string())
 }
 
+/// Mark all messages in a contact's chat threads as read in one transaction.
+///
+/// Flips `messages.is_read = 1` for every unread row in any thread where the
+/// contact is a participant and `threads.is_chat_thread = 1`, mirrors the
+/// state on `threads.is_read`, and resets the denormalised
+/// `chat_contacts.unread_count`. Returns the `(account_id, thread_id)` pairs
+/// that had any unread messages, so the caller can dispatch provider
+/// mark-read against each of them.
+pub fn mark_chat_read_local_sync(
+    conn: &Connection,
+    email: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("begin: {e}"))?;
+
+    let affected: Vec<(String, String)> = {
+        let mut stmt = tx
+            .prepare(
+                "SELECT DISTINCT m.account_id, m.thread_id \
+                 FROM messages m \
+                 INNER JOIN threads t \
+                   ON t.id = m.thread_id AND t.account_id = m.account_id \
+                 INNER JOIN thread_participants tp \
+                   ON tp.account_id = m.account_id AND tp.thread_id = m.thread_id \
+                 WHERE t.is_chat_thread = 1 AND tp.email = ?1 AND m.is_read = 0",
+            )
+            .map_err(|e| format!("prepare affected: {e}"))?;
+        stmt.query_map(params![email], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| format!("query affected: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("collect affected: {e}"))?
+    };
+
+    tx.execute(
+        "UPDATE messages SET is_read = 1 \
+         WHERE is_read = 0 \
+           AND (account_id, thread_id) IN ( \
+               SELECT t.account_id, t.id FROM threads t \
+               INNER JOIN thread_participants tp \
+                 ON tp.account_id = t.account_id AND tp.thread_id = t.id \
+               WHERE t.is_chat_thread = 1 AND tp.email = ?1 \
+           )",
+        params![email],
+    )
+    .map_err(|e| format!("update messages: {e}"))?;
+
+    tx.execute(
+        "UPDATE threads SET is_read = 1 \
+         WHERE is_read = 0 AND is_chat_thread = 1 \
+           AND (account_id, id) IN ( \
+               SELECT tp.account_id, tp.thread_id \
+               FROM thread_participants tp \
+               WHERE tp.email = ?1 \
+           )",
+        params![email],
+    )
+    .map_err(|e| format!("update threads: {e}"))?;
+
+    tx.execute(
+        "UPDATE chat_contacts SET unread_count = 0 WHERE email = ?1",
+        params![email],
+    )
+    .map_err(|e| format!("update chat_contacts: {e}"))?;
+
+    tx.commit().map_err(|e| format!("commit: {e}"))?;
+    Ok(affected)
+}
+
 /// Get the chat timeline rows for a contact, newest first.
 pub fn get_chat_timeline_sync(
     conn: &Connection,

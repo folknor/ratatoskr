@@ -265,7 +265,7 @@ impl App {
                 }
                 // Reload navigation + threads (or chat timeline) to reflect sync changes
                 if let Some(email) = self.active_chat.clone() {
-                    return self.enter_chat_view(email);
+                    return self.enter_chat_view(&email);
                 }
                 let _ = self.nav_generation.next();
                 let nav_task = self.load_navigation_and_threads();
@@ -477,7 +477,10 @@ impl App {
                 log::error!("ChatOlderLoaded error: {e}");
                 Task::none()
             }
-            Message::ChatReadMarked => Task::none(),
+            Message::ChatReadMarked => {
+                let token = self.chat_list_generation.next();
+                self.fire_chat_contacts_load(token)
+            }
             Message::ChatContactsLoaded(g, _) if !self.chat_list_generation.is_current(g) => {
                 Task::none()
             }

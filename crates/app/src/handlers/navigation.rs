@@ -13,7 +13,7 @@ impl App {
     pub(crate) fn handle_navigate_to(&mut self, target: NavigationTarget) -> Task<Message> {
         match target {
             NavigationTarget::Chat { ref email } => {
-                return self.enter_chat_view(email.clone());
+                return self.enter_chat_view(email);
             }
             NavigationTarget::Sidebar {
                 ref selection,

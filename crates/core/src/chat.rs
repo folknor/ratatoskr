@@ -1,8 +1,14 @@
 use std::collections::HashMap;
 
+use common::types::ProviderCtx;
 use db::db::DbState;
 use store::body_store::BodyStoreState;
 use store::inline_image_store::InlineImageStoreState;
+
+use crate::actions::ActionContext;
+use crate::actions::pending::enqueue_if_retryable;
+use crate::actions::provider::create_provider;
+use crate::progress::NoopProgressReporter;
 
 /// Summary data for a chat contact in the sidebar.
 #[derive(Debug, Clone)]
@@ -72,6 +78,96 @@ pub async fn undesignate_chat_contact(db: &DbState, email: &str) -> Result<(), S
 
     db.with_conn(move |conn| crate::db::queries_extra::chat::undesignate_chat_contact_sync(conn, &email))
         .await
+}
+
+/// Mark every unread message in a contact's chat threads as read.
+///
+/// Single transaction: flips `messages.is_read`, mirrors on
+/// `threads.is_read`, and resets the denormalised
+/// `chat_contacts.unread_count`. Returns the `(account_id, thread_id)`
+/// pairs that had unread messages, so the caller can dispatch provider
+/// mark-read against each of them.
+pub async fn mark_chat_read_local(
+    db: &DbState,
+    email: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let email = email.to_lowercase();
+    db.with_conn(move |conn| {
+        crate::db::queries_extra::chat::mark_chat_read_local_sync(conn, &email)
+    })
+    .await
+}
+
+/// Dispatch provider `mark_read(thread, true)` for every affected thread.
+///
+/// Builds one provider per account, then reuses it across that account's
+/// threads. Failures enqueue a pending op for the periodic retry worker.
+/// Entering a chat is a navigation side effect, not a user-initiated
+/// action - no toasts, no undo, no completion handler. Callers
+/// fire-and-forget.
+pub async fn mark_chat_read_remote(
+    ctx: &ActionContext,
+    affected: Vec<(String, String)>,
+) {
+    if affected.is_empty() {
+        return;
+    }
+
+    let mut by_account: HashMap<String, Vec<String>> = HashMap::new();
+    for (aid, tid) in affected {
+        by_account.entry(aid).or_default().push(tid);
+    }
+
+    for (account_id, thread_ids) in by_account {
+        let provider = match create_provider(&ctx.db, &account_id, ctx.encryption_key).await {
+            Ok(p) => p,
+            Err(e) => {
+                for thread_id in &thread_ids {
+                    let outcome = crate::actions::ActionOutcome::LocalOnly {
+                        reason: crate::actions::ActionError::remote(e.clone()),
+                        retryable: true,
+                    };
+                    enqueue_if_retryable(
+                        ctx,
+                        &outcome,
+                        &account_id,
+                        "markRead",
+                        thread_id,
+                        r#"{"read":true}"#,
+                    )
+                    .await;
+                }
+                continue;
+            }
+        };
+
+        for thread_id in thread_ids {
+            let provider_ctx = ProviderCtx {
+                account_id: &account_id,
+                db: &ctx.db,
+                body_store: &ctx.body_store,
+                inline_images: &ctx.inline_images,
+                search: &ctx.search,
+                progress: &NoopProgressReporter,
+            };
+            let outcome = match provider.mark_read(&provider_ctx, &thread_id, true).await {
+                Ok(()) => crate::actions::ActionOutcome::Success,
+                Err(e) => crate::actions::ActionOutcome::LocalOnly {
+                    reason: crate::actions::ActionError::remote(e.to_string()),
+                    retryable: true,
+                },
+            };
+            enqueue_if_retryable(
+                ctx,
+                &outcome,
+                &account_id,
+                "markRead",
+                &thread_id,
+                r#"{"read":true}"#,
+            )
+            .await;
+        }
+    }
 }
 
 /// List all chat contacts with sidebar summary data.
