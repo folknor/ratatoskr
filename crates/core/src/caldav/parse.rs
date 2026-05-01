@@ -81,7 +81,16 @@ pub fn parse_icalendar(ical_data: &str) -> Result<Vec<ParsedVEvent>, String> {
                 }
             }
             calcard::Entry::Eof => break,
-            calcard::Entry::InvalidLine(_) => continue,
+            calcard::Entry::InvalidLine(line) => {
+                // Logged at debug rather than warn: real calendar feeds
+                // (Outlook bridges in particular) emit harmless invalid
+                // lines (e.g. malformed X-properties). At debug an
+                // operator chasing "event missing after sync" can still
+                // find the dropped lines, but the log doesn't fire on
+                // every healthy sync.
+                log::debug!("calcard parser dropped an invalid iCal line: {line}");
+                continue;
+            }
             _ => continue,
         }
     }
@@ -733,11 +742,19 @@ fn local_name(raw: &[u8]) -> String {
 }
 
 /// Check if a resource looks like an iCalendar resource.
+///
+/// Content-type matching is case-insensitive (RFC 7231 § 3.1.1.1: media-type
+/// comparison is case-insensitive); some servers emit `TEXT/CALENDAR` and
+/// callers used to silently skip every event resource on those servers.
+/// `.ics` matching ignores case for the same reason - servers occasionally
+/// emit `.ICS` upstream and we shouldn't second-guess that.
 fn is_icalendar_resource(href: &str, content_type: &str) -> bool {
-    if content_type.contains("text/calendar") {
+    let ct_lower = content_type.to_ascii_lowercase();
+    if ct_lower.contains("text/calendar") {
         return true;
     }
-    if href.ends_with(".ics") {
+    let href_lower_tail = href.to_ascii_lowercase();
+    if href_lower_tail.ends_with(".ics") {
         return true;
     }
     // Accept entries with an etag but no content type info

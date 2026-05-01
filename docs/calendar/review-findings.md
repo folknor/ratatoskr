@@ -85,12 +85,9 @@ All findings addressed. Lenses and targets:
 - **Medium** - Empty SUMMARY / DESCRIPTION dropped via `.filter(|s| !s.is_empty())` and reported as `None`, indistinguishable from absent. User can't intentionally clear the title; merger keeps the previous one.
 - **Medium** - Folded-line + CRLF handling depends on calcard. LF-only line endings (some Linux bridges) may fail to unfold; long DESCRIPTION lines get truncated. Worth a unit test covering LF-only + folded long line.
 - **Medium** - Missing or unparseable DTSTART/DTEND yields `start_time=0` (Unix epoch) downstream (`sync.rs:234`), not a logged parse failure. Users see broken events at epoch instead of skipped/diagnosed bad items.
-- **Low** - `parse_icalendar` swallows `Entry::InvalidLine(_)` silently. A debug log of the bad line would help support.
-
 ### `crates/core/src/caldav/parse.rs::is_icalendar_resource` (711-720)
 
 - **Medium** - Sub-collection URIs without trailing slash treated as event resources via the third-arm fallback (Davical, Bedework, old Zimbra emit collection URIs without `/`). Triggers REPORT 403 on the collection, which can fail the whole batch.
-- **Low** - Case-sensitive `content_type.contains("text/calendar")` and `href.ends_with(".ics")` reject `TEXT/CALENDAR`; events with UUID-style hrefs all skipped.
 - **Low** - Hrefs with query strings (`/cal/event.ics?revision=42`) end with neither `.ics` nor `/`; pass third arm only with empty content-type. CalDAV-XML form (`application/calendar+xml`, RFC 6321) silently skipped.
 
 ### `crates/core/src/caldav/parse.rs::parse_propfind_calendars` / `parse_propfind_events` / `parse_multiget_report` (402-690)
@@ -98,7 +95,6 @@ All findings addressed. Lenses and targets:
 - **High** (flagged 3x) - `<propstat><status>` is never inspected. RFC 4918 §13: a `<response>` may carry multiple `<propstat>` blocks (typically 200 OK + 404/403). Iterating every `<prop>` regardless of sibling `<status>` causes:
   - `parse_propfind_events`: mixed 207 with 200/403/404 entries treated as absent from the remote set; `sync.rs:142, 189` interprets absence as deletion -> **silent local-cache wipe**.
   - `parse_multiget_report`: per-resource error responses with stale `<calendar-data>` (SOGo on parse failure, iCloud during partial-failure batches with `<expand>`) accepted as valid; **stale data overwrites local edits**.
-- **High** (flagged 2x) - `client.rs::propfind_raw` (`:503-507`) accepts any 2xx as success, no content-type check. 200-OK-with-HTML (SSO portals, misconfigured nginx) parses as empty multistatus and triggers the same deletion path. Verify XML content-type and `<multistatus>` root before extracting.
 - **High** - `parse_multiget_report` (`:664, :679`) stores the server's raw `<href>`; `list_events` resolves to absolute, but multiget hrefs come back relative on many servers. ETag lookup misses (`sync.rs:156, 168`), event stored under the path key, next sync classifies the path key as deleted. Re-normalize to listing identity before returning.
 - **High** - Recurring resources with master + override VEVENTs collapse: sync key is `caldav:{UID}` (`sync.rs:212, 289`); same-UID different-RECURRENCE-ID instances overwrite each other. User sees only one occurrence or the exception replacing the master. Fold RECURRENCE-ID into the key.
 - **Medium** - 207 with zero `<response>` children returns empty Vec with no log; indistinguishable from "no calendars provisioned" / first-login race / server-side error misreported as 207.
@@ -121,7 +117,6 @@ All findings addressed. Lenses and targets:
 ### `crates/core/src/caldav/client.rs::discover` / `discover_principal` (128-207)
 
 - **Medium** - Relative principal/home hrefs returned by a redirected `.well-known/caldav` are resolved against the original base URL, not the redirect target.
-- **Medium** - 200-OK-with-HTML accepted; can't distinguish "not CalDAV" from "CalDAV but principal missing." Add XML content-type + `<multistatus>` root check.
 - **Medium** - Scheme-downgrade redirect risk: depends on reqwest's version stripping `Authorization` on cross-origin redirects. Verify in `Cargo.toml`.
 - **Medium** - `build_client_from_config` (`mod.rs:294-300`) replays persisted principal/home; if home is present, discovery is skipped entirely. No rediscovery fallback when persisted URLs go stale (server migration, principal deletion, etc.).
 
@@ -139,7 +134,7 @@ All findings addressed. Lenses and targets:
 
 (Issues here are downstream of the parse.rs / client.rs findings above; listed for fix-sequencing visibility.)
 
-- **High** - Empty remote set interpreted as "all stored events deleted" (`:142, :189`). Cascades from any of: empty PROPFIND body, 200-with-HTML, 207-with-no-responses, propstat-status ignored.
+- **Medium** - Empty remote set is now guarded against wiping the local cache (`sync_calendar_events` skips the deletion phase when remote returns 0 entries against a non-empty local cache). Still open: when the *initial* sync of a calendar legitimately starts empty and the server later begins returning entries, the heuristic doesn't mis-fire (remote=0 with stored=0 is a no-op). The remaining failure mode is the propstat-status-not-inspected case below, where individual entries get filtered out as "absent" mid-batch even though the response was 207-OK overall.
 - **High** - Sync key is `caldav:{UID}` (`:212, :289`); master + override VEVENTs collide on `(account_id, google_event_id)`. Need RECURRENCE-ID folded into the key.
 - **Medium** - Missing or unparseable DTSTART stores `start_time=0` (`:234`); user sees an epoch event.
 - **Low** - `can_edit=true` hard-coded on upsert (`:53, :64`); read-only calendars from iCloud / Fastmail / SOGo show edit affordances and 403 on PUT/DELETE.

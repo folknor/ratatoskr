@@ -138,12 +138,30 @@ async fn sync_calendar_events(
         }
     }
 
-    // Determine which events were deleted on the server
-    let deleted_uris: Vec<String> = stored_etags
-        .keys()
-        .filter(|uri| !remote_uri_set.contains(*uri))
-        .cloned()
-        .collect();
+    // Determine which events were deleted on the server. Defensive guard:
+    // if the remote set came back completely empty but we have stored
+    // entries, suspect a bad response (PROPFIND returning a 200/empty body,
+    // 207 with no <response> children, transient server error masquerading
+    // as success) rather than honoring it as "every event was deleted".
+    // Clearing the local cache here is irreversible from the user's
+    // perspective; preserving it costs nothing because the next successful
+    // sync naturally reconciles. Real "user deleted everything" still
+    // works through the explicit `full_resync_calendar` path.
+    let deleted_uris: Vec<String> = if remote_entries.is_empty() && !stored_etags.is_empty() {
+        log::warn!(
+            "CalDAV sync for calendar {calendar_id}: server returned 0 events but local cache has {} - \
+             suspecting a transient server failure and skipping the deletion step. \
+             Use full_resync_calendar to force-clear if this is intentional.",
+            stored_etags.len()
+        );
+        Vec::new()
+    } else {
+        stored_etags
+            .keys()
+            .filter(|uri| !remote_uri_set.contains(*uri))
+            .cloned()
+            .collect()
+    };
 
     log::info!(
         "CalDAV sync for calendar {calendar_id}: {} to fetch, {} unchanged, {} deleted",

@@ -529,7 +529,25 @@ impl CalDavClient {
             .map_err(|e| format!("PROPFIND {url}: {e}"))?;
 
         let status = resp.status();
+        let content_type = response_content_type(&resp);
         let text = resp.text().await.map_err(|e| format!("read body: {e}"))?;
+
+        // Some auth flows (SSO portals, misconfigured nginx in front of a
+        // CalDAV server) terminate before reaching the backend and return
+        // 200 OK with an HTML login page. Without this guard the parser
+        // sees an "empty multistatus", returns no calendars/events, and
+        // the sync layer interprets that as "all events deleted" - silent
+        // local-cache wipe. Rejecting HTML responses here makes the
+        // failure visible (caller surfaces an error) instead of silent.
+        if content_type
+            .as_deref()
+            .is_some_and(|ct| ct.eq_ignore_ascii_case("text/html") || ct.starts_with("text/html"))
+        {
+            return Err(format!(
+                "PROPFIND {url} returned non-XML response (content-type: {}); refusing to treat as multistatus",
+                content_type.as_deref().unwrap_or("?")
+            ));
+        }
 
         if status.is_success() || status == StatusCode::MULTI_STATUS {
             Ok((status, text))
@@ -555,7 +573,18 @@ impl CalDavClient {
             .map_err(|e| format!("REPORT {url}: {e}"))?;
 
         let status = resp.status();
+        let content_type = response_content_type(&resp);
         let text = resp.text().await.map_err(|e| format!("read body: {e}"))?;
+
+        if content_type
+            .as_deref()
+            .is_some_and(|ct| ct.eq_ignore_ascii_case("text/html") || ct.starts_with("text/html"))
+        {
+            return Err(format!(
+                "REPORT {url} returned non-XML response (content-type: {}); refusing to treat as multistatus",
+                content_type.as_deref().unwrap_or("?")
+            ));
+        }
 
         if status.is_success() || status == StatusCode::MULTI_STATUS {
             Ok((status, text))
@@ -721,6 +750,16 @@ fn local_name(raw: &[u8]) -> String {
         Some(idx) => full[idx + 1..].to_string(),
         None => full.to_string(),
     }
+}
+
+/// Read the response's `Content-Type` header as a lowercased, parameter-
+/// stripped media type (e.g. `application/xml`). Returns `None` if the
+/// header is missing, not ASCII-decodable, or empty.
+fn response_content_type(resp: &reqwest::Response) -> Option<String> {
+    let raw = resp.headers().get(reqwest::header::CONTENT_TYPE)?;
+    let s = raw.to_str().ok()?;
+    let trimmed = s.split(';').next()?.trim().to_ascii_lowercase();
+    if trimmed.is_empty() { None } else { Some(trimmed) }
 }
 
 /// Escape `&`, `<`, and `>` for safe inclusion in XML element content.
