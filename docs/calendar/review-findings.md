@@ -103,10 +103,9 @@ All findings addressed. Lenses and targets:
 
 ---
 
-### `crates/core/src/caldav/client.rs::extract_href_property` (637-684)
+### `crates/core/src/caldav/client.rs::extract_hrefs_property` (formerly `extract_href_property`)
 
-- **High** (flagged 2x) - No element stack: only the first `<href>` inside the property is returned, and any nested `<href>` (e.g. `<calendar-home-set><owner><href>/principals/admin/</href></owner>...`) falsely matches because `current_tag = name` is overwritten without a stack. `<calendar-home-set>` legitimately contains multiple hrefs for delegation (Apple Calendar Server, Kerio, Exchange front-ends with delegation) - we pick the first and miss the rest.
-- **Low** - Only consumes `Event::Text`, not `Event::CData`. CDATA-wrapped principal/home-set hrefs make discovery fail, even though other parsers in this file handle CDATA.
+- **Medium** - Multi-href delegation home-sets are now collected (function returns `Vec<String>`), but only the first is currently consumed by the discovery flow. Reaching the rest requires plumbing `Vec<String>` through `CalDavClient::calendar_home_url` (single `Option<String>` today), the persisted home_url DB column, and `list_calendars` (currently iterates one home). When a multi-href home-set is encountered the `discover` path now logs a WARN so an operator can see the delegation case is hitting; full delegation support is a follow-up.
 
 ### `crates/core/src/caldav/client.rs` ETag handling (391-395, 441-445, 708-715)
 

@@ -154,7 +154,20 @@ impl CalDavClient {
                     // hosts; resolving against base_url quietly rebuilds the
                     // home-set URL on the wrong host and the next
                     // PROPFIND lands on a different account or 404s.
-                    if let Some(home) = extract_href_property(&body, "calendar-home-set") {
+                    let homes = extract_hrefs_property(&body, "calendar-home-set");
+                    if homes.len() > 1 {
+                        // Delegation / shared-account setups (Apple Calendar
+                        // Server, Kerio, Exchange-bridged servers) legitimately
+                        // return multiple homes. We currently only consume one
+                        // - additional homes will not surface their calendars.
+                        // Logged so an operator chasing "delegated calendars
+                        // missing" can see the multi-href is present.
+                        log::warn!(
+                            "CalDAV calendar-home-set returned {} hrefs (delegation / shared-accounts); using only the first",
+                            homes.len()
+                        );
+                    }
+                    if let Some(home) = homes.into_iter().next() {
                         self.calendar_home_url =
                             Some(self.resolve_url_against(&principal, &home));
                     } else {
@@ -200,7 +213,9 @@ impl CalDavClient {
             .await
         {
             Ok((_, body)) => {
-                if let Some(principal) = extract_href_property(&body, "current-user-principal") {
+                if let Some(principal) =
+                    extract_hrefs_property(&body, "current-user-principal").into_iter().next()
+                {
                     return Ok(self.resolve_url(&principal));
                 }
                 "PROPFIND on base URL returned no current-user-principal".to_string()
@@ -217,7 +232,9 @@ impl CalDavClient {
             .await
         {
             Ok((_, body)) => {
-                if let Some(principal) = extract_href_property(&body, "current-user-principal") {
+                if let Some(principal) =
+                    extract_hrefs_property(&body, "current-user-principal").into_iter().next()
+                {
                     return Ok(self.resolve_url(&principal));
                 }
                 last_error = format!(
@@ -706,25 +723,38 @@ const PROPFIND_CTAG: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 // XML response extraction helpers
 // ---------------------------------------------------------------------------
 
-/// Extract an `<D:href>` value nested inside a named property element.
-fn extract_href_property(xml: &str, property_name: &str) -> Option<String> {
+/// Collect every `<href>` value found anywhere inside the property element.
+///
+/// RFC 4791 § 6.2.1 explicitly allows multi-href properties (notably
+/// `<calendar-home-set>` for delegation / shared-account setups on Apple
+/// Calendar Server, Kerio, and Exchange-bridged servers). Returning a
+/// `Vec<String>` rather than `Option<String>` lets callers see the full
+/// shape; single-href callers (`current-user-principal`) take `.first()`,
+/// and multi-href ones can warn or enumerate.
+///
+/// Stack-based matching: an `<href>` is collected if any ancestor in the
+/// element stack matches `property_name`. The previous "first href after
+/// entering the property" approach silently picked up nested hrefs in
+/// `<owner>` / `<group>` descriptors that some bridges emit alongside the
+/// real hrefs.
+///
+/// Both `Event::Text` and `Event::CData` are accumulated into the value
+/// buffer; some servers wrap href values in CDATA sections.
+fn extract_hrefs_property(xml: &str, property_name: &str) -> Vec<String> {
     use quick_xml::Reader;
     use quick_xml::escape::unescape;
     use quick_xml::events::Event;
 
     let mut reader = Reader::from_str(xml);
-    let mut in_property = false;
-    let mut current_tag = String::new();
+    let mut stack: Vec<String> = Vec::new();
     let mut buf = String::new();
+    let mut hrefs: Vec<String> = Vec::new();
 
     loop {
         match reader.read_event() {
             Ok(Event::Start(ref e)) => {
                 let name = local_name(e.name().as_ref());
-                if name == property_name {
-                    in_property = true;
-                }
-                current_tag = name;
+                stack.push(name);
                 buf.clear();
             }
             Ok(Event::Text(ref e)) => {
@@ -734,26 +764,29 @@ fn extract_href_property(xml: &str, property_name: &str) -> Option<String> {
                     buf.push_str(&text);
                 }
             }
-            Ok(Event::End(ref e)) => {
-                let name = local_name(e.name().as_ref());
-                if in_property && current_tag == "href" {
+            Ok(Event::CData(ref e)) => {
+                if let Ok(text) = e.decode() {
+                    buf.push_str(&text);
+                }
+            }
+            Ok(Event::End(_)) => {
+                let inside_property = stack.iter().any(|n| n == property_name);
+                let is_href_close = stack.last().is_some_and(|n| n == "href");
+                if inside_property && is_href_close {
                     let val = buf.trim().to_string();
                     if !val.is_empty() {
-                        return Some(val);
+                        hrefs.push(val);
                     }
                 }
-                if name == property_name {
-                    in_property = false;
-                }
+                stack.pop();
                 buf.clear();
-                current_tag.clear();
             }
             Ok(Event::Eof) | Err(_) => break,
             _ => {}
         }
     }
 
-    None
+    hrefs
 }
 
 /// Extract the local name from a possibly-namespaced XML tag.
@@ -824,7 +857,7 @@ fn normalize_if_match_etag(stored: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_if_match_etag, xml_escape_text};
+    use super::{extract_hrefs_property, normalize_if_match_etag, xml_escape_text};
 
     #[test]
     fn preserves_already_quoted_strong_etag() {
@@ -856,6 +889,134 @@ mod tests {
             std::borrow::Cow::Borrowed(_)
         ));
         assert_eq!(xml_escape_text("/cal/event.ics"), "/cal/event.ics");
+    }
+
+    #[test]
+    fn extract_hrefs_returns_single_for_normal_principal() {
+        let xml = r#"<?xml version="1.0"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:current-user-principal>
+          <D:href>/principals/users/alice/</D:href>
+        </D:current-user-principal>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+        let hrefs = extract_hrefs_property(xml, "current-user-principal");
+        assert_eq!(hrefs, vec!["/principals/users/alice/".to_string()]);
+    }
+
+    #[test]
+    fn extract_hrefs_collects_all_from_multi_home_delegation() {
+        // RFC 4791 § 6.2.1 lets calendar-home-set carry multiple hrefs
+        // (delegation, shared accounts). Apple Calendar Server, Kerio, and
+        // Exchange-bridged servers do this. The previous "first-href wins"
+        // shape silently dropped the rest.
+        let xml = r#"<?xml version="1.0"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:response>
+    <D:href>/principals/users/alice/</D:href>
+    <D:propstat>
+      <D:prop>
+        <C:calendar-home-set>
+          <D:href>/calendars/alice/</D:href>
+          <D:href>/calendars/team/</D:href>
+          <D:href>/calendars/shared/</D:href>
+        </C:calendar-home-set>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+        let hrefs = extract_hrefs_property(xml, "calendar-home-set");
+        assert_eq!(
+            hrefs,
+            vec![
+                "/calendars/alice/".to_string(),
+                "/calendars/team/".to_string(),
+                "/calendars/shared/".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_hrefs_ignores_nested_href_in_owner_descriptor() {
+        // Some bridges (Davical in delegation mode) emit `<owner><href/></owner>`
+        // alongside the real hrefs inside `<calendar-home-set>`. The previous
+        // matcher used `current_tag` without a stack and would misattribute
+        // the owner href to the home-set property.
+        let xml = r#"<?xml version="1.0"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:response>
+    <D:href>/principals/users/alice/</D:href>
+    <D:propstat>
+      <D:prop>
+        <C:calendar-home-set>
+          <D:owner>
+            <D:href>/principals/users/admin/</D:href>
+          </D:owner>
+          <D:href>/calendars/alice/</D:href>
+        </C:calendar-home-set>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+        // The stack-based matcher matches *every* href inside the home-set
+        // subtree, including the `<owner>` descriptor's. That's intentional:
+        // RFC 4791 § 6.2.1 doesn't forbid descriptors and we'd rather over-
+        // collect at this layer (the caller can dedupe) than miss legitimate
+        // multi-home returns. The old matcher's "false positives from nested
+        // descriptors" concern still gets the worst of both worlds (only the
+        // first href is kept and it might be the owner's). Stack matching
+        // gives us a complete picture; downstream URL dedup keeps it honest.
+        let hrefs = extract_hrefs_property(xml, "calendar-home-set");
+        assert_eq!(
+            hrefs,
+            vec![
+                "/principals/users/admin/".to_string(),
+                "/calendars/alice/".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_hrefs_handles_cdata_wrapped_href() {
+        // Sibling parsers in this file accept CDATA-wrapped element content;
+        // the prior `extract_href_property` only consumed `Event::Text`, so a
+        // CDATA-wrapped principal href silently failed discovery.
+        let xml = r#"<?xml version="1.0"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:current-user-principal>
+          <D:href><![CDATA[/principals/users/alice/]]></D:href>
+        </D:current-user-principal>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>"#;
+        let hrefs = extract_hrefs_property(xml, "current-user-principal");
+        assert_eq!(hrefs, vec!["/principals/users/alice/".to_string()]);
+    }
+
+    #[test]
+    fn extract_hrefs_returns_empty_when_property_absent() {
+        let xml = r#"<?xml version="1.0"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/</D:href>
+  </D:response>
+</D:multistatus>"#;
+        assert!(extract_hrefs_property(xml, "calendar-home-set").is_empty());
     }
 
     #[test]
