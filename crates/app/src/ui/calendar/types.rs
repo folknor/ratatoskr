@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use chrono::{Datelike, Local, NaiveDate, Weekday};
+use chrono::{Datelike, Local, NaiveDate, TimeZone, Weekday};
 
 use crate::ui::calendar_month;
 use crate::ui::calendar_time_grid;
@@ -334,6 +334,30 @@ pub struct CalendarListEntry {
     pub is_visible: bool,
 }
 
+fn first_day_of_month(year: i32, month: u32) -> Option<NaiveDate> {
+    NaiveDate::from_ymd_opt(year, month, 1)
+}
+
+fn local_midnight_unix(date: NaiveDate) -> i64 {
+    let naive = match date.and_hms_opt(0, 0, 0) {
+        Some(d) => d,
+        None => return 0,
+    };
+    Local
+        .from_local_datetime(&naive)
+        .single()
+        .map(|dt| dt.timestamp())
+        // Spring-forward midnight is non-existent in some zones (rare; no
+        // current IANA zone springs forward at 00:00 but the API permits
+        // it). The window is approximate so we round up to the next
+        // representable minute.
+        .unwrap_or_else(|| {
+            naive
+                .and_utc()
+                .timestamp()
+        })
+}
+
 /// Persistent calendar state (survives mode switches).
 pub struct CalendarState {
     /// The currently selected/focused date.
@@ -399,6 +423,46 @@ impl CalendarState {
             dates_with_events: HashSet::new(),
             load_generation: rtsk::generation::GenerationCounter::new(),
         }
+    }
+
+    /// Compute the (start, end) Unix-second window the current view needs
+    /// loaded.
+    ///
+    /// We use a generous 3-month band centered on the currently-displayed
+    /// mini-month rather than the active view's tight range. Reasons:
+    /// - The month-view grid spans up to 6 weeks (mini_month +- a few days
+    ///   from neighbouring months), so a tight month window would clip the
+    ///   leading/trailing rows.
+    /// - The user navigates nearby weeks frequently; loading +-1 month
+    ///   means most arrow-key navigation hits already-loaded data without
+    ///   re-running the SELECT under the connection mutex.
+    /// - Recurring rows are loaded regardless of window (they pass the
+    ///   `recurrence_rule IS NOT NULL` branch in SQL), so the window only
+    ///   bounds non-recurring rows. A wider window costs almost nothing.
+    ///
+    /// The window is also used inside `expand_view_events` to clip the
+    /// recurrence-expansion output, so unbounded RRULEs don't pour years
+    /// of instances into the view.
+    pub fn current_view_window(&self) -> (i64, i64) {
+        let prev = first_day_of_month(self.mini_month_year, self.mini_month_month)
+            .and_then(|d| d.checked_sub_months(chrono::Months::new(1)))
+            .unwrap_or_else(|| {
+                first_day_of_month(self.mini_month_year, self.mini_month_month)
+                    .unwrap_or_else(|| Local::now().date_naive())
+            });
+        let next = first_day_of_month(self.mini_month_year, self.mini_month_month)
+            .and_then(|d| d.checked_add_months(chrono::Months::new(2)))
+            .unwrap_or_else(|| {
+                first_day_of_month(self.mini_month_year, self.mini_month_month)
+                    .unwrap_or_else(|| Local::now().date_naive())
+            });
+        // Anchor in chrono::Local. The window is approximate by design so
+        // a host-zone offset of a few hours doesn't matter; the exact
+        // boundary is meaningless for the SQL filter (it's just bounding
+        // the result set).
+        let start = local_midnight_unix(prev);
+        let end = local_midnight_unix(next);
+        (start, end)
     }
 
     /// Parse a view name string from the settings table.

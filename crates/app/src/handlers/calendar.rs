@@ -659,14 +659,21 @@ impl App {
     /// Reload calendar events from DB and rebuild views.
     ///
     /// Increments the load generation counter so that results from
-    /// previously-dispatched (now stale) loads are discarded.
+    /// previously-dispatched (now stale) loads are discarded. The
+    /// (start, end) window is computed from the currently-visible
+    /// mini-month so the SQL filter actually bounds the result and the
+    /// connection mutex isn't held while the recurrence expansion runs.
     pub(crate) fn reload_calendar_events(&mut self) -> Task<Message> {
         let load_generation = self.calendar.load_generation.next();
         let db = Arc::clone(&self.db);
         let db2 = Arc::clone(&self.db);
+        let (window_start, window_end) = self.calendar.current_view_window();
         Task::batch([
             Task::perform(
-                async move { db.load_calendar_events_for_view().await },
+                async move {
+                    db.load_calendar_events_for_view(window_start, window_end)
+                        .await
+                },
                 move |r| {
                     Message::Calendar(Box::new(CalendarMessage::EventsLoaded(load_generation, r)))
                 },

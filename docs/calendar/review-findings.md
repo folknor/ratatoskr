@@ -82,22 +82,6 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
 
 #### `expand_recurrence` / load path
 
-3. **High** [perf/claude H2, perf/codex Medium, arch/claude Medium reference] -
-   **`load_calendar_events_for_view_sync` runs RRULE expansion under the
-   DB connection lock, on every event in the table.** `:986-1050`. The
-   function holds `&Connection` (caller holds the mutex via
-   `Arc<Mutex<Connection>>`), runs the SELECT, then expands every
-   recurring row and `sort_by_key`s the result. Connection mutex is
-   held throughout - sync workers, IPC, search, body store all wait.
-   With YEARLY_MAX_STEPS=80_000 each `expand_yearly` may walk up to 80k
-   × 12 × ~30 candidates with a `tz.resolve()` per visit; 100 recurring
-   rules push into "tens of milliseconds per render" territory. The
-   SQL has no time window so all events ever synced are loaded and
-   expanded on every call (unbounded under the project's 5+ years of
-   history target). Fix: take a `(start, end)` parameter, push it into
-   SQL (`WHERE end_time > ? AND start_time < ?`), then drop the
-   connection before expansion.
-
 6. **Medium** [bugs/claude M1] - **Windows zone names fall through to
    `chrono::Local`.** `RecurrenceTz::from_event_timezone` (`:1085-1103`)
    only resolves IANA via `chrono_tz::Tz::from_str`. Microsoft display
@@ -173,11 +157,12 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
     single-day check.
 
 16. **Note (perf)** [perf/codex Medium implicit, perf/claude reference] -
-    **`YEARLY_MAX_STEPS=80_000` amplifies the expansion-under-mutex
-    issue (#3).** Sparse YEARLY rules (e.g.
-    `BYMONTH=2;BYMONTHDAY=29;COUNT=10000`) now walk 40k years before
-    the count cap fires. Fixing #3 first removes the operational
-    impact.
+    **`YEARLY_MAX_STEPS=80_000` is large but no longer a render-path
+    concern.** Sparse YEARLY rules
+    (`BYMONTH=2;BYMONTHDAY=29;COUNT=10000`) walk up to 40k years before
+    the count cap fires; expansion now runs off the connection mutex via
+    `expand_view_events`, so this only burns a CPU thread for a single
+    pathological row rather than blocking sync workers and IPC.
 
 17. **Low** [bugs/claude L1] - **`start_of_week` fallback returns the
     un-walked timestamp; `shift_to_weekday` then trusts that anchor.**

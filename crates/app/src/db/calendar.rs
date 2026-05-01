@@ -1,7 +1,7 @@
 use rtsk::db::queries_extra::calendars::{
     LocalCalendarEventParams, create_calendar_event_sync, delete_calendar_event_sync,
-    get_calendar_event_sync, get_event_attendees_sync, get_event_reminders_sync,
-    load_calendar_events_for_view_sync, load_calendars_for_sidebar_sync,
+    expand_view_events, get_calendar_event_sync, get_event_attendees_sync,
+    get_event_reminders_sync, load_calendars_for_sidebar_sync, load_view_event_rows_sync,
     set_calendar_visibility_sync, update_calendar_event_sync,
 };
 
@@ -59,37 +59,46 @@ impl Db {
             .await
     }
 
-    /// Load all calendar events as TimeGridEvent for view rendering.
+    /// Load calendar events for view rendering, clipped to a time window.
+    ///
+    /// Window is provided by the caller (the active view's date range) so
+    /// the SQL filter actually bounds the result set. The split into
+    /// "load rows under the connection mutex" + "expand outside" keeps the
+    /// CPU-heavy RRULE walk off the lock - sync workers, IPC, search, and
+    /// the body store no longer block while expansion runs. (Round 3 #3.)
     pub async fn load_calendar_events_for_view(
         &self,
+        window_start: i64,
+        window_end: i64,
     ) -> Result<Vec<crate::ui::calendar_time_grid::TimeGridEvent>, String> {
-        self.with_conn(|conn| {
-            let core_events = load_calendar_events_for_view_sync(conn)?;
-            Ok(core_events
-                .into_iter()
-                .map(|ev| crate::ui::calendar_time_grid::TimeGridEvent {
-                    id: ev.id,
-                    title: ev.title,
-                    start_time: ev.start_time,
-                    end_time: ev.end_time,
-                    all_day: ev.all_day,
-                    color: ev.color,
-                    calendar_name: ev.calendar_name,
-                    location: ev.location,
-                    recurrence_rule: ev.recurrence_rule,
-                    calendar_id: ev.calendar_id,
-                    account_id: ev.account_id,
-                    organizer_name: ev.organizer_name,
-                    organizer_email: ev.organizer_email,
-                    rsvp_status: ev.rsvp_status,
-                    description: ev.description,
-                    availability: ev.availability,
-                    visibility: ev.visibility,
-                    timezone: ev.timezone,
-                })
-                .collect())
-        })
-        .await
+        let rows = self
+            .with_conn(move |conn| load_view_event_rows_sync(conn, window_start, window_end))
+            .await?;
+        // Expand off the lock. Pure CPU work over the loaded Vec.
+        let core_events = expand_view_events(rows, window_start, window_end);
+        Ok(core_events
+            .into_iter()
+            .map(|ev| crate::ui::calendar_time_grid::TimeGridEvent {
+                id: ev.id,
+                title: ev.title,
+                start_time: ev.start_time,
+                end_time: ev.end_time,
+                all_day: ev.all_day,
+                color: ev.color,
+                calendar_name: ev.calendar_name,
+                location: ev.location,
+                recurrence_rule: ev.recurrence_rule,
+                calendar_id: ev.calendar_id,
+                account_id: ev.account_id,
+                organizer_name: ev.organizer_name,
+                organizer_email: ev.organizer_email,
+                rsvp_status: ev.rsvp_status,
+                description: ev.description,
+                availability: ev.availability,
+                visibility: ev.visibility,
+                timezone: ev.timezone,
+            })
+            .collect())
     }
 
     /// Delete a calendar event by id.

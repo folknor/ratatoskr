@@ -1005,16 +1005,25 @@ pub struct CalendarViewEvent {
     pub recurrence_id_canonical: Option<String>,
 }
 
-/// Load all calendar events with resolved calendar colors (synchronous).
+/// Load calendar event rows in the visible window (synchronous, DB-only).
 ///
-/// Recurring events are expanded into concrete instances; rows that
-/// override a specific instance via RECURRENCE-ID are emitted in place
-/// of the corresponding master expansion slot. Without that subtraction,
-/// a master series with one moved instance would render as N+1 events
-/// (the original slot AND the override) - exactly the phantom-override
-/// regression review #1 surfaced after the storage-key fix in Round 2.
-pub fn load_calendar_events_for_view_sync(
+/// Pushes the window into the SQL `WHERE` clause for non-recurring rows so
+/// the result set scales with what the user is actually viewing rather
+/// than with the entire history (the project targets 5+ years of synced
+/// data, which the previous "load everything" shape walked on every
+/// render). Recurring masters are kept regardless of their start/end
+/// because their stored `start_time`/`end_time` reflect the MASTER, not
+/// the instance window an RRULE actually covers - excluding them by
+/// the master's own bounds would silently drop recurring events whose
+/// instances run far past or before the master itself.
+///
+/// This function only loads. Expansion is deferred to
+/// `expand_view_events` (which has no DB dependency), so callers can
+/// drop the connection mutex before the CPU-heavy walk. (Round 3 #3.)
+pub fn load_view_event_rows_sync(
     conn: &rusqlite::Connection,
+    window_start: i64,
+    window_end: i64,
 ) -> Result<Vec<CalendarViewEvent>, String> {
     let mut stmt = conn
         .prepare(
@@ -1028,12 +1037,16 @@ pub fn load_calendar_events_for_view_sync(
              FROM calendar_events e
              LEFT JOIN calendars c
                ON c.account_id = e.account_id AND c.id = e.calendar_id
-             WHERE c.is_visible = 1 OR e.calendar_id IS NULL
+             WHERE (c.is_visible = 1 OR e.calendar_id IS NULL)
+               AND (
+                 e.recurrence_rule IS NOT NULL
+                 OR (e.start_time < ?1 AND e.end_time > ?2)
+               )
              ORDER BY e.start_time ASC",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map([], |row| {
+        .query_map(params![window_end, window_start], |row| {
             // Prefer `title` over `summary` (title is the v63 canonical field).
             let title_v63: Option<String> = row.get("title")?;
             let summary: Option<String> = row.get("summary")?;
@@ -1064,10 +1077,28 @@ pub fn load_calendar_events_for_view_sync(
             })
         })
         .map_err(|e| e.to_string())?;
-    let base_events: Vec<CalendarViewEvent> = rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
 
+/// Expand recurring rows into concrete instances and clip to the visible
+/// window. Pure CPU work - no DB access - so it runs off the connection
+/// mutex.
+///
+/// Override rows (RECURRENCE-ID set) are emitted in their own slot, and
+/// each master expansion subtracts the overridden slots so a series with
+/// one moved instance shows N events rather than N+1. See
+/// `expand_recurrence_with_overrides` for the dedup mechanism.
+///
+/// `window_start` / `window_end` clip the final result so an unbounded
+/// recurring rule (no UNTIL) doesn't pour 800+ default-capped instances
+/// into the view when the user is only looking at a single week. The
+/// expander still produces up to its cap; the clip drops anything
+/// outside [window_start, window_end).
+pub fn expand_view_events(
+    rows: Vec<CalendarViewEvent>,
+    window_start: i64,
+    window_end: i64,
+) -> Vec<CalendarViewEvent> {
     // Build a (account_id, uid) -> set of override canonical strings index
     // before expansion. The master row carries `recurrence_id_canonical =
     // None` and the RRULE; each override row carries its own
@@ -1075,7 +1106,7 @@ pub fn load_calendar_events_for_view_sync(
     // canonicalise each candidate timestamp with the same shape and skip
     // it when it lands in this set.
     let mut overrides_by_series: HashMap<(String, String), HashSet<String>> = HashMap::new();
-    for ev in &base_events {
+    for ev in &rows {
         if let (Some(uid), Some(canonical)) =
             (ev.uid.as_ref(), ev.recurrence_id_canonical.as_ref())
         {
@@ -1086,9 +1117,8 @@ pub fn load_calendar_events_for_view_sync(
         }
     }
 
-    // Expand recurring events into concrete instances.
-    let mut expanded = Vec::with_capacity(base_events.len());
-    for ev in base_events {
+    let mut expanded = Vec::with_capacity(rows.len());
+    for ev in rows {
         if let Some(ref rrule) = ev.recurrence_rule {
             let overrides = ev
                 .uid
@@ -1098,14 +1128,35 @@ pub fn load_calendar_events_for_view_sync(
                 })
                 .cloned()
                 .unwrap_or_default();
-            let mut instances = expand_recurrence_with_overrides(&ev, rrule, &overrides);
-            expanded.append(&mut instances);
+            for inst in expand_recurrence_with_overrides(&ev, rrule, &overrides) {
+                // Clip to window: an unbounded rule's expansion can
+                // produce instances years before/after the visible
+                // range. Keep instances that overlap [start, end).
+                if inst.start_time < window_end && inst.end_time > window_start {
+                    expanded.push(inst);
+                }
+            }
         } else {
             expanded.push(ev);
         }
     }
     expanded.sort_by_key(|e| e.start_time);
-    Ok(expanded)
+    expanded
+}
+
+/// Compatibility wrapper: loads + expands in one synchronous call. Holds
+/// the connection mutex for the full duration. Prefer the
+/// `load_view_event_rows_sync` + `expand_view_events` split for hot
+/// paths (the iced app's calendar reload runs once per nav refresh and
+/// would otherwise block sync workers, IPC, search, and body store on
+/// each render).
+pub fn load_calendar_events_for_view_sync(
+    conn: &rusqlite::Connection,
+    window_start: i64,
+    window_end: i64,
+) -> Result<Vec<CalendarViewEvent>, String> {
+    let rows = load_view_event_rows_sync(conn, window_start, window_end)?;
+    Ok(expand_view_events(rows, window_start, window_end))
 }
 
 /// Hard cap on COUNT to bound allocation. Real-world recurring events stay
