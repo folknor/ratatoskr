@@ -654,6 +654,17 @@ fn resolve_set_block_type(doc: &Document, selection: DocSelection, kind: BlockKi
         return vec![];
     }
 
+    // Don't allow creating block types that have no addressable inline runs
+    // (HR, Image, BlockQuote). The editor's flat `DocPosition` can't reach
+    // content inside a BlockQuote, so wrapping a paragraph in one would
+    // immediately strand the cursor on an unwritable block.
+    if matches!(
+        new_kind,
+        BlockKind::HorizontalRule | BlockKind::Image | BlockKind::BlockQuote
+    ) {
+        return vec![];
+    }
+
     vec![EditOp::SetBlockType {
         block_index,
         old: current_kind,

@@ -360,7 +360,6 @@ fn signature_formatting_toolbar<'a>(
         Space::new().width(SPACE_XS),
         block_btn(icon::list(), BlockKind::ListItem { ordered: false }),
         block_btn(icon::list_ordered(), BlockKind::ListItem { ordered: true }),
-        block_btn(icon::text_quote(), BlockKind::BlockQuote),
     ]
     .spacing(SPACE_XXXS)
     .align_y(Alignment::Center);

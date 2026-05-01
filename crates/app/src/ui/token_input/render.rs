@@ -8,6 +8,31 @@ use crate::ui::layout::*;
 use super::layout::text_area_origin;
 use super::widget::{TokenInputState, TokenInputWidget};
 
+/// Measure the rendered width of the text-input value using iced's text
+/// shaper, so the caret position matches what the user sees on screen for
+/// variable-width fonts (Inter has wider `m`/`w` and narrower `i`/`l`).
+fn measure_text_width(text: &str) -> f32 {
+    use iced::advanced::text::{
+        Alignment, Ellipsis, LineHeight, Paragraph as ParagraphTrait, Shaping, Wrapping,
+    };
+    type IcedParagraph = <iced::Renderer as iced::advanced::text::Renderer>::Paragraph;
+
+    let measure = iced::advanced::text::Text {
+        content: text,
+        bounds: Size::new(f32::INFINITY, f32::INFINITY),
+        size: iced::Pixels(TEXT_LG),
+        line_height: LineHeight::default(),
+        font: font::text(),
+        align_x: Alignment::Left,
+        align_y: iced::alignment::Vertical::Top,
+        shaping: Shaping::Advanced,
+        wrapping: Wrapping::None,
+        ellipsis: Ellipsis::None,
+        hint_factor: None,
+    };
+    IcedParagraph::with_text(measure).min_bounds().width
+}
+
 /// Draw the people icon glyph for group tokens using the icon font. The
 /// caller positions `position` at the top-left of the icon's square box;
 /// `bounds` and `line_height` are set to exactly the icon size so the
@@ -99,15 +124,15 @@ pub(super) fn draw_text_area(
         );
     }
 
-    // Text cursor when focused and no token selected
+    // Text cursor when focused and no token selected. The x-position is
+    // measured from iced's actual text shaping (matches what the renderer
+    // draws above) rather than a per-char-width heuristic, so the caret
+    // tracks variable-width Inter glyphs precisely.
     if state.is_focused && widget.selected_token.is_none() {
-        #[allow(clippy::cast_precision_loss)]
         let cursor_x = if widget.text.is_empty() {
             bounds.x + text_x
         } else {
-            let text_width =
-                widget.text.chars().count() as f32 * TEXT_LG * TOKEN_AVG_CHAR_WIDTH_FACTOR;
-            bounds.x + text_x + text_width
+            bounds.x + text_x + measure_text_width(widget.text)
         };
         let cursor_y = bounds.y + text_y + SPACE_XXXS;
         let cursor_height = TOKEN_HEIGHT - SPACE_XXS;

@@ -423,10 +423,20 @@ fn apply_insert_text(doc: &mut Document, position: DocPosition, text: &str) -> P
         .expect("InsertText: block_index out of bounds")
         .clone();
 
+    // Container blocks (BlockQuote), HorizontalRule, and Image don't have
+    // direct inline runs. The flat `DocPosition` model can't address content
+    // nested inside a BlockQuote, so editing on top of one is a no-op rather
+    // than a panic. The toolbar block-type resolver guards against creating
+    // this state, but the cursor can still land on such a block via reply
+    // content parsing or hit-testing.
     let mut block = block;
-    let runs = block
-        .runs_mut()
-        .expect("InsertText: block has no inline runs");
+    let Some(runs) = block.runs_mut() else {
+        return PosMap {
+            block_index: position.block_index,
+            entries: Vec::new(),
+            structural: None,
+        };
+    };
 
     insert_text_into_runs(runs, position.offset, text);
     doc.replace_block(position.block_index, block);
@@ -492,9 +502,15 @@ fn apply_single_block_delete(doc: &mut Document, start: DocPosition, end: DocPos
         .clone();
 
     let mut block = block;
-    let runs = block
-        .runs_mut()
-        .expect("DeleteRange: block has no inline runs");
+    let Some(runs) = block.runs_mut() else {
+        // Same reasoning as apply_insert_text: container/atom blocks have no
+        // addressable inline content under the flat DocPosition model.
+        return PosMap {
+            block_index: start.block_index,
+            entries: Vec::new(),
+            structural: None,
+        };
+    };
 
     let range = isolate_runs(runs, start.offset, end.offset);
     if range.start < range.end {
@@ -1267,6 +1283,41 @@ mod tests {
         .apply(&mut doc);
         assert_eq!(block_text(&doc, 0), "first!");
         assert!(Arc::ptr_eq(&doc.blocks[1], &original_second));
+    }
+
+    #[test]
+    fn insert_text_into_blockquote_is_noop() {
+        // Regression: clicking the toolbar's blockquote button used to wrap
+        // a paragraph in a Block::BlockQuote and the next keystroke would
+        // panic in apply_insert_text because BlockQuote has no inline runs.
+        // The toolbar resolver now refuses to create that state, but the
+        // operation itself must also defend against it for hit-testing /
+        // parsed-content paths.
+        let original = Block::BlockQuote {
+            blocks: vec![Arc::new(Block::paragraph("inner"))],
+        };
+        let mut doc = Document::from_blocks(vec![original.clone()]);
+        let op = EditOp::InsertText {
+            position: DocPosition::new(0, 0),
+            text: " ".into(),
+        };
+        op.apply(&mut doc);
+        // The block is unchanged; the keystroke was silently dropped.
+        assert_eq!(doc.block(0), Some(&original));
+    }
+
+    #[test]
+    fn insert_text_into_horizontal_rule_is_noop() {
+        let mut doc = Document::from_blocks(vec![
+            Block::paragraph("text"),
+            Block::HorizontalRule,
+        ]);
+        let op = EditOp::InsertText {
+            position: DocPosition::new(1, 0),
+            text: "x".into(),
+        };
+        op.apply(&mut doc);
+        assert!(matches!(doc.block(1), Some(&Block::HorizontalRule)));
     }
 
     #[test]

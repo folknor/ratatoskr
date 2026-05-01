@@ -194,20 +194,56 @@ pub fn remove_signature(document: &mut Document, separator_index: usize, end_ind
     }
 }
 
-/// Replace a signature in a document.
+/// Find the end of a signature region given its separator (HR) index.
 ///
-/// Removes the old signature region, then inserts the new one at the same
-/// position. Returns the new separator index, or `None` if no new signature.
+/// Returns the index of the block immediately following the signature, i.e.
+/// the first block that is *not* part of the signature region. The signature
+/// runs from `separator_index` (HR) up to but not including the returned end.
+///
+/// The end is detected by scanning forward for a `BlockQuote` (the quoted
+/// reply/forward content); the block immediately preceding it is the
+/// attribution paragraph and marks the boundary. If no `BlockQuote` is found,
+/// the signature runs to the end of the document.
+pub fn find_signature_end(document: &Document, separator_index: usize) -> usize {
+    let count = document.block_count();
+    for i in (separator_index + 1)..count {
+        if matches!(document.block(i), Some(&Block::BlockQuote { .. })) {
+            return i.saturating_sub(1);
+        }
+    }
+    count
+}
+
+/// Replace the signature region in a document.
+///
+/// `old_separator_index` is either the index of an existing `HorizontalRule`
+/// separator (in which case the signature region ending at the next
+/// `BlockQuote`/end-of-doc is removed first) or the index where a future
+/// signature should be inserted (e.g. the attribution position in a reply
+/// before any signature has been added). When `None`, the new signature is
+/// appended at the end of the document.
+///
+/// Returns the new separator index. On removal-only (`new_signature_html`
+/// is `None` or blank) the original placeholder index is preserved so a
+/// subsequent insertion lands in the same spot.
 pub fn replace_signature(
     document: &mut Document,
-    old_separator_index: usize,
-    old_end_index: Option<usize>,
+    old_separator_index: Option<usize>,
     new_signature_html: Option<&str>,
 ) -> Option<usize> {
-    remove_signature(document, old_separator_index, old_end_index);
+    if let Some(sep) = old_separator_index
+        && matches!(document.block(sep), Some(&Block::HorizontalRule))
+    {
+        let end = find_signature_end(document, sep);
+        remove_signature(document, sep, Some(end));
+    }
 
-    new_signature_html
-        .and_then(|sig_html| insert_signature(document, old_separator_index, sig_html))
+    let Some(sig_html) = new_signature_html else {
+        return old_separator_index;
+    };
+
+    let insert_at = old_separator_index.unwrap_or_else(|| document.block_count());
+    insert_signature(document, insert_at, sig_html).or(old_separator_index)
 }
 
 // ── Tests ───────────────────────────────────────────────
@@ -420,15 +456,88 @@ mod tests {
 
     #[test]
     fn replace_signature_old_to_new() {
+        // Reply-style document: content, HR, sig, attribution, blockquote.
         let mut doc = Document::from_blocks(vec![
             Block::paragraph("Content"),
             Block::HorizontalRule,
             Block::paragraph("Old Sig"),
             Block::paragraph("Attribution"),
+            Block::BlockQuote { blocks: vec![] },
         ]);
-        // Old sig region: blocks 1..3 (HR + "Old Sig"). Attribution at 3.
-        let new_idx = replace_signature(&mut doc, 1, Some(3), Some("<p>New Sig</p>"));
+        let new_idx = replace_signature(&mut doc, Some(1), Some("<p>New Sig</p>"));
         assert_eq!(new_idx, Some(1));
+        // Block 0: Content, 1: HR, 2: New Sig, 3: Attribution, 4: BlockQuote
+        assert_eq!(doc.block_count(), 5);
+        assert_eq!(doc.block(1), Some(&Block::HorizontalRule));
+        assert_eq!(
+            doc.block(2).map(Block::flattened_text).as_deref(),
+            Some("New Sig")
+        );
+        assert_eq!(
+            doc.block(3).map(Block::flattened_text).as_deref(),
+            Some("Attribution")
+        );
+        assert!(matches!(doc.block(4), Some(&Block::BlockQuote { .. })));
+    }
+
+    #[test]
+    fn replace_signature_old_to_new_no_quoted_content() {
+        // Non-reply document: signature runs to end of doc.
+        let mut doc = Document::from_blocks(vec![
+            Block::paragraph("Content"),
+            Block::HorizontalRule,
+            Block::paragraph("Old Sig L1"),
+            Block::paragraph("Old Sig L2"),
+        ]);
+        let new_idx = replace_signature(&mut doc, Some(1), Some("<p>New Sig</p>"));
+        assert_eq!(new_idx, Some(1));
+        // Block 0: Content, 1: HR, 2: New Sig
+        assert_eq!(doc.block_count(), 3);
+        assert_eq!(doc.block(1), Some(&Block::HorizontalRule));
+        assert_eq!(
+            doc.block(2).map(Block::flattened_text).as_deref(),
+            Some("New Sig")
+        );
+    }
+
+    #[test]
+    fn replace_signature_old_to_none_preserves_placeholder() {
+        let mut doc = Document::from_blocks(vec![
+            Block::paragraph("Content"),
+            Block::HorizontalRule,
+            Block::paragraph("Old Sig"),
+            Block::paragraph("Attribution"),
+            Block::BlockQuote { blocks: vec![] },
+        ]);
+        let new_idx = replace_signature(&mut doc, Some(1), None);
+        // Removal-only: separator placeholder is preserved so a future
+        // insert lands at the same spot (right before the attribution).
+        assert_eq!(new_idx, Some(1));
+        assert_eq!(doc.block_count(), 3);
+        assert_eq!(
+            doc.block(0).map(Block::flattened_text).as_deref(),
+            Some("Content")
+        );
+        assert_eq!(
+            doc.block(1).map(Block::flattened_text).as_deref(),
+            Some("Attribution")
+        );
+        assert!(matches!(doc.block(2), Some(&Block::BlockQuote { .. })));
+    }
+
+    #[test]
+    fn replace_signature_none_to_new_with_placeholder() {
+        // Reply-style doc with no sig yet; `old_separator_index` is the
+        // attribution position (a placeholder) so the insert lands before it.
+        let mut doc = Document::from_blocks(vec![
+            Block::paragraph("Content"),
+            Block::paragraph("Attribution"),
+            Block::BlockQuote { blocks: vec![] },
+        ]);
+        let new_idx = replace_signature(&mut doc, Some(1), Some("<p>New Sig</p>"));
+        assert_eq!(new_idx, Some(1));
+        // Block 0: Content, 1: HR, 2: New Sig, 3: Attribution, 4: BlockQuote
+        assert_eq!(doc.block_count(), 5);
         assert_eq!(doc.block(1), Some(&Block::HorizontalRule));
         assert_eq!(
             doc.block(2).map(Block::flattened_text).as_deref(),
@@ -441,47 +550,103 @@ mod tests {
     }
 
     #[test]
-    fn replace_signature_old_to_none() {
-        let mut doc = Document::from_blocks(vec![
-            Block::paragraph("Content"),
-            Block::HorizontalRule,
-            Block::paragraph("Old Sig"),
-            Block::paragraph("Attribution"),
-        ]);
-        let new_idx = replace_signature(&mut doc, 1, Some(3), None);
-        assert_eq!(new_idx, None);
-        assert_eq!(doc.block_count(), 2);
+    fn replace_signature_none_to_new_no_placeholder_appends() {
+        // Brand-new compose, no signature ever inserted.
+        let mut doc = Document::from_blocks(vec![Block::empty_paragraph()]);
+        let new_idx = replace_signature(&mut doc, None, Some("<p>Sig</p>"));
+        assert_eq!(new_idx, Some(1));
+        assert_eq!(doc.block(1), Some(&Block::HorizontalRule));
         assert_eq!(
-            doc.block(0).map(Block::flattened_text).as_deref(),
-            Some("Content")
-        );
-        assert_eq!(
-            doc.block(1).map(Block::flattened_text).as_deref(),
-            Some("Attribution")
+            doc.block(2).map(Block::flattened_text).as_deref(),
+            Some("Sig")
         );
     }
 
     #[test]
-    fn replace_signature_none_to_new() {
-        // Simulate a document with no signature - old_separator_index points
-        // to where the attribution starts, old_end_index == old_separator_index
-        // (empty range to remove).
-        let mut doc = Document::from_blocks(vec![
-            Block::paragraph("Content"),
-            Block::paragraph("Attribution"),
-        ]);
-        let new_idx = replace_signature(&mut doc, 1, Some(1), Some("<p>New Sig</p>"));
-        assert_eq!(new_idx, Some(1));
-        // Block 0: "Content"
-        // Block 1: HorizontalRule
-        // Block 2: "New Sig"
-        // Block 3: "Attribution"
-        assert_eq!(doc.block_count(), 4);
+    fn replace_signature_swap_does_not_duplicate() {
+        // Regression: switching From accounts in compose used to leave the
+        // old signature in place (because the old end_index was passed equal
+        // to the start, producing an empty removal range). Verify a swap
+        // results in exactly the new signature, not stacked.
+        let mut doc = Document::from_blocks(vec![Block::empty_paragraph()]);
+
+        let sep1 = replace_signature(&mut doc, None, Some("<p>Account A sig</p>"));
+        assert_eq!(sep1, Some(1));
+
+        let sep2 = replace_signature(&mut doc, sep1, Some("<p>Account B sig</p>"));
+        assert_eq!(sep2, Some(1));
+
+        // Block 0: empty paragraph
+        // Block 1: HR
+        // Block 2: "Account B sig"
+        assert_eq!(doc.block_count(), 3);
         assert_eq!(doc.block(1), Some(&Block::HorizontalRule));
         assert_eq!(
             doc.block(2).map(Block::flattened_text).as_deref(),
-            Some("New Sig")
+            Some("Account B sig")
         );
+        // The flattened text must not contain Account A's signature.
+        assert!(!doc.flattened_text().contains("Account A sig"));
+    }
+
+    #[test]
+    fn replace_signature_swap_in_reply_preserves_quoted_content() {
+        // Reply with sig: swap account, attribution + blockquote stay intact
+        // and there's only one signature.
+        let mut doc = Document::from_blocks(vec![
+            Block::empty_paragraph(),
+            Block::paragraph("On Mar 19, 2026, Bob wrote:"),
+            Block::BlockQuote {
+                blocks: vec![Arc::new(Block::paragraph("Original"))],
+            },
+        ]);
+
+        // First account's signature.
+        let sep = replace_signature(&mut doc, Some(1), Some("<p>Sig A</p>"));
+        assert_eq!(sep, Some(1));
+        // 0: empty, 1: HR, 2: Sig A, 3: attribution, 4: blockquote
+        assert_eq!(doc.block_count(), 5);
+
+        // Switch to second account's signature.
+        let sep = replace_signature(&mut doc, sep, Some("<p>Sig B</p>"));
+        assert_eq!(sep, Some(1));
+        assert_eq!(doc.block_count(), 5);
+        assert_eq!(doc.block(1), Some(&Block::HorizontalRule));
+        assert_eq!(
+            doc.block(2).map(Block::flattened_text).as_deref(),
+            Some("Sig B")
+        );
+        assert_eq!(
+            doc.block(3).map(Block::flattened_text).as_deref(),
+            Some("On Mar 19, 2026, Bob wrote:")
+        );
+        assert!(matches!(doc.block(4), Some(&Block::BlockQuote { .. })));
+        assert!(!doc.flattened_text().contains("Sig A"));
+    }
+
+    #[test]
+    fn find_signature_end_with_blockquote() {
+        let doc = Document::from_blocks(vec![
+            Block::empty_paragraph(),
+            Block::HorizontalRule,
+            Block::paragraph("Sig"),
+            Block::paragraph("Attribution"),
+            Block::BlockQuote { blocks: vec![] },
+        ]);
+        // End is the attribution block (index 3).
+        assert_eq!(find_signature_end(&doc, 1), 3);
+    }
+
+    #[test]
+    fn find_signature_end_without_blockquote() {
+        let doc = Document::from_blocks(vec![
+            Block::empty_paragraph(),
+            Block::HorizontalRule,
+            Block::paragraph("Sig L1"),
+            Block::paragraph("Sig L2"),
+        ]);
+        // No blockquote, so signature runs to end of doc.
+        assert_eq!(find_signature_end(&doc, 1), 4);
     }
 
     #[test]

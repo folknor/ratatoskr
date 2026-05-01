@@ -430,7 +430,6 @@ fn formatting_toolbar<'a>(window_id: iced::window::Id) -> Element<'a, Message> {
         fmt_btn(icon::italic(), ComposeMessage::FormatItalic),
         fmt_btn(icon::underline(), ComposeMessage::FormatUnderline),
         fmt_btn(icon::list(), ComposeMessage::FormatList),
-        fmt_btn(icon::text_quote(), ComposeMessage::FormatBlockquote),
         fmt_btn(icon::link(), ComposeMessage::FormatLink),
     ]
     .spacing(SPACE_XXS)

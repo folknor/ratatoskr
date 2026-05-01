@@ -452,9 +452,6 @@ pub const PAD_TOKEN_INPUT: Padding = Padding {
 };
 /// Minimum width for the text input portion before wrapping.
 pub const TOKEN_TEXT_MIN_WIDTH: f32 = 120.0;
-/// Average character width as a proportion of `TEXT_MD` for layout estimation.
-/// Used in token chip width calculation and cursor positioning.
-pub const TOKEN_AVG_CHAR_WIDTH_FACTOR: f32 = 0.54;
 
 // ── Calendar ────────────────────────────────────────────
 

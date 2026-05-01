@@ -60,8 +60,6 @@
 
 - [ ] **Star icon: need filled variant** *(Deferred - blocked on sluggrs SVG icon rendering)* - Lucide only has outline icons (confirmed: `star` U+E176, `star-half` U+E20B, no filled variant in the bundled font). Currently uses Unicode `*` as a stopgap, which causes size mismatch and visual jank. Will be resolved by switching to real SVG vector icon rendering (recently implemented in sluggrs, our text renderer) - filled and outline star SVGs can both ship and the toggle just swaps the asset. The button should also not change background color on toggle - just the icon fill.
 
-- [ ] **Token input: cursor x-position drift** - The text caret in To/Cc/Bcc fields drifts further from the last typed glyph the longer the typed string gets. Cause: `draw_text_area` (`crates/app/src/ui/token_input.rs`) computes the cursor x from a per-character estimate (`text.chars().count() * TEXT_LG * TOKEN_AVG_CHAR_WIDTH_FACTOR`, factor `0.54`) - fine for monospace, wrong for Inter where `m`/`w` are wider than `i`/`l`. Proper fix: store a `<iced::Renderer as iced::advanced::text::Renderer>::Paragraph` in `TokenInputState`, update it on text changes (`Text { content: widget.text, .. }` then read `min_bounds().width`), and use that measured width for the cursor x. Same pattern iced's own `text_input` uses (see `min_bounds()` calls in iced `widget/src/text_input.rs`). Will also unblock accurate click-to-position-caret if that's wired later.
-
 - [ ] **Autocomplete: cross-field drag-and-drop** - Drag detection works but drop cancels. Context menu "Move to" is the workaround. Needs ghost token rendering and target field hit-testing.
 - [ ] **Autocomplete: reuse beyond compose** - Widget only used in compose. Calendar attendee picker and group editor could reuse it.
 - [ ] **Contact pills on recipients** - Per `docs/pop-out-windows/problem-statement.md`: recipients in To/Cc fields should appear as plain text but become contact pills on hover, revealing an inline edit button for quick contact editing. Applies to: reading pane message headers, pop-out message view, compose window recipient display. Currently recipients are plain text everywhere with no hover interaction. Needs: (1) a contact pill widget that blends with background at rest and reveals pill styling + edit button on hover, (2) display name resolution from the contact system (name → email fallback chain), (3) wiring to the existing `EditContact` flow that opens the settings contact editor.
@@ -235,7 +233,6 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 - [ ] **Compose: surface "Add at least one recipient" properly** - Sending with no recipients sets `state.status = "Add at least one recipient"` (`pop_out/compose.rs::Send`), which renders as a small status line at the bottom of the form. Should be a real validation surface - inline error near the To field, a toast, or a focus-and-shake on the empty field. Same path also covers the placeholder "Send not yet wired" message and any future send-failure feedback; depends on the toast/notification system in the main TODO list.
 
-- [ ] **Compose: swap signature when From account changes** - The compose window resolves and inserts a signature once on open (see "Signature placement in compose" under Needs Visual Review). If the user then changes the From account via the dropdown, the previous account's signature stays in the body and the new account's default is not inserted. `ComposeMessage::FromAccountChanged` should remove the existing signature block (tracked via `state.active_signature_id` / `signature_separator_index`) and re-resolve + insert the new account's default in the same placement (bottom for new compose, before quoted text for reply).
 - [ ] **CardDAV contact write-back** - CardDAV client supports PROPFIND/REPORT/GET but not PUT/DELETE. Need vCard generation + PUT method for pushing contact edits to CardDAV servers. See `docs/contacts/problem-statement.md`.
 
 ## Refactor Backlog
@@ -269,7 +266,6 @@ Flagged inline as `TODO(refactor)` with `#[allow(clippy::too_many_arguments)]` o
 
 Completed features that need to be visually verified in the running app.
 
-- **Compose block-type format toggles** - Blockquote button wired in toolbar. Fixed apply_set_block_type for blockquote-to-paragraph conversion.
 - **Compose identity auto-selection (shared mailboxes)** - Auto-selects shared mailbox email when replying from SharedMailbox scope.
 - **Rights gating on action buttons (JMAP sharing)** - Mailbox rights flow through CommandContext. Actions disabled when rights deny.
 - **Signature placement in compose** - Auto-resolved on compose open. New compose: bottom. Reply: between content and quoted text.

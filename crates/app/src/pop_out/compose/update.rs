@@ -465,12 +465,6 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
             )));
             state.draft_dirty = true;
         }
-        ComposeMessage::FormatBlockquote => {
-            state.body.perform(RteAction::Edit(EditAction::SetBlockType(
-                rte::BlockKind::BlockQuote,
-            )));
-            state.draft_dirty = true;
-        }
         ComposeMessage::FormatLink | ComposeMessage::ToggleLinkDialog => {
             if !state.link_dialog_open {
                 state.link_text = state.body.selection_text();
@@ -524,16 +518,11 @@ pub fn update_compose(state: &mut ComposeState, msg: ComposeMessage) {
         } => {
             use rte::compose::replace_signature;
 
-            let old_sep = state
-                .signature_separator_index
-                .unwrap_or(state.body.document.block_count());
-            let new_sep = replace_signature(
+            state.signature_separator_index = replace_signature(
                 &mut state.body.document,
-                old_sep,
                 state.signature_separator_index,
                 signature_html.as_deref(),
             );
-            state.signature_separator_index = new_sep;
             state.active_signature_id = signature_id;
             state.draft_dirty = true;
         }

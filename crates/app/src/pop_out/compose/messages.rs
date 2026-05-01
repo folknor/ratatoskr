@@ -72,9 +72,8 @@ pub enum ComposeMessage {
     FormatItalic,
     FormatUnderline,
     FormatStrikethrough,
-    /// List / blockquote toggle via SetBlockType.
+    /// List toggle via SetBlockType.
     FormatList,
-    FormatBlockquote,
     /// Open the link insertion dialog.
     FormatLink,
     // ── Attachments ──
