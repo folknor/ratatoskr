@@ -1121,6 +1121,34 @@ const RRULE_MAX_COUNT: usize = 10_000;
 /// or UNTIL will terminate first.
 const RRULE_MAX_STEPS: usize = 12_000;
 
+/// Pick the per-expander instance cap.
+///
+/// When `rule.count` is present, that's the explicit upper bound (already
+/// clamped to `RRULE_MAX_COUNT` at parse time). When `rule.until` is
+/// present without COUNT, we let the expander run up to `RRULE_MAX_COUNT`:
+/// the time bound (window_end / UNTIL) terminates the loop, and a per-
+/// expander default of 800 silently truncated long-UNTIL rules far below
+/// what the user asked for - e.g. `FREQ=YEARLY;UNTIL=22000101T000000Z`
+/// from 2026 emitted 60 instances and stopped 114 years short of the
+/// requested UNTIL. (Round 3 #2.)
+///
+/// When neither COUNT nor UNTIL is set, we fall back to the
+/// `default_unbounded` cap. The 2-year synthesised window
+/// (`two_year_window_end`) is the time bound there, but dense BY-rules
+/// like `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR` (5/wk × 104wk = 520
+/// emissions) would be truncated by a smaller default - the standup
+/// vanishes 17 months in. The default below is chosen to cover the
+/// densest realistic 2-year span. (Round 3 #4.)
+fn instance_cap(rule: &Rrule, default_unbounded: usize) -> usize {
+    if let Some(n) = rule.count {
+        return n.max(1);
+    }
+    if rule.until.is_some() {
+        return RRULE_MAX_COUNT;
+    }
+    default_unbounded.clamp(1, RRULE_MAX_COUNT)
+}
+
 /// The wall-clock zone an event recurs in. RFC 5545 § 3.3.10: recurring
 /// events keep their wall-clock time across DST transitions and across
 /// instances - 09:00 every day means 09:00 *in that zone*, not 09:00 in
@@ -1227,9 +1255,16 @@ fn expand_recurrence_with_overrides(
     let Some(freq) = Freq::parse(&rule.freq) else {
         // FREQ is missing or unrecognized. We fall back to a single instance
         // (the master event) so the operator at least sees the event on the
-        // calendar; logging here makes the malformed rule visible rather
-        // than silently swapping behavior with the zero-instance case below.
-        log::warn!(
+        // calendar; logging here surfaces the malformed rule.
+        //
+        // Logged at debug rather than warn because this branch fires from
+        // every view render via `load_calendar_events_for_view_sync`. A
+        // calendar with N malformed RRULEs (and Outlook bridges + Apple
+        // Calendar exports do produce these) would otherwise emit N WARN
+        // lines per refresh, drowning out actual operational signal. The
+        // sync-time parse pass already records the same VEVENTs, so the
+        // signal isn't lost - just not repeated. (Round 3 #44.)
+        log::debug!(
             "RRULE has unrecognized or missing FREQ; emitting only master instance: {rrule_str}"
         );
         return vec![event.clone()];
@@ -1239,8 +1274,9 @@ fn expand_recurrence_with_overrides(
         // Falling through to the expanders would produce a wildly wrong
         // expansion (~22 days/month for `BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1`).
         // Emit only the master instance so the user sees the event in the
-        // right place without the noise; logging surfaces the gap.
-        log::warn!(
+        // right place without the noise. Debug-level for the same
+        // render-loop reason as the FREQ branch above.
+        log::debug!(
             "RRULE uses unsupported parts ({:?}); emitting only master instance: {rrule_str}",
             rule.unsupported_parts
         );
@@ -1256,8 +1292,8 @@ fn expand_recurrence_with_overrides(
         // `FREQ=YEARLY;BYDAY=20MO` would silently emit zero instances - no
         // single month has 20 Mondays. Emit the master instance and log;
         // the year-scope ordinal walk is a real feature, not a defensive
-        // tweak, and is left as a follow-up.
-        log::warn!(
+        // tweak, and is left as a follow-up. Debug-level (see above).
+        log::debug!(
             "RRULE FREQ=YEARLY with ordinal BYDAY and no BYMONTH would require a year-scope ordinal walk; emitting only master instance: {rrule_str}"
         );
         return vec![event.clone()];
@@ -1305,11 +1341,11 @@ fn expand_recurrence_with_overrides(
         }
     };
 
-    // Default cap matches the 2-year fallback window emitted by
-    // `two_year_window_end` when no COUNT/UNTIL is set. The previous 365
-    // silently truncated unbounded DAILY rules to ~1 year (the time bound
-    // would happily accept the second year, but the count cap fired first).
-    let max_instances = rule.count.unwrap_or(800).max(1);
+    // Outer cap: lets explicit COUNT through, lets UNTIL-bounded rules run
+    // to RRULE_MAX_COUNT (the time bound terminates), and falls back to a
+    // 2-year-window-sized default when neither is set. See `instance_cap`
+    // for the rationale and review-finding cross-references.
+    let max_instances = instance_cap(&rule, 800);
     if rule.count.is_some() && rule.until.is_some() {
         // RFC 5545 § 3.3.10: COUNT and UNTIL are mutually exclusive. Some
         // emitters send both anyway; we apply BOTH as upper bounds (the
@@ -1667,11 +1703,10 @@ fn parse_byday(spec: &str) -> Option<ByDay> {
 }
 
 fn expand_daily(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
-    // Default cap matches the 2-year fallback window in
-    // `expand_recurrence::two_year_window_end`. The previous 366 silently
-    // truncated unbounded DAILY rules to one year, which then got further
-    // capped by the outer `max_instances` default of 365.
-    let cap = rule.count.unwrap_or(800).min(RRULE_MAX_COUNT);
+    // Default unbounded cap matches the 2-year fallback window's worst case
+    // for FREQ=DAILY (730 days). UNTIL-bounded rules run to RRULE_MAX_COUNT
+    // and let the time bound terminate; see `instance_cap`.
+    let cap = instance_cap(rule, 800);
     let mut out = Vec::with_capacity(cap);
     let mut current = start;
     // Step-bounded iteration: a BYDAY filter can reject 6 of every 7
@@ -1702,7 +1737,12 @@ fn expand_daily(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
 }
 
 fn expand_weekly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
-    let cap = rule.count.unwrap_or(366).min(RRULE_MAX_COUNT);
+    // Bumped from 366 to 800: the previous default truncated dense BY-rules
+    // (e.g. `BYDAY=MO,TU,WE,TH,FR` = 5/wk × 104wk = 520 emissions) inside
+    // the 2-year synthesised fallback window. The standup vanished from
+    // the calendar 17 months in. (Round 3 #4.) UNTIL-bounded rules run to
+    // RRULE_MAX_COUNT.
+    let cap = instance_cap(rule, 800);
     let mut out = Vec::with_capacity(cap);
     let interval_days = rule.interval * 7;
 
@@ -1767,7 +1807,11 @@ fn expand_weekly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
 }
 
 fn expand_monthly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
-    let cap = rule.count.unwrap_or(120).min(RRULE_MAX_COUNT);
+    // Bumped from 120 to 800: dense BY-rules
+    // (`FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR` ~ 22/month) would otherwise
+    // truncate to ~5.5 months inside the 2-year fallback window. (Round 3
+    // #4.) UNTIL-bounded rules run to RRULE_MAX_COUNT.
+    let cap = instance_cap(rule, 800);
     let mut out = Vec::with_capacity(cap);
     let Some(start_dt) = tz.naive(start) else {
         return out;
@@ -1919,7 +1963,15 @@ fn nth_weekday_in_month(
 }
 
 fn expand_yearly(start: i64, rule: &Rrule, tz: RecurrenceTz) -> Vec<i64> {
-    let cap = rule.count.unwrap_or(60).min(RRULE_MAX_COUNT);
+    // YEARLY's unbounded default sits lower than the others because the
+    // 2-year fallback window only emits ~2 instances per realistic rule
+    // (annual events). 200 covers ~80 years for repeated holidays
+    // (`BYMONTH=12;BYMONTHDAY=25;COUNT=...`) without ever hitting in
+    // practice. UNTIL-bounded rules - the case
+    // `FREQ=YEARLY;UNTIL=22000101T000000Z` from 2026 (which previously
+    // emitted 60 of 174 instances) - run to RRULE_MAX_COUNT and let UNTIL
+    // do the work. (Round 3 #2.)
+    let cap = instance_cap(rule, 200);
     let mut out = Vec::with_capacity(cap);
     let Some(start_dt) = tz.naive(start) else {
         return out;
@@ -2823,6 +2875,60 @@ mod tests {
             );
             assert_eq!(end_local.naive_local().time().minute(), 0);
         }
+    }
+
+    #[test]
+    fn yearly_until_distant_emits_full_range_not_60_cap() {
+        // Round 3 #2 regression guard: previously expand_yearly defaulted
+        // to a 60-instance cap when COUNT was absent. A
+        // `FREQ=YEARLY;UNTIL=...` rule reaching far into the future would
+        // emit only 60 instances and silently stop. With UNTIL set, the
+        // cap rises to RRULE_MAX_COUNT and the time bound terminates.
+        let start = local_ts(2026, 6, 1, 9, 0);
+        let event = make_event(start, 3600);
+        // 100 years of yearly emissions is well past the old 60-cap and
+        // well under RRULE_MAX_COUNT.
+        let instances = expand_recurrence(
+            &event,
+            "FREQ=YEARLY;UNTIL=21260601T000000Z",
+        );
+        assert!(
+            instances.len() >= 100,
+            "expected >= 100 yearly instances; got {} (likely truncated by old cap)",
+            instances.len()
+        );
+    }
+
+    #[test]
+    fn weekly_byday_dense_unbounded_passes_old_366_cap() {
+        // Round 3 #4 regression guard: WEEKLY+BYDAY emitting 5 days/week
+        // over the synthesised 2-year fallback window is ~520 instances.
+        // The previous expand_weekly default of 366 silently truncated -
+        // the standup vanished 17 months in. Cap is now 800.
+        let start = local_ts(2026, 1, 5, 9, 0); // Monday
+        let event = make_event(start, 3600);
+        let instances =
+            expand_recurrence(&event, "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR");
+        assert!(
+            instances.len() > 366,
+            "weekly weekday rule capped at {} (old 366 cap regressed?)",
+            instances.len()
+        );
+    }
+
+    #[test]
+    fn monthly_byday_dense_unbounded_passes_old_120_cap() {
+        // Round 3 #4: MONTHLY+BYDAY=MO,TU,WE,TH,FR emits ~22 instances
+        // per month - the previous 120 cap truncated at ~5.5 months.
+        let start = local_ts(2026, 1, 1, 9, 0);
+        let event = make_event(start, 3600);
+        let instances =
+            expand_recurrence(&event, "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR");
+        assert!(
+            instances.len() > 120,
+            "monthly weekday rule capped at {} (old 120 cap regressed?)",
+            instances.len()
+        );
     }
 
     #[test]

@@ -82,18 +82,6 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
 
 #### `expand_recurrence` / load path
 
-2. **High** [perf/claude H1] - **RRULE generator caps silently truncate
-   UNTIL-bounded rules.** Each expander uses its own default cap
-   (`expand_daily=800`, `expand_weekly=366`, `expand_monthly=120`,
-   `expand_yearly=60`) at `:1511, 1542, 1607, 1759`. The inner cap is
-   what limits emission and ignores `rule.until` entirely. So
-   `FREQ=YEARLY;UNTIL=22000101T000000Z` from 2026 emits 60 instances and
-   stops 114 years short of UNTIL. `FREQ=DAILY;UNTIL=20310101T000000Z`
-   caps at 800 days ≈ 2.2 years. Fix: when
-   `rule.count.is_none() && rule.until.is_some()`, raise the inner cap
-   to `RRULE_MAX_COUNT`; `RRULE_MAX_STEPS` already bounds the loop on
-   unsatisfiable filters.
-
 3. **High** [perf/claude H2, perf/codex Medium, arch/claude Medium reference] -
    **`load_calendar_events_for_view_sync` runs RRULE expansion under the
    DB connection lock, on every event in the table.** `:986-1050`. The
@@ -109,19 +97,6 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
    history target). Fix: take a `(start, end)` parameter, push it into
    SQL (`WHERE end_time > ? AND start_time < ?`), then drop the
    connection before expansion.
-
-4. **High** [bugs/claude H2, bugs/codex #4, arch/claude Medium] -
-   **Per-expander default caps truncate dense rules below the 2-year
-   fallback window.** When neither COUNT nor UNTIL is set,
-   `expand_recurrence` synthesizes a 2-year window via
-   `two_year_window_end` (`:1218`). The expanders' `cap =
-   rule.count.unwrap_or(N)` truncates *before* that window for any
-   BY-rule that emits more than N candidates over 2 years. Concrete
-   cases: `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR` (5/wk × 104wk = 520) caps
-   at 366 → 17 months in, the standup vanishes. `FREQ=MONTHLY;BYDAY=
-   MO,TU,WE,TH,FR` (~22/mo) caps at 120 → ~5.5 months. Fix: bump
-   weekly/monthly defaults to match `expand_daily`'s 800, or scale by
-   BY-rule density. `:1542, 1607`.
 
 6. **Medium** [bugs/claude M1] - **Windows zone names fall through to
    `chrono::Local`.** `RecurrenceTz::from_event_timezone` (`:1085-1103`)
@@ -414,20 +389,6 @@ Multi-tag entries are cross-flagged and the highest-confidence signals.
     calcard alias gap is the real fix. Repro: `2024-06-15T10:00:00`
     in `Africa/Juba` ("South Sudan Standard Time", not in calcard)
     becomes 10:00Z instead of 08:00Z (with a log line now).
-
-### Logging / observability
-
-44. **Medium** [arch/claude Medium] - **WARN-level RRULE log lines fire
-    on every view render.** `calendars.rs:1147, 1158, 1175 +
-    start_of_week debug at :1893`. `load_calendar_events_for_view_sync`
-    runs through `reload_calendar_events` (which fires on every nav
-    refresh). Each call walks every recurring row through
-    `expand_recurrence`. A calendar with N malformed RRULEs (BYSETPOS,
-    BYWEEKNO, missing FREQ, etc - common in real Outlook bridges and
-    Apple Calendar exports) emits N `log::warn!` lines per refresh.
-    After a few minutes of UI use the log is dominated by these. Fix:
-    emit at debug, or move the validation/log to sync time and stash
-    a sticky "rule unsupported" marker on the row.
 
 ### Carry-overs from Round 2 still open
 
