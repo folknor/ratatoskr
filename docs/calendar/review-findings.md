@@ -47,10 +47,6 @@ All findings addressed. Lenses and targets:
 
 - **Low** - WEEKLY+BYDAY excluding DTSTART silently drops DTSTART. Matches dateutil; deviates from the strict RFC 5545 reading that DTSTART is always in the recurrence set. No comment in code; worth a deliberate decision.
 
-### `crates/db/src/db/queries_extra/calendars.rs::start_of_week` (1613-1626)
-
-- **Low** - `add_days_local(...).unwrap_or(timestamp)` returns the original timestamp on failure, used as the week-start anchor; downstream weekly expansion emits instances one entire week off, no caller indication. Triggered by zones with skipped days (Apia Dec 30 2011) crossed during walk-back.
-
 ### `crates/db/src/db/queries_extra/calendars.rs::parse_rrule` (1200-1244)
 
 - **Latent** - WKST only consulted in WEEKLY path; YEARLY/MONTHLY ignore it. OK while BYWEEKNO is unsupported; will silently break if BYWEEKNO is added without plumbing WKST through.

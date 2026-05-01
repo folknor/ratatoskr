@@ -1760,7 +1760,21 @@ fn start_of_week(timestamp: i64, week_start: chrono::Weekday) -> i64 {
     let from = week_start.num_days_from_monday() as i64;
     let to = current.num_days_from_monday() as i64;
     let days_back = (to - from).rem_euclid(7);
-    add_days_local(timestamp, -days_back).unwrap_or(timestamp)
+    add_days_local(timestamp, -days_back).unwrap_or_else(|| {
+        // `add_days_local` only returns None when the resulting NaiveDateTime
+        // or zone resolution overflows - in practice that requires walking
+        // back across a 24-hour-skipped day (Pacific/Apia Dec 30 2011).
+        // Falling back to the un-walked timestamp lets the weekly expander
+        // continue to emit instances anchored on the original day-of-week
+        // rather than emitting nothing; the alternative (returning the
+        // un-walked timestamp silently) was the previous behavior. Logged
+        // so the operator can attribute "weekly instances are off by some
+        // days" to a zone-skip event.
+        log::debug!(
+            "start_of_week: add_days_local(-{days_back}) failed (likely walking through a 24h-skipped day); falling back to un-shifted anchor"
+        );
+        timestamp
+    })
 }
 
 fn shift_to_weekday(
