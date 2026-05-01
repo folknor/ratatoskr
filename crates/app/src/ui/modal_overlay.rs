@@ -43,7 +43,13 @@ pub fn modal_overlay<'a, Message: Clone + 'a>(
                     .style(theme::ContainerClass::ModalBackdrop.style()),
             )
             .on_press(blocker_msg)
-            .interaction(mouse::Interaction::default())
+            // `Interaction::Idle` (not `default()`, which is `None`) makes the
+            // blocker actively claim the regular cursor. iced's `stack`
+            // mouse_interaction walks children top-to-bottom and skips any
+            // child returning `None`, so a `default()` blocker would let the
+            // base layer's pointer / text cursors bleed through to the
+            // dimmed area above it.
+            .interaction(mouse::Interaction::Idle)
             .into();
 
             let centered: Element<'a, Message> = container(content)
@@ -62,7 +68,13 @@ pub fn modal_overlay<'a, Message: Clone + 'a>(
                     .height(Length::Fill),
             )
             .on_press(blocker_msg)
-            .interaction(mouse::Interaction::default())
+            // `Interaction::Idle` (not `default()`, which is `None`) makes the
+            // blocker actively claim the regular cursor. iced's `stack`
+            // mouse_interaction walks children top-to-bottom and skips any
+            // child returning `None`, so a `default()` blocker would let the
+            // base layer's pointer / text cursors bleed through to the
+            // dimmed area above it.
+            .interaction(mouse::Interaction::Idle)
             .into();
 
             let sheet: Element<'a, Message> = container(content)

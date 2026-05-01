@@ -8,8 +8,6 @@
 
 - [ ] **Settings/People** - The contacts and group lists here need to conform much closer to the spec at docs/contacts/problem-statement.md. We're quite a ways off.
 
-- [ ] **Slide-in editor: confirm-discard on unsaved changes** - The contact and group editor slide-ins can currently close without warning whenever the slide-in "wants" to dismiss: clicking the Back button, pressing Escape, clicking a different settings tab in the left nav, or any other future close path. If the editor is dirty (new contact/group with content, or an existing one with edits not yet saved/auto-saved), we should pop a "Discard unsaved changes?" confirmation first. Needs a single chokepoint so every dismiss path runs the same check rather than per-call-site retrofits. Same pattern likely belongs on the account editor and signature editor sheets too.
-
 - [ ] **Settings/Notifications** - VIP Senders should move to contact editing, and this should be a toggle button here.
 
 - [ ] **Compose window help text** - The help text in the compose windows to/cc/bcc fields ("Add recipients...") is not vertically centered in the input field. Note: `token_input.rs::draw_text_area` already draws the placeholder with `align_y: Vertical::Center` inside a `TOKEN_HEIGHT` box and `PAD_TOKEN_INPUT` is symmetric (top=4, bottom=4), so on paper it should be centered. The misalignment must come from elsewhere - possibly the field's overall layout height vs. the `TOKEN_HEIGHT` slot, or font metrics asymmetry. Needs investigation with rendered measurements.
@@ -25,8 +23,6 @@
 - [ ] **Settings/Composing: Signatures** - This section needs work.
 
 - [ ] **Standardized popup/dropdown/modal** - Currently setting dropdowns, various modal dialogs (the Settings slide-in, Add Account modal, etc) use various methods to dim/control/disable/dismiss. We need standardized controls for all this. For example the Add Account modal currently dims the background (rest of the window), but it doesn't prevent interaction with any controls - even controls that are actually directly below it can still be interacted with. We need the same treatment as the Settings slide-in that does in fact disable things behind it. See `docs/ui/overlay-standardization-plan.md` for the implementation plan.
-
-- [ ] **Cursor bleed-through on blocking overlays** - When a Sheet or Modal is active, hovering over the blocker area may still show pointer/hand cursors from widgets in the base layer underneath. The `mouse_area` blocker sets `.interaction(mouse::Interaction::default())` but iced's `stack!` may composite `mouse_interaction` from all layers. May be pre-existing. Investigate whether iced's stack respects the topmost layer's cursor or falls through.
 
 - [ ] **Focus trapping for modals and sheets** - iced does not natively support focus trapping. Modal and Sheet surfaces should trap Tab/Shift-Tab focus within their content, but currently focus can escape to widgets behind the blocker. If iced adds focus trapping support, `modal_overlay()` (see `docs/ui/overlay-standardization-plan.md`) is the single place to wire it in. Until then, this is a known contract gap.
 
@@ -229,6 +225,12 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 - [ ] **Compose: surface "Add at least one recipient" properly** - Sending with no recipients sets `state.status = "Add at least one recipient"` (`pop_out/compose.rs::Send`), which renders as a small status line at the bottom of the form. Should be a real validation surface - inline error near the To field, a toast, or a focus-and-shake on the empty field. Same path also covers the placeholder "Send not yet wired" message and any future send-failure feedback; depends on the toast/notification system in the main TODO list.
 
 - [ ] **CardDAV contact write-back** - CardDAV client supports PROPFIND/REPORT/GET but not PUT/DELETE. Need vCard generation + PUT method for pushing contact edits to CardDAV servers. See `docs/contacts/problem-statement.md`.
+
+- [ ] **Rich text editor (rte) post-review gaps** - Surfaced during the 12-finding correctness review. None are regressions; all are interactions between the recent fixes and the existing flat `DocPosition` model.
+  - `is_atomic_block()` is defined as `!is_inline_block()`, so it includes `BlockQuote` alongside `Image` and `HorizontalRule`. Backspace at the start of a paragraph immediately following a `BlockQuote` now removes the entire quoted reply (not a no-op, not a merge). Acceptable but aggressive in the compose pop-out where BlockQuotes hold reply content - if user feedback bites, split atomic-vs-container behaviour in `resolve_delete_backward` / `resolve_delete_forward` (`crates/rte/src/rules.rs`).
+  - `link_at_content_point` (`crates/rte/src/widget/mod.rs`) returns `None` when `entry.paragraph()` is `None`, which is the case for container blocks (`BlockQuote`, list groups). Single-clicking a link inside a quoted reply still falls through to caret placement instead of emitting `Action::LinkClicked`. Matches the existing "container content isn't `DocPosition`-addressable" limitation - revisit when/if container content becomes addressable.
+  - Caret rendering inside an atomic block: `draw_cursor` (`crates/rte/src/widget/mod.rs`) falls into the no-paragraph branch and draws at `para_origin_x` for both offset 0 and offset 1, so arrowing across an `Image` or `HorizontalRule` produces no visible cursor movement even though the offset advances. Functionally fine (Backspace/Delete on the post-atom offset still removes the atom); purely a visual fidelity gap.
+  - `paste_plain_text` (`crates/rte/src/widget/editor_state.rs`) splits on `\n` after CRLF normalization, so a trailing newline (e.g. `"alpha\n"`) produces an extra empty paragraph at the end. Likely intended (preserves explicit blank-line intent), but worth confirming against real-world paste sources before treating as final.
 
 ## Refactor Backlog
 

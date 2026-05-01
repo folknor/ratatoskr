@@ -65,6 +65,14 @@ impl App {
         //    to close the sheet / settings.
         if self.show_settings {
             if *key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
+                // Escape inside the discard-changes confirm dialog cancels
+                // the deferred dismissal (returns the user to the editor)
+                // instead of re-triggering the same close request.
+                if self.settings.pending_discard.is_some() {
+                    return self.update(Message::Settings(
+                        crate::ui::settings::SettingsMessage::CancelDiscardEditorChanges,
+                    ));
+                }
                 if let Some(filter_id) = self.settings.focused_filter {
                     return self.update(Message::Settings(
                         crate::ui::settings::SettingsMessage::FilterCleared(filter_id),
