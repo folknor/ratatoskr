@@ -1098,6 +1098,22 @@ fn expand_recurrence(event: &CalendarViewEvent, rrule_str: &str) -> Vec<Calendar
         );
         return vec![event.clone()];
     }
+    if matches!(freq, Freq::Yearly)
+        && rule.bymonth.is_empty()
+        && rule.byday.iter().any(|b| b.ordinal.is_some())
+    {
+        // YEARLY + ordinal BYDAY without BYMONTH means "the n-th weekday of
+        // the year" (RFC 5545 § 3.3.10). The expander only walks per-month
+        // ordinals (`nth_weekday_in_month`), so a rule like
+        // `FREQ=YEARLY;BYDAY=20MO` would silently emit zero instances - no
+        // single month has 20 Mondays. Emit the master instance and log;
+        // the year-scope ordinal walk is a real feature, not a defensive
+        // tweak, and is left as a follow-up.
+        log::warn!(
+            "RRULE FREQ=YEARLY with ordinal BYDAY and no BYMONTH would require a year-scope ordinal walk; emitting only master instance: {rrule_str}"
+        );
+        return vec![event.clone()];
+    }
 
     let duration = event.end_time - event.start_time;
     // Default cap matches the 2-year fallback window emitted by
@@ -2114,6 +2130,20 @@ mod tests {
             dates,
             vec![(1, 31), (2, 1), (2, 28), (3, 1), (3, 31)]
         );
+    }
+
+    #[test]
+    fn yearly_ordinal_byday_without_bymonth_falls_back_to_master() {
+        // FREQ=YEARLY;BYDAY=20MO means "the 20th Monday of the year" per
+        // RFC 5545 § 3.3.10. The expander only handles per-month ordinal
+        // BYDAY today (no year-scope walker), so without BYMONTH set this
+        // would silently emit zero instances. The fallback emits the
+        // master so the operator at least sees the event, with a WARN.
+        let start = local_ts(2026, 1, 1, 9, 0);
+        let event = make_event(start, 3600);
+        let instances = expand_recurrence(&event, "FREQ=YEARLY;BYDAY=20MO;COUNT=3");
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].start_time, start);
     }
 
     #[test]

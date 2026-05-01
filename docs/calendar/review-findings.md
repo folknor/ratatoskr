@@ -40,7 +40,7 @@ All findings addressed. Lenses and targets:
 
 ### `crates/db/src/db/queries_extra/calendars.rs::expand_yearly` (1525-1579)
 
-- **High** (flagged 2x) - YEARLY+ordinal BYDAY without explicit BYMONTH visits only `dt.month()` and asks for the n-th weekday of *that month*. Repro: `FREQ=YEARLY;BYDAY=20MO` (the 20th Monday of the year) emits nothing because no month has 20 Mondays. Fix scope: implement year-scope ordinal lookup, or reject ordinal BYDAY when FREQ=YEARLY and BYMONTH is unset.
+- **Medium** - YEARLY+ordinal BYDAY without explicit BYMONTH (e.g. `FREQ=YEARLY;BYDAY=20MO` = "20th Monday of the year") now WARN-logs and falls back to the master instance instead of silently emitting zero instances. Implementing the actual year-scope ordinal walk (n-th weekday of the year, walking across all 12 months) is the real fix and a follow-up.
 - **Low** - Sparse YEARLY rules (e.g. leap-day-only) silently truncate before COUNT cap; outer step is yearly with `RRULE_MAX_STEPS=12_000`, so `COUNT=10000` never realized for `BYMONTH=2;BYMONTHDAY=29`.
 
 ### `crates/db/src/db/queries_extra/calendars.rs::expand_weekly`
