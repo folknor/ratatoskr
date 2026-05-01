@@ -479,13 +479,21 @@ fn parse_li_to_items(li_node: &Handle, ordered: bool, indent_level: u8, blocks: 
         };
 
         if is_nested_list {
-            // Flush pending inline children as a ListItem.
-            if !emitted_inline {
-                let runs = collect_inline_children(&inline_children);
+            // Flush pending inline children as a ListItem. If the nested list is
+            // the first meaningful content, keep an empty parent item.
+            let runs = collect_inline_children(&inline_children);
+            if !runs_are_empty(&runs) {
                 blocks.push(Block::ListItem {
                     ordered,
                     indent_level,
                     runs,
+                });
+                emitted_inline = true;
+            } else if !emitted_inline {
+                blocks.push(Block::ListItem {
+                    ordered,
+                    indent_level,
+                    runs: vec![StyledRun::plain(String::new())],
                 });
                 emitted_inline = true;
             }
@@ -505,14 +513,23 @@ fn parse_li_to_items(li_node: &Handle, ordered: bool, indent_level: u8, blocks: 
         }
     }
 
-    // If we never emitted an inline item (no nested list was first child),
-    // emit whatever inline content we have.
-    if !emitted_inline {
+    // Emit trailing inline content too. The flat list-item model cannot keep
+    // text after a nested list in the same item, so preserve it as another
+    // item at the same indent instead of dropping it.
+    if !inline_children.is_empty() {
         let runs = collect_inline_children(&inline_children);
+        if !runs_are_empty(&runs) {
+            blocks.push(Block::ListItem {
+                ordered,
+                indent_level,
+                runs,
+            });
+        }
+    } else if !emitted_inline {
         blocks.push(Block::ListItem {
             ordered,
             indent_level,
-            runs,
+            runs: vec![StyledRun::plain(String::new())],
         });
     }
 }
@@ -1287,6 +1304,28 @@ mod tests {
         } else {
             panic!("expected ListItem at indent 1");
         }
+    }
+
+    #[test]
+    fn list_item_preserves_text_after_nested_list() {
+        let doc = from_html("<ul><li>before<ul><li>nested</li></ul>after</li></ul>");
+        assert_eq!(doc.block_count(), 3);
+        assert_eq!(doc.block(0).expect("block").flattened_text(), "before");
+        assert_eq!(doc.block(1).expect("block").flattened_text(), "nested");
+        assert_eq!(doc.block(2).expect("block").flattened_text(), "after");
+    }
+
+    #[test]
+    fn list_item_preserves_text_between_nested_lists() {
+        let doc = from_html(
+            "<ul><li>before<ul><li>nested-a</li></ul>middle<ol><li>nested-b</li></ol>after</li></ul>",
+        );
+        assert_eq!(doc.block_count(), 5);
+        assert_eq!(doc.block(0).expect("block").flattened_text(), "before");
+        assert_eq!(doc.block(1).expect("block").flattened_text(), "nested-a");
+        assert_eq!(doc.block(2).expect("block").flattened_text(), "middle");
+        assert_eq!(doc.block(3).expect("block").flattened_text(), "nested-b");
+        assert_eq!(doc.block(4).expect("block").flattened_text(), "after");
     }
 
     #[test]

@@ -6,7 +6,7 @@
 //! paragraph types.
 
 use crate::document::{
-    Block, DocPosition, DocSelection, DocSlice, Document, InlineStyle, StyledRun,
+    Block, DocPosition, DocSelection, DocSlice, Document, InlineStyle, StyledRun, text_len,
 };
 use crate::html_parse::from_html;
 use crate::html_serialize::to_html;
@@ -218,7 +218,7 @@ impl EditorState {
                 if let Some(slice) = structured_slice {
                     self.paste_slice(&slice);
                 } else {
-                    self.apply_action(EditAction::InsertText(text));
+                    self.paste_plain_text(&text);
                 }
             }
             Action::Click(doc_pos) => {
@@ -249,19 +249,21 @@ impl EditorState {
     /// Apply a high-level edit action through the rules engine.
     pub fn apply_action(&mut self, action: EditAction) {
         let cursor_before = self.selection;
-
-        // Special case: ToggleInlineStyle at a collapsed caret toggles pending style.
-        if let EditAction::ToggleInlineStyle(style) = &action
-            && self.selection.is_collapsed()
-        {
-            self.pending_style.toggle(*style);
-            self.undo_stack.break_group();
-            return;
-        }
+        let collapsed_toggle = match &action {
+            EditAction::ToggleInlineStyle(style) if self.selection.is_collapsed() => Some(*style),
+            _ => None,
+        };
 
         let ops = rules::resolve(&self.document, self.selection, action, self.pending_style);
 
+        // Special case: ToggleInlineStyle at a collapsed non-link caret toggles
+        // pending style. The rules engine still gets first refusal so collapsed
+        // toggles inside links can format the whole link span.
         if ops.is_empty() {
+            if let Some(style) = collapsed_toggle {
+                self.pending_style.toggle(style);
+                self.undo_stack.break_group();
+            }
             return;
         }
 
@@ -351,6 +353,10 @@ impl EditorState {
         if slice.blocks.len() == 1 && slice.open_start && slice.open_end {
             // Inline fragment: insert runs preserving their styles.
             self.paste_inline_runs(insert_pos, &slice.blocks[0], &mut all_ops);
+        } else if slice.blocks.len() == 1 && !slice.open_start && !slice.open_end {
+            // A whole copied block should remain a block (e.g. heading/list
+            // item), not collapse into the surrounding paragraph.
+            self.paste_complete_blocks(insert_pos, &slice.blocks, &mut all_ops);
         } else if slice.blocks.iter().all(|b| !b.is_inline_block()) {
             // All blocks are non-inline (Image, HR, etc.) - insert as
             // complete blocks. These have no runs to merge.
@@ -378,6 +384,27 @@ impl EditorState {
         self.cursor.reset_blink();
         self.cursor.clear_target_x();
         self.cursor.clear_target_column();
+    }
+
+    fn paste_plain_text(&mut self, text: &str) {
+        if !text.contains('\n') && !text.contains('\r') {
+            self.apply_action(EditAction::InsertText(text.to_owned()));
+            return;
+        }
+
+        let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+        let blocks = normalized
+            .split('\n')
+            .map(|line| Block::Paragraph {
+                runs: vec![StyledRun::plain(line)],
+            })
+            .collect();
+        let slice = DocSlice {
+            blocks,
+            open_start: false,
+            open_end: false,
+        };
+        self.paste_slice(&slice);
     }
 
     /// Paste an inline fragment (single block, both ends open) at `pos`.
@@ -556,7 +583,7 @@ impl EditorState {
 
         match last_op {
             EditOp::InsertText { position, text } => {
-                let char_count = text.chars().count();
+                let char_count = text_len(text);
                 let new_pos = DocPosition::new(position.block_index, position.offset + char_count);
                 self.selection = DocSelection::caret(new_pos);
             }
@@ -580,7 +607,9 @@ impl EditorState {
             | EditOp::SetBlockType { .. }
             | EditOp::SetBlockAttrs { .. }
             | EditOp::InsertBlock { .. }
-            | EditOp::RemoveBlock { .. } => {
+            | EditOp::RemoveBlock { .. }
+            | EditOp::ReplaceBlock { .. }
+            | EditOp::RestoreMergedBlock { .. } => {
                 // These don't move the cursor.
             }
         }
@@ -830,7 +859,7 @@ fn splice_runs_into_block(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::{Block, DocPosition, DocSelection, Document, InlineStyle};
+    use crate::document::{Block, DocPosition, DocSelection, Document, HeadingLevel, InlineStyle};
 
     // ── EditorState::new ─────────────────────────────────
 
@@ -1494,6 +1523,46 @@ mod tests {
         );
     }
 
+    #[test]
+    fn insert_at_link_end_does_not_extend_link() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::Paragraph {
+            runs: vec![
+                StyledRun::linked("link", InlineStyle::BOLD, "https://example.com"),
+                StyledRun::plain(" plain"),
+            ],
+        }]));
+        state.selection = DocSelection::caret(DocPosition::new(0, 4));
+
+        state.apply_action(EditAction::InsertText("!".into()));
+
+        let runs = state.document.block(0).and_then(Block::runs).expect("runs");
+        let unlinked = runs
+            .iter()
+            .find(|run| run.text.starts_with('!'))
+            .expect("inserted");
+        assert_eq!(unlinked.link, None);
+        assert!(!unlinked.style.contains(InlineStyle::BOLD));
+    }
+
+    #[test]
+    fn collapsed_toggle_inside_link_formats_link_not_pending_style() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::Paragraph {
+            runs: vec![StyledRun::linked(
+                "link",
+                InlineStyle::empty(),
+                "https://example.com",
+            )],
+        }]));
+        state.selection = DocSelection::caret(DocPosition::new(0, 2));
+
+        state.apply_action(EditAction::ToggleInlineStyle(InlineStyle::BOLD));
+
+        assert!(state.pending_style.is_empty());
+        let runs = state.document.block(0).and_then(Block::runs).expect("runs");
+        assert!(runs[0].style.contains(InlineStyle::BOLD));
+        assert_eq!(runs[0].link.as_deref(), Some("https://example.com"));
+    }
+
     // ── Clipboard: internal copy/paste ───────────────────
 
     #[test]
@@ -1531,6 +1600,69 @@ mod tests {
                 .as_deref(),
             Some("worldhello world"),
         );
+    }
+
+    #[test]
+    fn external_plain_text_paste_splits_newlines_into_blocks() {
+        let mut state = EditorState::new();
+
+        state.perform(Action::Paste("alpha\nbeta".into()));
+
+        assert_eq!(state.document.block_count(), 2);
+        assert_eq!(
+            state
+                .document
+                .block(0)
+                .map(Block::flattened_text)
+                .as_deref(),
+            Some("alpha"),
+        );
+        assert_eq!(
+            state
+                .document
+                .block(1)
+                .map(Block::flattened_text)
+                .as_deref(),
+            Some("beta"),
+        );
+    }
+
+    #[test]
+    fn copy_paste_whole_heading_preserves_heading_type() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::Heading {
+            level: HeadingLevel::H2,
+            runs: vec![StyledRun::plain("Title")],
+        }]));
+        state.selection = DocSelection::range(DocPosition::new(0, 0), DocPosition::new(0, 5));
+        state.perform(Action::Copy);
+        state.selection = DocSelection::caret(DocPosition::new(0, 5));
+
+        state.perform(Action::Paste("Title".into()));
+
+        assert!(matches!(
+            state.document.block(1),
+            Some(Block::Heading {
+                level: HeadingLevel::H2,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn select_all_delete_removes_single_atom() {
+        let mut state = EditorState::from_document(Document::from_blocks(vec![Block::Image {
+            src: "cid:1".into(),
+            alt: "logo".into(),
+            width: None,
+            height: None,
+        }]));
+
+        state.perform(Action::SelectAll);
+        assert!(!state.selection.is_collapsed());
+        state.perform(Action::Edit(EditAction::DeleteSelection));
+
+        assert_eq!(state.document.block_count(), 1);
+        assert_eq!(state.document.block(0), Some(&Block::empty_paragraph()));
     }
 
     #[test]

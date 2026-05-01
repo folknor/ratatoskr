@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use crate::document::{
-    Block, BlockKind, DocPosition, Document, InlineStyle, StyledRun, isolate_runs,
+    Block, BlockKind, DocPosition, Document, InlineStyle, StyledRun, isolate_runs, text_len,
 };
 
 // ── Position map ────────────────────────────────────────
@@ -60,6 +60,8 @@ pub enum StructuralChange {
     Insert { block_index: usize, count: usize },
     /// A block was removed at `block_index`.
     Remove { block_index: usize },
+    /// A contiguous range of blocks was removed starting at `block_index`.
+    RemoveRange { block_index: usize, count: usize },
     /// Multiple blocks were removed/merged in a cross-block delete.
     /// `start_block` is the first affected block, `removed_count` is how many
     /// blocks after it were removed (merged into `start_block`).
@@ -82,6 +84,10 @@ pub struct DeletedContent {
     /// middle entries = fully deleted blocks (if any), last entry = head of end block
     /// that was removed.
     pub blocks: Vec<Block>,
+    /// For cross-block deletes ending inside an inline block, this stores the
+    /// preserved tail of the end block. Undo uses it to distinguish a real end
+    /// tail from the next unaffected block at the same index.
+    pub end_tail: Option<Block>,
 }
 
 // ── Edit operation ──────────────────────────────────────
@@ -143,6 +149,20 @@ pub enum EditOp {
 
     /// Remove a block at an index.
     RemoveBlock { index: usize, saved: Block },
+
+    /// Replace a block at an index.
+    ReplaceBlock {
+        index: usize,
+        old: Block,
+        new: Block,
+    },
+
+    /// Restore the block split created by undoing a merge.
+    RestoreMergedBlock {
+        block_index: usize,
+        saved: Block,
+        merge_offset: usize,
+    },
 }
 
 // ── PosMap ──────────────────────────────────────────────
@@ -213,6 +233,17 @@ impl PosMap {
                     DocPosition::new(block_index, 0)
                 } else if pos.block_index > block_index {
                     DocPosition::new(pos.block_index - 1, pos.offset)
+                } else {
+                    pos
+                }
+            }
+
+            Some(StructuralChange::RemoveRange { block_index, count }) => {
+                let end_block = block_index + count;
+                if pos.block_index >= block_index && pos.block_index < end_block {
+                    DocPosition::new(block_index, 0)
+                } else if pos.block_index >= end_block {
+                    DocPosition::new(pos.block_index - count, pos.offset)
                 } else {
                     pos
                 }
@@ -307,6 +338,12 @@ impl EditOp {
             } => apply_set_block_attrs(doc, *block_index, *new),
             Self::InsertBlock { index, block } => apply_insert_block(doc, *index, block),
             Self::RemoveBlock { index, .. } => apply_remove_block(doc, *index),
+            Self::ReplaceBlock { index, new, .. } => apply_replace_block(doc, *index, new),
+            Self::RestoreMergedBlock {
+                block_index,
+                saved,
+                merge_offset,
+            } => apply_restore_merged_block(doc, *block_index, saved, *merge_offset),
         }
     }
 
@@ -330,7 +367,7 @@ impl EditOp {
     fn invert_inner(&self, doc: Option<&Document>) -> Self {
         match self {
             Self::InsertText { position, text } => {
-                let char_count = text.chars().count();
+                let char_count = text_len(text);
                 let end = DocPosition::new(position.block_index, position.offset + char_count);
 
                 // When the document is available, capture the actual styled
@@ -348,6 +385,7 @@ impl EditOp {
                     end,
                     deleted: DeletedContent {
                         blocks: vec![Block::Paragraph { runs: deleted_runs }],
+                        end_tail: None,
                     },
                 }
             }
@@ -366,10 +404,12 @@ impl EditOp {
 
             Self::MergeBlocks {
                 block_index,
+                saved,
                 merge_offset,
-                ..
-            } => Self::SplitBlock {
-                position: DocPosition::new(block_index - 1, *merge_offset),
+            } => Self::RestoreMergedBlock {
+                block_index: *block_index,
+                saved: saved.clone(),
+                merge_offset: *merge_offset,
             },
 
             Self::ToggleInlineStyle {
@@ -411,6 +451,20 @@ impl EditOp {
                 index: *index,
                 block: saved.clone(),
             },
+            Self::ReplaceBlock { index, old, new } => Self::ReplaceBlock {
+                index: *index,
+                old: new.clone(),
+                new: old.clone(),
+            },
+            Self::RestoreMergedBlock {
+                block_index,
+                saved,
+                merge_offset,
+            } => Self::MergeBlocks {
+                block_index: *block_index,
+                saved: saved.clone(),
+                merge_offset: *merge_offset,
+            },
         }
     }
 }
@@ -441,7 +495,7 @@ fn apply_insert_text(doc: &mut Document, position: DocPosition, text: &str) -> P
     insert_text_into_runs(runs, position.offset, text);
     doc.replace_block(position.block_index, block);
 
-    let char_count = text.chars().count();
+    let char_count = text_len(text);
     PosMap {
         block_index: position.block_index,
         entries: vec![PosMapEntry {
@@ -455,14 +509,60 @@ fn apply_insert_text(doc: &mut Document, position: DocPosition, text: &str) -> P
 
 /// Insert `text` into a run list at the given flattened char offset.
 /// The text is inserted into whichever run contains that offset, inheriting its style.
-fn insert_text_into_runs(runs: &mut [StyledRun], offset: usize, text: &str) {
+fn insert_text_into_runs(runs: &mut Vec<StyledRun>, offset: usize, text: &str) {
     let mut pos = 0;
-    for run in runs.iter_mut() {
+    for i in 0..runs.len() {
+        let run = &runs[i];
         let run_len = run.char_len();
-        if offset >= pos && offset <= pos + run_len {
+        if offset == pos {
+            if i == 0 {
+                if runs[i].link.is_some() {
+                    runs.insert(
+                        i,
+                        StyledRun {
+                            text: text.to_owned(),
+                            style: runs[i].style,
+                            link: None,
+                        },
+                    );
+                    return;
+                }
+            } else if runs[i - 1].link.is_some() || runs[i].link.is_some() {
+                runs.insert(
+                    i,
+                    StyledRun {
+                        text: text.to_owned(),
+                        style: runs[i - 1].style,
+                        link: None,
+                    },
+                );
+                return;
+            } else {
+                let byte_offset = runs[i - 1].text.len();
+                runs[i - 1].text.insert_str(byte_offset, text);
+                return;
+            }
+        }
+        if offset < pos + run_len {
             let local = offset - pos;
-            let byte_offset = run.char_to_byte_offset(local);
-            run.text.insert_str(byte_offset, text);
+            let byte_offset = runs[i].char_to_byte_offset(local);
+            runs[i].text.insert_str(byte_offset, text);
+            return;
+        }
+        if offset == pos + run_len {
+            if runs[i].link.is_some() {
+                runs.insert(
+                    i + 1,
+                    StyledRun {
+                        text: text.to_owned(),
+                        style: runs[i].style,
+                        link: None,
+                    },
+                );
+            } else {
+                let byte_offset = runs[i].text.len();
+                runs[i].text.insert_str(byte_offset, text);
+            }
             return;
         }
         pos += run_len;
@@ -503,8 +603,24 @@ fn apply_single_block_delete(doc: &mut Document, start: DocPosition, end: DocPos
 
     let mut block = block;
     let Some(runs) = block.runs_mut() else {
-        // Same reasoning as apply_insert_text: container/atom blocks have no
-        // addressable inline content under the flat DocPosition model.
+        if start.offset == 0 && end.offset >= block.char_len() {
+            if doc.block_count() == 1 {
+                doc.replace_block(start.block_index, Block::empty_paragraph());
+                return PosMap {
+                    block_index: start.block_index,
+                    entries: Vec::new(),
+                    structural: None,
+                };
+            }
+            doc.blocks.remove(start.block_index);
+            return PosMap {
+                block_index: start.block_index,
+                entries: Vec::new(),
+                structural: Some(StructuralChange::Remove {
+                    block_index: start.block_index,
+                }),
+            };
+        }
         return PosMap {
             block_index: start.block_index,
             entries: Vec::new(),
@@ -536,54 +652,97 @@ fn apply_single_block_delete(doc: &mut Document, start: DocPosition, end: DocPos
 }
 
 fn apply_cross_block_delete(doc: &mut Document, start: DocPosition, end: DocPosition) -> PosMap {
-    // Collect the end block's tail (content after end.offset).
     let end_block = doc
         .block(end.block_index)
         .expect("DeleteRange: end block out of bounds")
         .clone();
-    let end_tail_runs = extract_runs_from_offset(end_block.runs().unwrap_or(&[]), end.offset);
-
-    // Modify start block: truncate at start.offset, append end tail.
     let start_block = doc
         .block(start.block_index)
         .expect("DeleteRange: start block out of bounds")
         .clone();
-    let mut new_block = start_block;
-    if let Some(runs) = new_block.runs_mut() {
-        truncate_runs(runs, start.offset);
-        runs.extend(end_tail_runs);
-        if runs.is_empty() {
-            runs.push(StyledRun::plain(String::new()));
+
+    let replacement =
+        build_cross_delete_replacement(&start_block, start.offset, &end_block, end.offset);
+
+    let include_end = end_block.is_inline_block() || end.offset > 0;
+    let last_removed = if include_end {
+        end.block_index
+    } else {
+        end.block_index.saturating_sub(1)
+    };
+
+    if let Some(new_block) = replacement {
+        doc.replace_block(start.block_index, new_block);
+        let blocks_to_remove = last_removed.saturating_sub(start.block_index);
+        for _ in 0..blocks_to_remove {
+            doc.blocks.remove(start.block_index + 1);
         }
-    }
-    doc.replace_block(start.block_index, new_block);
 
-    // Remove blocks from (start+1) through end (inclusive).
-    let blocks_to_remove = end.block_index - start.block_index;
+        return PosMap {
+            block_index: start.block_index,
+            entries: vec![PosMapEntry {
+                old_offset: start.offset,
+                old_len: 0,
+                new_len: 0,
+            }],
+            structural: if blocks_to_remove > 0 {
+                Some(StructuralChange::CrossBlockDelete {
+                    start_block: start.block_index,
+                    removed_count: blocks_to_remove,
+                    start_offset: start.offset,
+                })
+            } else {
+                None
+            },
+        };
+    }
+
+    let blocks_to_remove = last_removed
+        .saturating_sub(start.block_index)
+        .saturating_add(1);
     for _ in 0..blocks_to_remove {
-        doc.blocks.remove(start.block_index + 1);
+        doc.blocks.remove(start.block_index);
     }
-
     if doc.blocks.is_empty() {
         doc.blocks.push(Arc::new(Block::empty_paragraph()));
     }
 
     PosMap {
         block_index: start.block_index,
-        entries: vec![PosMapEntry {
-            old_offset: start.offset,
-            old_len: 0,
-            new_len: 0,
-        }],
-        structural: if blocks_to_remove > 0 {
-            Some(StructuralChange::CrossBlockDelete {
-                start_block: start.block_index,
-                removed_count: blocks_to_remove,
-                start_offset: start.offset,
-            })
-        } else {
-            None
-        },
+        entries: Vec::new(),
+        structural: Some(StructuralChange::RemoveRange {
+            block_index: start.block_index,
+            count: blocks_to_remove,
+        }),
+    }
+}
+
+fn build_cross_delete_replacement(
+    start_block: &Block,
+    start_offset: usize,
+    end_block: &Block,
+    end_offset: usize,
+) -> Option<Block> {
+    if start_block.is_inline_block() {
+        let mut new_block = start_block.clone();
+        if let Some(runs) = new_block.runs_mut() {
+            truncate_runs(runs, start_offset);
+            if let Some(end_runs) = end_block.runs() {
+                runs.extend(extract_runs_from_offset(end_runs, end_offset));
+            }
+            if runs.is_empty() {
+                runs.push(StyledRun::plain(String::new()));
+            }
+        }
+        return Some(new_block);
+    }
+
+    let end_runs = end_block.runs()?;
+    let tail = extract_runs_from_offset(end_runs, end_offset);
+    if tail.is_empty() {
+        None
+    } else {
+        Some(block_with_runs_like(end_block, tail))
     }
 }
 
@@ -608,6 +767,31 @@ fn apply_restore_deleted(
     // Single-block restore: splice the deleted runs back at the insertion offset,
     // preserving their original styling (bold, italic, links, etc.).
     if deleted_count == 1 {
+        if !deleted.blocks[0].is_inline_block() {
+            let insert_index = position.block_index.min(doc.block_count());
+            if doc.block_count() == 1
+                && insert_index == 0
+                && matches!(doc.block(0), Some(Block::Paragraph { runs }) if runs.iter().all(StyledRun::is_empty))
+            {
+                doc.replace_block(0, deleted.blocks[0].clone());
+                return PosMap {
+                    block_index: 0,
+                    entries: Vec::new(),
+                    structural: None,
+                };
+            }
+            doc.blocks
+                .insert(insert_index, Arc::new(deleted.blocks[0].clone()));
+            return PosMap {
+                block_index: insert_index,
+                entries: Vec::new(),
+                structural: Some(StructuralChange::Insert {
+                    block_index: insert_index,
+                    count: 1,
+                }),
+            };
+        }
+
         let deleted_runs = deleted.blocks[0].runs().unwrap_or(&[]);
         let char_count: usize = deleted_runs.iter().map(StyledRun::char_len).sum();
 
@@ -641,6 +825,10 @@ fn apply_restore_deleted(
     }
 
     // Cross-block restore.
+    if !deleted.blocks[0].is_inline_block() {
+        return apply_restore_deleted_from_atomic_start(doc, position, deleted);
+    }
+
     let merged_block = doc
         .block(position.block_index)
         .expect("RestoreDeleted: block out of bounds")
@@ -648,7 +836,11 @@ fn apply_restore_deleted(
 
     let merged_runs = merged_block.runs().unwrap_or(&[]);
     let head_runs = extract_runs_up_to(merged_runs, position.offset);
-    let tail_runs = extract_runs_from_offset(merged_runs, position.offset);
+    let tail_runs = deleted
+        .end_tail
+        .as_ref()
+        .and_then(Block::runs)
+        .map_or_else(Vec::new, <[StyledRun]>::to_vec);
 
     let mut new_blocks: Vec<Block> = Vec::with_capacity(deleted_count + 1);
 
@@ -659,13 +851,7 @@ fn apply_restore_deleted(
     if start_runs.is_empty() {
         start_runs.push(StyledRun::plain(String::new()));
     }
-    new_blocks.push(match &merged_block {
-        Block::Heading { level, .. } => Block::Heading {
-            level: *level,
-            runs: start_runs,
-        },
-        _ => Block::Paragraph { runs: start_runs },
-    });
+    new_blocks.push(block_with_runs_like(&deleted.blocks[0], start_runs));
 
     // Middle blocks (indices 1..deleted_count-1).
     for block in &deleted.blocks[1..deleted_count - 1] {
@@ -680,13 +866,12 @@ fn apply_restore_deleted(
     if end_runs.is_empty() {
         end_runs.push(StyledRun::plain(String::new()));
     }
-    new_blocks.push(match last_deleted {
-        Block::Heading { level, .. } => Block::Heading {
-            level: *level,
-            runs: end_runs,
-        },
-        _ => Block::Paragraph { runs: end_runs },
-    });
+    let end_block = if last_deleted.is_inline_block() {
+        block_with_runs_like(last_deleted, end_runs)
+    } else {
+        last_deleted.clone()
+    };
+    new_blocks.push(end_block);
 
     // Replace the merged block with the restored blocks.
     doc.blocks.remove(position.block_index);
@@ -699,6 +884,55 @@ fn apply_restore_deleted(
         entries: Vec::new(),
         structural: Some(StructuralChange::Insert {
             block_index: position.block_index,
+            count: deleted_count,
+        }),
+    }
+}
+
+fn apply_restore_deleted_from_atomic_start(
+    doc: &mut Document,
+    position: DocPosition,
+    deleted: &DeletedContent,
+) -> PosMap {
+    let deleted_count = deleted.blocks.len();
+    let insert_index = position.block_index.min(doc.block_count());
+    let last_deleted = &deleted.blocks[deleted_count - 1];
+
+    let mut restored = Vec::with_capacity(deleted_count);
+    restored.push(deleted.blocks[0].clone());
+    for block in &deleted.blocks[1..deleted_count - 1] {
+        restored.push(block.clone());
+    }
+
+    let consumed_current = if let Some(end_tail) = &deleted.end_tail {
+        let tail_runs = end_tail.runs().unwrap_or(&[]);
+        let mut end_runs = last_deleted.runs().unwrap_or(&[]).to_vec();
+        end_runs.extend(tail_runs.iter().cloned());
+        restored.push(block_with_runs_like(last_deleted, end_runs));
+        true
+    } else {
+        restored.push(last_deleted.clone());
+        false
+    };
+
+    if consumed_current && insert_index < doc.block_count() {
+        doc.blocks.remove(insert_index);
+    }
+    if doc.block_count() == 1
+        && matches!(doc.block(0), Some(Block::Paragraph { runs }) if runs.iter().all(StyledRun::is_empty))
+        && insert_index == 0
+    {
+        doc.blocks.clear();
+    }
+    for (i, block) in restored.into_iter().enumerate() {
+        doc.blocks.insert(insert_index + i, Arc::new(block));
+    }
+
+    PosMap {
+        block_index: insert_index,
+        entries: Vec::new(),
+        structural: Some(StructuralChange::Insert {
+            block_index: insert_index,
             count: deleted_count,
         }),
     }
@@ -815,6 +1049,25 @@ fn split_runs_at_offset(runs: &[StyledRun], offset: usize) -> (Vec<StyledRun>, V
     (left, right)
 }
 
+fn block_with_runs_like(template: &Block, runs: Vec<StyledRun>) -> Block {
+    match template {
+        Block::Heading { level, .. } => Block::Heading {
+            level: *level,
+            runs,
+        },
+        Block::ListItem {
+            ordered,
+            indent_level,
+            ..
+        } => Block::ListItem {
+            ordered: *ordered,
+            indent_level: *indent_level,
+            runs,
+        },
+        _ => Block::Paragraph { runs },
+    }
+}
+
 // ── Apply: MergeBlocks ──────────────────────────────────
 
 fn apply_merge_blocks(doc: &mut Document, block_index: usize, _merge_offset: usize) -> PosMap {
@@ -852,6 +1105,34 @@ fn apply_merge_blocks(doc: &mut Document, block_index: usize, _merge_offset: usi
         structural: Some(StructuralChange::Merge {
             block_index,
             merge_offset: prev_char_len,
+        }),
+    }
+}
+
+fn apply_restore_merged_block(
+    doc: &mut Document,
+    block_index: usize,
+    saved: &Block,
+    merge_offset: usize,
+) -> PosMap {
+    let merged_index = block_index.saturating_sub(1);
+    let merged_block = doc
+        .block(merged_index)
+        .expect("RestoreMergedBlock: merged block out of bounds")
+        .clone();
+    let merged_runs = merged_block.runs().unwrap_or(&[]);
+    let left_runs = extract_runs_up_to(merged_runs, merge_offset);
+    let left_block = block_with_runs_like(&merged_block, left_runs);
+
+    doc.replace_block(merged_index, left_block);
+    doc.blocks.insert(block_index, Arc::new(saved.clone()));
+
+    PosMap {
+        block_index: merged_index,
+        entries: Vec::new(),
+        structural: Some(StructuralChange::Insert {
+            block_index,
+            count: 1,
         }),
     }
 }
@@ -1091,12 +1372,31 @@ fn apply_insert_block(doc: &mut Document, index: usize, block: &Block) -> PosMap
 }
 
 fn apply_remove_block(doc: &mut Document, index: usize) -> PosMap {
-    doc.remove_block(index);
+    let removed = if index < doc.block_count() {
+        doc.remove_block(index).is_some()
+    } else {
+        false
+    };
 
     PosMap {
         block_index: index,
         entries: Vec::new(),
-        structural: Some(StructuralChange::Remove { block_index: index }),
+        structural: if removed {
+            Some(StructuralChange::Remove { block_index: index })
+        } else {
+            None
+        },
+    }
+}
+
+fn apply_replace_block(doc: &mut Document, index: usize, block: &Block) -> PosMap {
+    doc.replace_block(index, block.clone())
+        .expect("ReplaceBlock: block out of bounds");
+
+    PosMap {
+        block_index: index,
+        entries: Vec::new(),
+        structural: None,
     }
 }
 
@@ -1157,6 +1457,7 @@ fn invert_delete_range(start: DocPosition, _end: DocPosition, deleted: &DeletedC
         end: start,
         deleted: DeletedContent {
             blocks: deleted.blocks.clone(),
+            end_tail: deleted.end_tail.clone(),
         },
     }
 }
@@ -1308,10 +1609,7 @@ mod tests {
 
     #[test]
     fn insert_text_into_horizontal_rule_is_noop() {
-        let mut doc = Document::from_blocks(vec![
-            Block::paragraph("text"),
-            Block::HorizontalRule,
-        ]);
+        let mut doc = Document::from_blocks(vec![Block::paragraph("text"), Block::HorizontalRule]);
         let op = EditOp::InsertText {
             position: DocPosition::new(1, 0),
             text: "x".into(),
@@ -1406,6 +1704,7 @@ mod tests {
             end: DocPosition::new(0, 11),
             deleted: DeletedContent {
                 blocks: vec![Block::paragraph(" world")],
+                end_tail: None,
             },
         }
         .apply(&mut doc);
@@ -1420,6 +1719,7 @@ mod tests {
             end: DocPosition::new(0, 11),
             deleted: DeletedContent {
                 blocks: vec![Block::paragraph(" world")],
+                end_tail: None,
             },
         };
         op.apply(&mut doc);
@@ -1435,6 +1735,7 @@ mod tests {
             end: DocPosition::new(0, 3),
             deleted: DeletedContent {
                 blocks: vec![Block::paragraph("abc")],
+                end_tail: None,
             },
         }
         .apply(&mut doc);
@@ -1458,6 +1759,7 @@ mod tests {
                 blocks: vec![Block::Paragraph {
                     runs: vec![StyledRun::plain("xxx")],
                 }],
+                end_tail: None,
             },
         }
         .apply(&mut doc);
@@ -1477,6 +1779,7 @@ mod tests {
             end: DocPosition::new(0, 1),
             deleted: DeletedContent {
                 blocks: vec![Block::paragraph("\u{1f600}")],
+                end_tail: None,
             },
         }
         .apply(&mut doc);
@@ -1494,6 +1797,7 @@ mod tests {
             end: DocPosition::new(1, 4),
             deleted: DeletedContent {
                 blocks: vec![Block::paragraph("lo"), Block::paragraph(" wor")],
+                end_tail: Some(Block::paragraph("ld")),
             },
         }
         .apply(&mut doc);
@@ -1517,6 +1821,7 @@ mod tests {
                     Block::paragraph("bbb"),
                     Block::paragraph("cc"),
                 ],
+                end_tail: Some(Block::paragraph("c")),
             },
         }
         .apply(&mut doc);
@@ -1540,6 +1845,7 @@ mod tests {
                     Block::paragraph("bbb"),
                     Block::paragraph("cc"),
                 ],
+                end_tail: Some(Block::paragraph("c")),
             },
         };
         op.apply(&mut doc);
@@ -1695,6 +2001,38 @@ mod tests {
         assert_eq!(doc.block_count(), 2);
         assert_eq!(block_text(&doc, 0), "hello");
         assert_eq!(block_text(&doc, 1), " world");
+    }
+
+    #[test]
+    fn merge_invert_restores_saved_block_type() {
+        let mut doc = Document::from_blocks(vec![
+            Block::paragraph("hello"),
+            Block::Heading {
+                level: HeadingLevel::H2,
+                runs: vec![StyledRun::plain(" title")],
+            },
+        ]);
+        let op = EditOp::MergeBlocks {
+            block_index: 1,
+            saved: Block::Heading {
+                level: HeadingLevel::H2,
+                runs: vec![StyledRun::plain(" title")],
+            },
+            merge_offset: 5,
+        };
+
+        op.apply(&mut doc);
+        op.invert().apply(&mut doc);
+
+        assert!(matches!(doc.block(0), Some(Block::Paragraph { .. })));
+        assert!(matches!(
+            doc.block(1),
+            Some(Block::Heading {
+                level: HeadingLevel::H2,
+                ..
+            })
+        ));
+        assert_eq!(block_text(&doc, 1), " title");
     }
 
     #[test]
@@ -2221,6 +2559,129 @@ mod tests {
         assert_eq!(doc.flattened_text(), original.flattened_text());
     }
 
+    #[test]
+    fn cross_block_delete_undo_preserves_list_boundaries() {
+        let original = Document::from_blocks(vec![
+            Block::ListItem {
+                ordered: false,
+                indent_level: 2,
+                runs: vec![StyledRun::plain("abc")],
+            },
+            Block::ListItem {
+                ordered: true,
+                indent_level: 1,
+                runs: vec![StyledRun::plain("xyz")],
+            },
+        ]);
+        let mut doc = original.clone();
+        let op = EditOp::DeleteRange {
+            start: DocPosition::new(0, 1),
+            end: DocPosition::new(1, 2),
+            deleted: DeletedContent {
+                blocks: vec![
+                    Block::ListItem {
+                        ordered: false,
+                        indent_level: 2,
+                        runs: vec![StyledRun::plain("bc")],
+                    },
+                    Block::ListItem {
+                        ordered: true,
+                        indent_level: 1,
+                        runs: vec![StyledRun::plain("xy")],
+                    },
+                ],
+                end_tail: Some(Block::ListItem {
+                    ordered: true,
+                    indent_level: 1,
+                    runs: vec![StyledRun::plain("z")],
+                }),
+            },
+        };
+
+        op.apply(&mut doc);
+        op.invert().apply(&mut doc);
+        crate::normalize::normalize(&mut doc);
+
+        assert_eq!(doc, original);
+    }
+
+    #[test]
+    fn single_atom_delete_undo_restores_atom() {
+        let image = Block::Image {
+            src: "cid:1".into(),
+            alt: "logo".into(),
+            width: Some(10),
+            height: Some(20),
+        };
+        let mut doc = Document::from_blocks(vec![image.clone()]);
+        let op = EditOp::DeleteRange {
+            start: DocPosition::new(0, 0),
+            end: DocPosition::new(0, 1),
+            deleted: DeletedContent {
+                blocks: vec![image],
+                end_tail: None,
+            },
+        };
+
+        op.apply(&mut doc);
+        assert_eq!(doc.block(0), Some(&Block::empty_paragraph()));
+
+        op.invert().apply(&mut doc);
+        assert!(matches!(doc.block(0), Some(Block::Image { .. })));
+        assert_eq!(doc.block_count(), 1);
+    }
+
+    #[test]
+    fn cross_block_delete_from_atom_undo_restores_tail_block() {
+        let image = Block::Image {
+            src: "cid:1".into(),
+            alt: "logo".into(),
+            width: None,
+            height: None,
+        };
+        let original = Document::from_blocks(vec![image.clone(), Block::paragraph("abc")]);
+        let mut doc = original.clone();
+        let op = EditOp::DeleteRange {
+            start: DocPosition::new(0, 0),
+            end: DocPosition::new(1, 1),
+            deleted: DeletedContent {
+                blocks: vec![
+                    image,
+                    Block::Paragraph {
+                        runs: vec![StyledRun::plain("a")],
+                    },
+                ],
+                end_tail: Some(Block::Paragraph {
+                    runs: vec![StyledRun::plain("bc")],
+                }),
+            },
+        };
+
+        op.apply(&mut doc);
+        assert_eq!(doc.block_count(), 1);
+        assert_eq!(block_text(&doc, 0), "bc");
+
+        op.invert().apply(&mut doc);
+        crate::normalize::normalize(&mut doc);
+
+        assert_eq!(doc, original);
+    }
+
+    #[test]
+    fn remove_block_last_block_is_noop_map() {
+        let mut doc = Document::from_blocks(vec![Block::paragraph("abc")]);
+        let pos = DocPosition::new(0, 2);
+        let map = EditOp::RemoveBlock {
+            index: 0,
+            saved: Block::paragraph("abc"),
+        }
+        .apply(&mut doc);
+
+        assert_eq!(doc.block_count(), 1);
+        assert_eq!(block_text(&doc, 0), "abc");
+        assert_eq!(map.map(pos), pos);
+    }
+
     // ── Cursor stability ────────────────────────────────
 
     #[test]
@@ -2242,6 +2703,7 @@ mod tests {
             end: DocPosition::new(0, 4),
             deleted: DeletedContent {
                 blocks: vec![Block::paragraph("ell")],
+                end_tail: None,
             },
         }
         .apply(&mut doc);
@@ -2256,6 +2718,7 @@ mod tests {
             end: DocPosition::new(0, 7),
             deleted: DeletedContent {
                 blocks: vec![Block::paragraph("llo w")],
+                end_tail: None,
             },
         }
         .apply(&mut doc);

@@ -5851,6 +5851,7 @@ dependencies = [
  "html5ever 0.39.0",
  "iced",
  "markup5ever 0.39.0",
+ "unicode-segmentation",
 ]
 
 [[package]]

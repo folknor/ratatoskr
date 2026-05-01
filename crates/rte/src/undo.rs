@@ -3,7 +3,7 @@
 //! Consecutive character insertions group into one undo entry (split on pause,
 //! format change, or cursor jump).
 
-use crate::document::DocSelection;
+use crate::document::{DocSelection, text_len};
 use crate::operations::{EditOp, PosMap};
 
 /// A group of operations forming one undoable user action.
@@ -198,7 +198,7 @@ fn last_insert_end(ops: &[EditOp]) -> Option<crate::document::DocPosition> {
         if let EditOp::InsertText { position, text } = op {
             return Some(crate::document::DocPosition::new(
                 position.block_index,
-                position.offset + text.chars().count(),
+                position.offset + text_len(text),
             ));
         }
     }
@@ -251,6 +251,7 @@ mod tests {
             end: DocPosition::new(end_block, end_offset),
             deleted: crate::operations::DeletedContent {
                 blocks: vec![crate::document::Block::paragraph("x")],
+                end_tail: None,
             },
         }
     }

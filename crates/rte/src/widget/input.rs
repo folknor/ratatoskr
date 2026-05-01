@@ -14,6 +14,7 @@ use crate::rules::EditAction;
 
 use iced::keyboard::key::Named;
 use iced::keyboard::{Key, Modifiers};
+use unicode_segmentation::UnicodeSegmentation;
 
 // ── Key action types ────────────────────────────────────
 
@@ -96,11 +97,11 @@ pub fn map_key_event(key: &Key, modifiers: Modifiers, text: Option<&str>) -> Key
     }
 
     // Third: text input (non-control characters) when no command modifier is held.
-    if !cmd
-        && let Some(text) = text
-        && let Some(ch) = text.chars().find(|c| !c.is_control())
-    {
-        return KeyAction::Edit(EditAction::InsertText(ch.to_string()));
+    if !cmd && let Some(text) = text {
+        let filtered: String = text.chars().filter(|c| !c.is_control()).collect();
+        if !filtered.is_empty() {
+            return KeyAction::Edit(EditAction::InsertText(filtered));
+        }
     }
 
     KeyAction::None
@@ -217,6 +218,10 @@ fn classify(ch: char) -> CharClass {
     }
 }
 
+fn classify_grapheme(grapheme: &str) -> CharClass {
+    grapheme.chars().next().map_or(CharClass::Other, classify)
+}
+
 // ── Cursor movement helpers ─────────────────────────────
 
 /// Move cursor left by one character in the document.
@@ -263,7 +268,7 @@ pub fn move_right(doc: &Document, pos: DocPosition) -> DocPosition {
 /// Skips whitespace first, then moves through the word.
 pub fn word_left(doc: &Document, pos: DocPosition) -> DocPosition {
     let text = block_text(doc, pos.block_index);
-    let chars: Vec<char> = text.chars().collect();
+    let graphemes: Vec<&str> = UnicodeSegmentation::graphemes(text.as_str(), true).collect();
 
     if pos.offset == 0 {
         // At start of block: move to end of previous block, then word-left there.
@@ -276,10 +281,10 @@ pub fn word_left(doc: &Document, pos: DocPosition) -> DocPosition {
         return pos;
     }
 
-    let mut idx = pos.offset;
+    let mut idx = pos.offset.min(graphemes.len());
 
     // Skip whitespace going left.
-    while idx > 0 && classify(chars[idx - 1]) == CharClass::Whitespace {
+    while idx > 0 && classify_grapheme(graphemes[idx - 1]) == CharClass::Whitespace {
         idx -= 1;
     }
 
@@ -288,8 +293,8 @@ pub fn word_left(doc: &Document, pos: DocPosition) -> DocPosition {
     }
 
     // Now skip characters of the same class.
-    let target_class = classify(chars[idx - 1]);
-    while idx > 0 && classify(chars[idx - 1]) == target_class {
+    let target_class = classify_grapheme(graphemes[idx - 1]);
+    while idx > 0 && classify_grapheme(graphemes[idx - 1]) == target_class {
         idx -= 1;
     }
 
@@ -300,8 +305,8 @@ pub fn word_left(doc: &Document, pos: DocPosition) -> DocPosition {
 /// Skips the current word, then any whitespace after it.
 pub fn word_right(doc: &Document, pos: DocPosition) -> DocPosition {
     let text = block_text(doc, pos.block_index);
-    let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
+    let graphemes: Vec<&str> = UnicodeSegmentation::graphemes(text.as_str(), true).collect();
+    let len = graphemes.len();
 
     if pos.offset >= len {
         // At end of block: move to start of next block.
@@ -311,16 +316,16 @@ pub fn word_right(doc: &Document, pos: DocPosition) -> DocPosition {
         return pos;
     }
 
-    let mut idx = pos.offset;
+    let mut idx = pos.offset.min(len);
 
     // Skip characters of the current class.
-    let start_class = classify(chars[idx]);
-    while idx < len && classify(chars[idx]) == start_class {
+    let start_class = classify_grapheme(graphemes[idx]);
+    while idx < len && classify_grapheme(graphemes[idx]) == start_class {
         idx += 1;
     }
 
     // Skip whitespace after the word.
-    while idx < len && classify(chars[idx]) == CharClass::Whitespace {
+    while idx < len && classify_grapheme(graphemes[idx]) == CharClass::Whitespace {
         idx += 1;
     }
 
@@ -367,8 +372,8 @@ pub fn word_at(doc: &Document, pos: DocPosition) -> (DocPosition, DocPosition) {
     use super::super::document::Block;
 
     let text = block_text(doc, pos.block_index);
-    let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
+    let graphemes: Vec<&str> = UnicodeSegmentation::graphemes(text.as_str(), true).collect();
+    let len = graphemes.len();
 
     if len == 0 {
         let p = DocPosition::new(pos.block_index, 0);
@@ -383,17 +388,17 @@ pub fn word_at(doc: &Document, pos: DocPosition) -> (DocPosition, DocPosition) {
     } else {
         len - 1
     };
-    let target_class = classify(chars[anchor_idx]);
+    let target_class = classify_grapheme(graphemes[anchor_idx]);
 
     // Expand left.
     let mut start = anchor_idx;
-    while start > 0 && classify(chars[start - 1]) == target_class {
+    while start > 0 && classify_grapheme(graphemes[start - 1]) == target_class {
         start -= 1;
     }
 
     // Expand right.
     let mut end = anchor_idx + 1;
-    while end < len && classify(chars[end]) == target_class {
+    while end < len && classify_grapheme(graphemes[end]) == target_class {
         end += 1;
     }
 
@@ -717,6 +722,13 @@ mod tests {
                 action,
                 KeyAction::Edit(EditAction::InsertText("\u{00e9}".into()))
             );
+        }
+
+        #[test]
+        fn multi_codepoint_text_inserts_whole_commit() {
+            let text = "a\u{301}";
+            let action = map_key_event(&Key::Character(text.into()), no_mod(), Some(text));
+            assert_eq!(action, KeyAction::Edit(EditAction::InsertText(text.into())));
         }
 
         #[test]

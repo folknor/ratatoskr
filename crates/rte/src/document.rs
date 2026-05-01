@@ -10,6 +10,17 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use bitflags::bitflags;
+use unicode_segmentation::UnicodeSegmentation;
+
+pub(crate) fn text_len(text: &str) -> usize {
+    UnicodeSegmentation::graphemes(text, true).count()
+}
+
+pub(crate) fn text_to_byte_offset(text: &str, offset: usize) -> usize {
+    UnicodeSegmentation::grapheme_indices(text, true)
+        .nth(offset)
+        .map_or(text.len(), |(byte_idx, _)| byte_idx)
+}
 
 // ── Inline style ────────────────────────────────────────
 
@@ -69,7 +80,7 @@ impl StyledRun {
 
     /// The number of characters in this run.
     pub fn char_len(&self) -> usize {
-        self.text.chars().count()
+        text_len(&self.text)
     }
 
     /// Whether this run has the same formatting (style + link) as `other`.
@@ -105,10 +116,7 @@ impl StyledRun {
 
     /// Convert a char offset to a byte offset within this run's text.
     pub(crate) fn char_to_byte_offset(&self, char_offset: usize) -> usize {
-        self.text
-            .char_indices()
-            .nth(char_offset)
-            .map_or(self.text.len(), |(byte_idx, _)| byte_idx)
+        text_to_byte_offset(&self.text, char_offset)
     }
 }
 
@@ -283,6 +291,16 @@ impl Block {
     pub fn flattened_text(&self) -> String {
         match self {
             Self::Image { alt, .. } => alt.clone(),
+            Self::BlockQuote { blocks } => {
+                let mut buf = String::new();
+                for (i, block) in blocks.iter().enumerate() {
+                    if i > 0 {
+                        buf.push('\n');
+                    }
+                    buf.push_str(&block.flattened_text());
+                }
+                buf
+            }
             _ => match self.runs() {
                 Some(runs) => {
                     let total_len: usize = runs.iter().map(|r| r.text.len()).sum();
@@ -299,11 +317,12 @@ impl Block {
 
     /// Total character count of the block's flattened inline text.
     ///
-    /// Images are atomic and return 0 (not character-addressable).
+    /// Non-inline blocks are atomic and return 1 so they can be selected,
+    /// copied, and deleted as block-level objects.
     pub fn char_len(&self) -> usize {
         match self.runs() {
             Some(runs) => runs.iter().map(StyledRun::char_len).sum(),
-            None => 0,
+            None => 1,
         }
     }
 
@@ -318,6 +337,11 @@ impl Block {
     /// Whether this block is a structural container (BlockQuote).
     pub fn is_container(&self) -> bool {
         matches!(self, Self::BlockQuote { .. })
+    }
+
+    /// Whether this block is selected/deleted as a single block-level atom.
+    pub fn is_atomic_block(&self) -> bool {
+        !self.is_inline_block()
     }
 
     /// Extract the block-level attributes from this block.
@@ -593,6 +617,13 @@ impl Document {
         let end_block = self.block(end.block_index)?;
 
         if start.block_index == end.block_index {
+            if start.offset == 0 && end.offset >= start_block.char_len() {
+                return Some(DocSlice {
+                    blocks: vec![start_block.clone()],
+                    open_start: false,
+                    open_end: false,
+                });
+            }
             if let Some(runs) = start_block.runs() {
                 let extracted = extract_runs(runs, start.offset, end.offset);
                 return Some(DocSlice {
@@ -610,7 +641,7 @@ impl Document {
         if let Some(runs) = start_block.runs() {
             let extracted = extract_runs(runs, start.offset, start_block.char_len());
             blocks.push(Block::Paragraph { runs: extracted });
-        } else {
+        } else if start.offset == 0 {
             blocks.push(start_block.clone());
         }
 
@@ -623,7 +654,7 @@ impl Document {
         if let Some(runs) = end_block.runs() {
             let extracted = extract_runs(runs, 0, end.offset);
             blocks.push(Block::Paragraph { runs: extracted });
-        } else {
+        } else if end.offset > 0 {
             blocks.push(end_block.clone());
         }
 
@@ -757,6 +788,15 @@ mod tests {
     }
 
     #[test]
+    fn styled_run_offsets_are_grapheme_based() {
+        let run = StyledRun::plain("a\u{301}b");
+        assert_eq!(run.char_len(), 2);
+        let (left, right) = run.split_at(1);
+        assert_eq!(left.text, "a\u{301}");
+        assert_eq!(right.text, "b");
+    }
+
+    #[test]
     fn block_resolve_offset() {
         let block = Block::Paragraph {
             runs: vec![
@@ -799,14 +839,45 @@ mod tests {
     }
 
     #[test]
-    fn image_block_char_len_is_zero() {
+    fn image_block_char_len_is_atomic_unit() {
         let img = Block::Image {
             src: String::new(),
             alt: "x".into(),
             width: None,
             height: None,
         };
-        assert_eq!(img.char_len(), 0);
+        assert_eq!(img.char_len(), 1);
+    }
+
+    #[test]
+    fn slice_whole_heading_preserves_block_type() {
+        let doc = Document::from_blocks(vec![Block::Heading {
+            level: HeadingLevel::H2,
+            runs: vec![StyledRun::plain("Title")],
+        }]);
+        let slice = doc
+            .slice(DocPosition::new(0, 0), DocPosition::new(0, 5))
+            .expect("slice");
+
+        assert!(!slice.open_start);
+        assert!(!slice.open_end);
+        assert!(matches!(
+            slice.blocks.first(),
+            Some(Block::Heading {
+                level: HeadingLevel::H2,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn slice_whole_atom_preserves_block() {
+        let doc = Document::from_blocks(vec![Block::HorizontalRule]);
+        let slice = doc
+            .slice(DocPosition::new(0, 0), DocPosition::new(0, 1))
+            .expect("slice");
+
+        assert_eq!(slice.blocks, vec![Block::HorizontalRule]);
     }
 
     // ── BlockAttrs tests ────────────────────────────────

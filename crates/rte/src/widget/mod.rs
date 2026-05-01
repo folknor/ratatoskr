@@ -443,8 +443,17 @@ impl<Message> RichTextEditor<'_, Message> {
                             shell.publish(on_action(Action::DoubleClick(doc_pos)));
                         }
                         iced::advanced::mouse::click::Kind::Single => {
-                            widget_state.dragging = true;
-                            shell.publish(on_action(Action::Click(doc_pos)));
+                            if let Some(href) = link_at_content_point(
+                                content_pos,
+                                &widget_state.cache,
+                                &self.state.document,
+                            ) {
+                                widget_state.dragging = false;
+                                shell.publish(on_action(Action::LinkClicked(href)));
+                            } else {
+                                widget_state.dragging = true;
+                                shell.publish(on_action(Action::Click(doc_pos)));
+                            }
                         }
                     }
 
@@ -537,7 +546,7 @@ impl<Message> RichTextEditor<'_, Message> {
                 {
                     if *prev_ord == ordered && *prev_indent == indent_level {
                         idx += 1;
-                    } else if *prev_indent < indent_level {
+                    } else if *prev_indent <= indent_level {
                         break;
                     }
                 } else {
@@ -1283,6 +1292,25 @@ fn hit_test_content_point(
         .unwrap_or(0);
 
     crate::document::DocPosition::new(block_index, char_offset)
+}
+
+fn link_at_content_point(
+    content_pos: Point,
+    cache: &ParagraphCache<IcedParagraph>,
+    document: &crate::document::Document,
+) -> Option<String> {
+    let block_index = cache.block_at_y(content_pos.y)?;
+    let entry = cache.get(block_index)?;
+    let paragraph = entry.paragraph()?;
+    let block = document.block(block_index)?;
+    let runs = block.runs()?;
+    let content_x_offset = block_content_x_offset(block);
+    let local_point = Point::new(
+        content_pos.x - content_x_offset,
+        content_pos.y - entry.y_offset(),
+    );
+    let span_index = paragraph.hit_span(local_point)?;
+    runs.get(span_index).and_then(|run| run.link.clone())
 }
 
 // ── Into<Element> ───────────────────────────────────────

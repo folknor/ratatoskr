@@ -9,7 +9,7 @@
 //! notice when Enter doesn't do what they expect.
 
 use crate::document::{
-    Block, BlockKind, DocPosition, DocSelection, Document, InlineStyle, StyledRun,
+    Block, BlockKind, DocPosition, DocSelection, Document, InlineStyle, StyledRun, text_len,
 };
 use crate::operations::{DeletedContent, EditOp};
 
@@ -109,7 +109,7 @@ fn resolve_insert(
     // the inserted text.
     let diff = style.symmetric_difference(run_style);
     if !diff.is_empty() {
-        let char_count = text.chars().count();
+        let char_count = text_len(text);
         let insert_end = DocPosition::new(insert_pos.block_index, insert_pos.offset + char_count);
 
         for bit in diff.iter() {
@@ -233,9 +233,9 @@ fn resolve_delete_backward(doc: &Document, selection: DocSelection) -> Vec<EditO
 
     // Rule 3: at offset 0 of a non-first block - handle image blocks.
     if pos.offset == 0 {
-        // If the previous block is an image, delete (remove) it instead of merging.
+        // If the previous block is atomic, delete (remove) it instead of merging.
         if let Some(prev) = doc.block(pos.block_index - 1)
-            && matches!(prev, Block::Image { .. })
+            && prev.is_atomic_block()
         {
             return vec![EditOp::RemoveBlock {
                 index: pos.block_index - 1,
@@ -246,6 +246,9 @@ fn resolve_delete_backward(doc: &Document, selection: DocSelection) -> Vec<EditO
     }
 
     // Rule 4: delete the character before the cursor.
+    if block_is_atomic_at(doc, pos.block_index) {
+        return vec![remove_or_clear_block(doc, pos.block_index)];
+    }
     resolve_delete_char_backward(doc, pos)
 }
 
@@ -285,17 +288,8 @@ fn resolve_delete_char_backward(doc: &Document, pos: DocPosition) -> Vec<EditOp>
         return vec![];
     };
 
-    // Find the character before the cursor.
-    let text = block.flattened_text();
     let char_before_offset = pos.offset.saturating_sub(1);
-
-    // Get the actual character that will be deleted (for DeletedContent).
-    let deleted_char: String = text
-        .chars()
-        .nth(char_before_offset)
-        .map_or_else(String::new, |c| c.to_string());
-
-    if deleted_char.is_empty() {
+    if char_before_offset >= block.char_len() {
         return vec![];
     }
 
@@ -309,7 +303,8 @@ fn resolve_delete_char_backward(doc: &Document, pos: DocPosition) -> Vec<EditOp>
         start,
         end,
         deleted: DeletedContent {
-            blocks: vec![Block::Paragraph { runs: deleted_runs }],
+            blocks: vec![block_with_runs_like(block, deleted_runs)],
+            end_tail: None,
         },
     }]
 }
@@ -345,10 +340,10 @@ fn resolve_delete_forward(doc: &Document, selection: DocSelection) -> Vec<EditOp
 
     // Rule 3: at the end of a non-last block - handle image blocks.
     if at_block_end {
-        // If the next block is an image, delete (remove) it instead of merging.
+        // If the next block is atomic, delete (remove) it instead of merging.
         let next_idx = pos.block_index + 1;
         if let Some(next) = doc.block(next_idx)
-            && matches!(next, Block::Image { .. })
+            && next.is_atomic_block()
         {
             return vec![EditOp::RemoveBlock {
                 index: next_idx,
@@ -359,6 +354,9 @@ fn resolve_delete_forward(doc: &Document, selection: DocSelection) -> Vec<EditOp
     }
 
     // Rule 4: delete the character after the cursor.
+    if block_is_atomic_at(doc, pos.block_index) && pos.offset == 0 {
+        return vec![remove_or_clear_block(doc, pos.block_index)];
+    }
     resolve_delete_char_forward(doc, pos)
 }
 
@@ -398,12 +396,9 @@ fn resolve_delete_char_forward(doc: &Document, pos: DocPosition) -> Vec<EditOp> 
         return vec![];
     };
 
-    let text = block.flattened_text();
-    let char_after = text.chars().nth(pos.offset);
-
-    let Some(_deleted_ch) = char_after else {
+    if pos.offset >= block.char_len() {
         return vec![];
-    };
+    }
 
     let end_offset = pos.offset + 1;
 
@@ -413,7 +408,8 @@ fn resolve_delete_char_forward(doc: &Document, pos: DocPosition) -> Vec<EditOp> 
         start: pos,
         end: DocPosition::new(pos.block_index, end_offset),
         deleted: DeletedContent {
-            blocks: vec![Block::Paragraph { runs: deleted_runs }],
+            blocks: vec![block_with_runs_like(block, deleted_runs)],
+            end_tail: None,
         },
     }]
 }
@@ -456,28 +452,44 @@ fn build_deleted_content(doc: &Document, start: DocPosition, end: DocPosition) -
             None => {
                 return DeletedContent {
                     blocks: vec![Block::empty_paragraph()],
+                    end_tail: None,
                 };
             }
         };
 
-        let runs = block.runs().unwrap_or(&[]);
-        let deleted_runs = extract_deleted_runs(runs, start.offset, end.offset);
+        if let Some(runs) = block.runs() {
+            let deleted_runs = extract_deleted_runs(runs, start.offset, end.offset);
 
-        DeletedContent {
-            blocks: vec![Block::Paragraph { runs: deleted_runs }],
+            DeletedContent {
+                blocks: vec![block_with_runs_like(block, deleted_runs)],
+                end_tail: None,
+            }
+        } else if start.offset == 0 && end.offset >= block.char_len() {
+            DeletedContent {
+                blocks: vec![block.clone()],
+                end_tail: None,
+            }
+        } else {
+            DeletedContent {
+                blocks: vec![Block::empty_paragraph()],
+                end_tail: None,
+            }
         }
     } else {
         // Cross-block deletion.
         let mut blocks = Vec::new();
+        let mut end_tail = None;
 
         // Tail of start block (from start.offset to end of block).
         if let Some(start_block) = doc.block(start.block_index) {
             if let Some(runs) = start_block.runs() {
                 let tail_runs = extract_deleted_runs(runs, start.offset, start_block.char_len());
-                blocks.push(Block::Paragraph { runs: tail_runs });
+                blocks.push(block_with_runs_like(start_block, tail_runs));
             } else {
                 // Non-inline block (Image, HR, BlockQuote) - capture whole block.
-                blocks.push(start_block.clone());
+                if start.offset == 0 {
+                    blocks.push(start_block.clone());
+                }
             }
         }
 
@@ -492,14 +504,23 @@ fn build_deleted_content(doc: &Document, start: DocPosition, end: DocPosition) -
         if let Some(end_block) = doc.block(end.block_index) {
             if let Some(runs) = end_block.runs() {
                 let head_runs = extract_deleted_runs(runs, 0, end.offset);
-                blocks.push(Block::Paragraph { runs: head_runs });
+                blocks.push(block_with_runs_like(end_block, head_runs));
+                let tail_runs = extract_deleted_runs(runs, end.offset, end_block.char_len());
+                if !runs_are_effectively_empty(&tail_runs) {
+                    end_tail = Some(block_with_runs_like(end_block, tail_runs));
+                }
             } else {
                 // Non-inline block - capture whole block.
-                blocks.push(end_block.clone());
+                if end.offset > 0 {
+                    blocks.push(end_block.clone());
+                }
             }
         }
 
-        DeletedContent { blocks }
+        if blocks.is_empty() {
+            blocks.push(Block::empty_paragraph());
+        }
+        DeletedContent { blocks, end_tail }
     }
 }
 
@@ -743,6 +764,52 @@ fn find_link_boundaries(doc: &Document, pos: DocPosition) -> Option<(DocPosition
         DocPosition::new(pos.block_index, start_offset),
         DocPosition::new(pos.block_index, end_offset),
     ))
+}
+
+fn block_is_atomic_at(doc: &Document, block_index: usize) -> bool {
+    doc.block(block_index).is_some_and(Block::is_atomic_block)
+}
+
+fn remove_or_clear_block(doc: &Document, block_index: usize) -> EditOp {
+    let block = doc
+        .block(block_index)
+        .cloned()
+        .unwrap_or_else(Block::empty_paragraph);
+    if doc.block_count() <= 1 {
+        EditOp::ReplaceBlock {
+            index: block_index,
+            old: block,
+            new: Block::empty_paragraph(),
+        }
+    } else {
+        EditOp::RemoveBlock {
+            index: block_index,
+            saved: block,
+        }
+    }
+}
+
+fn block_with_runs_like(template: &Block, runs: Vec<StyledRun>) -> Block {
+    match template {
+        Block::Heading { level, .. } => Block::Heading {
+            level: *level,
+            runs,
+        },
+        Block::ListItem {
+            ordered,
+            indent_level,
+            ..
+        } => Block::ListItem {
+            ordered: *ordered,
+            indent_level: *indent_level,
+            runs,
+        },
+        _ => Block::Paragraph { runs },
+    }
+}
+
+fn runs_are_effectively_empty(runs: &[StyledRun]) -> bool {
+    runs.iter().all(StyledRun::is_empty)
 }
 
 /// Extract runs covering `[start_offset..end_offset)` from a run list.

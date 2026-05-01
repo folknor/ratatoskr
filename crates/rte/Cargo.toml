@@ -18,6 +18,7 @@ bitflags = "2.11.1"
 html5ever = "0.39"
 markup5ever = "0.39"
 hotpath = { workspace = true, optional = true }
+unicode-segmentation = "1.12"
 
 iced = { path = "/home/folk/Programs/sluggrs/repos/iced", default-features = false, features = [
     "wgpu", "tokio", "lazy", "advanced", "web-colors", "wayland", "image", "svg",
