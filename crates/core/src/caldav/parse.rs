@@ -59,8 +59,12 @@ pub struct ParsedReminder {
 
 /// Parse an iCalendar string and extract all VEVENTs.
 ///
-/// Uses the `calcard` crate for parsing.
-/// Returns `Err` if the iCalendar data cannot be parsed at all.
+/// Uses the `calcard` crate for parsing. Returns `Ok(empty Vec)` if the
+/// payload parses but contains no VEVENT - some servers return a
+/// VTIMEZONE-only VCALENDAR wrapper (e.g. when the timezone for a
+/// freshly-created event hasn't propagated yet). Callers should treat an
+/// empty result as "no event data available right now" rather than a hard
+/// error.
 pub fn parse_icalendar(ical_data: &str) -> Result<Vec<ParsedVEvent>, String> {
     let mut parser = Parser::new(ical_data);
     let mut events = Vec::new();
@@ -80,10 +84,6 @@ pub fn parse_icalendar(ical_data: &str) -> Result<Vec<ParsedVEvent>, String> {
             calcard::Entry::InvalidLine(_) => continue,
             _ => continue,
         }
-    }
-
-    if events.is_empty() {
-        return Err("No VEVENT found in iCalendar data".to_string());
     }
 
     Ok(events)
@@ -267,17 +267,29 @@ fn extract_datetime(
 
     // 1. Explicit TZID, resolves to a real zone (IANA or Windows).
     if let Some(tz_id) = entry.tz_id() {
-        let tz = resolver.resolve_or_default(Some(tz_id));
-        if !tz.is_floating() {
-            return (
-                common::time::resolve_local_to_timestamp(naive, &tz),
-                false,
+        // RFC 5545 § 3.3.5 says a property value with a TZID parameter MUST
+        // NOT also be UTC ("Z"-suffix). Some real-world emitters (older
+        // Outlook, some WebDAV bridges) violate this. When both are present
+        // we honor the embedded UTC offset (the path the wider calendar
+        // ecosystem converges on) but log it so an operator can spot the
+        // misbehaving server.
+        if dt.tz_hour.is_some() {
+            log::debug!(
+                "CalDAV property has both TZID={tz_id} and a UTC offset; honoring the offset per common practice"
             );
+        } else {
+            let tz = resolver.resolve_or_default(Some(tz_id));
+            if !tz.is_floating() {
+                return (
+                    common::time::resolve_local_to_timestamp(naive, &tz),
+                    false,
+                );
+            }
         }
     }
 
     // 2. UTC offset embedded in the value (Z-suffix or +HH:MM). calcard's
-    //    `to_timestamp()` already handles these - and the result does not
+    //    `to_timestamp()` already handles these and the result does not
     //    depend on a local zone, so it's safe to defer.
     if dt.tz_hour.is_some() {
         return (dt.to_timestamp(), false);
@@ -678,6 +690,15 @@ pub fn parse_multiget_report(xml: &str) -> Vec<(String, String)> {
 }
 
 /// Extract the local name from a possibly-namespaced XML tag.
+///
+/// We accept any namespace prefix here rather than restricting to the four
+/// well-known DAV / CalDAV / calendarserver / iCal URIs. In practice the
+/// element scoping (`<response>`, `<prop>`, `<resourcetype>`) provides the
+/// disambiguation: a stray `xyz:href` outside a `<response>` context is
+/// ignored by every parser, and a `xyz:href` inside one would be a
+/// malformed multistatus response anyway. The wider acceptance trades a
+/// theoretical false-positive risk for forgiveness with bridges that
+/// remap namespaces (Davical's "DAV1", Apple's `CALDAV` aliases).
 fn local_name(raw: &[u8]) -> String {
     let full = String::from_utf8_lossy(raw);
     match full.rfind(':') {
@@ -886,14 +907,18 @@ END:VCALENDAR\r\n";
     }
 
     #[test]
-    fn parse_no_vevent() {
+    fn parse_no_vevent_returns_empty_not_err() {
+        // A VCALENDAR wrapper with no VEVENT (e.g. VTIMEZONE-only response
+        // after a fresh PUT) is now Ok(empty Vec). Callers can decide how
+        // to surface "nothing here yet" - typically a stub DTO or a retry
+        // - rather than failing the whole sync with "No VEVENT found".
         let ical = "\
 BEGIN:VCALENDAR\r\n\
 VERSION:2.0\r\n\
 END:VCALENDAR\r\n";
 
-        let result = parse_icalendar(ical);
-        assert!(result.is_err());
+        let result = parse_icalendar(ical).expect("should parse");
+        assert!(result.is_empty());
     }
 
     #[test]

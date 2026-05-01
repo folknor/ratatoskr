@@ -338,21 +338,9 @@ async fn sync_caldav_calendar_account(
 ) -> Result<(), String> {
     let config =
         super::caldav::load_caldav_account_config(db, encryption_key, account_id).await?;
-    let mut client = rtsk::caldav::client::CalDavClient::new(
-        config.server_url(),
-        config.username(),
-        config.password(),
-        rtsk::caldav::client::AuthMethod::Basic,
-    );
-    if let Some(principal) = config.principal_url() {
-        client.set_principal_url(principal);
-    }
-    if let Some(home) = config.home_url() {
-        client.set_calendar_home_url(home);
-    }
     let needed_discovery = config.home_url().is_none();
+    let client = super::caldav::build_client_from_config(&config).await?;
     if needed_discovery {
-        client.discover().await?;
         super::caldav::persist_discovery_results(
             db,
             account_id,

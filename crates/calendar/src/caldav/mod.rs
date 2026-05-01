@@ -85,8 +85,8 @@ pub async fn caldav_create_event_impl(
     let ical_data = ical::build_caldav_ical_event(&input, Some(&uid));
     let event_url = join_calendar_path(calendar_remote_id, &format!("{uid}.ics"))?;
 
-    client.put_event(&event_url, &ical_data, None).await?;
-    fetch_caldav_event(&client, &event_url).await
+    let put_etag = client.put_event(&event_url, &ical_data, None).await?;
+    finalize_event(&client, &event_url, &input, &ical_data, Some(&uid), put_etag).await
 }
 
 pub async fn caldav_update_event_impl(
@@ -105,10 +105,94 @@ pub async fn caldav_update_event_impl(
     let merged = ical::merge_caldav_event_input(&existing, &input);
     let ical_data = ical::build_caldav_ical_event(&merged, existing.uid.as_deref());
 
-    client
+    let put_etag = client
         .put_event(remote_event_id, &ical_data, etag.as_deref())
         .await?;
-    fetch_caldav_event(&client, remote_event_id).await
+    finalize_event(
+        &client,
+        remote_event_id,
+        &merged,
+        &ical_data,
+        existing.uid.as_deref(),
+        put_etag,
+    )
+    .await
+}
+
+/// Resolve a CalendarEventDto for the response of a successful PUT.
+///
+/// When the server returned an ETag on the PUT response we can build the
+/// DTO directly from what we sent + that ETag, avoiding a follow-up GET
+/// that some eventually-consistent backends (Exchange front-ends, certain
+/// hosted CalDAV providers) race against the write. The GET path is still
+/// preferred when the server didn't include an ETag - that gives us
+/// server-side canonicalization for free, and any GET error surfaces as a
+/// user-actionable error.
+async fn finalize_event(
+    client: &CalDavClient,
+    event_url: &str,
+    input: &serde_json::Map<String, serde_json::Value>,
+    ical_data: &str,
+    uid: Option<&str>,
+    put_etag: Option<String>,
+) -> Result<CalendarEventDto, String> {
+    if let Some(etag) = put_etag {
+        return Ok(synthesize_event_dto(event_url, input, ical_data, uid, etag));
+    }
+    fetch_caldav_event(client, event_url).await
+}
+
+fn synthesize_event_dto(
+    event_url: &str,
+    input: &serde_json::Map<String, serde_json::Value>,
+    ical_data: &str,
+    uid: Option<&str>,
+    etag: String,
+) -> CalendarEventDto {
+    let summary = input
+        .get("summary")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let description = input
+        .get("description")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let location = input
+        .get("location")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let start_time = input
+        .get("startTime")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.timestamp())
+        .unwrap_or_default();
+    let end_time = input
+        .get("endTime")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.timestamp())
+        .unwrap_or(start_time + 3600);
+    let is_all_day = input
+        .get("isAllDay")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+
+    CalendarEventDto {
+        remote_event_id: event_url.to_string(),
+        uid: uid.map(str::to_string),
+        etag: Some(etag),
+        summary: summary.clone(),
+        title: summary,
+        description,
+        location,
+        start_time,
+        end_time,
+        is_all_day,
+        status: "confirmed".to_string(),
+        ical_data: Some(ical_data.to_string()),
+        ..CalendarEventDto::default()
+    }
 }
 
 pub async fn caldav_delete_event_impl(
@@ -188,22 +272,32 @@ pub async fn load_caldav_account_config(
 }
 
 async fn build_client(config: &CaldavAccountConfig) -> Result<CalDavClient, String> {
+    build_client_from_config(config).await
+}
+
+/// Construct a `CalDavClient` from a `CaldavAccountConfig`, replaying any
+/// previously discovered principal / home URLs so the second-and-later
+/// PROPFIND round-trips are skipped. If `home_url` was not persisted, runs
+/// full discovery.
+///
+/// Public so the sync path can use the same wiring without duplicating
+/// the build-then-discover dance.
+pub async fn build_client_from_config(
+    config: &CaldavAccountConfig,
+) -> Result<CalDavClient, String> {
     let mut client = CalDavClient::new(
-        &config.server_url,
-        &config.username,
-        &config.password,
+        config.server_url(),
+        config.username(),
+        config.password(),
         AuthMethod::Basic,
     );
-    // Hand persisted discovery results back to the client so `discover()`
-    // can skip whichever PROPFINDs are already covered. If neither is
-    // populated, full discovery runs.
-    if let Some(principal) = config.principal_url.as_deref() {
+    if let Some(principal) = config.principal_url() {
         client.set_principal_url(principal);
     }
-    if let Some(home) = config.home_url.as_deref() {
+    if let Some(home) = config.home_url() {
         client.set_calendar_home_url(home);
     }
-    if config.home_url.is_none() {
+    if config.home_url().is_none() {
         client.discover().await?;
     }
     Ok(client)
@@ -252,9 +346,22 @@ async fn fetch_caldav_event(
 ) -> Result<CalendarEventDto, String> {
     let (ical_data, etag) = client.get_event_ical(event_url).await?;
     let mut events = parse_icalendar(&ical_data)?;
-    let parsed = events
-        .pop()
-        .ok_or_else(|| format!("no VEVENT in CalDAV response for {event_url}"))?;
+    // VTIMEZONE-only responses are returned post-PUT by some servers when
+    // they're still propagating the new VEVENT. Surface a stub DTO so the
+    // caller can record what we sent (event_url + etag + raw ical_data)
+    // without failing the operation; the next sync replaces this with the
+    // canonical event.
+    let Some(parsed) = events.pop() else {
+        log::warn!(
+            "CalDAV: GET {event_url} returned VCALENDAR with no VEVENT; returning stub DTO"
+        );
+        return Ok(CalendarEventDto {
+            remote_event_id: event_url.to_string(),
+            etag,
+            ical_data: Some(ical_data),
+            ..CalendarEventDto::default()
+        });
+    };
 
     let attendees_json = if parsed.attendees.is_empty() {
         None

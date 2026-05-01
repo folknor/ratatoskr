@@ -362,6 +362,13 @@ impl CalDavClient {
     ///
     /// Returns `(ical_text, etag)`. Useful for re-reading server canonicalization
     /// after a PUT (e.g. for ETag refresh).
+    ///
+    /// Plain GET rather than a calendar-multiget REPORT: a few servers
+    /// (Yahoo, certain Kerio installs) require a REPORT to return the
+    /// canonicalized iCal post-PUT, but this matches the deleted ad-hoc
+    /// path's behavior and the create/update flow now prefers the PUT-side
+    /// ETag (`finalize_event` in `crates/calendar/src/caldav/mod.rs`) so the
+    /// GET is only a best-effort canonicalization fetch.
     pub async fn get_event_ical(
         &self,
         event_url: &str,
