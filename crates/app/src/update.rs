@@ -163,14 +163,29 @@ impl App {
             Message::ExecuteParameterized(id, args) => self.handle_execute_parameterized(id, args),
             Message::NavigateTo(target) => self.handle_navigate_to(target),
             Message::Escape => {
+                // Route calendar Escape through the calendar's own handlers
+                // so workflow-aware behavior runs - importantly, Escape from
+                // the editor's ConfirmDiscard returns to the editor with
+                // the draft intact instead of nuking workflow back to Idle.
                 if self.calendar.active_popover.is_some() {
-                    self.calendar.active_popover = None;
-                    return Task::none();
+                    return self
+                        .update(Message::Calendar(Box::new(
+                            crate::ui::calendar::CalendarMessage::ClosePopover,
+                        )));
+                }
+                if self.calendar.active_modal.is_some() {
+                    return self
+                        .update(Message::Calendar(Box::new(
+                            crate::ui::calendar::CalendarMessage::CloseModal,
+                        )));
                 }
                 if !matches!(
                     self.calendar.workflow,
                     crate::ui::calendar::CalendarWorkflow::Idle
                 ) {
+                    // Workflow is non-Idle but no surface is showing -
+                    // fall back to the blunt reset rather than stranding
+                    // an unreachable workflow state.
                     self.calendar.workflow = crate::ui::calendar::CalendarWorkflow::Idle;
                     self.calendar.sync_surfaces();
                     return Task::none();

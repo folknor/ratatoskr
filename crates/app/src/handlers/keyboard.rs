@@ -30,6 +30,13 @@ impl App {
                         state.discard_confirm_open = false;
                         return Task::none();
                     }
+                    if state.save_group_dialog_open {
+                        state.save_group_dialog_open = false;
+                        state.save_group_name.clear();
+                        state.save_group_error = None;
+                        state.save_group_in_flight = false;
+                        return Task::none();
+                    }
                 }
 
                 // Escape in a pop-out window closes that window
