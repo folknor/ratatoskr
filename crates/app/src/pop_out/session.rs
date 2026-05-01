@@ -16,6 +16,12 @@ pub struct SessionState {
     /// Open message view pop-out windows.
     #[serde(default)]
     pub message_views: Vec<MessageViewSessionEntry>,
+
+    /// Open compose pop-out windows. Each carries the `draft_id` of its
+    /// `local_drafts` row, which is the canonical store for compose state -
+    /// the entry only needs to remember which draft to reopen and where.
+    #[serde(default)]
+    pub compose_windows: Vec<ComposeSessionEntry>,
 }
 
 /// Minimal data needed to restore a message view window.
@@ -24,6 +30,20 @@ pub struct MessageViewSessionEntry {
     pub message_id: String,
     pub thread_id: String,
     pub account_id: String,
+
+    // Window geometry
+    pub width: f32,
+    pub height: f32,
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+}
+
+/// Minimal data needed to restore a compose pop-out. The compose body,
+/// recipients, subject, signature, and reply context all live on the
+/// `local_drafts` row - the entry just records which draft to reopen.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComposeSessionEntry {
+    pub draft_id: String,
 
     // Window geometry
     pub width: f32,
@@ -51,6 +71,7 @@ impl SessionState {
         Self {
             main_window: window,
             message_views: Vec::new(),
+            compose_windows: Vec::new(),
         }
     }
 }

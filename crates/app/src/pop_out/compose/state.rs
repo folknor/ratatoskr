@@ -83,6 +83,8 @@ pub struct ComposeState {
     // Window geometry
     pub width: f32,
     pub height: f32,
+    pub x: Option<f32>,
+    pub y: Option<f32>,
 
     // Signature tracking
     pub active_signature_id: Option<String>,
@@ -142,6 +144,8 @@ impl ComposeState {
             signature_separator_index: None,
             width: COMPOSE_DEFAULT_WIDTH,
             height: COMPOSE_DEFAULT_HEIGHT,
+            x: None,
+            y: None,
             draft_id: uuid::Uuid::new_v4().to_string(),
             draft_dirty: false,
             sending: false,
@@ -220,6 +224,8 @@ impl ComposeState {
             signature_separator_index,
             width: COMPOSE_DEFAULT_WIDTH,
             height: COMPOSE_DEFAULT_HEIGHT,
+            x: None,
+            y: None,
             draft_id: draft.id.clone(),
             draft_dirty: false,
             sending: false,

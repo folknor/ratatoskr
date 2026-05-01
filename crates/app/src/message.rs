@@ -138,6 +138,18 @@ pub enum Message {
     ComposeDraftTick,
     /// A local draft was loaded from DB - open it in a compose window.
     LocalDraftLoaded(Result<Option<rtsk::db::types::DbLocalDraft>, String>),
+    /// Session-restore draft load completed for an already-open compose
+    /// pop-out. The window opened at boot with default geometry; this
+    /// fills the `ComposeState` in place (or closes the window if the
+    /// draft was deleted between sessions).
+    RestoredComposeLoaded {
+        window_id: iced::window::Id,
+        width: f32,
+        height: f32,
+        x: Option<f32>,
+        y: Option<f32>,
+        result: Result<Option<rtsk::db::types::DbLocalDraft>, String>,
+    },
 
     // Thread detail via core
     ThreadDetailLoaded(

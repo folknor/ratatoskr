@@ -143,11 +143,18 @@ impl App {
             Message::WindowMoved(id, point) => {
                 if id == self.main_window_id {
                     self.window.set_position(point);
-                } else if let Some(PopOutWindow::MessageView(state)) =
-                    self.pop_out_windows.get_mut(&id)
-                {
-                    state.x = Some(point.x);
-                    state.y = Some(point.y);
+                } else {
+                    match self.pop_out_windows.get_mut(&id) {
+                        Some(PopOutWindow::MessageView(state)) => {
+                            state.x = Some(point.x);
+                            state.y = Some(point.y);
+                        }
+                        Some(PopOutWindow::Compose(state)) => {
+                            state.x = Some(point.x);
+                            state.y = Some(point.y);
+                        }
+                        Some(PopOutWindow::Calendar) | None => {}
+                    }
                 }
                 Task::none()
             }
@@ -423,6 +430,14 @@ impl App {
                 log::error!("Failed to load local draft: {e}");
                 Task::none()
             }
+            Message::RestoredComposeLoaded {
+                window_id,
+                width,
+                height,
+                x,
+                y,
+                result,
+            } => self.handle_restored_compose_loaded(window_id, width, height, x, y, result),
 
             // Thread detail via core (replaces separate messages/attachments loads)
             Message::ThreadDetailLoaded(g, _) if !self.thread_generation.is_current(g) => {
