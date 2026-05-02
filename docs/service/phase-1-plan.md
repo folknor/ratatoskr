@@ -12,27 +12,38 @@ The deliverable is small and well-scoped on purpose: every later phase plugs int
 
 ### In scope
 
-1. **Single-binary, dual-mode dispatch.** The existing `ratatoskr` binary gains a `--service` flag. With the flag, it runs the Service entry point and exits when the Service exits. Without, it boots the iced app exactly as today.
+1. **Single-binary, dual-mode dispatch.** The existing `ratatoskr` binary gains a `--service` flag. With the flag, it runs the Service entry point and exits. Without, it boots the iced app as today.
 2. **Two new workspace crates:**
-   - `crates/service-api/` - shared types between UI and Service (JSON-RPC request/response/notification enums, error types, version constant). Pure types crate; no logic.
-   - `crates/service/` - the Service runtime: `run_service()` async function that reads JSON-RPC from stdin, dispatches handlers, writes responses to stdout. Phase 1 surface: `health.ping`, `Shutdown` notification.
-3. **`ServiceClient` in the app crate.** Spawns the subprocess, manages stdio pipes, correlates request IDs to response futures, runs a background reader for incoming notifications, exposes a typed `request<R, P>(method, params)` API.
-4. **Heartbeat.** UI sends `health.ping` every 5 s; logs missed beats. No respawn yet (Phase 8); just visibility.
-5. **Parent-death detection.**
-   - Linux: `pre_exec` hook calling `prctl(PR_SET_PDEATHSIG, SIGTERM)` so the Service dies if the UI dies.
-   - macOS / Windows: a Service-side background task that polls the parent PID every 2 s; exits if the parent is gone.
-6. **Clean shutdown.** UI sends a `Shutdown` notification, waits up to 5 s for the Service's stdin to close, escalates to SIGTERM, then SIGKILL after another 5 s.
-7. **Logging.** Service writes logs to its stderr, which is inherited by the UI process's stderr (so `cargo run -p app` shows both interleaved). Each log line includes a `[service]` or `[ui]` tag for disambiguation.
-8. **Integration test.** A test in `crates/service/tests/spawn_and_ping.rs` that spawns the Service binary in a subprocess, pings it, verifies the response shape, and shuts down cleanly.
+   - `crates/service-api/` - shared types: `Request`, `Response`, `Notification` enums, `ServiceError`, `PROTOCOL_VERSION`, framing helpers (`write_message`, `read_message`). Phase 1 surface: `health.ping` + `shutdown` request.
+   - `crates/service/` - runtime. Two entry points:
+     - `run_service()` - production entry, wires real stdin/stdout.
+     - `run_service_with_io<R: AsyncRead, W: AsyncWrite>(stdin, stdout)` - testable entry, generic over IO.
+3. **`ServiceClient` in the app crate.** Spawns subprocess, manages stdio pipes, correlates request IDs, exposes typed `request<R, P>(method, params, timeout)`. Background reader task. Background stdout-writer task with bounded queue (the dispatch loop never blocks on stdout).
+4. **Pending-request map.** `DashMap<u64, oneshot::Sender<Result<serde_json::Value, ServiceError>>>` - **not** an untagged response enum. The typed `request()` wrapper deserializes the value into the expected response type after correlating by id. Drop impl drains and rejects every outstanding sender.
+5. **Per-request timeouts.** Default 5 s; `shutdown` gets 30 s; `index.rebuild` (when it lands later) gets infinite. Expired requests evict their pending entry.
+6. **Bounded notification channel.** Cap 1024. Phase 1 has no notifications yet, but the channel + the writer-task + the cap land here so later phases plug in cleanly.
+7. **Frame size cap.** 4 MiB per line; oversize frames rejected at the framing layer.
+8. **Heartbeat.** UI sends `health.ping` every 30 s; logs round-trip + missed beats. No respawn (Phase 1.5).
+9. **Parent-death detection (race-free per platform).**
+   - Linux: `pre_exec` hook calling `prctl(PR_SET_PDEATHSIG, SIGTERM)` + post-prctl `getppid()` check at startup. If the parent already died before the hook took effect, exit immediately.
+   - macOS: `kqueue` with `EVFILT_PROC` + `NOTE_EXIT` registered against the parent PID at start. Fires when *that specific process* exits.
+   - Windows: `OpenProcess` against parent PID + `WaitForSingleObject` on the resulting HANDLE. Race-free against PID reuse.
+10. **Clean shutdown.** `shutdown` is a **request**. UI awaits the response with a 30 s timeout, then SIGTERM, then SIGKILL after another 5 s.
+11. **Version handshake.** First `health.ping` after spawn asserts `response.version == PROTOCOL_VERSION`; mismatch is fatal boot error with a clear "binary mismatch" message.
+12. **Panic safety.** Every handler runs inside `AssertUnwindSafe(...).catch_unwind()`. Panics return `ServiceError::Panic { method, message }`; the dispatch loop continues. A panicking PDF extractor in Phase 7 won't kill the Service.
+13. **File-based logging.** Service writes to `<app_data>/logs/service.log` with simple size-based rolling (~10 MB cap, keep 3). stderr stays for `cargo run` debugging. Tagged `[service]` / `[ui]` prefixes for disambiguation in the interleaved console output.
+14. **Integration tests via in-process dispatch.** `tokio::io::duplex` driving `run_service_with_io` - no subprocess spawn, no test-binary scaffolding. Real-subprocess test is deferred to Phase 2+ when the IPC surface justifies it.
+15. **Real failure-mode tests.** EOF-during-pending-request, malformed JSON, concurrent ping fan-out (id correlation), version mismatch, spawn failure, panicking handler, oversize frame rejection.
 
 ### Out of scope
 
-- Any actual functionality moving across the boundary (sync, action service, Tantivy writer, blob store writes). All happens in later phases.
-- Respawn-on-crash with backoff. Phase 8.
-- Tray icon, autostart, daemon promotion. Out of v1 entirely (Phase 9 optional).
+- Any actual functionality moving across the boundary.
+- Respawn-on-crash. Phase 1.5.
+- Tray icon, autostart, daemon promotion.
 - Schema versioning of the JSON-RPC protocol. Pin format-version-1 in v1; bump method names if the contract changes later.
-- Authentication / authorization between UI and Service. They are the same trust domain (UI spawned the Service); stdio is private to the parent-child pair.
-- Any production logging story (structured logs, file rotation, etc.). Phase 1 logs to stderr; structured logging is a separate cross-cutting effort.
+- Authentication / authorization between UI and Service. Same trust domain.
+- Real-subprocess integration tests. In-process dispatch via `run_service_with_io` covers the contract; subprocess tests come when there are real handlers to validate cross-process.
+- Schema migrations + encryption-key relocation - those are Phase 1.5, not Phase 1.
 
 ## Architecture
 
@@ -87,17 +98,13 @@ In `service-api/src/lib.rs`:
 
 ```rust
 pub const PROTOCOL_VERSION: u32 = 1;
+pub const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;  // 4 MiB
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum RequestParams {
     HealthPing,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(untagged)]
-pub enum ResponseResult {
-    HealthPing(HealthPingResponse),
+    Shutdown,        // request, not notification - we await an ack
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -108,19 +115,49 @@ pub struct HealthPingResponse {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-#[serde(tag = "method", content = "params", rename_all = "snake_case")]
-pub enum Notification {
-    Shutdown,
+pub struct ShutdownResponse {
+    pub flushed_ok: bool,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct ServiceError {
-    pub code: i32,
-    pub message: String,
+#[serde(tag = "method", content = "params", rename_all = "snake_case")]
+pub enum Notification {
+    // empty in Phase 1 - the framework lands but nothing emits notifications yet
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, thiserror::Error)]
+pub enum ServiceError {
+    #[error("handler panic in {method}: {message}")]
+    Panic { method: String, message: String },
+    #[error("invalid params for {method}: {message}")]
+    InvalidParams { method: String, message: String },
+    #[error("unknown method: {0}")]
+    UnknownMethod(String),
+    #[error("internal error: {0}")]
+    Internal(String),
 }
 ```
 
-A wire-format wrapper type handles the `jsonrpc`/`id`/`method`/`result`/`error` envelope. Pick the simplest path: hand-roll it (~50 LOC of `serde_json::Value` munging) rather than pulling in `jsonrpsee` for one method. We can adopt `jsonrpsee` later if the surface area justifies it.
+**No untagged response enum.** Responses go through the wire as `serde_json::Value`; the typed `request<R, P>()` wrapper deserializes into the expected `R: DeserializeOwned` after correlating by id. This avoids the silent-misroute trap when two methods have structurally similar response types.
+
+The wire envelope (request/response/notification) is JSON-RPC 2.0:
+
+```rust
+// Outgoing request
+{"jsonrpc":"2.0","id":42,"method":"health.ping","params":{}}\n
+
+// Incoming response
+{"jsonrpc":"2.0","id":42,"result":{"version":1,"pid":12345,"uptime_ms":1234}}\n
+// or
+{"jsonrpc":"2.0","id":42,"error":{"code":-32603,"message":"...","data":{...}}}\n
+
+// Notification (no id, no response)
+{"jsonrpc":"2.0","method":"sync.progress","params":{...}}\n
+```
+
+`service-api` exposes a `write_message<T: Serialize, W: AsyncWrite>(value: &T, w: &mut W)` helper that uses compact serialization and appends a single `\n`. The crate forbids direct use of `serde_json::to_string_pretty` at the API level. One careless pretty-print would desync the framing.
+
+Realistic LOC for the framing layer with proper error handling (parse errors, frame-size rejection, EOF handling, panic catching, partial reads, write timeouts): 200-300 LOC, not 50.
 
 ### `ServiceClient` (UI-side) sketch
 
@@ -129,65 +166,148 @@ In `crates/app/src/service_client.rs`:
 ```rust
 pub struct ServiceClient {
     child: tokio::sync::Mutex<tokio::process::Child>,
-    stdin: tokio::sync::Mutex<tokio::process::ChildStdin>,
-    pending: Arc<DashMap<u64, oneshot::Sender<Result<ResponseResult, ServiceError>>>>,
+    stdin_tx: tokio::sync::mpsc::Sender<Vec<u8>>,  // bounded channel into the writer task
+    pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, ServiceError>>>>,
     next_id: AtomicU64,
-    notifications_tx: tokio::sync::mpsc::UnboundedSender<Notification>,
+    notifications_tx: tokio::sync::mpsc::Sender<Notification>,  // bounded, cap 1024
+    default_timeout: Duration,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ClientError {
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("service error: {0}")]
+    Service(#[from] ServiceError),
+    #[error("request timeout")]
+    Timeout,
+    #[error("service crashed")]
+    ServiceCrashed,
+    #[error("not connected")]
+    NotConnected,
+    #[error("protocol version mismatch: ui={ui}, service={service}")]
+    VersionMismatch { ui: u32, service: u32 },
+    #[error("response deserialize: {0}")]
+    Deserialize(#[from] serde_json::Error),
 }
 
 impl ServiceClient {
-    pub async fn spawn() -> Result<Self, SpawnError>;
-    pub async fn request(&self, params: RequestParams) -> Result<ResponseResult, ServiceError>;
-    pub async fn notify(&self, notification: Notification) -> Result<(), io::Error>;
-    pub async fn shutdown(&self) -> Result<(), ShutdownError>;
-    pub fn notifications(&self) -> tokio::sync::mpsc::UnboundedReceiver<Notification>;
+    pub async fn spawn() -> Result<Self, ClientError>;
+    pub async fn request<R: DeserializeOwned>(
+        &self,
+        params: RequestParams,
+        timeout: Option<Duration>,
+    ) -> Result<R, ClientError>;
+    pub async fn shutdown(&self) -> Result<(), ClientError>;
+    pub fn subscribe_notifications(&self) -> tokio::sync::mpsc::Receiver<Notification>;
+}
+
+impl Drop for ServiceClient {
+    fn drop(&mut self) {
+        // Drain pending; reject every outstanding sender with NotConnected
+        // so dropped clients don't leave hung waiters.
+    }
 }
 ```
 
 Background tasks owned by the `ServiceClient`:
-- **Reader task**: parses lines from the child's stdout, dispatches responses to `pending` (by id) or notifications to `notifications_tx` (no id).
-- **Heartbeat task**: every 5 s sends `RequestParams::HealthPing`; logs round-trip time; logs warning on missed beat.
+- **Reader task**: parses lines from the child's stdout, dispatches responses to `pending` (by id) or notifications to `notifications_tx` (no id). On EOF, fails every pending sender with `ClientError::ServiceCrashed`.
+- **Writer task**: drains `stdin_tx` and writes to the child's stdin. Bounded; if the child can't keep up the channel applies backpressure to callers.
+- **Heartbeat task**: every 30 s sends `RequestParams::HealthPing`; logs round-trip time; logs warning on missed beat. (No respawn until Phase 1.5.)
 
 ### Process spawn
 
 ```rust
-let child = tokio::process::Command::new(std::env::current_exe()?)
-    .arg("--service")
+let mut cmd = tokio::process::Command::new(std::env::current_exe()?);
+cmd.arg("--service")
     .stdin(std::process::Stdio::piped())
     .stdout(std::process::Stdio::piped())
     .stderr(std::process::Stdio::inherit())
-    .pre_exec_pdeathsig_on_linux()  // platform-gated helper
-    .kill_on_drop(true)
-    .spawn()?;
+    .kill_on_drop(true);
+
+#[cfg(target_os = "linux")]
+unsafe {
+    use std::os::unix::process::CommandExt;
+    cmd.pre_exec(|| {
+        // Set PR_SET_PDEATHSIG so SIGTERM fires when the parent (UI) thread exits.
+        // The Service code re-checks getppid() at startup to close the
+        // "parent died before this hook ran" race.
+        let r = libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+        if r != 0 { return Err(std::io::Error::last_os_error()); }
+        Ok(())
+    });
+}
+
+let child = cmd.spawn()?;
 ```
 
-The `pre_exec_pdeathsig_on_linux` helper wraps `Command::pre_exec` (unsafe) on Linux to call `prctl(PR_SET_PDEATHSIG, SIGTERM)` in the child before exec. On macOS/Windows it's a no-op; the Service-side parent-PID polling covers those platforms.
+On macOS, the spawning thread instead registers a `kqueue NOTE_EXIT` against the parent PID after `fork()` (or, simpler, the Service-side spawn handler does so at startup). On Windows, the Service-side startup calls `OpenProcess` against the parent PID and parks a task on `WaitForSingleObject`.
 
 ### Service-side dispatch loop
 
 ```rust
 pub async fn run_service() -> ! {
     setup_logging();
-    spawn_parent_pid_watcher();  // no-op on Linux, polls on mac/win
-    let stdin = tokio::io::BufReader::new(tokio::io::stdin());
-    let mut lines = stdin.lines();
-    let mut stdout = tokio::io::stdout();
-    while let Some(line) = lines.next_line().await? {
+    install_panic_hook();
+    spawn_parent_death_watcher();   // platform-gated; race-free per platform
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+    let exit_code = run_service_with_io(stdin, stdout).await;
+    std::process::exit(exit_code);
+}
+
+pub async fn run_service_with_io<R, W>(reader: R, writer: W) -> i32
+where
+    R: AsyncRead + Unpin + Send + 'static,
+    W: AsyncWrite + Unpin + Send + 'static,
+{
+    // Bounded channel from dispatch -> writer task.
+    // Dispatch never blocks on stdout; writer task drains.
+    let (out_tx, out_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(1024);
+    let writer_handle = tokio::spawn(writer_task(writer, out_rx));
+
+    let mut lines = tokio::io::BufReader::new(reader).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        if line.len() > MAX_FRAME_BYTES {
+            // Reject oversize frame; log but don't crash.
+            log_oversize_frame(line.len());
+            continue;
+        }
         match parse_envelope(&line) {
-            Envelope::Request { id, params } => {
-                let result = dispatch(params).await;
-                let response = build_response(id, result);
-                stdout.write_all(serde_json::to_vec(&response)?.as_slice()).await?;
-                stdout.write_all(b"\n").await?;
-                stdout.flush().await?;
+            Ok(Envelope::Request { id, params }) => {
+                let out_tx = out_tx.clone();
+                tokio::spawn(async move {
+                    let result = dispatch_with_panic_safety(params).await;
+                    let response = build_response(id, result);
+                    let _ = out_tx.send(response).await;
+                });
             }
-            Envelope::Notification { Notification::Shutdown } => {
-                std::process::exit(0);
+            Ok(Envelope::Notification(_)) => { /* none in Phase 1 */ }
+            Err(parse_err) => {
+                // Send a parse-error response with id=null per JSON-RPC spec.
+                let _ = out_tx.send(build_parse_error(parse_err)).await;
             }
         }
     }
-    // stdin closed (parent died or stdin pipe closed); exit cleanly
-    std::process::exit(0);
+    // EOF on stdin (parent died or pipe closed); shut down cleanly.
+    drop(out_tx);
+    let _ = writer_handle.await;
+    0
+}
+
+async fn dispatch_with_panic_safety(params: RequestParams) -> Result<serde_json::Value, ServiceError> {
+    use std::panic::AssertUnwindSafe;
+    use futures::FutureExt;
+    let method = params.method_name();
+    let result = AssertUnwindSafe(dispatch(params)).catch_unwind().await;
+    match result {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(e)) => Err(e),
+        Err(panic) => Err(ServiceError::Panic {
+            method: method.into(),
+            message: panic_message(panic),
+        }),
+    }
 }
 ```
 
@@ -195,84 +315,98 @@ pub async fn run_service() -> ! {
 
 In recommended commit order. Each item is one focused commit unless noted.
 
-1. **Workspace scaffolding.** Add `crates/service-api/` and `crates/service/` to the workspace `Cargo.toml`. Empty crate skeletons (lib.rs with a single `pub fn placeholder() {}`). Verify `brokkr check` clean.
-2. **`service-api` types.** Define `RequestParams`, `ResponseResult`, `Notification`, `ServiceError`, `PROTOCOL_VERSION`, and the wire envelope wrapper. Unit tests for serde round-trip on each enum.
-3. **`service` runtime + health handler.** Implement `run_service()` with stdin reader, dispatch loop, `health.ping` handler. Unit tests for the handler in isolation.
-4. **`--service` flag dispatch in `app`.** First thing in `main()`: check args for `--service`, jump to `service::run_service()` and never return. Otherwise continue to existing iced boot. Smoke test: `cargo run -p app -- --service` runs the Service in the foreground; stdin lines get processed.
-5. **`ServiceClient` skeleton.** Spawn + lifecycle + Shutdown handshake + `request()` + `notify()`. No reader task yet; verify spawn + shutdown work in isolation.
-6. **`ServiceClient` reader task.** Background task that parses child stdout, routes responses + notifications. Add the heartbeat task that sends `health.ping` every 5 s.
-7. **Wire `ServiceClient` into `App::boot`.** UI spawns the Service at start; logs "Service ready (pid=X)" on first successful ping. Quit teardown sends `Shutdown`, waits, escalates.
-8. **Parent-death detection.** Linux `pre_exec` `PR_SET_PDEATHSIG`; macOS/Windows parent-PID polling task in the Service. Manual test: `kill -9 <ui-pid>` and verify Service exits within a few seconds on each platform.
-9. **Integration test.** `crates/service/tests/spawn_and_ping.rs`: spawn the Service binary, ping it, assert response shape, send Shutdown, assert clean exit.
-10. **Tagged stderr logger.** `[service] ...` / `[ui] ...` prefixes on all log lines for disambiguation in the interleaved output.
+1. **Workspace scaffolding.** Add `crates/service-api/` and `crates/service/` to the workspace `Cargo.toml`. Empty crate skeletons. Verify `brokkr check` clean.
+2. **`service-api` types + framing layer.** Types as sketched above. `write_message` / `read_message` helpers with frame-size enforcement. JSON-RPC envelope parser with proper error handling. Unit tests: serde round-trip per enum, framing rejects oversize, parser handles malformed JSON gracefully (returns parse-error response with `id=null`).
+3. **`service` runtime: `run_service_with_io` + health handler + panic safety.** Generic-IO entry point so tests can drive it via `tokio::io::duplex`. `health.ping` handler returns `HealthPingResponse { version: PROTOCOL_VERSION, pid, uptime_ms }`. Dispatch wrapped in `catch_unwind`. Unit + in-process integration tests for the dispatch loop.
+4. **File-based logger.** Service writes to `<app_data>/logs/service.log` with size-based rolling (~10 MB cap, keep 3). Tagged `[service]` prefix. Falls back to stderr if log file can't be opened.
+5. **`run_service()` production entry.** Wires real stdin/stdout into `run_service_with_io`. Installs panic hook. Spawns parent-death watcher.
+6. **`--service` flag dispatch in `app`.** First thing in `main()`: if args contain `--service`, call `service::run_service()` and exit. Otherwise continue to existing iced boot. Smoke test: `cargo run -p app -- --service` runs the Service in the foreground.
+7. **`ServiceClient` core.** Spawn (with platform-gated parent-death setup), bounded stdin/notification channels, pending map (using `serde_json::Value` not untagged enum), typed `request<R>(...)`, `subscribe_notifications`, `Drop` impl that drains the pending map.
+8. **Reader + writer + heartbeat tasks.** Reader parses child stdout, routes responses to `pending` and notifications to `notifications_tx` (drops oldest under pressure for low-priority kinds; Phase 1 has none, but the framework is ready). Writer drains `stdin_tx` to the child's stdin. Heartbeat: 30 s, logs missed beats. Reader EOF fails every pending sender with `ClientError::ServiceCrashed`.
+9. **Wire `ServiceClient` into `App::boot`.** UI spawns Service; awaits first `health.ping`; asserts `response.version == PROTOCOL_VERSION` (fatal mismatch with clear message). Logs "Service ready (pid=X)". Quit teardown calls `service_client.shutdown()` (request, 30 s timeout, then SIGTERM, then SIGKILL after 5 s).
+10. **Race-free parent-death watchers per platform.** Linux: `pre_exec` PR_SET_PDEATHSIG + post-prctl `getppid()` check. macOS: `kqueue` `EVFILT_PROC` + `NOTE_EXIT`. Windows: `OpenProcess` + `WaitForSingleObject`. Manual test on each platform.
+11. **Real failure-mode tests** (in-process via `tokio::io::duplex` driving `run_service_with_io`): EOF-during-pending fails callers; malformed JSON returns parse-error and Service stays up; concurrent ping fan-out (100 ids, all distinct, all correlated); version mismatch fails boot; spawn-failure fails boot; panicking handler returns `ServiceError::Panic` and Service stays up; oversize frame rejected without crash.
 
-Total estimated commits: 10. Total estimated LOC: 600-800 (mostly types + boilerplate; the actual logic is small).
+Total estimated commits: 11. Total estimated LOC: 800-1100 (the framing layer and ClientError handling are real work; previous "600-800" undersold).
 
 ## File-by-file changes
 
 **New files:**
 - `crates/service-api/Cargo.toml`
-- `crates/service-api/src/{lib,request,response,notification,error,version}.rs`
+- `crates/service-api/src/{lib,request,response,notification,error,framing,version}.rs`
 - `crates/service/Cargo.toml`
-- `crates/service/src/{lib,dispatch,lifecycle,logging}.rs`
-- `crates/service/src/handlers/{mod,health}.rs`
-- `crates/service/tests/spawn_and_ping.rs`
+- `crates/service/src/{lib,dispatch,lifecycle,logging,parent_death}.rs`
+- `crates/service/src/handlers/{mod,health,shutdown}.rs`
+- `crates/service/tests/{dispatch_in_process,framing,failure_modes}.rs`
 - `crates/app/src/service_client.rs`
 
 **Modified files:**
 - `Cargo.toml` (workspace) - register the two new crates
 - `crates/app/Cargo.toml` - dep on `service-api` and `service`
 - `crates/app/src/main.rs` - mode dispatch
-- `crates/app/src/app.rs` - boot launches `ServiceClient`, stores it on `App`; teardown calls `service_client.shutdown()` in the existing window-close path
+- `crates/app/src/app.rs` - boot launches `ServiceClient`, stores it on `App`; teardown calls `service_client.shutdown()` in the window-close path
 - `crates/app/src/lib.rs` (or `mod.rs`) - re-export the new module if needed
 
-**Cargo.lock** will change with the new crates and (probably) `dashmap` or similar for the `pending` map. Committed with the rest per CLAUDE.md.
+**Cargo.lock** will change with the new crates plus deps (`dashmap`, `thiserror`, `libc` on Linux, `kqueue` or equivalent on macOS, `winapi`/`windows-sys` on Windows). Committed with the rest per CLAUDE.md.
 
 ## Test plan
 
 ### Unit tests
 
-- `service-api`: serde round-trip for each `Request` / `Response` / `Notification` variant. Verify envelope parsing handles malformed JSON gracefully.
-- `service`: each handler tested in isolation. `health.ping` returns a well-formed `HealthPingResponse`.
-- `service::dispatch`: exercise the parser with valid + malformed lines.
+- `service-api`: serde round-trip for each `Request` / `Response` / `Notification` variant; framing rejects oversize; JSON-RPC envelope parser handles malformed input.
+- `service`: each handler tested in isolation; panic-safe dispatcher catches and converts to `ServiceError::Panic`.
+- `service::dispatch`: parser exercised with valid + malformed + oversize lines.
 
-### Integration test
+### Integration tests (in-process)
 
-`crates/service/tests/spawn_and_ping.rs`:
-1. Spawn `env::current_exe()` in service mode (or, in test mode, spawn a Service-binary built specifically for the test - figure out the cleanest pattern).
-2. Send a `health.ping` request via the test's stdin pipe to the child.
-3. Read the response, assert structure.
-4. Send `Shutdown` notification.
-5. `child.wait()` returns within 5 seconds with exit code 0.
+All driven via `tokio::io::duplex` against `run_service_with_io`. No subprocess.
+
+- **`tests/dispatch_in_process.rs`** - happy path: ping → response with correct version/pid/uptime.
+- **`tests/framing.rs`** - oversize frame rejected; partial line buffered until newline; multiple frames in one buffered chunk.
+- **`tests/failure_modes.rs`**:
+  - EOF on the read half: dispatch loop exits cleanly.
+  - Malformed JSON line: parse-error response with `id=null`; loop continues.
+  - Concurrent fan-out: 100 simultaneous pings; assert 100 distinct ids correlated correctly.
+  - Panicking handler (test-only handler that panics): returns `ServiceError::Panic`; Service stays up; subsequent pings succeed.
+  - Version mismatch (test-only handler returning a wrong version): client reports `ClientError::VersionMismatch`.
+
+### `ServiceClient` tests
+
+These need a real subprocess to exercise the spawn path. Can wait for Phase 1.5 or land here using `escargot` / `cargo metadata` to locate the built `app` binary.
+
+- Spawn + ping: real subprocess answers `health.ping`.
+- Spawn + shutdown: clean exit within timeout.
+- SIGKILL the subprocess: pending requests fail with `ClientError::ServiceCrashed`.
 
 ### Manual test matrix
 
 - Linux: spawn UI, kill UI with SIGKILL, verify Service exits within 2 s (PR_SET_PDEATHSIG).
 - macOS: spawn UI, kill UI with SIGKILL, verify Service exits within polling interval (~2-5 s).
-- Windows: spawn UI, kill UI via Task Manager, verify Service exits within polling interval.
-- All: spawn UI, quit normally via the app's quit path, verify Service exits cleanly within 5 s and no zombie processes remain.
-- All: stop the Service externally (`kill <service-pid>`); verify the UI's heartbeat detects it and logs the missed beats. (No respawn yet; that's Phase 8.)
+- Windows: spawn UI, kill UI via Task Manager, verify Service exits via `WaitForSingleObject` immediately.
+- All: spawn UI, quit normally via the app's quit path, verify Service exits cleanly within 30 s (the shutdown-ack timeout) and no zombie processes remain.
+- All: stop the Service externally (`kill <service-pid>`); verify the UI's heartbeat detects it and logs the missed beats. (No respawn yet; that's Phase 1.5.)
 
 ## Open questions
 
 These are the questions the planning session should resolve before code starts; flagging them here for the document review.
 
-1. **Single binary vs two binaries.** Default proposal in this plan is single binary with `--service` flag. Alternative: ship a separate `ratatoskr-service` binary. Single-binary is simpler operationally (no path-lookup, version-drift impossible, smaller distribution surface) but conflates the two builds. I think single-binary is right; flagging for confirmation.
-2. **JSON-RPC library: hand-roll or `jsonrpsee`?** Default proposal: hand-roll for Phase 1 (one method, ~50 LOC of envelope handling). Adopt `jsonrpsee` later if the surface area or batching support justifies it. Reasonable to disagree.
-3. **Heartbeat interval.** Default proposal: 5 s. Long enough not to be chatty, short enough that a hung Service is noticed within a couple of beats. Tunable later.
-4. **`pending` map crate.** `DashMap` for the `id -> oneshot::Sender` table is the path of least resistance; we already have similar use elsewhere. Alternative: `Mutex<HashMap>`. DashMap probably right; minor.
-5. **Log tagging mechanism.** Default proposal: a thin wrapper around `log::info!` etc. that prepends `[service]` or `[ui]`. Could also use the `env_logger` formatter or a more structured approach (`tracing`). Phase 1 keeps it simple; revisit if logging gets unwieldy.
-6. **What to do if the Service spawn itself fails at app startup.** Probably: log a fatal error and refuse to boot the UI. Once any later phase puts real functionality in the Service, the UI can't usefully operate without it. Flagging for confirmation.
+1. **Single binary vs two binaries.** Default proposal: single binary with `--service` flag. Alternative: ship a separate `ratatoskr-service` binary. Single-binary is simpler operationally; flagging for confirmation. (`--service` stays a public CLI flag; it does not get hidden behind an env var or `--__internal-` convention.)
+2. **JSON-RPC library: hand-roll or `jsonrpsee`?** Default proposal: hand-roll for Phase 1 (small surface; framing layer is ~200-300 LOC including all the failure-mode handling). Adopt `jsonrpsee` later if the surface area or batching support justifies it.
+3. **`pending` map crate.** `DashMap` for the `id -> oneshot::Sender` table is the path of least resistance. Alternative: `Mutex<HashMap>`. DashMap probably right; minor.
+4. **Log tagging mechanism.** Default proposal: a thin wrapper around `log::info!` etc. that prepends `[service]` or `[ui]`. File-based logging via the rolling-file logger; stderr falls back if the log file can't be opened. `tracing` could replace `log` in a future cross-cutting effort.
+5. **`ServiceClient` subprocess tests in Phase 1 vs Phase 1.5.** The plan defers real-subprocess tests to Phase 1.5, since in-process `tokio::io::duplex` covers the contract. If we want belt-and-suspenders, `escargot` can spawn the built `app` binary in tests now. Marginal additional value; flagging.
 
 ## Verification (end-to-end)
 
 1. `cargo build -p app && ./target/debug/app` (or `cargo run -p app`) - app boots normally, log shows `Service ready (pid=NNN)` within 1 s.
 2. `ps -ef | grep ratatoskr` shows two processes: UI (parent) and service (child).
-3. Logs show heartbeat round-trips every 5 s, with sub-millisecond round-trip times.
-4. Quit the app. Service exits within 5 s. `ps` shows no zombie.
-5. Run again, this time SIGKILL the UI process. Service exits within 5 s on Linux (immediately on PR_SET_PDEATHSIG); within polling interval on macOS / Windows.
-6. Run `cargo test -p service` - integration test passes.
-7. `brokkr check` clean.
+3. Logs show heartbeat round-trips every 30 s with sub-millisecond round-trip times.
+4. `<app_data>/logs/service.log` exists and contains the boot + heartbeat lines tagged `[service]`.
+5. Quit the app. Service exits cleanly within 30 s via the request/ack handshake. `ps` shows no zombie.
+6. Run again, this time SIGKILL the UI process. Service exits within seconds on each platform (Linux: PR_SET_PDEATHSIG; macOS: kqueue NOTE_EXIT; Windows: WaitForSingleObject).
+7. Trigger a panic in a test-only handler. Client receives `ServiceError::Panic`; subsequent ping succeeds.
+8. Run `cargo test -p service` - integration tests pass.
+9. `brokkr check` clean.
 
 ## Promotion criteria
 

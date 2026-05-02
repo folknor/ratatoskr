@@ -1,20 +1,27 @@
-# The Service (Subprocess Worker)
+# The Service
 
-## Overview
+## The problem
 
-Ratatoskr runs as **two cooperating processes**: a UI process (the iced app), and a child worker process called **the Service**. The Service owns long-running, CPU-heavy, or write-side work that has no business competing with the UI runtime - sync, the action mutation gate, the Tantivy writer, blob-store writes, attachment text extraction, the retry queue. The UI owns rendering, user input, and read-side queries against shared on-disk state (Tantivy index, blob store, SQLite).
+Several things Ratatoskr needs to do well are fundamentally incompatible with running on the UI runtime, and the list keeps growing:
 
-The Service is a **child process of the UI** - spawned at app start, killed when the UI exits. It is *not* a system daemon; there is no autostart, no tray-resident lifetime, no surviving the app being closed. That promotion is possible later but explicitly out of scope for v1.
+- **Full-text indexing of attachment content.** Non-negotiable for an enterprise client - users have to be able to search inside the PDFs, Office documents, and plain-text attachments they receive. Text extraction is CPU-heavy (multi-second for a real-world PDF) and the indexing pass that follows it isn't a one-off - every newly cached attachment goes through it.
+- **One-shot re-indexing of multi-year mailboxes.** Schema migrations or extractor-version bumps require re-extracting and re-indexing every cached attachment. At realistic mailbox sizes (the project targets 150 GB+) this is a multi-hour batch job that today would freeze the UI for the duration *and* die instantly if the UI crashed.
+- **Sync, push, and the retry queue.** Already long-running, already produce visible UI jank during heavy sessions, already live on the iced runtime by accident rather than by design.
 
-## Why this matters
+Each of these is CPU-heavy or duration-unbounded write-side work that has no business competing with rendering, input, or UI state updates - and there is no satisfying answer to "how do we do this on the UI thread" that doesn't end with a frozen UI, a crashed sync, or both.
 
-Three things are forcing this decision right now, with attachment content indexing as the immediate trigger:
+## What this document proposes
 
-1. **Full-text indexing of attachments is non-negotiable for an enterprise client.** PDFs, Office documents, plaintext - users need to search inside attached files, not just message bodies. Text extraction is CPU-heavy (multi-second for large PDFs); doing it on the iced runtime would make the UI unusable during sync.
-2. **Re-indexing 5+ years of mail is a multi-hour batch job.** It must not crash with a UI hang, and it must not freeze the UI for hours while it runs. Today, both happen.
-3. **Sync, push, and the retry queue already want to be off the UI runtime.** They live there today by accident, not by design. Every long-running async task in the app currently shares a runtime with rendering, and the symptoms (lag, jank, dropped frames during heavy sync) are visible.
+Splitting Ratatoskr into two cooperating processes:
 
-The blob-store work for attachments (see `docs/attachments/problem-statement.md`) was the proximate trigger for this conversation, but the architectural decision applies to everything write-side and CPU-heavy in the app.
+- A **UI process** - the existing iced app, owning rendering, input, all UI state, and read-side queries against shared on-disk state.
+- A **child worker process called the Service** - owning the long-running operations listed above, plus everything write-side they imply (the action mutation gate, Tantivy writer, blob-store writes, push receivers).
+
+The two communicate over JSON-RPC stdio. The Service is a child of the UI process: spawned at start, killed at exit. It is explicitly **not** a system daemon; there is no autostart, no tray-resident lifetime, no surviving the UI being closed. That promotion is possible later but out of scope for v1.
+
+## Why decide this now
+
+The attachment caching work (`docs/attachments/`) was the proximate trigger for this conversation, but the architectural decision affects multiple in-flight design areas - attachments, search, sync, the action service - all of which need to know which side of the process boundary they land on. Recording the decision now, before any implementation, lets each of those areas plan against a known model rather than discover the boundary mid-build.
 
 ## What goes in v1, what doesn't
 
@@ -59,21 +66,42 @@ The blob-store work for attachments (see `docs/attachments/problem-statement.md`
                               app_data/...
 ```
 
-**Key invariant: the Service is the only writer.** UI never writes to SQLite, the blob store, or the Tantivy index. Reads go through the same in-process code paths the UI already uses. Writes go through IPC to the Service.
+**Key invariant: the Service is the only writer.** UI never writes to SQLite, the blob store, or the Tantivy index. Reads go through the same in-process code paths the UI already uses. Writes go through IPC to the Service. This invariant is enforced at the type level (see `Type-level enforcement` below) - it cannot be silently broken by adding a new call site.
+
+### Type-level enforcement
+
+Convention isn't enough. The state types the UI process holds today (`DbState`, `BodyStoreState`, `InlineImageStoreState`, `SearchState`) are all `Clone` and writer-capable; nothing prevents a future call site in the UI from writing. We close this with a read/write split at the type level:
+
+- `DbState` -> `ReadDbState` (UI) + `WriteDbState` (Service). The two share the same underlying `Connection`-pool wrapper internally, but only `WriteDbState` exposes write methods. The UI's boot path constructs `ReadDbState` only; `WriteDbState` is constructible only inside the Service binary's entry point.
+- Same split for `BodyStoreState`, `InlineImageStoreState`, `SearchState`, the inline-image SQLite store, and any future content store. UI sees the read half; Service sees the write half.
+- The Tantivy writer becomes Service-internal and is never handed out as a value; the UI gets a `tantivy::IndexReader` and a notification-driven `reload()` trigger (see `Tantivy reader reload` below).
+
+This means Phase 2's "the Action service moves" is enforced at compile time: the UI can no longer construct an `ActionContext` because `ActionContext` requires `WriteDbState`, which UI code can't construct. Same for sync, blob writes, etc. Adding a new write surface in UI code becomes a type error, not a runtime contract violation.
+
+### Tantivy reader reload
+
+`tantivy::IndexReader` is snapshot-based. A reader that opens at start and never reloads sees no Service-side commits. Pattern:
+
+- Service emits `index.committed` notifications after every Tantivy commit batch.
+- UI owns one shared `IndexReader`; on `index.committed` it calls `reader.reload()`.
+- All UI search call sites query through this single reader, so reload is observable globally.
+
+The reload is cheap (cooperative; no work happens until the next searcher acquires) and avoids the lag-behind-arbitrary problem.
 
 ## What the UI owns
 
 - All rendering, all iced runtime tasks.
-- All user input.
-- Tantivy *readers* (search queries are fast, in-process, no IPC).
+- All user input, including selection state, command-palette state, undo stack, optimistic in-flight UI updates.
+- Action *resolution and planning*: `MailActionIntent -> resolve_intent -> build_execution_plan` stays UI-side. These steps read selected threads, sidebar selection, and completion-behavior policy - all UI-owned state. The Service receives a *resolved plan* (a list of `MailOperation` values) to execute.
+- Tantivy *readers* (search queries are fast, in-process, no IPC). Reload triggered by Service's `index.committed` notifications.
 - Blob store *readers* (positional reads against immutable pack files; OS page cache does the heavy lifting).
-- Direct SQLite reads for everything the UI already queries (navigation, thread lists, message bodies, etc.). SQLite supports many concurrent readers + one writer; the writer happens to live in the Service.
-- Settings UI (which calls into the Service for any state it needs to write).
+- Direct SQLite reads via `ReadDbState` for everything the UI queries (navigation, thread lists, message bodies, etc.). SQLite supports many concurrent readers + one writer; the writer lives in the Service.
+- Settings UI (calls into the Service for any state that needs to be written).
 - Pop-out windows.
 
 ## What the Service owns
 
-- The Action service (mutation gate). Existing in-process abstraction; relocates with no shape change.
+- The Action service execution layer (mutation gate). Resolution + planning stay UI-side; the Service receives a `MailOperation` list and executes via `batch_execute`. Completion outcomes stream back as notifications.
 - All sync paths (JMAP, Gmail, Graph, IMAP). Pre-fetch of attachments runs here.
 - The Tantivy writer + the Tantivy commit cadence.
 - All blob-store writes (`PackStore::put`, `unref`, `evict_lru`, `gc`).
@@ -85,30 +113,48 @@ The blob-store work for attachments (see `docs/attachments/problem-statement.md`
 
 ## Lifecycle
 
-**Start.** UI launches; UI spawns the Service as a child process via `tokio::process::Command` (or the equivalent platform spawn). UI passes the app data directory and runtime config via command-line args. Service initializes its handles to SQLite / blob store / Tantivy writer, then announces readiness via a stdio handshake. UI proceeds with first paint once the handshake completes.
+**Start.** UI launches; UI spawns the Service as a child process via `tokio::process::Command`. UI passes the app data directory and runtime config via command-line args. Service initializes its handles to SQLite / blob store / Tantivy writer, then announces readiness via a stdio handshake (response to the UI's first `health.ping` includes `PROTOCOL_VERSION`; mismatch with the UI's compile-time constant is a fatal boot error).
 
-**Health.** Service heartbeats every N seconds. UI tears down + respawns if heartbeats stop (Service died, hung, deadlocked). Re-respawn has a backoff to avoid crashloops.
+**Health.** Service heartbeats every 30 s. UI logs missed beats; minimal respawn (cold restart, no in-flight replay) lands in Phase 1.5 so any Service crash during Phases 2-7 doesn't take the app down. Polish (backoff, crashloop detection, UI status indicator) lands in Phase 8.
 
-**Shutdown.** UI quit -> UI sends `Shutdown` request -> Service flushes Tantivy writer + closes pack files cleanly -> Service exits -> UI exits. If Service doesn't ack within a timeout, UI sends SIGTERM, then SIGKILL. Worst case: torn writes detected on next start by the recover paths each subsystem already has (or will have).
+**Shutdown.** UI quit -> UI sends `Shutdown` *request* (not a notification - we need an explicit ack) -> Service flushes Tantivy writer + closes pack files cleanly -> Service responds -> Service exits -> UI exits. UI awaits the response with a 30 s timeout (large Tantivy commits + pack-file fsync can take real time). On timeout: SIGTERM, then SIGKILL after another 5 s. Worst case: torn writes detected on next start by the recover paths each subsystem already has (or will have).
 
-**Crash.** If the UI crashes, the Service is orphaned. Two options: (a) Service exits when its parent dies (SIGHUP / `prctl(PR_SET_PDEATHSIG)` on Linux, equivalent watchdog on macOS/Windows), (b) Service stays alive and the next UI launch reattaches. Option (a) is simpler and matches v1 scope (no surviving UI exit anyway); pick (a).
+**Crash.** If the UI crashes, the Service must exit cleanly. Race-free primitives per platform:
 
-**No persistent process.** Quit the app, the Service is gone. Restart the app, both come back. This is deliberate v1 simplicity.
+- **Linux**: `pre_exec` hook calling `prctl(PR_SET_PDEATHSIG, SIGTERM)`. After the hook runs, the Service code re-checks `getppid()` once at startup; if the parent already died before the hook took effect, exit immediately. (Closes the "parent died between fork and prctl" race.)
+- **macOS**: `kqueue` with `EVFILT_PROC` and `NOTE_EXIT` registered against the parent PID at start. Fires when *that specific process* exits - immune to PID reuse.
+- **Windows**: `OpenProcess` against the parent PID at start (returns a HANDLE bound to the specific process instance), then `WaitForSingleObject` on the handle. Race-free against PID reuse.
+
+PID-polling is rejected: PID reuse is fast on busy systems, and the Service would attach to a stranger if the parent died between polls.
+
+**No persistent process.** Quit the app, the Service is gone. Restart the app, both come back. This is deliberate v1 simplicity. Tray-residency promotion (Phase 9) requires no Service-lifecycle changes - only a UI-side change to not call `iced::exit()` on close. The Service's lifecycle is keyed on the UI *process*, not the visible window, so the parent-death machinery still works correctly.
 
 ## IPC
 
-**Transport.** JSON-RPC 2.0 over stdio. Newline-delimited JSON per message. UI writes to Service's stdin; Service writes to UI's stdin (which the UI reads as the Service's stdout).
+**Transport.** JSON-RPC 2.0 over stdio. Newline-delimited JSON per message. UI writes to the Service's stdin; the Service writes to its own stdout (read by the UI as the child's stdout).
 
-**Why stdio + JSON-RPC.** Universally available, no socket files / port allocation / firewall concerns, well-supported by Rust crates (`jsonrpsee`, hand-rolled is also fine for this scope), debuggable by piping to a file. Schema can grow without protocol changes.
+**Framing constraint.** Every message is exactly one line of compact JSON terminated by a single `\n`. No `to_string_pretty`, no embedded literal newlines in payloads. The wire-format crate (`service-api`) exposes a single `write_message` helper that enforces this; direct `serde_json::to_writer` is forbidden at the public API. One careless pretty-print would desync the framing.
+
+**Why stdio + JSON-RPC.** Universally available, no socket files / port allocation / firewall concerns, well-supported by Rust crates, debuggable by piping to a file. Schema can grow without protocol changes.
 
 **Why not gRPC / Cap'n Proto / shared memory.** All add machinery we don't need at this scope. The hot path is intentionally not crossing the IPC boundary - reads are direct against on-disk state. Writes are infrequent enough (sync per N seconds, action per user click) that JSON serialization cost is invisible.
+
+**Backpressure and resource bounds.** First-class concern, not a polish item.
+
+- **Notifications (Service -> UI):** bounded channel (cap 1024). Sync-progress events coalesce per account (only the latest unread progress survives under pressure). Indexer progress, same.
+- **Service stdout writes:** the dispatch loop never blocks on stdout. A dedicated writer task drains a bounded queue and writes to stdout; if the queue fills, low-priority notifications drop oldest-first. The dispatch loop never stalls because the UI is slow to read.
+- **Requests:** every `request()` call has a default timeout (5 s for synchronous methods, 30 s for `Shutdown`, configurable per-method for known long ones like `index.rebuild`). Expired requests evict their pending entry so leaked oneshots don't accumulate.
+- **Large blobs:** `attachment.fetch` doesn't return `Vec<u8>` over JSON. It returns `{ content_hash, size }`; the UI re-reads positionally from the pack file. Same for any future "give me bytes" method - JSON carries the location, not the content.
+- **Per-line frame size cap:** 4 MiB. Anything larger is a contract violation and gets rejected at the framing layer.
 
 **Message shape (sketch, settled in implementation):**
 
 - `Request { id, method, params }` -> `Response { id, result | error }`. Synchronous-feeling, fits the action service / settings write surface.
-- `Notification { method, params }` for one-way streams (sync progress, push events, indexer progress). UI dispatches as iced messages.
+- `Notification { method, params }` for one-way streams (sync progress, push events, indexer progress, `index.committed`). UI dispatches as iced messages.
 
-**Surface scope.** Start small: `health.ping`, `sync.start_account`, `sync.cancel_account`, `action.dispatch`, `attachment.fetch`, `index.rebuild`, plus a `notification` channel for sync progress, push events, action completion. Grow per phase as call sites move.
+**Panic safety.** Every handler runs inside `AssertUnwindSafe(...).catch_unwind()` (or as a `tokio::task::spawn` whose `JoinError` is treated as a service error). A panicking handler returns `ServiceError::Panic { method, message }` to the caller; the dispatch loop continues. A single bad PDF or Tantivy panic does not kill the Service.
+
+**Surface scope.** Start small: `health.ping`, `sync.start_account`, `sync.cancel_account`, `action.execute_plan`, `attachment.fetch`, `index.rebuild`, plus notifications (`sync.progress`, `push.event`, `action.completed`, `index.committed`, `attachment.cached`). Grow per phase as call sites move.
 
 ## The Action service / The Service: clarifying naming
 
@@ -148,17 +194,60 @@ Three new settings entries surface from this work:
 - **Service restart in place during a long-running sync.** If the Service crashes mid-sync, the next start re-syncs from the last checkpoint. No live-migration of in-flight work.
 - **Schema migrations of the IPC protocol.** v1 ships one protocol version. Bump the JSON-RPC method names if the contract changes; treat the UI and Service as a tightly coupled pair shipped together.
 
+## Migration policy
+
+Each cross-boundary migration of a subsystem (sync, blob writes, Tantivy writer, etc.) is a **single atomic commit**. No straddling: the subsystem is either entirely in the UI's address space or entirely in the Service's. Validated mechanically: before each phase lands, the Service-bound subsystem's writer-constructor is changed to require `WriteDbState` (or the equivalent platform-write-state type), which the UI cannot construct - so any UI call site that hasn't been migrated yet fails to compile. This forces every call-site move to land with the migration commit instead of being discovered later.
+
+The "exists but not wired" failure mode flagged in CLAUDE.md's multi-agent rules applies here in spades. The atomic-commit policy is the structural defense against it.
+
+## Write-surface inventory (UI -> Service migration)
+
+Every place the UI process writes to durable state today, mapped to the phase that relocates it. This list anchors the migration policy above; if a write surface isn't on this list, it hasn't been considered.
+
+| Write surface | Today (UI-side) | Relocates in |
+|---------------|-----------------|--------------|
+| Action service mutations (archive, label, snooze, etc.) | `core::actions` invoked from `handlers/commands.rs` and many UI sites | Phase 2 (execution only; planning stays UI-side) |
+| Pending-ops retry queue (`db_pending_ops_*`) | Background task in UI; drains queue, re-dispatches actions | Phase 2 (rides with the action service) |
+| Sync writes (DB metadata + body store + inline image store + Tantivy) | `core::sync_dispatch::sync_delta_for_account` per account | Phase 3 (JMAP), Phase 5 (others) |
+| Push state (JMAP push state, IDLE state) | `crates/jmap/src/sync/...` push tables | Phase 4 |
+| Tantivy writer + commit cadence | Inside sync persistence; reader shares the writer's state | Pulled into Phase 3 (writer relocation precedes sync relocation OR lands in the same commit; reader split happens here) |
+| Blob store writes (`PackStore::put / unref / evict_lru / gc`) | Currently doesn't exist; will be added by attachments Phase 1a as library; writer instance lives Service-side from day one of the relocation | Phase 6 |
+| Preferences (`set_setting` via `handlers/core.rs:514`) | Direct DB write from UI handler | Phase 4 (settings are write-side) |
+| Account create / update / delete (`handlers/core.rs:778`, `update_account_sync`) | Direct DB write | Phase 4 |
+| Signature CRUD (`handlers/signatures.rs`) | Direct DB write | Phase 4 |
+| Local draft auto-save (`handlers/pop_out/compose_draft.rs`) | Sync DB write on window close, async write on tick | Phase 4 |
+| Pinned searches (`db/pinned_searches.rs`) | Direct DB write | Phase 4 |
+| Calendar mutations (`handlers/calendar.rs`) | Direct DB write | Phase 4 |
+| Schema migrations | Run at boot in the UI process | Phase 1.5 - relocate to Service boot, UI defers `ReadDbState` construction until the Service signals "schema OK" via the boot handshake |
+| Encryption-key load | Read from disk at boot in the UI process | Service reads it itself at boot. Not via IPC - the key is needed before any token-bearing IPC can happen. Phase 1.5. |
+| OAuth flow (redirect listener + token exchange + token persist) | UI process owns the redirect listener (it's the visible app); token persist is a DB write | Phase 4: UI captures redirect; ships code to Service; Service exchanges + persists. Two-step IPC. |
+
+Anything not in this table is either (a) read-only from the UI's perspective and stays UI-side, or (b) we missed it - in which case the Phase 4 planning session has explicit homework to grep for `with_write_conn` / `db.execute` / similar in UI code and reconcile.
+
+## Cross-store crash consistency
+
+The Service writes to four durable stores: SQLite (main + `bodies.db`), pack files, Tantivy, inline-image store. A crash mid-sequence can leave inter-store inconsistencies: `attachments` row written but pack append not fsync'd; Tantivy doc references a body the body store hasn't durably committed; etc. Each store has its own crash-safe recovery (SQLite WAL, append-only pack scan, Tantivy uncommitted-segment cleanup) but cross-store reconciliation is not free.
+
+**Startup invariant pass** (lands as part of Phase 8, the crash-recovery polish phase):
+
+- For every `attachments` row with `content_hash IS NOT NULL`: assert the pack store can resolve the hash. If not (post-crash orphan), null the column and let the next sync re-fetch.
+- For every Tantivy doc: assert the message id still exists in `messages`. Drop orphans.
+- For every body store entry: assert the message id still exists. Drop orphans.
+
+The pass is bounded (it's a one-shot scan at startup) and idempotent. Logged so we can see how often crashes leave us reconciling.
+
 ## Cross-cutting impact
 
 This decision touches a lot. Listed for visibility, addressed in detail in the implementation roadmap:
 
 - **Sync architecture.** All four provider sync paths move from "tokio task in the UI process" to "tokio task in the Service process." `Sync` IPC notifications replace today's direct `Message::SyncComplete` dispatch.
-- **Search.** Tantivy writer relocates; readers stay where they are. Attachment text extraction is wired in as a new pipeline step.
-- **Action service.** Relocates wholesale. The IPC surface for actions is the bulk of the new RPC schema.
-- **Push notifications.** JMAP push subscriber moves into the Service. Push events become Service-to-UI notifications instead of in-process channel sends.
-- **Attachments.** All write-side operations (`BlobStore::put`, `unref`, `evict_lru`, `gc`) become Service-internal. Read-side stays UI-direct against on-disk pack files. The attachment problem statement's Phase 1a (`PackStore` library) is unchanged; Phases 1b/2 (orchestration + sync wiring) effectively move into Service phases.
-- **Tests.** Most existing tests are in-process and work unchanged. New IPC-boundary tests need their own harness (spawn a Service, talk to it, verify behavior).
-- **Crash recovery.** Each subsystem owned by the Service needs a recovery story for "Service died mid-write." Most already do (SQLite WAL, append-only pack files with crash-safe recovery, Tantivy commit semantics) - this is mostly verification rather than new work.
+- **Search.** Tantivy writer relocates as part of Phase 3 (sync owns the writer today). Readers stay UI-side, driven by `index.committed` notifications. Attachment text extraction wires in as a Phase 7 pipeline step on top of the already-Service-side writer.
+- **Action service.** Execution-side relocates; planning + completion-effects stay UI-side. The IPC surface is `action.execute_plan { plan }` -> notifications.
+- **Push notifications.** JMAP push subscriber moves into the Service. Push events become Service-internal triggers for sync; UI gets `push.event { account_id }` notifications for status-bar visibility.
+- **Attachments.** All write-side operations (`BlobStore::put`, `unref`, `evict_lru`, `gc`) become Service-internal. Read-side stays UI-direct against on-disk pack files. The attachment problem statement's Phase 1a (`PackStore` library) is unchanged; Phases 1b/2 (orchestration + sync wiring) move into Service phases.
+- **Progress reporting.** Today the UI provides the `&dyn ProgressReporter` impl. After Phase 2, the Service constructs an impl that serializes events into IPC notifications. This is a real refactor (the "no shape change" framing was wrong), addressed as a sub-step of Phase 2.
+- **Tests.** Most existing tests are in-process and work unchanged. The Phase 1 integration test uses an in-process dispatch harness (`tokio::io::duplex` driving `run_service_with_io`) - no subprocess spawn, no test-binary scaffolding. Real-subprocess tests come in Phase 2+ when the IPC surface justifies them.
+- **Crash recovery.** Each subsystem owned by the Service has a per-store recovery story; the cross-store invariant pass is new work (Phase 8).
 
 ## Verification
 

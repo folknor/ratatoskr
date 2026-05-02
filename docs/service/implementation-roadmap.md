@@ -26,19 +26,27 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 - Decision pinned on single-binary-multi-mode (one `ratatoskr` binary, `--service` flag selects mode) vs separate binaries. Default proposal: single binary with mode flag.
 
 **In scope.**
-- New crate `crates/service-api/` defining `Request`, `Response`, `Notification` enums shared between UI and Service. Phase 1 surface: just `Ping`/`Pong`.
-- New crate `crates/service/` with `run_service()` async entry point: reads JSON-RPC from stdin, writes responses to stdout, handles `health.ping`, exits on `Shutdown` notification.
-- `crates/app/src/main.rs` dispatches based on a `--service` flag: with the flag, calls `service::run_service()`; without, boots iced as today.
-- New module `crates/app/src/service_client.rs`: spawns the subprocess (`tokio::process::Command::new(env::current_exe()?).arg("--service")`), pipes stdio, manages request/response correlation, background reader for notifications.
-- Heartbeat: UI sends `health.ping` every 5 s, logs missed beats. No respawn yet (Phase 8); just visibility.
-- Parent-death detection on Linux via `pre_exec` + `prctl(PR_SET_PDEATHSIG, SIGTERM)`. macOS/Windows: poll parent PID every N seconds, exit if it's gone.
-- Clean shutdown handshake: UI sends `Shutdown` notification, waits up to 5 s for Service exit, escalates SIGTERM -> SIGKILL.
+- New crate `crates/service-api/` defining `Request`, `Response`, `Notification` enums + framing helpers shared between UI and Service. Phase 1 surface: just `health.ping` and `Shutdown`. `PROTOCOL_VERSION` constant; first ping asserts UI's constant matches Service's response or boot fails.
+- New crate `crates/service/` with `run_service()` async entry point + `run_service_with_io()` generic over `AsyncRead`/`AsyncWrite` for testability.
+- `crates/app/src/main.rs` dispatches based on `--service` flag.
+- New module `crates/app/src/service_client.rs`: spawns subprocess, pipes stdio, manages request/response correlation, dedicated stdout-writer task with bounded queue.
+- Per-request timeouts (default 5 s; `Shutdown` gets 30 s); expired requests evict their pending entry.
+- Bounded notification channel (cap 1024) with progress-event coalescing for the small set we have (just heartbeat round-trips in Phase 1; framework ready for sync/index in later phases).
+- Frame size cap (4 MiB) enforced at the framing layer; oversize frames rejected.
+- Panic safety: every handler wrapped in `catch_unwind`; panics return `ServiceError::Panic`, dispatch loop continues.
+- File-based logging: Service writes to `<app_data>/logs/service.log` with simple size-based rolling (~10 MB cap, keep 3). stderr stays for `cargo run` debugging.
+- Heartbeat: 30 s interval. Logs missed beats only - no respawn here (lands in Phase 1.5).
+- Parent-death detection (race-free per platform):
+  - Linux: `pre_exec` + `prctl(PR_SET_PDEATHSIG, SIGTERM)` + post-prctl `getppid()` check at startup (closes the "parent died before hook" race).
+  - macOS: `kqueue` with `EVFILT_PROC` + `NOTE_EXIT` registered against parent PID at start.
+  - Windows: `OpenProcess` against parent PID + `WaitForSingleObject` on the HANDLE.
+- Clean shutdown: `Shutdown` is a **request** (not a notification); UI awaits the response with a 30 s timeout, then SIGTERM, then SIGKILL after another 5 s.
 
 **Out of scope.**
-- Any actual functionality moving across the boundary. Sync, action service, Tantivy writer, blob store writes, etc. all stay in the UI process.
-- Respawn-on-crash with backoff (Phase 8).
+- Any actual functionality moving across the boundary.
+- Respawn-on-crash (lands in Phase 1.5).
 - Tray icon, autostart, daemon promotion.
-- Schema versioning of the JSON-RPC protocol (UI and Service ship as a tightly coupled pair; pin format-version-1 in v1, bump method names if anything changes later).
+- Schema versioning of the JSON-RPC protocol (pin format-version-1 in v1; UI/Service shipped as a coupled pair).
 
 **Touchpoints.**
 - New crates: `crates/service-api/`, `crates/service/`.
@@ -49,17 +57,49 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 - Workspace `Cargo.toml` - register the two new crates.
 
 **Exit criteria.**
-- `cargo run -p app` spawns the subprocess; `ps` shows two processes (UI + child).
+- `cargo run -p app` spawns the subprocess; `ps` shows two processes.
 - UI logs "Service ready (pid=...)" on start.
-- Heartbeat ticks visibly in logs.
-- Quitting the UI cleanly exits the Service (no orphan in `ps`).
-- SIGKILLing the UI exits the Service within seconds (Linux: PR_SET_PDEATHSIG triggers; macOS/Windows: parent-poll triggers).
-- Integration test: `crates/service/tests/spawn_and_ping.rs` spawns the service, pings it, asserts the response, shuts down cleanly.
+- Quitting the UI cleanly exits the Service via the request/ack handshake (no orphan in `ps`).
+- SIGKILLing the UI exits the Service within seconds on all three platforms (Linux: PR_SET_PDEATHSIG; macOS: kqueue; Windows: WaitForSingleObject).
+- `<app_data>/logs/service.log` exists and contains the boot + heartbeat lines.
+- Integration tests cover: happy-path ping, EOF-during-pending-request, malformed JSON, concurrent ping fan-out (id correlation), version mismatch, spawn failure, panicking handler returns `ServiceError::Panic` and Service stays up.
 
 **Risks / open questions.**
-- Stdio framing under load (long messages, partial reads). Use `tokio::io::AsyncBufReadExt::read_line` for newline-delimited JSON; document any payload-size cap.
-- Logging: Service writes logs to its stderr, which is inherited by the UI's stderr. Works for `cargo run` but may swallow output in packaged builds. Probably fine for v1; revisit if it's painful.
-- Test harness for stdio-spawned subprocess. May need a test helper that spawns the service binary in a subprocess from the test process.
+- Stdio framing helper LOC: realistic estimate is 200-300 LOC including all the failure-mode handling (parse errors, frame-size rejection, EOF, partial reads, write timeouts, panic catching). The earlier "~50 LOC" was undersold.
+- `ResponseResult` is *not* a unified untagged enum. `pending` map holds `oneshot::Sender<Result<serde_json::Value, ServiceError>>`; the typed `request<R, P>()` wrapper deserializes the value into `R` after correlating by id. Avoids the silent-misroute trap of untagged-with-many-variants.
+- `ServiceClient::Drop` impl drains the pending map and rejects every outstanding sender so dropped clients don't leave hung waiters.
+
+---
+
+## Phase 1.5 - Minimal respawn + UI degraded state
+
+**Goal.** A Service crash during Phases 2-7 doesn't take the app down. This is *not* the polished crash-recovery story (that's Phase 8) - just enough to keep development livable.
+
+**Entry criteria.**
+- Phase 1 landed.
+
+**In scope.**
+- If the Service exits unexpectedly: `ServiceClient` spawns a new one. No backoff, no crashloop detection, no UI status indicator yet.
+- Pending requests at the time of crash are immediately failed with `ClientError::ServiceCrashed`. UI surfaces this per call site (probably as a "Try again" toast once the toast system lands; until then, log).
+- Two real subsystems land here for the same reason: schema migrations relocate to Service boot (so UI's `ReadDbState` construction depends on a Service handshake), and encryption-key load relocates to Service boot (must happen before any token-bearing IPC).
+- Spawn-failure policy: spawn failure at boot is **fatal** (UI refuses to boot). Consistent across phases - avoids a "this used to boot without the Service" regression in later phases.
+
+**Out of scope.**
+- Backoff, crashloop detection, status indicator (Phase 8).
+- In-flight request replay (Phase 8).
+
+**Touchpoints.**
+- `crates/service_client.rs` - respawn loop, pending-request cleanup on respawn.
+- `crates/service/src/main.rs` (or equivalent boot path) - run schema migrations Service-side; load encryption key.
+- `crates/app/src/app.rs` - boot waits for Service `health.ping` response (which now implies "schema migrated, key loaded, ready") before constructing `ReadDbState`.
+
+**Exit criteria.**
+- `kill <service-pid>`; UI logs the crash, spawns a new Service, app continues to function.
+- Pending requests at crash time fail with a clear error, not a hang.
+- `cargo test -p service` includes a respawn integration test.
+
+**Risks / open questions.**
+- Migration policy: this phase introduces the first "UI defers until Service ready" coupling. Need to be careful that this doesn't regress UI startup time visibly for the no-pending-migration case (the common one).
 
 ---
 
@@ -67,72 +107,95 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 
 **Goal.** The Action service (the existing in-process mutation gate) runs inside the Service. UI dispatches actions via IPC; the Service executes them and reports outcome.
 
+**Goal.** Action *execution* moves into the Service. Resolution + planning + completion-effects stay UI-side. UI sends a resolved plan; Service executes; outcome streams back as notifications. Plus: the type-level write/read split lands here so the invariant becomes mechanical.
+
 **Entry criteria.**
-- Phase 1 landed.
-- A clear list of every Action service entry point in the current code (the planning session enumerates these).
+- Phase 1 + 1.5 landed.
+- A clear inventory of every Action service entry point in the current code (the planning session enumerates these).
 
 **In scope.**
-- `service-api` grows new methods: `action.dispatch { account_id, intent }` -> `ActionOutcome`, plus `action.completed` notifications for async completions and undo eligibility.
-- Service hosts the action pipeline: `MailActionIntent -> resolve_intent -> build_execution_plan -> batch_execute -> handle_action_completed`.
-- UI's existing call sites (currently calling `core::actions::*` directly) replaced with `service_client.dispatch_action(...)`.
-- The existing `ActionContext` (`core::actions::ActionContext`) reconstructed on the Service side from Service-owned state (db, encryption key, stores).
+- **Type-level write/read split.** `DbState` -> `ReadDbState` + `WriteDbState`. Same for `BodyStoreState`, `InlineImageStoreState`, `SearchState`. UI boot constructs read-only halves; only Service binary entry can construct the write halves. This makes the invariant compile-enforced.
+- **Action service: execution-only relocates.**
+  - UI keeps: `MailActionIntent`, `resolve_intent`, `build_execution_plan`. These read selection state, sidebar scope, completion-behavior policy - all UI-owned. They produce a list of `MailOperation`.
+  - Service gets: `batch_execute(plan: Vec<MailOperation>) -> outcomes`, plus `MutationLog` writes.
+  - UI keeps: completion-effects (toast, auto-advance, undo eligibility, optimistic thread-list updates) - driven by `action.completed` notifications.
+- `service-api` new methods: `action.execute_plan { plan }` -> per-operation `OperationOutcome` notifications, then a final `action.completed { ... }` notification.
+- **Pending-ops worker relocates.** The retry queue (`db_pending_ops_*` drainer) runs inside the Service since it dispatches actions and the action execution layer is now Service-side.
+- **Progress reporter shim.** `&dyn ProgressReporter` impl in the Service serializes events into IPC notifications; UI's existing `IcedProgressReporter` keeps consuming them as it does today. This is real refactoring work - the relocation is not "no shape change" as previously framed.
+- UI's existing call sites currently calling `core::actions::*` directly become: build the plan UI-side, then `service_client.execute_plan(plan)`.
+- The existing `ActionContext` (`core::actions::ActionContext`) is reconstructed on the Service side from Service-owned state (`WriteDbState`, encryption key, write halves of stores).
 
 **Out of scope.**
 - Sync. Sync still happens in the UI process - it'll move in Phase 3.
 - Push. Same.
-- Streaming progress for long-running actions (e.g. bulk archive of 500 threads). Probably wanted; deferred to a later iteration.
+- Streaming progress for long-running actions (e.g. bulk archive of 500 threads). The notification model supports this naturally; tuning the cadence is a follow-up.
 
 **Touchpoints.**
-- `crates/service-api/` - new method + outcome types.
+- `crates/db/src/db/...` - introduce the read/write state-type split.
+- `crates/stores/src/...` - same for body / inline-image / search states.
+- `crates/service-api/` - `action.execute_plan` method + `OperationOutcome` / `action.completed` notifications.
 - `crates/service/src/handlers/action.rs` - new.
-- `crates/app/src/handlers/...` - replace direct action calls with service-client calls.
-- Possibly `crates/core/src/actions/context.rs` - decouple `ActionContext` from `App` state references.
+- `crates/service/src/pending_ops.rs` - new (retry queue worker).
+- `crates/app/src/handlers/commands.rs` - dispatch goes through the service client; planning stays here.
+- `crates/app/src/action_resolve.rs` - unchanged in shape; just no longer calls the executor directly.
+- `crates/core/src/actions/context.rs` - decouple `ActionContext` from `App` state references.
 
 **Exit criteria.**
-- All user-triggered actions (archive, delete, label, snooze, etc.) flow through IPC.
+- All user-triggered actions (archive, delete, label, snooze, etc.) build the plan UI-side and execute Service-side.
+- UI compilation fails if anyone tries to construct a `WriteDbState` outside the Service crate.
 - `MutationLog` entries continue to land correctly (logged from the Service side).
 - Undo continues to work.
+- Pending-ops queue continues to drain (now Service-side).
 
 **Risks / open questions.**
-- The Action service's interaction with the UI's `nav_generation` / `thread_generation` counters (which gate stale UI updates). Probably: keep the counters UI-side; Service notifications carry no generation; UI bumps generations on receiving completions.
-- Error type serialization across the boundary - need to decide which `ActionError` variants survive intact and which collapse into a generic `RemoteError`.
+- The interaction with the UI's `nav_generation` / `thread_generation` counters (which gate stale UI updates). Generations stay UI-side; Service notifications carry no generation; UI bumps generations on receiving `action.completed`.
+- Error type serialization across the boundary - decide which `ActionError` variants survive intact and which collapse into a generic `RemoteError`.
+- The `ActionContext` decoupling from `App` state may force some other extractions in `core::actions::context`. Scope to keep on the radar but not block the phase.
 
 ---
 
-## Phase 3 - Move sync into the Service (JMAP first)
+## Phase 3 - Move sync into the Service (JMAP first), including Tantivy writer relocation
 
-**Goal.** JMAP delta sync runs inside the Service. UI gets sync progress and completion via notifications instead of in-process channels.
+**Goal.** JMAP delta sync runs inside the Service, including all of its write-side interactions (DB, body store, inline image store, Tantivy writer). UI gets sync progress + completion via notifications. Tantivy reader stays UI-side, driven by `index.committed` notifications.
 
 **Entry criteria.**
-- Phase 1 + 2 landed.
+- Phase 1 + 1.5 + 2 landed.
 - The Action service migration validated the IPC pattern under realistic load.
 
 **In scope.**
-- `service-api` new methods: `sync.start_account { account_id }`, `sync.cancel_account { account_id }`. New notification: `sync.progress { ... }`, `sync.completed { ... }`.
-- The Service owns sync dispatch: `sync_delta_for_account` runs Service-side using Service-owned db / body store / inline image store / search state.
-- The UI's `dispatch_sync_delta` -> `Task::perform(...)` becomes `service_client.start_sync(account_id)` returning a future that resolves on `sync.completed`.
+- **Tantivy writer relocates here, not in Phase 7.** Sync today indexes via `SearchState`, which always opens an `IndexWriter`. Sync moving Service-side means the writer must come with it - they're entangled. This phase splits `SearchState` into a reader half (UI) and a writer half (Service-internal), and adds the `index.committed { generation }` notification that UI uses to drive `IndexReader::reload()`. Phase 7 then layers attachment text-extraction *on top of* the already-Service-side writer; it does not relocate it.
+- `service-api` new methods: `sync.start_account { account_id }`, `sync.cancel_account { account_id }`. New notifications: `sync.progress`, `sync.completed`, `index.committed`.
+- Service owns sync dispatch: `sync_delta_for_account` runs Service-side using Service-owned `WriteDbState` / write halves of body store / inline image store / Tantivy writer.
+- UI's `dispatch_sync_delta` -> `Task::perform(...)` becomes `service_client.start_sync(account_id)` returning a future that resolves on `sync.completed`.
 - `App.sync_handles` (the `iced::task::Handle` map from the recent sync-cancellation work) replaced by Service-side cancellation tokens; UI's cancel call becomes IPC.
+- UI search reader subscribes to `index.committed` notifications and calls `reader.reload()` on each.
 
 **Out of scope.**
-- Other providers (Phase 5 here ports them).
+- Other providers (Phase 5 ports them).
 - Push notifications (Phase 4).
-- Re-tuning the existing per-account concurrency limit (4) - stays the same.
+- Re-tuning per-account concurrency limit (4) - stays the same.
+- New extractors / attachment indexing (Phase 7).
 
 **Touchpoints.**
-- `crates/service-api/` - sync methods + notifications.
+- `crates/search/src/lib.rs` - split `SearchState` into reader/writer halves; the writer becomes Service-only.
+- `crates/service-api/` - sync methods + `index.committed` notification.
 - `crates/service/src/handlers/sync.rs` - new.
+- `crates/sync/src/persistence.rs` - now writes through Service-owned writer halves.
 - `crates/app/src/handlers/provider.rs` - rewire `dispatch_sync_delta` to talk to the Service.
 - `crates/app/src/update.rs` - `Message::SyncComplete` arrives via IPC notification rather than `Task::perform` callback.
+- `crates/app/src/...` (search reader sites) - one shared reader; reload on `index.committed`.
 
 **Exit criteria.**
 - A JMAP sync triggered from the UI runs in the Service process (visible in `top` / `htop`).
 - Sync progress events reach the UI status bar in real time.
 - Cancel mid-sync works.
 - The "abort sync on account deletion" wiring (recent work) continues to function via IPC.
+- Search results returned from the UI reader reflect Service-side writes within milliseconds of `index.committed`.
+- UI compilation fails if anyone tries to construct a Tantivy `IndexWriter` outside the Service crate.
 
 **Risks / open questions.**
-- Sync writes touch the body store, inline image store, search index. All three become Service-owned. The UI's read paths against them stay UI-direct (multi-reader-safe stores).
-- Currently `Message::SyncComplete` triggers a navigation reload + thread list refresh. That side effect stays UI-side; the Service just notifies.
+- Tantivy writer lock recovery on uncleanly-killed Service. Tantivy ≥0.21 recovers stale writer locks; verify with a kill-mid-write test in this phase. Document the version bound in `crates/search/Cargo.toml`.
+- Currently `Message::SyncComplete` triggers a navigation reload + thread list refresh. That side effect stays UI-side; Service just notifies.
 
 ---
 
@@ -193,54 +256,55 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 
 ---
 
-## Phase 6 - Blob store writes into the Service
+## Phase 6 - Settings + remaining UI write surfaces relocate
 
-**Goal.** All `BlobStore::put` / `unref` / `evict_lru` / `gc` calls happen inside the Service. UI continues to do positional reads from immutable pack files directly. The Service exposes `attachment.fetch` over IPC for cache-miss reads.
+**Goal.** The "Service is the only writer" invariant is fully realized. Every UI write path enumerated in the problem-statement inventory has moved across the boundary; the type-level read/write split (introduced in Phase 2) catches anything left behind at compile time. Plus: the BlobStore writer relocates and `attachment.fetch` IPC lands.
+
+(Phase 6 used to be just blob writes; the previous split was wrong because sync brings the BlobStore writer with it in Phase 3 anyway. Combining "remaining write surfaces" + the small attachment.fetch IPC into one phase reflects the actual shape of work.)
 
 **Entry criteria.**
-- Phase 1 landed.
-- Attachments roadmap Phase 1a + 1b landed (`PackStore` exists, `core::attachments::fetch_or_load` exists).
-- Phase 3 landed (sync runs Service-side, so sync-time pre-fetch can wire here naturally).
+- Phase 5 landed (all sync runs Service-side; the BlobStore writer is already relocated as a sync dependency).
+- Attachments roadmap Phase 1a + 1b landed.
 
 **In scope.**
-- `service-api` new method: `attachment.fetch { account_id, message_id, attachment_id }` -> `Vec<u8>` (or `content_hash` reference for large blobs).
-- Service hosts the `BlobStore` writer instance.
-- Sync-time pre-fetch (attachments roadmap Phase 2) wires here as the consumer.
-- UI's hot-path reads use the existing `PackStore::get` API directly (no IPC).
-- Eviction policy + GC from attachments roadmap Phase 6 lands here.
+- **Remaining write surfaces** from the problem-statement inventory: preferences, account create/update/delete, signature CRUD, local draft auto-save, pinned searches, calendar mutations, OAuth token persist. Each becomes a Service-side handler reachable via IPC.
+- **`attachment.fetch` IPC** for cache-miss reads. Returns `{ content_hash, size }` not `Vec<u8>` (per backpressure policy); UI re-reads positionally from the pack file.
+- **Eviction policy + GC** from attachments roadmap Phase 6 lands here, since the BlobStore writer is now Service-side.
+- **OAuth two-step coordination.** UI captures the redirect (it's the visible app); ships the auth code to Service via IPC; Service exchanges + persists the token.
 
 **Out of scope.**
-- Settings UI for attachment caching policy (attachments Phase 4 - lives UI-side).
+- Settings UI changes for attachment caching policy (attachments Phase 4, lives UI-side; just makes IPC calls).
 - Calendar attachments (separate work).
 
 **Touchpoints.**
-- `crates/service-api/` - `attachment.fetch` method.
-- `crates/service/src/handlers/attachment.rs` - new.
-- `crates/app/src/handlers/attachments.rs` - cold-path uses service client; hot-path is direct read.
+- `crates/service-api/` - `attachment.fetch`, `prefs.set`, `account.upsert`, `account.delete`, `signature.upsert`, `signature.delete`, `draft.save`, `pinned_search.upsert`, `pinned_search.delete`, `calendar.mutate`, `oauth.exchange_code`. (Final names settle in planning; this is the surface.)
+- `crates/service/src/handlers/{attachment,prefs,account,signature,draft,pinned_search,calendar,oauth}.rs` - new.
+- `crates/app/src/handlers/...` - replace direct DB writes with service-client calls. Type system catches anything missed.
 
 **Exit criteria.**
-- `BlobStore::put` calls only happen from inside the Service process.
-- UI hot-path attachment reads bypass IPC entirely.
+- `git grep` for `with_write_conn` / similar in `crates/app/` returns nothing.
+- The `WriteDbState` constructor is unreachable from any UI call site (compile-enforced).
 - Cache-miss Open / Save calls succeed via IPC.
 
 **Risks / open questions.**
-- Tombstone visibility across processes: the Service tombstones a blob, UI tries to read it before the index commit propagates. Needs careful ordering (Service holds the write lock; UI reads see the post-commit state via SQLite WAL).
-- Concurrent reads of the open (currently-being-written-to) pack. Must guarantee the UI never reads past the last fsync'd offset.
+- Tombstone visibility across processes: Service tombstones a blob, UI tries to read it before the index commit propagates. Service holds the write lock; UI reads see the post-commit state via SQLite WAL - verify with a stress test.
+- Concurrent reads of the currently-being-written-to pack must never read past the last fsync'd offset. The pack store API enforces this; verify it survives the IPC boundary.
+- OAuth coordination introduces a UI-Service round-trip during the redirect window. Need to verify it doesn't blow timeouts on slow OAuth servers.
 
 ---
 
-## Phase 7 - Attachment text extraction + Tantivy indexing in the Service
+## Phase 7 - Attachment text extraction + Tantivy indexing
 
-**Goal.** The forcing function. Cached attachments get text-extracted (per mime-type extractors) and indexed into Tantivy. Search results disambiguate "matched in body" vs. "matched in attachment X." The Tantivy writer lives in the Service; UI keeps its multi-reader.
+**Goal.** The forcing function. Cached attachments get text-extracted (per mime-type extractors) and indexed into Tantivy. Search results disambiguate "matched in body" vs. "matched in attachment X." Layers on top of the already-Service-side Tantivy writer (relocated in Phase 3).
 
 **Entry criteria.**
-- Phase 6 landed (blob store writes are Service-side; cached attachments exist).
-- Tantivy writer relocation to the Service is part of this phase.
+- Phase 3 landed (Tantivy writer is Service-side).
+- Phase 6 landed (BlobStore writer is Service-side; cached attachments exist).
 
 **In scope.**
-- `crates/service/src/text_extract/` - per-mime extractor dispatch. Initial extractors: PDF (via a Rust PDF text extraction crate, TBD), OOXML (`.docx`, `.xlsx`, `.pptx` - zip + xml text extraction), plain text. Skip lists for opaque binaries.
-- Tantivy writer relocates to the Service. UI keeps reader.
+- `crates/service/src/text_extract/` - per-mime extractor dispatch. Initial extractors: PDF (Rust crate TBD - `pdf-extract` for v1, with explicit "best effort, skip the weird ones" caveat; `pdfium-render` or `mupdf-rs` evaluated as later upgrades), OOXML (`.docx`/`.xlsx`/`.pptx` - zip + xml text extraction), plain text. Skip lists for opaque binaries (mp4, zip, exe, etc.).
 - Pipeline: pre-fetch -> extract -> add to Tantivy doc with `attachment_*` field tags -> commit batched.
+- Tantivy schema migration: add `attachment_text`, `attachment_filename`, `attachment_mime` fields.
 - Re-index command (`index.rebuild`) for one-shot full re-extraction. Multi-hour acceptable; reports progress via notification.
 - Search results carry "match in attachment" annotations.
 
@@ -268,33 +332,37 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 
 ---
 
-## Phase 8 - Crash recovery polish
+## Phase 8 - Crash recovery polish + cross-store reconciliation
 
-**Goal.** The Service surviving / failing / being respawned is well-handled. UI shows visible state when the Service is restarting; queued work is preserved across a Service crash.
+**Goal.** The Service surviving / failing / being respawned is fully handled (Phase 1.5 was the minimal version). UI shows visible state when the Service is restarting; queued work is preserved across a Service crash. Plus: the cross-store invariant pass (orphan reconciliation) lands here.
 
 **Entry criteria.**
-- Phases 1-6 landed. Real crashes are happening (or being induced) so we know what hurts.
+- Phases 1-7 landed. Real crashes are happening (or being induced) so we know what hurts.
 
 **In scope.**
-- Respawn with exponential backoff on Service crash.
+- Respawn with exponential backoff (Phase 1.5 was no-backoff).
 - Crashloop detection: if respawn fails N times in M seconds, surface a permanent error state in the UI ("Service can't start - check logs").
 - UI status indicator for Service health (small banner or status bar element).
-- In-flight requests are either (a) replayed if idempotent, (b) failed back to the caller with a clear error if not. Schema decision per-method.
-- Persistence of the retry queue across Service restarts (already on disk in `pending_ops` table; just verify).
+- In-flight requests are either (a) replayed if idempotent, (b) failed back to the caller with a clear error if not. Schema decision per-method, recorded in `service-api`.
+- Persistence of the retry queue across Service restarts (already on disk in `pending_ops` table; verify).
+- **Cross-store invariant pass** at Service startup: every `attachments.content_hash` resolves in the pack store; every Tantivy doc references an existing message; every body-store entry references an existing message. Orphans dropped, logged.
 
 **Out of scope.**
 - Hot-restart / live state migration of the Service. Crash + cold restart is the model.
 
 **Touchpoints.**
-- `crates/app/src/service_client.rs` - respawn logic.
+- `crates/app/src/service_client.rs` - backoff + crashloop detection + status reporting.
 - `crates/app/src/ui/status_bar.rs` - new "Service degraded" indicator.
+- `crates/service/src/startup_invariants.rs` - new (orphan reconciliation pass).
 
 **Exit criteria.**
-- Killing the Service mid-sync results in a respawn within a few seconds; the affected sync is restarted on the next tick.
+- Killing the Service mid-sync results in a respawn within a few seconds (Phase 1.5 already), backoff prevents tight crashloops (new), status indicator surfaces the degraded state (new).
 - A persistently failing Service surfaces a clear UI error rather than silent breakage.
+- Startup invariant pass runs in <5s on a typical mailbox; logged stats let us see how often crashes leave us reconciling.
 
 **Risks / open questions.**
 - Distinguishing "Service crashed" from "Service is just slow under load" in the heartbeat. Generous timeouts; longer for the first heartbeat after a sync starts.
+- Invariant pass cost on a 200 GB mailbox - need to bound it (probably "scan only what's been written since last clean shutdown" using a marker file).
 
 ---
 
