@@ -6,7 +6,9 @@
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
-use crate::db::queries_extra::contacts::{db_delete_contact, db_upsert_contact_full};
+use crate::db::queries_extra::contacts::{
+    UpsertContactParams, db_delete_contact, db_upsert_contact_full,
+};
 
 // ── Public types ─────────────────────────────────────────
 
@@ -56,15 +58,17 @@ pub async fn save_contact(ctx: &ActionContext, input: ContactSaveInput) -> Actio
         let source = inp.source.as_deref().unwrap_or("user");
         db_upsert_contact_full(
             &conn,
-            &inp.id,
-            &inp.email,
-            inp.display_name.as_deref(),
-            inp.email2.as_deref(),
-            inp.phone.as_deref(),
-            inp.company.as_deref(),
-            inp.notes.as_deref(),
-            inp.account_id.as_deref(),
-            source,
+            UpsertContactParams {
+                id: &inp.id,
+                email: &inp.email,
+                display_name: inp.display_name.as_deref(),
+                email2: inp.email2.as_deref(),
+                phone: inp.phone.as_deref(),
+                company: inp.company.as_deref(),
+                notes: inp.notes.as_deref(),
+                account_id: inp.account_id.as_deref(),
+                source,
+            },
         )
         .map_err(ActionError::db)
     })

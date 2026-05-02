@@ -69,7 +69,12 @@ pub fn jmap_push_subscription(receiver: &JmapPushReceiver) -> Subscription<Strin
 
 impl App {
     /// Dispatch a delta sync for a specific account as a background task.
-    pub(crate) fn dispatch_sync_delta(&self, account_id: String) -> Task<Message> {
+    ///
+    /// Skips dispatch if a sync for the same account is already in-flight -
+    /// the periodic tick will pick it up next round. The returned task is
+    /// wrapped with `Task::abortable` and its handle is stashed in
+    /// `sync_handles` so `handle_delete_account` can cancel it.
+    pub(crate) fn dispatch_sync_delta(&mut self, account_id: String) -> Task<Message> {
         let Some(encryption_key) = self.encryption_key else {
             log::error!("Cannot sync: no encryption key");
             return Task::none();
@@ -99,8 +104,14 @@ impl App {
         };
         let reporter = Arc::clone(&self.sync_reporter);
 
-        let aid = account_id.clone();
-        Task::perform(
+        if self.sync_handles.contains_key(&account_id) {
+            log::debug!("Sync for {account_id} already in-flight; skipping dispatch");
+            return Task::none();
+        }
+
+        let aid_for_msg = account_id.clone();
+        let aid_for_map = account_id.clone();
+        let task = Task::perform(
             async move {
                 let core_db = db.write_db_state();
                 rtsk::sync_dispatch::sync_delta_for_account(
@@ -114,17 +125,20 @@ impl App {
                 )
                 .await
             },
-            move |result| Message::SyncComplete(aid, result),
-        )
+            move |result| Message::SyncComplete(aid_for_msg, result),
+        );
+        let (task, handle) = task.abortable();
+        self.sync_handles.insert(aid_for_map, handle);
+        task
     }
 
     /// Dispatch delta sync for all active accounts.
-    pub(crate) fn sync_all_accounts(&self) -> Task<Message> {
-        let tasks: Vec<Task<Message>> = self
-            .sidebar
-            .accounts
-            .iter()
-            .map(|a| self.dispatch_sync_delta(a.id.clone()))
+    pub(crate) fn sync_all_accounts(&mut self) -> Task<Message> {
+        let account_ids: Vec<String> =
+            self.sidebar.accounts.iter().map(|a| a.id.clone()).collect();
+        let tasks: Vec<Task<Message>> = account_ids
+            .into_iter()
+            .map(|id| self.dispatch_sync_delta(id))
             .collect();
 
         if tasks.is_empty() {

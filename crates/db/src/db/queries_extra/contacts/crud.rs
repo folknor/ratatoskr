@@ -112,23 +112,27 @@ pub async fn db_find_contact_id_by_email(
     .await
 }
 
+/// Mutable fields written by `db_upsert_contact_full`.
+#[derive(Debug, Clone, Copy)]
+pub struct UpsertContactParams<'a> {
+    pub id: &'a str,
+    pub email: &'a str,
+    pub display_name: Option<&'a str>,
+    pub email2: Option<&'a str>,
+    pub phone: Option<&'a str>,
+    pub company: Option<&'a str>,
+    pub notes: Option<&'a str>,
+    pub account_id: Option<&'a str>,
+    pub source: &'a str,
+}
+
 /// Upsert a contact with all mutable fields.
 ///
 /// Used by the contact action service. The app-crate `save_contact_inner`
 /// has equivalent SQL - this is the core-accessible version.
-// TODO(refactor): wrap mutable fields in an UpsertContactParams struct.
-#[allow(clippy::too_many_arguments)]
 pub fn db_upsert_contact_full(
     conn: &Connection,
-    id: &str,
-    email: &str,
-    display_name: Option<&str>,
-    email2: Option<&str>,
-    phone: Option<&str>,
-    company: Option<&str>,
-    notes: Option<&str>,
-    account_id: Option<&str>,
-    source: &str,
+    input: UpsertContactParams<'_>,
 ) -> Result<(), String> {
     let now = chrono::Utc::now().timestamp();
     conn.execute(
@@ -146,15 +150,15 @@ pub fn db_upsert_contact_full(
              account_id = excluded.account_id,
              updated_at = excluded.updated_at",
         params![
-            id,
-            email,
-            display_name,
-            email2,
-            phone,
-            company,
-            notes,
-            account_id,
-            source,
+            input.id,
+            input.email,
+            input.display_name,
+            input.email2,
+            input.phone,
+            input.company,
+            input.notes,
+            input.account_id,
+            input.source,
             now
         ],
     )

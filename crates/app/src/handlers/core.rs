@@ -629,6 +629,20 @@ impl App {
     }
 
     pub(crate) fn handle_delete_account(&mut self, account_id: String) -> Task<Message> {
+        // Cancel any in-flight delta sync for this account so it can't keep
+        // writing to the deleted account's stores after CASCADE has fired.
+        // Caveat: `Handle::abort` drops the wrapped future at its next yield
+        // point - writes that already landed before that yield are not undone.
+        // The body-store / inline-image / search-index cleanup below re-deletes
+        // anything the sync wrote up to the abort, so orphans get reaped by
+        // the same CASCADE pass. A write that races *between* cleanup batches
+        // and abort can still orphan; closing that hole would need per-account
+        // generation checks at every store-write site.
+        if let Some(handle) = self.sync_handles.remove(&account_id) {
+            handle.abort();
+            log::info!("Aborted in-flight sync for deleted account {account_id}");
+        }
+
         // Close compose and message-view pop-outs belonging to the deleted account.
         let windows_to_close: Vec<iced::window::Id> = self
             .pop_out_windows

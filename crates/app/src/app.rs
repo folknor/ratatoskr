@@ -120,6 +120,12 @@ pub struct App {
     #[allow(dead_code)]
     pub(crate) sync_reporter: Arc<crate::ui::status_bar::IcedProgressReporter>,
 
+    /// In-flight delta-sync handles keyed by account id. Used to
+    /// (1) skip dispatch when a sync for the same account is already running
+    /// and (2) abort the task on account deletion so a stale sync can't keep
+    /// writing to the deleted account's stores.
+    pub(crate) sync_handles: HashMap<String, iced::task::Handle>,
+
     // JMAP push notification pipeline
     pub(crate) jmap_push_tx: tokio::sync::mpsc::UnboundedSender<String>,
     pub(crate) jmap_push_receiver: JmapPushReceiver,
@@ -293,6 +299,7 @@ impl App {
             active_chat: None,
             sync_receiver,
             sync_reporter,
+            sync_handles: HashMap::new(),
             jmap_push_tx,
             jmap_push_receiver,
             body_store,

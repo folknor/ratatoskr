@@ -7,6 +7,7 @@ pub mod probe;
 pub mod registry;
 pub mod types;
 
+use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Notify;
@@ -152,15 +153,68 @@ fn domains_related(a: &str, b: &str) -> bool {
     a == b || a.ends_with(&format!(".{b}")) || b.ends_with(&format!(".{a}"))
 }
 
+/// Extract the domain from an email address.
+///
+/// The returned string is fed into HTTPS probes (`autoconfig.{domain}`,
+/// `https://{domain}/.well-known/...`, etc.). Without validation, an address
+/// like `evil@10.0.0.1` or `evil@host:8080/path` turns the discovery cascade
+/// into a probe-flavor SSRF oracle for hosts on the user's network. Only
+/// admit shapes that are unambiguously a hostname pointing at a public host.
 fn extract_domain(email: &str) -> Result<String, String> {
     let domain = email
         .split('@')
         .nth(1)
         .ok_or_else(|| "Invalid email address: missing @".to_string())?;
-    if domain.is_empty() || !domain.contains('.') {
+    if domain.is_empty() {
+        return Err("Invalid email address: empty domain".to_string());
+    }
+    let bad_byte = |b: u8| {
+        matches!(
+            b,
+            b':' | b'/' | b'\\' | b'?' | b'#' | b'@' | b'[' | b']' | b' ' | b'\t'
+        ) || b.is_ascii_control()
+    };
+    if domain.bytes().any(bad_byte) {
+        return Err("Invalid email address: bad domain characters".to_string());
+    }
+    if let Ok(v4) = domain.parse::<Ipv4Addr>()
+        && !is_public_v4(&v4)
+    {
+        return Err("Invalid email address: non-routable IP".to_string());
+    }
+    // `Ipv4Addr::from_str` is strict dotted-quad, but the system resolver
+    // happily expands shorthand forms (`127.1` -> `127.0.0.1`,
+    // `0x7f.1` -> loopback, etc.). Reject any all-numeric host so a
+    // hand-crafted address can't sneak past via the resolver.
+    if domain.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
+        return Err("Invalid email address: numeric host disallowed".to_string());
+    }
+    if !domain.contains('.') {
         return Err("Invalid email address: bad domain".to_string());
     }
     Ok(domain.to_string())
+}
+
+/// Is this IPv4 address routable on the public internet?
+///
+/// Rejects loopback, RFC 1918 private space, link-local, multicast, broadcast,
+/// the unspecified address, RFC 5737 documentation ranges, and RFC 6598
+/// carrier-grade NAT (`100.64.0.0/10`). Bracketed / bare IPv6 literals are
+/// already rejected upstream by the bad-character filter, so v4 is the only
+/// shape that can reach this check.
+fn is_public_v4(v4: &Ipv4Addr) -> bool {
+    if v4.is_loopback()
+        || v4.is_private()
+        || v4.is_link_local()
+        || v4.is_unspecified()
+        || v4.is_broadcast()
+        || v4.is_multicast()
+        || v4.is_documentation()
+    {
+        return false;
+    }
+    let octets = v4.octets();
+    !(octets[0] == 100 && (octets[1] & 0xC0) == 64)
 }
 
 fn elapsed_ms(start: Instant) -> u64 {
@@ -305,5 +359,94 @@ fn err_diag(stage: &'static str) -> StageDiagnostic {
         outcome: StageOutcome::Error {
             message: "task panicked".to_string(),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_domain_accepts_normal_email() {
+        assert_eq!(
+            extract_domain("user@example.com").as_deref(),
+            Ok("example.com")
+        );
+        assert_eq!(
+            extract_domain("first.last@mail.corp.example.com").as_deref(),
+            Ok("mail.corp.example.com")
+        );
+    }
+
+    #[test]
+    fn extract_domain_requires_at_sign_and_dot() {
+        assert!(extract_domain("noatsign").is_err());
+        assert!(extract_domain("user@localhost").is_err());
+        assert!(extract_domain("user@").is_err());
+    }
+
+    #[test]
+    fn extract_domain_rejects_loopback_and_private_ipv4() {
+        for bad in [
+            "user@127.0.0.1",
+            "user@10.0.0.5",
+            "user@192.168.1.1",
+            "user@172.16.0.1",
+            "user@169.254.0.1",  // link-local
+            "user@224.0.0.1",    // multicast
+            "user@255.255.255.255", // broadcast
+            "user@0.0.0.0",      // unspecified
+            "user@192.0.2.1",    // documentation
+            "user@100.64.0.1",   // CGNAT
+        ] {
+            assert!(
+                extract_domain(bad).is_err(),
+                "expected {bad} to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn extract_domain_rejects_numeric_shorthand_hosts() {
+        // `Ipv4Addr::from_str` is strict, but `getaddrinfo` will expand
+        // `127.1` into `127.0.0.1`. Reject anything that's all digits + dots
+        // so the shorthand can't sneak the IP past the dotted-quad check.
+        // (Rejecting public IPv4 literals like 8.8.8.8 too is a fine
+        // collateral - email-by-IP is a vanishing use case.)
+        for bad in ["user@127.1", "user@8.8.8.8", "user@192.168.1"] {
+            assert!(
+                extract_domain(bad).is_err(),
+                "expected {bad} to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn extract_domain_rejects_url_syntax() {
+        for bad in [
+            "user@example.com:8080",       // port
+            "user@example.com/path",       // path
+            "user@example.com?query=1",    // query
+            "user@example.com#frag",       // fragment
+            "user@evil@example.com",       // userinfo (extra @)
+            "user@[::1]",                  // bracketed IPv6
+            "user@[2001:db8::1]",          // bracketed public-looking IPv6
+            "user@example .com",           // whitespace
+            "user@example\tcom",           // tab
+            "user@example.com\n",          // trailing newline / control
+        ] {
+            assert!(
+                extract_domain(bad).is_err(),
+                "expected {bad} to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn extract_domain_rejects_bare_ipv6() {
+        // Bare IPv6 contains `:` so it falls out at the bad-character filter
+        // even before reaching the IP check.
+        assert!(extract_domain("user@::1").is_err());
+        assert!(extract_domain("user@2001:db8::1").is_err());
     }
 }

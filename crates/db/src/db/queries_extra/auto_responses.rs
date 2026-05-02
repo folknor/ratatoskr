@@ -45,18 +45,22 @@ pub fn get_auto_response_sync(
     })
 }
 
+/// Mutable fields written by `upsert_auto_response_sync`.
+#[derive(Debug, Clone, Copy)]
+pub struct UpsertAutoResponseParams<'a> {
+    pub account_id: &'a str,
+    pub enabled: bool,
+    pub start_date: Option<&'a str>,
+    pub end_date: Option<&'a str>,
+    pub internal_message_html: Option<&'a str>,
+    pub external_message_html: Option<&'a str>,
+    pub external_audience: &'a str,
+}
+
 /// Upsert an auto-response cache entry.
-// TODO(refactor): wrap fields in an UpsertAutoResponseParams struct.
-#[allow(clippy::too_many_arguments)]
 pub fn upsert_auto_response_sync(
     conn: &Connection,
-    account_id: &str,
-    enabled: bool,
-    start_date: Option<&str>,
-    end_date: Option<&str>,
-    internal_message_html: Option<&str>,
-    external_message_html: Option<&str>,
-    external_audience: &str,
+    p: UpsertAutoResponseParams<'_>,
 ) -> Result<(), String> {
     conn.execute(
         "INSERT INTO auto_responses \
@@ -69,13 +73,13 @@ pub fn upsert_auto_response_sync(
            internal_message_html = ?5, external_message_html = ?6, \
            external_audience = ?7, last_synced_at = unixepoch()",
         params![
-            account_id,
-            enabled as i32,
-            start_date,
-            end_date,
-            internal_message_html,
-            external_message_html,
-            external_audience,
+            p.account_id,
+            i32::from(p.enabled),
+            p.start_date,
+            p.end_date,
+            p.internal_message_html,
+            p.external_message_html,
+            p.external_audience,
         ],
     )
     .map_err(|e| format!("upsert auto_response: {e}"))?;

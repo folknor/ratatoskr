@@ -96,13 +96,15 @@ pub async fn db_upsert_auto_response(
     db.with_conn(move |conn| {
         crate::db::queries_extra::auto_responses::upsert_auto_response_sync(
             conn,
-            &account_id,
-            config.enabled,
-            config.start_date.as_deref(),
-            config.end_date.as_deref(),
-            config.internal_message_html.as_deref(),
-            config.external_message_html.as_deref(),
-            config.external_audience.as_str(),
+            crate::db::queries_extra::auto_responses::UpsertAutoResponseParams {
+                account_id: &account_id,
+                enabled: config.enabled,
+                start_date: config.start_date.as_deref(),
+                end_date: config.end_date.as_deref(),
+                internal_message_html: config.internal_message_html.as_deref(),
+                external_message_html: config.external_message_html.as_deref(),
+                external_audience: config.external_audience.as_str(),
+            },
         )
     })
     .await

@@ -506,110 +506,81 @@ pub async fn db_delete_alias(db: &DbState, id: String) -> Result<(), String> {
     .await
 }
 
-// TODO(refactor): 15 args - migrate to a SaveLocalDraftParams struct.
-#[allow(clippy::too_many_arguments)]
-pub async fn db_save_local_draft(
-    db: &DbState,
-    id: String,
-    account_id: String,
-    to_addresses: Option<String>,
-    cc_addresses: Option<String>,
-    bcc_addresses: Option<String>,
-    subject: Option<String>,
-    body_html: Option<String>,
-    reply_to_message_id: Option<String>,
-    thread_id: Option<String>,
-    from_email: Option<String>,
-    signature_id: Option<String>,
-    remote_draft_id: Option<String>,
-    attachments: Option<String>,
-    signature_separator_index: Option<i64>,
-) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        conn.execute(
-            "INSERT INTO local_drafts (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
-                subject, body_html, reply_to_message_id, thread_id, from_email, signature_id, \
-                remote_draft_id, attachments, signature_separator_index, updated_at, sync_status)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, unixepoch(), 'pending')
-                 ON CONFLICT(id) DO UPDATE SET
-                   to_addresses = ?3, cc_addresses = ?4, bcc_addresses = ?5,
-                   subject = ?6, body_html = ?7, reply_to_message_id = ?8,
-                   thread_id = ?9, from_email = ?10, signature_id = ?11,
-                   remote_draft_id = ?12, attachments = ?13,
-                   signature_separator_index = ?14,
-                   updated_at = unixepoch(), sync_status = 'pending'",
-            params![
-                id,
-                account_id,
-                to_addresses,
-                cc_addresses,
-                bcc_addresses,
-                subject,
-                body_html,
-                reply_to_message_id,
-                thread_id,
-                from_email,
-                signature_id,
-                remote_draft_id,
-                attachments,
-                signature_separator_index,
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
+/// Mutable fields written by the local-draft upsert.
+///
+/// Used by both the async `db_save_local_draft` and the sync
+/// `db_save_local_draft_sync`. Owned strings so the value can move into the
+/// `with_conn` closure on the async path.
+#[derive(Debug, Clone)]
+pub struct SaveLocalDraftParams {
+    pub id: String,
+    pub account_id: String,
+    pub to_addresses: Option<String>,
+    pub cc_addresses: Option<String>,
+    pub bcc_addresses: Option<String>,
+    pub subject: Option<String>,
+    pub body_html: Option<String>,
+    pub reply_to_message_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub from_email: Option<String>,
+    pub signature_id: Option<String>,
+    pub remote_draft_id: Option<String>,
+    pub attachments: Option<String>,
+    pub signature_separator_index: Option<i64>,
 }
 
-#[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
-pub fn db_save_local_draft_sync(
+const SAVE_LOCAL_DRAFT_SQL: &str = "INSERT INTO local_drafts (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
+    subject, body_html, reply_to_message_id, thread_id, from_email, signature_id, \
+    remote_draft_id, attachments, signature_separator_index, updated_at, sync_status)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, unixepoch(), 'pending')
+     ON CONFLICT(id) DO UPDATE SET
+       to_addresses = ?3, cc_addresses = ?4, bcc_addresses = ?5,
+       subject = ?6, body_html = ?7, reply_to_message_id = ?8,
+       thread_id = ?9, from_email = ?10, signature_id = ?11,
+       remote_draft_id = ?12, attachments = ?13,
+       signature_separator_index = ?14,
+       updated_at = unixepoch(), sync_status = 'pending'";
+
+fn exec_save_local_draft(
     conn: &crate::db::Connection,
-    id: String,
-    account_id: String,
-    to_addresses: Option<String>,
-    cc_addresses: Option<String>,
-    bcc_addresses: Option<String>,
-    subject: Option<String>,
-    body_html: Option<String>,
-    reply_to_message_id: Option<String>,
-    thread_id: Option<String>,
-    from_email: Option<String>,
-    signature_id: Option<String>,
-    remote_draft_id: Option<String>,
-    attachments: Option<String>,
-    signature_separator_index: Option<i64>,
+    p: &SaveLocalDraftParams,
 ) -> Result<(), String> {
     conn.execute(
-        "INSERT INTO local_drafts (id, account_id, to_addresses, cc_addresses, bcc_addresses, \
-            subject, body_html, reply_to_message_id, thread_id, from_email, signature_id, \
-            remote_draft_id, attachments, signature_separator_index, updated_at, sync_status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, unixepoch(), 'pending')
-             ON CONFLICT(id) DO UPDATE SET
-               to_addresses = ?3, cc_addresses = ?4, bcc_addresses = ?5,
-               subject = ?6, body_html = ?7, reply_to_message_id = ?8,
-               thread_id = ?9, from_email = ?10, signature_id = ?11,
-               remote_draft_id = ?12, attachments = ?13,
-               signature_separator_index = ?14,
-               updated_at = unixepoch(), sync_status = 'pending'",
+        SAVE_LOCAL_DRAFT_SQL,
         params![
-            id,
-            account_id,
-            to_addresses,
-            cc_addresses,
-            bcc_addresses,
-            subject,
-            body_html,
-            reply_to_message_id,
-            thread_id,
-            from_email,
-            signature_id,
-            remote_draft_id,
-            attachments,
-            signature_separator_index,
+            p.id,
+            p.account_id,
+            p.to_addresses,
+            p.cc_addresses,
+            p.bcc_addresses,
+            p.subject,
+            p.body_html,
+            p.reply_to_message_id,
+            p.thread_id,
+            p.from_email,
+            p.signature_id,
+            p.remote_draft_id,
+            p.attachments,
+            p.signature_separator_index,
         ],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+pub async fn db_save_local_draft(
+    db: &DbState,
+    params: SaveLocalDraftParams,
+) -> Result<(), String> {
+    db.with_conn(move |conn| exec_save_local_draft(conn, &params))
+        .await
+}
+
+pub fn db_save_local_draft_sync(
+    conn: &crate::db::Connection,
+    params: &SaveLocalDraftParams,
+) -> Result<(), String> {
+    exec_save_local_draft(conn, params)
 }
 
 pub fn db_mark_queued_drafts_failed_sync(conn: &crate::db::Connection) -> Result<usize, String> {

@@ -126,6 +126,8 @@ These are verified, adopted project-wide, and should be followed for all new wor
 
 **State types are `Clone`** - `DbState`, `BodyStoreState`, `InlineImageStoreState`, `SearchState`, `AppCryptoState` all wrap `Arc<Mutex<_>>` and implement `Clone`.
 
+**In-flight task handles for per-entity background work** - When the app dispatches a long-running per-entity Task (currently: per-account delta sync, in `App.sync_handles: HashMap<String, iced::task::Handle>`), it wraps the dispatch with `Task::abortable()`, stashes the handle keyed by the entity id, and (1) skips re-dispatch when an entry already exists, (2) removes the entry on the completion message, (3) calls `handle.abort()` when the underlying entity is deleted. The completion handler also drops results for entities that no longer exist - defense in depth against stale messages. Caveat: `Handle::abort` cancels at the next yield point, so writes already in-flight are not undone - external-store cleanup must run after the abort, and tightly racy writes still need per-entity generation checks at the write site.
+
 **DOM-to-widget pipeline** - V1 in `html_render.rs`. Supports links, CID images, inline formatting (bold/italic/underline/strike/code via `iced::widget::rich_text`), block structure. Complexity heuristic (table depth >5, style tags >2) falls back to plain text. Used in both the reading pane and the pop-out message view (Simple HTML / Original HTML modes). Remaining gaps: remote image loading with consent, table rendering, image caching - tracked in TODO.md.
 
 ## Current Exceptions

@@ -244,6 +244,18 @@ impl App {
                 Task::batch([sync_task, pending_task, gal_task, cal_task])
             }
             Message::SyncComplete(account_id, result) => {
+                // Free the handle so the next tick can re-dispatch.
+                self.sync_handles.remove(&account_id);
+                // If the account was deleted while sync was in-flight, drop
+                // the result silently. The status-bar warning, navigation
+                // reload, and chat-view refresh below all assume the account
+                // still exists.
+                if !self.sidebar.accounts.iter().any(|a| a.id == account_id) {
+                    log::debug!(
+                        "Dropping sync result for unknown/deleted account {account_id}"
+                    );
+                    return Task::none();
+                }
                 match result {
                     Err(ref e) => {
                         log::error!("Sync failed for {account_id}: {e}");

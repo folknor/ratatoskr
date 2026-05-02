@@ -1,12 +1,8 @@
 # TODO
 
+As a general rule, TODO.md items are **removed** when completed.
+
 ## Remaining Work
-
-- [ ] **Expand dev-seed** - The dev-seed script needs to create Smart Folders, contact groups, VIP contacts. Also attachments should be actual files. Needs to create actual signatures for contacts, both HTML and simple ones. Needs to create more emails with links and other non-text content. Needs to create fake shared accounts and mailboxes.
-
-- [ ] **dev-seed calendars** - Obvious.
-
-- [ ] **Settings/People** - The contacts and group lists here need to conform much closer to the spec at docs/contacts/problem-statement.md. We're quite a ways off.
 
 - [ ] **Settings/Notifications** - VIP Senders should move to contact editing, and this should be a toggle button here.
 
@@ -16,7 +12,7 @@
 
 - [ ] **Attachment saving** - Should remember last folder. Ideally last folder per thread ID.
 
-- [ ] **Collapse individual expanded messages** - Chevron now points up (fixed: added `icon::chevron_up()` at U+E070, swapped in `widgets::expanded_message_card`). Remaining: the button needs a new place to live - probably a very long, thin button that stretches across the entire horizontal space at the top of the message frame. This needs to be unified with the Attachments panel collapsing, which is currently taking up too much vertical space; also too much padding above the Attachments section.
+- [ ] **Collapse individual expanded messages** - The button needs a new place to live - probably a very long, thin button that stretches across the entire horizontal space at the top of the message frame. This needs to be unified with the Attachments panel collapsing, which is currently taking up too much vertical space; also too much padding above the Attachments section.
 
 - [ ] **Settings/Composing: Signatures** - This section needs work.
 
@@ -34,35 +30,29 @@
 
 - [ ] **Calendar move semantics for existing events** - The calendar picker is disabled for `EditingEvent` because moving an event between calendars requires provider-specific support (some providers need delete+create). When provider calendar-move APIs are implemented, re-enable the picker for existing events and update `account_id` ownership logic in the `CalendarSelected` handler accordingly.
 
-- [ ] **Link hover URL disclosure (email content)** - Links in email bodies need either a tooltip that shows the destination URL or status-bar disclosure. Decision still pending.
+- [ ] **Link hover URL disclosure (email content)** - Links in email bodies need status-bar disclosure.
 
 - [ ] **Link context menu (email content)** - Right-clicking a link in an email body should offer actions like Copy Link and related link operations.
 
-- [ ] **Pop out message viewer body rendering** - The current pills for selecting Plain/Simple/Original/Source need to move. The spec currently doesn't say clearly where they should go. This needs to be resolved first. See `docs/pop-out-windows/discrepancies.md` Medium #5.
-
-- [ ] **Pop out message viewer body rendering toggle buttons** - Plain text uses the plain body; Simple HTML / Original HTML now both route through `html_render.rs` so inline formatting, links, lists, blockquotes, and CID image alt-text all show. Original differs from Simple only in remote-image policy, which still isn't enforced (the `block_remote_images` setting isn't plumbed through the pop-out path yet, so both modes are equivalent until that lands - tracked under "Remote image loading with user consent" in the HTML rendering section). Source mode synthesizes a usable pseudo-`.eml`; faithful Source needs the "Raw message source store" entry below. See `docs/pop-out-windows/discrepancies.md` Medium #6 and #7.
-
 - [ ] **Pop-out viewer attachment Open / Save / Save All are stubs** - The compact attachment cards in the message-view pop-out render Save / Open buttons on hover and a Save All button in the panel header, but `handlers/pop_out/message_view.rs` handles all three with `log::info!("not yet implemented")`. The buttons are clickable; nothing happens. Open should hand off to the OS default handler; Save / Save All should use `rfd::AsyncFileDialog` (file / folder picker) and write attachment bytes from the attachment file cache. Should share the last-folder-per-thread memory from the "Attachment saving" item above once that lands. See `docs/pop-out-windows/discrepancies.md` Medium #10.
-
-- [ ] **Message box / toast notification system** - Generic modal message box and/or toast notification infrastructure for the app. Needed for: compose draft save failure on close (currently silently aborts the close with no user feedback), action service retry exhaustion warnings, and any future error/confirmation flows. Should support at least: transient toasts (auto-dismiss), persistent error banners, and modal confirmation dialogs.
 
 - [ ] **Starred thread card background** - The golden tint on starred thread cards uses a fixed `mix()` ratio (`STARRED_BG_ALPHA`) which may not look right across all themes. Needs a GPU-level blend/shader effect that adapts to the theme's background luminance so the starred highlight reads consistently in both light and dark themes.
 
 - [ ] **Star icon: need filled variant** *(Deferred - blocked on sluggrs SVG icon rendering)* - Lucide only has outline icons (confirmed: `star` U+E176, `star-half` U+E20B, no filled variant in the bundled font). Currently uses Unicode `*` as a stopgap, which causes size mismatch and visual jank. Will be resolved by switching to real SVG vector icon rendering (recently implemented in sluggrs, our text renderer) - filled and outline star SVGs can both ship and the toggle just swaps the asset. The button should also not change background color on toggle - just the icon fill.
 
 - [ ] **Autocomplete: cross-field drag-and-drop** - Drag detection works but drop cancels. Context menu "Move to" is the workaround. Needs ghost token rendering and target field hit-testing.
-- [ ] **Autocomplete: reuse beyond compose** - Widget only used in compose. Calendar attendee picker and group editor could reuse it.
-- [ ] **Contact pills on recipients** - Per `docs/pop-out-windows/problem-statement.md`: recipients in To/Cc fields should appear as plain text but become contact pills on hover, revealing an inline edit button for quick contact editing. Applies to: reading pane message headers, pop-out message view, compose window recipient display. Currently recipients are plain text everywhere with no hover interaction. Needs: (1) a contact pill widget that blends with background at rest and reveals pill styling + edit button on hover, (2) display name resolution from the contact system (name → email fallback chain), (3) wiring to the existing `EditContact` flow that opens the settings contact editor. See `docs/pop-out-windows/discrepancies.md` High #4.
 
-- [ ] **Action service: user-facing retry status** *(Deferred - blocked on toast system)* - Backend complete: `db_pending_ops_count()`, `db_pending_ops_failed_count()`, `db_pending_ops_retry_failed()` all exist. Zero UI wiring. Needs the toast/notification system (first TODO item) before this can surface "N actions pending retry" badges or "Archive failed after 10 retries" persistent notifications. Without this, users have no visibility into silently diverged state.
+- [ ] **Autocomplete: reuse beyond compose** - Widget only used in compose. Calendar attendee picker and group editor could potentially reuse it.
+
+- [ ] **Contact pills on recipients** - Per `docs/pop-out-windows/problem-statement.md`: recipients in To/Cc fields (in all parts of the app: pop-out view, compose, reading pane thread view, and chat view) should appear as plain text but become contact pills on hover, revealing an inline edit button for quick contact editing. Applies to: reading pane message headers, pop-out message view, compose window recipient display. Currently recipients are plain text everywhere (except pop-out compose window) with no hover interaction. Needs: (1) a contact pill widget that blends with background at rest and reveals pill styling + edit button on hover, (2) display name resolution from the contact system (name → email fallback chain), (3) wiring to the existing `EditContact` flow that opens the settings contact editor. See `docs/pop-out-windows/discrepancies.md` High #4.
+
+- [ ] **Action service: user-facing retry status** *(Deferred - blocked on toast system)* - Backend complete: `db_pending_ops_count()`, `db_pending_ops_failed_count()`, `db_pending_ops_retry_failed()` all exist. Zero UI wiring. Needs a toast/notification syste before this can surface "N actions pending retry" badges or "Archive failed after 10 retries" persistent notifications. Without this, users have no visibility into silently diverged state.
 
 - [ ] **Action service: native provider batching** *(Deferred - low ROI until bulk ops are common)* - `batch_execute` dispatches per-thread `MailOperation` sequentially within each account. Provider reuse per account already eliminated client construction overhead - remaining cost is network latency (one round-trip per thread). Native batching (Gmail batch API, Graph `/$batch`, JMAP `Email/set`, IMAP multi-UID STORE) would reduce 50 round-trips to 1-3 for bulk operations. `PartialEq` on `MailOperation` enables grouping identical operations; the executor contract already specifies regrouping semantics. Implementation deferred until bulk operations on 50+ threads become a real user workflow.
 
 - [ ] **Raw message source store** - The Source view in the pop-out message viewer currently synthesizes a pseudo-`.eml` from parsed headers + body store content (best effort, not faithful to the original MIME framing). For real on-the-wire raw source we'd need a new `raw_source_store` (zstd-compressed blob store, parallel to `body_store` / inline image store, keyed by `(account_id, message_id)`) populated during sync. Each provider needs a separate fetch path: Gmail `format=raw`, JMAP blob endpoint, Graph `/messages/{id}/$value`, IMAP `BODY[]` (currently parsed-on-the-fly and discarded). Without it, DKIM/ARC verification, the original Received chain, original Content-Transfer-Encoding, MIME boundary strings, header order/casing, and address comments all stay lost - reassembly from the parsed columns can't reproduce any of those byte-exactly. Storage cost is real at the project's "150+ GB cached mailbox" target, so the rollout should consider scope (only newer messages? evict on archive? per-account opt-in?) before turning capture on by default. See `docs/pop-out-windows/discrepancies.md` Medium #7.
 
-- [ ] **Sync-task cancellation on account deletion** - Delete flow removes DB data but doesn't cancel in-flight sync tasks. Stale sync completions could write to deleted account state.
-
-- [ ] **Scroll virtualization** - Thread list renders all cards in `column![]` inside `scrollable`. Needs iced-level virtual scrolling for large mailboxes.
+- [ ] **Scroll virtualization** - Thread list renders all cards in `column![]` inside `scrollable`. Needs iced-level virtual scrolling for large mailboxes. This is a much more difficult problem than it appears. Do not take this work lightly.
 
 - [ ] **Scroll-to-selected in palette** - Arrow keys update `selected_index` but `scrollable::scroll_to` doesn't exist in our iced fork. Needs alternative approach.
 
@@ -74,7 +64,6 @@
 
 - [ ] **Bundle SQLite for release builds** *(Deferred until 1.0)* - Re-enable `rusqlite/bundled` feature for release builds so the binary ships a known SQLite version with FTS5 guaranteed. Dev builds use system libsqlite3 for faster compiles.
 
-
 - [ ] **Reconsider sidebar layout** *(Deferred until right before 1.0)* - Currently the spec says: (1) sidebar should not show any Labels section when "All Accounts" is selected, (2) when a single account is selected, only labels belonging to that account should be shown, and (3) that for providers that have a "folder" concept, the users folders should show in the Labels section. We might need to re-think all 3.
 
 ## Roadmap Features - Remaining Work
@@ -83,7 +72,7 @@ Features with backend complete but UI or integration work remaining. Each refere
 
 ### Labels Unification - `docs/labels-unification/problem-statement.md`
 
-Phases 1-6 complete (backend unified). **10 discrepancies remain** - see `docs/labels-unification/discrepancies.md`. Critical: command palette rejects non-Gmail label operations, palette queries use legacy type filtering. Also:
+**10 discrepancies remain** - see `docs/labels-unification/discrepancies.md`. Critical: command palette rejects non-Gmail label operations, palette queries use legacy type filtering. Also:
 
 - [ ] **Label picker overlay** - Triggered from reading pane or command palette. Lists all available tag-type labels with colors for apply/remove.
 
@@ -214,7 +203,6 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 - [ ] **Mail content stores not encrypted at rest** *(unverified - surfaced by codex security review 2026-05-01)* - `BodyStore` keeps compressed HTML/text bodies in `bodies.db` unencrypted (`crates/stores/src/body_store.rs:117`), inline images are raw SQLite blobs (`crates/stores/src/inline_image_store.rs:96`), and attachment cache files are raw bytes (`crates/stores/src/attachment_cache.rs:52`). Compression is not a security boundary. Either envelope-encrypt with AES-256-GCM, or document explicitly that content at rest relies on OS / full-disk encryption.
 
-- [ ] **Discovery domain extraction accepts internal hosts** *(verified 2026-05-01; partial)* - Email-domain extraction (`crates/core/src/discovery/mod.rs:155`) accepts anything after `@` with a dot, so a user signing in with `evil@local.lan.with.dot` triggers OIDC / autoconfig probes against `local.lan.with.dot/.well-known/...` - a probe-flavor SSRF oracle for internal-host enumeration on a corp network. OIDC endpoint validation has been tightened (`is_valid_https_url` now uses `Url::parse` to require https scheme, host, no userinfo, no fragment) and the OIDC client builder now uses `.https_only(true)` so redirects can't downgrade to plaintext, but the email-domain extraction still needs a real allowlist: parse host as `Ipv4Addr`/`Ipv6Addr` and reject loopback / private / link-local, reject ports outside `{443}` (or a small known set), reject embedded userinfo. Bounded SSRF surface; low impact off-corp-network.
 
 ## Remaining Enhancements (other)
 
@@ -248,15 +236,14 @@ The DOM-to-widget pipeline (`html_render.rs`) handles structural HTML but has si
 
 Flagged inline as `TODO(refactor)` with `#[allow(clippy::too_many_arguments)]` or `#[allow(clippy::type_complexity)]` so clippy stays clean. Nothing here is blocking - each is a localized API cleanup that would replace a long arg list or nested-Option tuple with a named struct.
 
+**Triage first: dead code in the params-struct backlog.** These are `pub` and re-exported via `pub use ...::*` in `queries_extra.rs`, but have **zero workspace callers**. Decide delete-vs-refactor before doing the params-struct rewrite - polishing dead code has no payoff.
+- [ ] `db_insert_scheduled_email` (14 args) - `crates/db/src/db/queries_extra/compose.rs`
+- [ ] `db_upsert_attachment` (10 args) - `crates/db/src/db/queries_extra/labels_attachments.rs`
+- [ ] `db_upsert_alias` (10 args) - `crates/db/src/db/queries_extra/compose.rs`
+- [ ] `db_upsert_label_coalesce` (9 args) - `crates/db/src/db/queries_extra/labels_attachments.rs`
+- [ ] `db_update_template` (8 args) - `crates/db/src/db/queries_extra/compose.rs`
+
 **Replace long arg lists with a params struct:**
-- [ ] `db_save_local_draft` (15 args) - `crates/db/src/db/queries_extra/compose.rs:505` -> `SaveLocalDraftParams`
-- [ ] `db_insert_scheduled_email` (14 args) - `crates/db/src/db/queries_extra/compose.rs:705` -> `ScheduledEmailParams`
-- [ ] `db_upsert_contact_full` (10 args) - `crates/db/src/db/queries_extra/contacts.rs:121` -> `UpsertContactParams`
-- [ ] `db_upsert_attachment` (10 args) - `crates/db/src/db/queries_extra/labels_attachments.rs:66` -> `UpsertAttachmentParams`
-- [ ] `db_upsert_alias` (10 args) - `crates/db/src/db/queries_extra/compose.rs:402` -> `UpsertAliasParams`
-- [ ] `db_upsert_label_coalesce` (9 args) - `crates/db/src/db/queries_extra/labels_attachments.rs:5` -> `UpsertLabelParams`
-- [ ] `db_update_template` (8 args) - `crates/db/src/db/queries_extra/compose.rs:46` -> `UpdateTemplateParams`
-- [ ] `upsert_auto_response_sync` (8 args) - `crates/db/src/db/queries_extra/auto_responses.rs:49` -> `UpsertAutoResponseParams`
 - [ ] `gmail::ops::send_reaction` (9 args) - `crates/gmail/src/ops.rs:454` -> `ReactionMessage` (headers + threading fields)
 - [ ] `imap_delta_sync` (8 args) - `crates/imap/src/imap_delta.rs:41` -> bundle stores/state into a `SyncCtx` struct
 - [ ] `compose::new_reply` (8 args) - `crates/app/src/pop_out/compose.rs:563` -> `ReplyContext`
@@ -268,17 +255,6 @@ Flagged inline as `TODO(refactor)` with `#[allow(clippy::too_many_arguments)]` o
 **Replace nested-Option tuples with named structs:**
 - [ ] `merge_contact_pair_sync` builds a 6-tuple of `Option<String>` for the merge row - `crates/db/src/db/queries_extra/contacts/dedup.rs:75`. Local-only - immediately destructured into named locals; struct adds boilerplate without clarity gain. Skip unless we want zero `type_complexity` allows.
 - [ ] compressed-body batches `(String, Option<Vec<u8>>, Option<Vec<u8>>)` (two call sites) - `crates/stores/src/body_store.rs:152, 241` -> `CompressedBody` struct. Two unrelated sites that share a shape but no logic; struct improves readability of the in-flight Vec but doesn't dedup anything.
-
-## Needs Visual Review
-
-Completed features that need to be visually verified in the running app.
-
-- **Compose identity auto-selection (shared mailboxes)** - Auto-selects shared mailbox email when replying from SharedMailbox scope.
-- **Rights gating on action buttons (JMAP sharing)** - Mailbox rights flow through CommandContext. Actions disabled when rights deny.
-- **Signature placement in compose** - Auto-resolved on compose open. New compose: bottom. Reply: between content and quoted text.
-- **BIMI avatar display** - Wired BimiLruCache to thread list sender avatars with circular image, initials fallback.
-- **Active auto-reply status indicator** - Status bar shows "Out of Office auto-reply is active" when any account has enabled auto-replies.
-- **CID image loading from inline image store** - Wired through thread detail → HTML renderer.
 
 ## Cross-Cutting Architecture Patterns
 
