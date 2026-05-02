@@ -38,7 +38,7 @@ pub(super) fn build_row<'a>(b: RowBuilder<'a>) -> Element<'a, SettingsMessage> {
 }
 
 /// Returns the position for index `i` in a list of length `n`.
-fn position_for(i: usize, n: usize) -> RowPosition {
+pub(super) fn position_for(i: usize, n: usize) -> RowPosition {
     match (n, i) {
         (1, _) => RowPosition::Only,
         (_, 0) => RowPosition::Top,
@@ -50,7 +50,7 @@ fn position_for(i: usize, n: usize) -> RowPosition {
 /// Closure factory: builds the action-button style for a settings row at
 /// the given position, capturing `position` so the closure satisfies
 /// iced's `'static`-friendly style fn signature.
-fn settings_row_style(
+pub(super) fn settings_row_style(
     position: RowPosition,
 ) -> impl Fn(&iced::Theme, button::Status) -> button::Style + 'static {
     move |theme, status| theme::style_settings_row_button(theme, status, position)
@@ -258,8 +258,10 @@ pub(super) fn setting_row<'a>(
 }
 
 /// `setting_row` with an optional secondary line beneath the label, matching
-/// `toggle_row`'s two-line layout. The row grows to `SETTINGS_TOGGLE_ROW_HEIGHT`
-/// when a description is present.
+/// `toggle_row`'s two-line layout. With a description, the control's vertical
+/// position is locked to the label-line baseline (multi-line descriptions
+/// grow the row downward without moving the control). Without a description,
+/// the row stays at `SETTINGS_ROW_HEIGHT` and the control centres in it.
 pub(super) fn setting_row_with_description<'a>(
     label: &'a str,
     description: Option<&'a str>,
@@ -267,44 +269,55 @@ pub(super) fn setting_row_with_description<'a>(
     on_press: SettingsMessage,
 ) -> RowBuilder<'a> {
     Box::new(move |position| {
-        let label_col: Element<'a, SettingsMessage> = if let Some(desc) = description {
+        let inner: Element<'a, SettingsMessage> = if let Some(desc) = description {
             column![
-                text(label).size(TEXT_LG).style(text::base),
-                text(desc)
-                    .size(TEXT_SM)
-                    .style(theme::TextClass::Tertiary.style()),
-            ]
-            .spacing(SPACE_XXXS)
-            .into()
-        } else {
-            text(label).size(TEXT_LG).style(text::base).into()
-        };
-
-        let height = if description.is_some() {
-            SETTINGS_TOGGLE_ROW_HEIGHT
-        } else {
-            SETTINGS_ROW_HEIGHT
-        };
-
-        button(
-            container(
                 row![
-                    container(label_col).align_y(Alignment::Center),
-                    Space::new().width(Length::Fill),
+                    container(text(label).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
+                        .align_y(Alignment::Center)
+                        .width(Length::Fill),
                     control,
                 ]
-                .align_y(Alignment::Center),
-            )
-            .padding(PAD_SETTINGS_ROW)
+                .align_y(Alignment::Center)
+                .height(SETTINGS_LABEL_LINE_HEIGHT)
+                .width(Length::Fill),
+                row![
+                    container(
+                        text(desc)
+                            .size(TEXT_SM)
+                            .style(theme::TextClass::Tertiary.style()),
+                    )
+                    .width(Length::FillPortion(4)),
+                    Space::new().width(Length::FillPortion(1)),
+                ]
+                .width(Length::Fill),
+            ]
             .width(Length::Fill)
-            .height(height)
-            .align_y(Alignment::Center),
-        )
-        .on_press(on_press)
-        .padding(0)
-        .style(settings_row_style(position))
-        .width(Length::Fill)
-        .into()
+            .into()
+        } else {
+            row![
+                container(text(label).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill),
+                control,
+            ]
+            .align_y(Alignment::Center)
+            .width(Length::Fill)
+            .into()
+        };
+
+        let mut outer = container(inner)
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill);
+        if description.is_none() {
+            outer = outer.height(SETTINGS_ROW_HEIGHT).align_y(Alignment::Center);
+        }
+
+        button(outer)
+            .on_press(on_press)
+            .padding(0)
+            .style(settings_row_style(position))
+            .width(Length::Fill)
+            .into()
     })
 }
 
@@ -321,26 +334,42 @@ pub(super) fn toggle_row<'a>(
         let on_press_msg = on_toggle(!value);
         button(
             container(
-                row![
-                    column![
-                        text(label).size(TEXT_LG).style(text::base),
-                        text(description)
-                            .size(TEXT_SM)
-                            .style(theme::TextClass::Tertiary.style()),
+                column![
+                    // Top line: bold label + toggler on a fixed-height
+                    // baseline. The toggler's Y is anchored here regardless
+                    // of how many lines the description below wraps to,
+                    // so it never moves when content grows or the window
+                    // narrows.
+                    row![
+                        container(text(label).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
+                            .align_y(Alignment::Center)
+                            .width(Length::Fill),
+                        animated_toggler(value)
+                            .size(TEXT_HEADING)
+                            .on_toggle(on_toggle)
+                            .style(theme::TogglerClass::Settings.style()),
                     ]
-                    .spacing(SPACE_XXXS),
-                    Space::new().width(Length::Fill),
-                    animated_toggler(value)
-                        .size(TEXT_HEADING)
-                        .on_toggle(on_toggle)
-                        .style(theme::TogglerClass::Settings.style()),
+                    .align_y(Alignment::Center)
+                    .height(SETTINGS_LABEL_LINE_HEIGHT)
+                    .width(Length::Fill),
+                    // Description capped at 80% of the row width via
+                    // FillPortion(4)/(1) so it can't grow horizontally
+                    // into the toggler column. Wraps freely.
+                    row![
+                        container(
+                            text(description)
+                                .size(TEXT_SM)
+                                .style(theme::TextClass::Tertiary.style()),
+                        )
+                        .width(Length::FillPortion(4)),
+                        Space::new().width(Length::FillPortion(1)),
+                    ]
+                    .width(Length::Fill),
                 ]
-                .align_y(Alignment::Center),
+                .width(Length::Fill),
             )
             .padding(PAD_SETTINGS_ROW)
-            .width(Length::Fill)
-            .height(SETTINGS_TOGGLE_ROW_HEIGHT)
-            .align_y(Alignment::Center),
+            .width(Length::Fill),
         )
         .on_press(on_press_msg)
         .padding(0)
@@ -483,10 +512,11 @@ pub(super) fn coming_soon_row<'a>(feature: &'a str) -> RowBuilder<'a> {
 
 /// A row with a label on the left (50%) and an optional icon + slider on the right (50%).
 /// No hover effect - only direct slider interaction. The slider has a strong snap toward `default`.
-// TODO(refactor): bundle slider params into a SliderRow struct with builder methods.
+// TODO(refactor): introduce a `SliderRow` builder struct - 9 args.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn slider_row<'a>(
     label: &'a str,
+    description: Option<&'a str>,
     icon: Option<iced::widget::Text<'a>>,
     range: std::ops::RangeInclusive<f32>,
     value: f32,
@@ -518,30 +548,63 @@ pub(super) fn slider_row<'a>(
             slider_widget.into()
         };
 
-        container(
-            row![
-                container(text(label).size(TEXT_LG).style(text::base))
-                    .align_y(Alignment::Center)
-                    .width(Length::FillPortion(1)),
-                container(right_content)
-                    .align_y(Alignment::Center)
-                    .width(Length::FillPortion(1)),
-            ]
-            .align_y(Alignment::Center),
-        )
-        .padding(PAD_SETTINGS_ROW)
-        .width(Length::Fill)
-        .height(SETTINGS_ROW_HEIGHT)
+        // Same shape as the other description-bearing row builders: the
+        // label-line is fixed-height so the slider's vertical position is
+        // anchored regardless of how many lines the description below
+        // wraps to. Without a description the row stays at
+        // `SETTINGS_ROW_HEIGHT`.
+        let label_line = row![
+            container(text(label).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
+                .align_y(Alignment::Center)
+                .width(Length::FillPortion(1)),
+            container(right_content)
+                .align_y(Alignment::Center)
+                .width(Length::FillPortion(1)),
+        ]
         .align_y(Alignment::Center)
-        .into()
+        .width(Length::Fill);
+
+        let inner: Element<'a, SettingsMessage> = if let Some(desc) = description {
+            column![
+                container(label_line).height(SETTINGS_LABEL_LINE_HEIGHT),
+                row![
+                    container(
+                        text(desc)
+                            .size(TEXT_SM)
+                            .style(theme::TextClass::Tertiary.style()),
+                    )
+                    .width(Length::FillPortion(4)),
+                    Space::new().width(Length::FillPortion(1)),
+                ]
+                .width(Length::Fill),
+            ]
+            .spacing(SPACE_XXXS)
+            .width(Length::Fill)
+            .into()
+        } else {
+            label_line.into()
+        };
+
+        let mut outer = container(inner)
+            .padding(PAD_SETTINGS_ROW)
+            .width(Length::Fill);
+        if description.is_none() {
+            outer = outer.height(SETTINGS_ROW_HEIGHT).align_y(Alignment::Center);
+        }
+        outer.into()
     })
 }
 
 /// A group of mutually exclusive radio options, rendered as rows with hover effects.
-/// Each row has a radio circle on the left, label text a fixed distance away.
-/// Radio groups must always have their own `section()` - don't mix with other row types.
+/// Each row has a radio circle on the left, label text a fixed distance away,
+/// and an optional description below the label that wraps within an 80%
+/// width cap. Radio groups must always have their own `section()` - don't
+/// mix with other row types.
+///
+/// Tuples are `(label, description, value)`. Pass `None` for `description`
+/// when an option doesn't need a secondary line.
 pub(super) fn radio_group<'a, V>(
-    options: &'a [(&'a str, V)],
+    options: &'a [(&'a str, Option<&'a str>, V)],
     selected: Option<V>,
     on_select: impl Fn(V) -> SettingsMessage + 'a + Copy,
 ) -> Vec<RowBuilder<'a>>
@@ -550,34 +613,67 @@ where
 {
     options
         .iter()
-        .map(|(label, value)| {
+        .map(|(label, description, value)| {
             let label = *label;
+            let description = *description;
             let value = *value;
             let row_builder: RowBuilder<'a> = Box::new(move |position| {
                 let msg = on_select(value);
-                button(
-                    container(
-                        row![
-                            radio("", value, selected, on_select)
-                                .size(RADIO_SIZE)
-                                .spacing(0)
-                                .style(theme::RadioClass::Settings.style()),
-                            container(text(label).size(TEXT_LG).style(text::base))
-                                .align_y(Alignment::Center),
-                        ]
-                        .spacing(RADIO_LABEL_SPACING)
-                        .align_y(Alignment::Center),
-                    )
-                    .padding(PAD_SETTINGS_ROW)
+                let radio_circle = radio("", value, selected, on_select)
+                    .size(RADIO_SIZE)
+                    .spacing(0)
+                    .style(theme::RadioClass::Settings.style());
+
+                // Pin the radio circle onto the label-line baseline by
+                // wrapping it in a fixed-height container, so multi-line
+                // descriptions below the label don't drag the circle down.
+                let radio_slot = container(radio_circle)
+                    .align_y(Alignment::Center)
+                    .height(SETTINGS_RADIO_LINE_HEIGHT);
+
+                let label_text = container(text(label).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
+                    .align_y(Alignment::Center)
+                    .height(SETTINGS_RADIO_LINE_HEIGHT)
+                    .width(Length::Fill);
+
+                let inner: Element<'a, SettingsMessage> = if let Some(desc) = description {
+                    // Radios put their control (the circle) outside the
+                    // description column to the left, so there's no
+                    // control on the right edge to "protect" from a long
+                    // description. Let the description take the full width
+                    // of the column rather than capping at 80% like the
+                    // toggle / dropdown rows have to.
+                    column![
+                        label_text,
+                        text(desc)
+                            .size(TEXT_SM)
+                            .style(theme::TextClass::Tertiary.style())
+                            .width(Length::Fill),
+                    ]
                     .width(Length::Fill)
-                    .height(SETTINGS_ROW_HEIGHT)
-                    .align_y(Alignment::Center),
-                )
-                .on_press(msg)
-                .padding(0)
-                .style(settings_row_style(position))
-                .width(Length::Fill)
-                .into()
+                    .into()
+                } else {
+                    label_text.into()
+                };
+
+                let outer_row = row![radio_slot, inner]
+                    .spacing(RADIO_LABEL_SPACING)
+                    .align_y(Alignment::Start)
+                    .width(Length::Fill);
+
+                let mut wrapper = container(outer_row)
+                    .padding(PAD_SETTINGS_ROW)
+                    .width(Length::Fill);
+                if description.is_none() {
+                    wrapper = wrapper.height(SETTINGS_ROW_HEIGHT).align_y(Alignment::Center);
+                }
+
+                button(wrapper)
+                    .on_press(msg)
+                    .padding(0)
+                    .style(settings_row_style(position))
+                    .width(Length::Fill)
+                    .into()
             });
             row_builder
         })
@@ -772,7 +868,7 @@ pub(super) fn editable_list<'a>(
 /// so a multi-row helper that fills a section keeps the section's outer corners
 /// on its first/last rows. Only the corners aligned with the outer position
 /// can be `LG`-rounded; otherwise the inner seams stay `SM`.
-fn compose_positions(outer: RowPosition, inner: RowPosition) -> RowPosition {
+pub(super) fn compose_positions(outer: RowPosition, inner: RowPosition) -> RowPosition {
     match (outer, inner) {
         (RowPosition::Only, p) => p,
         (RowPosition::Top, RowPosition::Top) => RowPosition::Top,
@@ -803,42 +899,167 @@ pub(super) fn action_row<'a>(
     on_press: SettingsMessage,
 ) -> RowBuilder<'a> {
     Box::new(move |position| {
-        let mut content = row![].spacing(SPACE_SM).align_y(Alignment::Center);
-
-        if let Some(ico) = icon {
-            content = content.push(
-                container(ico.size(ICON_XL).style(text::secondary)).align_y(Alignment::Center),
-            );
-        }
-
-        let label_col: Element<'a, SettingsMessage> = if let Some(desc) = description {
-            column![
-                text(label).size(TEXT_LG).style(text::base),
-                text(desc)
-                    .size(TEXT_SM)
-                    .style(theme::TextClass::Tertiary.style()),
-            ]
-            .spacing(SPACE_XXXS)
-            .into()
-        } else {
-            text(label).size(TEXT_LG).style(text::base).into()
-        };
-
-        content = content.push(label_col);
-        content = content.push(Space::new().width(Length::Fill));
-
         let trailing = match kind {
             ActionKind::Url => icon::external_link(),
             ActionKind::InApp => icon::arrow_right(),
         };
-        content = content
-            .push(container(trailing.size(ICON_XL).style(text::base)).align_y(Alignment::Center));
 
-        button(content)
+        // Inner column lives to the right of the optional leading icon. It
+        // contains the label-line (label + trailing icon, fixed-height) and,
+        // when present, a description that wraps below at 80% of its width.
+        // Trailing icon and leading icon both anchor to the label line so
+        // they don't drift when the description wraps to multiple lines.
+        let inner: Element<'a, SettingsMessage> = if let Some(desc) = description {
+            column![
+                row![
+                    container(text(label).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
+                        .align_y(Alignment::Center)
+                        .width(Length::Fill),
+                    container(trailing.size(ICON_XL).style(text::base))
+                        .align_y(Alignment::Center),
+                ]
+                .align_y(Alignment::Center)
+                .height(SETTINGS_LABEL_LINE_HEIGHT)
+                .width(Length::Fill)
+                .spacing(SPACE_SM),
+                row![
+                    container(
+                        text(desc)
+                            .size(TEXT_SM)
+                            .style(theme::TextClass::Tertiary.style()),
+                    )
+                    .width(Length::FillPortion(4)),
+                    Space::new().width(Length::FillPortion(1)),
+                ]
+                .width(Length::Fill),
+            ]
+            .width(Length::Fill)
+            .into()
+        } else {
+            row![
+                container(text(label).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill),
+                container(trailing.size(ICON_XL).style(text::base))
+                    .align_y(Alignment::Center),
+            ]
+            .align_y(Alignment::Center)
+            .width(Length::Fill)
+            .spacing(SPACE_SM)
+            .into()
+        };
+
+        let mut outer_row = row![].spacing(SPACE_SM).width(Length::Fill);
+        if let Some(ico) = icon {
+            // Lock the leading icon onto the label-line baseline by giving
+            // its container the same fixed height. Outer row uses Top
+            // alignment so the icon and label stay paired even when the
+            // description wraps to multiple lines below.
+            outer_row = outer_row.push(
+                container(ico.size(ICON_XL).style(text::secondary))
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center)
+                    .height(SETTINGS_LABEL_LINE_HEIGHT),
+            );
+        }
+        outer_row = outer_row.push(inner);
+        let outer_row = outer_row.align_y(Alignment::Start);
+
+        button(outer_row)
             .on_press(on_press)
             .padding(PAD_SETTINGS_ROW)
             .style(settings_row_style(position))
             .width(Length::Fill)
             .into()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn position_for_classifies_endpoints() {
+        // Lone item rounds all four outer corners.
+        assert_eq!(position_for(0, 1), RowPosition::Only);
+
+        // Two-item list: first row caps the top, second caps the bottom.
+        assert_eq!(position_for(0, 2), RowPosition::Top);
+        assert_eq!(position_for(1, 2), RowPosition::Bottom);
+
+        // Five-item list: only the endpoints round; everything between
+        // stays Middle so its inner seams meet the dividers cleanly.
+        assert_eq!(position_for(0, 5), RowPosition::Top);
+        assert_eq!(position_for(1, 5), RowPosition::Middle);
+        assert_eq!(position_for(2, 5), RowPosition::Middle);
+        assert_eq!(position_for(3, 5), RowPosition::Middle);
+        assert_eq!(position_for(4, 5), RowPosition::Bottom);
+    }
+
+    #[test]
+    fn compose_positions_preserves_outer_corners_only() {
+        // A nested list that itself fills the section keeps the section's
+        // outer rounding only on the matching ends.
+        assert_eq!(
+            compose_positions(RowPosition::Only, RowPosition::Top),
+            RowPosition::Top,
+        );
+        assert_eq!(
+            compose_positions(RowPosition::Only, RowPosition::Bottom),
+            RowPosition::Bottom,
+        );
+        assert_eq!(
+            compose_positions(RowPosition::Only, RowPosition::Middle),
+            RowPosition::Middle,
+        );
+
+        // Top outer + Top inner keeps the LG top corner; bottom edge has
+        // siblings inside the parent section so it must stay Middle.
+        assert_eq!(
+            compose_positions(RowPosition::Top, RowPosition::Top),
+            RowPosition::Top,
+        );
+        assert_eq!(
+            compose_positions(RowPosition::Top, RowPosition::Bottom),
+            RowPosition::Middle,
+        );
+
+        // Symmetric for Bottom.
+        assert_eq!(
+            compose_positions(RowPosition::Bottom, RowPosition::Bottom),
+            RowPosition::Bottom,
+        );
+        assert_eq!(
+            compose_positions(RowPosition::Bottom, RowPosition::Top),
+            RowPosition::Middle,
+        );
+
+        // Outer Middle never picks up outer corners regardless of inner.
+        assert_eq!(
+            compose_positions(RowPosition::Middle, RowPosition::Top),
+            RowPosition::Middle,
+        );
+        assert_eq!(
+            compose_positions(RowPosition::Middle, RowPosition::Only),
+            RowPosition::Middle,
+        );
+    }
+
+    #[test]
+    fn compose_positions_handles_single_internal_row() {
+        // A nested helper that renders a single row passes its inner Only
+        // through; the section position decides the outer rounding.
+        assert_eq!(
+            compose_positions(RowPosition::Top, RowPosition::Only),
+            RowPosition::Top,
+        );
+        assert_eq!(
+            compose_positions(RowPosition::Bottom, RowPosition::Only),
+            RowPosition::Bottom,
+        );
+        assert_eq!(
+            compose_positions(RowPosition::Only, RowPosition::Only),
+            RowPosition::Only,
+        );
+    }
 }

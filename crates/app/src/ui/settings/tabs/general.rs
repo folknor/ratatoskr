@@ -63,6 +63,7 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
             slider_row(
                 "Scale",
                 None,
+                None,
                 1.0..=4.0,
                 state.scale_preview.unwrap_or(state.scale),
                 1.0,
@@ -98,9 +99,9 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
         "Reading Pane",
         radio_group(
             &[
-                ("Right", "Right"),
-                ("Bottom", "Bottom"),
-                ("Hidden", "Hidden"),
+                ("Right", None, "Right"),
+                ("Bottom", None, "Bottom"),
+                ("Hidden", None, "Hidden"),
             ],
             Some(state.reading_pane_position.as_str()),
             |v| SettingsMessage::ReadingPaneChanged(v.to_string()),

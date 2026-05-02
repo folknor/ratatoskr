@@ -314,6 +314,19 @@ pub const PAD_SETTINGS_CONTENT: Padding = Padding {
 pub const SETTINGS_ROW_HEIGHT: f32 = 52.0;
 /// Toggle rows with label + description need more room.
 pub const SETTINGS_TOGGLE_ROW_HEIGHT: f32 = 64.0;
+/// Height of the title-line inside a settings row that pairs the label
+/// with an inline control on the right (toggle, dropdown trigger, slider).
+/// Sized just above the toggler glyph so the title rides high in the row
+/// and the description hangs immediately below without a dead band.
+/// Controls anchored to this line keep a fixed vertical position
+/// regardless of how many lines the description wraps to.
+pub const SETTINGS_LABEL_LINE_HEIGHT: f32 = 22.0;
+
+/// Title-line height for radio rows where the label pairs with a circle
+/// on the left. Slightly taller than `SETTINGS_LABEL_LINE_HEIGHT` because
+/// the radio circle wants more breathing room beside the label than a
+/// toggle or dropdown trigger does.
+pub const SETTINGS_RADIO_LINE_HEIGHT: f32 = 27.0;
 
 /// Settings row (label + control).
 pub const PAD_SETTINGS_ROW: Padding = Padding {
@@ -559,3 +572,37 @@ pub const CHAT_DATE_SEPARATOR_SPACING: f32 = 16.0;
 pub const PEOPLE_PANEL_HEIGHT: f32 = 380.0;
 /// Vertical spacing between contact / group pills inside their panel.
 pub const PEOPLE_PILL_SPACING: f32 = 8.0;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The label-line that hosts inline controls (toggle, dropdown trigger)
+    /// must be at least as tall as the toggler glyph, otherwise the toggler
+    /// gets vertically clipped inside its fixed-height container.
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn settings_label_line_holds_toggler_glyph() {
+        assert!(
+            SETTINGS_LABEL_LINE_HEIGHT >= TEXT_HEADING,
+            "SETTINGS_LABEL_LINE_HEIGHT ({SETTINGS_LABEL_LINE_HEIGHT}) must be \
+             at least the toggler glyph size ({TEXT_HEADING}) so the toggler \
+             fits without clipping inside the fixed-height label line",
+        );
+    }
+
+    /// Radio rows pair the label with a circle on the left, not a control
+    /// on the right - they want a slightly taller label-line than toggle /
+    /// dropdown rows. Guard against the constants drifting back to equality.
+    #[test]
+    #[allow(clippy::assertions_on_constants)]
+    fn settings_radio_line_is_taller_than_label_line() {
+        assert!(
+            SETTINGS_RADIO_LINE_HEIGHT > SETTINGS_LABEL_LINE_HEIGHT,
+            "SETTINGS_RADIO_LINE_HEIGHT ({SETTINGS_RADIO_LINE_HEIGHT}) should \
+             be larger than SETTINGS_LABEL_LINE_HEIGHT ({SETTINGS_LABEL_LINE_HEIGHT}) \
+             so radios keep their roomier baseline while toggle / dropdown \
+             rows ride tighter against the row top",
+        );
+    }
+}

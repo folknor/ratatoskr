@@ -6,6 +6,7 @@ use crate::ui::layout::*;
 use crate::ui::settings::row_widgets::*;
 use crate::ui::settings::types::*;
 use crate::ui::theme;
+use crate::ui::theme::RowPosition;
 use crate::ui::widgets;
 
 pub(super) fn accounts_tab(state: &Settings) -> Element<'_, SettingsMessage> {
@@ -14,26 +15,62 @@ pub(super) fn accounts_tab(state: &Settings) -> Element<'_, SettingsMessage> {
         .width(Length::Fill)
         .max_width(SETTINGS_CONTENT_MAX_WIDTH);
 
-    let mut card_col = column![].width(Length::Fill);
-    for (i, account) in state.managed_accounts.iter().enumerate() {
-        if i > 0 {
-            card_col = card_col
+    col = col.push(section("Accounts", vec![accounts_section_body(state)]));
+
+    col.into()
+}
+
+/// Section body that holds the account cards, dividers, and the trailing
+/// "Add Account" button as one merged unit. Returning a single `RowBuilder`
+/// (rather than one `static_row` per element) lets the inner code compute
+/// per-card `RowPosition` using `position_for(i, internal_n)` so the first
+/// card picks up the section's outer top corners and the Add button picks
+/// up the bottom corners. Mirrors the pattern in `editable_list`.
+fn accounts_section_body<'a>(state: &'a Settings) -> RowBuilder<'a> {
+    Box::new(move |outer_position| {
+        let n_accounts = state.managed_accounts.len();
+        // Internal row count = accounts + Add button.
+        let internal_n = n_accounts + 1;
+
+        let mut col = column![].width(Length::Fill);
+
+        for (i, account) in state.managed_accounts.iter().enumerate() {
+            if i > 0 {
+                col = col.push(
+                    iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()),
+                );
+            }
+            let internal_pos = position_for(i, internal_n);
+            let effective = compose_positions(outer_position, internal_pos);
+            col = col.push(account_card(account, i, &state.account_drag, effective));
+        }
+
+        if n_accounts > 0 {
+            col = col
                 .push(iced::widget::rule::horizontal(1).style(theme::RuleClass::Subtle.style()));
         }
-        card_col = card_col.push(account_card(account, i, &state.account_drag));
-    }
 
-    let account_list: Element<'_, SettingsMessage> = if state.managed_accounts.len() > 1 {
-        mouse_area(card_col)
-            .on_move(SettingsMessage::AccountDragMove)
-            .on_release(SettingsMessage::AccountDragEnd)
-            .on_exit(SettingsMessage::AccountDragEnd)
-            .into()
-    } else {
-        card_col.into()
-    };
+        let add_internal_pos = position_for(internal_n.saturating_sub(1), internal_n);
+        let add_effective = compose_positions(outer_position, add_internal_pos);
+        col = col.push(add_account_button(add_effective));
 
-    let add_btn = button(
+        // Wrap in a single mouse_area so drag tracking continues to fire as
+        // the cursor leaves individual card bounds. Only when there's
+        // something to reorder.
+        if n_accounts > 1 {
+            mouse_area(col)
+                .on_move(SettingsMessage::AccountDragMove)
+                .on_release(SettingsMessage::AccountDragEnd)
+                .on_exit(SettingsMessage::AccountDragEnd)
+                .into()
+        } else {
+            col.into()
+        }
+    })
+}
+
+fn add_account_button<'a>(position: RowPosition) -> Element<'a, SettingsMessage> {
+    button(
         container(
             row![
                 icon::plus().size(ICON_MD).style(text::base),
@@ -53,22 +90,17 @@ pub(super) fn accounts_tab(state: &Settings) -> Element<'_, SettingsMessage> {
     )
     .on_press(SettingsMessage::AddAccountFromSettings)
     .padding(PAD_SETTINGS_ROW)
-    .style(theme::ButtonClass::Action.style())
+    .style(settings_row_style(position))
     .width(Length::Fill)
-    .height(SETTINGS_ROW_HEIGHT);
-
-    col = col.push(section(
-        "Accounts",
-        vec![static_row(account_list), static_row(add_btn)],
-    ));
-
-    col.into()
+    .height(SETTINGS_ROW_HEIGHT)
+    .into()
 }
 
 fn account_card<'a>(
     account: &'a ManagedAccount,
     index: usize,
     drag: &'a Option<AccountDragState>,
+    position: RowPosition,
 ) -> Element<'a, SettingsMessage> {
     let name = account
         .account_name
@@ -154,7 +186,7 @@ fn account_card<'a>(
     button(inner_container)
         .on_press(SettingsMessage::AccountCardClicked(id))
         .padding(0)
-        .style(theme::ButtonClass::Action.style())
+        .style(settings_row_style(position))
         .width(Length::Fill)
         .into()
 }

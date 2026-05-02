@@ -501,3 +501,141 @@ impl Settings {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rtsk::db::queries::{SettingsBootstrapSnapshot, UiBootstrapSnapshot};
+
+    fn empty_ui_snapshot() -> UiBootstrapSnapshot {
+        UiBootstrapSnapshot {
+            active_account_id: None,
+            language: None,
+            global_compose_shortcut: None,
+            custom_shortcuts: None,
+            search_index_version: None,
+            theme: None,
+            sidebar_collapsed: false,
+            contact_sidebar_visible: true,
+            reading_pane_position: None,
+            read_filter: None,
+            email_list_width: None,
+            email_density: None,
+            default_reply_mode: None,
+            mark_as_read_behavior: None,
+            send_and_archive: false,
+            font_size: None,
+            color_theme: None,
+            inbox_view_mode: None,
+            show_sync_status: true,
+            task_sidebar_visible: false,
+            sidebar_nav_config: None,
+        }
+    }
+
+    fn default_settings_snapshot() -> SettingsBootstrapSnapshot {
+        SettingsBootstrapSnapshot {
+            notifications_enabled: true,
+            undo_send_delay_seconds: None,
+            block_remote_images: true,
+            phishing_detection_enabled: true,
+            phishing_sensitivity: None,
+            sync_period_days: None,
+            ai_provider: None,
+            ollama_server_url: None,
+            ollama_model: None,
+            claude_model: None,
+            openai_model: None,
+            gemini_model: None,
+            copilot_model: None,
+            ai_enabled: true,
+            ai_auto_categorize: true,
+            ai_auto_summarize: true,
+            ai_auto_draft_enabled: true,
+            ai_writing_style_enabled: true,
+            auto_archive_categories: None,
+            smart_notifications: true,
+            notify_categories: None,
+            attachment_cache_max_mb: None,
+        }
+    }
+
+    /// Every Settings field that the commit handler in `handlers/core.rs`
+    /// writes to the DB must round-trip through `apply_bootstrap` from the
+    /// matching snapshot field. This test pins that mapping so a rename or
+    /// drop in the snapshot structs is caught here, not silently at boot.
+    #[test]
+    fn apply_bootstrap_round_trips_seven_persisted_fields() {
+        let mut settings = Settings::default();
+
+        let mut ui = empty_ui_snapshot();
+        ui.theme = Some("Tokyo Night".into());
+        ui.font_size = Some("Large".into());
+        ui.reading_pane_position = Some("bottom".into());
+        ui.show_sync_status = false;
+
+        let mut s = default_settings_snapshot();
+        s.block_remote_images = false;
+        s.phishing_detection_enabled = false;
+        s.phishing_sensitivity = Some("Aggressive".into());
+
+        settings.apply_bootstrap(&ui, &s);
+
+        assert_eq!(settings.theme, "Tokyo Night");
+        assert_eq!(settings.font_size, "Large");
+        assert_eq!(settings.reading_pane_position, "bottom");
+        assert!(!settings.sync_status_bar);
+        assert!(!settings.block_remote_images);
+        assert!(!settings.phishing_detection);
+        assert_eq!(settings.phishing_sensitivity, "Aggressive");
+    }
+
+    /// `committed_preferences` is the baseline the editor opens with. After
+    /// `apply_bootstrap` it must reflect the persisted values, otherwise
+    /// the first edit shows a spurious "unsaved changes" state.
+    #[test]
+    fn apply_bootstrap_resets_committed_shadow() {
+        let mut settings = Settings::default();
+        settings.committed_preferences.theme = "Light".into();
+        settings.committed_preferences.sync_status_bar = true;
+
+        let mut ui = empty_ui_snapshot();
+        ui.theme = Some("Dracula".into());
+        ui.show_sync_status = false;
+
+        let s = default_settings_snapshot();
+        settings.apply_bootstrap(&ui, &s);
+
+        assert_eq!(settings.committed_preferences.theme, "Dracula");
+        assert!(!settings.committed_preferences.sync_status_bar);
+        // Live and committed must be in lockstep so the next begin_editing()
+        // sees an empty diff.
+        assert_eq!(settings.theme, settings.committed_preferences.theme);
+        assert_eq!(
+            settings.sync_status_bar,
+            settings.committed_preferences.sync_status_bar
+        );
+    }
+
+    /// Snapshot fields that arrive as `None` (no row in the settings table)
+    /// must leave existing Settings fields untouched, so a fresh DB without
+    /// rows for these keys boots with sensible defaults rather than empty
+    /// strings.
+    #[test]
+    fn apply_bootstrap_leaves_string_defaults_when_snapshot_is_none() {
+        let mut settings = Settings::default();
+        let original_theme = settings.theme.clone();
+        let original_font_size = settings.font_size.clone();
+        let original_pane = settings.reading_pane_position.clone();
+        let original_sensitivity = settings.phishing_sensitivity.clone();
+
+        let ui = empty_ui_snapshot();
+        let s = default_settings_snapshot();
+        settings.apply_bootstrap(&ui, &s);
+
+        assert_eq!(settings.theme, original_theme);
+        assert_eq!(settings.font_size, original_font_size);
+        assert_eq!(settings.reading_pane_position, original_pane);
+        assert_eq!(settings.phishing_sensitivity, original_sensitivity);
+    }
+}
