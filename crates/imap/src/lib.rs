@@ -4,6 +4,7 @@ pub mod connection;
 pub mod convert;
 pub mod folder_mapper;
 pub mod imap_delta;
+pub mod imap_delta_janitor;
 pub mod imap_initial;
 pub mod ops;
 pub mod parse;
