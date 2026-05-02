@@ -8,13 +8,13 @@ the open punch list from the 4 review rounds. They overlap in places.
 
 | Open finding | Relation to survey catalog | Order verdict |
 |---|---|---|
-| #9 DST-gap zero-duration | Catalog #3 *is* this fix | **Don't do separately** — it's catalog #3 (eventix DST-gap port) |
+| #9 DST-gap zero-duration | Catalog #3 *is* this fix | **Don't do separately** - it's catalog #3 (eventix DST-gap port) |
 | #47 empty vs absent | Blocked on catalog #4 (caldata migration) | **Can't do first** |
 | #45 inverted error signaling | Lives in same `expand_recurrence` as catalog #2 | **Do during catalog #2**, not before |
-| #46 YEARLY+ordinal year-scope walk | Independent engine work | Neutral — pick up anytime |
+| #46 YEARLY+ordinal year-scope walk | Independent engine work | Neutral - pick up anytime |
 | #50 multi-href delegation home-sets | CalDAV discovery, unrelated to parser/RRULE | Neutral |
 | #38, #39 weak-ETag notes | Docs / operational | Neutral, ~15 min docs work |
-| #16, #18 | Decided notes, no action | — |
+| #16, #18 | Decided notes, no action | - |
 
 Net: nothing here blocks the catalog. Three items are entangled with
 specific catalog items (and shouldn't be done as a separate first pass);

@@ -268,10 +268,8 @@ Flagged inline as `TODO(refactor)` with `#[allow(clippy::too_many_arguments)]` o
 - [ ] `undoable_text_input::handle_update` (9 args) - `crates/app/src/ui/undoable_text_input.rs:291` -> `UpdateCtx` struct
 
 **Replace nested-Option tuples with named structs:**
-- [ ] `get_contact_meta_by_id_sync` returns `Option<(Option<String>, Option<String>, Option<String>)>` - `crates/db/src/db/queries_extra/action_helpers.rs:42` -> `ContactMeta` struct
-- [ ] `merge_contact_pair_sync` builds a 6-tuple of `Option<String>` for the merge row - `crates/db/src/db/queries_extra/contacts.rs:949` -> `MergeContactRow` struct
-- [ ] address-row 4-tuples of `Option<String>` (two call sites) - `crates/db/src/db/queries_extra/thread_persistence.rs:447, 665` -> `AddressRow` struct
-- [ ] compressed-body batches `(String, Option<Vec<u8>>, Option<Vec<u8>>)` (two call sites) - `crates/stores/src/body_store.rs:152, 241` -> `CompressedBody` struct
+- [ ] `merge_contact_pair_sync` builds a 6-tuple of `Option<String>` for the merge row - `crates/db/src/db/queries_extra/contacts/dedup.rs:75`. Local-only - immediately destructured into named locals; struct adds boilerplate without clarity gain. Skip unless we want zero `type_complexity` allows.
+- [ ] compressed-body batches `(String, Option<Vec<u8>>, Option<Vec<u8>>)` (two call sites) - `crates/stores/src/body_store.rs:152, 241` -> `CompressedBody` struct. Two unrelated sites that share a shape but no logic; struct improves readability of the in-flight Vec but doesn't dedup anything.
 
 ## Needs Visual Review
 

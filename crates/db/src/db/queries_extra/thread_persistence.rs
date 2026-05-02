@@ -15,6 +15,42 @@ pub struct ThreadAggregate {
     pub has_attachments: bool,
 }
 
+/// One message's address fields as raw, possibly-NULL strings from the
+/// `messages` table. Each string holds the unparsed RFC 5322 address list
+/// for that header; parsing happens downstream in `upsert_thread_participants`.
+struct AddressRow {
+    from: Option<String>,
+    to: Option<String>,
+    cc: Option<String>,
+    bcc: Option<String>,
+}
+
+fn fetch_thread_address_rows(
+    tx: &Transaction,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<Vec<AddressRow>, String> {
+    let mut stmt = tx
+        .prepare(
+            "SELECT from_address, to_addresses, cc_addresses, bcc_addresses \
+             FROM messages WHERE account_id = ?1 AND thread_id = ?2",
+        )
+        .map_err(|e| format!("prepare addr: {e}"))?;
+    let rows: Vec<AddressRow> = stmt
+        .query_map(rusqlite::params![account_id, thread_id], |row| {
+            Ok(AddressRow {
+                from: row.get(0)?,
+                to: row.get(1)?,
+                cc: row.get(2)?,
+                bcc: row.get(3)?,
+            })
+        })
+        .map_err(|e| format!("query addr: {e}"))?
+        .filter_map(Result::ok)
+        .collect();
+    Ok(rows)
+}
+
 pub fn compute_thread_aggregate(
     tx: &Transaction,
     account_id: &str,
@@ -430,41 +466,15 @@ pub fn delete_messages_and_cleanup_threads(
                 rusqlite::params![account_id, tid],
             )
             .map_err(|e| format!("clear thread participants: {e}"))?;
-            let mut addr_stmt = tx
-                .prepare(
-                    "SELECT from_address, to_addresses, cc_addresses, bcc_addresses \
-                     FROM messages WHERE account_id = ?1 AND thread_id = ?2",
-                )
-                .map_err(|e| format!("prepare addr: {e}"))?;
-            // TODO(refactor): introduce an AddressRow struct instead of the nested-Option tuple.
-            #[allow(clippy::type_complexity)]
-            let rows: Vec<(
-                Option<String>,
-                Option<String>,
-                Option<String>,
-                Option<String>,
-            )> = addr_stmt
-                .query_map(rusqlite::params![account_id, tid], |row| {
-                    Ok((
-                        row.get::<_, Option<String>>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                    ))
-                })
-                .map_err(|e| format!("query addr: {e}"))?
-                .filter_map(Result::ok)
-                .collect();
-            drop(addr_stmt);
-            for (from, to, cc, bcc) in &rows {
+            for row in fetch_thread_address_rows(tx, account_id, tid)? {
                 upsert_thread_participants(
                     tx,
                     account_id,
                     tid,
-                    from.as_deref(),
-                    to.as_deref(),
-                    cc.as_deref(),
-                    bcc.as_deref(),
+                    row.from.as_deref(),
+                    row.to.as_deref(),
+                    row.cc.as_deref(),
+                    row.bcc.as_deref(),
                 )?;
             }
             maybe_update_chat_state(tx, account_id, tid, &user_emails)?;
@@ -708,37 +718,15 @@ fn rebuild_thread_participants(
     )
     .map_err(|e| format!("clear thread participants: {e}"))?;
 
-    let mut addr_stmt = tx
-        .prepare(
-            "SELECT from_address, to_addresses, cc_addresses, bcc_addresses \
-             FROM messages WHERE account_id = ?1 AND thread_id = ?2",
-        )
-        .map_err(|e| format!("prepare addr query: {e}"))?;
-    // TODO(refactor): introduce an AddressRow struct instead of the nested-Option tuple.
-    #[allow(clippy::type_complexity)]
-    let rows: Vec<(Option<String>, Option<String>, Option<String>, Option<String>)> = addr_stmt
-        .query_map(rusqlite::params![account_id, thread_id], |row| {
-            Ok((
-                row.get::<_, Option<String>>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, Option<String>>(3)?,
-            ))
-        })
-        .map_err(|e| format!("query addr: {e}"))?
-        .filter_map(Result::ok)
-        .collect();
-    drop(addr_stmt);
-
-    for (from, to, cc, bcc) in &rows {
+    for row in fetch_thread_address_rows(tx, account_id, thread_id)? {
         upsert_thread_participants(
             tx,
             account_id,
             thread_id,
-            from.as_deref(),
-            to.as_deref(),
-            cc.as_deref(),
-            bcc.as_deref(),
+            row.from.as_deref(),
+            row.to.as_deref(),
+            row.cc.as_deref(),
+            row.bcc.as_deref(),
         )?;
     }
 

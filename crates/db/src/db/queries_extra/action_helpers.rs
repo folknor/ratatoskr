@@ -38,22 +38,27 @@ pub fn get_label_kind_sync(
     })
 }
 
-/// Look up contact metadata by ID (source, server_id, account_id).
-// TODO(refactor): introduce a ContactMeta struct instead of the nested-Option tuple.
-#[allow(clippy::type_complexity)]
+/// Identity fields needed to route a contact mutation through the right provider.
+pub struct ContactMeta {
+    pub source: Option<String>,
+    pub server_id: Option<String>,
+    pub account_id: Option<String>,
+}
+
+/// Look up contact metadata by ID. Returns `None` when the contact row is missing.
 pub fn get_contact_meta_by_id_sync(
     conn: &Connection,
     contact_id: &str,
-) -> Result<Option<(Option<String>, Option<String>, Option<String>)>, String> {
+) -> Result<Option<ContactMeta>, String> {
     conn.query_row(
         "SELECT source, server_id, account_id FROM contacts WHERE id = ?1",
         params![contact_id],
         |row| {
-            Ok((
-                row.get::<_, Option<String>>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<String>>(2)?,
-            ))
+            Ok(ContactMeta {
+                source: row.get(0)?,
+                server_id: row.get(1)?,
+                account_id: row.get(2)?,
+            })
         },
     )
     .map(Some)

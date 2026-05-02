@@ -147,7 +147,7 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
     .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))
     .and_then(|r| r);
 
-    let (source, server_id, account_id) = match meta_result {
+    let meta = match meta_result {
         Ok(m) => m,
         Err(e) => {
             let outcome = ActionOutcome::Failed { error: e };
@@ -155,19 +155,19 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
             return outcome;
         }
     };
-    if let Some(ref aid) = account_id {
+    if let Some(ref aid) = meta.account_id {
         mlog.set_account_id(aid);
     }
-    if let Some(ref sid) = server_id {
+    if let Some(ref sid) = meta.server_id {
         mlog.set_remote_id(sid);
     }
 
-    let source_str = source.as_deref().unwrap_or("user");
+    let source_str = meta.source.as_deref().unwrap_or("user");
 
     // 2. For synced contacts, attempt provider delete
     let mut provider_outcome = None;
     if source_str != "user"
-        && let (Some(aid), Some(sid)) = (account_id.as_deref(), server_id.as_deref())
+        && let (Some(aid), Some(sid)) = (meta.account_id.as_deref(), meta.server_id.as_deref())
     {
         match dispatch_delete(ctx, source_str, aid, sid).await {
             Ok(()) => {}
