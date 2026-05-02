@@ -509,9 +509,50 @@ impl App {
                 self.close_settings();
                 Task::none()
             }
-            SettingsEvent::PreferencesCommitted | SettingsEvent::PreferencesDiscarded => {
-                // Preferences have been committed or discarded within Settings.
-                // The live fields are already updated - no additional action needed.
+            SettingsEvent::PreferencesCommitted => {
+                let prefs = self.settings.committed_preferences.clone();
+                let result = self.db.write_db_state().with_conn_sync(|conn| {
+                    let tx = conn
+                        .unchecked_transaction()
+                        .map_err(|e| format!("begin prefs tx: {e}"))?;
+                    let bool_str = |v: bool| if v { "true" } else { "false" };
+                    rtsk::db::queries::set_setting(
+                        &tx,
+                        "show_sync_status",
+                        bool_str(prefs.sync_status_bar),
+                    )?;
+                    rtsk::db::queries::set_setting(
+                        &tx,
+                        "block_remote_images",
+                        bool_str(prefs.block_remote_images),
+                    )?;
+                    rtsk::db::queries::set_setting(
+                        &tx,
+                        "phishing_detection_enabled",
+                        bool_str(prefs.phishing_detection),
+                    )?;
+                    rtsk::db::queries::set_setting(
+                        &tx,
+                        "phishing_sensitivity",
+                        &prefs.phishing_sensitivity,
+                    )?;
+                    rtsk::db::queries::set_setting(&tx, "theme", &prefs.theme)?;
+                    rtsk::db::queries::set_setting(&tx, "font_size", &prefs.font_size)?;
+                    rtsk::db::queries::set_setting(
+                        &tx,
+                        "reading_pane_position",
+                        &prefs.reading_pane_position,
+                    )?;
+                    tx.commit().map_err(|e| format!("commit prefs tx: {e}"))?;
+                    Ok(())
+                });
+                if let Err(e) = result {
+                    log::error!("Failed to persist preferences: {e}");
+                }
+                Task::none()
+            }
+            SettingsEvent::PreferencesDiscarded => {
+                // Live fields are already restored to committed state by Settings.
                 Task::none()
             }
             SettingsEvent::DateDisplayChanged(display) => {

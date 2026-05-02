@@ -18,6 +18,7 @@ use crate::ui::undoable::UndoableText;
 use crate::window_state;
 use cmdk::{BindingTable, Chord, CommandRegistry, FocusedRegion, UndoStack, current_platform};
 use iced::{Task, Theme};
+use rtsk::db::queries::{get_settings_bootstrap_snapshot, get_ui_bootstrap_snapshot};
 use rtsk::db::queries_extra::{db_mark_queued_drafts_failed_sync, get_calendar_default_view_sync};
 use rtsk::generation::{GenerationCounter, Nav, PopOut, Search, ThreadDetail};
 use std::collections::HashMap;
@@ -229,6 +230,19 @@ impl App {
             .map(|view_name| CalendarState::parse_view_name(&view_name))
             .unwrap_or(CalendarView::Month);
 
+        // Load persisted preferences. The bootstrap snapshots don't decrypt
+        // anything (they only cover non-secure keys), so a zero key is fine
+        // when the real key is missing.
+        let snapshot_key = encryption_key.unwrap_or([0u8; 32]);
+        let bootstrap = db
+            .read_db_state()
+            .with_conn_sync(|conn| {
+                let ui = get_ui_bootstrap_snapshot(conn, &snapshot_key)?;
+                let settings = get_settings_bootstrap_snapshot(conn, &snapshot_key)?;
+                Ok((ui, settings))
+            })
+            .ok();
+
         let bimi_cache = Arc::new(rtsk::bimi::BimiLruCache::new());
 
         let mut app = Self {
@@ -286,6 +300,10 @@ impl App {
             encryption_key,
             action_ctx,
         };
+
+        if let Some((ui_snap, settings_snap)) = bootstrap {
+            app.settings.apply_bootstrap(&ui_snap, &settings_snap);
+        }
 
         // Resurface orphaned 'queued' drafts from the old send path.
         // These were never sent - transition to 'failed' so they're visible

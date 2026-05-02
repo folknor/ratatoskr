@@ -10,15 +10,11 @@
 
 - [ ] **Settings/Notifications** - VIP Senders should move to contact editing, and this should be a toggle button here.
 
-- [ ] **Compose window help text** - The help text in the compose windows to/cc/bcc fields ("Add recipients...") is not vertically centered in the input field. Note: `token_input.rs::draw_text_area` already draws the placeholder with `align_y: Vertical::Center` inside a `TOKEN_HEIGHT` box and `PAD_TOKEN_INPUT` is symmetric (top=4, bottom=4), so on paper it should be centered. The misalignment must come from elsewhere - possibly the field's overall layout height vs. the `TOKEN_HEIGHT` slot, or font metrics asymmetry. Needs investigation with rendered measurements.
-
 - [ ] **Settings/Accounts: Edit Account** - This section needs rework.
 
 - [ ] **Attachment saving** - Should remember last folder. Ideally last folder per thread ID.
 
 - [ ] **Collapse individual expanded messages** - Chevron now points up (fixed: added `icon::chevron_up()` at U+E070, swapped in `widgets::expanded_message_card`). Remaining: the button needs a new place to live - probably a very long, thin button that stretches across the entire horizontal space at the top of the message frame. This needs to be unified with the Attachments panel collapsing, which is currently taking up too much vertical space; also too much padding above the Attachments section.
-
-- [ ] **Settings row hover (group editor members)** - The group editor's `group_member_section` (`crates/app/src/ui/settings/tabs.rs`) builds its section manually instead of via `section()`, so its rows still use uniform `RADIUS_SM` hover corners and don't pick up the position-aware styling that the rest of the settings rows now use. Convert it to use `section_untitled` with `RowBuilder` items, or have the helper accept and propagate `RowPosition`.
 
 - [ ] **Settings/Composing: Signatures** - This section needs work.
 

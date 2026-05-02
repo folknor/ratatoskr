@@ -247,6 +247,34 @@ impl Settings {
         s
     }
 
+    /// Apply persisted preferences from the DB bootstrap snapshots, called
+    /// once at app startup. Mirrors the writes performed by the commit
+    /// handler so a launch round-trip preserves what the user saved.
+    /// Only fields tracked by `Settings` are pulled in; other snapshot
+    /// fields are owned by other components.
+    pub fn apply_bootstrap(
+        &mut self,
+        ui: &rtsk::db::queries::UiBootstrapSnapshot,
+        settings: &rtsk::db::queries::SettingsBootstrapSnapshot,
+    ) {
+        if let Some(ref t) = ui.theme {
+            self.theme = t.clone();
+        }
+        if let Some(ref f) = ui.font_size {
+            self.font_size = f.clone();
+        }
+        if let Some(ref r) = ui.reading_pane_position {
+            self.reading_pane_position = r.clone();
+        }
+        self.sync_status_bar = ui.show_sync_status;
+        self.block_remote_images = settings.block_remote_images;
+        self.phishing_detection = settings.phishing_detection_enabled;
+        if let Some(ref s) = settings.phishing_sensitivity {
+            self.phishing_sensitivity = s.clone();
+        }
+        self.committed_preferences = self.snapshot_preferences();
+    }
+
     /// Snapshot current preferences into the editing shadow.
     /// Called when the settings panel opens.
     pub fn begin_editing(&mut self) {

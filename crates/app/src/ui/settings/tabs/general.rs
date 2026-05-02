@@ -86,8 +86,8 @@ pub(super) fn general_tab(state: &Settings) -> iced::Element<'_, SettingsMessage
                 SettingsMessage::ToggleSelect(SelectField::DateDisplay),
             ),
             toggle_row(
-                "Show Sync Status Bar",
-                "Display sync progress in the status bar",
+                "Show status bar",
+                "Show sync progress, action confirmations, warnings, and the Out-of-Office indicator at the bottom of the window.",
                 state.sync_status_bar,
                 SettingsMessage::ToggleSyncStatusBar,
             ),
