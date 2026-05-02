@@ -879,13 +879,18 @@ pub(super) fn compose_positions(outer: RowPosition, inner: RowPosition) -> RowPo
     }
 }
 
-/// The action type determines the trailing icon.
+/// The action type determines the trailing icon and label colour.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum ActionKind {
     /// Opens an external URL - shows external_link icon.
     Url,
     /// In-app action or slide-in overlay - shows arrow_right icon.
     InApp,
+    /// Destructive in-app action (delete, sign out, reset). Trailing icon
+    /// is the trash glyph; both the label and the icon render in the
+    /// danger colour to make the row visually distinct from neutral
+    /// in-app actions sharing the same section.
+    Danger,
 }
 
 /// A full-row button with optional leading icon, label + optional description,
@@ -902,6 +907,15 @@ pub(super) fn action_row<'a>(
         let trailing = match kind {
             ActionKind::Url => icon::external_link(),
             ActionKind::InApp => icon::arrow_right(),
+            ActionKind::Danger => icon::trash(),
+        };
+        let label_style: fn(&iced::Theme) -> text::Style = match kind {
+            ActionKind::Danger => text::danger,
+            _ => text::base,
+        };
+        let trailing_style: fn(&iced::Theme) -> text::Style = match kind {
+            ActionKind::Danger => text::danger,
+            _ => text::base,
         };
 
         // Inner column lives to the right of the optional leading icon. It
@@ -912,10 +926,10 @@ pub(super) fn action_row<'a>(
         let inner: Element<'a, SettingsMessage> = if let Some(desc) = description {
             column![
                 row![
-                    container(text(label).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
+                    container(text(label).size(TEXT_LG).style(label_style).wrapping(text::Wrapping::None))
                         .align_y(Alignment::Center)
                         .width(Length::Fill),
-                    container(trailing.size(ICON_XL).style(text::base))
+                    container(trailing.size(ICON_XL).style(trailing_style))
                         .align_y(Alignment::Center),
                 ]
                 .align_y(Alignment::Center)
@@ -937,10 +951,10 @@ pub(super) fn action_row<'a>(
             .into()
         } else {
             row![
-                container(text(label).size(TEXT_LG).style(text::base).wrapping(text::Wrapping::None))
+                container(text(label).size(TEXT_LG).style(label_style).wrapping(text::Wrapping::None))
                     .align_y(Alignment::Center)
                     .width(Length::Fill),
-                container(trailing.size(ICON_XL).style(text::base))
+                container(trailing.size(ICON_XL).style(trailing_style))
                     .align_y(Alignment::Center),
             ]
             .align_y(Alignment::Center)

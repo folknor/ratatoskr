@@ -118,10 +118,27 @@ pub(super) fn settings_view(state: &Settings) -> Element<'_, SettingsMessage> {
             SettingsMessage::Noop,
         );
 
-        if state.pending_discard.is_some() {
+        let with_sheet = if state.pending_discard.is_some() {
             crate::ui::modal_overlay::modal_overlay(
                 with_sheet,
                 discard_changes_dialog(),
+                crate::ui::modal_overlay::ModalSurface::Modal,
+                SettingsMessage::Noop,
+            )
+        } else {
+            with_sheet
+        };
+
+        // Delete-account confirm sits on top of any other settings layer
+        // (sheet, discard dialog) since it represents the user's most
+        // destructive intent in this section. State lives on the editor
+        // itself so reopening the editor doesn't re-open the dialog.
+        if let Some(editor) = state.editing_account.as_ref()
+            && editor.show_delete_confirmation
+        {
+            crate::ui::modal_overlay::modal_overlay(
+                with_sheet,
+                delete_account_dialog(&editor.account_id),
                 crate::ui::modal_overlay::ModalSurface::Modal,
                 SettingsMessage::Noop,
             )
@@ -152,6 +169,24 @@ fn discard_changes_dialog<'a>() -> Element<'a, SettingsMessage> {
             DialogAction::destructive(
                 "Discard",
                 SettingsMessage::ConfirmDiscardEditorChanges,
+            ),
+        ],
+        None,
+    )
+}
+
+fn delete_account_dialog(account_id: &str) -> Element<'_, SettingsMessage> {
+    alert_dialog(
+        "Delete account?",
+        "All cached email, attachments, calendar entries and contacts for this account will be permanently removed from this device. This cannot be undone.",
+        vec![
+            DialogAction::default_action(
+                "Cancel",
+                SettingsMessage::DeleteAccountCancelled,
+            ),
+            DialogAction::destructive(
+                "Delete",
+                SettingsMessage::DeleteAccountConfirmed(account_id.to_string()),
             ),
         ],
         None,

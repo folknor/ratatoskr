@@ -40,6 +40,8 @@ pub enum ContainerClass {
     SelectMenu,
     /// Selected theme preview ring.
     ThemeSelectedRing,
+    /// Selected color-swatch focus ring (circular).
+    ColorSwatchSelectedRing,
     /// Shortcut key badge.
     KeyBadge,
     /// Active drag-reorder row highlight.
@@ -105,6 +107,7 @@ impl ContainerClass {
             Self::SettingsSection => style_settings_section_container,
             Self::SelectMenu => style_select_menu_container,
             Self::ThemeSelectedRing => style_theme_selected_ring,
+            Self::ColorSwatchSelectedRing => style_color_swatch_selected_ring,
             Self::KeyBadge => style_key_badge_container,
             Self::DraggingRow => style_dragging_row_container,
             Self::StatusBar => style_status_bar_container,
@@ -320,6 +323,21 @@ fn style_theme_selected_ring(theme: &Theme) -> container::Style {
             color: p.primary.base.color,
             width: 2.0,
             radius: (RADIUS_MD + 4.0).into(),
+        },
+        ..Default::default()
+    }
+}
+
+/// Circular focus ring for the selected color-palette swatch. The radius
+/// is intentionally large enough to fully round any swatch container we
+/// pair this with, since the swatch itself is rendered as a circle.
+fn style_color_swatch_selected_ring(theme: &Theme) -> container::Style {
+    let p = theme.palette();
+    container::Style {
+        border: iced::Border {
+            color: p.primary.base.color,
+            width: 2.0,
+            radius: 999.0.into(),
         },
         ..Default::default()
     }

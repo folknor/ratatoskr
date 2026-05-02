@@ -5,9 +5,9 @@ use iced::{Alignment, Color, Element, Length, Rectangle, Renderer, Theme, mouse}
 
 use crate::ui::emoji_picker::{EMOJI_TABLE, EmojiCategory, EmojiEntry};
 use crate::ui::layout::{
-    COLOR_PALETTE_COLUMNS, COLOR_SWATCH_CHECK_SCALE, COLOR_SWATCH_DIMMED_ALPHA, COLOR_SWATCH_SIZE,
-    EMOJI_BUTTON_SIZE, EMOJI_GRID_COLUMNS, EMOJI_PICKER_MAX_HEIGHT, EMOJI_PICKER_WIDTH, PAD_INPUT,
-    PAD_COLOR_SWATCH, SCROLLBAR_SPACING, SPACE_XS, SPACE_XXS, SPACE_XXXS, TEXT_MD, TEXT_TITLE,
+    COLOR_SWATCH_CHECK_SCALE, COLOR_SWATCH_DIMMED_ALPHA, COLOR_SWATCH_SIZE, EMOJI_BUTTON_SIZE,
+    EMOJI_GRID_COLUMNS, EMOJI_PICKER_MAX_HEIGHT, EMOJI_PICKER_WIDTH, PAD_COLOR_SWATCH, PAD_INPUT,
+    SCROLLBAR_SPACING, SPACE_XS, SPACE_XXS, SPACE_XXXS, TEXT_MD, TEXT_TITLE,
 };
 use crate::ui::theme;
 
@@ -169,56 +169,88 @@ fn swatch_check_mark(frame: &mut canvas::Frame<Renderer>, bounds: Rectangle, rad
     );
 }
 
-/// Build a reusable color palette grid.
+/// Build a reusable color palette grid that flows to fit its container.
 ///
 /// `selected` is the currently selected preset index (if any).
-/// `used_colors` are background hex strings of already-assigned colors
-/// (shown dimmed with a check mark).
-/// `on_select` maps a preset index to the caller's message type.
+/// `used_colors` are background hex strings of already-assigned colors;
+/// they render dimmed with a check mark and are NOT clickable.
+/// `on_select` maps a preset index to the caller's message type and is
+/// only called for available swatches.
+///
+/// The grid uses iced's `Responsive` widget to compute how many swatches
+/// fit per row from the parent's width on every layout pass, so the grid
+/// reflows when the section narrows. Selected swatches render as a
+/// non-button container with a circular focus ring (matching the Theme
+/// tab's selected-ring pattern).
 pub fn color_palette_grid<'a, M: Clone + 'a>(
     selected: Option<usize>,
     used_colors: &[String],
     on_select: impl Fn(usize) -> M + 'a,
 ) -> Element<'a, M> {
-    let presets = label_colors::preset_colors::all_presets();
-    let mut grid = column![].spacing(SPACE_XS);
-    let mut current_row = row![].spacing(SPACE_XS);
+    let used_colors: Vec<String> = used_colors.to_vec();
+    iced::widget::Responsive::new(move |size| {
+        let presets = label_colors::preset_colors::all_presets();
+        // Width consumed by one swatch button (Canvas + per-side padding)
+        // plus the inter-swatch gap.
+        let swatch_outer = COLOR_SWATCH_SIZE + 2.0 * PAD_COLOR_SWATCH;
+        let stride = swatch_outer + SPACE_XS;
+        // Adding one stride's worth of imaginary trailing gap to the
+        // available width lets the last swatch in a row fit without a gap
+        // pushing the count down by one.
+        // Width is non-negative and bounded by parent layout; the floor of
+        // (width / stride) is well within usize range. Clamp to >=1 so an
+        // unexpectedly tiny container still renders one column instead of
+        // dividing by zero.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let cols = ((size.width + SPACE_XS) / stride).floor().max(1.0) as usize;
 
-    for (i, &(_name, bg_hex, _fg_hex)) in presets.iter().enumerate() {
-        let is_selected = selected == Some(i);
-        let is_used = used_colors.iter().any(|c| c == bg_hex);
-        let color = theme::hex_to_color(bg_hex);
+        let mut grid = column![].spacing(SPACE_XS);
+        let mut current_row = row![].spacing(SPACE_XS);
 
-        let swatch = Canvas::new(SwatchPainter {
-            color,
-            selected: is_selected,
-            used: is_used,
-        })
-        .width(COLOR_SWATCH_SIZE)
-        .height(COLOR_SWATCH_SIZE);
+        for (i, &(_name, bg_hex, _fg_hex)) in presets.iter().enumerate() {
+            let is_selected = selected == Some(i);
+            let is_used = used_colors.iter().any(|c| c == bg_hex);
+            let color = theme::hex_to_color(bg_hex);
 
-        let style = if is_selected {
-            theme::ButtonClass::ColorSwatchSelected
-        } else {
-            theme::ButtonClass::BareTransparent
-        };
+            let swatch = Canvas::new(SwatchPainter {
+                color,
+                selected: is_selected,
+                used: is_used,
+            })
+            .width(COLOR_SWATCH_SIZE)
+            .height(COLOR_SWATCH_SIZE);
 
-        let swatch_btn = button(swatch)
-            .on_press(on_select(i))
-            .padding(PAD_COLOR_SWATCH)
-            .style(style.style());
+            let cell: Element<'_, M> = if is_selected {
+                // Selected: not a button (already-selected swatches are
+                // not actionable). Outer container draws the focus ring.
+                container(container(swatch).padding(PAD_COLOR_SWATCH))
+                    .style(theme::ContainerClass::ColorSwatchSelectedRing.style())
+                    .into()
+            } else if is_used {
+                // Used by another account: dimmed by SwatchPainter, no
+                // press handler so the user can't pick it.
+                container(swatch).padding(PAD_COLOR_SWATCH).into()
+            } else {
+                button(swatch)
+                    .on_press(on_select(i))
+                    .padding(PAD_COLOR_SWATCH)
+                    .style(theme::ButtonClass::BareTransparent.style())
+                    .into()
+            };
 
-        current_row = current_row.push(swatch_btn);
+            current_row = current_row.push(cell);
 
-        if (i + 1) % COLOR_PALETTE_COLUMNS == 0 {
-            grid = grid.push(current_row);
-            current_row = row![].spacing(SPACE_XS);
+            if (i + 1) % cols == 0 {
+                grid = grid.push(current_row);
+                current_row = row![].spacing(SPACE_XS);
+            }
         }
-    }
 
-    if !presets.len().is_multiple_of(COLOR_PALETTE_COLUMNS) {
-        grid = grid.push(current_row);
-    }
+        if !presets.len().is_multiple_of(cols) {
+            grid = grid.push(current_row);
+        }
 
-    grid.into()
+        grid.into()
+    })
+    .into()
 }

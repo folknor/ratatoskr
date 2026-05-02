@@ -21,6 +21,11 @@ pub enum AccountHealth {
     Warning,
     Error,
     Disabled,
+    /// We don't have enough signal to classify the account: it has never
+    /// synced and there's no token expiry info to lean on. Common for
+    /// freshly added accounts before the first sync runs and for synthetic
+    /// dev-seed accounts that never go through the real sync path.
+    Unknown,
 }
 
 /// Compute account health from token expiry and sync state.
@@ -31,6 +36,9 @@ pub fn compute_health(
 ) -> AccountHealth {
     if !is_active {
         return AccountHealth::Disabled;
+    }
+    if last_sync_at.is_none() && token_expires_at.is_none() {
+        return AccountHealth::Unknown;
     }
     let now = chrono::Utc::now().timestamp();
     if let Some(expires) = token_expires_at {

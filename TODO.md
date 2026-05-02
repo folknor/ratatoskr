@@ -12,6 +12,8 @@
 
 - [ ] **Settings/Accounts: Edit Account** - This section needs rework.
 
+- [ ] **Password input UX** - `input_row_secure` currently masks every character to a dot the moment it's typed. Open questions: (1) should there be an "eye" toggle that reveals the value while held / pressed? (2) should the most recently typed character render as plaintext for ~1 second before turning into a dot, the way iOS / Android do? (3) should reveal-on-hover ever apply, or strictly explicit gesture? Affects `input_row_secure` in `row_widgets.rs` and every CalDAV / IMAP / SMTP password field that uses it.
+
 - [ ] **Attachment saving** - Should remember last folder. Ideally last folder per thread ID.
 
 - [ ] **Collapse individual expanded messages** - Chevron now points up (fixed: added `icon::chevron_up()` at U+E070, swapped in `widgets::expanded_message_card`). Remaining: the button needs a new place to live - probably a very long, thin button that stretches across the entire horizontal space at the top of the message frame. This needs to be unified with the Attachments panel collapsing, which is currently taking up too much vertical space; also too much padding above the Attachments section.

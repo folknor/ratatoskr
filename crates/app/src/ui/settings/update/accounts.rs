@@ -75,10 +75,15 @@ impl Settings {
             return;
         };
         let presets = label_colors::preset_colors::all_presets();
+        // Saved hex strings may not be a preset hex literally (dev-seed
+        // accounts use Google brand colors, older accounts may have arbitrary
+        // user-picked hex). Snap to the nearest preset so the picker still
+        // shows a selected swatch and the user can confirm or change it.
         let color_index = account
             .account_color
             .as_deref()
-            .and_then(|hex| presets.iter().position(|(_, bg, _)| *bg == hex));
+            .and_then(label_colors::preset_colors::nearest_exchange_preset)
+            .and_then(|name| presets.iter().position(|(n, _, _)| *n == name));
 
         self.editing_account = Some(AccountEditor {
             account_id: account.id.clone(),

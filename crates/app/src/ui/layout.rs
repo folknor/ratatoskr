@@ -427,7 +427,7 @@ pub const PROTOCOL_CARD_HEIGHT: f32 = 64.0;
 /// Welcome icon size on the first-launch email input screen.
 pub const WELCOME_ICON_SIZE: f32 = 96.0;
 /// Color swatch button padding (around the canvas).
-pub const PAD_COLOR_SWATCH: f32 = 2.0;
+pub const PAD_COLOR_SWATCH: f32 = 4.0;
 /// Alpha for dimmed (already-used) color swatches.
 pub const COLOR_SWATCH_DIMMED_ALPHA: f32 = 0.35;
 /// Proportional factor for check-mark size relative to swatch radius.

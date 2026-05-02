@@ -37,8 +37,6 @@ pub enum ButtonClass {
     ProtocolCard,
     /// Protocol selection card (selected, primary border).
     ProtocolCardSelected,
-    /// Color swatch with selection ring.
-    ColorSwatchSelected,
     /// Experimental numbered variant.
     Experiment { variant: usize },
     /// Experimental semantic variant (success/warning/danger).
@@ -79,7 +77,6 @@ impl ButtonClass {
             Self::PinnedSearch { active } => style_pinned_search_button(theme, status, active),
             Self::ProtocolCard => style_protocol_card_button(theme, status, false),
             Self::ProtocolCardSelected => style_protocol_card_button(theme, status, true),
-            Self::ColorSwatchSelected => style_color_swatch_selected_button(theme, status),
             Self::Experiment { variant } => style_exp_btn(theme, status, variant),
             Self::ExperimentSemantic { variant } => style_exp_semantic_btn(theme, status, variant),
             Self::Destructive => style_destructive_button(theme, status),
@@ -560,22 +557,6 @@ fn style_protocol_card_button(
             color: border_color,
             width: if selected { 2.0 } else { 1.0 },
             radius: 8.0.into(),
-        },
-        ..Default::default()
-    }
-}
-
-fn style_color_swatch_selected_button(theme: &Theme, _status: button::Status) -> button::Style {
-    let p = theme.palette();
-    let pri = p.primary.base.color;
-
-    button::Style {
-        background: None,
-        text_color: p.background.base.text,
-        border: iced::Border {
-            color: pri,
-            width: 2.0,
-            radius: 6.0.into(),
         },
         ..Default::default()
     }
