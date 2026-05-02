@@ -62,7 +62,7 @@ The attachment caching work (`docs/attachments/`) was the proximate trigger for 
                               ratatoskr.db (SQLite)
                               bodies.db (SQLite)
                               attachment_packs/data-*.pack
-                              tantivy_index/
+                              search_index/
                               app_data/...
 ```
 
@@ -129,19 +129,35 @@ The reload is cheap (cooperative; no work happens until the next searcher acquir
 
 **The Service installs a SIGTERM handler** that triggers the same shutdown flow as the request-driven path. Without it, `kill <service-pid>` (or the UI's escalation path) terminates without flushes; with it, an external SIGTERM is treated as a polite "please shut down" with the same drain + flush + sentinel sequence. Worst case (SIGKILL, OOM, hard machine power-off): torn writes detected on next start by the per-store recover paths each subsystem owns, plus the cross-store invariant pass gated on the missing sentinel file.
 
-**Crash.** If the UI crashes, the Service must exit cleanly. Each platform has the same race shape (parent dies between fork and the child's registration) and each gets the same race-close: the registration *plus* a post-registration "is the parent still alive?" recheck.
+**Crash.** If the UI crashes, the Service must exit cleanly. v1 ships for Linux and Windows. Linux closes the parent-died-before-registration race with registration *plus* a post-registration "is the parent still alive?" recheck; Windows avoids the race entirely via Job Object semantics.
 
 - **Linux**: `pre_exec` hook calling `prctl(PR_SET_PDEATHSIG, SIGTERM)`. After the hook runs, the Service code re-checks `getppid()` once at startup; if `getppid() == 1` the parent already died before the hook took effect, exit immediately.
-- **macOS**: `kqueue` with `EVFILT_PROC` and `NOTE_EXIT` registered against the parent PID at start. Registration fires only against *that specific process* (immune to PID reuse), but the parent can die between fork and registration. Same race-close as Linux: after `kqueue` registration, recheck `getppid() == 1` (parent reparented to launchd) and exit if so.
 - **Windows**: a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` is the documented Windows idiom for child-lifetime binding. The UI creates the Job before spawning the Service, sets the kill-on-close flag, and assigns the Service to the Job. When the UI dies (handle released), the OS terminates every process in the Job. No PID lookup means no PID-reuse race. Side benefit: any further grandchildren the Service spawns (e.g. PDF/OOXML extractor subprocesses in Phase 7) inherit the Job and are killed with the parent.
 
 PID-polling is rejected: PID reuse is fast on busy systems, and the Service would attach to a stranger if the parent died between polls. `OpenProcess(parent_pid)` after startup has the same flaw on Windows (TOCTOU between exec and OpenProcess) and is also rejected; the Job Object pattern avoids the PID lookup entirely.
 
+**Grandchildren** (Phase 7 PDF/OOXML extractor subprocesses) inherit Service-death detection as follows:
+
+- **Linux**: `PR_SET_PDEATHSIG` only covers a process's *immediate* parent. The cascade still fires (UI dies -> Service gets SIGTERM -> drains -> exits -> extractor's parent (Service) just died -> extractor gets *its* `PR_SET_PDEATHSIG` signal), but only if every Service-spawned child applies the same `pre_exec` PR_SET_PDEATHSIG + post-prctl `getppid() == 1` recheck the Service uses. Phase 7's extractor-spawn helper must apply the pattern; this is a per-child contract, not a one-time setup.
+- **Windows**: Job Object inheritance handles this for free. Any child the Service spawns is automatically assigned to the same Job (default behavior unless `CREATE_BREAKAWAY_FROM_JOB` is set, which we don't), so the UI's handle drop terminates the entire process tree.
+
+**macOS (deferred to post-1.0).** Design retained for when macOS becomes a target: `kqueue` with `EVFILT_PROC` and `NOTE_EXIT` registered against the parent PID at start. Registration fires only against *that specific process* (immune to PID reuse), but the parent can die between fork and registration. Same race-close as Linux: after `kqueue` registration, recheck `getppid() == 1` (parent reparented to launchd) and exit if so. Not validated in v1; Phase 1 exit criteria do not require it.
+
 **No persistent process.** Quit the app, the Service is gone. Restart the app, both come back. This is deliberate v1 simplicity. Tray-residency promotion (Phase 9) requires no Service-lifecycle changes - only a UI-side change to not call `iced::exit()` on close. The Service's lifecycle is keyed on the UI *process*, not the visible window, so the parent-death machinery still works correctly.
 
-**Single-instance guard.** Once schema migrations move Service-side (Phase 1.5), a second app instance trying to migrate the same data dir would race. SQLite migrations wrapped in `BEGIN EXCLUSIVE` would fail in the second Service; the second UI would see "Service crashed" - a misleading error for "another instance is running." The Service takes an OS-level file lock on the app data directory at boot. If locked, it exits with `ServiceError::AnotherInstanceRunning`; the UI surfaces that as a clear "Ratatoskr is already running" dialog rather than a respawn-storm.
+**Single-instance guard.** Once schema migrations move Service-side (Phase 1.5), a second app instance trying to migrate the same data dir would race. SQLite migrations wrapped in `BEGIN EXCLUSIVE` would fail in the second Service; the second UI would see "Service crashed" - a misleading error for "another instance is running." The Service takes an OS-level file lock on a dedicated lock file under the app data directory at boot.
 
-**Service log file naming.** The rolling log file (`service.log`) is multi-writer-unsafe: a respawning Service writes to the same file while the dying Service might still hold a handle. The Service writes to `service.<pid>.log` (PID in the filename) and rotates at boot only. A small `service.log` symlink in the same directory points at the current Service's log file for convenience.
+The lock is *not* a JSON-RPC `ServiceError`: the Service exits before stdio is established as a JSON-RPC channel. The UI distinguishes Service exit codes - clean / handshake-failure / instance-already-running / migration-failure / fatal-key-load - via a small `BootExitCode` enum, and surfaces "Ratatoskr is already running" on the corresponding code rather than treating it as a crash. Cross-platform file lock library: `fs2` and `fd-lock` are the candidates; both work on Linux and Windows. Pick in the Phase 1.5 plan.
+
+Lock release semantics:
+- **Linux**: kernel releases the lock on process exit (clean, panic, SIGKILL all OK).
+- **Windows**: `LockFileEx`-style locks release on handle close, which the kernel does on process exit. Same coverage.
+
+The respawn loop must `wait()` on the dying child *before* spawning a replacement; otherwise the new Service races the old one for the lock and bounces with "another instance," which is indistinguishable in the UI from a real second-instance attempt.
+
+**Service log file naming.** The rolling log file is multi-writer-unsafe: a respawning Service writes to the same file while the dying Service might still hold a handle. The Service writes to `service.<pid>.log` (PID in the filename) and rotates at boot only.
+
+A pointer to "the current Service's log" is a `service.log` *symlink* on Linux. On Windows, symlinks require Developer Mode or admin since Win10 1703 and are not a default-acceptable dependency. On Windows the equivalent is a small `service.log.txt` text file containing the current Service's PID (rewritten at each boot); operators run `type service.<pid>.log` against that PID. (`Windows shortcuts (.lnk) are GUI-shell-only and aren't useful from a terminal.`)
 
 ## IPC
 
@@ -158,13 +174,13 @@ PID-polling is rejected: PID reuse is fast on busy systems, and the Service woul
 - **Notification class taxonomy.** Not all notifications are interchangeable. Each `service-api` notification declares one of three classes:
   - `Coalesce { key }` - duplicates collapse on the enqueue side. Latest-wins. Use for `sync.progress`, `index.progress`, `attachment.fetch_progress`.
   - `Drop` - drop oldest under queue pressure. Use for advisory events (heartbeat ticks, debug telemetry).
-  - `MustDeliver` - must reach the UI; never coalesced or dropped. Use for state-change events: `action.completed`, `index.committed`, `push.event`, `attachment.cached`. If a `MustDeliver` queue fills, the dispatch loop applies backpressure on the producer for that one class only (a slow indexer cannot stop sync from making progress, but it cannot drop `index.committed` either).
+  - `MustDeliver` - must reach the UI; never coalesced or dropped. Use for state-change events: `action.completed`, `index.committed`, `push.event`, `attachment.cached`. If the UI consumer of `MustDeliver` notifications stalls, the right outcome is end-to-end backpressure: the UI reader stops draining the pipe, OS pipe buffers fill, the Service's writer task blocks, the producing handler blocks. Slow UI does not silently drop `action.completed`; it slows the Service.
   Without this taxonomy, dropping `action.completed` silently desynchronizes generations and `index.committed` silently lags the search reader.
-- **Notifications (Service -> UI):** bounded channel (cap 1024 for `Coalesce` and `Drop` classes; cap 64 for `MustDeliver` with backpressure). Coalescing and drop policies are enqueue-side: the channel is wrapped in a thin layer that enforces per-class semantics, since `tokio::sync::mpsc` does not coalesce or selectively drop on its own.
+- **Single ordered notification channel at the UI client.** The reader task on the UI side parses lines off the pipe in wire order and enqueues to **one** ordered `mpsc` channel (separate from the response pending-map). Per-class policy is enforced at *enqueue*: `Coalesce` overwrites the last entry with the same key, `Drop` evicts oldest on full, `MustDeliver` uses awaited send (`Sender::send().await`, not `try_send`). One channel preserves cross-class FIFO order, so `action.completed` (MustDeliver) can never be observed before the per-operation `OperationOutcome` events that preceded it on the wire. (An earlier draft used two channels and `try_send` for both lanes; that violated `MustDeliver` semantics and lost cross-class ordering. Settled here as the one-channel design.) Channel capacity ~1024.
 - **Inbound framing cap is enforced *during* read, not after.** The Service's reader uses a bounded line decoder (`tokio_util::codec::LinesCodec::new_with_max_length(MAX_FRAME_BYTES)` or equivalent `read_until` against a `Take`-wrapped reader) that rejects once `MAX_FRAME_BYTES + 1` bytes have been seen *without* having allocated the whole oversized line. A 1 GiB no-newline payload must not OOM the Service before the cap fires.
-- **Reader task does not stall on slow consumers.** The reader uses `try_send` for notifications and drops-or-coalesces per class on overflow rather than `await`ing on a full channel. A slow UI consumer of notifications cannot stall responses (responses go to a separate pending-map dispatch path).
-- **Bounded in-flight requests.** The dispatch loop spawns at most N (default 64) concurrent handlers; further requests wait on a semaphore rather than ballooning Service memory under a pathological client.
-- **Service stdout writes:** the dispatch loop never blocks on stdout. A dedicated writer task drains a bounded queue and writes to stdout; queue full applies the same per-class drop/coalesce/backpressure policy as the inbound notifications channel.
+- **Bounded in-flight requests.** The dispatch loop spawns at most N (default 64) concurrent handlers; further requests wait on a semaphore rather than ballooning Service memory under a pathological client. **Acquire the permit *inside* the spawned handler task, not in the dispatch loop**: acquiring before `tokio::spawn` would stall the dispatch loop's stdin read whenever 64 slow handlers are in-flight, blocking fast methods (e.g. `health.ping` heartbeats survive only because pipe buffers exceed ping size, but other fast methods would queue behind slow ones). Acquiring inside means dispatch keeps reading; queued tasks contend for the semaphore on their own.
+- **Outbound `MustDeliver` and the in-flight semaphore interact.** A handler that emits `MustDeliver` notifications mid-flight (e.g. per-operation `OperationOutcome` from a bulk action) holds its semaphore permit while awaiting outbound enqueue. If the outbound pipeline is backpressured (slow UI consumer), the handler blocks holding the slot, starving further dispatch. Either size the outbound queue large enough that this is not the bottleneck, or release the permit before the final `MustDeliver` send. The Phase 2 plan owns this decision since `OperationOutcome` is the first `MustDeliver` use site; tuning is not Phase 1.
+- **Service stdout writes:** the dispatch loop never blocks on stdout. A dedicated writer task drains a bounded queue and writes to stdout. Queue full *for* `MustDeliver` *items* applies backpressure on the producer (awaited send into the queue); for `Coalesce`/`Drop` items the queue applies the per-class policy.
 - **Requests:** every method declares its timeout at the API definition site, not at the call site. The defaults table:
   | Method | Timeout |
   |--------|---------|
@@ -180,7 +196,18 @@ PID-polling is rejected: PID reuse is fast on busy systems, and the Service woul
 - **Large blobs:** `attachment.fetch` doesn't return `Vec<u8>` over JSON. It returns `{ content_hash, size }`; the UI re-reads positionally from the pack file. Same for any future "give me bytes" method - JSON carries the location, not the content.
 - **Per-line frame size cap:** 4 MiB. Anything larger is a contract violation and gets rejected at the framing layer.
 
-**Stdio discipline (corruption defense).** The Service uses stdout exclusively for JSON-RPC frames. A transitive dependency calling `println!`, a `tracing-subscriber` defaulting to stdout, an interactive panic handler reading stdin, or any `eprintln!` accidentally redirected during dev all break the framing irrecoverably. The Service therefore dups its original stdin/stdout file descriptors at the very top of `run_service()` to saved FDs, replaces `STDOUT_FILENO`/`STDIN_FILENO` with `/dev/null` (or `STDERR_FILENO` for stdout), and routes the writer/reader tasks through the saved FDs only. The framing layer's `write_message` helper enforces compact serialization (no `to_string_pretty`, no embedded literal newlines); direct `serde_json::to_writer` is forbidden at the public API.
+**Stdio discipline (corruption defense).** The Service uses stdout exclusively for JSON-RPC frames. A transitive dependency calling `println!`, a `tracing-subscriber` defaulting to stdout, an interactive panic handler reading stdin, or any `eprintln!` accidentally redirected during dev all break the framing irrecoverably. The Service therefore claims its real stdin/stdout at the top of `run_service()` and replaces the standard slots with sinks before any other code runs. Per-platform mechanism:
+
+- **Linux**: `dup` `STDIN_FILENO` and `STDOUT_FILENO` to saved FDs; open `/dev/null` and `dup2` it onto `STDIN_FILENO`/`STDOUT_FILENO`. Reader/writer tasks operate on the saved FDs (wrapped in `tokio::fs::File` or `OwnedFd` -> `tokio::io::AsyncFd`).
+- **Windows**: `DuplicateHandle` the standard input and output handles; open `NUL` (`CreateFileW("NUL", ...)`) and `SetStdHandle(STD_INPUT_HANDLE | STD_OUTPUT_HANDLE)` to point at it. Reader/writer tasks operate on the duplicated handles. CRT fd table is updated via `_open_osfhandle` / `_dup2` if any C-runtime call site might write to fd 0/1. `AllocConsole` and `AttachConsole` create new console buffers outside the std handle slots; transitive use is rare but worth flagging in the Phase 1.5 plan if any dep calls them.
+
+The defense covers the standard FDs/handles. It does *not* intercept direct writes to `/dev/tty` (Linux) or `CONOUT$` (Windows) - those are vanishingly rare in libraries but possible in panic-handler tooling; we accept the residual risk and check with a stress test before Phase 1 ships.
+
+**Pipe binary mode (Windows).** `tokio::process::Command` on Windows opens piped stdio in binary mode by default - explicitly verify before Phase 1 ships. CRLF translation on the pipe would silently corrupt JSON-RPC framing the moment any embedded `\r` shows up in a payload.
+
+**Stdio inheritance for grandchildren.** Children the Service spawns later (Phase 7 PDF/OOXML extractors) inherit the redirected (post-defense) stdio by default. That's almost always what we want - a runaway extractor's stdout lands on `/dev/null`/`NUL`, not in our JSON-RPC stream. If the Service ever needs to capture an extractor's stdout (e.g. for log forwarding), it must explicitly pipe it via `Stdio::piped()`; inheritance gives empty output rather than the original stdout.
+
+The framing layer's `write_message` helper enforces compact serialization (no `to_string_pretty`, no embedded literal newlines); direct `serde_json::to_writer` is forbidden at the public API.
 
 **Sensitive-value logging policy.** The Service handles message bodies, OAuth bearer tokens, encryption-keyed payloads, search queries (which contain user PII), draft auto-save content, and attachment text. The rolling log file in `<app_data>/logs/service.<pid>.log` must never contain these:
 
@@ -194,7 +221,11 @@ Wire types whose serialization would otherwise reach the logger wrap sensitive f
 - `Request { id, method, params }` -> `Response { id, result | error }`. Synchronous-feeling, fits the action service / settings write surface.
 - `Notification { method, params }` for one-way streams (sync progress, push events, indexer progress, `index.committed`). UI dispatches as iced messages.
 
-**Panic safety.** Every handler runs inside `AssertUnwindSafe(...).catch_unwind()` (or as a `tokio::task::spawn` whose `JoinError` is treated as a service error). A panicking handler returns `ServiceError::Panic { method, message }` to the caller; the dispatch loop continues. A single bad PDF or Tantivy panic does not kill the Service.
+**Panic safety.** Every handler runs inside `AssertUnwindSafe(...).catch_unwind()` (or as a `tokio::task::spawn` whose `JoinError` is treated as a service error). On debug + the default panic strategy, a panicking handler returns `ServiceError::Panic { method, message }` to the caller; the dispatch loop continues.
+
+**However, the workspace release profile sets `panic = "abort"` (`Cargo.toml:117`).** In release builds, `catch_unwind` does not catch panics - the process aborts. The contract on the wire therefore varies by build profile: in debug, callers can observe `ServiceError::Panic` and the Service stays up; in release, a panicking handler crashes the Service and the UI sees `ClientError::ServiceCrashed` followed by a respawn (Phase 1.5). The doc previously claimed panic-as-error in production - that was wrong.
+
+We accept this for v1: panics in mature handler code are rare, and the Phase 1.5 respawn loop is the production safety net. If a future phase needs production catch-and-continue (e.g. one bad PDF should not crash the Service even in release), revisit by adding a release profile override on the `service` and `service-api` crates with `panic = "unwind"`. Out of scope for v1.
 
 **Surface scope.** Start small: `health.ping`, `sync.start_account`, `sync.cancel_account`, `action.execute_plan`, `attachment.fetch`, `index.rebuild`, plus notifications (`sync.progress`, `push.event`, `action.completed`, `index.committed`, `attachment.cached`). Grow per phase as call sites move.
 
@@ -256,7 +287,7 @@ Every place the UI process writes to durable state today, mapped to the phase th
 |---------------|-----------------|--------------|
 | Action service mutations (archive, label, snooze, etc.) | `core::actions` invoked from `handlers/commands.rs` and many UI sites | Phase 2 (execution only; planning stays UI-side) |
 | Pending-ops retry queue (`db_pending_ops_*`) | Background task in UI; drains queue, re-dispatches actions | Phase 2 (rides with the action service) |
-| Pending-ops boot recovery (`recover_on_boot` resets stranded executing rows) | Runs at app boot in UI process | Phase 2 (gates the boot handshake) |
+| Pending-ops boot recovery (`recover_on_boot` resets stranded executing rows) | Runs at app boot in UI process | Phase 1.5 (gates the boot handshake; the periodic drainer relocates separately in Phase 2 with the action service) |
 | Undo (compensating-action dispatch in `handlers/commands.rs`) | Builds a reverse plan, invokes core::actions directly | Phase 2 (undo follows the action pipeline) |
 | Compose send (uses `ActionContext` for SMTP submit + DB updates) | `handlers/pop_out/compose_send.rs` | Phase 2 (send is a Service-side action; large attachments mean its IPC timeout is generous - see timeout table) |
 | Snooze resurfacing (timer-driven) | `handlers/commands.rs` SyncTick path | Phase 2 (becomes a Service-internal periodic task; UI receives `action.completed` notifications) |
@@ -277,13 +308,15 @@ Every place the UI process writes to durable state today, mapped to the phase th
 | Calendar provider sync writes | UI-side via `handlers/provider.rs` | Phase 5 (rides with sync ports) |
 | Contacts / GAL refresh writes | `handlers/contacts.rs`, GAL refresh in `handlers/provider.rs` | Phase 6 |
 | Attachment collapse-state preferences | UI-side | Phase 6 (with the rest of preferences) |
+| Chat read-on-view side effect (`mark_chat_read_local_sync` on entering a chat) | `handlers/chat.rs` calls `db.read_db_state()` then writes via `crates/db/src/db/queries_extra/chat.rs:218` | Phase 2 (this is a `MailOperation`-shaped action; the read-on-view trigger fires from UI but the mutation goes through the action service) |
+| Thread-participants backfill at boot (`handlers/core.rs`) writing to `thread_participants` via `crates/db/src/db/queries_extra/thread_persistence.rs:670` | Synchronous DB write at app boot | Phase 1.5 (rides with the boot-side relocations) |
 | Schema migrations | Run at boot in the UI process | Phase 1.5 - relocate to Service boot, UI defers `ReadDbState` construction until the Service signals "schema OK" via the boot handshake |
 | Velo->Ratatoskr DB rename migration | Runs in `ReadWriteDb::init` UI-side | Phase 1.5 - moves with schema migrations; Service is the only process that should rename |
 | Encryption-key load | Read from disk at boot in the UI process | Service reads it itself at boot. Not via IPC - the key is needed before any token-bearing IPC can happen. Phase 1.5. **Missing/unreadable key on Service boot is a fatal exit, not a silent zero-key fallback** - the auto-respawn machinery would otherwise widen the window where data gets written under the zero key. |
 | OAuth flow (redirect listener + token exchange + token persist) | UI process owns the redirect listener (it's the visible app); token persist is a DB write | Phase 6: UI captures redirect; ships code to Service; Service exchanges + persists. Two-step IPC. (Phase 4's Service-side push needs a token-refresh path before Phase 6 lands - addressed in Phase 4 plan.) |
 | Global `Db` / state handles (`OnceLock<Arc<Db>>` populated synchronously at app start) | `crates/app/src/main.rs` opens DB before `App::boot` | Phase 1.5 - initialization defers until Service handshake; many sync `crate::DB.get().expect(...)` call sites need to flip to async-init or accept a not-yet-ready state |
 
-Anything not in this table is either (a) read-only from the UI's perspective and stays UI-side, or (b) we missed it - in which case each phase planning session has explicit homework to grep for `with_write_conn` / `db.execute` / similar in UI code and reconcile.
+Anything not in this table is either (a) read-only from the UI's perspective and stays UI-side, or (b) we missed it - in which case each phase planning session has explicit homework to grep for `with_write_conn` / `db.execute` / similar in UI code and reconcile. **Grep alone is not sufficient.** Some UI handlers obtain a `read_db_state()` and then call into a function that internally opens a transaction and writes (the chat read-on-view path is the canonical example: `handlers/chat.rs` -> `read_db_state()` -> `mark_chat_read_local_sync` -> `tx.execute`). Each phase planning session must also walk the call graph from any UI-side `read_db_state()` user looking for downstream `Transaction::execute` / `with_write_conn` calls.
 
 ## Cross-store crash consistency
 
@@ -292,6 +325,25 @@ The Service writes to four durable stores: SQLite (main + `bodies.db`), pack fil
 The reconciliation work splits across two phases. **The minimal pass lands with the writer relocation that introduces the cross-store risk** - i.e. Phase 3, the moment the Service first writes four stores. The optimized invariant pass (with marker-file gating and bounded re-scan windows) stays in Phase 8.
 
 **Clean-shutdown sentinel.** The Service writes a `clean_shutdown` sentinel file (in `<app_data>/`) at the end of its shutdown drain, and removes it at boot once it has acquired all writer handles. On boot, if the sentinel is missing (i.e. last process did not shut down cleanly), the Service runs the per-store recovery pass before signaling boot-handshake readiness.
+
+**Exit-path matrix.** The teardown story has five interacting mechanisms (`kill_on_drop` disabled on the child handle, explicit `ServiceClient::Drop` ordering, Service-side SIGTERM handler, sentinel writer at the end of the drain, and Windows Job Object kill-on-close). They produce different outcomes per teardown trigger; explicit table:
+
+| Trigger | Sentinel written? | Recovery scan next boot? | UI-observed result |
+|---------|-------------------|--------------------------|---------------------|
+| Graceful UI quit (Shutdown request -> ack) | yes | no | clean exit |
+| UI quit but Service unresponsive (30 s timeout -> SIGTERM Linux / TerminateProcess Windows) | Linux: yes (SIGTERM handler runs the drain); Windows: **no** (TerminateProcess is not catchable) | Linux: no; Windows: yes | clean exit on Linux; "last shutdown was unclean" scan on next Windows boot |
+| UI quit + Service still unresponsive 5 s after escalation (SIGKILL Linux / handle drop Windows) | no | yes | scan on next boot; UI logs the timeout |
+| UI panic / OOM-kill | no (Linux: pdeathsig delivers SIGTERM but parent is already gone, the drain may run; Windows: Job Object kills before any handler runs) | yes | scan on next boot |
+| Service panic in handler (debug profile) | not reached - Service stays up via `catch_unwind` | n/a | UI sees `ServiceError::Panic` |
+| Service panic (release profile, `panic = "abort"`) | no | yes | UI sees `ClientError::ServiceCrashed`; respawn (Phase 1.5) |
+| External SIGTERM to Service (Linux) | yes (SIGTERM handler runs the drain) | no | UI sees the channel close after the drain; logs missed heartbeat; respawn (Phase 1.5) |
+| External SIGKILL to Service | no | yes | UI sees the channel close immediately; respawn |
+| External TerminateProcess to Service (Windows) | no | yes | same as SIGKILL |
+| Hard machine power-off / kernel panic | no | yes | torn-write recovery via per-store + cross-store passes |
+
+The Windows asymmetry - 2 of the 3 "shutdown" exit paths and the panic/abort path land without a sentinel - means abnormal Windows exits routinely trigger the recovery scan. That's by design: Phase 8's marker-file gating shrinks the scan to "what changed since last clean shutdown," not "everything," so the cost on a 200 GB mailbox is bounded. Phase 3 / Phase 6 ship the slow scan; users on Windows will pay it more often than Linux users until Phase 8 lands.
+
+A future enhancement (out of scope for v1) is a UI-side "pre-kill" sentinel write before `TerminateProcess`, so the Windows clean-exit path matches Linux. Costs a UI->disk write in the shutdown hot path; not worth the complexity until Phase 8 lands and we measure how often the recovery scan actually fires in practice.
 
 **Phase 3 (minimal pass, lands with sync relocation).** Naive but correct, full-table scans, no optimization:
 
@@ -328,12 +380,12 @@ This decision touches a lot. Listed for visibility, addressed in detail in the i
 
 End-to-end behavior to test once the v1 phases land:
 
-1. Start the app. Both processes are visible in `ps` / Activity Monitor / Task Manager. UI is parent, Service is child.
+1. Start the app. Both processes are visible in `ps` / Task Manager. UI is parent, Service is child.
 2. Issue a search. Result returns from UI-side Tantivy reader; Service is not involved on the read path.
 3. Trigger a sync. Service does the work; UI gets sync progress notifications (coalesced under load). UI rendering remains responsive throughout.
 4. Send a kill signal to the Service mid-sync. UI detects the lost heartbeat, respawns the Service, the boot handshake re-runs (schema check + key load + per-store recovery if sentinel missing), sync resumes from the last checkpoint.
 5. Quit the UI. Service receives shutdown request, drains in-flight work, flushes Tantivy writer + closes pack files, writes the clean-shutdown sentinel, exits cleanly. No orphan process in `ps`.
-6. SIGKILL the UI. Service detects parent death (PR_SET_PDEATHSIG / kqueue NOTE_EXIT + getppid recheck / Job Object kill-on-close), exits within seconds. No orphan process.
+6. SIGKILL the UI. Service detects parent death (Linux: PR_SET_PDEATHSIG + getppid recheck; Windows: Job Object kill-on-close), exits within seconds. No orphan process.
 7. Start a second app instance against the same data dir. Second instance sees `ServiceError::AnotherInstanceRunning` and surfaces a clear error rather than racing on schema migrations.
 8. Open a thread with a cached PDF attachment that has been indexed. Search for a phrase known to be in the PDF body. Result returns the message with a "match in attachment" annotation.
 9. Trigger a re-index. Indexer runs in the Service, progress reported via notification (coalesced). UI remains responsive.

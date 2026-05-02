@@ -38,14 +38,13 @@ The deliverable is small and well-scoped on purpose: every later phase plugs int
    - `Coalesce { key }`: latest-wins on the enqueue side. For `sync.progress`, `index.progress`.
    - `Drop`: drop oldest under queue pressure. For advisory events.
    - `MustDeliver`: never coalesced or dropped. For state changes (`action.completed`, `index.committed`, `push.event`).
-8. **Bounded channels with per-class semantics.** `Coalesce`/`Drop` share a 1024-cap channel with enqueue-side coalescing/drop. `MustDeliver` gets a smaller (cap 64) channel with backpressure-on-producer.
-9. **Reader task does not stall on slow consumers.** `try_send` for notifications, drop-or-coalesce per class on overflow. Responses go to a separate dispatch path (the pending map). A slow UI consumer of notifications cannot block responses.
-10. **Bounded in-flight handlers.** Service-side dispatch holds at most N (default 64) concurrent handlers via a semaphore; further requests wait rather than ballooning Service memory under a pathological client. Heartbeat handler bypasses the semaphore.
+8. **Single ordered notification channel.** One bounded `mpsc` channel (cap 1024) carries all notifications in wire order. Per-class enqueue policy: `Coalesce` overwrites by key; `Drop` evicts oldest on full; `MustDeliver` uses awaited `send` so backpressure flows back through the OS pipe buffers to the producing handler. (See problem-statement.md "Single ordered notification channel at the UI client" for why this beats the two-channel design.)
+9. **Reader task pipeline.** Reader parses lines, dispatches responses to the pending map (separate from notifications), and enqueues notifications via the per-class policy above. A slow UI consumer of notifications stalls Service writes (correct for `MustDeliver`) but never stalls response delivery, since responses go through the pending map directly.
+10. **Bounded in-flight handlers.** Service-side dispatch holds at most N (default 64) concurrent handlers via a semaphore; further requests wait rather than ballooning Service memory under a pathological client. **Permit acquired *inside* the spawned handler task**, not in the dispatch loop, so the dispatch loop keeps reading stdin even while 64 slow handlers are in flight. Heartbeat handler bypasses the semaphore.
 11. **Inbound frame cap (4 MiB) enforced *during* read**, not after. Use a bounded line decoder (`tokio_util::codec::LinesCodec::new_with_max_length(MAX_FRAME_BYTES)` or equivalent `read_until` against a `Take`-wrapped reader). A 1 GiB no-newline payload must not OOM the Service before the cap fires. The Phase 1 self-contradiction "uncapped in v1" goes away.
 12. **Heartbeat.** UI sends `health.ping` every 30 s; logs round-trip + missed beats. No respawn (Phase 1.5). Heartbeat handler bypasses the in-flight semaphore so heavy load can't starve it.
-13. **Parent-death detection (race-free per platform).** Each platform pairs registration with a "is the parent still alive?" recheck so the parent-died-before-registration race is closed:
+13. **Parent-death detection (v1: Linux + Windows; macOS deferred to post-1.0, design retained in `problem-statement.md`).** Linux closes the parent-died-before-registration race with registration plus a "is the parent still alive?" recheck; Windows avoids the race via Job Object semantics.
     - Linux: `pre_exec` hook calling `prctl(PR_SET_PDEATHSIG, SIGTERM)` + post-prctl `getppid() == 1` check at startup.
-    - macOS: `kqueue` with `EVFILT_PROC` + `NOTE_EXIT` registered against the parent PID at start, **then post-registration `getppid() == 1` check** (parent reparented to launchd if dead).
     - Windows: parent creates a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, assigns the Service to it before spawning. No PID lookup, no PID-reuse race. (`OpenProcess(parent_pid)` after startup is rejected: TOCTOU between exec and OpenProcess on Windows is a real bug class.)
 14. **Clean shutdown.** `shutdown` is a **request**. UI awaits the response with a 30 s timeout, then SIGTERM (no-op on Windows; `start_kill` is `TerminateProcess`-equivalent), then SIGKILL after another 5 s. Service-side SIGTERM handler triggers the same shutdown drain (flush Tantivy, close pack files, write clean-shutdown sentinel) as the request-driven path. No torn writes via the SIGTERM path.
 15. **Version handshake.** First `health.ping` after spawn asserts `response.version == PROTOCOL_VERSION`; mismatch is fatal boot error with a clear "binary mismatch" message. The `health.ping` request envelope shape is **frozen** for v1 - any future Service binary must still parse and respond to a v1 ping (otherwise the handshake catches mismatches only when responses can be parsed at all).
@@ -54,7 +53,7 @@ The deliverable is small and well-scoped on purpose: every later phase plugs int
 18. **File-based logging.** Service writes to `<app_data>/logs/service.<pid>.log` with simple size-based rolling (~10 MB cap, keep 3). PID in the filename avoids the multi-writer race during respawn. A `service.log` symlink in the same directory points at the current Service. stderr stays for `cargo run` debugging. Tagged `[service]` / `[ui]` prefixes for disambiguation in the interleaved console output.
 19. **Sensitive-value logging policy** (defined in `problem-statement.md` § IPC). Loggable: method names, request IDs, account IDs, timing. Not loggable: any params/results payload contents, OAuth auth codes, message bodies, search queries, draft content. Wire types use `RedactedString` / `RedactedBytes` wrappers; framing layer's logging hook records method + id + timing only.
 20. **Integration tests via in-process dispatch** (`tokio::io::duplex` driving `run_service_with_io`) cover the dispatch contract.
-21. **Real-subprocess smoke tests** land in Phase 1 too. In-process duplex by definition cannot test: `--service` flag dispatch, real stdio pipe wiring, child cleanup on Drop, version mismatch from a binary that genuinely runs `--service` mode of itself, OS pipe buffering, parent-death detection. Use `escargot` or workspace-built helper. Minimum set: spawn + ping; spawn + clean shutdown; spawn + drop without shutdown (no orphan); Linux SIGKILL of UI -> Service exits within 2 s. macOS / Windows parent-death stays manual.
+21. **Real-subprocess smoke tests** land in Phase 1 too. In-process duplex by definition cannot test: `--service` flag dispatch, real stdio pipe wiring, child cleanup on Drop, version mismatch from a binary that genuinely runs `--service` mode of itself, OS pipe buffering, parent-death detection. Use `escargot` or workspace-built helper. Minimum set: spawn + ping; spawn + clean shutdown; spawn + drop without shutdown (no orphan); Linux SIGKILL of UI -> Service exits within 2 s. Windows parent-death stays manual.
 22. **Real failure-mode tests** (in-process duplex). EOF-during-pending-request, malformed JSON, concurrent ping fan-out (id correlation), version mismatch, spawn failure, panicking handler, oversize frame rejection without OOM.
 
 ### Out of scope
@@ -64,8 +63,8 @@ The deliverable is small and well-scoped on purpose: every later phase plugs int
 - Tray icon, autostart, daemon promotion.
 - Schema versioning of the JSON-RPC protocol. Pin format-version-1 in v1; bump method names if the contract changes later.
 - Authentication / authorization between UI and Service. Same trust domain.
-- Real-subprocess integration tests. In-process dispatch via `run_service_with_io` covers the contract; subprocess tests come when there are real handlers to validate cross-process.
 - Schema migrations + encryption-key relocation - those are Phase 1.5, not Phase 1.
+- Single-instance file lock - those are Phase 1.5, not Phase 1. The lock guards against concurrent schema migrations, which only land in Phase 1.5.
 
 ## Architecture
 
@@ -211,8 +210,6 @@ The wire envelope (request/response/notification) is JSON-RPC 2.0:
 
 `service-api` exposes a `write_message<T: Serialize, W: AsyncWrite>(value: &T, w: &mut W)` helper that uses compact serialization and appends a single `\n`. The crate forbids direct use of `serde_json::to_string_pretty` at the API level. One careless pretty-print would desync the framing.
 
-Realistic LOC for the framing layer with proper error handling (parse errors, frame-size rejection, EOF handling, panic catching, partial reads, write timeouts): 200-300 LOC, not 50.
-
 ### `ServiceClient` (UI-side) sketch
 
 In `crates/app/src/service_client.rs`:
@@ -223,10 +220,11 @@ pub struct ServiceClient {
     stdin_tx: tokio::sync::mpsc::Sender<Vec<u8>>,  // bounded channel into the writer task
     pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, ServiceError>>>>,
     next_id: AtomicU64,
-    // Two notification channels per the class taxonomy.
-    // Coalesce/Drop share one; MustDeliver gets its own with backpressure on producer.
-    notif_lossy_tx: tokio::sync::mpsc::Sender<Notification>,    // cap 1024
-    notif_strict_tx: tokio::sync::mpsc::Sender<Notification>,    // cap 64
+    // Single ordered notification channel. Cross-class FIFO is preserved by
+    // having ONE channel; per-class policy (Coalesce/Drop/MustDeliver) is
+    // enforced on enqueue. See problem-statement.md "Single ordered notification
+    // channel at the UI client" for the rationale.
+    notif_tx: tokio::sync::mpsc::Sender<Notification>,    // cap 1024
     reader_handle: tokio::task::JoinHandle<()>,
     writer_handle: tokio::task::JoinHandle<()>,
     heartbeat_handle: tokio::task::JoinHandle<()>,
@@ -261,10 +259,11 @@ impl ServiceClient {
 
     pub async fn shutdown(&self) -> Result<(), ClientError>;
 
-    /// Subscribe to notifications. Returns a single combined receiver
-    /// (Coalesce/Drop and MustDeliver merged). The recipe wraps this in
-    /// an iced subscription, mirroring the JmapPushReceiver pattern in
-    /// crates/app/src/handlers/provider.rs so Phase 2 plugs in cleanly.
+    /// Subscribe to notifications. Returns the receiver for the single
+    /// ordered notification channel. Cross-class FIFO is preserved.
+    /// The recipe wraps this in an iced subscription, mirroring the
+    /// JmapPushReceiver pattern in crates/app/src/handlers/provider.rs
+    /// so Phase 2 plugs in cleanly.
     pub fn subscribe_notifications(&self) -> tokio::sync::mpsc::Receiver<Notification>;
 }
 
@@ -292,7 +291,7 @@ impl Drop for ServiceClient {
 ```
 
 Background tasks owned by the `ServiceClient`:
-- **Reader task**: parses lines from the child's stdout (bounded line decoder enforcing `MAX_FRAME_BYTES` during read), dispatches responses to `pending` (by id) and notifications to either `notif_lossy_tx` (Coalesce/Drop) or `notif_strict_tx` (MustDeliver) based on the notification's declared class. **`try_send` for both notification channels** - never `await`s on a full channel, so a slow UI consumer cannot block responses. Coalesce notifications find-and-overwrite the existing entry for the same key on the enqueue side; Drop kind drops oldest. On EOF, fails every pending sender with `ClientError::ServiceCrashed`.
+- **Reader task**: parses lines from the child's stdout (bounded line decoder enforcing `MAX_FRAME_BYTES` during read), dispatches responses to `pending` (by id) and notifications to the single ordered `notif_tx`. Per-class enqueue policy: `Coalesce` finds and overwrites the existing entry for the same key (no allocation if found, append otherwise); `Drop` evicts oldest on full; `MustDeliver` uses awaited `send` so OS pipe buffers fill and Service-side writes backpressure naturally. Responses go to the pending map, separate from notifications, so a slow UI consumer of notifications cannot stall response delivery to the requesting code path. On EOF, fails every pending sender with `ClientError::ServiceCrashed`.
 - **Writer task**: drains `stdin_tx` and writes to the child's stdin. Bounded; if the child can't keep up the channel applies backpressure to callers.
 - **Heartbeat task**: every 30 s sends `RequestParams::HealthPing`; logs round-trip time; logs warning on missed beat. Exits when `stdin_tx` send fails (Service died). No respawn until Phase 1.5.
 
@@ -336,17 +335,15 @@ unsafe {
 let child = cmd.spawn()?;
 ```
 
-On macOS, parent-death detection is handled Service-side (`kqueue NOTE_EXIT` on the parent PID, then post-registration `getppid() == 1` recheck). The UI side does no special setup beyond the pipe configuration and the disabled `kill_on_drop`.
-
 ### Service-side dispatch loop
 
 ```rust
 pub async fn run_service() -> ! {
     setup_logging();          // <app_data>/logs/service.<pid>.log + symlink
     install_panic_hook();     // writes to log file before default behavior
-    acquire_instance_lock();  // file lock on app_data; AnotherInstanceRunning if held
     setup_sigterm_handler();  // triggers shutdown drain on SIGTERM (Unix)
     spawn_parent_death_watcher();   // platform-gated; race-free per platform
+    // Single-instance lock arrives in Phase 1.5 (gates concurrent schema migrations).
 
     // Stdio corruption defense. Dup the original stdin/stdout to saved FDs;
     // replace STDIN_FILENO / STDOUT_FILENO with /dev/null. Any transitive
@@ -392,13 +389,17 @@ where
         };
         match parse_envelope(&line) {
             Ok(Envelope::Request { id, params }) => {
+                // Acquire the in-flight permit *inside* the spawned task,
+                // not here. Acquiring before tokio::spawn would block the
+                // dispatch loop's stdin read whenever 64 slow handlers
+                // are in flight, queuing fast methods behind slow ones.
+                let inflight = inflight.clone();
                 let out_tx = out_tx.clone();
-                let permit = match params.bypasses_semaphore() {
-                    true => None,
-                    false => Some(inflight.clone().acquire_owned().await.unwrap()),
-                };
                 tokio::spawn(async move {
-                    let _permit = permit; // held for the duration of the handler
+                    let _permit = match params.bypasses_semaphore() {
+                        true => None,
+                        false => Some(inflight.acquire_owned().await.unwrap()),
+                    };
                     let result = dispatch_with_panic_safety(params).await;
                     let response = build_response(id, result);
                     let _ = out_tx.send(response).await;
@@ -442,11 +443,10 @@ In recommended commit order. Each item is one focused commit unless noted.
 2. **`service-api` types + bounded framing layer.** `RequestParams` (with explicit `#[serde(rename = "...")]` for dotted method names), `HealthPingResponse`, `ShutdownResponse`, `Notification`, `NotificationClass`, `RedactedString` / `RedactedBytes`, `ServiceError`, `PROTOCOL_VERSION`, `MAX_FRAME_BYTES`. Bounded line decoder enforcing `MAX_FRAME_BYTES` *during* read. `write_message` helper with compact-only serialization. JSON-RPC envelope parser. Unit tests: serde round-trip, framing rejects oversize without buffering whole line, malformed JSON returns parse-error.
 3. **`service` runtime: `run_service_with_io` + health handler + panic safety + bounded in-flight semaphore.** Generic-IO entry point. `health.ping` handler returns `HealthPingResponse { version: PROTOCOL_VERSION, pid, uptime_ms }`. Dispatch wrapped in `catch_unwind`. In-flight handler semaphore (cap 64; heartbeat bypasses). Unit + in-process integration tests for the dispatch loop.
 4. **File-based logger + sensitive-value redaction.** Service writes to `<app_data>/logs/service.<pid>.log` with size-based rolling (~10 MB cap, keep 3); maintains a `service.log` symlink to the current file. Tagged `[service]` prefix. Falls back to stderr if log file can't be opened. Verify `Debug` impls for `RedactedString` / `RedactedBytes` print `<redacted len=N>` form.
-5. **`run_service()` production entry.** Wires real stdin/stdout into `run_service_with_io`. Stdio dup-and-replace defense (saved FDs + redirect real stdio to `/dev/null`). Installs panic hook (writes to log file before default behavior). Acquires single-instance file lock on `<app_data>`. Sets up SIGTERM handler that triggers the shutdown drain.
-6. **Race-free parent-death watchers per platform.** Three commits, one per platform, since each is a self-contained module:
+5. **`run_service()` production entry.** Wires real stdin/stdout into `run_service_with_io`. Stdio dup-and-replace defense (Linux: dup `STDIN_FILENO`/`STDOUT_FILENO` to saved FDs, replace originals with `/dev/null`; Windows: equivalent via `DuplicateHandle` + `SetStdHandle` against `NUL`). Installs panic hook (writes to log file before default behavior). Sets up SIGTERM handler that triggers the shutdown drain. (Single-instance file lock lands in Phase 1.5 alongside schema migrations, not here.)
+6. **Race-free parent-death watchers (v1: Linux + Windows).** Two commits, one per platform, since each is a self-contained module:
    - 6a (Linux): `pre_exec` PR_SET_PDEATHSIG + post-prctl `getppid() == 1` check.
-   - 6b (macOS): `kqueue` `EVFILT_PROC` + `NOTE_EXIT` + post-registration `getppid() == 1` check.
-   - 6c (Windows): `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` Job Object setup. Lives on the spawn (UI) side; included here to keep the platform parent-death modules together. Manual test on each platform.
+   - 6b (Windows): `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` Job Object setup. Lives on the spawn (UI) side; included here to keep the platform parent-death modules together. Manual test on each platform.
 7. **`--service` flag dispatch in `app`.** First thing in `main()`: if args contain `--service`, call `service::run_service()` and exit. Otherwise continue to existing iced boot. Smoke test: `cargo run -p app -- --service` runs the Service in the foreground.
 8. **`ServiceClient` core.** Spawn with `kill_on_drop(false)`, Job Object on Windows. Bounded stdin / notification channels (separate `MustDeliver` and `Coalesce`/`Drop` lanes). Pending map (using `serde_json::Value` not untagged enum). Typed `request<R>(...)` with timeouts pulled from per-method declaration. `subscribe_notifications`. `ClientError` enum (including `AnotherInstanceRunning`).
 9. **`ServiceClient::Drop` ordering.** Cancel reader/writer/heartbeat handles; close stdin; brief wait; SIGKILL if still alive; drain pending. Documented as a contract. Test: drop a `ServiceClient` without calling `shutdown()`; child exits within 1 s; no orphan.
@@ -458,9 +458,7 @@ In recommended commit order. Each item is one focused commit unless noted.
     - Spawn + `health.ping` round-trip succeeds against a real subprocess.
     - Spawn + `Shutdown` request returns ack; child exits within 30 s.
     - Spawn + drop `ServiceClient` without shutdown; child exits within a few seconds; no orphan.
-    - (Linux only) Spawn + SIGKILL the parent of the test harness; subprocess exits within 2 s. macOS / Windows parent-death stays manual.
-
-Total estimated commits: 14 (was 11 - the platform parent-death watchers split into three, real-subprocess smoke tests added, Drop-ordering separated). Total estimated LOC: **1200-1700 including tests** (was "800-1100"; the framing layer plus real failure handling, Drop ordering, Windows Job Object, stdio dup-and-replace, notification recipe, and real-subprocess fixtures together push past the prior estimate).
+    - (Linux only) Spawn + SIGKILL the parent of the test harness; subprocess exits within 2 s. Windows parent-death stays manual.
 
 ## File-by-file changes
 
@@ -468,8 +466,8 @@ Total estimated commits: 14 (was 11 - the platform parent-death watchers split i
 - `crates/service-api/Cargo.toml`
 - `crates/service-api/src/{lib,request,response,notification,error,framing,version,redacted}.rs`
 - `crates/service/Cargo.toml`
-- `crates/service/src/{lib,dispatch,lifecycle,logging,instance_lock,sigterm,stdio_defense}.rs`
-- `crates/service/src/parent_death/{mod,linux,macos,windows}.rs`
+- `crates/service/src/{lib,dispatch,lifecycle,logging,sigterm,stdio_defense}.rs` (Phase 1.5 adds `instance_lock.rs` with the schema migration work.)
+- `crates/service/src/parent_death/{mod,linux,windows}.rs`
 - `crates/service/src/handlers/{mod,health,shutdown}.rs`
 - `crates/service/tests/{dispatch_in_process,framing,failure_modes}.rs`
 - `crates/service/tests/subprocess_smoke.rs` - real-subprocess tests via `escargot`.
@@ -483,7 +481,7 @@ Total estimated commits: 14 (was 11 - the platform parent-death watchers split i
 - `crates/app/src/app.rs` - boot launches `ServiceClient`, stores it on `App`; teardown calls `service_client.shutdown()` in the window-close path
 - `crates/app/src/lib.rs` (or `mod.rs`) - re-export the new module if needed
 
-**Cargo.lock** will change with the new crates plus deps (`dashmap`, `thiserror`, `libc` on Linux, `kqueue` or equivalent on macOS, `winapi`/`windows-sys` on Windows). Committed with the rest per CLAUDE.md.
+**Cargo.lock** will change with the new crates plus deps (`dashmap`, `thiserror`, `libc` on Linux, `winapi`/`windows-sys` on Windows, plus a cross-platform file-lock crate - candidates: `fs2`, `fd-lock`). Committed with the rest per CLAUDE.md.
 
 ## Test plan
 
@@ -515,14 +513,13 @@ Land in Phase 1, using `escargot` to locate the built `app` binary. Cover what i
 - **Spawn + ping** - real subprocess answers `health.ping`.
 - **Spawn + shutdown** - clean exit within timeout, sentinel file written.
 - **Spawn + drop without shutdown** - dropping `ServiceClient` (Drop ordering) terminates child within 1 s; no orphan process.
-- **Linux only: SIGKILL the parent process** - subprocess exits within 2 s via PR_SET_PDEATHSIG. (Run with a wrapper test harness that forks; macOS / Windows parent-death stays manual.)
+- **Linux only: SIGKILL the parent process** - subprocess exits within 2 s via PR_SET_PDEATHSIG. (Run with a wrapper test harness that forks; Windows parent-death stays manual.)
 - **Spawn-failure** - point `current_exe` at a non-existent binary; assert clear error, no hang.
 - **Stdout corruption defense** - test-only build path that calls `println!` from a transitive dep; assert the JSON-RPC framing on the saved-FD stdout is unaffected.
 
 ### Manual test matrix (run before each phase ships)
 
 - Linux: spawn UI, kill UI with SIGKILL, verify Service exits within 2 s (PR_SET_PDEATHSIG + getppid recheck).
-- macOS: spawn UI, kill UI with SIGKILL, verify Service exits within ~2 s (kqueue NOTE_EXIT + getppid recheck).
 - Windows: spawn UI, kill UI via Task Manager, verify Service exits immediately (Job Object KILL_ON_JOB_CLOSE).
 - All: spawn UI, quit normally via the app's quit path, verify Service exits cleanly within 30 s (the shutdown-ack timeout); clean-shutdown sentinel present; no zombie processes remain.
 - All: stop the Service externally (`kill <service-pid>`); verify the UI's heartbeat detects it and logs the missed beats. (No respawn yet; that's Phase 1.5.)
@@ -539,7 +536,7 @@ Settled before this plan landed:
 
 Resolve in implementation:
 
-1. **JSON-RPC library: hand-roll or `jsonrpsee`?** Default: hand-roll for Phase 1 (small surface; bounded line decoder + framing is 200-300 LOC). Adopt `jsonrpsee` later if surface area or batching justifies it.
+1. **JSON-RPC library: hand-roll or `jsonrpsee`?** Default: hand-roll for Phase 1 (small surface). Adopt `jsonrpsee` later if surface area or batching justifies it.
 2. **`pending` map crate.** `DashMap` for `id -> oneshot::Sender` is the path of least resistance. Alternative: `Mutex<HashMap>`. DashMap probably right; minor.
 3. **Log tagging mechanism.** Default: thin wrapper around `log::info!` etc. that prepends `[service]` or `[ui]`. File-based logging via rolling-file logger; stderr falls back if the log file can't be opened. `tracing` could replace `log` in a future cross-cutting effort.
 4. **Bounded line decoder choice.** `tokio_util::codec::LinesCodec::new_with_max_length` vs. hand-rolled `read_until` against `Take`. Both work; LinesCodec is well-trodden but pulls another crate. Decide in implementation; not a design-level question.
@@ -552,20 +549,21 @@ Resolve in implementation:
 3. Logs show heartbeat round-trips every 30 s with sub-millisecond round-trip times.
 4. `<app_data>/logs/service.<pid>.log` exists and contains the boot + heartbeat lines tagged `[service]`. Symlink `service.log` points at the current Service. No payload contents in the log.
 5. Quit the app. Service exits cleanly within 30 s via the request/ack handshake; clean-shutdown sentinel file present. `ps` shows no zombie.
-6. Run again, this time SIGKILL the UI process. Service exits within seconds on each platform (Linux: PR_SET_PDEATHSIG + getppid recheck; macOS: kqueue NOTE_EXIT + getppid recheck; Windows: Job Object KILL_ON_JOB_CLOSE).
+6. Run again, this time SIGKILL the UI process. Service exits within seconds on v1 platforms (Linux: PR_SET_PDEATHSIG + getppid recheck; Windows: Job Object KILL_ON_JOB_CLOSE).
 7. Run a third time, SIGTERM the Service externally (`kill <service-pid>`). Service runs the shutdown drain (sentinel written) before exit.
 8. Trigger a panic in a test-only handler. Client receives `ServiceError::Panic`; subsequent ping succeeds.
 9. Run `cargo test -p service` - all in-process and real-subprocess tests pass.
 10. Send an oversize frame (>4 MiB no-newline payload) to the Service. Memory usage stays bounded; parse-error response received; Service stays up.
-11. Try to launch a second instance against the same data dir. Second instance exits with `ServiceError::AnotherInstanceRunning`.
-12. `brokkr check` clean.
+11. `brokkr check` clean.
+
+(Two-instance test moves to the Phase 1.5 verification list, when the file lock lands.)
 
 ## Promotion criteria
 
 This phase is done when:
 - All "Exit criteria" in the roadmap's Phase 1 section are satisfied.
 - The integration test is green in CI.
-- Manual cross-platform shutdown tests pass on Linux, macOS, and Windows (the user runs them).
+- Manual cross-platform shutdown tests pass on Linux and Windows (the user runs them).
 - Reviewer signoff on this plan + its delivered code.
 
 The next phase (Phase 2 - Action service migration) gets its own equivalent plan document at the time it's tackled.
