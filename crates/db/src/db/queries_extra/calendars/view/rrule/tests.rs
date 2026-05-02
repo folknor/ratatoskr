@@ -1,4 +1,5 @@
     use super::*;
+    use super::super::CalendarViewEvent;
     use chrono::{TimeZone, Timelike};
 
     fn local_ts(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> i64 {
