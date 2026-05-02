@@ -50,14 +50,14 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 INSERT OR IGNORE INTO settings (key, value) VALUES
-    ('theme', 'system'),
+    ('theme', 'System'),
     ('sidebar_collapsed', 'false'),
-    ('reading_pane_position', 'right'),
+    ('reading_pane_position', 'Right'),
     ('sync_period_days', '365'),
     ('notifications_enabled', 'true'),
     ('undo_send_delay_seconds', '5'),
     ('default_font', 'system'),
-    ('font_size', 'default'),
+    ('font_size', 'Default'),
     ('block_remote_images', 'true'),
     ('ai_enabled', 'true'),
     ('ai_auto_categorize', 'true'),
@@ -69,7 +69,7 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
     ('notify_categories', 'Primary'),
     ('auto_archive_after_unsubscribe', 'true'),
     ('phishing_detection_enabled', 'true'),
-    ('phishing_sensitivity', 'default'),
+    ('phishing_sensitivity', 'Default'),
     ('ai_auto_draft_enabled', 'true'),
     ('ai_writing_style_enabled', 'true'),
     ('default_read_receipt_policy', 'never'),

@@ -252,25 +252,39 @@ impl Settings {
     /// handler so a launch round-trip preserves what the user saved.
     /// Only fields tracked by `Settings` are pulled in; other snapshot
     /// fields are owned by other components.
+    ///
+    /// String values are matched case-insensitively against their canonical
+    /// option lists - early DBs were seeded with lowercase values that
+    /// don't match the dropdowns, and reading those literally would leave
+    /// the dropdown displaying an unselectable string. Unknown values are
+    /// dropped, leaving the existing `Settings::default()` value in place.
     pub fn apply_bootstrap(
         &mut self,
         ui: &rtsk::db::queries::UiBootstrapSnapshot,
         settings: &rtsk::db::queries::SettingsBootstrapSnapshot,
     ) {
-        if let Some(ref t) = ui.theme {
-            self.theme = t.clone();
+        if let Some(canonical) = ui.theme.as_deref().and_then(canonical_theme) {
+            self.theme = canonical.into();
         }
-        if let Some(ref f) = ui.font_size {
-            self.font_size = f.clone();
+        if let Some(canonical) = ui.font_size.as_deref().and_then(canonical_font_size) {
+            self.font_size = canonical.into();
         }
-        if let Some(ref r) = ui.reading_pane_position {
-            self.reading_pane_position = r.clone();
+        if let Some(canonical) = ui
+            .reading_pane_position
+            .as_deref()
+            .and_then(canonical_reading_pane)
+        {
+            self.reading_pane_position = canonical.into();
         }
         self.sync_status_bar = ui.show_sync_status;
         self.block_remote_images = settings.block_remote_images;
         self.phishing_detection = settings.phishing_detection_enabled;
-        if let Some(ref s) = settings.phishing_sensitivity {
-            self.phishing_sensitivity = s.clone();
+        if let Some(canonical) = settings
+            .phishing_sensitivity
+            .as_deref()
+            .and_then(canonical_phishing_sensitivity)
+        {
+            self.phishing_sensitivity = canonical.into();
         }
         self.committed_preferences = self.snapshot_preferences();
     }
@@ -502,6 +516,32 @@ impl Settings {
     }
 }
 
+/// Resolve `value` to one of `options` using ASCII case-insensitive
+/// equality. Returns the canonical option string when matched so the
+/// dropdown can highlight it. Returns `None` for anything else.
+fn canonical_match(value: &str, options: &[&'static str]) -> Option<&'static str> {
+    options
+        .iter()
+        .find(|opt| opt.eq_ignore_ascii_case(value))
+        .copied()
+}
+
+fn canonical_theme(value: &str) -> Option<&'static str> {
+    canonical_match(value, &["System", "Light", "Dark", "Theme"])
+}
+
+fn canonical_font_size(value: &str) -> Option<&'static str> {
+    canonical_match(value, &["Small", "Default", "Large", "XLarge"])
+}
+
+fn canonical_reading_pane(value: &str) -> Option<&'static str> {
+    canonical_match(value, &["Right", "Bottom", "Hidden"])
+}
+
+fn canonical_phishing_sensitivity(value: &str) -> Option<&'static str> {
+    canonical_match(value, &["Low", "Default", "High"])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -562,32 +602,76 @@ mod tests {
 
     /// Every Settings field that the commit handler in `handlers/core.rs`
     /// writes to the DB must round-trip through `apply_bootstrap` from the
-    /// matching snapshot field. This test pins that mapping so a rename or
-    /// drop in the snapshot structs is caught here, not silently at boot.
+    /// matching snapshot field. String values are validated against the
+    /// canonical option lists; only the booleans flow through unchanged.
     #[test]
     fn apply_bootstrap_round_trips_seven_persisted_fields() {
         let mut settings = Settings::default();
 
         let mut ui = empty_ui_snapshot();
-        ui.theme = Some("Tokyo Night".into());
+        ui.theme = Some("Dark".into());
         ui.font_size = Some("Large".into());
-        ui.reading_pane_position = Some("bottom".into());
+        ui.reading_pane_position = Some("Bottom".into());
         ui.show_sync_status = false;
 
         let mut s = default_settings_snapshot();
         s.block_remote_images = false;
         s.phishing_detection_enabled = false;
-        s.phishing_sensitivity = Some("Aggressive".into());
+        s.phishing_sensitivity = Some("High".into());
 
         settings.apply_bootstrap(&ui, &s);
 
-        assert_eq!(settings.theme, "Tokyo Night");
+        assert_eq!(settings.theme, "Dark");
         assert_eq!(settings.font_size, "Large");
-        assert_eq!(settings.reading_pane_position, "bottom");
+        assert_eq!(settings.reading_pane_position, "Bottom");
         assert!(!settings.sync_status_bar);
         assert!(!settings.block_remote_images);
         assert!(!settings.phishing_detection);
-        assert_eq!(settings.phishing_sensitivity, "Aggressive");
+        assert_eq!(settings.phishing_sensitivity, "High");
+    }
+
+    /// Pre-existing dev DBs were seeded with lowercase values like 'system'
+    /// or 'right' that don't match the dropdown option lists, leaving the
+    /// dropdown displaying an unselectable string. `apply_bootstrap` must
+    /// canonicalize these against their option lists - case-insensitively -
+    /// rather than copying them through verbatim.
+    #[test]
+    fn apply_bootstrap_canonicalizes_case_for_string_prefs() {
+        let mut settings = Settings::default();
+
+        let mut ui = empty_ui_snapshot();
+        ui.theme = Some("system".into());
+        ui.font_size = Some("default".into());
+        ui.reading_pane_position = Some("right".into());
+        let mut s = default_settings_snapshot();
+        s.phishing_sensitivity = Some("default".into());
+
+        settings.apply_bootstrap(&ui, &s);
+
+        assert_eq!(settings.theme, "System");
+        assert_eq!(settings.font_size, "Default");
+        assert_eq!(settings.reading_pane_position, "Right");
+        assert_eq!(settings.phishing_sensitivity, "Default");
+    }
+
+    /// A garbage value in the DB (typo, abandoned theme, value left over
+    /// from a renamed option) must not overwrite the in-memory default and
+    /// leave the dropdown in an unselectable state.
+    #[test]
+    fn apply_bootstrap_keeps_default_when_db_value_is_unknown() {
+        let mut settings = Settings::default();
+        let original_theme = settings.theme.clone();
+        let original_font_size = settings.font_size.clone();
+
+        let mut ui = empty_ui_snapshot();
+        ui.theme = Some("Solarized-Lapland".into());
+        ui.font_size = Some("XXXLarge".into());
+        let s = default_settings_snapshot();
+
+        settings.apply_bootstrap(&ui, &s);
+
+        assert_eq!(settings.theme, original_theme);
+        assert_eq!(settings.font_size, original_font_size);
     }
 
     /// `committed_preferences` is the baseline the editor opens with. After
@@ -600,13 +684,13 @@ mod tests {
         settings.committed_preferences.sync_status_bar = true;
 
         let mut ui = empty_ui_snapshot();
-        ui.theme = Some("Dracula".into());
+        ui.theme = Some("Dark".into());
         ui.show_sync_status = false;
 
         let s = default_settings_snapshot();
         settings.apply_bootstrap(&ui, &s);
 
-        assert_eq!(settings.committed_preferences.theme, "Dracula");
+        assert_eq!(settings.committed_preferences.theme, "Dark");
         assert!(!settings.committed_preferences.sync_status_bar);
         // Live and committed must be in lockstep so the next begin_editing()
         // sees an empty diff.
