@@ -1,0 +1,188 @@
+-- ── Labels ──────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS labels (
+    id TEXT NOT NULL,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    color_bg TEXT,
+    color_fg TEXT,
+    visible INTEGER DEFAULT 1,
+    sort_order INTEGER DEFAULT 0,
+    imap_folder_path TEXT,
+    imap_special_use TEXT,
+    namespace_type TEXT,
+    parent_label_id TEXT,
+    label_kind TEXT NOT NULL DEFAULT 'container',
+    right_read INTEGER,
+    right_add INTEGER,
+    right_remove INTEGER,
+    right_set_seen INTEGER,
+    right_set_keywords INTEGER,
+    right_create_child INTEGER,
+    right_rename INTEGER,
+    right_delete INTEGER,
+    right_submit INTEGER,
+    is_subscribed INTEGER,
+    PRIMARY KEY (account_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_labels_account ON labels(account_id);
+
+CREATE TABLE IF NOT EXISTS label_color_overrides (
+    label_name TEXT NOT NULL PRIMARY KEY COLLATE NOCASE,
+    color_bg TEXT NOT NULL
+);
+
+-- ── Threads ─────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS threads (
+    id TEXT NOT NULL,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    subject TEXT,
+    snippet TEXT,
+    last_message_at INTEGER,
+    message_count INTEGER DEFAULT 0,
+    is_read INTEGER DEFAULT 0,
+    is_starred INTEGER DEFAULT 0,
+    is_important INTEGER DEFAULT 0,
+    has_attachments INTEGER DEFAULT 0,
+    is_snoozed INTEGER DEFAULT 0,
+    snooze_until INTEGER,
+    is_pinned INTEGER DEFAULT 0,
+    is_muted INTEGER DEFAULT 0,
+    shared_mailbox_id TEXT,
+    is_chat_thread INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (account_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_threads_date ON threads(account_id, last_message_at DESC);
+CREATE INDEX IF NOT EXISTS idx_threads_snoozed ON threads(is_snoozed, snooze_until);
+CREATE INDEX IF NOT EXISTS idx_threads_pinned ON threads(account_id, is_pinned DESC, last_message_at DESC);
+CREATE INDEX IF NOT EXISTS idx_threads_muted ON threads(account_id, is_muted);
+CREATE INDEX IF NOT EXISTS idx_threads_shared_mailbox ON threads(account_id, shared_mailbox_id, last_message_at DESC);
+CREATE INDEX IF NOT EXISTS idx_threads_chat ON threads(account_id, is_chat_thread) WHERE is_chat_thread = 1;
+
+CREATE TABLE IF NOT EXISTS thread_labels (
+    thread_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    label_id TEXT NOT NULL,
+    PRIMARY KEY (account_id, thread_id, label_id),
+    FOREIGN KEY (account_id, thread_id) REFERENCES threads(account_id, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_thread_labels_label ON thread_labels(account_id, label_id);
+
+CREATE TABLE IF NOT EXISTS thread_bundles (
+    account_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    bundle TEXT NOT NULL,
+    is_manual INTEGER DEFAULT 0,
+    created_at INTEGER DEFAULT (unixepoch()),
+    PRIMARY KEY (account_id, thread_id),
+    FOREIGN KEY (account_id, thread_id) REFERENCES threads(account_id, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_thread_bundles ON thread_bundles(account_id, bundle);
+
+-- ── Messages ────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS messages (
+    id TEXT NOT NULL,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL,
+    from_address TEXT,
+    from_name TEXT,
+    to_addresses TEXT,
+    cc_addresses TEXT,
+    bcc_addresses TEXT,
+    reply_to TEXT,
+    subject TEXT,
+    snippet TEXT,
+    date INTEGER NOT NULL,
+    is_read INTEGER DEFAULT 0,
+    is_starred INTEGER DEFAULT 0,
+    body_cached INTEGER DEFAULT 0,
+    raw_size INTEGER,
+    internal_date INTEGER,
+    list_unsubscribe TEXT,
+    list_unsubscribe_post TEXT,
+    auth_results TEXT,
+    message_id_header TEXT,
+    references_header TEXT,
+    in_reply_to_header TEXT,
+    imap_uid INTEGER,
+    imap_folder TEXT,
+    mdn_requested INTEGER NOT NULL DEFAULT 0,
+    is_reaction INTEGER NOT NULL DEFAULT 0,
+    mdn_sent INTEGER NOT NULL DEFAULT 0,
+    -- Set to 1 when the message includes an iMIP / iCalendar (text/calendar)
+    -- payload. Drives meeting-invite UI affordances (calendar pill on the
+    -- thread card, RSVP buttons in the reading pane). Populated at message-
+    -- insert time from the attachment list.
+    has_meeting_invite INTEGER NOT NULL DEFAULT 0,
+    -- iCalendar METHOD parameter (REQUEST/REPLY/CANCEL/COUNTER). Useful for
+    -- the UI to differentiate fresh invitations from RSVP responses without
+    -- re-parsing the iCal payload.
+    meeting_invite_method TEXT,
+    -- iCalendar UID, used to match this message to a calendar event row
+    -- after CalDAV/Graph/JMAP/Gmail calendar sync stores the event.
+    meeting_invite_uid TEXT,
+    PRIMARY KEY (account_id, id),
+    FOREIGN KEY (account_id, thread_id) REFERENCES threads(account_id, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(account_id, thread_id, date ASC);
+CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(account_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(from_address);
+CREATE INDEX IF NOT EXISTS idx_messages_imap_uid ON messages(account_id, imap_folder, imap_uid);
+CREATE INDEX IF NOT EXISTS idx_messages_message_id ON messages(message_id_header);
+CREATE INDEX IF NOT EXISTS idx_messages_invite_uid ON messages(account_id, meeting_invite_uid)
+    WHERE meeting_invite_uid IS NOT NULL;
+
+-- ── Attachments ─────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS attachments (
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    filename TEXT,
+    mime_type TEXT,
+    size INTEGER,
+    gmail_attachment_id TEXT,
+    content_id TEXT,
+    is_inline INTEGER DEFAULT 0,
+    local_path TEXT,
+    imap_part_id TEXT,
+    cached_at INTEGER,
+    cache_size INTEGER,
+    content_hash TEXT,
+    FOREIGN KEY (account_id, message_id) REFERENCES messages(account_id, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(account_id, message_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_cid ON attachments(content_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_content_hash ON attachments(content_hash);
+
+CREATE TABLE IF NOT EXISTS cloud_attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id TEXT,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    direction TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    cloud_url TEXT,
+    file_name TEXT,
+    file_size INTEGER,
+    mime_type TEXT,
+    drive_item_id TEXT,
+    upload_session_url TEXT,
+    upload_status TEXT NOT NULL DEFAULT 'pending',
+    bytes_uploaded INTEGER NOT NULL DEFAULT 0,
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_cloud_attachments_message ON cloud_attachments(message_id);
+CREATE INDEX IF NOT EXISTS idx_cloud_attachments_status ON cloud_attachments(upload_status) WHERE upload_status != 'sent';
+
+-- ── UI state ────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS thread_ui_state (
+    thread_id TEXT NOT NULL,
+    account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    attachments_collapsed INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (account_id, thread_id)
+);

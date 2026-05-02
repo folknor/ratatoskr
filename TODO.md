@@ -273,16 +273,6 @@ Flagged inline as `TODO(refactor)` with `#[allow(clippy::too_many_arguments)]` o
 - [ ] address-row 4-tuples of `Option<String>` (two call sites) - `crates/db/src/db/queries_extra/thread_persistence.rs:447, 665` -> `AddressRow` struct
 - [ ] compressed-body batches `(String, Option<Vec<u8>>, Option<Vec<u8>>)` (two call sites) - `crates/stores/src/body_store.rs:152, 241` -> `CompressedBody` struct
 
-**Split oversized files (>1000 lines, snapshot 2026-05-01):**
-- [ ] `crates/app/src/ui/emoji_picker.rs` (2946 lines) -> extract emoji catalog/data into a separate module (likely generated); keep widget logic in `emoji_picker.rs`
-- [ ] `crates/db/src/db/queries_extra/calendars.rs` (2105 lines) -> split RRULE expansion/parsing helpers (`parse_rrule`, `parse_byday`, `parse_until_date`, `expand_*`) from event-query CRUD
-- [ ] `crates/app/src/ui/sidebar.rs` (1277 lines) -> split by sidebar section (accounts / labels / smart folders / public folders / shared mailboxes)
-- [ ] `crates/imap/src/imap_delta.rs` (1189 lines) -> phase-based split (fetch / parse / persist) or feature-based (mailbox vs flags vs UIDVALIDITY recovery)
-- [ ] `crates/core/src/caldav/parse.rs` (1155 lines) -> separate XML multistatus parsers (`parse_propfind_*`, `parse_multiget_report`) from iCal extraction (`extract_datetime`, `extract_vevent`, `parse_icalendar`)
-- [ ] `crates/smart-folder/src/parser.rs` (1097 lines) -> consider splitting lexer / tokenizer from parser if boundaries are clean
-- [ ] `crates/app/src/handlers/core.rs` (1035 lines) -> extract focused handler subsystems out of the catch-all
-- [ ] `crates/app/src/pop_out/message_view.rs` (1012 lines) -> follow the `pop_out/compose/*` pattern (helpers / messages / modals / state / token_handlers / types / update / view)
-
 ## Needs Visual Review
 
 Completed features that need to be visually verified in the running app.
