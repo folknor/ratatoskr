@@ -1,16 +1,11 @@
-//! Action-journal write helpers (Phase 2 task 8).
+//! Action-journal write helpers.
 //!
 //! The journal tables `action_jobs` and `action_job_ops` are defined in
 //! `schema/12_actions.sql`. This module exposes the narrow `pub(crate)`
 //! helpers that `service-state::WriteDbState` re-exposes through
-//! `ActionDbWrite` (Phase 2 task 7) and that Phase 1.5's boot recovery
-//! path (`recover_on_boot_db_only`) consumes.
-//!
-//! Scope today: boot recovery + status query. The worker-side leasing
-//! helpers (`lease_next_ready_op`, `mark_op_complete`,
-//! `update_job_status_on_completion`) and the handler-side insert helpers
-//! land with task 9 (the action.execute_plan handler + worker) so the
-//! shape of those helpers can be designed against a concrete consumer.
+//! `ActionDbWrite` (Phase 2 task 7) and that the action handler +
+//! worker (Phase 2 task 9) and Phase 1.5's boot recovery
+//! (`recover_on_boot_db_only`) consume.
 
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -117,6 +112,378 @@ pub fn query_job_status(
         status: JobStatus::from_sql(&status_str)?,
         summary,
     }))
+}
+
+// ---------------------------------------------------------------------------
+// Handler-side insert (Phase 2 task 9)
+// ---------------------------------------------------------------------------
+
+/// One operation row to insert as part of an `insert_mail_plan` call.
+#[derive(Debug, Clone)]
+pub struct PlanOpInsert {
+    pub operation_id: u32,
+    pub ordinal: u32,
+    pub thread_id: String,
+    /// Serialized `WireMailOperation` payload.
+    pub operation_blob: Vec<u8>,
+}
+
+/// Atomically insert a `mail_plan` job + its ops in a single
+/// transaction. Returns the journal-side timestamp (UNIX seconds) so
+/// the caller can echo it in logs / reconciliation responses.
+///
+/// The handler calls this BEFORE returning `ActionPlanAck` to the UI.
+/// The transaction commit IS the durability boundary that backs the
+/// "journaled = true" promise: on a Service crash after this returns,
+/// the worker's recovery sweep finds the rows and replays them.
+pub fn insert_mail_plan(
+    conn: &Connection,
+    plan_id: &[u8; 16],
+    account_id: &str,
+    quiet: bool,
+    ops: &[PlanOpInsert],
+) -> Result<i64, String> {
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("insert_mail_plan begin: {e}"))?;
+    let now: i64 = tx
+        .query_row("SELECT unixepoch()", [], |row| row.get(0))
+        .map_err(|e| format!("insert_mail_plan now: {e}"))?;
+    tx.execute(
+        "INSERT INTO action_jobs (\
+             job_id, kind, account_id, status, quiet, payload, \
+             created_at, updated_at\
+         ) VALUES (?1, 'mail_plan', ?2, 'queued', ?3, X'', ?4, ?4)",
+        params![plan_id.as_slice(), account_id, quiet as i64, now],
+    )
+    .map_err(|e| format!("insert_mail_plan jobs: {e}"))?;
+    for op in ops {
+        tx.execute(
+            "INSERT INTO action_job_ops (\
+                 job_id, operation_id, ordinal, thread_id, operation, status\
+             ) VALUES (?1, ?2, ?3, ?4, ?5, 'pending')",
+            params![
+                plan_id.as_slice(),
+                op.operation_id,
+                op.ordinal,
+                op.thread_id,
+                op.operation_blob.as_slice(),
+            ],
+        )
+        .map_err(|e| format!("insert_mail_plan ops: {e}"))?;
+    }
+    tx.commit()
+        .map_err(|e| format!("insert_mail_plan commit: {e}"))?;
+    Ok(now)
+}
+
+// ---------------------------------------------------------------------------
+// Worker-side lease (Phase 2 task 9)
+// ---------------------------------------------------------------------------
+
+/// A row leased by `lease_next_ready_op`, ready for execution.
+#[derive(Debug, Clone)]
+pub struct LeasedOp {
+    pub plan_id: [u8; 16],
+    pub operation_id: u32,
+    pub ordinal: u32,
+    pub thread_id: String,
+    pub operation_blob: Vec<u8>,
+    pub account_id: String,
+    pub quiet: bool,
+}
+
+/// Atomically pick the next ready op across all jobs and transition it
+/// from `pending` to `leased` with the worker incarnation as owner.
+///
+/// Order: oldest job first (`action_jobs.created_at` ASC), then
+/// smallest ordinal within the job. SQLite's `UPDATE ... RETURNING`
+/// (3.35+) gives us atomicity in one round-trip; the partial index
+/// `action_job_ops_ready` covers the inner SELECT.
+///
+/// Account-fairness is enforced on the worker side via a per-account
+/// `tokio::sync::Semaphore` rather than in SQL - the SELECT below is
+/// purely "next ready op anywhere," and the worker pool is
+/// responsible for not grabbing more than N ops per account in
+/// parallel.
+///
+/// `lease_duration_ms` sets `lease_expires_at` for the recovery sweep
+/// (`recover_stale_leases`) - if the worker dies before completing
+/// the op, recovery resets it to `pending`.
+pub fn lease_next_ready_op(
+    conn: &Connection,
+    worker_owner: &[u8; 16],
+    lease_duration_ms: i64,
+) -> Result<Option<LeasedOp>, String> {
+    /// `(job_id_bytes, operation_id, ordinal, thread_id, operation_blob)`
+    /// destructured into a typed `LeasedOp` immediately after the query.
+    type LeaseRow = (Vec<u8>, u32, u32, String, Vec<u8>);
+    let row: Option<LeaseRow> = conn
+        .query_row(
+            "UPDATE action_job_ops SET \
+                 status = 'leased', \
+                 lease_owner = ?1, \
+                 lease_expires_at = unixepoch('subsec') * 1000 + ?2 \
+             WHERE (job_id, operation_id) = ( \
+                 SELECT ops.job_id, ops.operation_id \
+                 FROM action_job_ops ops \
+                 JOIN action_jobs jobs USING (job_id) \
+                 WHERE ops.status = 'pending' \
+                   AND jobs.status IN ('queued', 'leased', 'executing') \
+                 ORDER BY jobs.created_at, ops.ordinal \
+                 LIMIT 1 \
+             ) \
+             RETURNING job_id, operation_id, ordinal, thread_id, operation",
+            params![worker_owner.as_slice(), lease_duration_ms],
+            |row| {
+                Ok((
+                    row.get::<_, Vec<u8>>(0)?,
+                    row.get::<_, u32>(1)?,
+                    row.get::<_, u32>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Vec<u8>>(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| format!("lease_next_ready_op: {e}"))?;
+    let Some((job_id_bytes, operation_id, ordinal, thread_id, operation_blob)) = row else {
+        return Ok(None);
+    };
+    let plan_id: [u8; 16] = job_id_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| "lease_next_ready_op: job_id is not 16 bytes".to_string())?;
+    // Pull account_id + quiet from the parent row. Cheap PK lookup.
+    let (account_id, quiet) = conn
+        .query_row(
+            "SELECT account_id, quiet FROM action_jobs WHERE job_id = ?1",
+            params![plan_id.as_slice()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0)),
+        )
+        .map_err(|e| format!("lease_next_ready_op parent lookup: {e}"))?;
+    Ok(Some(LeasedOp {
+        plan_id,
+        operation_id,
+        ordinal,
+        thread_id,
+        operation_blob,
+        account_id,
+        quiet,
+    }))
+}
+
+/// Mark a leased op as transitioned out of execution. The worker calls
+/// this with the terminal status (`Done` / `Failed` / `Conflict`) and
+/// the serialized `OperationResult` blob. Clears the lease so recovery
+/// won't reset the row.
+pub fn mark_op_terminal(
+    conn: &Connection,
+    plan_id: &[u8; 16],
+    operation_id: u32,
+    new_status: OpTerminalStatus,
+    outcome_blob: &[u8],
+) -> Result<(), String> {
+    let status_str = new_status.as_sql();
+    conn.execute(
+        "UPDATE action_job_ops SET \
+             status = ?1, \
+             outcome = ?2, \
+             lease_owner = NULL, \
+             lease_expires_at = NULL \
+         WHERE job_id = ?3 AND operation_id = ?4",
+        params![status_str, outcome_blob, plan_id.as_slice(), operation_id],
+    )
+    .map_err(|e| format!("mark_op_terminal: {e}"))?;
+    Ok(())
+}
+
+/// Terminal status for an op, as written by `mark_op_terminal`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpTerminalStatus {
+    Done,
+    Failed,
+    Conflict,
+}
+
+impl OpTerminalStatus {
+    fn as_sql(self) -> &'static str {
+        match self {
+            Self::Done => "done",
+            Self::Failed => "failed",
+            Self::Conflict => "conflict",
+        }
+    }
+}
+
+/// Counts of `action_job_ops` rows by terminal/non-terminal state for
+/// a single job. Returned by `count_ops_by_status` so the worker can
+/// decide whether the job is finished and what summary to write.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OpStatusCounts {
+    pub pending: u32,
+    pub leased: u32,
+    pub executing: u32,
+    pub done: u32,
+    pub failed: u32,
+    pub conflict: u32,
+}
+
+impl OpStatusCounts {
+    pub fn total(&self) -> u32 {
+        self.pending + self.leased + self.executing + self.done + self.failed + self.conflict
+    }
+    pub fn non_terminal(&self) -> u32 {
+        self.pending + self.leased + self.executing
+    }
+    pub fn terminal(&self) -> u32 {
+        self.done + self.failed + self.conflict
+    }
+}
+
+/// Return per-status counts of ops for a job. Used by the worker after
+/// `mark_op_terminal` to decide whether to finalize the job (if
+/// `non_terminal() == 0`) and which terminal status to write
+/// (`completed` / `partial` / `failed`).
+pub fn count_ops_by_status(
+    conn: &Connection,
+    plan_id: &[u8; 16],
+) -> Result<OpStatusCounts, String> {
+    let mut counts = OpStatusCounts::default();
+    let mut stmt = conn
+        .prepare(
+            "SELECT status, COUNT(*) FROM action_job_ops \
+             WHERE job_id = ?1 GROUP BY status",
+        )
+        .map_err(|e| format!("count_ops_by_status prepare: {e}"))?;
+    let rows = stmt
+        .query_map(params![plan_id.as_slice()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+        })
+        .map_err(|e| format!("count_ops_by_status query: {e}"))?;
+    for row in rows {
+        let (status, count) = row.map_err(|e| format!("count_ops_by_status row: {e}"))?;
+        match status.as_str() {
+            "pending" => counts.pending = count,
+            "leased" => counts.leased = count,
+            "executing" => counts.executing = count,
+            "done" => counts.done = count,
+            "failed" => counts.failed = count,
+            "conflict" => counts.conflict = count,
+            other => log::warn!("count_ops_by_status: unknown op status {other}"),
+        }
+    }
+    Ok(counts)
+}
+
+/// Set the terminal status + summary blob on an `action_jobs` row.
+/// The worker calls this once when the last op transitions out of
+/// non-terminal status, choosing the new status from the per-op
+/// counts (`completed` if everything succeeded, `failed` if every op
+/// failed, `partial` otherwise).
+pub fn finalize_job(
+    conn: &Connection,
+    plan_id: &[u8; 16],
+    new_status: JobTerminalStatus,
+    summary_blob: &[u8],
+) -> Result<(), String> {
+    let status_str = new_status.as_sql();
+    conn.execute(
+        "UPDATE action_jobs SET \
+             status = ?1, \
+             summary = ?2, \
+             lease_owner = NULL, \
+             lease_expires_at = NULL, \
+             updated_at = unixepoch() \
+         WHERE job_id = ?3",
+        params![status_str, summary_blob, plan_id.as_slice()],
+    )
+    .map_err(|e| format!("finalize_job: {e}"))?;
+    Ok(())
+}
+
+/// Terminal status for a job, written by `finalize_job`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobTerminalStatus {
+    Completed,
+    Partial,
+    Failed,
+}
+
+impl JobTerminalStatus {
+    fn as_sql(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Partial => "partial",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// One row returned by `unemitted_terminal_ops` for replay on UI
+/// reconnection.
+#[derive(Debug, Clone)]
+pub struct ReplayableOp {
+    pub plan_id: [u8; 16],
+    pub operation_id: u32,
+    pub status: OpTerminalStatus,
+    pub outcome_blob: Vec<u8>,
+    pub quiet: bool,
+}
+
+/// Return all ops that have a terminal outcome (`outcome IS NOT NULL`)
+/// belonging to non-terminal jobs. These are the ops the Service must
+/// re-emit to the UI on reconnection - the UI's per-plan
+/// `applied_outcomes` set dedupes any duplicates against what it
+/// already saw.
+///
+/// Quiet jobs (e.g. mark-chat-read) suppress per-op outcome emission;
+/// `quiet` is returned so the caller can skip them.
+pub fn unemitted_terminal_ops(conn: &Connection) -> Result<Vec<ReplayableOp>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT ops.job_id, ops.operation_id, ops.status, ops.outcome, jobs.quiet \
+             FROM action_job_ops ops \
+             JOIN action_jobs jobs USING (job_id) \
+             WHERE ops.outcome IS NOT NULL \
+               AND jobs.status IN ('queued', 'leased', 'executing') \
+             ORDER BY jobs.created_at, ops.ordinal",
+        )
+        .map_err(|e| format!("unemitted_terminal_ops prepare: {e}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, Vec<u8>>(0)?,
+                row.get::<_, u32>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Vec<u8>>(3)?,
+                row.get::<_, i64>(4)? != 0,
+            ))
+        })
+        .map_err(|e| format!("unemitted_terminal_ops query: {e}"))?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (job_id_bytes, operation_id, status_str, outcome_blob, quiet) =
+            row.map_err(|e| format!("unemitted_terminal_ops row: {e}"))?;
+        let plan_id: [u8; 16] = job_id_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| "unemitted_terminal_ops: job_id is not 16 bytes".to_string())?;
+        let status = match status_str.as_str() {
+            "done" => OpTerminalStatus::Done,
+            "failed" => OpTerminalStatus::Failed,
+            "conflict" => OpTerminalStatus::Conflict,
+            other => return Err(format!("unemitted_terminal_ops unknown op status: {other}")),
+        };
+        out.push(ReplayableOp {
+            plan_id,
+            operation_id,
+            status,
+            outcome_blob,
+            quiet,
+        });
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -336,6 +703,290 @@ mod tests {
             .expect("present");
         assert_eq!(snapshot.status, JobStatus::Completed);
         assert_eq!(snapshot.summary.as_deref(), Some(b"summary-blob".as_ref()));
+    }
+
+    #[test]
+    fn insert_mail_plan_writes_jobs_and_ops_atomically() {
+        let conn = fresh_db();
+        let plan_id = [0xA1; 16];
+        let ops = vec![
+            PlanOpInsert {
+                operation_id: 0,
+                ordinal: 0,
+                thread_id: "thr-1".into(),
+                operation_blob: b"op-0-blob".to_vec(),
+            },
+            PlanOpInsert {
+                operation_id: 1,
+                ordinal: 1,
+                thread_id: "thr-2".into(),
+                operation_blob: b"op-1-blob".to_vec(),
+            },
+        ];
+        let now = insert_mail_plan(&conn, &plan_id, "acc-1", false, &ops).expect("insert");
+        assert!(now > 0);
+
+        // jobs row exists with status='queued'
+        let snapshot = query_job_status(&conn, &plan_id)
+            .expect("status")
+            .expect("present");
+        assert_eq!(snapshot.status, JobStatus::Queued);
+
+        // both ops inserted with status='pending'
+        let counts = count_ops_by_status(&conn, &plan_id).expect("counts");
+        assert_eq!(counts.pending, 2);
+        assert_eq!(counts.terminal(), 0);
+    }
+
+    #[test]
+    fn lease_next_ready_op_picks_oldest_pending() {
+        let conn = fresh_db();
+        let plan_a = [0xAA; 16];
+        let plan_b = [0xBB; 16];
+        // plan_b is created later, so plan_a should be picked first.
+        insert_mail_plan(
+            &conn,
+            &plan_a,
+            "acc-1",
+            false,
+            &[PlanOpInsert {
+                operation_id: 0,
+                ordinal: 0,
+                thread_id: "thr-a".into(),
+                operation_blob: b"a".to_vec(),
+            }],
+        )
+        .expect("insert a");
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        insert_mail_plan(
+            &conn,
+            &plan_b,
+            "acc-1",
+            false,
+            &[PlanOpInsert {
+                operation_id: 0,
+                ordinal: 0,
+                thread_id: "thr-b".into(),
+                operation_blob: b"b".to_vec(),
+            }],
+        )
+        .expect("insert b");
+
+        let owner = [0xFF; 16];
+        let leased = lease_next_ready_op(&conn, &owner, 60_000)
+            .expect("lease")
+            .expect("some");
+        assert_eq!(leased.plan_id, plan_a, "older job leased first");
+        assert_eq!(leased.thread_id, "thr-a");
+        assert_eq!(leased.account_id, "acc-1");
+        assert!(!leased.quiet);
+    }
+
+    #[test]
+    fn lease_next_ready_op_returns_none_when_no_pending() {
+        let conn = fresh_db();
+        let owner = [0u8; 16];
+        let result = lease_next_ready_op(&conn, &owner, 60_000).expect("lease");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn lease_next_ready_op_does_not_release_a_leased_op() {
+        let conn = fresh_db();
+        let plan_id = [0xCC; 16];
+        insert_mail_plan(
+            &conn,
+            &plan_id,
+            "acc-1",
+            false,
+            &[PlanOpInsert {
+                operation_id: 0,
+                ordinal: 0,
+                thread_id: "thr".into(),
+                operation_blob: b"x".to_vec(),
+            }],
+        )
+        .expect("insert");
+        let owner = [0xFF; 16];
+        let first = lease_next_ready_op(&conn, &owner, 60_000)
+            .expect("first lease")
+            .expect("some");
+        assert_eq!(first.operation_id, 0);
+        // Second lease finds no pending (the one we just leased moved to
+        // 'leased', not 'pending').
+        let second = lease_next_ready_op(&conn, &owner, 60_000).expect("second lease");
+        assert!(second.is_none());
+    }
+
+    #[test]
+    fn mark_op_terminal_clears_lease_and_sets_outcome() {
+        let conn = fresh_db();
+        let plan_id = [0xDD; 16];
+        insert_mail_plan(
+            &conn,
+            &plan_id,
+            "acc-1",
+            false,
+            &[PlanOpInsert {
+                operation_id: 7,
+                ordinal: 0,
+                thread_id: "thr".into(),
+                operation_blob: b"x".to_vec(),
+            }],
+        )
+        .expect("insert");
+        let owner = [0xFF; 16];
+        let leased = lease_next_ready_op(&conn, &owner, 60_000)
+            .expect("lease")
+            .expect("some");
+
+        mark_op_terminal(
+            &conn,
+            &leased.plan_id,
+            leased.operation_id,
+            OpTerminalStatus::Done,
+            b"outcome-blob",
+        )
+        .expect("mark done");
+
+        let counts = count_ops_by_status(&conn, &plan_id).expect("counts");
+        assert_eq!(counts.done, 1);
+        assert_eq!(counts.non_terminal(), 0);
+
+        // lease fields cleared
+        let (lease_owner, lease_expires_at): (Option<Vec<u8>>, Option<i64>) = conn
+            .query_row(
+                "SELECT lease_owner, lease_expires_at FROM action_job_ops \
+                 WHERE job_id = ?1 AND operation_id = 7",
+                params![plan_id.as_slice()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("query");
+        assert!(lease_owner.is_none());
+        assert!(lease_expires_at.is_none());
+    }
+
+    #[test]
+    fn finalize_job_sets_status_and_summary() {
+        let conn = fresh_db();
+        let plan_id = [0xEE; 16];
+        insert_mail_plan(
+            &conn,
+            &plan_id,
+            "acc-1",
+            false,
+            &[PlanOpInsert {
+                operation_id: 0,
+                ordinal: 0,
+                thread_id: "thr".into(),
+                operation_blob: b"x".to_vec(),
+            }],
+        )
+        .expect("insert");
+
+        finalize_job(
+            &conn,
+            &plan_id,
+            JobTerminalStatus::Completed,
+            b"summary-blob",
+        )
+        .expect("finalize");
+
+        let snapshot = query_job_status(&conn, &plan_id)
+            .expect("query")
+            .expect("present");
+        assert_eq!(snapshot.status, JobStatus::Completed);
+        assert_eq!(snapshot.summary.as_deref(), Some(b"summary-blob".as_ref()));
+    }
+
+    #[test]
+    fn count_ops_by_status_aggregates_correctly() {
+        let conn = fresh_db();
+        let plan_id = [0x12; 16];
+        insert_mail_plan(
+            &conn,
+            &plan_id,
+            "acc-1",
+            false,
+            &[
+                PlanOpInsert {
+                    operation_id: 0,
+                    ordinal: 0,
+                    thread_id: "t".into(),
+                    operation_blob: b"x".to_vec(),
+                },
+                PlanOpInsert {
+                    operation_id: 1,
+                    ordinal: 1,
+                    thread_id: "t".into(),
+                    operation_blob: b"x".to_vec(),
+                },
+                PlanOpInsert {
+                    operation_id: 2,
+                    ordinal: 2,
+                    thread_id: "t".into(),
+                    operation_blob: b"x".to_vec(),
+                },
+            ],
+        )
+        .expect("insert");
+        // Mark op 0 done, op 1 failed, leave op 2 pending.
+        mark_op_terminal(&conn, &plan_id, 0, OpTerminalStatus::Done, b"o0").expect("done");
+        mark_op_terminal(&conn, &plan_id, 1, OpTerminalStatus::Failed, b"o1").expect("failed");
+        let counts = count_ops_by_status(&conn, &plan_id).expect("counts");
+        assert_eq!(counts.done, 1);
+        assert_eq!(counts.failed, 1);
+        assert_eq!(counts.pending, 1);
+        assert_eq!(counts.total(), 3);
+        assert_eq!(counts.terminal(), 2);
+        assert_eq!(counts.non_terminal(), 1);
+    }
+
+    #[test]
+    fn unemitted_terminal_ops_returns_only_non_terminal_jobs() {
+        let conn = fresh_db();
+        let plan_active = [0x01; 16];
+        let plan_done = [0x02; 16];
+
+        insert_mail_plan(
+            &conn,
+            &plan_active,
+            "acc-1",
+            false,
+            &[PlanOpInsert {
+                operation_id: 0,
+                ordinal: 0,
+                thread_id: "t".into(),
+                operation_blob: b"a".to_vec(),
+            }],
+        )
+        .expect("insert active");
+        insert_mail_plan(
+            &conn,
+            &plan_done,
+            "acc-1",
+            false,
+            &[PlanOpInsert {
+                operation_id: 0,
+                ordinal: 0,
+                thread_id: "t".into(),
+                operation_blob: b"b".to_vec(),
+            }],
+        )
+        .expect("insert done");
+
+        // Both ops have outcomes, but only plan_active is non-terminal.
+        mark_op_terminal(&conn, &plan_active, 0, OpTerminalStatus::Done, b"o-active")
+            .expect("active done");
+        mark_op_terminal(&conn, &plan_done, 0, OpTerminalStatus::Done, b"o-done").expect("done");
+        finalize_job(&conn, &plan_done, JobTerminalStatus::Completed, b"sum")
+            .expect("finalize done");
+
+        let replayable = unemitted_terminal_ops(&conn).expect("query");
+        assert_eq!(replayable.len(), 1);
+        assert_eq!(replayable[0].plan_id, plan_active);
+        assert_eq!(replayable[0].outcome_blob, b"o-active");
+        assert!(matches!(replayable[0].status, OpTerminalStatus::Done));
     }
 
     #[test]
