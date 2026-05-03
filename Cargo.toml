@@ -29,6 +29,7 @@ members = [
 "crates/dev-seed",
 "crates/types",
 "crates/crypto-key",
+"crates/process-lifetime",
 ]
 
 exclude = [

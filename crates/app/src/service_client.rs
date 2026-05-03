@@ -100,7 +100,7 @@ pub struct ServiceClient {
     /// a true last-resort. Reused across respawns: each new child is
     /// assigned to the same `ProcessGuard` so the safety net stays in place
     /// for the replacement.
-    _process_guard: service::parent_death::ProcessGuard,
+    _process_guard: process_lifetime::ProcessGuard,
 }
 
 impl std::fmt::Debug for ServiceClient {
@@ -358,7 +358,7 @@ impl ServiceClient {
         extra_args: &[&str],
         respawn_config: Option<RespawnConfig>,
     ) -> Result<Arc<Self>, ClientError> {
-        let process_guard = service::parent_death::ProcessGuard::new()?;
+        let process_guard = process_lifetime::ProcessGuard::new()?;
         let pending: Arc<
             DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>,
         > = Arc::new(DashMap::new());
@@ -1281,7 +1281,7 @@ async fn launch_subprocess(
     binary: &Path,
     app_data_dir: &Path,
     extra_args: &[&str],
-    process_guard: &service::parent_death::ProcessGuard,
+    process_guard: &process_lifetime::ProcessGuard,
     pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>>,
     next_id: Arc<AtomicU64>,
     notifications: Arc<NotificationQueue>,
@@ -1301,7 +1301,7 @@ async fn launch_subprocess(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::inherit())
         .kill_on_drop(false);
-    service::parent_death::configure_command(&mut command)?;
+    process_lifetime::configure_command(&mut command)?;
 
     let mut child = command.spawn()?;
     // Assign immediately; on Windows the kill-on-job-close protection only

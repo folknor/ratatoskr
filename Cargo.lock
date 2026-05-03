@@ -246,6 +246,7 @@ dependencies = [
  "log",
  "mime_guess",
  "mundy",
+ "process-lifetime",
  "rfd",
  "rte",
  "rtsk",
@@ -5380,6 +5381,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "process-lifetime"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "log",
+ "tokio",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "profiling"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6311,6 +6322,7 @@ dependencies = [
  "futures-util",
  "libc",
  "log",
+ "process-lifetime",
  "serde",
  "serde_json",
  "service-api",

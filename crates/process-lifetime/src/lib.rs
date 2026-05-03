@@ -1,3 +1,10 @@
+//! Cross-platform parent-death detection + child-lifetime guards.
+//!
+//! Extracted from `service::parent_death` so both `service` (the in-child
+//! `exit_if_parent_missing` call) and `app` (the `ProcessGuard` held in
+//! `ServiceClient`) consume the same machinery without `app -> service`
+//! pulling in the entire Service crate just for this surface.
+
 use std::io;
 
 #[cfg(target_os = "linux")]

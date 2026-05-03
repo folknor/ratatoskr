@@ -11,7 +11,6 @@ mod handlers;
 mod instance_lock;
 mod lifecycle;
 mod logging;
-pub mod parent_death;
 mod sigterm;
 mod stdio_defense;
 
@@ -26,7 +25,7 @@ pub fn run_service_blocking() -> ! {
     //    have died before that hook fired. Run as the first synchronous
     //    statement so we exit before any allocation, file open, or runtime
     //    construction wastes work.
-    parent_death::exit_if_parent_missing();
+    process_lifetime::exit_if_parent_missing();
 
     // 2. Stdio corruption defense - synchronously dup stdin/stdout aside and
     //    redirect the real slots to /dev/null (Linux) / NUL (Windows). After
