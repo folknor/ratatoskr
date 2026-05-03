@@ -122,6 +122,11 @@ where
     // drain above completes - `flushed_ok: true` means the sentinel was
     // written and every in-flight handler has returned.
     if let Some(id) = pending_shutdown_id {
+        // Framing-layer logging hook: same shape as spawn_handler. Records
+        // the outcome (ok / internal) and elapsed-since-shutdown-arrival;
+        // never the response payload.
+        let outcome = if flushed_ok { "ok" } else { "internal" };
+        log::info!("dispatch end method=shutdown id={id} outcome={outcome}");
         let result = serde_json::to_value(ShutdownResponse { flushed_ok })
             .map_err(|error| ServiceError::Internal(error.to_string()));
         send_handler_response(&out_tx, id, result).await;
@@ -151,7 +156,10 @@ async fn handle_line(
         Ok(ParsedClientMessage::Request {
             id,
             params: RequestParams::Shutdown,
-        }) => HandleOutcome::Shutdown(id),
+        }) => {
+            log::info!("dispatch start method=shutdown id={id}");
+            HandleOutcome::Shutdown(id)
+        }
         Ok(ParsedClientMessage::Request { id, params }) => {
             // Bypass the admission gate for heartbeat-class requests so a
             // flood of slow handlers can't starve the UI's health check.
@@ -227,7 +235,14 @@ fn spawn_handler(
     started_at: Instant,
     handlers_in_flight: &mut JoinSet<()>,
 ) {
+    let method = params.method_name();
+    // Framing-layer logging hook: record method + id only at dispatch entry.
+    // Never the params payload - once Phase 2+ methods carry user content
+    // (message bodies, search queries, OAuth codes) in params, payload-level
+    // logging would silently bypass the RedactedString net.
+    log::info!("dispatch start method={method} id={id}");
     handlers_in_flight.spawn(async move {
+        let entered = Instant::now();
         // Acquire the in-flight permit *inside* the spawned task - never
         // in the dispatch loop. Acquiring upfront would stall the dispatch
         // loop's stdin read whenever MAX_IN_FLIGHT slow handlers are
@@ -239,6 +254,10 @@ fn spawn_handler(
             match inflight.acquire_owned().await {
                 Ok(permit) => Some(permit),
                 Err(error) => {
+                    log::warn!(
+                        "dispatch end method={method} id={id} elapsed_ms={} outcome=internal",
+                        entered.elapsed().as_millis(),
+                    );
                     send_handler_response(
                         &out_tx,
                         id,
@@ -250,8 +269,31 @@ fn spawn_handler(
             }
         };
         let result = dispatch_with_panic_safety(params, started_at).await;
+        // Framing-layer logging hook: record outcome discriminant only.
+        // The error variant name lands; the error message does not, since
+        // ServiceError::Panic and ServiceError::Internal can carry caller-
+        // -supplied content.
+        let elapsed_ms = entered.elapsed().as_millis();
+        let outcome = match &result {
+            Ok(_) => "ok",
+            Err(error) => error_outcome_kind(error),
+        };
+        log::info!("dispatch end method={method} id={id} elapsed_ms={elapsed_ms} outcome={outcome}");
         send_handler_response(&out_tx, id, result).await;
     });
+}
+
+/// Discriminant-only outcome string for dispatch-end logging. Returns the
+/// variant name with no payload content - the error message itself is held
+/// back from the rolling log file by sensitive-value policy.
+fn error_outcome_kind(error: &ServiceError) -> &'static str {
+    match error {
+        ServiceError::Panic { .. } => "panic",
+        ServiceError::InvalidParams { .. } => "invalid_params",
+        ServiceError::UnknownMethod(_) => "unknown_method",
+        ServiceError::Internal(_) => "internal",
+        ServiceError::Backpressure => "backpressure",
+    }
 }
 
 async fn dispatch_with_panic_safety(

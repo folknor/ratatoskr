@@ -75,6 +75,23 @@ impl Job {
     /// parent's `tokio::process::Child` keeps an open handle to the child for
     /// the child's full lifetime; the kernel will not recycle the PID while
     /// that handle exists, so an OpenProcess(pid) lookup here is unambiguous.
+    ///
+    /// The Phase 1 plan originally promised "assigns the Service to it before
+    /// spawning. No PID lookup, no PID-reuse race." `tokio::process::Command`
+    /// cannot deliver that - it spawns the child running, with no
+    /// `CREATE_SUSPENDED` knob. The fully race-free implementation would
+    /// require dropping `tokio::process::Command` for raw `CreateProcessW`
+    /// with `CREATE_SUSPENDED` set, then `AssignProcessToJobObject`, then
+    /// `ResumeThread` on the child's main thread. That means
+    /// reimplementing significant parts of tokio's process plumbing
+    /// (stdio piping, exit-status reaping, kill_on_drop semantics) and
+    /// owning the platform-specific bug surface that comes with it.
+    /// Accepted residual risk for v1: the spawn->assign window is on the
+    /// order of microseconds in normal operation, and the dominant
+    /// teardown path (UI Shutdown handshake or external SIGKILL hitting
+    /// after assign) doesn't touch this race. If the manual-test matrix
+    /// or a real Windows host surfaces breakage, the `CreateProcessW`
+    /// restructure is the documented follow-up.
     pub(super) fn assign(&self, child_pid: u32) -> io::Result<()> {
         // SAFETY: OpenProcess returns a fresh handle on success. We need
         // PROCESS_SET_QUOTA (Job assignment is a quota operation) plus

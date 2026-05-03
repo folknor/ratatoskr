@@ -326,6 +326,18 @@ impl Drop for ServiceClient {
         // before this Drop returns and we'd fall through to SIGKILL every
         // time on a busy worker. block_in_place + Handle::block_on works on
         // a multi-threaded runtime; single-threaded falls back to polling.
+        //
+        // Single-threaded fallback caveat: on a `current_thread` runtime,
+        // `runtime_for_block_on` returns None, the writer task can't run
+        // because we're occupying the only worker, ChildStdin doesn't
+        // close, the Service never sees EOF, and we go straight to SIGKILL
+        // after the 1.2 s polling budget. Production uses a multi-thread
+        // runtime (iced's daemon, plus the Service's own runtime), so this
+        // only bites tests that pin a current_thread flavor. Documented
+        // rather than fixed: a current_thread-aware Drop would need the
+        // task to drain via a different mechanism (e.g. a dedicated
+        // shutdown thread), which is more machinery than the failure mode
+        // warrants.
         match runtime_for_block_on() {
             Some(handle) => {
                 tokio::task::block_in_place(|| {

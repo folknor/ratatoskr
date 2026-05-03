@@ -112,6 +112,25 @@ fn set_nonblocking_fd(fd: &std::os::fd::OwnedFd) -> io::Result<()> {
 /// proper IOCP-driven async pipe handling on Windows is a deeper refactor
 /// (no public tokio API today). Revisit when tokio gains a public Windows
 /// pipe abstraction.
+///
+/// Two redirections are necessary on Windows. The Win32 std handle slots
+/// (`STD_INPUT_HANDLE`, `STD_OUTPUT_HANDLE`) are what `std::io::stdout` /
+/// `println!` go through and what tokio uses; redirecting those is the
+/// primary defense and covers all pure-Rust I/O. The C runtime maintains a
+/// SEPARATE fd table for fds 0/1 used by `printf`, `fprintf`, and any FFI
+/// dependency that prints through the CRT (Phase 7 PDF/OOXML extractors are
+/// the realistic future case). `SetStdHandle` does not touch the CRT fd
+/// table, so we additionally `_dup2` a fresh NUL-backed CRT fd onto fds 0
+/// and 1.
+///
+/// Partial-failure note: if the first `SetStdHandle` succeeds and the
+/// second fails, this function returns `Err` and the `nul_keepalive` File
+/// drops, closing the NUL handle that the successful slot still references.
+/// The caller (`run_service_blocking`) exits the process on `Err`, so no
+/// other code observes the stale slot. The function is therefore not
+/// soundness-clean in isolation - fixing that would require a multi-phase
+/// rollback of the partial assignment, which is overkill for the only
+/// caller's behavior. If the call site ever changes to recover, revisit.
 #[cfg(windows)]
 pub(crate) fn claim_stdio() -> io::Result<SavedStdio> {
     use std::fs::OpenOptions;
@@ -145,10 +164,70 @@ pub(crate) fn claim_stdio() -> io::Result<SavedStdio> {
     }
     std::mem::forget(nul_keepalive);
 
+    redirect_crt_fds_to_nul()?;
+
     Ok(SavedStdio {
         stdin_handle,
         stdout_handle,
     })
+}
+
+/// Redirect C-runtime fds 0 and 1 to NUL via `_dup2` so `printf`-class call
+/// sites in any C-FFI dependency can't bypass `SetStdHandle` and reach the
+/// JSON-RPC pipe. Pure-Rust `println!` is already covered by the
+/// `SetStdHandle` step above; this is forward-defense for Phase 7 extractor
+/// crates and similar.
+///
+/// Implementation: open a dedicated NUL handle for the CRT, wrap it as a
+/// CRT fd via `_open_osfhandle`, `_dup2` onto fds 0 and 1 (each `_dup2`
+/// internally `DuplicateHandle`s the underlying OS handle, so the resulting
+/// fds own independent OS handles), then `_close` the temporary fd. The
+/// duplicates remain bound to fd 0 / fd 1 for the process lifetime.
+#[cfg(windows)]
+fn redirect_crt_fds_to_nul() -> io::Result<()> {
+    use std::fs::OpenOptions;
+    use std::os::windows::io::IntoRawHandle;
+
+    // _O_BINARY: skip CRT text-mode CR/LF translation. We want raw NUL
+    // semantics either way; the constant matters only if any caller later
+    // queries the fd's mode.
+    const _O_BINARY: i32 = 0x8000;
+
+    // CRT bindings. `_open_osfhandle` takes ownership of the OS handle on
+    // success; `_dup2` returns 0 on success / -1 on failure. Using extern
+    // declarations rather than the `libc` crate to avoid pulling another
+    // Windows dep for three calls.
+    unsafe extern "C" {
+        fn _open_osfhandle(osfhandle: isize, flags: i32) -> i32;
+        fn _dup2(src: i32, dst: i32) -> i32;
+        fn _close(fd: i32) -> i32;
+    }
+
+    let nul = OpenOptions::new().read(true).write(true).open("NUL")?;
+    // _open_osfhandle takes ownership of the underlying handle on success;
+    // forget the File wrapper so its drop doesn't double-close.
+    let nul_handle = nul.into_raw_handle();
+    let crt_fd = unsafe { _open_osfhandle(nul_handle as isize, _O_BINARY) };
+    if crt_fd < 0 {
+        // _open_osfhandle didn't take ownership on failure - reconstruct
+        // the OwnedHandle so its drop closes the OS handle we leaked.
+        // SAFETY: nul_handle came from a valid File we just dropped via
+        // into_raw_handle; ownership is unchanged.
+        unsafe {
+            drop(std::os::windows::io::OwnedHandle::from_raw_handle(nul_handle));
+        }
+        return Err(io::Error::other("_open_osfhandle failed"));
+    }
+
+    let dup_in = unsafe { _dup2(crt_fd, 0) };
+    let dup_out = unsafe { _dup2(crt_fd, 1) };
+    // Always close the temporary CRT fd, even if a _dup2 failed - it owns
+    // a duplicate of the NUL handle that we don't want to leak.
+    unsafe { _close(crt_fd) };
+    if dup_in < 0 || dup_out < 0 {
+        return Err(io::Error::other("_dup2 onto fd 0/1 failed"));
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
