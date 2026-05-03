@@ -28,41 +28,23 @@ impl AppCryptoState {
 
 /// Load the AES-256-GCM encryption key from the key file.
 ///
-/// Tries `ratatoskr.key` first, falls back to legacy `velo.key`.
+/// Tries `ratatoskr.key` first, falls back to legacy `velo.key`. Thin
+/// wrapper around `crypto_key::load_encryption_key` that flattens the
+/// structured `LoadError` into a `String` for backward-compat with
+/// existing callers (the `rtsk::load_encryption_key` re-export and
+/// `crates/app/src/app.rs`).
+///
+/// The shared crate handles every security property the previous in-line
+/// implementation lacked: TOCTOU-safe permission repair via fchmod on
+/// the open fd, file-owner UID validation (Unix), zeroizing buffer for
+/// the loaded bytes, and release-build hard-fail on the all-zero
+/// dev-seed key. See `crates/crypto-key/src/lib.rs` for details.
 pub fn load_encryption_key(app_data_dir: &Path) -> Result<[u8; 32], String> {
-    let key_path = app_data_dir.join("ratatoskr.key");
-    let legacy_path = app_data_dir.join("velo.key");
-
-    let path = if key_path.exists() {
-        key_path
-    } else if legacy_path.exists() {
-        log::debug!("Using legacy key file velo.key");
-        legacy_path
-    } else {
-        log::error!("No encryption key file found (ratatoskr.key or velo.key)");
-        return Err("No encryption key file found (ratatoskr.key)".to_string());
-    };
-
-    log::debug!("Loading encryption key from {}", path.display());
-
-    let contents =
-        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read key file: {e}"))?;
-
-    // Retroactively fix permissions on existing key files
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Err(err) = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)) {
-            log::warn!("Failed to set key permissions on {}: {err}", path.display());
-        }
-    }
-
-    let key_bytes = STANDARD
-        .decode(contents.trim())
-        .map_err(|e| format!("Failed to decode key: {e}"))?;
-
-    <[u8; 32]>::try_from(key_bytes.as_slice())
-        .map_err(|_| "Encryption key must be exactly 32 bytes".to_string())
+    let secret = crypto_key::load_encryption_key(app_data_dir).map_err(|e| e.to_string())?;
+    // Copy out before `secret` drops and zeroes its buffer. Production
+    // callers wrap the returned `[u8; 32]` in `AppCryptoState` (defined
+    // above) which preserves the zeroize-on-drop property.
+    Ok(*secret.expose())
 }
 
 /// Decrypt a value encrypted by the TS crypto module.

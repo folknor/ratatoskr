@@ -16,7 +16,7 @@
 //! the boot exit code into an actual `std::process::exit`.
 
 use crate::boot_progress;
-use crate::key_load;
+use crypto_key::SecretKey;
 use db::db::pending_ops::db_pending_ops_recover_on_boot_sync;
 use db::db::queries_extra::{
     backfill_thread_participants_for_account_sync, db_mark_queued_drafts_failed_sync,
@@ -38,8 +38,14 @@ use tokio::sync::{Notify, mpsc};
 /// `rtsk::load_encryption_key` and `Db::open` calls in `crates/app/src/app.rs`.
 /// The `#[allow(dead_code)]` markers come off then.
 pub(crate) struct BootContext {
+    /// AES-256-GCM key loaded from `<app_data>/ratatoskr.key`. Held in a
+    /// `SecretKey` wrapper so the bytes zeroize on drop - the Service's
+    /// long-lived process otherwise risks the key lingering in freed
+    /// heap pages or core dumps for the lifetime of the runtime.
+    /// Phase 2's `ActionContext` consumes via `key.expose()` and copies
+    /// into the cipher's internal slot.
     #[allow(dead_code)]
-    pub(crate) encryption_key: [u8; 32],
+    pub(crate) encryption_key: SecretKey,
     /// DB connection opened during boot. Held past the boot sequence so
     /// Phase 2's relocated action service can construct its `ActionContext`
     /// from it without re-opening the file. `Arc<Mutex<Connection>>` matches
@@ -236,7 +242,7 @@ async fn run_boot_sequence_inner(
 
     let key = match tokio::task::spawn_blocking({
         let dir = app_data_dir.clone();
-        move || key_load::load_encryption_key(&dir)
+        move || crypto_key::load_encryption_key(&dir)
     })
     .await
     {
@@ -476,7 +482,7 @@ mod tests {
     fn boot_context_constructs_with_every_field_readable() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         let ctx = BootContext {
-            encryption_key: [9u8; 32],
+            encryption_key: SecretKey::from_bytes([9u8; 32]),
             db_conn: Arc::new(Mutex::new(conn)),
             schema_version: 100,
             migrations_applied: 1,
@@ -484,8 +490,8 @@ mod tests {
         };
         // Read every field; if Phase 2 drops one of these, the test stops
         // compiling.
-        assert_eq!(ctx.encryption_key[0], 9);
-        assert_eq!(ctx.encryption_key.len(), 32);
+        assert_eq!(ctx.encryption_key.expose()[0], 9);
+        assert_eq!(ctx.encryption_key.expose().len(), 32);
         assert_eq!(ctx.schema_version, 100);
         assert_eq!(ctx.migrations_applied, 1);
         assert_eq!(ctx.recovery_warnings.len(), 1);

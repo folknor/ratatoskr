@@ -9,7 +9,6 @@ pub use boot::{TEST_BOOT_DELAY_LOCK, TEST_BOOT_DELAY_MS};
 mod dispatch;
 mod handlers;
 mod instance_lock;
-mod key_load;
 mod lifecycle;
 mod logging;
 pub mod parent_death;

@@ -25,6 +25,7 @@ store = { path = "../stores" }
 search = { path = "../search" }
 seen = { path = "../seen" }
 types = { path = "../types" }
+crypto-key = { path = "../crypto-key" }
 
 # Crate-specific deps
 tokio = { workspace = true, features = ["sync"] }

@@ -1043,6 +1043,7 @@ dependencies = [
  "async-trait",
  "base64",
  "chrono",
+ "crypto-key",
  "css-inline",
  "db",
  "getrandom 0.4.2",
@@ -1280,6 +1281,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77727bb15fa921304124b128af125e7e3b968275d1b108b379190264f4423710"
 dependencies = [
  "hybrid-array",
+]
+
+[[package]]
+name = "crypto-key"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "libc",
+ "log",
+ "zeroize",
 ]
 
 [[package]]
@@ -6293,6 +6304,7 @@ name = "service"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "crypto-key",
  "db",
  "dirs",
  "fs2",

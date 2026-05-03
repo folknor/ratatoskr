@@ -195,4 +195,6 @@ To update the prime prompt for an archetype, pipe new content to `review prime <
 
 ## Encryption
 
-AES-256-GCM (`core/src/provider/crypto.rs`). Key file: `ratatoskr.key` (or legacy `velo.key`) in app data dir. Format: `base64(iv):base64(ct+tag)`. Falls back to zero-key if missing.
+AES-256-GCM (`crates/common/src/crypto.rs` for the cipher; key load lives in the dep-free `crates/crypto-key/` crate shared between `common` and `service`). Key file: `ratatoskr.key` (or legacy `velo.key`) in app data dir. Format: base64-encoded 32 bytes. Encrypted-value wire format: `base64(iv):base64(ct+tag)`.
+
+Boot path: Service loads + validates the key during `BootPhase::LoadingKey`. A missing or unreadable key file is a fatal Service exit (`BootExitCode::KeyLoadFailure = 73`); there is no zero-key fallback. The `crypto-key` crate enforces TOCTOU-safe permission repair (`O_NOFOLLOW` + `fchmod` via the open fd), file-owner UID validation on Unix, and a release-build hard-fail on the all-zero dev-seed key so a stray dev key cannot silently downgrade AES-256-GCM in production. Loaded keys are returned in a `SecretKey` wrapper that zeroizes its buffer on drop.

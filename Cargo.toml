@@ -28,6 +28,7 @@ members = [
 "crates/import",
 "crates/dev-seed",
 "crates/types",
+"crates/crypto-key",
 ]
 
 exclude = [

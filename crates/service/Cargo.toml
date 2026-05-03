@@ -13,6 +13,7 @@ test-helpers = ["service-api/test-helpers"]
 [dependencies]
 service-api = { path = "../service-api" }
 db = { path = "../db" }
+crypto-key = { path = "../crypto-key" }
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }

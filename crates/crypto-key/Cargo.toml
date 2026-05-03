@@ -1,0 +1,19 @@
+[package]
+name = "crypto-key"
+description = "Encryption key file loader for Ratatoskr - shared between common and service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+base64.workspace = true
+log = "0.4"
+zeroize = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

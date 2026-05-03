@@ -233,6 +233,13 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
 ///
 /// `load_encryption_key` expects base64-encoded 32 bytes; 32 zero bytes
 /// encode to a known fixed string, so no base64 dependency is needed.
+///
+/// This zero key is the dev-seed fixture: ephemeral test data round-trips
+/// through the same crypto path as production. The `crypto-key` crate
+/// hard-fails on this exact byte pattern in release builds (see
+/// `LoadError::AllZeroInRelease`) so a stray dev key file cannot ship to
+/// production and silently downgrade AES-256-GCM. Debug builds warn
+/// instead so dev workflows continue working.
 fn write_dev_encryption_key(app_data_dir: &Path) -> Result<(), String> {
     let key_path = app_data_dir.join("ratatoskr.key");
     // base64(b'\x00' * 32) = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="

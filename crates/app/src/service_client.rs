@@ -259,6 +259,20 @@ pub enum ClientError {
     /// `ServiceCrashed` so the log line names the actual cause.
     #[error("schema_version changed across respawn: was {was}, now {now}")]
     SchemaVersionChanged { was: u32, now: u32 },
+    /// Respawn observed a `boot.ready` but `first_boot_ready` was None.
+    /// `handle_crash` defers respawn while `first_boot_ready` is None
+    /// (initial boot's `run_spawn_flow` owns the Terminal-on-failure
+    /// surface), so reaching this path means a refactor broke that
+    /// invariant. Treating it as Terminal rather than capturing-and-
+    /// continuing is per security review: continuing would lose the
+    /// binary-swap detection on every subsequent respawn (the next
+    /// comparison would be against the newly-captured value, not the
+    /// original). Treating it as `unreachable!()` was rejected because
+    /// this code runs in a spawned crash-handler task; a panic there can
+    /// vanish as task failure rather than surfacing a fatal user-visible
+    /// event.
+    #[error("respawn missing first_boot_ready baseline; cannot prove no binary swap")]
+    SchemaBaselineMissing,
     #[error("response deserialize: {0}")]
     Deserialize(#[from] serde_json::Error),
 }
@@ -915,35 +929,52 @@ impl ServiceClient {
         let response: BootReadyResponse = self.request(RequestParams::BootReady).await?;
 
         // Schema-version sanity check vs the first BootReady captured by
-        // run_spawn_flow. handle_crash already deferred the respawn if
-        // first_boot_ready was None, so the None arm here is unreachable in
-        // normal flow; we treat it as defense-in-depth, log a warning, and
-        // capture the response so subsequent respawns at least have a
-        // baseline to compare against.
-        let mismatch: Option<(u32, u32)> = {
-            let mut guard = respawn
+        // run_spawn_flow. The contract: `handle_crash` defers respawn when
+        // `first_boot_ready` is None (initial boot's `run_spawn_flow` owns
+        // the Terminal-on-failure surface), so reaching the None arm here
+        // means a refactor broke that invariant. We surface that as a
+        // distinct Terminal failure rather than capturing the response as
+        // a new baseline - the latter would silently lose binary-swap
+        // detection on every subsequent respawn because future comparisons
+        // would be against the newly-captured value, not the original.
+        // See ClientError::SchemaBaselineMissing for the rationale on
+        // choosing Terminal over `unreachable!()`.
+        enum SchemaCheck {
+            Ok,
+            Mismatch { was: u32, now: u32 },
+            BaselineMissing,
+        }
+        let check = {
+            let guard = respawn
                 .first_boot_ready
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
             match guard.as_ref() {
                 Some(first) if first.schema_version != response.schema_version => {
-                    Some((first.schema_version, response.schema_version))
+                    SchemaCheck::Mismatch {
+                        was: first.schema_version,
+                        now: response.schema_version,
+                    }
                 }
-                Some(_) => None,
-                None => {
-                    log::warn!(
-                        "respawn observed first_boot_ready=None; capturing now (defensive)",
-                    );
-                    *guard = Some(response.clone());
-                    None
-                }
+                Some(_) => SchemaCheck::Ok,
+                None => SchemaCheck::BaselineMissing,
             }
         };
-        if let Some((was, now)) = mismatch {
-            log::error!(
-                "respawn schema_version changed (was {was}, now {now}); binary swap detected",
-            );
-            return Err(ClientError::SchemaVersionChanged { was, now });
+        match check {
+            SchemaCheck::Ok => {}
+            SchemaCheck::Mismatch { was, now } => {
+                log::error!(
+                    "respawn schema_version changed (was {was}, now {now}); binary swap detected",
+                );
+                return Err(ClientError::SchemaVersionChanged { was, now });
+            }
+            SchemaCheck::BaselineMissing => {
+                log::error!(
+                    "respawn observed first_boot_ready=None; handle_crash should have deferred. \
+                     Treating as Terminal: binary-swap detection cannot proceed without a baseline.",
+                );
+                return Err(ClientError::SchemaBaselineMissing);
+            }
         }
 
         let _ = respawn
@@ -1828,6 +1859,38 @@ mod tests {
             BootFailureReason::Other(_) => {}
             other => panic!("expected Other, got {other:?}"),
         }
+    }
+
+    /// Both schema-related Terminal variants flow through `Other(detail)`
+    /// (they're not BootClassification cases since they originate from
+    /// the respawn handshake, not a child-process exit code). The user-
+    /// visible message must name what kind of failure it was so the next
+    /// boot's diagnostics can route on it. Locks the Display contract -
+    /// a refactor that swapped one variant's #[error] for the other would
+    /// not be caught by the surrounding code (both produce String) but
+    /// would break log triage.
+    #[test]
+    fn schema_terminal_variants_have_distinct_user_messages() {
+        let mismatch = ClientError::SchemaVersionChanged { was: 100, now: 101 };
+        let mismatch_msg =
+            terminal_failure_user_message(&BootFailureReason::from_client_error(&mismatch));
+        assert!(
+            mismatch_msg.contains("schema_version") && mismatch_msg.contains("100"),
+            "mismatch message must name the schema_version field and the prior value, got: {mismatch_msg}"
+        );
+
+        let missing = ClientError::SchemaBaselineMissing;
+        let missing_msg =
+            terminal_failure_user_message(&BootFailureReason::from_client_error(&missing));
+        assert!(
+            missing_msg.contains("baseline"),
+            "baseline-missing message must name the missing baseline, got: {missing_msg}"
+        );
+
+        // The two messages must not collide - log triage has to be able to
+        // distinguish "we detected a swap" from "we lost the ability to
+        // detect a swap".
+        assert_ne!(mismatch_msg, missing_msg);
     }
 
     /// Crashloop tracker: the first two respawns are not crashloops; the
