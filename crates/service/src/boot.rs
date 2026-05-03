@@ -87,6 +87,18 @@ pub(crate) struct BootSharedState {
     /// wakeup costs at most one drain delay (the worker re-checks
     /// the journal on every wakeup, not just once per signal).
     action_worker_wakeup: Notify,
+    /// Phase 1.5 carry-forward 19h / Phase 2 task 22: bounds parallel
+    /// `boot.ready` handlers. Stdio is private so a malicious flood
+    /// is not realistic, but a UI bug that re-issues boot.ready
+    /// would balloon `JoinSet` linearly (each handler parks on
+    /// `Notify` until boot completes). The first caller flips this
+    /// flag to true; subsequent callers fail fast with
+    /// `BootReadyInFlight` rather than queueing. If the result is
+    /// already populated (boot completed but the previous ack got
+    /// lost), even fail-fast callers can read the cached result -
+    /// `wait_for_ready` checks `result` first so it returns
+    /// immediately in that case.
+    boot_ready_inflight: std::sync::atomic::AtomicBool,
 }
 
 impl BootSharedState {
@@ -96,7 +108,36 @@ impl BootSharedState {
             result: Mutex::new(None),
             context: Mutex::new(None),
             action_worker_wakeup: Notify::new(),
+            boot_ready_inflight: std::sync::atomic::AtomicBool::new(false),
         })
+    }
+
+    /// Try to claim the boot.ready in-flight slot. Returns a guard on
+    /// success that releases the slot on drop; returns `None` if a
+    /// previous caller is still parked. The handler in
+    /// `crates/service/src/handlers/boot.rs` consults this before
+    /// awaiting `wait_for_ready` so a UI bug (or future surface) that
+    /// fires multiple boot.ready calls cannot balloon the dispatch
+    /// `JoinSet` with parked tasks.
+    pub(crate) fn try_claim_boot_ready_slot(self: &Arc<Self>) -> Option<BootReadyGuard> {
+        if self
+            .boot_ready_inflight
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
+            None
+        } else {
+            Some(BootReadyGuard {
+                state: Arc::clone(self),
+            })
+        }
+    }
+
+    /// Inspect the cached `result`, used by the boot.ready handler when
+    /// it loses the in-flight slot race: if the result has already
+    /// landed, a "second caller" can satisfy the request from the
+    /// cache instead of failing.
+    pub(crate) fn cached_result(&self) -> Option<Result<BootReadyResponse, BootFailure>> {
+        self.result.lock().expect("boot result poisoned").clone()
     }
 
     /// Wake up the action worker so it drains the journal. Called by
@@ -194,6 +235,22 @@ impl BootSharedState {
             }
         }
         self.notify.notify_waiters();
+    }
+}
+
+/// RAII guard returned by `BootSharedState::try_claim_boot_ready_slot`.
+/// Releases the in-flight flag on drop so a future legitimate retry
+/// (e.g. after a respawn) can re-claim. Tied to the `BootSharedState`
+/// the slot belongs to via an `Arc` clone.
+pub(crate) struct BootReadyGuard {
+    state: Arc<BootSharedState>,
+}
+
+impl Drop for BootReadyGuard {
+    fn drop(&mut self) {
+        self.state
+            .boot_ready_inflight
+            .store(false, std::sync::atomic::Ordering::Release);
     }
 }
 
