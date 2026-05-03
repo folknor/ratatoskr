@@ -2,7 +2,7 @@ use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
-use crate::progress::NoopProgressReporter;
+use db::progress::NoopProgressReporter;
 use crate::send::{SendRequest, build_mime_message_base64url, mark_draft_failed, mark_draft_sent};
 use common::types::ProviderCtx;
 
@@ -44,7 +44,7 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
-        crate::db::queries_extra::draft_lifecycle::persist_draft_pending_sync(
+        db::db::queries_extra::draft_lifecycle::persist_draft_pending_sync(
             &conn,
             &draft_id,
             &account_id,
@@ -61,7 +61,7 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
         .map_err(ActionError::db)?;
 
         let transitioned =
-            crate::db::queries_extra::draft_lifecycle::mark_draft_sending_sync(&conn, &draft_id)
+            db::db::queries_extra::draft_lifecycle::mark_draft_sending_sync(&conn, &draft_id)
                 .map_err(ActionError::db)?;
         if !transitioned {
             return Err(ActionError::invalid_state(format!(
@@ -145,10 +145,10 @@ pub async fn delete_draft(ctx: &ActionContext, account_id: &str, draft_id: &str)
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
         let remote_id =
-            crate::db::queries_extra::draft_lifecycle::get_remote_draft_id_sync(&conn, &did)
+            db::db::queries_extra::draft_lifecycle::get_remote_draft_id_sync(&conn, &did)
                 .map_err(ActionError::db)?;
 
-        crate::db::queries_extra::draft_lifecycle::delete_draft_sync(&conn, &did)
+        db::db::queries_extra::draft_lifecycle::delete_draft_sync(&conn, &did)
             .map_err(ActionError::db)?;
 
         Ok(remote_id)

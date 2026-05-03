@@ -15,8 +15,8 @@ use lettre::message::{
     Attachment, Mailbox, MessageBuilder, MultiPart, SinglePart, header::ContentType,
 };
 
-use crate::db::ReadDbState;
-use crate::provider::encoding::encode_base64url_nopad;
+use db::db::ReadDbState;
+use common::encoding::encode_base64url_nopad;
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -212,7 +212,7 @@ pub fn build_mime_message_base64url(req: &SendRequest) -> Result<String, SendErr
 pub async fn mark_draft_sending(db: &ReadDbState, draft_id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         let transitioned =
-            crate::db::queries_extra::draft_lifecycle::mark_draft_sending_sync(conn, &draft_id)?;
+            db::db::queries_extra::draft_lifecycle::mark_draft_sending_sync(conn, &draft_id)?;
         if !transitioned {
             return Err(format!(
                 "Draft {draft_id} not found or already sending/sent"
@@ -230,7 +230,7 @@ pub async fn mark_draft_sent(
     sent_message_id: String,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
-        crate::db::queries_extra::draft_lifecycle::mark_draft_sent_sync(
+        db::db::queries_extra::draft_lifecycle::mark_draft_sent_sync(
             conn,
             &draft_id,
             &sent_message_id,
@@ -242,7 +242,7 @@ pub async fn mark_draft_sent(
 /// Transition a local draft to `'failed'` status after a send error.
 pub async fn mark_draft_failed(db: &ReadDbState, draft_id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
-        crate::db::queries_extra::draft_lifecycle::mark_draft_failed_sync(conn, &draft_id)
+        db::db::queries_extra::draft_lifecycle::mark_draft_failed_sync(conn, &draft_id)
     })
     .await
 }

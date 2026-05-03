@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use super::context::ActionContext;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
-use crate::db::{ReadDbState, params};
+use db::db::{ReadDbState, params};
 
 // ── Test helpers ────────────────────────────────────────────────────
 
@@ -15,7 +15,7 @@ fn make_test_ctx() -> (ActionContext, tempfile::TempDir) {
     let tmp = tempfile::tempdir().expect("tempdir");
 
     // Main DB with full migrations
-    let conn = crate::db::Connection::open_in_memory().expect("open in-memory db");
+    let conn = db::db::Connection::open_in_memory().expect("open in-memory db");
     db::db::migrations::run_all(&conn).expect("migrations");
     let db = ReadDbState::from_arc(Arc::new(Mutex::new(conn)));
 

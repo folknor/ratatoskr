@@ -6,14 +6,15 @@ use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
-use crate::email_actions::remove_inbox_label;
-use crate::progress::NoopProgressReporter;
+use db::db::queries::set_thread_starred;
+use db::progress::NoopProgressReporter;
 
-/// Local DB mutation for archive. Returns true if state changed.
-pub(crate) async fn archive_local(
+/// Local DB mutation for star. Returns true if state changed.
+pub(crate) async fn star_local(
     ctx: &ActionContext,
     account_id: &str,
     thread_id: &str,
+    starred: bool,
 ) -> Result<bool, ActionError> {
     let ctx_clone = ctx.clone();
     let aid = account_id.to_string();
@@ -24,7 +25,7 @@ pub(crate) async fn archive_local(
         let conn = conn
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        remove_inbox_label(&conn, &aid, &tid)
+        set_thread_starred(&conn, &aid, &tid, starred)
             .map(|n| n > 0)
             .map_err(ActionError::db)
     })
@@ -32,14 +33,16 @@ pub(crate) async fn archive_local(
     .map_err(|e| ActionError::db(format!("spawn_blocking: {e}")))?
 }
 
-/// Provider dispatch for archive (assumes local mutation already applied).
-async fn archive_dispatch(
+/// Provider dispatch for star (assumes local mutation already applied).
+async fn star_dispatch(
     ctx: &ActionContext,
     provider: &dyn ProviderOps,
     account_id: &str,
     thread_id: &str,
+    starred: bool,
 ) -> ActionOutcome {
-    let mlog = MutationLog::begin("archive", account_id, thread_id);
+    let mlog = MutationLog::begin("star", account_id, thread_id);
+    let params_json = format!(r#"{{"starred":{starred}}}"#);
 
     let provider_ctx = ProviderCtx {
         account_id,
@@ -50,7 +53,7 @@ async fn archive_dispatch(
         progress: &NoopProgressReporter,
     };
 
-    let outcome = match provider.archive(&provider_ctx, thread_id).await {
+    let outcome = match provider.star(&provider_ctx, thread_id, starred).await {
         Ok(()) => ActionOutcome::Success,
         Err(e) => {
             let msg = e.to_string();
@@ -60,16 +63,22 @@ async fn archive_dispatch(
             }
         }
     };
-    enqueue_if_retryable(ctx, &outcome, account_id, "archive", thread_id, "{}").await;
+    enqueue_if_retryable(ctx, &outcome, account_id, "star", thread_id, &params_json).await;
     mlog.emit(&outcome);
     outcome
 }
 
-/// Archive a single thread: remove from inbox locally, then dispatch to provider.
-pub async fn archive(ctx: &ActionContext, account_id: &str, thread_id: &str) -> ActionOutcome {
-    let mlog = MutationLog::begin("archive", account_id, thread_id);
+/// Toggle star on a single thread.
+pub async fn star(
+    ctx: &ActionContext,
+    account_id: &str,
+    thread_id: &str,
+    starred: bool,
+) -> ActionOutcome {
+    let mlog = MutationLog::begin("star", account_id, thread_id);
+    let params_json = format!(r#"{{"starred":{starred}}}"#);
 
-    match archive_local(ctx, account_id, thread_id).await {
+    match star_local(ctx, account_id, thread_id, starred).await {
         Err(e) => {
             let outcome = ActionOutcome::Failed { error: e };
             mlog.emit(&outcome);
@@ -80,29 +89,30 @@ pub async fn archive(ctx: &ActionContext, account_id: &str, thread_id: &str) -> 
     }
 
     match create_provider(&ctx.db, account_id, ctx.encryption_key).await {
-        Ok(provider) => archive_dispatch(ctx, &*provider, account_id, thread_id).await,
+        Ok(provider) => star_dispatch(ctx, &*provider, account_id, thread_id, starred).await,
         Err(e) => {
             let outcome = ActionOutcome::LocalOnly {
                 reason: ActionError::remote(e),
                 retryable: true,
             };
-            enqueue_if_retryable(ctx, &outcome, account_id, "archive", thread_id, "{}").await;
+            enqueue_if_retryable(ctx, &outcome, account_id, "star", thread_id, &params_json).await;
             mlog.emit(&outcome);
             outcome
         }
     }
 }
 
-/// Archive with a pre-constructed provider (for batch reuse).
-pub(crate) async fn archive_with_provider(
+/// Star with a pre-constructed provider (for batch reuse).
+pub(crate) async fn star_with_provider(
     ctx: &ActionContext,
     provider: &dyn ProviderOps,
     account_id: &str,
     thread_id: &str,
+    starred: bool,
 ) -> ActionOutcome {
-    let mlog = MutationLog::begin("archive", account_id, thread_id);
+    let mlog = MutationLog::begin("star", account_id, thread_id);
 
-    match archive_local(ctx, account_id, thread_id).await {
+    match star_local(ctx, account_id, thread_id, starred).await {
         Err(e) => {
             let outcome = ActionOutcome::Failed { error: e };
             mlog.emit(&outcome);
@@ -112,5 +122,5 @@ pub(crate) async fn archive_with_provider(
         Ok(true) => {}
     }
 
-    archive_dispatch(ctx, provider, account_id, thread_id).await
+    star_dispatch(ctx, provider, account_id, thread_id, starred).await
 }

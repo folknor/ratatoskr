@@ -4,7 +4,7 @@ use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::provider::create_provider;
-use crate::progress::NoopProgressReporter;
+use db::progress::NoopProgressReporter;
 use common::types::{ProviderCtx, ProviderFolderMutation};
 
 /// Build a `ProviderCtx` from an `ActionContext` and account ID.
@@ -97,7 +97,7 @@ pub async fn create_folder(
         let conn = conn
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        crate::db::queries_extra::action_helpers::upsert_folder_from_mutation_sync(
+        db::db::queries_extra::action_helpers::upsert_folder_from_mutation_sync(
             &conn,
             &m.id,
             &aid,
@@ -186,7 +186,7 @@ pub async fn rename_folder(
         let conn = conn
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        crate::db::queries_extra::action_helpers::upsert_folder_from_mutation_sync(
+        db::db::queries_extra::action_helpers::upsert_folder_from_mutation_sync(
             &conn,
             &fid,
             &aid,
@@ -262,7 +262,7 @@ pub async fn delete_folder(
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
         // Delete thread_labels first - no FK cascade from labels to thread_labels.
-        crate::db::queries_extra::action_helpers::delete_folder_sync(&conn, &aid, &fid)
+        db::db::queries_extra::action_helpers::delete_folder_sync(&conn, &aid, &fid)
             .map_err(ActionError::db)?;
         Ok(())
     })

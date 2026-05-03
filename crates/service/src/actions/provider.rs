@@ -1,4 +1,4 @@
-use crate::db::ReadDbState;
+use db::db::ReadDbState;
 use common::ops::ProviderOps;
 
 /// Create a provider ops instance for the given account.
@@ -16,7 +16,7 @@ pub async fn create_provider(
     let aid = account_id.to_string();
     let provider = db
         .with_conn(move |conn| {
-            crate::db::queries_extra::contacts::get_account_provider_sync(conn, &aid)
+            db::db::queries_extra::contacts::get_account_provider_sync(conn, &aid)
         })
         .await?;
 

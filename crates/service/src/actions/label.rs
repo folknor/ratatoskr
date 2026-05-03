@@ -7,7 +7,7 @@ use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
 use super::pending::enqueue_if_retryable;
 use super::provider::create_provider;
-use crate::progress::NoopProgressReporter;
+use db::progress::NoopProgressReporter;
 
 /// Local DB mutation for add-label: validate label exists and is a tag, then
 /// insert into `thread_labels` (idempotent).
@@ -29,7 +29,7 @@ pub(crate) async fn add_label_local(
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
-        let label_kind = crate::db::queries_extra::action_helpers::get_label_kind_sync(
+        let label_kind = db::db::queries_extra::action_helpers::get_label_kind_sync(
             &conn, &lid, &aid,
         )
         .map_err(|e| ActionError::db(format!("label lookup: {e}")))?
@@ -41,7 +41,7 @@ pub(crate) async fn add_label_local(
             ));
         }
 
-        crate::email_actions::insert_label(&conn, &aid, &tid, &lid).map_err(ActionError::db)?;
+        db::db::queries_extra::insert_label(&conn, &aid, &tid, &lid).map_err(ActionError::db)?;
 
         Ok(())
     })
@@ -172,7 +172,7 @@ pub(crate) async fn remove_label_local(
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
 
-        let label_kind = crate::db::queries_extra::action_helpers::get_label_kind_sync(
+        let label_kind = db::db::queries_extra::action_helpers::get_label_kind_sync(
             &conn, &lid, &aid,
         )
         .map_err(|e| ActionError::db(format!("label lookup: {e}")))?
@@ -184,7 +184,7 @@ pub(crate) async fn remove_label_local(
             ));
         }
 
-        crate::email_actions::remove_label(&conn, &aid, &tid, &lid).map_err(ActionError::db)?;
+        db::db::queries_extra::remove_label(&conn, &aid, &tid, &lid).map_err(ActionError::db)?;
 
         Ok(())
     })

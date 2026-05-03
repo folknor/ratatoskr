@@ -35,7 +35,10 @@ pub use ::db::progress;
 pub mod provider;
 pub mod scheduled_send;
 pub mod scope;
-pub mod send;
+// Phase 2 task 6: `core::send` moved to `service::send`. Re-export
+// the wire-shaped `SendAttachment` / `SendRequest` types via
+// `core::actions` (which now shims to `service::actions::*`); other
+// consumers go through `service::send` directly.
 pub use search;
 pub mod search_pipeline;
 pub use seen as seen_addresses;

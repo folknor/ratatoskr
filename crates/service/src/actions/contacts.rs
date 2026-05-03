@@ -6,9 +6,54 @@
 use super::context::ActionContext;
 use super::log::MutationLog;
 use super::outcome::{ActionError, ActionOutcome};
-use crate::db::queries_extra::contacts::{
+use db::db::queries_extra::contacts::{
     UpsertContactParams, db_delete_contact, db_upsert_contact_full,
 };
+
+// Phase 2 task 6: pure JSON-builder helpers inlined here to avoid a
+// service -> core back-dep. These were previously
+// `crate::contacts::sync_google::build_google_contact_update_body` and
+// `crate::contacts::sync_graph::build_graph_contact_update_body` in
+// core; both are pure functions over `phone / company / notes / etag`,
+// so duplicating ~10 lines is cheaper than dragging core's contact-sync
+// modules into service. (The originals remain in core for the
+// non-action contact-sync paths that still live there.)
+fn build_google_contact_update_body(
+    phone: Option<&str>,
+    company: Option<&str>,
+    notes: Option<&str>,
+    etag: &str,
+) -> serde_json::Value {
+    let mut person = serde_json::json!({ "etag": etag });
+    if let Some(phone_val) = phone {
+        person["phoneNumbers"] = serde_json::json!([{ "value": phone_val }]);
+    }
+    if let Some(company_val) = company {
+        person["organizations"] = serde_json::json!([{ "name": company_val }]);
+    }
+    if let Some(notes_val) = notes {
+        person["biographies"] = serde_json::json!([{ "value": notes_val }]);
+    }
+    person
+}
+
+fn build_graph_contact_update_body(
+    phone: Option<&str>,
+    company: Option<&str>,
+    notes: Option<&str>,
+) -> serde_json::Value {
+    let mut body = serde_json::json!({});
+    if let Some(phone_val) = phone {
+        body["homePhones"] = serde_json::json!([phone_val]);
+    }
+    if let Some(company_val) = company {
+        body["companyName"] = serde_json::Value::String(company_val.to_string());
+    }
+    if let Some(notes_val) = notes {
+        body["personalNotes"] = serde_json::Value::String(notes_val.to_string());
+    }
+    body
+}
 
 // ── Public types ─────────────────────────────────────────
 
@@ -143,7 +188,7 @@ pub async fn delete_contact(ctx: &ActionContext, contact_id: &str) -> ActionOutc
         let conn = conn
             .lock()
             .map_err(|e| ActionError::db(format!("db lock: {e}")))?;
-        crate::db::queries_extra::action_helpers::get_contact_meta_by_id_sync(&conn, &cid)
+        db::db::queries_extra::action_helpers::get_contact_meta_by_id_sync(&conn, &cid)
             .map_err(ActionError::db)?
             .ok_or_else(|| ActionError::not_found(format!("contact {cid} not found")))
     })
@@ -256,7 +301,7 @@ async fn dispatch_write_back(
                 gmail::client::GmailClient::from_account(&ctx.db, account_id, ctx.encryption_key)
                     .await
                     .map_err(ActionError::remote)?;
-            let body = crate::contacts::sync_google::build_google_contact_update_body(
+            let body = build_google_contact_update_body(
                 phone, company, notes, "*", // etag "*" = skip optimistic locking
             );
             let field_mask = update_fields.join(",");
@@ -275,8 +320,7 @@ async fn dispatch_write_back(
                 graph::client::GraphClient::from_account(&ctx.db, account_id, ctx.encryption_key)
                     .await
                     .map_err(ActionError::remote)?;
-            let body =
-                crate::contacts::sync_graph::build_graph_contact_update_body(phone, company, notes);
+            let body = build_graph_contact_update_body(phone, company, notes);
             client
                 .patch(&format!("/me/contacts/{server_id}"), &body, &ctx.db)
                 .await

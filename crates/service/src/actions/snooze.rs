@@ -18,8 +18,8 @@ pub async fn snooze(
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        crate::email_actions::remove_label(&conn, &aid, &tid, "INBOX")?;
-        crate::db::queries_extra::action_helpers::snooze_thread_sync(&conn, &aid, &tid, until)?;
+        db::db::queries_extra::remove_label(&conn, &aid, &tid, "INBOX")?;
+        db::db::queries_extra::action_helpers::snooze_thread_sync(&conn, &aid, &tid, until)?;
         Ok(())
     })
     .await
@@ -45,8 +45,8 @@ pub async fn unsnooze(ctx: &ActionContext, account_id: &str, thread_id: &str) ->
     let local_result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        crate::email_actions::insert_label(&conn, &aid, &tid, "INBOX")?;
-        crate::db::queries_extra::action_helpers::unsnooze_thread_sync(&conn, &aid, &tid)?;
+        db::db::queries_extra::insert_label(&conn, &aid, &tid, "INBOX")?;
+        db::db::queries_extra::action_helpers::unsnooze_thread_sync(&conn, &aid, &tid)?;
         Ok(())
     })
     .await

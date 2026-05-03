@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use crate::body_store::BodyStoreState;
-use crate::db::ReadDbState;
-use crate::search::SearchState;
+use store::body_store::BodyStoreState;
+use db::db::ReadDbState;
+use search::SearchState;
 use store::inline_image_store::InlineImageStoreState;
 
 /// Dependencies needed by the action service.
@@ -62,7 +62,7 @@ impl ActionContext {
         let conn = conn
             .lock()
             .map_err(|e| super::outcome::ActionError::db(format!("db lock: {e}")))?;
-        let exists = crate::db::queries_extra::action_helpers::thread_exists_sync(
+        let exists = db::db::queries_extra::action_helpers::thread_exists_sync(
             &conn,
             account_id,
             thread_id,

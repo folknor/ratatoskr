@@ -6,7 +6,7 @@
 
 use super::context::ActionContext;
 use super::outcome::{ActionError, ActionOutcome};
-use crate::db::pending_ops::{
+use db::db::pending_ops::{
     db_pending_ops_delete, db_pending_ops_enqueue, db_pending_ops_get,
     db_pending_ops_increment_retry, db_pending_ops_recover_executing, db_pending_ops_update_status,
 };
@@ -123,7 +123,7 @@ async fn process_account_group(
     ctx: &ActionContext,
     retry_ctx: &ActionContext,
     account_id: &str,
-    ops: Vec<crate::db::pending_ops::PendingOperation>,
+    ops: Vec<db::db::pending_ops::PendingOperation>,
 ) {
     use super::provider::create_provider;
 
@@ -229,7 +229,7 @@ async fn dispatch_pending_op(
             super::spam::spam(ctx, account_id, resource_id, is_spam).await
         }
         "moveToFolder" => {
-            let folder_id = crate::provider::typed_ids::FolderId::from(
+            let folder_id = common::typed_ids::FolderId::from(
                 params
                     .get("folderId")
                     .and_then(serde_json::Value::as_str)
@@ -238,7 +238,7 @@ async fn dispatch_pending_op(
             let source = params
                 .get("sourceLabelId")
                 .and_then(serde_json::Value::as_str)
-                .map(crate::provider::typed_ids::FolderId::from);
+                .map(common::typed_ids::FolderId::from);
             super::move_to_folder::move_to_folder(
                 ctx,
                 account_id,
@@ -266,7 +266,7 @@ async fn dispatch_pending_op(
             super::permanent_delete::permanent_delete(ctx, account_id, resource_id).await
         }
         "addLabel" => {
-            let label_id = crate::provider::typed_ids::TagId::from(
+            let label_id = common::typed_ids::TagId::from(
                 params
                     .get("labelId")
                     .and_then(serde_json::Value::as_str)
@@ -275,7 +275,7 @@ async fn dispatch_pending_op(
             super::label::add_label(ctx, account_id, resource_id, &label_id).await
         }
         "removeLabel" => {
-            let label_id = crate::provider::typed_ids::TagId::from(
+            let label_id = common::typed_ids::TagId::from(
                 params
                     .get("labelId")
                     .and_then(serde_json::Value::as_str)
@@ -295,7 +295,7 @@ async fn dispatch_pending_op(
 /// Re-dispatch a pending op using a pre-constructed provider (for provider reuse).
 async fn dispatch_pending_op_with_provider(
     ctx: &ActionContext,
-    provider: &dyn crate::provider::ops::ProviderOps,
+    provider: &dyn common::ops::ProviderOps,
     account_id: &str,
     operation_type: &str,
     resource_id: &str,
@@ -316,7 +316,7 @@ async fn dispatch_pending_op_with_provider(
             super::spam::spam_with_provider(ctx, provider, account_id, resource_id, is_spam).await
         }
         "moveToFolder" => {
-            let folder_id = crate::provider::typed_ids::FolderId::from(
+            let folder_id = common::typed_ids::FolderId::from(
                 params
                     .get("folderId")
                     .and_then(serde_json::Value::as_str)
@@ -325,7 +325,7 @@ async fn dispatch_pending_op_with_provider(
             let source = params
                 .get("sourceLabelId")
                 .and_then(serde_json::Value::as_str)
-                .map(crate::provider::typed_ids::FolderId::from);
+                .map(common::typed_ids::FolderId::from);
             super::move_to_folder::move_to_folder_with_provider(
                 ctx,
                 provider,
@@ -361,7 +361,7 @@ async fn dispatch_pending_op_with_provider(
             .await
         }
         "addLabel" => {
-            let label_id = crate::provider::typed_ids::TagId::from(
+            let label_id = common::typed_ids::TagId::from(
                 params
                     .get("labelId")
                     .and_then(serde_json::Value::as_str)
@@ -371,7 +371,7 @@ async fn dispatch_pending_op_with_provider(
                 .await
         }
         "removeLabel" => {
-            let label_id = crate::provider::typed_ids::TagId::from(
+            let label_id = common::typed_ids::TagId::from(
                 params
                     .get("labelId")
                     .and_then(serde_json::Value::as_str)
