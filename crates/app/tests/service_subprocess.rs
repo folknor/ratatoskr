@@ -64,9 +64,43 @@ impl Drop for DataDirGuard {
     }
 }
 
-fn binary_path() -> Result<&'static str, std::io::Error> {
+/// Resolve the path to the `app` binary the test should spawn.
+///
+/// Preferred source: the `BROKKR_TEST_BIN_DIR` env var that brokkr's test
+/// harness sets to the directory containing the just-rebuilt
+/// `build_packages` artefacts (see brokkr's README under "Env vars
+/// exported to `cargo test`"). This is the source of truth when brokkr
+/// is rebuilding `app` separately from the test crate's compile, which
+/// happens any time a `[[check]]` entry sets `build_packages = ["app"]`
+/// with feature flags that differ from the test crate's own compile.
+/// Reading `cfg!(debug_assertions)` is unreliable per the brokkr README
+/// because `[profile.test]` overrides can flip `debug-assertions` in the
+/// test binary even though the rebuilt binary lives under `debug/`.
+///
+/// Fallback: `CARGO_BIN_EXE_app`, the path cargo wires in at compile
+/// time of the test crate. This is correct under plain `cargo test` (no
+/// brokkr) and under `brokkr check` / `brokkr test` when `build_packages`
+/// is unset, since both point at the same binary in those cases. The
+/// fallback keeps test runs outside brokkr (`cargo test -p app
+/// service_subprocess_ping_and_shutdown`) working unchanged.
+fn binary_path() -> Result<std::path::PathBuf, std::io::Error> {
+    if let Ok(dir) = std::env::var("BROKKR_TEST_BIN_DIR") {
+        let candidate = std::path::PathBuf::from(dir).join("app");
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+        // BROKKR_TEST_BIN_DIR was set but the binary isn't there. Fall
+        // through to CARGO_BIN_EXE_app rather than erroring; the env var
+        // can outlive a stale cargo target dir, and the compile-time
+        // fallback is still correct in that case.
+    }
     option_env!("CARGO_BIN_EXE_app")
-        .ok_or_else(|| std::io::Error::other("CARGO_BIN_EXE_app not set"))
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| {
+            std::io::Error::other(
+                "neither BROKKR_TEST_BIN_DIR nor CARGO_BIN_EXE_app is set",
+            )
+        })
 }
 
 #[tokio::test]
@@ -155,7 +189,7 @@ where
 async fn dropping_client_terminates_child_within_one_second() -> TestResult {
     let binary = binary_path()?;
     let data_dir = DataDirGuard::new("drop_no_shutdown")?;
-    let client = ServiceClient::spawn_for_test(Path::new(binary), data_dir.path(), &[]).await?;
+    let client = ServiceClient::spawn_for_test(&binary, data_dir.path(), &[]).await?;
     let pid = client
         .child_pid()
         .ok_or_else(|| std::io::Error::other("child has no pid"))?;
@@ -274,7 +308,7 @@ async fn linux_parent_sigkill_terminates_service_within_two_seconds() -> TestRes
 async fn println_from_handler_does_not_corrupt_json_rpc_framing() -> TestResult {
     let binary = binary_path()?;
     let data_dir = DataDirGuard::new("println_defense")?;
-    let client = ServiceClient::spawn_for_test(Path::new(binary), data_dir.path(), &[]).await?;
+    let client = ServiceClient::spawn_for_test(&binary, data_dir.path(), &[]).await?;
 
     let _: () = client
         .request(RequestParams::TestPrintln {
@@ -297,7 +331,7 @@ async fn version_mismatch_surfaces_during_handshake() -> TestResult {
     let binary = binary_path()?;
     let data_dir = DataDirGuard::new("version_mismatch")?;
     let result = ServiceClient::spawn_for_test(
-        Path::new(binary),
+        &binary,
         data_dir.path(),
         &["--test-fake-version=999"],
     )
@@ -325,7 +359,7 @@ async fn version_mismatch_surfaces_during_handshake() -> TestResult {
 async fn pending_request_fails_with_service_crashed_when_child_killed() -> TestResult {
     let binary = binary_path()?;
     let data_dir = DataDirGuard::new("eof_during_pending")?;
-    let client = ServiceClient::spawn_for_test(Path::new(binary), data_dir.path(), &[]).await?;
+    let client = ServiceClient::spawn_for_test(&binary, data_dir.path(), &[]).await?;
     let pid = client
         .child_pid()
         .ok_or_else(|| std::io::Error::other("child has no pid"))?;
@@ -381,7 +415,7 @@ async fn spawn_with_events_emits_child_spawned_then_boot_ready_on_healthy_boot()
     let binary = binary_path()?;
     let data_dir = DataDirGuard::new("two_phase_happy")?;
     let mut events = ServiceClient::spawn_with_events_for_test(
-        std::path::PathBuf::from(binary),
+        binary,
         data_dir.path().to_path_buf(),
         Vec::new(),
     );
@@ -438,7 +472,7 @@ async fn spawn_with_events_emits_terminal_on_missing_key() -> TestResult {
     let binary = binary_path()?;
     let data_dir = DataDirGuard::without_key("two_phase_missing_key")?;
     let mut events = ServiceClient::spawn_with_events_for_test(
-        std::path::PathBuf::from(binary),
+        binary,
         data_dir.path().to_path_buf(),
         Vec::new(),
     );
@@ -555,7 +589,7 @@ async fn second_instance_against_same_data_dir_exits_with_already_running() -> T
     // Service A: spawn and wait for it to be past lock acquisition. The
     // ping/pong proves A has reached the dispatch loop, which only happens
     // after the lock is held.
-    let mut a = Command::new(binary)
+    let mut a = Command::new(&binary)
         .arg("--service")
         .arg("--app-data-dir")
         .arg(app_data_dir)
@@ -585,7 +619,7 @@ async fn second_instance_against_same_data_dir_exits_with_already_running() -> T
 
     // Service B: should exit with code 71 quickly. We don't drive its IPC -
     // the lock check fires before any tokio runtime work.
-    let mut b = Command::new(binary)
+    let mut b = Command::new(&binary)
         .arg("--service")
         .arg("--app-data-dir")
         .arg(app_data_dir)
@@ -633,7 +667,7 @@ async fn spawn_with_events_classifies_another_instance_running() -> TestResult {
     let app_data_dir = data_dir.path();
 
     // Service A: spawn and drive a ping so we know the lock is held.
-    let mut a = Command::new(binary)
+    let mut a = Command::new(&binary)
         .arg("--service")
         .arg("--app-data-dir")
         .arg(app_data_dir)
@@ -664,7 +698,7 @@ async fn spawn_with_events_classifies_another_instance_running() -> TestResult {
     // Terminal event carrying the structured AnotherInstanceRunning
     // classification.
     let mut events = ServiceClient::spawn_with_events_for_test(
-        std::path::PathBuf::from(binary),
+        binary,
         app_data_dir.to_path_buf(),
         Vec::new(),
     );
@@ -716,7 +750,7 @@ async fn respawn_after_sigkill_succeeds() -> TestResult {
     let binary = binary_path()?;
     let data_dir = DataDirGuard::new("respawn_after_sigkill")?;
     let mut events = ServiceClient::spawn_with_events_for_test(
-        std::path::PathBuf::from(binary),
+        binary,
         data_dir.path().to_path_buf(),
         Vec::new(),
     );
@@ -833,7 +867,7 @@ async fn pending_request_fails_at_respawn_then_subsequent_succeeds() -> TestResu
     let binary = binary_path()?;
     let data_dir = DataDirGuard::new("pending_fail_respawn_succeed")?;
     let mut events = ServiceClient::spawn_with_events_for_test(
-        std::path::PathBuf::from(binary),
+        binary,
         data_dir.path().to_path_buf(),
         Vec::new(),
     );
@@ -961,7 +995,7 @@ async fn terminal_failure_at_initial_boot_does_not_respawn() -> TestResult {
     let binary = binary_path()?;
     let data_dir = DataDirGuard::without_key("terminal_no_respawn")?;
     let mut events = ServiceClient::spawn_with_events_for_test(
-        std::path::PathBuf::from(binary),
+        binary,
         data_dir.path().to_path_buf(),
         Vec::new(),
     );
@@ -1059,7 +1093,7 @@ async fn crashloop_threshold_emits_terminal_after_third_crash() -> TestResult {
     let binary = binary_path()?;
     let data_dir = DataDirGuard::new("crashloop_threshold")?;
     let mut events = ServiceClient::spawn_with_events_for_test(
-        std::path::PathBuf::from(binary),
+        binary,
         data_dir.path().to_path_buf(),
         Vec::new(),
     );
@@ -1207,7 +1241,7 @@ async fn stale_notifications_dropped_after_generation_bump_end_to_end() -> TestR
     let binary = binary_path()?;
     let data_dir = DataDirGuard::new("stale_notif_e2e")?;
     let mut events = ServiceClient::spawn_with_events_for_test(
-        std::path::PathBuf::from(binary),
+        binary,
         data_dir.path().to_path_buf(),
         Vec::new(),
     );
@@ -1352,7 +1386,7 @@ async fn deadlocked_service_drop_escalates_to_kill() -> TestResult {
     // and park indefinitely instead of exiting cleanly. Drop must
     // SIGKILL it.
     let client = ServiceClient::spawn_for_test(
-        Path::new(binary),
+        &binary,
         data_dir.path(),
         &["--test-hang-on-stdin-eof"],
     )

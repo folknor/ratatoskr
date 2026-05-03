@@ -534,7 +534,13 @@ impl ServiceClient {
     /// `notification_should_dispatch` compares the tag against this value
     /// to drop notifications from a dying-but-still-flushing reader after
     /// a respawn (scope item 20 of `phase-1.5-plan.md`).
-    pub(crate) fn current_generation(&self) -> u32 {
+    ///
+    /// `pub` (not `pub(crate)`) because integration tests in
+    /// `crates/app/tests/service_subprocess.rs` live in a separate crate
+    /// and need to assert respawn bumped this counter end-to-end. The
+    /// counter exposes only the running incarnation count, no secret
+    /// state.
+    pub fn current_generation(&self) -> u32 {
         self.current_generation.load(Ordering::SeqCst)
     }
 
@@ -1430,6 +1436,7 @@ pub(crate) fn reader_should_enqueue(captured: u32, live: Option<u32>) -> bool {
 /// - `action.completed` (action service)
 /// - `push.event` (provider push delivery)
 /// - `OperationOutcome` (any future generic outcome notification)
+///
 /// Untagged variants are reserved for synthetic / test-only payloads.
 fn tag_notification_with_generation(
     notification: Notification,
