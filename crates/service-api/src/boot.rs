@@ -149,11 +149,28 @@ pub struct BootProgress {
 /// migrations-applied count; Phase 3 will extend with `tantivy_ready` and
 /// Phase 6 with the writers-initialized confirmation. Each future addition is
 /// one new field, not a new shape.
+///
+/// `recovery_warnings` carries non-fatal failures from the boot recovery
+/// steps (pending-ops recovery, queued-drafts sweep, thread-participants
+/// backfill). These are documented in `phase-1.5-plan.md` scope items 4 / 5
+/// / 5a as state-repair, not correctness gates - a failure leaves the DB in
+/// the same state the previous boot left it in. Surfacing them on the
+/// response gives the UI an observable signal for diagnostics
+/// ("boot ok but recovery had issues; check the logs") instead of forcing
+/// operators to grep `service.<pid>.log` for warn lines.
+///
+/// Empty Vec on a healthy boot. Skipped on the wire when empty so the
+/// payload doesn't grow on the common path. Each entry is a short
+/// human-readable label (e.g., "pending-ops recovery", "queued-drafts
+/// sweep") - the actual error detail stays in the rolling log file under
+/// the sensitive-value policy.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BootReadyResponse {
     pub ready: bool,
     pub schema_version: u32,
     pub migrations_applied: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovery_warnings: Vec<String>,
 }
 
 #[cfg(test)]
@@ -314,9 +331,54 @@ mod tests {
             ready: true,
             schema_version: 100,
             migrations_applied: 1,
+            recovery_warnings: Vec::new(),
         };
         let json = serde_json::to_value(&original).expect("serialize");
         let recovered: BootReadyResponse = serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
+    }
+
+    /// `recovery_warnings` round-trips when populated and is omitted from
+    /// the wire payload when empty (the common-case healthy boot path).
+    #[test]
+    fn boot_ready_response_recovery_warnings_round_trip() {
+        let with_warnings = BootReadyResponse {
+            ready: true,
+            schema_version: 100,
+            migrations_applied: 0,
+            recovery_warnings: vec![
+                "pending-ops recovery".to_string(),
+                "thread-participants backfill".to_string(),
+            ],
+        };
+        let json = serde_json::to_value(&with_warnings).expect("serialize");
+        let recovered: BootReadyResponse = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(with_warnings, recovered);
+
+        let empty = BootReadyResponse {
+            ready: true,
+            schema_version: 100,
+            migrations_applied: 0,
+            recovery_warnings: Vec::new(),
+        };
+        let json_str = serde_json::to_string(&empty).expect("serialize");
+        assert!(
+            !json_str.contains("recovery_warnings"),
+            "empty recovery_warnings must be omitted from the wire payload, got: {json_str}",
+        );
+    }
+
+    /// Older Service builds omit the field entirely. Defaulting to an empty
+    /// Vec keeps the deserialize-side robust against forward/backward
+    /// shipping skew during a UI/Service upgrade.
+    #[test]
+    fn boot_ready_response_recovery_warnings_default_when_absent() {
+        let json = serde_json::json!({
+            "ready": true,
+            "schema_version": 100,
+            "migrations_applied": 0
+        });
+        let recovered: BootReadyResponse = serde_json::from_value(json).expect("deserialize");
+        assert!(recovered.recovery_warnings.is_empty());
     }
 }

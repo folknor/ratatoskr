@@ -164,6 +164,15 @@ impl ReadyApp {
             boot_response.schema_version,
             boot_response.migrations_applied,
         );
+        if !boot_response.recovery_warnings.is_empty() {
+            log::warn!(
+                "Service boot completed with {} recovery warning(s); state-repair steps that did \
+                 not run cleanly: {}. The boot succeeded; the next boot will retry. See the \
+                 service log for the underlying errors.",
+                boot_response.recovery_warnings.len(),
+                boot_response.recovery_warnings.join(", "),
+            );
+        }
         let data_dir = crate::APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
         let db = Arc::new(
             Db::open(data_dir).expect("UI-side DB open after Service handshake"),

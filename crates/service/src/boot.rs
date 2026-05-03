@@ -47,6 +47,12 @@ pub(crate) struct BootContext {
     /// Number of migrations actually applied this boot. 0 on a healthy
     /// repeat boot; non-zero only on first-run or after a schema bump.
     pub(crate) migrations_applied: u32,
+    /// Short human-readable labels for each recovery step that failed
+    /// non-fatally. Empty on a healthy boot. Echoed to the UI in
+    /// `BootReadyResponse.recovery_warnings` so the splash transition can
+    /// surface "boot ok but recovery had issues" without the UI having to
+    /// grep the rolling log file.
+    pub(crate) recovery_warnings: Vec<String>,
 }
 
 /// Per-Service-instance boot state. The boot task populates `result` (and
@@ -152,6 +158,7 @@ pub(crate) async fn run_boot_sequence(
                 ready: true,
                 schema_version: ctx.schema_version,
                 migrations_applied: ctx.migrations_applied,
+                recovery_warnings: ctx.recovery_warnings.clone(),
             }),
             Some(ctx),
         ),
@@ -222,6 +229,7 @@ async fn run_boot_sequence_inner(
     };
 
     let conn = Arc::new(Mutex::new(conn));
+    let mut recovery_warnings: Vec<String> = Vec::new();
 
     boot_progress::emit(&out_tx, BootPhase::RecoveringPendingOps, None);
     if let Err(error) = run_boot_recovery(&conn, "pending-ops recovery", |c| {
@@ -230,6 +238,7 @@ async fn run_boot_sequence_inner(
     .await
     {
         log::warn!("pending-ops boot recovery failed: {error}");
+        recovery_warnings.push("pending-ops recovery".to_string());
     }
 
     boot_progress::emit(&out_tx, BootPhase::SweepingQueuedDrafts, None);
@@ -243,6 +252,7 @@ async fn run_boot_sequence_inner(
     .await
     {
         log::warn!("queued-drafts sweep failed: {error}");
+        recovery_warnings.push("queued-drafts sweep".to_string());
     }
 
     boot_progress::emit(&out_tx, BootPhase::BackfillingThreadParticipants, None);
@@ -252,6 +262,7 @@ async fn run_boot_sequence_inner(
     .await
     {
         log::warn!("thread-participants backfill failed: {error}");
+        recovery_warnings.push("thread-participants backfill".to_string());
     }
 
     Ok(BootContext {
@@ -259,6 +270,7 @@ async fn run_boot_sequence_inner(
         db_conn: conn,
         schema_version,
         migrations_applied,
+        recovery_warnings,
     })
 }
 

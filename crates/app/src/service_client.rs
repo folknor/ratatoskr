@@ -7,6 +7,7 @@ use service_api::{
     RequestParams, RequestTimeoutKind, ServiceError, ServiceResponse, ShutdownResponse,
     encode_message, parse_service_message,
 };
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex, PoisonError, Weak,
@@ -19,6 +20,19 @@ use tokio::sync::{mpsc, oneshot};
 
 const STDIN_QUEUE_CAP: usize = 1024;
 const NOTIFICATION_QUEUE_CAP: usize = 1024;
+
+/// Sliding-window crashloop bound for the post-Ready respawn loop. A
+/// runtime crash that produces an `UnexpectedExit` (signal-killed, unknown
+/// numeric code) does NOT match `BootExitCode::from_i32`, so the
+/// terminal-no-respawn policy doesn't fire and the respawn loop keeps
+/// going. The 1 s sleep before respawn is the only other bound, which
+/// caps CPU at ~one Service per second forever - per-PID log naming would
+/// turn that into 86 400 log files per day. This crashloop guard turns the
+/// loop terminal after `CRASHLOOP_THRESHOLD` respawns within
+/// `CRASHLOOP_WINDOW`. Phase 8 replaces this with exponential backoff +
+/// real telemetry; for v1 a flat threshold is enough.
+const CRASHLOOP_WINDOW: Duration = Duration::from_secs(30);
+const CRASHLOOP_THRESHOLD: usize = 3;
 
 pub type ServiceNotificationReceiver = Arc<NotificationQueue>;
 
@@ -74,6 +88,11 @@ pub struct ServiceClient {
     is_shutting_down: AtomicBool,
     /// Per-client respawn knobs; `None` on the test single-shot spawn path.
     respawn_config: Option<RespawnConfig>,
+    /// Sliding-window timestamps of recent respawns. `handle_crash`
+    /// pushes onto this before launching a replacement; the crashloop
+    /// guard fires when `CRASHLOOP_THRESHOLD` entries land within
+    /// `CRASHLOOP_WINDOW`. See [`CrashloopTracker::record_and_check`].
+    respawn_attempts: Mutex<VecDeque<Instant>>,
     /// Cross-platform parent-death tie-up. Held for the lifetime of the
     /// client so the OS-level safety net (Job Object on Windows) survives
     /// any failure in our explicit Drop teardown. Listed last so it drops
@@ -337,6 +356,7 @@ impl ServiceClient {
             current_generation: AtomicU32::new(0),
             is_shutting_down: AtomicBool::new(false),
             respawn_config,
+            respawn_attempts: Mutex::new(VecDeque::new()),
             _process_guard: process_guard,
         });
 
@@ -775,6 +795,31 @@ impl ServiceClient {
                 .spawn_event_tx
                 .send(SpawnEvent::Terminal(ClientError::BootFailure {
                     classification: BootClassification::BootFailure { code: boot_code },
+                }))
+                .await;
+            return;
+        }
+
+        // Crashloop guard. The 1 s sleep above bounds CPU at one Service
+        // per second; under signal-killed crashloops that is still enough
+        // to fill `<app_data>/logs/` with thousands of files per hour and
+        // exhaust the rest-of-day's disk budget on a busy host. The
+        // sliding-window tracker fires Terminal after CRASHLOOP_THRESHOLD
+        // respawns within CRASHLOOP_WINDOW. The classification carries the
+        // dying child's exit code so the user-visible message names what
+        // kind of exit was repeating.
+        let now = Instant::now();
+        if record_respawn_and_check_crashloop(&self.respawn_attempts, now) {
+            let classification =
+                BootClassification::from_exit_code(exit_status.and_then(|s| s.code()));
+            log::error!(
+                "crashloop detected ({CRASHLOOP_THRESHOLD} respawns within {CRASHLOOP_WINDOW:?}); \
+                 terminating with {classification:?}",
+            );
+            let _ = respawn
+                .spawn_event_tx
+                .send(SpawnEvent::Terminal(ClientError::BootFailure {
+                    classification,
                 }))
                 .await;
             return;
@@ -1242,6 +1287,14 @@ async fn reader_task<R>(
                     }
                 }
                 Ok(ParsedServiceMessage::Notification(notification)) => {
+                    let live = weak_client.upgrade().map(|c| c.current_generation());
+                    if !reader_should_enqueue(generation, live) {
+                        log::debug!(
+                            "reader_task(gen={generation}): dropping stale notification \
+                             (current_generation now {live:?})",
+                        );
+                        continue;
+                    }
                     let tagged = tag_notification_with_generation(notification, generation);
                     notifications.enqueue(tagged).await;
                 }
@@ -1262,6 +1315,45 @@ async fn reader_task<R>(
             }
         }
     }
+}
+
+/// Sliding-window crashloop tracker. Pushes `now` onto the deque, evicts
+/// entries older than `CRASHLOOP_WINDOW`, and returns `true` when the deque
+/// reaches `CRASHLOOP_THRESHOLD` entries (i.e., this is the threshold-th
+/// respawn within the window). Extracted for testability; the `now`
+/// parameter lets unit tests drive the clock without depending on real
+/// time.
+fn record_respawn_and_check_crashloop(
+    queue: &Mutex<VecDeque<Instant>>,
+    now: Instant,
+) -> bool {
+    let mut guard = queue.lock().unwrap_or_else(PoisonError::into_inner);
+    // Evict expired entries. checked_sub guards against the (effectively
+    // never) startup case where Instant::now() is younger than the window.
+    if let Some(cutoff) = now.checked_sub(CRASHLOOP_WINDOW) {
+        while guard.front().is_some_and(|t| *t < cutoff) {
+            guard.pop_front();
+        }
+    }
+    guard.push_back(now);
+    guard.len() >= CRASHLOOP_THRESHOLD
+}
+
+/// Pre-queue gate for the reader task. Returns `true` if the reader's
+/// captured generation still matches the live `current_generation`. Used to
+/// drop stale notifications BEFORE they enter the queue, where the per-phase
+/// `CoalesceKey::BootProgress` coalesce policy would let a stale-generation
+/// `BootProgress` overwrite a fresh-generation one in its slot - the
+/// dispatch-side `notification_should_dispatch` check then drops the (stale)
+/// replacement, taking the fresh update with it. The reader-side gate closes
+/// that window.
+///
+/// The `live` parameter is `None` when `weak_client.upgrade()` returned None
+/// (the App has dropped the client and we're shutting down anyway). Treat
+/// that as "no live generation", which collapses to "drop" - the reader is
+/// about to exit and the queue will drain.
+pub(crate) fn reader_should_enqueue(captured: u32, live: Option<u32>) -> bool {
+    matches!(live, Some(current) if current == captured)
 }
 
 /// Tag `BootProgress` with the reader's fixed generation so the dispatch
@@ -1713,6 +1805,133 @@ mod tests {
             BootFailureReason::Other(_) => {}
             other => panic!("expected Other, got {other:?}"),
         }
+    }
+
+    /// Crashloop tracker: the first two respawns are not crashloops; the
+    /// third within the window is. Drives the clock manually so the test
+    /// doesn't depend on wall time.
+    #[test]
+    fn crashloop_tracker_fires_on_third_respawn_within_window() {
+        let queue: Mutex<VecDeque<Instant>> = Mutex::new(VecDeque::new());
+        let t0 = Instant::now();
+        assert!(!record_respawn_and_check_crashloop(&queue, t0));
+        assert!(!record_respawn_and_check_crashloop(
+            &queue,
+            t0 + Duration::from_secs(5),
+        ));
+        assert!(record_respawn_and_check_crashloop(
+            &queue,
+            t0 + Duration::from_secs(10),
+        ));
+    }
+
+    /// Crashloop tracker evicts entries older than the window, so a slow
+    /// drip of respawns never trips the bound. The first respawn at t0
+    /// drops out before the third at t0+CRASHLOOP_WINDOW+1s, leaving the
+    /// queue with two recent entries - below threshold.
+    #[test]
+    fn crashloop_tracker_evicts_old_entries() {
+        let queue: Mutex<VecDeque<Instant>> = Mutex::new(VecDeque::new());
+        let t0 = Instant::now();
+        assert!(!record_respawn_and_check_crashloop(&queue, t0));
+        assert!(!record_respawn_and_check_crashloop(
+            &queue,
+            t0 + Duration::from_secs(15),
+        ));
+        // CRASHLOOP_WINDOW is 30 s; advance to 31 s past t0 so the first
+        // entry has expired.
+        assert!(!record_respawn_and_check_crashloop(
+            &queue,
+            t0 + Duration::from_secs(31),
+        ));
+    }
+
+    /// Pre-queue gate accepts the reader's notification when generations
+    /// match.
+    #[test]
+    fn reader_should_enqueue_passes_when_generations_match() {
+        assert!(reader_should_enqueue(3, Some(3)));
+    }
+
+    /// Pre-queue gate drops the reader's notification when generations
+    /// differ - a respawn has happened and this reader is from the dying
+    /// incarnation.
+    #[test]
+    fn reader_should_enqueue_drops_when_generations_differ() {
+        assert!(!reader_should_enqueue(3, Some(4)));
+        assert!(!reader_should_enqueue(3, Some(2)));
+    }
+
+    /// Pre-queue gate drops when the live generation is None (the client
+    /// has been dropped). The reader is about to exit anyway.
+    #[test]
+    fn reader_should_enqueue_drops_when_no_live_client() {
+        assert!(!reader_should_enqueue(3, None));
+    }
+
+    /// End-to-end: a stale `BootProgress` filtered at the reader's pre-queue
+    /// gate cannot overwrite a fresh `BootProgress` in the queue's coalesce
+    /// slot. Without the reader-side gate, a stale gen=1 `Migrating(1, 10)`
+    /// arriving after a fresh gen=2 `Migrating(5, 10)` would replace it
+    /// (per-phase coalesce key, generation not part of the key); the
+    /// dispatch-side check would then drop the merged (stale-tagged)
+    /// notification, losing the fresh update with it. Pin the property:
+    /// after the gate, only fresh notifications reach the queue.
+    #[tokio::test]
+    async fn stale_reader_notifications_never_enter_the_queue() {
+        let queue: crate::notification_queue::NotificationQueue<Notification> =
+            crate::notification_queue::NotificationQueue::new(8);
+
+        let live_gen = 2u32;
+
+        // Fresh reader (gen=2) enqueues. Gate passes.
+        let fresh = tag_notification_with_generation(
+            Notification::BootProgress(service_api::BootProgress {
+                phase: service_api::BootPhase::Migrating {
+                    current: 5,
+                    total: 10,
+                },
+                message: None,
+                service_generation: 0,
+            }),
+            2,
+        );
+        if reader_should_enqueue(2, Some(live_gen)) {
+            queue.enqueue(fresh).await;
+        }
+
+        // Stale reader (gen=1) tries to enqueue after a respawn. Gate drops.
+        let stale = tag_notification_with_generation(
+            Notification::BootProgress(service_api::BootProgress {
+                phase: service_api::BootPhase::Migrating {
+                    current: 1,
+                    total: 10,
+                },
+                message: None,
+                service_generation: 0,
+            }),
+            1,
+        );
+        if reader_should_enqueue(1, Some(live_gen)) {
+            queue.enqueue(stale).await;
+        }
+
+        // Only the fresh notification is in the queue.
+        let received = queue
+            .recv()
+            .await
+            .expect("queue should have the fresh notification");
+        match received {
+            Notification::BootProgress(bp) => {
+                assert_eq!(bp.service_generation, 2);
+                assert!(matches!(
+                    bp.phase,
+                    service_api::BootPhase::Migrating { current: 5, total: 10 }
+                ));
+            }
+        }
+        queue.close();
+        assert!(queue.recv().await.is_none(), "queue must be empty");
     }
 
     /// End-to-end: tag a notification with the reader's gen, then run the
