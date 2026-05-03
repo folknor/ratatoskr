@@ -31,10 +31,23 @@
 //   ServiceShutdownComplete(Result<(), _>)         - drop (no Service exists)
 //
 // Window / appearance:
-//   WindowResized(id, size)                        - handle (apply to single
-//                                                    main window if id matches)
-//   WindowMoved(id, point)                         - handle (same)
-//   WindowCloseRequested(id)                       - handle (iced::exit if main)
+//   WindowResized(id, size)                        - drop (BootingApp does
+//                                                    not own a WindowState;
+//                                                    ReadyApp loads the saved
+//                                                    geometry from disk on
+//                                                    transition. The splash
+//                                                    is short-lived enough
+//                                                    that mid-boot resizes
+//                                                    not being persisted is
+//                                                    acceptable.)
+//   WindowMoved(id, point)                         - drop (same reason)
+//   WindowCloseRequested(id)                       - handle (iced::exit if
+//                                                    id matches main window;
+//                                                    drop otherwise. Only
+//                                                    the main window exists
+//                                                    during Booting, so the
+//                                                    drop arm is unreachable
+//                                                    in practice.)
 //   AppearanceChanged(mode)                        - forward (stash for Ready)
 //
 // Harmless / no state:

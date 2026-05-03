@@ -1271,7 +1271,15 @@ async fn heartbeat_task(
         match result {
             Ok(value) => match serde_json::from_value::<HealthPingResponse>(value) {
                 Ok(_) => log::debug!("service heartbeat ok in {:?}", started.elapsed()),
-                Err(error) => log::warn!("service heartbeat decode failed: {error}"),
+                Err(error) => {
+                    // Decode failure is a hard error per scope item 16's
+                    // "anything else: hard, respawn" catch-all. A Service
+                    // that answered `health.ping` with an unparseable body
+                    // is wedged in a state we cannot recover from in-place.
+                    log::warn!("service heartbeat decode failed: {error}; triggering respawn");
+                    trigger_crash_handler(&weak_client, generation);
+                    return;
+                }
             },
             Err(ClientError::Timeout) => {
                 // Per scope item 16: Timeout is transient and does NOT

@@ -599,13 +599,23 @@ impl BootingApp {
             return crate::ui::widgets::empty_placeholder("", "");
         }
         let label = self.splash.label();
-        let detail = self.splash.message.clone().unwrap_or_else(|| {
-            if let Some(service_api::BootPhase::Migrating { current, total }) = self.splash.phase {
-                format!("Migration {current} of {total}")
-            } else {
-                "Ratatoskr is starting...".to_string()
+        // For Migrating, always show the count - even if the Service emitted
+        // a human-readable message, the user benefits from seeing concrete
+        // progress on a long migration. For other phases, fall back to the
+        // optional message, then a generic placeholder.
+        let detail = match self.splash.phase {
+            Some(service_api::BootPhase::Migrating { current, total }) => {
+                match self.splash.message.as_deref() {
+                    Some(msg) => format!("{msg} ({current}/{total})"),
+                    None => format!("Migration {current} of {total}"),
+                }
             }
-        });
+            _ => self
+                .splash
+                .message
+                .clone()
+                .unwrap_or_else(|| "Ratatoskr is starting...".to_string()),
+        };
         iced::widget::container(
             iced::widget::column![
                 iced::widget::text("Ratatoskr").size(28),

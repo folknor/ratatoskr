@@ -45,6 +45,14 @@ where
     W: AsyncWrite + Unpin + Send + 'static,
 {
     let started_at = Instant::now();
+
+    // Clear the clean_shutdown sentinel before the boot sequence runs. Phase
+    // 3+ cross-store recovery uses sentinel-absent-at-boot as its trigger;
+    // without this, the marker would persist across reboots and recovery
+    // would never fire. Lock acquisition has already gated this call site, so
+    // a contending second instance cannot race us.
+    lifecycle.clear_sentinel().await;
+
     let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_QUEUE_CAP);
     let writer_handle = tokio::spawn(writer_task(writer, out_rx));
     let inflight = Arc::new(Semaphore::new(MAX_IN_FLIGHT));
