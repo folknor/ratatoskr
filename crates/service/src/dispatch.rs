@@ -351,6 +351,7 @@ fn error_outcome_kind(error: &ServiceError) -> &'static str {
         ServiceError::UnknownMethod(_) => "unknown_method",
         ServiceError::Internal(_) => "internal",
         ServiceError::Backpressure => "backpressure",
+        ServiceError::BootFailure { .. } => "boot_failure",
     }
 }
 

@@ -1,7 +1,8 @@
 use app::service_client::{ClientError, ServiceClient, SpawnEvent};
 use service_api::{
-    BootExitCode, BoundedLineReader, HealthPingResponse, JsonRpcRequest, ParsedServiceMessage,
-    RequestParams, ServiceResponse, ShutdownResponse, parse_service_message, write_message,
+    BootClassification, BootExitCode, BoundedLineReader, HealthPingResponse, JsonRpcRequest,
+    ParsedServiceMessage, RequestParams, ServiceError, ServiceResponse, ShutdownResponse,
+    parse_service_message, write_message,
 };
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -418,10 +419,15 @@ async fn spawn_with_events_emits_child_spawned_then_boot_ready_on_healthy_boot()
 }
 
 /// `spawn_with_events` against a data dir without `ratatoskr.key`: ping
-/// succeeds (Service is up), so ChildSpawned arrives. boot.ready then
-/// fails when the Service exits with KeyLoadFailure. Either the boot.ready
-/// reply carries the Service error, or the Service has already exited and
-/// the request fails with ServiceCrashed - either is a valid Terminal.
+/// succeeds (Service is up), so ChildSpawned arrives. boot.ready then fails
+/// because the boot sequence's key-load step exits the Service with
+/// `BootExitCode::KeyLoadFailure`. The Terminal must carry the structured
+/// `BootFailure { code: KeyLoadFailure }` classification - either via
+/// `ServiceError::BootFailure` on the wire (if the Service flushed the
+/// response before exiting) or via the dying child's exit-code elevation
+/// in `run_spawn_flow` (if the Service exited first). Both paths land at
+/// the same classified terminal-failure surface so the UI shows the
+/// "Encryption key missing or unreadable" message.
 #[tokio::test(flavor = "multi_thread")]
 async fn spawn_with_events_emits_terminal_on_missing_key() -> TestResult {
     let binary = binary_path()?;
@@ -440,13 +446,10 @@ async fn spawn_with_events_emits_terminal_on_missing_key() -> TestResult {
         SpawnEvent::ChildSpawned(client) => client,
         SpawnEvent::Terminal(error) => {
             // It's also valid for spawn-time to fail before ChildSpawned if
-            // the version-check ping never gets answered - but with the
-            // Service successfully starting up + answering ping, this path
-            // is unlikely. Fall through with the error.
-            return Err(std::io::Error::other(format!(
-                "expected ChildSpawned (Service should answer ping), got Terminal: {error:?}"
-            ))
-            .into());
+            // the version-check ping never gets answered. In that case the
+            // error must already carry the classification.
+            assert_terminal_is_key_load_failure(&error);
+            return Ok(());
         }
         SpawnEvent::BootReady(_) => {
             return Err(std::io::Error::other(
@@ -461,7 +464,7 @@ async fn spawn_with_events_emits_terminal_on_missing_key() -> TestResult {
         .map_err(|_| std::io::Error::other("Terminal did not arrive in time"))?
         .ok_or_else(|| std::io::Error::other("event stream closed without second event"))?;
     match second {
-        SpawnEvent::Terminal(_error) => {}
+        SpawnEvent::Terminal(error) => assert_terminal_is_key_load_failure(&error),
         other => {
             return Err(std::io::Error::other(format!(
                 "expected Terminal second, got {other:?}"
@@ -470,6 +473,33 @@ async fn spawn_with_events_emits_terminal_on_missing_key() -> TestResult {
         }
     }
     Ok(())
+}
+
+/// Pin the contract that a missing-key Terminal carries the structured
+/// classification. Two valid shapes per `BootFailureReason::from_client_error`:
+///
+/// - `ClientError::Service(ServiceError::BootFailure { code: KeyLoadFailure })`
+///   - the boot.ready response was flushed before the Service exited.
+/// - `ClientError::BootFailure { classification: BootFailure { KeyLoadFailure } }`
+///   - the Service exited before the response was flushed and the spawn
+///     flow elevated `ServiceCrashed` / `Timeout` from the dying child's
+///     exit code.
+///
+/// Anything else (raw `ServiceCrashed`, generic `Internal`, etc.) means the
+/// initial-boot classification path regressed; fail loudly.
+fn assert_terminal_is_key_load_failure(error: &ClientError) {
+    match error {
+        ClientError::Service(ServiceError::BootFailure {
+            code: BootExitCode::KeyLoadFailure,
+        }) => {}
+        ClientError::BootFailure {
+            classification:
+                BootClassification::BootFailure {
+                    code: BootExitCode::KeyLoadFailure,
+                },
+        } => {}
+        other => panic!("expected classified KeyLoadFailure, got {other:?}"),
+    }
 }
 
 /// Spawning a Service against a data dir without a `ratatoskr.key` file
@@ -568,6 +598,97 @@ async fn second_instance_against_same_data_dir_exits_with_already_running() -> T
     );
 
     // Clean teardown of A so the lock is released.
+    write_message(
+        &JsonRpcRequest::new(2, &RequestParams::Shutdown),
+        &mut a_stdin,
+    )
+    .await?;
+    let (id, _response) = read_response(&mut a_reader).await?;
+    assert_eq!(id, Some(2));
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), a.wait()).await??;
+    Ok(())
+}
+
+/// The headline initial-boot classification test the post-Phase-1.5 review
+/// flagged: a second instance against a contended lock must surface
+/// `Terminal(BootFailure { AnotherInstanceRunning })` to the App, NOT the
+/// generic `ServiceCrashed` that earlier paths produced. This is what makes
+/// the user see "Ratatoskr is already running." instead of "Service boot
+/// failed: service crashed."
+///
+/// The Service exits with code 71 BEFORE answering the version-check ping,
+/// so the AnotherInstanceRunning case can only be classified via the spawn
+/// flow's exit-code elevation - the wire-side `ServiceError::BootFailure`
+/// path never fires for this case (the Service is gone before its dispatch
+/// loop even reads stdin).
+#[tokio::test(flavor = "multi_thread")]
+async fn spawn_with_events_classifies_another_instance_running() -> TestResult {
+    let binary = binary_path()?;
+    let data_dir = DataDirGuard::new("two_phase_another_instance")?;
+    let app_data_dir = data_dir.path();
+
+    // Service A: spawn and drive a ping so we know the lock is held.
+    let mut a = Command::new(binary)
+        .arg("--service")
+        .arg("--app-data-dir")
+        .arg(app_data_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()?;
+    let mut a_stdin = a
+        .stdin
+        .take()
+        .ok_or_else(|| std::io::Error::other("missing a stdin"))?;
+    let a_stdout = a
+        .stdout
+        .take()
+        .ok_or_else(|| std::io::Error::other("missing a stdout"))?;
+    let mut a_reader = BoundedLineReader::new(a_stdout, service_api::MAX_FRAME_BYTES);
+    write_message(
+        &JsonRpcRequest::new(1, &RequestParams::HealthPing),
+        &mut a_stdin,
+    )
+    .await?;
+    let (id, _response) = read_response(&mut a_reader).await?;
+    assert_eq!(id, Some(1));
+
+    // Service B: drive through `spawn_with_events_for_test` so the spawn
+    // flow's exit-code elevation has a chance to run. Expect a single
+    // Terminal event carrying the structured AnotherInstanceRunning
+    // classification.
+    let mut events = ServiceClient::spawn_with_events_for_test(
+        std::path::PathBuf::from(binary),
+        app_data_dir.to_path_buf(),
+        Vec::new(),
+    );
+    let event = tokio::time::timeout(std::time::Duration::from_secs(10), events.recv())
+        .await
+        .map_err(|_| std::io::Error::other("Terminal did not arrive"))?
+        .ok_or_else(|| std::io::Error::other("event stream closed empty"))?;
+
+    match event {
+        SpawnEvent::Terminal(error) => match error {
+            ClientError::BootFailure {
+                classification:
+                    BootClassification::BootFailure {
+                        code: BootExitCode::AnotherInstanceRunning,
+                    },
+            } => {}
+            other => panic!(
+                "expected Terminal(BootFailure {{ AnotherInstanceRunning }}), got {other:?}",
+            ),
+        },
+        SpawnEvent::ChildSpawned(_) | SpawnEvent::BootReady(_) => {
+            panic!("Service B should not reach ChildSpawned / BootReady against contended lock");
+        }
+    }
+
+    // Drain so we don't leave a dangling event channel.
+    drop(events);
+
+    // Clean teardown of A.
     write_message(
         &JsonRpcRequest::new(2, &RequestParams::Shutdown),
         &mut a_stdin,
@@ -716,9 +837,10 @@ async fn terminal_failure_at_initial_boot_does_not_respawn() -> TestResult {
         .ok_or_else(|| std::io::Error::other("event stream closed empty"))?;
     let _client = match first {
         SpawnEvent::ChildSpawned(client) => client,
-        SpawnEvent::Terminal(_) => {
+        SpawnEvent::Terminal(error) => {
             // Allowed: spawn might fail before ChildSpawned in some
-            // environments, in which case there's nothing left to test.
+            // environments. The classification must still be correct.
+            assert_terminal_is_key_load_failure(&error);
             return Ok(());
         }
         other => {
@@ -733,7 +855,7 @@ async fn terminal_failure_at_initial_boot_does_not_respawn() -> TestResult {
         .map_err(|_| std::io::Error::other("Terminal did not arrive in time"))?
         .ok_or_else(|| std::io::Error::other("event stream closed without Terminal"))?;
     match second {
-        SpawnEvent::Terminal(_) => {}
+        SpawnEvent::Terminal(error) => assert_terminal_is_key_load_failure(&error),
         other => {
             return Err(std::io::Error::other(format!(
                 "expected Terminal, got {other:?}"

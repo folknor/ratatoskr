@@ -3,11 +3,11 @@
 //! Awaits the Service boot sequence's completion (key load, DB open +
 //! migrations, pending-ops recovery, queued-drafts sweep, thread-
 //! participants backfill) and returns a `BootReadyResponse` to the UI. On
-//! boot failure, returns a `ServiceError::Internal` describing the
-//! classification - though the UI usually observes failure via the dying
-//! child's exit code rather than a `boot.ready` reply, since the dispatch
-//! loop breaks out and the writer task closes shortly after the failure
-//! signal propagates.
+//! boot failure, returns a structured `ServiceError::BootFailure { code }`
+//! so the UI can recover the same `BootExitCode` discriminator it would
+//! observe from the dying child's exit code. Whichever path the failure
+//! takes - response-flushed-before-exit or exit-before-response - the UI
+//! reaches the same classified terminal-failure surface.
 //!
 //! The handler bypasses both the per-handler semaphore and the dispatch-
 //! loop admission cap (via `RequestParams::bypasses_admission()`), because
@@ -21,11 +21,11 @@ use service_api::ServiceError;
 use std::sync::Arc;
 
 pub(super) async fn handle(state: &Arc<BootSharedState>) -> Result<Value, ServiceError> {
-    let response = state.wait_for_ready().await.map_err(|failure| {
-        ServiceError::Internal(format!(
-            "boot sequence failed: {failure:?} (exit code {})",
-            failure.as_exit_code().as_i32()
-        ))
-    })?;
+    let response = state
+        .wait_for_ready()
+        .await
+        .map_err(|failure| ServiceError::BootFailure {
+            code: failure.as_exit_code(),
+        })?;
     serde_json::to_value(&response).map_err(|error| ServiceError::Internal(error.to_string()))
 }

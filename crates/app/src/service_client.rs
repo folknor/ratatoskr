@@ -114,10 +114,23 @@ impl BootFailureReason {
     /// info so the UI can surface a friendlier message for the
     /// `AnotherInstanceRunning` case; everything else falls back to the
     /// `Display` of the error.
+    ///
+    /// Two paths produce a `Classified`:
+    /// - `ClientError::BootFailure { classification }`: synthesized by the
+    ///   spawn flow when the dying child's exit code mapped to a
+    ///   `BootExitCode` (or to `UnexpectedExit`) directly.
+    /// - `ClientError::Service(ServiceError::BootFailure { code })`: the
+    ///   Service answered `boot.ready` with the structured error before
+    ///   exiting. We project this onto the same `BootClassification` shape
+    ///   so the UI's per-code message dispatch is uniform across the two
+    ///   paths.
     pub(crate) fn from_client_error(error: &ClientError) -> Self {
         match error {
             ClientError::BootFailure { classification } => {
                 Self::Classified(*classification)
+            }
+            ClientError::Service(ServiceError::BootFailure { code }) => {
+                Self::Classified(BootClassification::BootFailure { code: *code })
             }
             other => Self::Other(other.to_string()),
         }
@@ -343,7 +356,21 @@ impl ServiceClient {
 
         client.install_running_state(spawned, generation);
 
-        let ping: HealthPingResponse = client.request(RequestParams::HealthPing).await?;
+        let ping: HealthPingResponse = match client.request(RequestParams::HealthPing).await {
+            Ok(ping) => ping,
+            Err(error) => {
+                // The Service exited or crashed before answering the version-
+                // check ping. If the dying child's exit code maps to a known
+                // `BootExitCode` (the canonical `AnotherInstanceRunning` case
+                // - the second instance against a contended lock exits 71
+                // before its dispatch loop even reads stdin), elevate
+                // `ServiceCrashed` / `Timeout` into a structured
+                // `ClientError::BootFailure` so the terminal-failure handler
+                // surfaces the right per-code message instead of the generic
+                // "service crashed".
+                return Err(client.elevate_initial_boot_error(error).await);
+            }
+        };
         if ping.version != PROTOCOL_VERSION {
             return Err(ClientError::VersionMismatch {
                 ui: PROTOCOL_VERSION,
@@ -352,6 +379,66 @@ impl ServiceClient {
         }
         log::info!("Service ready (pid={}, gen={generation})", ping.pid);
         Ok(client)
+    }
+
+    /// Wait briefly for the dying child and project its exit code into a
+    /// `ClientError::BootFailure { classification }`. Used by the initial-
+    /// boot path (both the version-check ping and the `boot.ready` round-
+    /// trip) to elevate generic `ServiceCrashed` / `Timeout` errors into
+    /// structured boot-classification errors when the Service has already
+    /// exited with a deterministic code. If the original error is already
+    /// classified, or the child has not exited, returns the original.
+    ///
+    /// Tears the running state down as a side effect (the watchdog wait
+    /// requires `&mut Child`); subsequent IPC calls on this client will
+    /// return `NotConnected`. That's fine because callers only use this on
+    /// the terminal-failure path - the client is on its way to being
+    /// dropped anyway.
+    async fn elevate_initial_boot_error(self: &Arc<Self>, original: ClientError) -> ClientError {
+        // Already structured - nothing to elevate.
+        match &original {
+            ClientError::BootFailure { .. } => return original,
+            ClientError::Service(ServiceError::BootFailure { .. }) => return original,
+            _ => {}
+        }
+
+        // Take the running state and wait briefly for the child to exit. The
+        // child has typically already exited by the time we're here (the EOF
+        // / writer-task death is what produced `original`); we still need the
+        // wait() to reap it and pull the exit code. A 2 s budget is plenty
+        // for an already-dead process; on Linux `waitpid` returns
+        // immediately on a zombie.
+        let dying_state = {
+            let mut guard = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            guard.take()
+        };
+        let Some(state) = dying_state else {
+            return original;
+        };
+        let RunningState {
+            mut child,
+            stdin_tx,
+            reader_handle,
+            writer_handle,
+            heartbeat_handle,
+            generation: _,
+        } = state;
+        drop(stdin_tx);
+        let abort_budget = Duration::from_millis(200);
+        let _ = tokio::time::timeout(abort_budget, reader_handle).await;
+        let _ = tokio::time::timeout(abort_budget, writer_handle).await;
+        let _ = tokio::time::timeout(abort_budget, heartbeat_handle).await;
+
+        let Some(status) = wait_with_kill_watchdog(&mut child, Duration::from_secs(2)).await
+        else {
+            return original;
+        };
+
+        let classification = BootClassification::from_exit_code(status.code());
+        log::info!(
+            "elevated initial-boot error to {classification:?} (original: {original})",
+        );
+        ClientError::BootFailure { classification }
     }
 
     fn install_running_state(&self, spawned: SpawnedSubprocess, generation: u32) {
@@ -574,6 +661,43 @@ impl ServiceClient {
     ///    check, re-emit `BootReady`. Any failure during these steps emits
     ///    `Terminal`.
     async fn handle_crash(self: Arc<Self>, dying_generation: u32) {
+        // Pre-checks BEFORE taking the running state. If we're going to bail
+        // (test single-shot, shutting down, or pre-BootReady deferral to
+        // run_spawn_flow), leave the state alone so the path that owns the
+        // terminal-failure surface can wait on the dying child for its
+        // exit code. Without this, run_spawn_flow's `elevate_initial_boot
+        // _error` would find the state already taken and miss the
+        // classification.
+
+        if self.is_shutting_down.load(Ordering::SeqCst) {
+            log::debug!("client is shutting down; not respawning");
+            return;
+        }
+        let Some(respawn) = self.respawn_config.as_ref() else {
+            // Test single-shot path: client tears down on first crash, the
+            // test owns orchestration. No respawn machinery; bail before
+            // touching state.
+            return;
+        };
+        if respawn
+            .first_boot_ready
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_none()
+        {
+            // Initial boot has not produced a BootReady yet. run_spawn_flow's
+            // pending request returned Err and its `elevate_initial_boot_error`
+            // path will take the state, wait on the child, and emit a
+            // classified Terminal. Bumping current_generation here would also
+            // be premature - there's no replacement incarnation to discriminate
+            // notifications against.
+            log::debug!(
+                "handle_crash(gen={dying_generation}): initial boot not yet complete; \
+                 deferring to run_spawn_flow",
+            );
+            return;
+        }
+
         let dying_state = {
             let mut guard = self.state.lock().unwrap_or_else(PoisonError::into_inner);
             match guard.as_ref() {
@@ -615,27 +739,6 @@ impl ServiceClient {
 
         if self.is_shutting_down.load(Ordering::SeqCst) {
             log::debug!("client is shutting down; not respawning");
-            return;
-        }
-        let Some(respawn) = self.respawn_config.as_ref() else {
-            return;
-        };
-
-        // Defer to run_spawn_flow if the initial boot hasn't finished yet:
-        // the very first crash during the initial `boot.ready` round-trip
-        // would otherwise produce two concurrent respawn drivers (this one
-        // and run_spawn_flow's Err return path racing). run_spawn_flow's
-        // Err-emits-Terminal is what the App expects; let it own that
-        // surface and bail here.
-        if respawn
-            .first_boot_ready
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_none()
-        {
-            log::debug!(
-                "handle_crash: initial boot not yet complete; deferring to run_spawn_flow",
-            );
             return;
         }
 
@@ -1084,7 +1187,14 @@ async fn run_spawn_flow(
             let _ = tx.send(SpawnEvent::BootReady(response)).await;
         }
         Err(error) => {
-            let _ = tx.send(SpawnEvent::Terminal(error)).await;
+            // Elevate `ServiceCrashed` / `Timeout` into a structured
+            // `BootFailure` if the Service exited with a known
+            // `BootExitCode` (KeyLoadFailure / MigrationFailure /
+            // AnotherInstanceRunning). Already-structured errors
+            // (ServiceError::BootFailure from the boot.ready handler) pass
+            // through unchanged.
+            let elevated = client.elevate_initial_boot_error(error).await;
+            let _ = tx.send(SpawnEvent::Terminal(elevated)).await;
         }
     }
 }

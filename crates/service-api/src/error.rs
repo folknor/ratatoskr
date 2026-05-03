@@ -1,3 +1,4 @@
+use crate::boot::BootExitCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -17,6 +18,16 @@ pub enum ServiceError {
     /// admission backpressure signal, not a per-handler error.
     #[error("service at capacity (in-flight admission rejected)")]
     Backpressure,
+    /// The Service's boot sequence failed. Carries the structured
+    /// `BootExitCode` so the UI can surface a friendly per-code message
+    /// (e.g. "Encryption key missing or unreadable" for `KeyLoadFailure`)
+    /// without parsing a Display string. This is the wire shape returned by
+    /// the `boot.ready` handler when the boot sequence ends in a fatal
+    /// failure that gets to ack before the Service exits; if the Service
+    /// exits before the response can be flushed, the UI instead inspects
+    /// the dying child's exit code (which carries the same `BootExitCode`).
+    #[error("boot sequence failed: {code:?}")]
+    BootFailure { code: BootExitCode },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,6 +97,14 @@ impl From<ServiceError> for JsonRpcErrorObject {
                 -32000,
                 "service at capacity (in-flight admission rejected)".to_string(),
             ),
+            // Pick a server-error code distinct from `Backpressure` so the
+            // wire code alone discriminates these cases even if `data`
+            // round-trip fails. `-32001` is also within the implementation-
+            // defined server-error range.
+            ServiceError::BootFailure { code } => (
+                -32001,
+                format!("boot sequence failed (exit code {})", code.as_i32()),
+            ),
         };
         Self {
             code,
@@ -152,5 +171,35 @@ mod tests {
         let object = JsonRpcErrorObject::parse_error("no payload");
         let result = object.try_into_service_error();
         assert!(result.is_err());
+    }
+
+    /// `BootFailure` round-trips through the JSON-RPC error object so the UI
+    /// recovers the structured `BootExitCode` from the response without
+    /// parsing the Display string. Closes the headline initial-boot
+    /// classification gap for the case where the Service does answer
+    /// `boot.ready` before exiting.
+    #[test]
+    fn boot_failure_round_trips_through_json_rpc_object() {
+        let original = ServiceError::BootFailure {
+            code: BootExitCode::KeyLoadFailure,
+        };
+        let object = JsonRpcErrorObject::from(original);
+        assert_eq!(object.code, -32001);
+        let recovered = object
+            .try_into_service_error()
+            .expect("data carries the original variant");
+        assert!(matches!(
+            recovered,
+            ServiceError::BootFailure { code: BootExitCode::KeyLoadFailure }
+        ));
+    }
+
+    #[test]
+    fn boot_failure_wire_code_is_distinct_from_backpressure() {
+        let bp = JsonRpcErrorObject::from(ServiceError::Backpressure);
+        let bf = JsonRpcErrorObject::from(ServiceError::BootFailure {
+            code: BootExitCode::MigrationFailure,
+        });
+        assert_ne!(bp.code, bf.code);
     }
 }
