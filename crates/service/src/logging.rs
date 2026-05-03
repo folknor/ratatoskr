@@ -10,8 +10,36 @@ const ROLLED_LOGS: u8 = 3;
 const STALE_LOG_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 static LOGGER: OnceLock<ServiceFileLogger> = OnceLock::new();
 
+/// Install the rolling-file + stderr logger. On file-open failure (logs
+/// directory unwritable, disk full, etc.) the logger degrades to stderr-
+/// only and that fact is written directly to stderr so a Service that
+/// fails its boot sequence still has at least one channel for the failure
+/// cause. We deliberately do not abort here on file-open failure: stderr
+/// is inherited on dev runs and captured by the UI's spawn flow in
+/// production, so degraded logging is strictly better than no Service.
+///
+/// Returns `Err(SetLoggerError)` only if `log::set_logger` had already
+/// been called in this process. That is unreachable in production
+/// (run_service_blocking calls `init` exactly once); the test harness
+/// can hit it across multiple in-process Service instances and the error
+/// is benign there since the global logger is shared.
 pub(crate) fn init(app_data_dir: &Path) -> Result<(), log::SetLoggerError> {
-    let logger = ServiceFileLogger::open(app_data_dir).unwrap_or_else(|_| ServiceFileLogger::stderr());
+    let (logger, file_open_error) = match ServiceFileLogger::open(app_data_dir) {
+        Ok(logger) => (logger, None),
+        Err(error) => (ServiceFileLogger::stderr(), Some(error)),
+    };
+    if let Some(error) = file_open_error {
+        // Use stderr().lock() rather than eprintln! so the failure line
+        // doesn't race with the panic hook or library code that may also
+        // write to stderr. Best-effort: we're already in the degraded
+        // path, ignoring this final write means stderr is genuinely
+        // unwritable and we have nowhere to surface diagnostics.
+        let line = format!(
+            "[service] log-file open failed for {} ({error}); falling back to stderr-only logging\n",
+            app_data_dir.display(),
+        );
+        let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), line.as_bytes());
+    }
     let _ = LOGGER.set(logger);
     if let Some(logger) = LOGGER.get() {
         log::set_logger(logger)?;

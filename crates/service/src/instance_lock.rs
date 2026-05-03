@@ -136,4 +136,27 @@ mod tests {
         drop(guard);
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// Panic safety: if a thread holding the lock unwinds via a panic, the
+    /// guard's Drop must release the underlying file lock. This is the
+    /// kernel-managed-on-process-exit guarantee fs2 was chosen for - locks
+    /// release on handle close (which Drop triggers, even on unwind). A
+    /// regression that switched to a non-RAII lock primitive would leave
+    /// the lock held forever after a panic; this test catches that.
+    #[test]
+    fn lock_released_when_holder_panics() {
+        let dir = temp_data_dir("panic_release").expect("temp dir");
+        let dir_for_thread = dir.clone();
+        let panicked = std::thread::spawn(move || {
+            let _guard = acquire(&dir_for_thread).expect("first acquire");
+            panic!("intentional test panic - guard must drop on unwind");
+        })
+        .join();
+        assert!(panicked.is_err(), "thread should have panicked");
+        // After the panicking thread's stack unwound, the guard's Drop
+        // closed the file handle and the kernel released the lock. A new
+        // acquire on the same directory must succeed.
+        let _retry = acquire(&dir).expect("acquire after panic-released lock");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -1,10 +1,11 @@
 //! Service-side boot sequence orchestrator.
 //!
 //! Runs concurrently with the dispatch loop so `health.ping` continues to
-//! round-trip while migrations run. The current implementation covers the
-//! key-load step; future Phase 1.5 commits add the remaining phases (DB
-//! open + migrations, pending-ops recovery, queued-drafts sweep, thread-
-//! participants backfill).
+//! round-trip while migrations run. Implements the full Phase 1.5 sequence:
+//! key load -> DB open + velo->ratatoskr rename + schema migrations ->
+//! pending-ops recovery -> queued-drafts sweep -> thread-participants
+//! backfill. Each step emits a corresponding `BootPhase` notification so
+//! the splash can render progress.
 //!
 //! On fatal boot failure (missing key, migration failure, etc.) the
 //! sequence does NOT call `std::process::exit` directly: it returns a
@@ -30,8 +31,12 @@ use tokio::sync::{Notify, mpsc};
 /// Service-side boot artifacts loaded once at boot. Phase 2's `ActionContext`
 /// will consume the encryption key + DB connection from here once the action
 /// service moves across the boundary; until then the fields are held but
-/// unused (the UI keeps its own key + DB load). The `allow(dead_code)`
-/// resolves when Phase 2's handler reads them.
+/// unused (the UI keeps its own key + DB load).
+///
+/// TODO(phase-2): the action service handler reads `encryption_key` and
+/// `db_conn` from this struct, replacing the UI-side
+/// `rtsk::load_encryption_key` and `Db::open` calls in `crates/app/src/app.rs`.
+/// The `#[allow(dead_code)]` markers come off then.
 pub(crate) struct BootContext {
     #[allow(dead_code)]
     pub(crate) encryption_key: [u8; 32],
@@ -80,6 +85,13 @@ impl BootSharedState {
     }
 
     /// Park until `signal_ready` fires. The boot.ready handler calls this.
+    ///
+    /// The outer `loop` is defense-in-depth: today `signal_ready` populates
+    /// `result` exactly once and `notify.notify_waiters()` wakes every
+    /// parked task, so the second iteration always finds `Some(result)`.
+    /// The loop survives a future refactor that might use `notify_one` or
+    /// add a spurious-wakeup path; keeping it costs one extra mutex check
+    /// in the unreachable case.
     pub(crate) async fn wait_for_ready(&self) -> Result<BootReadyResponse, BootFailure> {
         loop {
             if let Some(result) = self.result.lock().expect("boot result poisoned").clone() {
@@ -103,7 +115,14 @@ impl BootSharedState {
     ) {
         {
             let mut guard = self.result.lock().expect("boot result poisoned");
-            if guard.is_none() {
+            if guard.is_some() {
+                // Double-signal would normally be a programming error - the
+                // boot task is the sole producer here. Logging at debug
+                // makes the situation visible if a future refactor adds a
+                // second call site (e.g., a retry path) so the silent
+                // no-op doesn't hide the bug.
+                log::debug!("BootSharedState::signal_ready called twice; second call ignored");
+            } else {
                 *guard = Some(result);
             }
         }
@@ -172,10 +191,47 @@ pub(crate) async fn run_boot_sequence(
     outcome
 }
 
+/// Test-only artificial delay inserted at the start of the boot sequence,
+/// before the LoadingKey phase emits. Used by the in-process integration
+/// tests to verify that `boot.ready` actually parks on `BootSharedState`
+/// rather than racing past via a fast-DB no-delay path. The delay is
+/// process-wide; tests that drive it must serialize on
+/// `crate::boot::TEST_BOOT_DELAY_LOCK` so they don't race each other.
+/// Always returns 0 in release builds where the test-helpers feature is
+/// not compiled in.
+#[cfg(feature = "test-helpers")]
+fn test_boot_delay_ms() -> u64 {
+    use std::sync::atomic::Ordering;
+    TEST_BOOT_DELAY_MS.load(Ordering::SeqCst)
+}
+
+#[cfg(not(feature = "test-helpers"))]
+fn test_boot_delay_ms() -> u64 {
+    0
+}
+
+/// Test-only knob: set the artificial boot delay (in milliseconds) inserted
+/// at the start of `run_boot_sequence_inner`. Process-wide; serialize via
+/// `TEST_BOOT_DELAY_LOCK` from tests that need exclusive control over it.
+#[cfg(feature = "test-helpers")]
+pub static TEST_BOOT_DELAY_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// Test-only mutex used to serialize tests that set `TEST_BOOT_DELAY_MS`.
+/// Tests acquire this guard, set the atomic, run the boot, then reset.
+#[cfg(feature = "test-helpers")]
+pub static TEST_BOOT_DELAY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 async fn run_boot_sequence_inner(
     out_tx: mpsc::Sender<Vec<u8>>,
     app_data_dir: PathBuf,
 ) -> Result<BootContext, BootFailure> {
+    let delay = test_boot_delay_ms();
+    if delay > 0 {
+        log::debug!("test-helpers: artificial boot delay {delay}ms before LoadingKey");
+        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+    }
+
     boot_progress::emit(&out_tx, BootPhase::LoadingKey, None);
 
     let key = match tokio::task::spawn_blocking({
@@ -210,7 +266,11 @@ async fn run_boot_sequence_inner(
     })
     .await;
 
-    let (conn, schema_version, migrations_applied) = match migrate_outcome {
+    let MigrateOutcome {
+        conn,
+        schema_version,
+        migrations_applied,
+    } = match migrate_outcome {
         Ok(Ok(result)) => result,
         Ok(Err(error)) => {
             log::error!(
@@ -231,6 +291,14 @@ async fn run_boot_sequence_inner(
     let conn = Arc::new(Mutex::new(conn));
     let mut recovery_warnings: Vec<String> = Vec::new();
 
+    // RecoveringPendingOps: state-repair on the pending_operations table
+    // (resets stranded `status='executing'` rows to 'pending') AND on
+    // local_drafts (resurfaces stranded `sync_status='sending'` rows as
+    // 'failed'). The two repairs share a phase because both target rows
+    // that were mid-mutation when the previous Service died, and both run
+    // off the same connection. Distinct from SweepingQueuedDrafts below,
+    // which targets a different sync_status value ('queued') and a
+    // different failure mode (drafts that never made it into 'sending').
     boot_progress::emit(&out_tx, BootPhase::RecoveringPendingOps, None);
     if let Err(error) = run_boot_recovery(&conn, "pending-ops recovery", |c| {
         db_pending_ops_recover_on_boot_sync(c)
@@ -241,6 +309,12 @@ async fn run_boot_sequence_inner(
         recovery_warnings.push("pending-ops recovery".to_string());
     }
 
+    // SweepingQueuedDrafts: marks `local_drafts.sync_status='queued'` rows
+    // as 'failed' so the user sees them surfaced in the drafts view rather
+    // than stuck in a queue that the previous Service never drained. Phase
+    // 1.5 has no live action service, so any 'queued' row is by definition
+    // orphaned. Distinct from the 'sending' resurfacing above (different
+    // sync_status, different lifecycle stage).
     boot_progress::emit(&out_tx, BootPhase::SweepingQueuedDrafts, None);
     if let Err(error) = run_boot_recovery(&conn, "queued-drafts sweep", |c| {
         let count = db_mark_queued_drafts_failed_sync(c)?;
@@ -336,6 +410,15 @@ fn run_backfill_for_all_accounts(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+/// Outcome of the synchronous DB open + migration step. A struct rather
+/// than a magic 3-tuple so future additions (e.g. a "DB was reopened from
+/// the post-rename path" flag) can land as named fields.
+struct MigrateOutcome {
+    conn: Connection,
+    schema_version: u32,
+    migrations_applied: u32,
+}
+
 /// Synchronous DB open + migration step. Runs inside `spawn_blocking` so
 /// `rusqlite`'s blocking I/O never starves the dispatch task or the
 /// notification writer. Per-step migration progress is pumped via
@@ -344,7 +427,7 @@ fn run_backfill_for_all_accounts(conn: &Connection) -> Result<(), String> {
 fn open_db_and_migrate(
     app_data_dir: &std::path::Path,
     out_tx: &mpsc::Sender<Vec<u8>>,
-) -> Result<(Connection, u32, u32), String> {
+) -> Result<MigrateOutcome, String> {
     reconcile_velo_rename(app_data_dir)?;
     let db_path = app_data_dir.join("ratatoskr.db");
     let conn = Connection::open(&db_path)
@@ -352,13 +435,28 @@ fn open_db_and_migrate(
     apply_standard_pragmas(&conn)?;
 
     let mut progress = |current: u32, total: u32| {
+        // Populate the human-readable message so the splash always has
+        // text to render even on a fresh-DB single-migration run where the
+        // before-COMMIT and after-COMMIT frames flicker quickly. The UI
+        // also derives "Migration N of M" from the structured `current` /
+        // `total`; the message is the wire-side label the splash uses
+        // when no localised override is wired in.
+        let message = if current == 0 {
+            format!("Starting migration 1 of {total}")
+        } else {
+            format!("Applied migration {current} of {total}")
+        };
         boot_progress::emit(
             out_tx,
             BootPhase::Migrating { current, total },
-            None,
+            Some(message),
         );
     };
     let migrations_applied = migrations::run_all_with_progress(&conn, &mut progress)?;
     let schema_version = migrations::current_schema_version(&conn)?;
-    Ok((conn, schema_version, migrations_applied))
+    Ok(MigrateOutcome {
+        conn,
+        schema_version,
+        migrations_applied,
+    })
 }

@@ -749,6 +749,15 @@ impl ServiceClient {
         drop(stdin_tx);
 
         let exit_status = wait_with_kill_watchdog(&mut child, Duration::from_secs(5)).await;
+        // Abort the helper tasks before awaiting them; without explicit
+        // .abort() calls a still-running heartbeat with a stale
+        // weak_client.upgrade() can idle for up to its 30 s interval
+        // before its next tick fails-and-exits. Aborting first then
+        // awaiting with a 200 ms watchdog gets us the same correctness
+        // bound but tightens the post-crash cleanup window.
+        reader_handle.abort();
+        writer_handle.abort();
+        heartbeat_handle.abort();
         let abort_budget = Duration::from_millis(200);
         let _ = tokio::time::timeout(abort_budget, reader_handle).await;
         let _ = tokio::time::timeout(abort_budget, writer_handle).await;
@@ -838,6 +847,20 @@ impl ServiceClient {
         let new_gen = self.current_generation.load(Ordering::SeqCst);
         let extra_arg_refs: Vec<&str> =
             respawn.extra_args.iter().map(String::as_str).collect();
+
+        // Early bail before launch_subprocess fires. handle_crash already
+        // checked is_shutting_down before sleeping, but Drop could have
+        // fired during the 1 s cooldown; without this check we'd
+        // briefly fork a Service process that immediately gets torn
+        // down, contending the lockfile for as long as the new process
+        // takes to acquire-then-release. The post-launch check below
+        // remains as defense-in-depth for the narrower race that opens
+        // after we cross this gate.
+        if self.is_shutting_down.load(Ordering::SeqCst) {
+            log::debug!("respawn skipped: client shutting down");
+            return Ok(());
+        }
+
         let spawned = launch_subprocess(
             &respawn.binary_path,
             &respawn.app_data_dir,

@@ -52,6 +52,13 @@ impl RequestParams {
     }
 
     pub fn timeout(&self) -> RequestTimeoutKind {
+        // `Shutdown` does NOT set `bypasses_admission()`, but the dispatch
+        // loop intercepts it in `handle_line` before reaching the
+        // admission check, so the per-handler semaphore and the dispatch-
+        // loop admission cap are both effectively bypassed for Shutdown
+        // by virtue of dispatch-loop interception. The 30 s timeout below
+        // is the budget for the in-flight drain to complete before the
+        // UI escalates to SIGTERM.
         match self {
             Self::HealthPing => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             Self::Shutdown => RequestTimeoutKind::Finite(Duration::from_secs(30)),

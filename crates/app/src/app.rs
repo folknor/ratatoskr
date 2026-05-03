@@ -135,8 +135,13 @@ pub struct ReadyApp {
     pub(crate) body_store: Option<rtsk::body_store::BodyStoreState>,
     /// Inline image store for CID image resolution.
     pub(crate) inline_image_store: Option<store::inline_image_store::InlineImageStoreState>,
-    /// Encryption key for decrypting provider credentials (OAuth tokens, passwords).
-    pub(crate) encryption_key: Option<[u8; 32]>,
+    /// Encryption key for decrypting provider credentials (OAuth tokens,
+    /// passwords). Loaded by the Service at boot (BootPhase::LoadingKey)
+    /// and again by the UI here as a thin redundancy. Phase 2 plumbs the
+    /// already-validated key through IPC and removes the UI-side load;
+    /// until then, a UI-only load failure here is treated as fatal in
+    /// from_boot_ready() rather than silently degrading to a zero key.
+    pub(crate) encryption_key: [u8; 32],
     /// Action service context - the authoritative write path for email mutations.
     /// `None` if stores failed to initialize at boot (degraded mode).
     pub(crate) action_ctx: Option<rtsk::actions::ActionContext>,
@@ -221,30 +226,32 @@ impl ReadyApp {
                 }
             };
 
-        let encryption_key = match rtsk::load_encryption_key(data_dir) {
-            Ok(key) => Some(key),
-            Err(e) => {
-                log::error!("Failed to load encryption key: {e}");
-                None
-            }
-        };
+        // The Service has already loaded and validated the key in its boot
+        // sequence (BootPhase::LoadingKey - a missing or unreadable key is a
+        // fatal Service exit with BootExitCode::KeyLoadFailure, surfaced to
+        // the user before this code runs). Reaching this point with a load
+        // failure means the key file changed between the Service's read and
+        // ours - permissions race, transient FS glitch, etc. Surfacing as
+        // expect() rather than silently degrading to a zero key (the Phase 1
+        // behaviour the plan called out as a real risk) is the correct
+        // response: a fatal error here gives the user a chance to fix the
+        // underlying problem instead of writing data under a zero key.
+        // Phase 2 will plumb the Service's already-validated key through IPC
+        // and remove this UI-side load entirely.
+        let encryption_key = rtsk::load_encryption_key(data_dir)
+            .expect("encryption key must be loadable after Service validated it at boot");
 
         // Initialize search state once - shared between the app and action service.
         let search_state: Option<Arc<rtsk::search::SearchState>> =
             rtsk::search::SearchState::init(data_dir).map(Arc::new).ok();
 
-        let action_ctx = match (
-            &body_store,
-            &inline_image_store,
-            &search_state,
-            encryption_key,
-        ) {
-            (Some(bs), Some(iis), Some(ss), Some(key)) => Some(rtsk::actions::ActionContext {
+        let action_ctx = match (&body_store, &inline_image_store, &search_state) {
+            (Some(bs), Some(iis), Some(ss)) => Some(rtsk::actions::ActionContext {
                 db: db.write_db_state(),
                 body_store: bs.clone(),
                 inline_images: iis.clone(),
                 search: (**ss).clone(),
-                encryption_key: key,
+                encryption_key,
                 suppress_pending_enqueue: false,
                 in_flight: std::sync::Arc::new(std::sync::Mutex::new(
                     std::collections::HashSet::new(),
@@ -267,14 +274,13 @@ impl ReadyApp {
             .unwrap_or(CalendarView::Month);
 
         // Load persisted preferences. The bootstrap snapshots don't decrypt
-        // anything (they only cover non-secure keys), so a zero key is fine
-        // when the real key is missing.
-        let snapshot_key = encryption_key.unwrap_or([0u8; 32]);
+        // anything (they only cover non-secure keys), so the encryption key
+        // is fed through unchanged.
         let bootstrap = db
             .read_db_state()
             .with_conn_sync(|conn| {
-                let ui = get_ui_bootstrap_snapshot(conn, &snapshot_key)?;
-                let settings = get_settings_bootstrap_snapshot(conn, &snapshot_key)?;
+                let ui = get_ui_bootstrap_snapshot(conn, &encryption_key)?;
+                let settings = get_settings_bootstrap_snapshot(conn, &encryption_key)?;
                 Ok((ui, settings))
             })
             .ok();
@@ -582,21 +588,46 @@ impl BootingApp {
                 BootingUpdate::Stay(Task::none())
             }
             Message::WindowCloseRequested(id) if id == self.main_window_id => {
+                // The user closed the splash mid-boot. We do not have a
+                // ServiceClient in shape to issue a clean Shutdown here -
+                // ChildSpawned may not have arrived yet, and even if it has
+                // the boot.ready handler is parked on a Notify that we
+                // can't unblock from this path. Rely on the Service's
+                // kernel-managed lock release and the writer task seeing
+                // EOF on stdin when ServiceClient::Drop fires after iced
+                // unwinds. Log the exit so the next launch's diagnostics
+                // can distinguish "user cancelled" from "boot failure".
+                log::info!("user closed splash mid-boot; exiting");
                 BootingUpdate::Stay(iced::exit())
             }
             Message::AppearanceChanged(mode) => {
                 self.appearance_mode = Some(mode);
                 BootingUpdate::Stay(Task::none())
             }
+            // BootingApp owns only the main window (the splash); the
+            // `WindowCloseRequested(id) if id == self.main_window_id` arm
+            // above handles it. Other window IDs cannot exist during
+            // Booting, so no fallback close-arm is needed.
             Message::WindowResized(_, _)
             | Message::WindowMoved(_, _)
-            | Message::WindowCloseRequested(_)
             | Message::Noop
             | Message::ModifiersChanged(_) => BootingUpdate::Stay(Task::none()),
             other => {
+                // Take the variant name from the start of the Debug
+                // representation (everything before `(` or `{`) rather than
+                // `std::mem::discriminant`, which prints
+                // `Discriminant(<opaque-id>)` and leaves the operator
+                // guessing. We deliberately do not Debug-print the full
+                // message: some Message variants carry large payloads
+                // (ThreadDetailLoaded, etc.) that would noisily fill the
+                // log on every drop. The variant name is the useful signal.
+                let debug = format!("{other:?}");
+                let name = debug
+                    .split(['(', '{', ' '])
+                    .next()
+                    .unwrap_or("?");
                 log::debug!(
-                    "BootingApp dropped message variant {:?} (whitelist per phase-1.5-plan scope item 21)",
-                    std::mem::discriminant(&other),
+                    "BootingApp dropped message variant {name} (whitelist per phase-1.5-plan scope item 21)",
                 );
                 BootingUpdate::Stay(Task::none())
             }
@@ -645,9 +676,16 @@ impl BootingApp {
     }
 
     pub(crate) fn subscription(&self) -> iced::Subscription<Message> {
+        // The whitelist in `BootingApp::update` (and the doc-comment table in
+        // `message.rs`) declares only three categories as actionable while
+        // Booting: AppearanceChanged (forward to Ready), WindowCloseRequested
+        // (iced::exit on the main window), and ServiceNotification (drives
+        // the splash via boot.progress). WindowResized / WindowMoved are
+        // explicitly "drop" because BootingApp does not own a WindowState;
+        // not subscribing to them avoids generating events that the update
+        // path would just discard.
         let mut subs = vec![
             appearance::subscription().map(Message::AppearanceChanged),
-            iced::window::resize_events().map(|(id, size)| Message::WindowResized(id, size)),
             iced::window::close_requests().map(Message::WindowCloseRequested),
         ];
         if let Some(notifications) = self.service_notifications.as_ref() {
@@ -747,5 +785,85 @@ impl App {
             App::Booting(b) => b.subscription(),
             App::Ready(r) => r.subscription(),
         }
+    }
+}
+
+#[cfg(test)]
+mod splash_tests {
+    use super::SplashState;
+    use service_api::{BootPhase, BootProgress};
+
+    fn progress(phase: BootPhase, message: Option<&str>) -> BootProgress {
+        BootProgress {
+            phase,
+            message: message.map(String::from),
+            service_generation: 0,
+        }
+    }
+
+    /// Default state (before any BootProgress arrives) renders a placeholder
+    /// label so the splash isn't empty during the brief window between
+    /// ChildSpawned and the first boot.progress notification.
+    #[test]
+    fn label_for_default_state_uses_connecting_placeholder() {
+        let splash = SplashState::default();
+        assert_eq!(splash.label(), "Connecting to Service...");
+    }
+
+    /// Each `BootPhase` variant maps to a distinct splash label. The
+    /// `BootPhase::Migrating` variant collapses the structured `current` /
+    /// `total` into a single label - the `BootingApp::view` is what splices
+    /// the count back onto the line.
+    #[test]
+    fn label_covers_every_boot_phase() {
+        let cases = [
+            (BootPhase::LoadingKey, "Loading encryption key..."),
+            (BootPhase::OpeningDatabase, "Opening database..."),
+            (
+                BootPhase::Migrating { current: 0, total: 1 },
+                "Migrating database...",
+            ),
+            (
+                BootPhase::Migrating { current: 5, total: 10 },
+                "Migrating database...",
+            ),
+            (BootPhase::RecoveringPendingOps, "Recovering pending operations..."),
+            (BootPhase::SweepingQueuedDrafts, "Sweeping queued drafts..."),
+            (
+                BootPhase::BackfillingThreadParticipants,
+                "Backfilling thread participants...",
+            ),
+        ];
+        for (phase, expected) in cases {
+            let mut splash = SplashState::default();
+            splash.apply(progress(phase, None));
+            assert_eq!(
+                splash.label(),
+                expected,
+                "phase {phase:?} should produce label {expected:?}"
+            );
+        }
+    }
+
+    /// `apply` overwrites both `phase` and `message`. Locks in that a new
+    /// notification fully replaces the prior splash state rather than merging
+    /// fields - the per-phase coalesce key on the wire already deduplicates,
+    /// so the splash should always reflect the latest delivered message.
+    #[test]
+    fn apply_overwrites_phase_and_message() {
+        let mut splash = SplashState::default();
+        splash.apply(progress(
+            BootPhase::Migrating { current: 1, total: 5 },
+            Some("Applied migration 1 of 5"),
+        ));
+        assert_eq!(
+            splash.phase,
+            Some(BootPhase::Migrating { current: 1, total: 5 })
+        );
+        assert_eq!(splash.message.as_deref(), Some("Applied migration 1 of 5"));
+
+        splash.apply(progress(BootPhase::RecoveringPendingOps, None));
+        assert_eq!(splash.phase, Some(BootPhase::RecoveringPendingOps));
+        assert_eq!(splash.message, None);
     }
 }

@@ -131,17 +131,22 @@ impl BootPhase {
 
 /// Payload of the `boot.progress` notification.
 ///
-/// `service_generation` is tagged on the UI side at reader-task enqueue time,
-/// not by the Service. It exists so the App's notification dispatcher can
-/// drop `BootProgress` (and any future `MustDeliver` payloads) emitted by a
-/// dying Service whose new incarnation has already been spawned. The Service
-/// emits `0` (or any value); the UI overwrites with its current
-/// `service_generation` counter.
+/// `service_generation` is **wire-reserved for the UI**: the Service emits
+/// `0`, the UI's reader task overwrites it with its current
+/// `ServiceClient::current_generation` at enqueue time, and the App's
+/// notification dispatcher drops payloads whose tag does not match the live
+/// generation. This closes the cross-respawn race where a dying Service can
+/// enqueue a stale `BootProgress` (or in Phase 2+, a stale `MustDeliver`
+/// notification) that arrives after the replacement Service is established.
+/// The field defaults to 0 on deserialize so a future Service that omits it
+/// still parses cleanly; the UI's reader task always overwrites the value
+/// regardless of what arrived on the wire.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BootProgress {
     pub phase: BootPhase,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(default)]
     pub service_generation: u32,
 }
 

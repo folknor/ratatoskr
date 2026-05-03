@@ -1,5 +1,11 @@
 mod boot;
 mod boot_progress;
+
+/// Re-export test-helpers knobs for the in-process integration tests so
+/// they can drive the artificial boot delay without `pub mod boot` leaking
+/// every internal item. Compiled out of release builds.
+#[cfg(feature = "test-helpers")]
+pub use boot::{TEST_BOOT_DELAY_LOCK, TEST_BOOT_DELAY_MS};
 mod dispatch;
 mod handlers;
 mod instance_lock;
@@ -32,16 +38,39 @@ pub fn run_service_blocking() -> ! {
     let saved_stdio = match stdio_defense::claim_stdio() {
         Ok(saved) => saved,
         Err(error) => {
-            eprintln!("[service] failed to claim service stdio: {error}");
+            // claim_stdio failed before the redirect could complete, so
+            // stderr may be partially redirected. Use a direct locked
+            // write to bypass any printf-shaped buffering inside
+            // `eprintln!` that could land mid-byte on the JSON-RPC pipe
+            // if stdout/stderr were swapped underneath us.
+            let line = format!("[service] failed to claim service stdio: {error}\n");
+            let _ = std::io::Write::write_all(
+                &mut std::io::stderr().lock(),
+                line.as_bytes(),
+            );
             std::process::exit(1);
         }
     };
 
     // 3. Logging + panic hook. Both write only to the rolling file and
     //    stderr; never stdout. Safe after the redirect above.
-    let app_data_dir = app_data_dir_from_args().unwrap_or_else(default_app_data_dir);
+    let arg_app_data_dir = app_data_dir_from_args();
+    let app_data_dir = arg_app_data_dir
+        .clone()
+        .unwrap_or_else(default_app_data_dir);
     let _ = logging::init(&app_data_dir);
     logging::install_panic_hook();
+    if arg_app_data_dir.is_none() {
+        // Production launches always pass --app-data-dir from the UI; a
+        // missing arg is most likely a debug-session invocation
+        // (`cargo run -p app -- --service`). Log so the data dir path is
+        // visible in the rolling log file - otherwise a contributor
+        // chasing "why is the data dir empty?" has no signal.
+        log::info!(
+            "no --app-data-dir provided; falling back to {}",
+            app_data_dir.display(),
+        );
+    }
 
     // 4. Single-instance lock. A second Service spawned against the same
     //    data dir gets `AnotherInstanceRunning` and exits before doing any

@@ -49,8 +49,24 @@ pub(crate) fn load_encryption_key(app_data_dir: &Path) -> Result<[u8; 32], Strin
         .decode(contents.trim())
         .map_err(|error| format!("failed to decode key: {error}"))?;
 
-    <[u8; 32]>::try_from(key_bytes.as_slice())
-        .map_err(|_| "encryption key must be exactly 32 bytes".to_string())
+    let key = <[u8; 32]>::try_from(key_bytes.as_slice())
+        .map_err(|_| "encryption key must be exactly 32 bytes".to_string())?;
+
+    // Dev-seed writes 32 zero bytes to ratatoskr.key so Service boot's
+    // key-load step succeeds without bringing up a real key generator. A
+    // release build accidentally shipping with that file would silently
+    // encrypt every credential under a key of all zeros - no AES-256-GCM
+    // confidentiality at all. Emit a warning when the loaded bytes are all
+    // zero so a stray dev key file in production logs visibly. The check
+    // costs one comparison; it is not a security boundary, just a
+    // diagnostic tripwire.
+    if key.iter().all(|&b| b == 0) {
+        log::warn!(
+            "loaded encryption key is all zeros; this is the dev-seed key. \
+             Production builds must use a real key file."
+        );
+    }
+    Ok(key)
 }
 
 #[cfg(test)]

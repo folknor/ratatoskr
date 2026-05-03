@@ -80,15 +80,28 @@ pub fn run_all(conn: &Connection) -> Result<u32, String> {
     run_all_with_progress(conn, &mut |_, _| {})
 }
 
-/// Run all pending migrations, invoking `progress(current, total)` once per
-/// migration that actually applies. `current` is 1-based; `total` is the
-/// total number of migrations the runner is going to apply this call. The
-/// callback fires AFTER the migration commits (so on crash the user-visible
-/// "now applying N/M" never overstates progress).
+/// Run all pending migrations, invoking the `progress(current, total)`
+/// callback at two points per applied migration:
+/// - `progress(index, total)` BEFORE the migration's transaction begins,
+///   where `index` is 0-based for the first migration, 1-based thereafter.
+///   This produces the "now applying N/total" frame the UI splash needs to
+///   render the `Migrating` phase even when the migration itself completes
+///   before the post-commit frame can race other phase notifications.
+/// - `progress(current, total)` AFTER the COMMIT, where `current` is the
+///   1-based count of migrations that have completed in this run. Emitting
+///   the completion frame post-commit means the user-visible "applied N
+///   of M" never overstates: a crash mid-migration rolls back via SQLite
+///   WAL recovery and the next boot re-runs from the same starting count.
 ///
-/// Phase 1.5 ships with a single v100 migration, so the callback fires
-/// at most once per fresh DB; the per-step callback exists for future
-/// multi-migration releases.
+/// Net: `total` callbacks for `total` migrations, where the first frame
+/// carries `(0, total)` ("starting migration 1") and subsequent frames
+/// carry `(N, total)` ("migration N committed"). The wire-side per-phase
+/// `CoalesceKey::BootProgress(BootPhaseKind::Migrating)` collapses these
+/// to the latest, so the user experience is monotonic.
+///
+/// Phase 1.5 ships with a single v100 migration, so a fresh DB sees frames
+/// `(0, 1)` then `(1, 1)`; the per-step callback exists for future multi-
+/// migration releases.
 ///
 /// Contract for migration authors (see scope item 19 of
 /// `docs/service/phase-1.5-plan.md`):
@@ -155,6 +168,15 @@ pub fn run_all_with_progress(
     let total = u32::try_from(pending.len()).unwrap_or(u32::MAX);
     let mut applied_count: u32 = 0;
     for (index, m) in pending.iter().enumerate() {
+        // Emit a "starting" frame BEFORE the transaction begins so the
+        // splash gets a Migrating event even on a sub-second migration that
+        // would otherwise complete before a post-commit notification could
+        // race other phases through the writer queue. `current` here is
+        // 0-based for the first migration; subsequent migrations carry the
+        // number of already-committed migrations as their starting count.
+        let starting = u32::try_from(index).unwrap_or(u32::MAX);
+        progress(starting, total);
+
         log::info!("Running migration v{}: {}", m.version, m.description);
 
         conn.execute_batch("BEGIN")
@@ -234,5 +256,52 @@ mod tests {
             .expect("query");
         let expected = MIGRATIONS.last().expect("at least one migration").version;
         assert_eq!(max_ver, expected);
+    }
+
+    /// Locks in the per-migration progress contract: each migration produces
+    /// exactly two callback invocations - one BEFORE the transaction begins
+    /// (current=index, 0-based) and one AFTER the commit completes
+    /// (current=index+1, 1-based). Phase 1.5 ships with a single v100
+    /// migration so a fresh DB sees `(0, 1)` then `(1, 1)`.
+    #[test]
+    fn run_all_with_progress_emits_before_and_after_commit() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("pragmas");
+
+        let mut frames: Vec<(u32, u32)> = Vec::new();
+        let applied = run_all_with_progress(&conn, &mut |current, total| {
+            frames.push((current, total));
+        })
+        .expect("migrations should succeed");
+
+        // One migration applied, so total == 1.
+        assert_eq!(applied, 1);
+        assert_eq!(
+            frames,
+            vec![(0, 1), (1, 1)],
+            "expected one before-COMMIT (0/1) and one after-COMMIT (1/1) frame, got {frames:?}"
+        );
+    }
+
+    /// On a DB that's already at the latest schema, the runner must not call
+    /// `progress` at all. Locks in "no spurious frames" - the splash would
+    /// otherwise tick a Migrating phase on every UI launch even when no
+    /// migration is actually running.
+    #[test]
+    fn run_all_with_progress_emits_nothing_on_up_to_date_db() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("pragmas");
+        run_all(&conn).expect("first run applies migrations");
+
+        let mut frames: Vec<(u32, u32)> = Vec::new();
+        let applied = run_all_with_progress(&conn, &mut |current, total| {
+            frames.push((current, total));
+        })
+        .expect("second run should be a no-op");
+
+        assert_eq!(applied, 0);
+        assert!(frames.is_empty(), "no frames expected, got {frames:?}");
     }
 }

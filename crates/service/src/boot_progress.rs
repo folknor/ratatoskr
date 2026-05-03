@@ -22,13 +22,20 @@ use tokio::sync::mpsc;
 
 /// Serialize and enqueue a `boot.progress` notification onto the outbound
 /// writer queue. Best-effort: a `try_send` failure is logged at warn and
-/// dropped. The OUTBOUND_QUEUE_CAP (1024) far exceeds the bounded number of
-/// boot-sequence emissions, so a drop here means something is genuinely
-/// wrong with the writer task or the consumer; the boot sequence proceeds
-/// either way.
+/// dropped.
 ///
-/// Phase 1.5 commit 5 lands the helper. Commits 6 through 9 call it from
-/// the per-phase boot work that those commits introduce.
+/// Why try_send-and-drop is safe in Phase 1.5: the dispatch loop's
+/// OUTBOUND_QUEUE_CAP is 1024 entries, and the entire Phase 1.5 boot
+/// sequence emits a bounded number of frames (one per BootPhase, plus
+/// 2*N for an N-migration run via the before/after-COMMIT callback).
+/// That assumption holds today for any plausible migration count. If a
+/// future phase adds a chatty `MustDeliver` notification during boot,
+/// or an unbounded-size loop emits per-row progress, this helper must
+/// switch to `send().await` (with a path back to the dispatch loop's
+/// out_tx) - or the queue cap must grow. The contract:
+/// `OUTBOUND_QUEUE_CAP` must remain much larger than the total number of
+/// Phase-1.5 boot.progress frames. Land any new emitter behind a
+/// regression test that verifies this still holds.
 pub(crate) fn emit(out_tx: &mpsc::Sender<Vec<u8>>, phase: BootPhase, message: Option<String>) {
     let notification = Notification::BootProgress(BootProgress {
         phase,

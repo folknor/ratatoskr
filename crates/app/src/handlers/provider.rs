@@ -75,10 +75,7 @@ impl ReadyApp {
     /// wrapped with `Task::abortable` and its handle is stashed in
     /// `sync_handles` so `handle_delete_account` can cancel it.
     pub(crate) fn dispatch_sync_delta(&mut self, account_id: String) -> Task<Message> {
-        let Some(encryption_key) = self.encryption_key else {
-            log::error!("Cannot sync: no encryption key");
-            return Task::none();
-        };
+        let encryption_key = self.encryption_key;
 
         let db = Arc::clone(&self.db);
         let body_store = match self.body_store.clone() {
@@ -164,9 +161,7 @@ impl ReadyApp {
     /// Refresh GAL (Global Address List) caches for accounts that support it.
     /// Only fetches if the cache is stale (>24h). Runs silently in the background.
     pub(crate) fn refresh_gal_caches(&self) -> Task<Message> {
-        let Some(encryption_key) = self.encryption_key else {
-            return Task::none();
-        };
+        let encryption_key = self.encryption_key;
 
         let account_ids: Vec<String> = self
             .sidebar
@@ -215,9 +210,7 @@ impl ReadyApp {
     /// Sync calendars for all accounts that have calendar support.
     /// Runs silently in the background, same pattern as `refresh_gal_caches`.
     pub(crate) fn sync_calendars(&self) -> Task<Message> {
-        let Some(encryption_key) = self.encryption_key else {
-            return Task::none();
-        };
+        let encryption_key = self.encryption_key;
 
         // Pass all accounts - calendar_sync_account returns Err for unsupported
         // providers, which is logged as a warning. This avoids filtering out
@@ -267,9 +260,7 @@ impl ReadyApp {
     /// Start JMAP push notification managers for all JMAP accounts.
     /// Call after accounts are loaded and encryption key is available.
     pub(crate) fn start_jmap_push(&self) -> Task<Message> {
-        let Some(encryption_key) = self.encryption_key else {
-            return Task::none();
-        };
+        let encryption_key = self.encryption_key;
 
         let jmap_accounts: Vec<(String, String)> = self
             .sidebar

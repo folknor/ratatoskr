@@ -395,16 +395,6 @@ async fn dispatch_pending_op_with_provider(
     }
 }
 
-/// Synchronous DB-only boot recovery for the Service. Thin wrapper around
-/// `db::db::pending_ops::db_pending_ops_recover_on_boot_sync`; that's the
-/// canonical home for the function (it lives next to the rest of the
-/// `pending_operations` SQL primitives). This wrapper exists so callers
-/// reaching into `rtsk::actions::pending` see both the async and sync boot-
-/// recovery paths in one place.
-pub fn recover_on_boot_db_only(conn: &crate::db::Connection) -> Result<(), String> {
-    db::db::pending_ops::db_pending_ops_recover_on_boot_sync(conn)
-}
-
 /// Recover from crash - reset stale 'executing' ops to 'pending'.
 /// Also resurface stale 'sending' drafts as 'failed'.
 /// Call once at app boot.

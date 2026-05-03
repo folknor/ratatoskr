@@ -95,7 +95,7 @@ impl ReadyApp {
         }
 
         // Periodic sync - delta sync all accounts every 5 minutes
-        if !self.sidebar.accounts.is_empty() && self.encryption_key.is_some() {
+        if !self.sidebar.accounts.is_empty() {
             subs.push(
                 iced::time::every(std::time::Duration::from_secs(300)).map(|_| Message::SyncTick),
             );

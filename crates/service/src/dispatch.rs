@@ -74,6 +74,14 @@ where
     // failure the sequence posts the boot exit code via `boot_failure_tx`;
     // the dispatch loop's select! breaks out on that event so the Service
     // exits promptly with the right code.
+    //
+    // Channel capacity 1: one fatal failure per boot is the canonical case;
+    // a `try_send`-style overflow cannot happen since the boot task only
+    // emits at most one failure before completing. The send result is
+    // intentionally discarded: if the dispatch loop already broke out (via
+    // Shutdown or stdin EOF) the rx is dropped before the send arrives.
+    // That's safe because the only paths that break out early (Shutdown,
+    // EOF) want exit code 0 anyway, and `boot_exit_code` stays None.
     let (boot_failure_tx, mut boot_failure_rx) = mpsc::channel::<BootExitCode>(1);
     let boot_handle = tokio::spawn({
         let out_tx = out_tx.clone();
@@ -161,6 +169,18 @@ where
     // Reap the boot task so any boot-sequence panic surfaces in the log
     // rather than vanishing at process exit. We don't need the result -
     // the boot_failure_rx already delivered it during the dispatch loop.
+    //
+    // Ordering note: the abort fires AFTER `drain_in_flight` because the
+    // boot.ready handler parks on `BootSharedState::wait_for_ready` and
+    // would never return if we aborted the boot task before it signalled.
+    // The downside is that a Shutdown arriving during a long migration
+    // (the boot task is in `spawn_blocking` and cannot be aborted) waits
+    // out the migration before the abort runs; under the UI's 30 s IPC
+    // timeout this manifests as SIGTERM-then-SIGKILL via the standard
+    // shutdown escalation path rather than a quick clean exit. Acceptable
+    // per phase-1.5-plan.md scope item 18; flagged here so a future
+    // refactor that swaps the ordering doesn't accidentally deadlock the
+    // boot.ready handler.
     boot_handle.abort();
     let _ = boot_handle.await;
 
@@ -171,17 +191,29 @@ where
 
     // If the loop exited because of a Shutdown request, ack only after the
     // drain above completes - `flushed_ok: true` means the sentinel was
-    // written and every in-flight handler has returned.
+    // written and every in-flight handler has returned. Skip the ack
+    // entirely if boot_exit_code is set: the Service is exiting non-zero
+    // because boot failed, and answering "shutdown ok, flushed_ok=true"
+    // while exiting with code 71/72/73 is misleading in log triage. The
+    // kernel-level exit code is what the UI observes; the missing ack is
+    // benign (the UI's shutdown-request future returns ServiceCrashed,
+    // which is correct for a Service that exited mid-shutdown).
     if let Some(id) = pending_shutdown_id {
-        // Framing-layer logging hook: same shape as spawn_handler. Records
-        // the outcome (ok / internal) and elapsed-since-shutdown-arrival;
-        // never the response payload.
-        let outcome = if flushed_ok { "ok" } else { "internal" };
-        log::info!("dispatch end method=shutdown id={id} outcome={outcome}");
-        let result = serde_json::to_value(ShutdownResponse { flushed_ok })
-            .map_err(|error| ServiceError::Internal(error.to_string()));
-        send_handler_response(&out_tx, id, result).await;
-        lifecycle.request_shutdown();
+        if boot_exit_code.is_some() {
+            log::info!(
+                "dispatch end method=shutdown id={id} outcome=skipped_boot_failed",
+            );
+        } else {
+            // Framing-layer logging hook: same shape as spawn_handler.
+            // Records the outcome (ok / internal) and elapsed-since-
+            // shutdown-arrival; never the response payload.
+            let outcome = if flushed_ok { "ok" } else { "internal" };
+            log::info!("dispatch end method=shutdown id={id} outcome={outcome}");
+            let result = serde_json::to_value(ShutdownResponse { flushed_ok })
+                .map_err(|error| ServiceError::Internal(error.to_string()));
+            send_handler_response(&out_tx, id, result).await;
+            lifecycle.request_shutdown();
+        }
     }
 
     drop(out_tx);
