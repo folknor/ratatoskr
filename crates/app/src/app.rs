@@ -584,6 +584,16 @@ impl BootingApp {
                     service_api::Notification::BootProgress(progress) => {
                         self.splash.apply(progress);
                     }
+                    // Phase 2 wire types exist but no plan is in flight
+                    // during Booting (the action service won't dispatch
+                    // until ReadyApp is constructed). Drop with a debug
+                    // log so a leaked notification is observable.
+                    service_api::Notification::OperationOutcome(_)
+                    | service_api::Notification::ActionCompleted(_) => {
+                        log::debug!(
+                            "BootingApp dropped action notification (no plans in flight pre-ready)"
+                        );
+                    }
                 }
                 BootingUpdate::Stay(Task::none())
             }

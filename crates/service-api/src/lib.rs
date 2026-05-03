@@ -1,3 +1,4 @@
+mod action;
 mod boot;
 mod error;
 mod framing;
@@ -7,6 +8,11 @@ mod request;
 mod response;
 mod version;
 
+pub use action::{
+    ActionCompleted, ActionPlanAck, ActionWireOperation, ActionWirePlan, OperationId,
+    OperationOutcome, OperationResult, PlanId, PlanSummary, RemoteFailure, WireFolderId,
+    WireMailOperation, WireTagId,
+};
 pub use boot::{
     BootClassification, BootExitCode, BootPhase, BootPhaseKind, BootProgress, BootReadyResponse,
 };
@@ -16,7 +22,7 @@ pub use framing::{
     ParsedClientMessage, ParsedServiceMessage, RequestParseError, ServiceResponse,
     encode_message, parse_client_message, parse_service_message, write_message,
 };
-pub use notification::{CoalesceKey, Notification, NotificationClass};
+pub use notification::{CoalesceKey, Notification, NotificationClass, WithGeneration};
 pub use redacted::{RedactedBytes, RedactedString};
 pub use request::{RequestParams, RequestTimeoutKind};
 pub use response::{HealthPingResponse, ShutdownResponse};

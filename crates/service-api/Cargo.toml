@@ -12,6 +12,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "rt", "time"] }
+uuid = { version = "1.23.1", features = ["v4", "v7", "serde"] }
 
 [features]
 # Adds `RequestParams::TestPanic` / `TestVersion` / `TestSlow` variants and

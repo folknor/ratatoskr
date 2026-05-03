@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 
+use crate::action::ActionWirePlan;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestTimeoutKind {
     Finite(Duration),
@@ -17,6 +19,17 @@ pub enum RequestParams {
     /// drafts sweep + thread-participants backfill have all completed. The
     /// long timeout (10 minutes) covers a 50 GB-class schema migration.
     BootReady,
+    /// Submit a resolved-and-planned action for execution. The Service
+    /// handler validates the plan, journals it into `action_jobs` +
+    /// `action_job_ops` (per Phase 2 plan scope item 18a), signals the
+    /// worker pool, and returns `ActionPlanAck { plan_id, journaled }`.
+    /// Per-operation `OperationOutcome` notifications stream from the
+    /// worker; `ActionCompleted` closes the stream.
+    ///
+    /// The 5 s timeout is the **handler** budget (validate + insert
+    /// rows + signal `tokio::sync::Notify`). The worker has no IPC
+    /// timeout - it runs to completion or until respawn.
+    ActionExecutePlan { plan: ActionWirePlan },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -40,6 +53,7 @@ impl RequestParams {
             Self::HealthPing => "health.ping",
             Self::Shutdown => "shutdown",
             Self::BootReady => "boot.ready",
+            Self::ActionExecutePlan { .. } => "action.execute_plan",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -63,6 +77,12 @@ impl RequestParams {
             Self::HealthPing => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             Self::Shutdown => RequestTimeoutKind::Finite(Duration::from_secs(30)),
             Self::BootReady => RequestTimeoutKind::Finite(Duration::from_secs(600)),
+            // Handler-only budget: validate + journal + signal worker.
+            // The worker has no IPC timeout (per Phase 2 plan scope
+            // item 3, which split execution off the request future
+            // because the dispatch loop sends the response only after
+            // the handler returns).
+            Self::ActionExecutePlan { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
@@ -101,6 +121,7 @@ impl RequestParams {
             Self::HealthPing => Value::Null,
             Self::Shutdown => Value::Null,
             Self::BootReady => Value::Null,
+            Self::ActionExecutePlan { plan } => serde_json::json!({ "plan": plan }),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -125,6 +146,15 @@ impl RequestParams {
             "boot.ready" => {
                 expect_no_params(method, params)?;
                 Ok(Self::BootReady)
+            }
+            "action.execute_plan" => {
+                #[derive(Deserialize)]
+                struct P {
+                    plan: ActionWirePlan,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("action.execute_plan params: {e}"))?;
+                Ok(Self::ActionExecutePlan { plan: p.plan })
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {
@@ -208,6 +238,71 @@ mod tests {
     #[test]
     fn shutdown_does_not_bypass_admission() {
         assert!(!RequestParams::Shutdown.bypasses_admission());
+    }
+
+    #[test]
+    fn action_execute_plan_timeout_is_five_seconds() {
+        let plan = ActionWirePlan {
+            plan_id: crate::action::PlanId::new_v7(),
+            operations: Vec::new(),
+        };
+        assert_eq!(
+            RequestParams::ActionExecutePlan { plan }.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn action_execute_plan_method_name_is_dotted() {
+        let plan = ActionWirePlan {
+            plan_id: crate::action::PlanId::new_v7(),
+            operations: Vec::new(),
+        };
+        assert_eq!(
+            RequestParams::ActionExecutePlan { plan }.method_name(),
+            "action.execute_plan",
+        );
+    }
+
+    #[test]
+    fn action_execute_plan_does_not_bypass_admission() {
+        let plan = ActionWirePlan {
+            plan_id: crate::action::PlanId::new_v7(),
+            operations: Vec::new(),
+        };
+        assert!(
+            !RequestParams::ActionExecutePlan { plan }.bypasses_admission(),
+            "action.execute_plan is bounded handler work; admission cap applies",
+        );
+    }
+
+    #[test]
+    fn action_execute_plan_round_trips_from_method_params() {
+        use crate::action::{
+            ActionWireOperation, OperationId, PlanId, WireFolderId, WireMailOperation,
+        };
+
+        let plan = ActionWirePlan {
+            plan_id: PlanId::new_v7(),
+            operations: vec![
+                ActionWireOperation {
+                    operation_id: OperationId(0),
+                    account_id: "acc-1".into(),
+                    thread_id: "thr-9".into(),
+                    operation: WireMailOperation::MoveToFolder {
+                        dest: WireFolderId("inbox".into()),
+                        source: Some(WireFolderId("archive".into())),
+                    },
+                },
+            ],
+        };
+        let original = RequestParams::ActionExecutePlan { plan };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
     }
 
     #[test]

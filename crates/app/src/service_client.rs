@@ -1965,6 +1965,7 @@ mod tests {
             Notification::BootProgress(bp) => {
                 assert_eq!(bp.service_generation, 7);
             }
+            other => panic!("expected BootProgress; got {other:?}"),
         }
     }
 
@@ -2358,6 +2359,7 @@ mod tests {
                     service_api::BootPhase::Migrating { current: 5, total: 10 }
                 ));
             }
+            other => panic!("expected BootProgress; got {other:?}"),
         }
         queue.close();
         assert!(queue.recv().await.is_none(), "queue must be empty");

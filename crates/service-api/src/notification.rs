@@ -1,3 +1,4 @@
+use crate::action::{ActionCompleted, OperationOutcome};
 use crate::boot::{BootPhaseKind, BootProgress};
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +32,9 @@ impl WithGeneration for BootProgress {
         self.service_generation = generation;
     }
 }
+
+// `OperationOutcome` and `ActionCompleted` `WithGeneration` impls live
+// in `crate::action` alongside the type definitions; see that module.
 
 /// Per-class coalesce key. The queue compares `CoalesceKey` for equality
 /// when deciding whether a new entry replaces an existing one; the type is
@@ -75,6 +79,18 @@ pub enum Notification {
     /// run.
     #[serde(rename = "boot.progress")]
     BootProgress(BootProgress),
+    /// Per-operation outcome from the action worker. `MustDeliver`: a
+    /// dropped outcome desynchronises the UI's per-plan
+    /// `applied_outcomes` set vs the journal. Cross-respawn safety via
+    /// `service_generation`.
+    #[serde(rename = "action.operation_outcome")]
+    OperationOutcome(OperationOutcome),
+    /// Per-plan completion from the action worker. `MustDeliver`: a
+    /// dropped completion leaves the UI's `in_flight_plans` entry alive
+    /// forever. Emitted after the per-plan transaction has committed and
+    /// is observable from a fresh read connection.
+    #[serde(rename = "action.completed")]
+    ActionCompleted(ActionCompleted),
     /// Test-only variant. Lets the wire round-trip be exercised when no
     /// production payload happens to match a test's needs. Compiled out of
     /// release builds via `#[cfg(test)]`.
@@ -89,6 +105,14 @@ impl Notification {
             Self::BootProgress(progress) => NotificationClass::Coalesce {
                 key: CoalesceKey::BootProgress(progress.phase.coalesce_discriminant()),
             },
+            // `MustDeliver` for both action notifications: the UI's
+            // applied-outcome dedupe and the in-flight-plans completion
+            // unwinder both need every event to land. Coalescing would
+            // collapse outcomes for different operations within a plan
+            // (each carries a distinct OperationId), and dropping under
+            // pressure would leak `in_flight_plans` entries forever.
+            Self::OperationOutcome(_) => NotificationClass::MustDeliver,
+            Self::ActionCompleted(_) => NotificationClass::MustDeliver,
             #[cfg(test)]
             Self::TestEcho { .. } => NotificationClass::Coalesce {
                 key: CoalesceKey::test("test.echo"),
@@ -99,6 +123,8 @@ impl Notification {
     pub fn method_name(&self) -> &'static str {
         match self {
             Self::BootProgress(_) => "boot.progress",
+            Self::OperationOutcome(_) => "action.operation_outcome",
+            Self::ActionCompleted(_) => "action.completed",
             #[cfg(test)]
             Self::TestEcho { .. } => "test.echo",
         }
@@ -134,6 +160,8 @@ impl Notification {
     pub fn service_generation(&self) -> Option<u32> {
         match self {
             Self::BootProgress(progress) => Some(progress.generation()),
+            Self::OperationOutcome(outcome) => Some(outcome.generation()),
+            Self::ActionCompleted(completed) => Some(completed.generation()),
             #[cfg(test)]
             Self::TestEcho { .. } => None,
         }
@@ -151,6 +179,8 @@ impl Notification {
     pub fn set_service_generation(&mut self, generation: u32) {
         match self {
             Self::BootProgress(progress) => progress.set_generation(generation),
+            Self::OperationOutcome(outcome) => outcome.set_generation(generation),
+            Self::ActionCompleted(completed) => completed.set_generation(generation),
             #[cfg(test)]
             Self::TestEcho { .. } => {}
         }
@@ -288,6 +318,104 @@ mod tests {
             value: "x".to_string(),
         };
         assert_eq!(n.service_generation(), None);
+    }
+
+    #[test]
+    fn operation_outcome_classifies_as_must_deliver() {
+        use crate::action::{OperationId, OperationResult, PlanId};
+        let outcome = Notification::OperationOutcome(crate::action::OperationOutcome {
+            plan_id: PlanId::new_v7(),
+            operation_id: OperationId(0),
+            result: OperationResult::Success,
+            service_generation: 0,
+        });
+        assert!(matches!(outcome.class(), NotificationClass::MustDeliver));
+    }
+
+    #[test]
+    fn action_completed_classifies_as_must_deliver() {
+        use crate::action::PlanId;
+        let completed = Notification::ActionCompleted(crate::action::ActionCompleted {
+            plan_id: PlanId::new_v7(),
+            summary: crate::action::PlanSummary::default(),
+            service_generation: 0,
+        });
+        assert!(matches!(completed.class(), NotificationClass::MustDeliver));
+    }
+
+    #[test]
+    fn operation_outcome_method_name_is_dotted() {
+        use crate::action::{OperationId, OperationResult, PlanId};
+        let outcome = Notification::OperationOutcome(crate::action::OperationOutcome {
+            plan_id: PlanId::new_v7(),
+            operation_id: OperationId(0),
+            result: OperationResult::Success,
+            service_generation: 0,
+        });
+        assert_eq!(outcome.method_name(), "action.operation_outcome");
+    }
+
+    #[test]
+    fn action_completed_method_name_is_dotted() {
+        use crate::action::PlanId;
+        let completed = Notification::ActionCompleted(crate::action::ActionCompleted {
+            plan_id: PlanId::new_v7(),
+            summary: crate::action::PlanSummary::default(),
+            service_generation: 0,
+        });
+        assert_eq!(completed.method_name(), "action.completed");
+    }
+
+    #[test]
+    fn operation_outcome_service_generation_round_trips() {
+        use crate::action::{OperationId, OperationResult, PlanId};
+        let mut n = Notification::OperationOutcome(crate::action::OperationOutcome {
+            plan_id: PlanId::new_v7(),
+            operation_id: OperationId(0),
+            result: OperationResult::Success,
+            service_generation: 1,
+        });
+        assert_eq!(n.service_generation(), Some(1));
+        n.set_service_generation(99);
+        assert_eq!(n.service_generation(), Some(99));
+    }
+
+    #[test]
+    fn action_completed_service_generation_round_trips() {
+        use crate::action::PlanId;
+        let mut n = Notification::ActionCompleted(crate::action::ActionCompleted {
+            plan_id: PlanId::new_v7(),
+            summary: crate::action::PlanSummary::default(),
+            service_generation: 1,
+        });
+        assert_eq!(n.service_generation(), Some(1));
+        n.set_service_generation(99);
+        assert_eq!(n.service_generation(), Some(99));
+    }
+
+    #[test]
+    fn operation_outcome_round_trips_through_parse_service_message() {
+        use crate::action::{OperationId, OperationResult, PlanId};
+
+        let plan_id = PlanId::new_v7();
+        let original = Notification::OperationOutcome(crate::action::OperationOutcome {
+            plan_id,
+            operation_id: OperationId(2),
+            result: OperationResult::Success,
+            service_generation: 5,
+        });
+        let json = serde_json::to_string(&original).expect("serialize");
+        let line = format!(r#"{{"jsonrpc":"2.0",{}}}"#, &json[1..json.len() - 1]);
+        let parsed = parse_service_message(&line).expect("parse");
+        match parsed {
+            ParsedServiceMessage::Notification(Notification::OperationOutcome(outcome)) => {
+                assert_eq!(outcome.plan_id, plan_id);
+                assert_eq!(outcome.operation_id, OperationId(2));
+                assert_eq!(outcome.result, OperationResult::Success);
+                assert_eq!(outcome.service_generation, 5);
+            }
+            other => panic!("expected OperationOutcome notification, got {other:?}"),
+        }
     }
 
     #[test]

@@ -539,6 +539,15 @@ async fn boot_progress_notifications_emitted_in_order() -> TestResult {
             Ok(ParsedServiceMessage::Notification(Notification::BootProgress(p))) => {
                 phases.push(p.phase);
             }
+            Ok(ParsedServiceMessage::Notification(
+                Notification::OperationOutcome(_) | Notification::ActionCompleted(_),
+            )) => {
+                // Action notifications cannot fire during the boot
+                // sequence (no action.execute_plan is in flight); if
+                // one ever does, that's a Phase 2+ regression worth
+                // flagging loudly rather than silently ignoring.
+                panic!("unexpected action notification during boot.ready: {line}");
+            }
             Ok(ParsedServiceMessage::Response {
                 id: Some(1),
                 response,

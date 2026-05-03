@@ -302,8 +302,10 @@ mod tests {
         let phases: Vec<BootPhase> = {
             let mut collected = Vec::new();
             for _ in 0..3 {
-                let Notification::BootProgress(p) = queue.recv().await.expect("recv");
-                collected.push(p.phase);
+                match queue.recv().await.expect("recv") {
+                    Notification::BootProgress(p) => collected.push(p.phase),
+                    other => panic!("expected BootProgress; got {other:?}"),
+                }
             }
             collected
         };
