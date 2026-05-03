@@ -8,17 +8,43 @@ use tokio::process::Command;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
+/// RAII handle for the per-test data directory. Removes the dir when dropped
+/// (panic-on-test-failure included) so smoke runs don't accumulate stray
+/// `target/service-smoke-*` directories.
+struct DataDirGuard {
+    path: PathBuf,
+}
+
+impl DataDirGuard {
+    fn new() -> std::io::Result<Self> {
+        let path = service_smoke_data_dir()?;
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path)?;
+        Ok(Self { path })
+    }
+
+    fn path(&self) -> &PathBuf {
+        &self.path
+    }
+}
+
+impl Drop for DataDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
 #[tokio::test]
 async fn service_subprocess_ping_and_shutdown() -> TestResult {
     let binary = option_env!("CARGO_BIN_EXE_app")
         .ok_or_else(|| std::io::Error::other("CARGO_BIN_EXE_app not set"))?;
-    let app_data_dir = service_smoke_data_dir()?;
-    tokio::fs::create_dir_all(&app_data_dir).await?;
+    let data_dir = DataDirGuard::new()?;
+    let app_data_dir = data_dir.path();
 
     let mut child = Command::new(binary)
         .arg("--service")
         .arg("--app-data-dir")
-        .arg(&app_data_dir)
+        .arg(app_data_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())

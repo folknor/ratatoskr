@@ -71,29 +71,9 @@ The Phase 1 promotion criterion is "the integration test is green in CI"; the in
 
 ## Smaller correctness issues
 
-### 7. `dirs::data_dir()` default writes Service logs to the prod data dir during dev
-
-`crates/service/src/lib.rs:69-73` falls back to `dirs::data_dir().join("org.folknor.ratatoskr")` when `--app-data-dir` isn't provided. `cargo run -p app -- --service` (suggested as a smoke check in plan section 7) writes its log + `clean_shutdown` sentinel into the production data dir, not the dev one. A `target/`-rooted default would isolate dev runs.
-
-### 8. `RequestParams::params_value` always returns `{}`
-
-`crates/service-api/src/request.rs:36-40`. Phase 2 will need either struct-shaped enum variants on `RequestParams` or a separate per-method type with `Serialize` / `Deserialize`. Worth restructuring now while the surface is small (two methods).
-
-### 9. `ServiceError::AnotherInstanceRunning` is dead code
-
-`crates/service-api/src/error.rs:14-15`. Single-instance lock is Phase 1.5 work. Either remove the variant now and re-add in 1.5, or accept that this code path is unverified. Today the `From<ServiceError>` impl maps it to `JsonRpcErrorObject::internal` with a hardcoded "another instance is running" string, none of which is reachable.
-
-### 10. `panic_message` only handles `&str` and `String` payloads
-
-`crates/service/src/dispatch.rs:162-170`. Custom panic types (e.g. `panic!(value)` with arbitrary types) report `"unknown panic payload"`. Acceptable but documents a real loss of detail.
-
 ### 11. Smoke test does not exercise `ServiceClient` Drop
 
 `crates/app/tests/service_subprocess.rs` writes requests and reads responses directly through `BoundedLineReader`, never spawning a real `ServiceClient`. The plan's "Spawn + drop without shutdown" path needs the actual `ServiceClient` Drop ordering exercised against a real subprocess. Today nothing tests that path end-to-end.
-
-### 12. Smoke test does not clean up `target/service-smoke-{pid}/`
-
-`crates/app/tests/service_subprocess.rs:87-91` creates a per-pid directory under `target/` and never removes it. Each run leaves a clean-shutdown sentinel and (eventually) Service log files behind. Trivial; flag for tidying when tests are extended.
 
 ## Out of scope (do not address in Phase 1)
 

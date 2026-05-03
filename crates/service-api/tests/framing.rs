@@ -5,8 +5,22 @@ use service_api::{
 use tokio::io::AsyncWriteExt;
 
 #[test]
-fn parses_health_ping_request() -> Result<(), Box<dyn std::error::Error>> {
+fn parses_health_ping_request_with_empty_object_params() -> Result<(), Box<dyn std::error::Error>> {
     let line = r#"{"jsonrpc":"2.0","id":42,"method":"health.ping","params":{}}"#;
+    let parsed = parse_client_message(line)?;
+    assert_eq!(
+        parsed,
+        ParsedClientMessage::Request {
+            id: 42,
+            params: RequestParams::HealthPing
+        }
+    );
+    Ok(())
+}
+
+#[test]
+fn parses_health_ping_request_with_null_params() -> Result<(), Box<dyn std::error::Error>> {
+    let line = r#"{"jsonrpc":"2.0","id":42,"method":"health.ping","params":null}"#;
     let parsed = parse_client_message(line)?;
     assert_eq!(
         parsed,
@@ -35,7 +49,7 @@ async fn writes_compact_single_line_messages() -> Result<(), Box<dyn std::error:
         .ok_or_else(|| std::io::Error::other("missing frame"))?;
     assert_eq!(
         line,
-        r#"{"jsonrpc":"2.0","id":7,"method":"health.ping","params":{}}"#
+        r#"{"jsonrpc":"2.0","id":7,"method":"health.ping","params":null}"#
     );
     Ok(())
 }

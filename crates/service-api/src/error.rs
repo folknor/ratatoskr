@@ -11,8 +11,6 @@ pub enum ServiceError {
     UnknownMethod(String),
     #[error("internal error: {0}")]
     Internal(String),
-    #[error("another instance is already running")]
-    AnotherInstanceRunning,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,9 +73,6 @@ impl From<ServiceError> for JsonRpcErrorObject {
                 (-32603, format!("handler panic in {method}: {message}"))
             }
             ServiceError::Internal(message) => (-32603, message.clone()),
-            ServiceError::AnotherInstanceRunning => {
-                (-32603, "another instance is running".to_string())
-            }
         };
         Self {
             code,
