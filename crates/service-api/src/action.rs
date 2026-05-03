@@ -234,6 +234,41 @@ impl WithGeneration for ActionCompleted {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Sync progress wire type
+// ---------------------------------------------------------------------------
+
+/// Generic progress event from Service-side action / sync runs.
+///
+/// `IpcProgressReporter` (in `crates/service/src/progress.rs`) is the
+/// `db::ProgressReporter` impl that wraps these for the IPC boundary.
+/// The `event_name` + `payload` shape mirrors the existing
+/// `ProgressReporter::emit_json` signature so call sites in the
+/// relocated action service / sync paths don't need to think about
+/// the wire envelope.
+///
+/// Classified `Coalesce { key: SyncProgress(account_id) }`: per-account
+/// latest-wins. Action operations might emit multiple progress events
+/// per plan (per-thread imap iteration during a bulk archive, for
+/// example); collapsing per-account keeps the queue bounded under
+/// large plans without losing the distinction between accounts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncProgress {
+    pub account_id: String,
+    pub event_name: String,
+    pub payload: serde_json::Value,
+    pub service_generation: u32,
+}
+
+impl WithGeneration for SyncProgress {
+    fn generation(&self) -> u32 {
+        self.service_generation
+    }
+    fn set_generation(&mut self, generation: u32) {
+        self.service_generation = generation;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

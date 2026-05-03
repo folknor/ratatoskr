@@ -1,4 +1,4 @@
-use crate::action::{ActionCompleted, OperationOutcome};
+use crate::action::{ActionCompleted, OperationOutcome, SyncProgress};
 use crate::boot::{BootPhaseKind, BootProgress};
 use serde::{Deserialize, Serialize};
 
@@ -48,6 +48,10 @@ impl WithGeneration for BootProgress {
 #[serde(rename_all = "snake_case", tag = "kind", content = "value")]
 pub enum CoalesceKey {
     BootProgress(BootPhaseKind),
+    /// Sync / action-progress events keyed per-account so latest-wins
+    /// per-account; events from different accounts never collapse onto
+    /// each other.
+    SyncProgress(String),
     /// Synthetic key used only by in-process queue tests in consumer crates.
     /// The queue's per-class enqueue logic is generic over `Classifiable`,
     /// and tests construct mock items with arbitrary string-keyed coalesce
@@ -91,6 +95,13 @@ pub enum Notification {
     /// is observable from a fresh read connection.
     #[serde(rename = "action.completed")]
     ActionCompleted(ActionCompleted),
+    /// Generic progress event from Service-side action / sync runs.
+    /// `Coalesce { key: SyncProgress(account_id) }`: per-account latest-
+    /// wins so a chatty per-row progress emission (sync importing a
+    /// large mailbox, action service archiving 200 threads) cannot
+    /// flood the queue.
+    #[serde(rename = "sync.progress")]
+    SyncProgress(SyncProgress),
     /// Test-only variant. Lets the wire round-trip be exercised when no
     /// production payload happens to match a test's needs. Compiled out of
     /// release builds via `#[cfg(test)]`.
@@ -113,6 +124,9 @@ impl Notification {
             // pressure would leak `in_flight_plans` entries forever.
             Self::OperationOutcome(_) => NotificationClass::MustDeliver,
             Self::ActionCompleted(_) => NotificationClass::MustDeliver,
+            Self::SyncProgress(progress) => NotificationClass::Coalesce {
+                key: CoalesceKey::SyncProgress(progress.account_id.clone()),
+            },
             #[cfg(test)]
             Self::TestEcho { .. } => NotificationClass::Coalesce {
                 key: CoalesceKey::test("test.echo"),
@@ -125,6 +139,7 @@ impl Notification {
             Self::BootProgress(_) => "boot.progress",
             Self::OperationOutcome(_) => "action.operation_outcome",
             Self::ActionCompleted(_) => "action.completed",
+            Self::SyncProgress(_) => "sync.progress",
             #[cfg(test)]
             Self::TestEcho { .. } => "test.echo",
         }
@@ -162,6 +177,7 @@ impl Notification {
             Self::BootProgress(progress) => Some(progress.generation()),
             Self::OperationOutcome(outcome) => Some(outcome.generation()),
             Self::ActionCompleted(completed) => Some(completed.generation()),
+            Self::SyncProgress(progress) => Some(progress.generation()),
             #[cfg(test)]
             Self::TestEcho { .. } => None,
         }
@@ -181,6 +197,7 @@ impl Notification {
             Self::BootProgress(progress) => progress.set_generation(generation),
             Self::OperationOutcome(outcome) => outcome.set_generation(generation),
             Self::ActionCompleted(completed) => completed.set_generation(generation),
+            Self::SyncProgress(progress) => progress.set_generation(generation),
             #[cfg(test)]
             Self::TestEcho { .. } => {}
         }

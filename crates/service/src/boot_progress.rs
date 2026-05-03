@@ -42,15 +42,41 @@ pub(crate) fn emit(out_tx: &mpsc::Sender<Vec<u8>>, phase: BootPhase, message: Op
         message,
         service_generation: 0,
     });
-    let bytes = match serialize_notification(&notification) {
+    enqueue_notification(out_tx, &notification);
+}
+
+/// Serialize a notification and enqueue it on the outbound writer
+/// queue with `try_send` semantics.
+///
+/// Lifted out of `emit` so that other Service-side notification
+/// emitters (the relocated action service's `IpcProgressReporter`
+/// in `crate::progress`, future sync paths) share the same
+/// serialization + enqueue logic. Same caveat as `emit`: the
+/// `try_send` drop-on-full policy is safe today only because the
+/// total Phase 1.5 frame count fits comfortably under
+/// `OUTBOUND_QUEUE_CAP`. Phase 2's `MustDeliver` notifications
+/// (action.operation_outcome, action.completed) MUST NOT use this
+/// helper and must instead be emitted via an awaited `send`; the
+/// drop-on-full policy is incompatible with `MustDeliver` semantics.
+/// The action handler+worker (Phase 2 task 9) lands the awaited-send
+/// path. Coalesce-class notifications (boot.progress, sync.progress)
+/// can keep using this helper because the queue's coalesce policy
+/// already collapses repeats, so a try_send drop in the rare full-
+/// queue case is no worse than a coalesce hit.
+pub(crate) fn enqueue_notification(
+    out_tx: &mpsc::Sender<Vec<u8>>,
+    notification: &Notification,
+) {
+    let method_name = notification.method_name();
+    let bytes = match serialize_notification(notification) {
         Ok(bytes) => bytes,
         Err(error) => {
-            log::warn!("failed to serialize boot.progress: {error}");
+            log::warn!("failed to serialize {method_name}: {error}");
             return;
         }
     };
     if let Err(error) = out_tx.try_send(bytes) {
-        log::warn!("failed to enqueue boot.progress notification: {error}");
+        log::warn!("failed to enqueue {method_name} notification: {error}");
     }
 }
 

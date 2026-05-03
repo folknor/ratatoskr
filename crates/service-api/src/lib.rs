@@ -10,8 +10,8 @@ mod version;
 
 pub use action::{
     ActionCompleted, ActionPlanAck, ActionWireOperation, ActionWirePlan, OperationId,
-    OperationOutcome, OperationResult, PlanId, PlanSummary, RemoteFailure, WireFolderId,
-    WireMailOperation, WireTagId,
+    OperationOutcome, OperationResult, PlanId, PlanSummary, RemoteFailure, SyncProgress,
+    WireFolderId, WireMailOperation, WireTagId,
 };
 pub use boot::{
     BootClassification, BootExitCode, BootPhase, BootPhaseKind, BootProgress, BootReadyResponse,
