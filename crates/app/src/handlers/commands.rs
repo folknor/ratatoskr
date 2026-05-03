@@ -154,7 +154,22 @@ impl ReadyApp {
         self.dispatch_plan(plan)
     }
 
-    /// Dispatch an execution plan through the batch executor.
+    /// Dispatch an execution plan via IPC to the Service-side action
+    /// service. The Service journals the plan into `action_jobs` /
+    /// `action_job_ops`, returns `ActionPlanAck`, then the worker
+    /// drives execution and streams `OperationOutcome` /
+    /// `ActionCompleted` notifications back. Notifications hit
+    /// `Message::ServiceNotification` -> the per-plan outcomes
+    /// accumulate in `ReadyApp.pending_action_plans`, and
+    /// `Notification::ActionCompleted` fires `Message::ActionCompleted`
+    /// so the existing `handle_action_completed` flow runs unchanged.
+    ///
+    /// Pre-dispatch:
+    /// - Generation counters bump BEFORE the IPC call so a stale
+    ///   `ThreadsLoaded` / `NavigationLoaded` landing during the
+    ///   round-trip cannot overwrite the optimistic state.
+    /// - The plan is stashed in `pending_action_plans` keyed by the
+    ///   freshly-generated `PlanId` so notifications can find it.
     pub(crate) fn dispatch_plan(
         &mut self,
         plan: crate::action_resolve::ActionExecutionPlan,
@@ -163,21 +178,153 @@ impl ReadyApp {
             return Task::none();
         }
 
-        let Some(ctx) = self.action_ctx() else {
-            // I4: rollback optimistic mutations before returning
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            // Pre-Ready (no client) or Service crashed without respawn:
+            // roll back optimistic state and surface a toast.
             self.rollback_optimistic(&plan.optimistic);
             self.status_bar.show_confirmation(
-                "\u{26A0} Action unavailable \u{2014} service not initialized".to_string(),
+                "\u{26A0} Action unavailable \u{2014} service not connected".to_string(),
             );
             return Task::none();
         };
 
-        let operations = plan.operations.clone();
+        // Pre-dispatch invalidation - PRE-IPC, not post-completion.
+        // Without these bumps, a stale ThreadsLoaded landing between
+        // dispatch and OperationOutcome would overwrite the optimistic
+        // update.
+        let _ = self.nav_generation.next();
+        let _ = self.thread_generation.next();
+
+        let plan_id = service_api::PlanId::new_v7();
+        let wire_plan = crate::action_wire::to_wire_plan(plan_id, &plan);
+        self.pending_action_plans.insert(
+            plan_id,
+            crate::app::PendingActionPlan {
+                plan,
+                outcomes: Vec::new(),
+            },
+        );
 
         Task::perform(
-            async move { rtsk::actions::batch_execute(&ctx, operations).await },
-            move |outcomes| Message::ActionCompleted { plan, outcomes },
+            async move { client.execute_plan(wire_plan).await },
+            move |result| Message::ActionDispatched {
+                plan_id,
+                result: result.map_err(|e| e.to_string()),
+            },
         )
+    }
+
+    /// Synchronous response to `dispatch_plan`'s IPC call. Success
+    /// case: the Service journaled the plan; we wait for the
+    /// `OperationOutcome` / `ActionCompleted` notifications to drive
+    /// the rest. Error case: dispatch never reached the worker, so
+    /// the `OperationOutcome` stream won't fire - we have to clean up
+    /// `pending_action_plans` ourselves and roll back the optimistic
+    /// state.
+    pub(crate) fn handle_action_dispatched(
+        &mut self,
+        plan_id: service_api::PlanId,
+        result: Result<service_api::ActionPlanAck, String>,
+    ) -> Task<Message> {
+        match result {
+            Ok(_ack) => {
+                // Worker is now executing; outcomes will arrive via
+                // notifications. Nothing to do here.
+                Task::none()
+            }
+            Err(error) => {
+                let pending = self.pending_action_plans.remove(&plan_id);
+                if let Some(state) = pending {
+                    self.rollback_optimistic(&state.plan.optimistic);
+                }
+                log::warn!("action plan {plan_id} dispatch failed: {error}");
+                self.status_bar
+                    .show_confirmation(format!("\u{26A0} Action failed: {error}"));
+                Task::none()
+            }
+        }
+    }
+
+    /// Wire `OperationOutcome` notification arrival to the per-plan
+    /// outcomes accumulator. The companion `ActionCompleted`
+    /// notification (handled in `handle_notification_action_completed`)
+    /// drains the accumulator and fires `Message::ActionCompleted`.
+    pub(crate) fn handle_notification_operation_outcome(
+        &mut self,
+        outcome: service_api::OperationOutcome,
+    ) -> Task<Message> {
+        let Some(state) = self.pending_action_plans.get_mut(&outcome.plan_id) else {
+            // Outcome for an unknown plan - either the plan was already
+            // completed (race), or this is a replay from a previous
+            // incarnation whose plan never crossed into `pending_action_plans`
+            // (UI restarted between dispatch and outcome). Drop quietly.
+            log::debug!(
+                "OperationOutcome for unknown plan {:?} (op {}) - dropping",
+                outcome.plan_id,
+                outcome.operation_id.0,
+            );
+            return Task::none();
+        };
+        let action_outcome = crate::action_wire::wire_outcome_to_action_outcome(outcome.result);
+        state.outcomes.push((outcome.operation_id.0, action_outcome));
+        Task::none()
+    }
+
+    /// Wire `ActionCompleted` notification arrival to
+    /// `Message::ActionCompleted` so the existing post-completion
+    /// pipeline (toast, undo eligibility, optimistic rollback on
+    /// failure, auto-advance) runs against the assembled outcomes.
+    pub(crate) fn handle_notification_action_completed(
+        &mut self,
+        completion: &service_api::ActionCompleted,
+    ) -> Task<Message> {
+        let Some(state) = self.pending_action_plans.remove(&completion.plan_id) else {
+            log::debug!(
+                "ActionCompleted for unknown plan {:?} - dropping",
+                completion.plan_id,
+            );
+            return Task::none();
+        };
+        let crate::app::PendingActionPlan { plan, mut outcomes } = state;
+        // Sort by operation_id so the outcomes Vec aligns with the
+        // plan.operations order (op_id == index into operations).
+        outcomes.sort_by_key(|(op_id, _)| *op_id);
+
+        let expected = u32::try_from(plan.operations.len()).unwrap_or(u32::MAX);
+        if outcomes.len() < plan.operations.len() {
+            // Some OperationOutcome notifications were dropped or arrived
+            // after ActionCompleted. Backfill the missing slots with a
+            // synthetic LocalOnly so the existing handler doesn't index
+            // off the end. Logged at warn so the gap is visible.
+            log::warn!(
+                "plan {:?} completed with only {} of {} outcomes",
+                completion.plan_id,
+                outcomes.len(),
+                plan.operations.len(),
+            );
+            let present: std::collections::HashSet<u32> =
+                outcomes.iter().map(|(id, _)| *id).collect();
+            for op_id in 0..expected {
+                if !present.contains(&op_id) {
+                    outcomes.push((
+                        op_id,
+                        rtsk::actions::ActionOutcome::LocalOnly {
+                            reason: rtsk::actions::ActionError::remote(
+                                "OperationOutcome notification missing on the wire",
+                            ),
+                            retryable: false,
+                        },
+                    ));
+                }
+            }
+            outcomes.sort_by_key(|(op_id, _)| *op_id);
+        }
+        let outcomes_vec: Vec<rtsk::actions::ActionOutcome> =
+            outcomes.into_iter().map(|(_, o)| o).collect();
+        Task::done(Message::ActionCompleted {
+            plan,
+            outcomes: outcomes_vec,
+        })
     }
 
     /// Rollback optimistic mutations when dispatch cannot proceed (I4).

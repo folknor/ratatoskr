@@ -192,12 +192,9 @@ impl ReadyApp {
             }
             Message::ServiceNotification(notification) => {
                 // Drop notifications from a dying-but-still-flushing reader
-                // after a respawn (item 15 of phase-1.5-plan.md). Phase 1.5
-                // production has only BootProgress, which after the
-                // Booting -> Ready transition is uninteresting to ReadyApp
-                // anyway; the gen-check is in place so Phase 2+
-                // notifications (action.completed, push.event, etc.) hit
-                // the same guard without further plumbing.
+                // after a respawn (item 15 of phase-1.5-plan.md). The
+                // generation check applies to every variant; per-variant
+                // dispatch happens after the gen-filter.
                 let current_gen = self
                     .service_client
                     .as_ref()
@@ -209,8 +206,25 @@ impl ReadyApp {
                 ) {
                     return Task::none();
                 }
-                log::debug!("Service notification: {}", notification.method_name());
-                Task::none()
+                match notification {
+                    service_api::Notification::OperationOutcome(outcome) => {
+                        self.handle_notification_operation_outcome(outcome)
+                    }
+                    service_api::Notification::ActionCompleted(completion) => {
+                        self.handle_notification_action_completed(&completion)
+                    }
+                    service_api::Notification::SyncProgress(_)
+                    | service_api::Notification::BootProgress(_) => {
+                        // BootProgress is uninteresting post-Ready;
+                        // SyncProgress is a Phase 3 surface (no UI
+                        // consumer wired yet).
+                        log::debug!("Service notification: {}", notification.method_name());
+                        Task::none()
+                    }
+                }
+            }
+            Message::ActionDispatched { plan_id, result } => {
+                self.handle_action_dispatched(plan_id, result)
             }
             Message::ServiceShutdownComplete(result) => {
                 if let Err(error) = result {

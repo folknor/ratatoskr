@@ -592,6 +592,24 @@ impl ServiceClient {
         serde_json::from_value(value).map_err(ClientError::from)
     }
 
+    /// Submit a resolved action plan for execution.
+    ///
+    /// The Service handler validates the plan, journals it into the
+    /// `action_jobs` / `action_job_ops` tables, and returns
+    /// `ActionPlanAck { plan_id, journaled: true }` once the journal
+    /// transaction has committed. Per-operation `OperationOutcome`
+    /// notifications stream from the worker; `ActionCompleted` closes
+    /// the stream when every op has reached terminal status.
+    ///
+    /// 5 s timeout (handler is just validate + journal + signal); the
+    /// worker has no IPC timeout.
+    pub async fn execute_plan(
+        &self,
+        plan: service_api::ActionWirePlan,
+    ) -> Result<service_api::ActionPlanAck, ClientError> {
+        self.request(RequestParams::ActionExecutePlan { plan }).await
+    }
+
     pub async fn shutdown(&self) -> Result<(), ClientError> {
         // Tell handle_crash to bail rather than respawning if the dispatch
         // shutdown races with reader-EOF (the Service is exiting; the EOF

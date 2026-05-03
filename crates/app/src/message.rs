@@ -198,6 +198,18 @@ pub enum Message {
         plan: crate::action_resolve::ActionExecutionPlan,
         outcomes: Vec<rtsk::actions::ActionOutcome>,
     },
+    /// Phase 2 task 10: synchronous response from the IPC
+    /// `action.execute_plan` round-trip. `Ok(plan_id)` means the
+    /// Service durably journaled the plan and is now executing; the
+    /// per-operation `OperationOutcome` notifications + final
+    /// `ActionCompleted` notification will arrive on the
+    /// `ServiceNotification` stream. `Err(_)` means the dispatch
+    /// itself failed (Service unreachable, validation rejected, etc.) -
+    /// the dispatcher rolls back optimistic state and surfaces a toast.
+    ActionDispatched {
+        plan_id: service_api::PlanId,
+        result: Result<service_api::ActionPlanAck, String>,
+    },
     /// Send completed - carries compose window ID and outcome.
     /// Separate from ActionCompleted because send operates on a compose window,
     /// not a thread list selection.

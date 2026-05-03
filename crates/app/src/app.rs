@@ -149,6 +149,32 @@ pub struct ReadyApp {
     // Service process scaffold
     pub(crate) service_client: Option<Arc<ServiceClient>>,
     pub(crate) service_notifications: ServiceNotificationReceiver,
+
+    /// Per-plan completion state for action plans dispatched via the
+    /// IPC `action.execute_plan` path. Inserted in `dispatch_plan`,
+    /// accumulated as `OperationOutcome` notifications arrive, drained
+    /// in `Notification::ActionCompleted` handling - which fires
+    /// `Message::ActionCompleted` carrying the assembled domain
+    /// outcomes so `handle_action_completed` runs unchanged.
+    ///
+    /// Phase 2 task 10 doesn't introduce the full tri-state in_flight
+    /// tracking the plan describes (Pending / Acked / AckUnknown +
+    /// post-respawn `action.job_status` reconciliation). This map is
+    /// the simpler "plan + accumulating outcomes" flavour; the
+    /// reconciliation surface lands with task 11.
+    pub(crate) pending_action_plans:
+        std::collections::HashMap<service_api::PlanId, PendingActionPlan>,
+}
+
+/// State tracked per dispatched action plan while its
+/// `OperationOutcome` notifications stream in.
+#[derive(Debug, Clone)]
+pub(crate) struct PendingActionPlan {
+    pub(crate) plan: crate::action_resolve::ActionExecutionPlan,
+    /// `(operation_id, ActionOutcome)` pairs in arrival order. Sorted
+    /// by `operation_id` before firing `Message::ActionCompleted` so
+    /// the per-target outcome ordering matches the dispatched plan.
+    pub(crate) outcomes: Vec<(u32, rtsk::actions::ActionOutcome)>,
 }
 
 impl ReadyApp {
@@ -344,6 +370,7 @@ impl ReadyApp {
             action_ctx,
             service_client: Some(service_client),
             service_notifications,
+            pending_action_plans: std::collections::HashMap::new(),
         };
 
         if let Some((ui_snap, settings_snap)) = bootstrap {

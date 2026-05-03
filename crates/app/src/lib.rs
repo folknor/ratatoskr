@@ -15,6 +15,7 @@
 // ────────────────────────────────────────────────────────
 
 pub(crate) mod action_resolve;
+pub(crate) mod action_wire;
 mod app;
 mod appearance;
 mod command_dispatch;
