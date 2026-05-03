@@ -1,8 +1,9 @@
+use app::service_client::{ClientError, ServiceClient};
 use service_api::{
     BoundedLineReader, HealthPingResponse, JsonRpcRequest, ParsedServiceMessage, RequestParams,
     ServiceResponse, ShutdownResponse, parse_service_message, write_message,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::process::Command;
 
@@ -16,14 +17,16 @@ struct DataDirGuard {
 }
 
 impl DataDirGuard {
-    fn new() -> std::io::Result<Self> {
-        let path = service_smoke_data_dir()?;
+    fn new(suffix: &str) -> std::io::Result<Self> {
+        let path = std::env::current_dir()?
+            .join("target")
+            .join(format!("service-smoke-{}-{}", std::process::id(), suffix));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path)?;
         Ok(Self { path })
     }
 
-    fn path(&self) -> &PathBuf {
+    fn path(&self) -> &Path {
         &self.path
     }
 }
@@ -34,11 +37,15 @@ impl Drop for DataDirGuard {
     }
 }
 
+fn binary_path() -> Result<&'static str, std::io::Error> {
+    option_env!("CARGO_BIN_EXE_app")
+        .ok_or_else(|| std::io::Error::other("CARGO_BIN_EXE_app not set"))
+}
+
 #[tokio::test]
 async fn service_subprocess_ping_and_shutdown() -> TestResult {
-    let binary = option_env!("CARGO_BIN_EXE_app")
-        .ok_or_else(|| std::io::Error::other("CARGO_BIN_EXE_app not set"))?;
-    let data_dir = DataDirGuard::new()?;
+    let binary = binary_path()?;
+    let data_dir = DataDirGuard::new("ping_and_shutdown")?;
     let app_data_dir = data_dir.path();
 
     let mut child = Command::new(binary)
@@ -110,8 +117,189 @@ where
     }
 }
 
-fn service_smoke_data_dir() -> Result<PathBuf, std::io::Error> {
-    Ok(std::env::current_dir()?
-        .join("target")
-        .join(format!("service-smoke-{}", std::process::id())))
+/// Drop ServiceClient without calling shutdown(). The OS-level child must
+/// exit promptly via the explicit Drop teardown (abort tasks, close stdin,
+/// SIGKILL fallback). No orphan should remain.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn dropping_client_terminates_child_within_one_second() -> TestResult {
+    let binary = binary_path()?;
+    let data_dir = DataDirGuard::new("drop_no_shutdown")?;
+    let client = ServiceClient::spawn_for_test(Path::new(binary), data_dir.path(), &[]).await?;
+    let pid = client
+        .child_pid()
+        .ok_or_else(|| std::io::Error::other("child has no pid"))?;
+    drop(client);
+
+    let started = std::time::Instant::now();
+    while started.elapsed() < std::time::Duration::from_millis(1500) {
+        if !pid_is_alive(pid)? {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    Err(std::io::Error::other(format!(
+        "Service pid {pid} still alive {:?} after Drop",
+        started.elapsed()
+    ))
+    .into())
+}
+
+/// Pointing at a non-existent binary must surface a clear error rather than
+/// hang. Tests the spawn-failure path of ServiceClient::spawn_for_test.
+#[tokio::test]
+async fn spawn_failure_against_missing_binary_returns_io_error() -> TestResult {
+    let data_dir = DataDirGuard::new("spawn_failure")?;
+    let bogus = data_dir.path().join("does-not-exist");
+    let result =
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            ServiceClient::spawn_for_test(&bogus, data_dir.path(), &[]),
+        )
+        .await
+        .map_err(|_| std::io::Error::other("spawn hung past timeout"))?;
+    match result {
+        Err(ClientError::Io(_)) => Ok(()),
+        Err(other) => Err(std::io::Error::other(format!(
+            "expected ClientError::Io, got {other:?}"
+        ))
+        .into()),
+        Ok(_) => Err(std::io::Error::other("spawn unexpectedly succeeded").into()),
+    }
+}
+
+/// SIGKILL the helper that spawned the Service; the kernel's
+/// PR_SET_PDEATHSIG (set on the child via `pre_exec`) must fire promptly
+/// and the Service must exit within ~2 s. Linux-only - macOS is deferred,
+/// Windows uses Job Object KILL_ON_JOB_CLOSE which can only be exercised
+/// on a real Windows host.
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread")]
+async fn linux_parent_sigkill_terminates_service_within_two_seconds() -> TestResult {
+    use tokio::io::AsyncBufReadExt;
+
+    let service_binary = binary_path()?;
+    let helper_binary = option_env!("CARGO_BIN_EXE_parent_death_helper").ok_or_else(|| {
+        std::io::Error::other("CARGO_BIN_EXE_parent_death_helper not set")
+    })?;
+    let data_dir = DataDirGuard::new("parent_sigkill")?;
+
+    let mut helper = Command::new(helper_binary)
+        .arg(service_binary)
+        .arg(data_dir.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()?;
+
+    let stdout = helper
+        .stdout
+        .take()
+        .ok_or_else(|| std::io::Error::other("helper has no stdout"))?;
+    let mut reader = tokio::io::BufReader::new(stdout);
+    let mut line = String::new();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        reader.read_line(&mut line),
+    )
+    .await
+    .map_err(|_| std::io::Error::other("helper did not print pid in time"))??;
+    let service_pid: u32 = line
+        .trim()
+        .parse()
+        .map_err(|e| std::io::Error::other(format!("parse pid {line:?}: {e}")))?;
+
+    let helper_pid = helper
+        .id()
+        .ok_or_else(|| std::io::Error::other("helper has no pid"))?;
+    let helper_pid = i32::try_from(helper_pid).map_err(std::io::Error::other)?;
+    // SAFETY: SIGKILL on a known PID we just spawned. Holding the
+    // `kill_on_drop(true)` Child handle keeps the PID stable.
+    let kill_result = unsafe { libc::kill(helper_pid, libc::SIGKILL) };
+    if kill_result != 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+
+    let started = std::time::Instant::now();
+    while started.elapsed() < std::time::Duration::from_secs(3) {
+        if !pid_is_alive(service_pid)? {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    Err(std::io::Error::other(format!(
+        "Service pid {service_pid} still alive {:?} after parent SIGKILL",
+        started.elapsed()
+    ))
+    .into())
+}
+
+/// Service handler calls `println!` from inside the dispatch loop.
+/// Without the stdio-defense (dup the original stdin/stdout to saved fds,
+/// redirect the globals to /dev/null), the println would corrupt the
+/// JSON-RPC pipe and the next request would fail to parse. With it in
+/// place, the TestPrintln response is well-formed and a follow-up ping
+/// still round-trips.
+#[tokio::test]
+async fn println_from_handler_does_not_corrupt_json_rpc_framing() -> TestResult {
+    let binary = binary_path()?;
+    let data_dir = DataDirGuard::new("println_defense")?;
+    let client = ServiceClient::spawn_for_test(Path::new(binary), data_dir.path(), &[]).await?;
+
+    let _: () = client
+        .request(RequestParams::TestPrintln {
+            message: "STDIO-CORRUPTION-CANARY-XYZ".to_string(),
+        })
+        .await?;
+
+    let ping: HealthPingResponse = client.request(RequestParams::HealthPing).await?;
+    assert_eq!(ping.version, service_api::PROTOCOL_VERSION);
+
+    Ok(())
+}
+
+/// Service returns a wrong protocol version (driven by the test-helpers
+/// `--test-fake-version` flag); ServiceClient::spawn must surface
+/// `ClientError::VersionMismatch` rather than continuing with a bogus
+/// peer.
+#[tokio::test]
+async fn version_mismatch_surfaces_during_handshake() -> TestResult {
+    let binary = binary_path()?;
+    let data_dir = DataDirGuard::new("version_mismatch")?;
+    let result = ServiceClient::spawn_for_test(
+        Path::new(binary),
+        data_dir.path(),
+        &["--test-fake-version=999"],
+    )
+    .await;
+    match result {
+        Err(ClientError::VersionMismatch { ui, service }) => {
+            assert_eq!(ui, service_api::PROTOCOL_VERSION);
+            assert_eq!(service, 999);
+            Ok(())
+        }
+        Err(other) => Err(std::io::Error::other(format!(
+            "expected VersionMismatch, got {other:?}"
+        ))
+        .into()),
+        Ok(_) => Err(std::io::Error::other("spawn unexpectedly succeeded").into()),
+    }
+}
+
+#[cfg(unix)]
+fn pid_is_alive(pid: u32) -> std::io::Result<bool> {
+    let pid = i32::try_from(pid).map_err(std::io::Error::other)?;
+    // SAFETY: kill(pid, 0) only checks reachability + permission; no signal
+    // is delivered. The libc ABI is straightforward.
+    let result = unsafe { libc::kill(pid, 0) };
+    if result == 0 {
+        return Ok(true);
+    }
+    let err = std::io::Error::last_os_error();
+    match err.raw_os_error() {
+        Some(libc::ESRCH) => Ok(false),
+        // EPERM means the process exists but we can't signal it - still alive.
+        Some(libc::EPERM) => Ok(true),
+        _ => Err(err),
+    }
 }

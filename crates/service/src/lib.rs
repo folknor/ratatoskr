@@ -56,6 +56,23 @@ fn app_data_dir_from_args() -> Option<PathBuf> {
     None
 }
 
+/// Test-only override for the version reported in `health.ping` responses.
+/// Triggered by `--test-fake-version=N` on the Service command line. Used
+/// by the version-mismatch integration test; off in production builds.
+#[cfg(feature = "test-helpers")]
+pub(crate) fn test_fake_version() -> Option<u32> {
+    let mut args = std::env::args();
+    while let Some(arg) = args.next() {
+        if let Some(value) = arg.strip_prefix("--test-fake-version=") {
+            return value.parse().ok();
+        }
+        if arg == "--test-fake-version" {
+            return args.next().and_then(|v| v.parse().ok());
+        }
+    }
+    None
+}
+
 fn default_app_data_dir() -> PathBuf {
     if let Some(dev_dir) = workspace_dev_data_dir() {
         return dev_dir;

@@ -114,6 +114,110 @@ async fn invalid_request_correlates_error_to_extracted_id() -> TestResult {
     shutdown(harness).await
 }
 
+#[cfg(feature = "test-helpers")]
+#[tokio::test]
+async fn panicking_handler_returns_service_error_panic_and_loop_continues() -> TestResult {
+    use service_api::{JsonRpcErrorObject, ServiceError};
+    let mut harness = spawn_harness();
+    write_request(&mut harness.stdin, 5, RequestParams::TestPanic).await?;
+    let (id, response) = read_response(&mut harness.stdout).await?;
+    assert_eq!(id, Some(5));
+    let error = match response {
+        ServiceResponse::Error(error) => error,
+        ServiceResponse::Success(_) => {
+            return Err(std::io::Error::other("expected error response").into());
+        }
+    };
+    assert_eq!(error.code, -32603);
+    let recovered: ServiceError = JsonRpcErrorObject::try_into_service_error(error)
+        .map_err(|_| std::io::Error::other("data did not carry ServiceError"))?;
+    assert!(
+        matches!(recovered, ServiceError::Panic { ref method, .. } if method == "test.panic"),
+        "expected ServiceError::Panic for test.panic, got {recovered:?}"
+    );
+
+    write_request(&mut harness.stdin, 6, RequestParams::HealthPing).await?;
+    let (id, response) = read_response(&mut harness.stdout).await?;
+    assert_eq!(id, Some(6));
+    assert!(matches!(response, ServiceResponse::Success(_)));
+
+    shutdown(harness).await
+}
+
+#[cfg(feature = "test-helpers")]
+#[tokio::test]
+async fn in_flight_semaphore_caps_concurrent_handlers_and_heartbeat_bypasses() -> TestResult {
+    // Issue 100 slow handlers in parallel. Each sleeps for 800ms. The
+    // semaphore caps concurrency at 64; the math says the second batch
+    // (>=64 in flight) starts no earlier than the first slot frees, so a
+    // bisect of "started" times tells us whether any 65 ran simultaneously.
+    //
+    // Heartbeat-bypass check: while the slow handlers are queued, fire a
+    // single ping. It must round-trip even before any TestSlow has finished,
+    // because health.ping bypasses the semaphore.
+    let mut harness = spawn_harness();
+    let total: usize = 100;
+    let slow_ms: u64 = 800;
+    let start_id: u64 = 100;
+    let issued_at = std::time::Instant::now();
+    for i in 0..total {
+        write_request(
+            &mut harness.stdin,
+            start_id + i as u64,
+            RequestParams::TestSlow { millis: slow_ms },
+        )
+        .await?;
+    }
+    // Drain a few responses to confirm at least one batch finishes.
+    let mut completion_times = Vec::new();
+    let mut ping_seen = false;
+    let ping_id = start_id + total as u64 + 1;
+    write_request(&mut harness.stdin, ping_id, RequestParams::HealthPing).await?;
+
+    while completion_times.len() < total || !ping_seen {
+        let (id, response) = read_response(&mut harness.stdout).await?;
+        let id = id.ok_or_else(|| std::io::Error::other("missing response id"))?;
+        match response {
+            ServiceResponse::Success(_) => {}
+            ServiceResponse::Error(error) => {
+                return Err(std::io::Error::other(format!(
+                    "unexpected error response for id {id}: {error:?}"
+                ))
+                .into());
+            }
+        }
+        if id == ping_id {
+            // Ping must complete BEFORE the first batch of slow handlers
+            // (issue + slow_ms) would naturally finish - i.e., near-instant.
+            assert!(
+                issued_at.elapsed() < std::time::Duration::from_millis(slow_ms),
+                "heartbeat ping waited behind the slow batch (took {:?})",
+                issued_at.elapsed()
+            );
+            ping_seen = true;
+        } else {
+            completion_times.push(issued_at.elapsed());
+        }
+    }
+
+    // First 64 completed in roughly slow_ms; next 36 in roughly 2*slow_ms.
+    completion_times.sort();
+    let first_batch_max = completion_times[63];
+    let second_batch_min = completion_times[64];
+    assert!(
+        second_batch_min > first_batch_max,
+        "expected a clear two-batch staircase, got first[63]={first_batch_max:?}, second[0]={second_batch_min:?}"
+    );
+    // Sanity: the second batch did not start until the first finished.
+    let slop = std::time::Duration::from_millis(slow_ms / 4);
+    assert!(
+        second_batch_min >= std::time::Duration::from_millis(slow_ms).saturating_sub(slop),
+        "second batch started too early: {second_batch_min:?}"
+    );
+
+    shutdown(harness).await
+}
+
 #[tokio::test]
 async fn concurrent_ping_ids_are_correlated() -> TestResult {
     let mut harness = spawn_harness();
@@ -152,11 +256,15 @@ async fn read_response(
         .next_line()
         .await?
         .ok_or_else(|| std::io::Error::other("service closed stdout"))?;
-    match parse_service_message(&line)? {
-        ParsedServiceMessage::Response { id, response } => Ok((id, response)),
-        ParsedServiceMessage::Notification(_) => {
+    match parse_service_message(&line) {
+        Ok(ParsedServiceMessage::Response { id, response }) => Ok((id, response)),
+        Ok(ParsedServiceMessage::Notification(_)) => {
             Err(std::io::Error::other("unexpected notification").into())
         }
+        Err(error) => Err(std::io::Error::other(format!(
+            "parse_service_message failed: {error}\nline: {line}"
+        ))
+        .into()),
     }
 }
 

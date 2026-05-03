@@ -12,6 +12,21 @@ pub enum RequestTimeoutKind {
 pub enum RequestParams {
     HealthPing,
     Shutdown,
+    /// Always panics in the handler. Used to verify dispatch panic safety.
+    #[cfg(feature = "test-helpers")]
+    TestPanic,
+    /// Returns a `HealthPingResponse` with the requested protocol version.
+    /// Used to drive `ClientError::VersionMismatch` from the handshake.
+    #[cfg(feature = "test-helpers")]
+    TestVersion { version: u32 },
+    /// Sleeps for `millis` before responding. Used to verify the in-flight
+    /// semaphore cap and the heartbeat-bypasses-semaphore property.
+    #[cfg(feature = "test-helpers")]
+    TestSlow { millis: u64 },
+    /// Calls `println!` (or its global-stdout-handle equivalent on Windows)
+    /// before responding. Used to verify the stdio corruption defense.
+    #[cfg(feature = "test-helpers")]
+    TestPrintln { message: String },
 }
 
 impl RequestParams {
@@ -19,6 +34,14 @@ impl RequestParams {
         match self {
             Self::HealthPing => "health.ping",
             Self::Shutdown => "shutdown",
+            #[cfg(feature = "test-helpers")]
+            Self::TestPanic => "test.panic",
+            #[cfg(feature = "test-helpers")]
+            Self::TestVersion { .. } => "test.version",
+            #[cfg(feature = "test-helpers")]
+            Self::TestSlow { .. } => "test.slow",
+            #[cfg(feature = "test-helpers")]
+            Self::TestPrintln { .. } => "test.println",
         }
     }
 
@@ -26,6 +49,12 @@ impl RequestParams {
         match self {
             Self::HealthPing => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             Self::Shutdown => RequestTimeoutKind::Finite(Duration::from_secs(30)),
+            #[cfg(feature = "test-helpers")]
+            Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(5))
+            }
+            #[cfg(feature = "test-helpers")]
+            Self::TestSlow { .. } => RequestTimeoutKind::Finite(Duration::from_secs(60)),
         }
     }
 
@@ -36,23 +65,22 @@ impl RequestParams {
     /// Serialize this request's params into the `params` field of the
     /// JSON-RPC envelope.
     ///
-    /// Phase 1 has only unit variants, which serialize to `Value::Null` (the
-    /// wire-canonical "no params"). Future struct-shaped variants should be
-    /// added as tuple variants wrapping a `Serialize` params struct, e.g.
-    ///
-    /// ```ignore
-    /// pub enum RequestParams {
-    ///     OpenThread(OpenThreadParams),
-    /// }
-    /// // in params_value():
-    /// Self::OpenThread(p) => serde_json::to_value(p).unwrap_or(Value::Null),
-    /// ```
-    ///
-    /// Each match arm is the canonical extension point.
+    /// Unit variants serialize to `Value::Null` (the wire-canonical "no
+    /// params"). Tuple-shaped variants serialize their inner struct via
+    /// `serde_json::to_value`. Each match arm is the canonical extension
+    /// point.
     pub fn params_value(&self) -> Value {
         match self {
             Self::HealthPing => Value::Null,
             Self::Shutdown => Value::Null,
+            #[cfg(feature = "test-helpers")]
+            Self::TestPanic => Value::Null,
+            #[cfg(feature = "test-helpers")]
+            Self::TestVersion { version } => serde_json::json!({ "version": version }),
+            #[cfg(feature = "test-helpers")]
+            Self::TestSlow { millis } => serde_json::json!({ "millis": millis }),
+            #[cfg(feature = "test-helpers")]
+            Self::TestPrintln { message } => serde_json::json!({ "message": message }),
         }
     }
 
@@ -65,6 +93,41 @@ impl RequestParams {
             "shutdown" => {
                 expect_no_params(method, params)?;
                 Ok(Self::Shutdown)
+            }
+            #[cfg(feature = "test-helpers")]
+            "test.panic" => {
+                expect_no_params(method, params)?;
+                Ok(Self::TestPanic)
+            }
+            #[cfg(feature = "test-helpers")]
+            "test.version" => {
+                #[derive(Deserialize)]
+                struct P {
+                    version: u32,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.version params: {e}"))?;
+                Ok(Self::TestVersion { version: p.version })
+            }
+            #[cfg(feature = "test-helpers")]
+            "test.slow" => {
+                #[derive(Deserialize)]
+                struct P {
+                    millis: u64,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.slow params: {e}"))?;
+                Ok(Self::TestSlow { millis: p.millis })
+            }
+            #[cfg(feature = "test-helpers")]
+            "test.println" => {
+                #[derive(Deserialize)]
+                struct P {
+                    message: String,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("test.println params: {e}"))?;
+                Ok(Self::TestPrintln { message: p.message })
             }
             _ => Err(format!("unknown method: {method}")),
         }

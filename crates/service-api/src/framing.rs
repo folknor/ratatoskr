@@ -86,6 +86,13 @@ impl<R: AsyncRead + Unpin> BoundedLineReader<R> {
             self.reader.consume(consumed);
         }
     }
+
+    /// Test-only accessor for the in-flight buffer size, used to verify
+    /// that the reader caps its allocation under a no-newline payload.
+    #[cfg(test)]
+    fn buffer_len(&self) -> usize {
+        self.buffer.len()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -240,20 +247,31 @@ fn extract_u64(value: &Value) -> Option<u64> {
 pub fn parse_service_message(line: &str) -> Result<ParsedServiceMessage, RequestParseError> {
     let raw: RawMessage = serde_json::from_str(line)?;
     require_jsonrpc(&raw)?;
+    // serde's Option<Value> deserialization collapses JSON `null` to `None`,
+    // so `{"result": null}` and "no result field" are indistinguishable on
+    // this side of the wire. Drive the response/notification choice off the
+    // (id, method) shape rather than result/error presence; treat absent
+    // result+error as Success(Value::Null).
     match (raw.id.as_ref(), raw.method.as_deref()) {
-        (_, None) if raw.result.is_some() || raw.error.is_some() => {
+        (Some(_), None) => {
             let id = parse_response_id(raw.id.as_ref())?;
-            let response = match (raw.result, raw.error) {
-                (Some(result), None) => ServiceResponse::Success(result),
-                (None, Some(error)) => ServiceResponse::Error(error),
-                _ => {
-                    return Err(RequestParseError::InvalidRequest {
-                        id: None,
-                        message: "response must contain result or error".to_string(),
-                    });
-                }
+            let response = if let Some(error) = raw.error {
+                ServiceResponse::Error(error)
+            } else {
+                ServiceResponse::Success(raw.result.unwrap_or(Value::Null))
             };
             Ok(ParsedServiceMessage::Response { id, response })
+        }
+        (None, None) if raw.error.is_some() => {
+            // Parse-error response from the Service: id is null/absent,
+            // error is present. Surface it with id=None.
+            let error = raw
+                .error
+                .expect("guarded by the arm condition");
+            Ok(ParsedServiceMessage::Response {
+                id: None,
+                response: ServiceResponse::Error(error),
+            })
         }
         (None, Some(method)) => {
             let value = serde_json::json!({
@@ -323,4 +341,63 @@ where
     }
     bytes.push(b'\n');
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    /// Feed a 1 MiB no-newline payload in 8 KiB chunks while sampling the
+    /// reader's internal buffer. The cap is 64 KiB; the buffer must never
+    /// exceed it. This is the "during read" requirement: a pathological
+    /// producer cannot make the reader allocate past the cap before the
+    /// `TooLarge` error fires.
+    #[tokio::test]
+    async fn bounded_reader_buffer_stays_capped_under_no_newline_payload() {
+        let max_len = 64 * 1024;
+        let chunk = vec![b'a'; 8 * 1024];
+        let total_chunks = 128;
+
+        let (mut writer, reader) = tokio::io::duplex(16 * 1024);
+        let producer = tokio::spawn(async move {
+            for _ in 0..total_chunks {
+                if writer.write_all(&chunk).await.is_err() {
+                    return;
+                }
+            }
+            let _ = writer.shutdown().await;
+        });
+
+        let mut lines = BoundedLineReader::new(reader, max_len);
+        let mut peak = 0usize;
+        let mut got_too_large = false;
+        for _ in 0..(total_chunks * 4) {
+            // Drive the reader forward in small steps. The duplex's 16 KiB
+            // capacity backpressures the producer, so we never have more
+            // than a few chunks in flight, but the cumulative payload is
+            // 1 MiB - far past the 64 KiB cap.
+            let next = tokio::time::timeout(
+                std::time::Duration::from_millis(200),
+                lines.next_line(),
+            )
+            .await;
+            peak = peak.max(lines.buffer_len());
+            match next {
+                Ok(Err(FrameError::TooLarge)) => {
+                    got_too_large = true;
+                    break;
+                }
+                Ok(Ok(_)) | Ok(Err(_)) => break,
+                Err(_) => continue,
+            }
+        }
+        producer.abort();
+
+        assert!(got_too_large, "expected TooLarge before exhausting payload");
+        assert!(
+            peak <= max_len,
+            "buffer grew past cap: peak={peak}, max_len={max_len}"
+        );
+    }
 }

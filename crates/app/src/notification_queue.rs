@@ -6,7 +6,7 @@ use tokio::sync::Notify;
 /// Per-class queue policy is keyed off this trait so unit tests can use a
 /// mock type whose classification is set by the test instead of being driven
 /// by the wire format.
-pub(crate) trait Classifiable {
+pub trait Classifiable {
     fn classify(&self) -> NotificationClass;
 }
 
@@ -29,7 +29,7 @@ impl Classifiable for Notification {
 ///
 /// Single consumer is assumed: `recv` pops from the front under the same
 /// mutex that `enqueue` uses to mutate the deque.
-pub(crate) struct NotificationQueue<T: Classifiable = Notification> {
+pub struct NotificationQueue<T: Classifiable = Notification> {
     state: Mutex<QueueState<T>>,
     item_available: Notify,
     space_available: Notify,
@@ -42,7 +42,7 @@ struct QueueState<T> {
 }
 
 impl<T: Classifiable> NotificationQueue<T> {
-    pub(crate) fn new(capacity: usize) -> Self {
+    pub fn new(capacity: usize) -> Self {
         Self {
             state: Mutex::new(QueueState {
                 items: VecDeque::new(),
@@ -54,7 +54,7 @@ impl<T: Classifiable> NotificationQueue<T> {
         }
     }
 
-    pub(crate) async fn enqueue(&self, item: T) {
+    pub async fn enqueue(&self, item: T) {
         match item.classify() {
             NotificationClass::Coalesce { key } => self.enqueue_coalesce(&key, item),
             NotificationClass::Drop => self.enqueue_drop(item),
@@ -117,7 +117,7 @@ impl<T: Classifiable> NotificationQueue<T> {
         }
     }
 
-    pub(crate) async fn recv(&self) -> Option<T> {
+    pub async fn recv(&self) -> Option<T> {
         loop {
             let waiter = self.item_available.notified();
             tokio::pin!(waiter);
@@ -135,7 +135,7 @@ impl<T: Classifiable> NotificationQueue<T> {
         }
     }
 
-    pub(crate) fn close(&self) {
+    pub fn close(&self) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         state.closed = true;
         self.item_available.notify_waiters();

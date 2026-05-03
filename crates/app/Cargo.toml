@@ -52,9 +52,13 @@ hotpath = { workspace = true, optional = true }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
 [features]
 default = ["dev-seed"]
 dev-seed = ["dep:dev-seed"]
+test-helpers = ["service/test-helpers", "service-api/test-helpers"]
 hotpath = [
     "dep:hotpath",
     "hotpath/hotpath",

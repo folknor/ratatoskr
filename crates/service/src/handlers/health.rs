@@ -6,9 +6,19 @@ pub(super) async fn handle(started_at: Instant) -> Result<Value, ServiceError> {
     let uptime_ms = started_at.elapsed().as_millis();
     let uptime_ms = u64::try_from(uptime_ms).unwrap_or(u64::MAX);
     serde_json::to_value(HealthPingResponse {
-        version: PROTOCOL_VERSION,
+        version: report_version(),
         pid: std::process::id(),
         uptime_ms,
     })
     .map_err(|error| ServiceError::Internal(error.to_string()))
+}
+
+#[cfg(feature = "test-helpers")]
+fn report_version() -> u32 {
+    crate::test_fake_version().unwrap_or(PROTOCOL_VERSION)
+}
+
+#[cfg(not(feature = "test-helpers"))]
+fn report_version() -> u32 {
+    PROTOCOL_VERSION
 }

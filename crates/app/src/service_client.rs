@@ -19,7 +19,7 @@ use tokio::sync::{mpsc, oneshot};
 const STDIN_QUEUE_CAP: usize = 1024;
 const NOTIFICATION_QUEUE_CAP: usize = 1024;
 
-pub(crate) type ServiceNotificationReceiver = Arc<NotificationQueue>;
+pub type ServiceNotificationReceiver = Arc<NotificationQueue>;
 
 pub struct ServiceClient {
     child: Mutex<Option<Child>>,
@@ -45,7 +45,7 @@ impl std::fmt::Debug for ServiceClient {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum ClientError {
+pub enum ClientError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("service error: {0}")]
@@ -63,12 +63,38 @@ pub(crate) enum ClientError {
 }
 
 impl ServiceClient {
-    pub(crate) async fn spawn(app_data_dir: &Path) -> Result<Arc<Self>, ClientError> {
-        let mut command = Command::new(std::env::current_exe()?);
+    pub async fn spawn(app_data_dir: &Path) -> Result<Arc<Self>, ClientError> {
+        let exe = std::env::current_exe()?;
+        Self::spawn_inner(&exe, app_data_dir, &[]).await
+    }
+
+    /// Test-only spawn that lets tests override the binary path and pass
+    /// extra args to the Service. Used for spawn-failure (bad binary path)
+    /// and version-mismatch (`--test-fake-version=N`) coverage. Compiled
+    /// out of release builds via the `test-helpers` feature.
+    #[cfg(feature = "test-helpers")]
+    pub async fn spawn_for_test(
+        binary: &Path,
+        app_data_dir: &Path,
+        extra_args: &[&str],
+    ) -> Result<Arc<Self>, ClientError> {
+        Self::spawn_inner(binary, app_data_dir, extra_args).await
+    }
+
+    async fn spawn_inner(
+        binary: &Path,
+        app_data_dir: &Path,
+        extra_args: &[&str],
+    ) -> Result<Arc<Self>, ClientError> {
+        let mut command = Command::new(binary);
         command
             .arg("--service")
             .arg("--app-data-dir")
-            .arg(app_data_dir)
+            .arg(app_data_dir);
+        for arg in extra_args {
+            command.arg(arg);
+        }
+        command
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit())
@@ -130,7 +156,7 @@ impl ServiceClient {
         Ok(client)
     }
 
-    pub(crate) async fn request<R>(&self, params: RequestParams) -> Result<R, ClientError>
+    pub async fn request<R>(&self, params: RequestParams) -> Result<R, ClientError>
     where
         R: DeserializeOwned,
     {
@@ -138,7 +164,7 @@ impl ServiceClient {
         serde_json::from_value(value).map_err(ClientError::from)
     }
 
-    pub(crate) async fn shutdown(&self) -> Result<(), ClientError> {
+    pub async fn shutdown(&self) -> Result<(), ClientError> {
         let request_result = self.request::<ShutdownResponse>(RequestParams::Shutdown).await;
         match request_result {
             Ok(_) => {
@@ -163,8 +189,17 @@ impl ServiceClient {
         Ok(())
     }
 
-    pub(crate) fn notifications(&self) -> ServiceNotificationReceiver {
+    pub fn notifications(&self) -> ServiceNotificationReceiver {
         Arc::clone(&self.notifications)
+    }
+
+    /// Returns the child Service's PID while the child is still alive.
+    /// Used by integration tests to verify that the OS-level process exits
+    /// after explicit shutdown or after the client is dropped.
+    pub fn child_pid(&self) -> Option<u32> {
+        let guard = self.child.lock().ok()?;
+        let child = guard.as_ref()?;
+        child.id()
     }
 
     async fn request_value(
@@ -553,5 +588,92 @@ fn fail_pending(
         if let Some((_, sender)) = pending.remove(&id) {
             let _ = sender.send(Err(ClientError::ServiceCrashed));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Dropping the guard without disarming must remove the pending entry.
+    /// Covers the request-future-cancelled-mid-flight path.
+    #[test]
+    fn pending_guard_evicts_entry_when_dropped_armed() {
+        let pending: DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>> =
+            DashMap::new();
+        let (tx, _rx) = oneshot::channel();
+        pending.insert(42, tx);
+        {
+            let _guard = PendingGuard::new(&pending, 42);
+        }
+        assert!(!pending.contains_key(&42));
+    }
+
+    /// A disarmed guard must leave the pending entry alone (the reader's
+    /// dispatch_response already removed and consumed the sender).
+    #[test]
+    fn pending_guard_leaves_entry_when_disarmed() {
+        let pending: DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>> =
+            DashMap::new();
+        let (tx, _rx) = oneshot::channel();
+        pending.insert(7, tx);
+        {
+            let mut guard = PendingGuard::new(&pending, 7);
+            guard.disarm();
+        }
+        assert!(pending.contains_key(&7));
+    }
+
+    /// Heartbeat task continues after a single Timeout. Drives time via
+    /// `tokio::time::pause` so the test runs in milliseconds. After the
+    /// first ping times out (no responder reads `pending`), the next
+    /// interval tick must fire a second ping - that's the proof of
+    /// continuation.
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn heartbeat_continues_past_a_single_timeout() {
+        let pending = Arc::new(DashMap::<
+            u64,
+            oneshot::Sender<Result<serde_json::Value, ClientError>>,
+        >::new());
+        let next_id = Arc::new(AtomicU64::new(1));
+        let (stdin_tx, mut stdin_rx) = mpsc::channel::<Vec<u8>>(8);
+
+        let task = tokio::spawn(heartbeat_task(
+            stdin_tx.clone(),
+            Arc::clone(&pending),
+            Arc::clone(&next_id),
+        ));
+
+        // First interval tick (the initial tick fires immediately on
+        // tokio::time::interval, but here `start_paused` means we control
+        // when it fires).
+        tokio::time::advance(Duration::from_millis(1)).await;
+        let _first = stdin_rx
+            .recv()
+            .await
+            .expect("first ping should be enqueued");
+
+        // No responder fills the pending entry. Advance past the
+        // HealthPing finite timeout (5 s) so request_value_raw returns
+        // ClientError::Timeout. The heartbeat must log and continue rather
+        // than exit.
+        tokio::time::advance(Duration::from_secs(6)).await;
+        // Yield so the heartbeat task can observe the timeout.
+        tokio::task::yield_now().await;
+
+        // Advance to the next interval tick (30 s after the prior one).
+        tokio::time::advance(Duration::from_secs(30)).await;
+        let _second = tokio::time::timeout(Duration::from_secs(1), stdin_rx.recv())
+            .await
+            .expect("second ping should arrive after the prior timeout")
+            .expect("stdin channel closed unexpectedly");
+
+        // We have what we needed. Dropping `stdin_tx` (and the rx) lets
+        // the heartbeat exit cleanly on its next send.
+        drop(stdin_tx);
+        drop(stdin_rx);
+        // Don't await `task` directly because it may still be in a sleep;
+        // abort to keep the test fast.
+        task.abort();
     }
 }

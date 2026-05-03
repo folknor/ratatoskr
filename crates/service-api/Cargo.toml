@@ -12,3 +12,10 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "rt", "time"] }
+
+[features]
+# Adds `RequestParams::TestPanic` / `TestVersion` / `TestSlow` variants and
+# parser routing for them. Off by default; `brokkr check`'s `--all-features`
+# turns it on for tests, production builds (`cargo build --release`) leave
+# it off so the test variants never reach the wire.
+test-helpers = []
