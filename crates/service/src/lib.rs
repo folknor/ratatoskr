@@ -1,11 +1,13 @@
 mod dispatch;
 mod handlers;
+mod instance_lock;
 mod lifecycle;
 mod logging;
 pub mod parent_death;
 mod sigterm;
 mod stdio_defense;
 
+use service_api::BootExitCode;
 use std::path::PathBuf;
 
 pub use dispatch::run_service_with_io;
@@ -38,6 +40,32 @@ pub fn run_service_blocking() -> ! {
     let _ = logging::init(&app_data_dir);
     logging::install_panic_hook();
 
+    // 4. Single-instance lock. A second Service spawned against the same
+    //    data dir gets `AnotherInstanceRunning` and exits before doing any
+    //    DB work. The guard is held until process exit; the kernel releases
+    //    the underlying file lock on close (clean, panic, or SIGKILL).
+    //
+    //    Lock acquisition fires before the writer task is alive, so no
+    //    `BootProgress` notification is possible here - the distinguishable
+    //    exit code is the user-visible signal.
+    let _instance_lock = match instance_lock::acquire(&app_data_dir) {
+        Ok(guard) => guard,
+        Err(instance_lock::AcquireError::Contended) => {
+            log::error!(
+                "another Ratatoskr Service is already running for {}",
+                app_data_dir.display()
+            );
+            std::process::exit(BootExitCode::AnotherInstanceRunning.as_i32());
+        }
+        Err(instance_lock::AcquireError::Io(error)) => {
+            log::error!(
+                "failed to acquire instance lock at {}: {error}",
+                app_data_dir.display()
+            );
+            std::process::exit(1);
+        }
+    };
+
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_name("ratatoskr-service")
@@ -54,7 +82,7 @@ pub fn run_service_blocking() -> ! {
         let lifecycle = lifecycle::ServiceLifecycle::new(Some(app_data_dir));
         sigterm::spawn(lifecycle.clone());
 
-        // 4. Wrap the saved FDs/HANDLEs into tokio I/O types now that we
+        // 5. Wrap the saved FDs/HANDLEs into tokio I/O types now that we
         //    have a runtime context.
         match stdio_defense::adopt_into_runtime(saved_stdio) {
             Ok((stdin, stdout)) => {
@@ -67,6 +95,7 @@ pub fn run_service_blocking() -> ! {
         }
     });
 
+    drop(_instance_lock);
     std::process::exit(exit_code);
 }
 

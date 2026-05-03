@@ -1,7 +1,7 @@
 use app::service_client::{ClientError, ServiceClient};
 use service_api::{
-    BoundedLineReader, HealthPingResponse, JsonRpcRequest, ParsedServiceMessage, RequestParams,
-    ServiceResponse, ShutdownResponse, parse_service_message, write_message,
+    BootExitCode, BoundedLineReader, HealthPingResponse, JsonRpcRequest, ParsedServiceMessage,
+    RequestParams, ServiceResponse, ShutdownResponse, parse_service_message, write_message,
 };
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -339,6 +339,78 @@ async fn pending_request_fails_with_service_crashed_when_child_killed() -> TestR
         )
         .into()),
     }
+}
+
+/// Two `--service` instances against the same data dir: the first takes the
+/// fs2 file lock at boot; the second hits the contended path and exits with
+/// `BootExitCode::AnotherInstanceRunning` (code 71). Lets the UI surface
+/// "Ratatoskr is already running" rather than treating it as a crash.
+#[tokio::test(flavor = "multi_thread")]
+async fn second_instance_against_same_data_dir_exits_with_already_running() -> TestResult {
+    let binary = binary_path()?;
+    let data_dir = DataDirGuard::new("instance_lock")?;
+    let app_data_dir = data_dir.path();
+
+    // Service A: spawn and wait for it to be past lock acquisition. The
+    // ping/pong proves A has reached the dispatch loop, which only happens
+    // after the lock is held.
+    let mut a = Command::new(binary)
+        .arg("--service")
+        .arg("--app-data-dir")
+        .arg(app_data_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()?;
+
+    let mut a_stdin = a
+        .stdin
+        .take()
+        .ok_or_else(|| std::io::Error::other("missing a stdin"))?;
+    let a_stdout = a
+        .stdout
+        .take()
+        .ok_or_else(|| std::io::Error::other("missing a stdout"))?;
+    let mut a_reader = BoundedLineReader::new(a_stdout, service_api::MAX_FRAME_BYTES);
+
+    write_message(
+        &JsonRpcRequest::new(1, &RequestParams::HealthPing),
+        &mut a_stdin,
+    )
+    .await?;
+    let (id, _response) = read_response(&mut a_reader).await?;
+    assert_eq!(id, Some(1));
+
+    // Service B: should exit with code 71 quickly. We don't drive its IPC -
+    // the lock check fires before any tokio runtime work.
+    let mut b = Command::new(binary)
+        .arg("--service")
+        .arg("--app-data-dir")
+        .arg(app_data_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()?;
+
+    let b_status = tokio::time::timeout(std::time::Duration::from_secs(5), b.wait()).await??;
+    assert_eq!(
+        b_status.code(),
+        Some(BootExitCode::AnotherInstanceRunning.as_i32()),
+        "Service B should exit with AnotherInstanceRunning (71); got {b_status:?}"
+    );
+
+    // Clean teardown of A so the lock is released.
+    write_message(
+        &JsonRpcRequest::new(2, &RequestParams::Shutdown),
+        &mut a_stdin,
+    )
+    .await?;
+    let (id, _response) = read_response(&mut a_reader).await?;
+    assert_eq!(id, Some(2));
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), a.wait()).await??;
+    Ok(())
 }
 
 #[cfg(unix)]
