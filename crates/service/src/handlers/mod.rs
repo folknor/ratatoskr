@@ -1,3 +1,4 @@
+mod action;
 mod action_status;
 mod boot;
 mod health;
@@ -26,15 +27,7 @@ pub(crate) async fn dispatch(
             "shutdown reached handler dispatch; lifecycle layer should have intercepted".into(),
         )),
         RequestParams::BootReady => boot::handle(&boot_state).await,
-        // Stub until Phase 2 task 9 lands the handler+worker. Returning
-        // `Internal` rather than `unreachable!()` so the dispatch path
-        // stays exhaustive without panicking if a UI accidentally
-        // sends `action.execute_plan` against a Service from before
-        // the action service relocated. Once task 9 lands this arm
-        // routes to `crate::handlers::action::handle_execute_plan`.
-        RequestParams::ActionExecutePlan { .. } => Err(ServiceError::Internal(
-            "action.execute_plan handler not yet implemented (Phase 2 task 9)".into(),
-        )),
+        RequestParams::ActionExecutePlan { plan } => action::handle(&boot_state, plan).await,
         RequestParams::ActionJobStatus { plan_id } => {
             action_status::handle(&boot_state, plan_id).await
         }

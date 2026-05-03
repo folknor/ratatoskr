@@ -79,6 +79,14 @@ pub(crate) struct BootSharedState {
     result: Mutex<Option<Result<BootReadyResponse, BootFailure>>>,
     #[allow(dead_code)]
     context: Mutex<Option<BootContext>>,
+    /// Wakeup channel from the action handler to the action worker.
+    /// The handler `notify_one`s this after journaling a plan; the
+    /// worker (Phase 2 task 9c) parks on `notified()` and drains the
+    /// journal. Using a `Notify` rather than an mpsc keeps the
+    /// handler's notify-then-return path lock-free and means a missed
+    /// wakeup costs at most one drain delay (the worker re-checks
+    /// the journal on every wakeup, not just once per signal).
+    action_worker_wakeup: Notify,
 }
 
 impl BootSharedState {
@@ -87,7 +95,24 @@ impl BootSharedState {
             notify: Notify::new(),
             result: Mutex::new(None),
             context: Mutex::new(None),
+            action_worker_wakeup: Notify::new(),
         })
+    }
+
+    /// Wake up the action worker so it drains the journal. Called by
+    /// the `action.execute_plan` handler after journaling a plan
+    /// (Phase 2 task 9b). The worker (task 9c) parks on
+    /// `await_action_worker_wakeup()` and re-scans the journal on
+    /// every wake. Idempotent under the hood (Notify's
+    /// `notify_one`-without-waiter semantics still wake the next
+    /// `notified().await`).
+    pub(crate) fn notify_action_worker(&self) {
+        self.action_worker_wakeup.notify_one();
+    }
+
+    #[allow(dead_code)] // consumed by the worker in task 9c
+    pub(crate) fn await_action_worker_wakeup(&self) -> tokio::sync::futures::Notified<'_> {
+        self.action_worker_wakeup.notified()
     }
 
     /// Park until `signal_ready` fires. The boot.ready handler calls this.

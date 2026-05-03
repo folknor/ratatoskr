@@ -32,6 +32,7 @@ mod star;
 #[cfg(test)]
 mod tests;
 mod trash;
+pub(crate) mod wire_conversion;
 
 pub use archive::archive;
 pub use batch::batch_execute;
