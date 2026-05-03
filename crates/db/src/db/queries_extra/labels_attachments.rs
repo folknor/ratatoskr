@@ -1,11 +1,11 @@
-use super::super::DbState;
+use super::super::ReadDbState;
 use super::super::types::{AttachmentSender, AttachmentWithContext, LabelSortOrderItem};
 use rusqlite::params;
 
 // TODO(refactor): wrap fields in an UpsertLabelParams struct.
 #[allow(clippy::too_many_arguments)]
 pub async fn db_upsert_label_coalesce(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     account_id: String,
     name: String,
@@ -31,7 +31,7 @@ pub async fn db_upsert_label_coalesce(
     .await
 }
 
-pub async fn db_delete_labels_for_account(db: &DbState, account_id: String) -> Result<(), String> {
+pub async fn db_delete_labels_for_account(db: &ReadDbState, account_id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute(
             "DELETE FROM labels WHERE account_id = ?1",
@@ -44,7 +44,7 @@ pub async fn db_delete_labels_for_account(db: &DbState, account_id: String) -> R
 }
 
 pub async fn db_update_label_sort_order(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     label_orders: Vec<LabelSortOrderItem>,
 ) -> Result<(), String> {
@@ -66,7 +66,7 @@ pub async fn db_update_label_sort_order(
 // TODO(refactor): wrap fields in an UpsertAttachmentParams struct.
 #[allow(clippy::too_many_arguments)]
 pub async fn db_upsert_attachment(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     message_id: String,
     account_id: String,
@@ -103,7 +103,7 @@ pub async fn db_upsert_attachment(
 }
 
 pub async fn db_get_attachments_for_account(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     limit: i64,
     offset: i64,
@@ -150,7 +150,7 @@ pub async fn db_get_attachments_for_account(
 }
 
 pub async fn db_get_attachment_senders(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<AttachmentSender>, String> {
     db.with_conn(move |conn| {

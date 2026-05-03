@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use jmap_client::Get;
 use jmap_client::calendar_event::CalendarEvent;
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries_extra::{
     CalendarAttendeeWriteRow, CalendarReminderWriteRow, UpsertCalendarEventParams,
     delete_event_by_remote_id_sync, replace_event_attendees_sync, replace_event_reminders_sync,
@@ -19,7 +19,7 @@ use super::payload::{
 ///
 /// Extracts JSCalendar properties and maps them to the DB schema.
 pub(super) async fn persist_jmap_event(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     event: &CalendarEvent<Get>,
     cal_map: &HashMap<&str, &str>,
@@ -125,7 +125,7 @@ pub(super) async fn persist_jmap_event(
 
 /// Delete a calendar event by its JMAP event ID.
 pub(super) async fn delete_event_by_jmap_id(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     jmap_event_id: &str,
 ) -> Result<(), String> {
@@ -141,7 +141,7 @@ pub(super) async fn delete_event_by_jmap_id(
 ///
 /// Reuses the existing `jmap_sync_state` table via sync.
 pub(super) async fn save_calendar_sync_state(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     state_type: &str,
     state: &str,
@@ -151,7 +151,7 @@ pub(super) async fn save_calendar_sync_state(
 
 /// Load a JMAP sync state for calendar objects.
 pub(super) async fn load_calendar_sync_state(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     state_type: &str,
 ) -> Result<Option<String>, String> {
@@ -162,7 +162,7 @@ pub(super) async fn load_calendar_sync_state(
 
 /// Upsert a calendar entry. Returns the local UUID.
 pub(super) async fn upsert_calendar(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     remote_id: &str,
     display_name: Option<&str>,

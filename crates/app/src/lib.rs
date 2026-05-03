@@ -89,7 +89,7 @@ pub fn run() -> iced::Result {
     // The DB is no longer opened here. Phase 1.5 makes the Service the
     // canonical owner of boot-time DB work (migrations, recovery, sweep,
     // backfill); the UI's `ReadyApp::from_boot_ready` opens its own
-    // read-side DbState after the Service handshake completes.
+    // read-side ReadDbState after the Service handshake completes.
 
     let detected_scale = display::detect_default_scale();
     let _ = DEFAULT_SCALE.set(detected_scale);

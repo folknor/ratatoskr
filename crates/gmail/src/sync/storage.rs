@@ -1,4 +1,4 @@
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries_extra::{AttachmentInsertRow, MessageInsertRow, insert_attachments, insert_messages};
 use search::{SearchDocument, SearchState};
 use store::body_store::BodyStoreState;
@@ -17,7 +17,7 @@ pub(super) async fn process_single_thread(
     client: &GmailClient,
     thread_id: &str,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,

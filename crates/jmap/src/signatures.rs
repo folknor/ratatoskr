@@ -2,7 +2,7 @@ use sha2::{Digest, Sha256};
 
 use jmap_client::identity::{IdentityGet, IdentitySet};
 
-use db::db::DbState;
+use db::db::ReadDbState;
 
 use super::client::JmapClient;
 
@@ -18,7 +18,7 @@ use super::client::JmapClient;
 pub async fn sync_jmap_identity_signatures(
     client: &JmapClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<usize, String> {
     let identities = fetch_all_identities(client).await?;
 

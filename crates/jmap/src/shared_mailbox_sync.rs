@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use jmap_client::mailbox::MailboxChanges;
 
 use common::types::SyncResult;
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 use search::SearchState;
 use store::body_store::BodyStoreState;
@@ -40,7 +40,7 @@ pub async fn sync_shared_account(
     client: &JmapClient,
     jmap_account_id: &str,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
@@ -126,7 +126,7 @@ pub async fn sync_shared_account(
 pub async fn sync_all_shared_accounts(
     client: &JmapClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,

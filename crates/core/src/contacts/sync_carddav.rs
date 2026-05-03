@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use crate::carddav::client::CardDavClient;
 use crate::carddav::parse::{self, ParsedVCard};
-use crate::db::DbState;
+use crate::db::ReadDbState;
 
 // Re-export the sync result type.
 pub use crate::carddav::sync::SyncResult;
@@ -27,7 +27,7 @@ pub use crate::db::queries_extra::contact_carddav::CarddavContactUpsert;
 ///   fetch only those, and prune contacts that disappeared.
 pub async fn sync_carddav_contacts_full(
     client: &CardDavClient,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<SyncResult, String> {
     // Check CTag for quick change detection
@@ -187,7 +187,7 @@ fn vcard_to_upsert(
 // CTag / ETag persistence (delegated to db)
 // ---------------------------------------------------------------------------
 
-async fn load_ctag(db: &DbState, account_id: &str) -> Result<Option<String>, String> {
+async fn load_ctag(db: &ReadDbState, account_id: &str) -> Result<Option<String>, String> {
     let aid = account_id.to_string();
     db.with_conn(move |conn| {
         crate::db::queries_extra::contact_carddav::load_carddav_ctag_sync(conn, &aid)
@@ -195,7 +195,7 @@ async fn load_ctag(db: &DbState, account_id: &str) -> Result<Option<String>, Str
     .await
 }
 
-async fn save_ctag(db: &DbState, account_id: &str, ctag: &str) -> Result<(), String> {
+async fn save_ctag(db: &ReadDbState, account_id: &str, ctag: &str) -> Result<(), String> {
     let aid = account_id.to_string();
     let ctag_owned = ctag.to_string();
     db.with_conn(move |conn| {
@@ -209,7 +209,7 @@ async fn save_ctag(db: &DbState, account_id: &str, ctag: &str) -> Result<(), Str
 }
 
 async fn load_stored_etags(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<HashMap<String, String>, String> {
     let aid = account_id.to_string();

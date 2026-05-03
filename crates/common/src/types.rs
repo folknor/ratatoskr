@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 use search::SearchState;
 use store::body_store::BodyStoreState;
@@ -28,7 +28,7 @@ pub struct AutoSyncResult {
 /// Bundles state references to stay under clippy's 7-arg limit.
 pub struct ProviderCtx<'a> {
     pub account_id: &'a str,
-    pub db: &'a DbState,
+    pub db: &'a ReadDbState,
     pub body_store: &'a BodyStoreState,
     pub inline_images: &'a InlineImageStoreState,
     pub search: &'a SearchState,

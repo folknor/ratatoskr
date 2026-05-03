@@ -5,7 +5,7 @@ mod storage;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 use search::SearchState;
 use store::body_store::BodyStoreState;
@@ -24,7 +24,7 @@ pub(crate) use delta::GmailSyncResult;
 pub(crate) struct SyncCtx<'a> {
     pub client: &'a GmailClient,
     pub account_id: &'a str,
-    pub db: &'a DbState,
+    pub db: &'a ReadDbState,
     pub body_store: &'a BodyStoreState,
     pub inline_images: &'a InlineImageStoreState,
     pub search: &'a SearchState,
@@ -41,7 +41,7 @@ pub async fn gmail_initial_sync(
     client: &GmailClient,
     account_id: &str,
     days_back: i64,
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
@@ -127,7 +127,7 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
 pub async fn gmail_delta_sync(
     client: &GmailClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,

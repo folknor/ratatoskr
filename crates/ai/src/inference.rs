@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
-use rtsk::db::DbState;
+use rtsk::db::ReadDbState;
 use rtsk::provider::crypto::{AppCryptoState, decrypt_value, is_encrypted};
 
 use rtsk::provider::http::shared_http_client;
@@ -13,7 +13,7 @@ use crate::types::{AiCompletionRequest, AiConfig, AiError, AiProvider};
 // ---------------------------------------------------------------------------
 
 /// Load the full AI settings map from the `settings` table.
-pub async fn load_ai_settings_map(db: &DbState) -> Result<HashMap<String, String>, AiError> {
+pub async fn load_ai_settings_map(db: &ReadDbState) -> Result<HashMap<String, String>, AiError> {
     db.with_conn(|conn| {
         let mut stmt = conn
             .prepare(
@@ -46,7 +46,7 @@ pub async fn load_ai_settings_map(db: &DbState) -> Result<HashMap<String, String
 }
 
 /// Load the resolved AI configuration (provider, model, key, URL).
-pub async fn load_ai_config(db: &DbState, encryption_key: &[u8; 32]) -> Result<AiConfig, AiError> {
+pub async fn load_ai_config(db: &ReadDbState, encryption_key: &[u8; 32]) -> Result<AiConfig, AiError> {
     let settings = load_ai_settings_map(db).await?;
     build_ai_config(&settings, encryption_key)
 }
@@ -100,7 +100,7 @@ fn build_ai_config(
 // ---------------------------------------------------------------------------
 
 /// Read a single plain-text setting value.
-pub async fn read_plain_setting(db: &DbState, key: &str) -> Result<Option<String>, AiError> {
+pub async fn read_plain_setting(db: &ReadDbState, key: &str) -> Result<Option<String>, AiError> {
     let key_name = key.to_string();
     db.with_conn(move |conn| rtsk::db::get_setting(conn, &key_name))
         .await
@@ -108,7 +108,7 @@ pub async fn read_plain_setting(db: &DbState, key: &str) -> Result<Option<String
 }
 
 /// Check whether AI is available (enabled + configured).
-pub async fn ai_is_available(db: &DbState, crypto: &AppCryptoState) -> Result<bool, AiError> {
+pub async fn ai_is_available(db: &ReadDbState, crypto: &AppCryptoState) -> Result<bool, AiError> {
     let enabled = read_plain_setting(db, "ai_enabled").await?;
     if enabled.as_deref() == Some("false") {
         return Ok(false);
@@ -128,7 +128,7 @@ pub async fn ai_is_available(db: &DbState, crypto: &AppCryptoState) -> Result<bo
 }
 
 /// Return the normalized provider name from the DB.
-pub async fn get_provider_name(db: &DbState) -> Result<String, AiError> {
+pub async fn get_provider_name(db: &ReadDbState) -> Result<String, AiError> {
     Ok(read_plain_setting(db, "ai_provider")
         .await?
         .as_deref()
@@ -143,7 +143,7 @@ pub async fn get_provider_name(db: &DbState) -> Result<String, AiError> {
 
 /// Complete an AI request using the stored config.
 pub async fn complete(
-    db: &DbState,
+    db: &ReadDbState,
     crypto: &AppCryptoState,
     request: &AiCompletionRequest,
 ) -> Result<String, AiError> {
@@ -380,12 +380,12 @@ fn normalize_provider_name(value: &str) -> &'static str {
 /// An [`AiCompleter`] implementation that reads configuration from the DB
 /// and calls the appropriate AI provider over HTTP.
 pub struct DbConfigCompleter<'a> {
-    db: &'a DbState,
+    db: &'a ReadDbState,
     crypto: &'a AppCryptoState,
 }
 
 impl<'a> DbConfigCompleter<'a> {
-    pub fn new(db: &'a DbState, crypto: &'a AppCryptoState) -> Self {
+    pub fn new(db: &'a ReadDbState, crypto: &'a AppCryptoState) -> Self {
         Self { db, crypto }
     }
 }

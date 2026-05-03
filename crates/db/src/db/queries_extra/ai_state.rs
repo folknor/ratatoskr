@@ -1,9 +1,9 @@
-use super::super::DbState;
+use super::super::ReadDbState;
 use super::super::types::{DbFolderSyncState, DbWritingStyleProfile, UncachedAttachment};
 use crate::db::{query_as, query_one};
 use rusqlite::params;
 
-pub async fn db_attachment_cache_total_size(db: &DbState) -> Result<i64, String> {
+pub async fn db_attachment_cache_total_size(db: &ReadDbState) -> Result<i64, String> {
     db.with_conn(move |conn| {
         conn.query_row(
             "SELECT COALESCE(SUM(cache_size), 0) AS total FROM attachments WHERE cached_at IS NOT NULL",
@@ -16,7 +16,7 @@ pub async fn db_attachment_cache_total_size(db: &DbState) -> Result<i64, String>
 }
 
 pub async fn db_uncached_recent_attachments(
-    db: &DbState,
+    db: &ReadDbState,
     max_size: i64,
     cutoff_epoch: i64,
     limit: i64,
@@ -40,7 +40,7 @@ pub async fn db_uncached_recent_attachments(
 }
 
 pub async fn db_get_ai_cache(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     thread_id: String,
     cache_type: String,
@@ -64,7 +64,7 @@ pub async fn db_get_ai_cache(
 }
 
 pub async fn db_set_ai_cache(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     thread_id: String,
     cache_type: String,
@@ -86,7 +86,7 @@ pub async fn db_set_ai_cache(
 }
 
 pub async fn db_delete_ai_cache(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     thread_id: String,
     cache_type: String,
@@ -103,7 +103,7 @@ pub async fn db_delete_ai_cache(
 }
 
 pub async fn db_get_cached_scan_result(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     message_id: String,
 ) -> Result<Option<String>, String> {
@@ -126,7 +126,7 @@ pub async fn db_get_cached_scan_result(
 }
 
 pub async fn db_cache_scan_result(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     message_id: String,
     result_json: String,
@@ -142,7 +142,7 @@ pub async fn db_cache_scan_result(
     .await
 }
 
-pub async fn db_delete_scan_results(db: &DbState, account_id: String) -> Result<(), String> {
+pub async fn db_delete_scan_results(db: &ReadDbState, account_id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute(
             "DELETE FROM link_scan_results WHERE account_id = ?1",
@@ -155,7 +155,7 @@ pub async fn db_delete_scan_results(db: &DbState, account_id: String) -> Result<
 }
 
 pub async fn db_get_writing_style_profile(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Option<DbWritingStyleProfile>, String> {
     db.with_conn(move |conn| {
@@ -170,7 +170,7 @@ pub async fn db_get_writing_style_profile(
 }
 
 pub async fn db_upsert_writing_style_profile(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     profile_text: String,
     sample_count: i64,
@@ -191,7 +191,7 @@ pub async fn db_upsert_writing_style_profile(
 }
 
 pub async fn db_delete_writing_style_profile(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
@@ -206,7 +206,7 @@ pub async fn db_delete_writing_style_profile(
 }
 
 pub async fn db_get_folder_sync_state(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     folder_path: String,
 ) -> Result<Option<DbFolderSyncState>, String> {
@@ -222,7 +222,7 @@ pub async fn db_get_folder_sync_state(
 }
 
 pub async fn db_upsert_folder_sync_state(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     folder_path: String,
     uidvalidity: Option<i64>,
@@ -245,7 +245,7 @@ pub async fn db_upsert_folder_sync_state(
 }
 
 pub async fn db_delete_folder_sync_state(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     folder_path: String,
 ) -> Result<(), String> {
@@ -261,7 +261,7 @@ pub async fn db_delete_folder_sync_state(
 }
 
 pub async fn db_clear_all_folder_sync_states(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
@@ -276,7 +276,7 @@ pub async fn db_clear_all_folder_sync_states(
 }
 
 pub async fn db_get_all_folder_sync_states(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<DbFolderSyncState>, String> {
     db.with_conn(move |conn| {

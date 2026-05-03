@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::{Connection, Row, params};
 
-use super::DbState;
+use super::ReadDbState;
 use super::types::DbMessage;
 use crate::body_store::{BodyStoreState, MessageBody};
 use crate::provider::crypto::{decrypt_value, is_encrypted};
@@ -161,7 +161,7 @@ fn read_setting_map(
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub async fn get_messages_for_thread(
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     account_id: String,
     thread_id: String,

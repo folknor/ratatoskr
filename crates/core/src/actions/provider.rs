@@ -1,4 +1,4 @@
-use crate::db::DbState;
+use crate::db::ReadDbState;
 use common::ops::ProviderOps;
 
 /// Create a provider ops instance for the given account.
@@ -9,7 +9,7 @@ use common::ops::ProviderOps;
 /// This is the single point of provider resolution. The app crate should
 /// not construct providers directly.
 pub async fn create_provider(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     encryption_key: [u8; 32],
 ) -> Result<Box<dyn ProviderOps>, String> {

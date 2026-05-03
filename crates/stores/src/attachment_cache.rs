@@ -4,7 +4,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use xxhash_rust::xxh3::xxh3_64;
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries_extra::{
     AttachmentCacheInfo, clear_attachment_cache_fields_batch, count_cached_attachment_refs,
     find_attachment_cache_info, get_cached_attachments_oldest_first,
@@ -133,7 +133,7 @@ pub fn update_cache_fields(
     update_attachment_cache_fields(conn, attachment_id, local_path, cache_size, content_hash)
 }
 
-async fn attachment_cache_max_bytes(db: &DbState) -> Result<i64, String> {
+async fn attachment_cache_max_bytes(db: &ReadDbState) -> Result<i64, String> {
     db.with_conn(|conn| {
         let raw = db::db::queries::get_setting(conn, "attachment_cache_max_mb").unwrap_or(None);
         let max_mb = raw
@@ -147,7 +147,7 @@ async fn attachment_cache_max_bytes(db: &DbState) -> Result<i64, String> {
 }
 
 /// Enforce the configured attachment cache size limit by evicting oldest entries.
-pub async fn enforce_cache_limit(db: &DbState, app_data_dir: &Path) -> Result<(), String> {
+pub async fn enforce_cache_limit(db: &ReadDbState, app_data_dir: &Path) -> Result<(), String> {
     let max_bytes = attachment_cache_max_bytes(db).await?;
     if max_bytes <= 0 {
         return Ok(());
@@ -212,7 +212,7 @@ pub async fn enforce_cache_limit(db: &DbState, app_data_dir: &Path) -> Result<()
 
 /// Check the inline image SQLite store for small cached images.
 pub async fn try_inline_image_hit(
-    db: &DbState,
+    db: &ReadDbState,
     inline_images: &InlineImageStoreState,
     account_id: &str,
     message_id: &str,
@@ -244,7 +244,7 @@ pub async fn try_inline_image_hit(
 /// Check the content-addressed file cache for a previously fetched
 /// attachment.
 pub async fn try_cache_hit(
-    db: &DbState,
+    db: &ReadDbState,
     app_data_dir: &Path,
     account_id: &str,
     message_id: &str,
@@ -279,7 +279,7 @@ pub async fn try_cache_hit(
 ///
 /// Spawns a background task so the caller is not blocked.
 pub fn cache_after_fetch(
-    db: &DbState,
+    db: &ReadDbState,
     inline_images: &InlineImageStoreState,
     app_data_dir: &Path,
     account_id: &str,

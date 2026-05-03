@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use rusqlite::{Connection, OptionalExtension};
 
 /// Synchronous version: update account sync state (history_id column).
@@ -14,7 +14,7 @@ pub fn update_account_sync_state(
 
 /// Async version: update account sync state (history_id column).
 pub async fn save_account_history_id(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     history_id: &str,
 ) -> Result<(), String> {
@@ -25,7 +25,7 @@ pub async fn save_account_history_id(
 }
 
 pub async fn load_account_history_id(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<Option<String>, String> {
     let aid = account_id.to_string();
@@ -34,7 +34,7 @@ pub async fn load_account_history_id(
 }
 
 pub async fn save_jmap_sync_state(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     state_type: &str,
     state: &str,
@@ -43,7 +43,7 @@ pub async fn save_jmap_sync_state(
 }
 
 pub async fn load_jmap_sync_state(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     state_type: &str,
 ) -> Result<Option<String>, String> {
@@ -55,7 +55,7 @@ pub async fn load_jmap_sync_state(
 /// `shared_account_id` is `None` for the primary account, `Some(jmap_id)` for
 /// a shared account discovered from the JMAP Session.
 pub async fn save_jmap_sync_state_for(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     shared_account_id: Option<&str>,
     state_type: &str,
@@ -82,7 +82,7 @@ pub async fn save_jmap_sync_state_for(
 
 /// Load JMAP sync state for a specific (possibly shared) account.
 pub async fn load_jmap_sync_state_for(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     shared_account_id: Option<&str>,
     state_type: &str,
@@ -106,7 +106,7 @@ pub async fn load_jmap_sync_state_for(
 }
 
 pub async fn save_graph_delta_token(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
     delta_link: &str,
@@ -129,7 +129,7 @@ pub async fn save_graph_delta_token(
 }
 
 pub async fn load_graph_delta_tokens(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<HashMap<String, String>, String> {
     let aid = account_id.to_string();
@@ -155,7 +155,7 @@ pub async fn load_graph_delta_tokens(
 }
 
 pub async fn delete_graph_delta_token(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
 ) -> Result<(), String> {
@@ -177,7 +177,7 @@ pub async fn delete_graph_delta_token(
 // ── Graph contact delta tokens ────────────────────────────
 
 pub async fn save_graph_contact_delta_token(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
     delta_link: &str,
@@ -200,7 +200,7 @@ pub async fn save_graph_contact_delta_token(
 }
 
 pub async fn load_graph_contact_delta_tokens(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<HashMap<String, String>, String> {
     let aid = account_id.to_string();
@@ -226,7 +226,7 @@ pub async fn load_graph_contact_delta_tokens(
 }
 
 pub async fn delete_graph_contact_delta_token(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
 ) -> Result<(), String> {
@@ -248,7 +248,7 @@ pub async fn delete_graph_contact_delta_token(
 // ── Google People API contact sync tokens ────────────────
 
 pub async fn save_google_contacts_sync_token(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     sync_token: &str,
 ) -> Result<(), String> {
@@ -259,7 +259,7 @@ pub async fn save_google_contacts_sync_token(
 }
 
 pub async fn load_google_contacts_sync_token(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<Option<String>, String> {
     let key = format!("google_contacts_sync_token:{account_id}");
@@ -269,7 +269,7 @@ pub async fn load_google_contacts_sync_token(
 }
 
 pub async fn delete_google_contacts_sync_token(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<(), String> {
     let key = format!("google_contacts_sync_token:{account_id}");
@@ -280,7 +280,7 @@ pub async fn delete_google_contacts_sync_token(
 // ── Google People API otherContacts sync tokens ──────────
 
 pub async fn save_google_other_contacts_sync_token(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     sync_token: &str,
 ) -> Result<(), String> {
@@ -291,7 +291,7 @@ pub async fn save_google_other_contacts_sync_token(
 }
 
 pub async fn load_google_other_contacts_sync_token(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<Option<String>, String> {
     let key = format!("google_other_contacts_sync_token:{account_id}");
@@ -301,7 +301,7 @@ pub async fn load_google_other_contacts_sync_token(
 }
 
 pub async fn delete_google_other_contacts_sync_token(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<(), String> {
     let key = format!("google_other_contacts_sync_token:{account_id}");
@@ -312,7 +312,7 @@ pub async fn delete_google_other_contacts_sync_token(
 // ── Graph shared mailbox delta tokens ────────────────────
 
 pub async fn save_shared_mailbox_delta_token(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     mailbox_id: &str,
     folder_id: &str,
@@ -337,7 +337,7 @@ pub async fn save_shared_mailbox_delta_token(
 }
 
 pub async fn load_shared_mailbox_delta_tokens(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     mailbox_id: &str,
 ) -> Result<HashMap<String, String>, String> {
@@ -365,7 +365,7 @@ pub async fn load_shared_mailbox_delta_tokens(
 }
 
 pub async fn delete_shared_mailbox_delta_tokens(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     mailbox_id: &str,
 ) -> Result<(), String> {
@@ -386,7 +386,7 @@ pub async fn delete_shared_mailbox_delta_tokens(
 
 /// Delete a single delta token for a specific folder within a shared mailbox.
 pub async fn delete_shared_mailbox_delta_token(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     mailbox_id: &str,
     folder_id: &str,
@@ -420,7 +420,7 @@ pub struct SharedMailboxSyncEntry {
 
 /// Get all enabled shared mailboxes for an account.
 pub async fn get_enabled_shared_mailboxes(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<Vec<SharedMailboxSyncEntry>, String> {
     let aid = account_id.to_string();
@@ -450,7 +450,7 @@ pub async fn get_enabled_shared_mailboxes(
 
 /// Update the sync status for a shared mailbox after a sync attempt.
 pub async fn update_shared_mailbox_sync_status(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     mailbox_id: &str,
     last_synced_at: i64,
@@ -475,7 +475,7 @@ pub async fn update_shared_mailbox_sync_status(
 
 /// Enable sync for a shared mailbox, inserting a row if it doesn't exist.
 pub async fn enable_shared_mailbox_sync(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     mailbox_id: &str,
     display_name: Option<&str>,
@@ -501,7 +501,7 @@ pub async fn enable_shared_mailbox_sync(
 
 /// Disable sync for a shared mailbox.
 pub async fn disable_shared_mailbox_sync(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     mailbox_id: &str,
 ) -> Result<(), String> {
@@ -523,7 +523,7 @@ pub async fn disable_shared_mailbox_sync(
 
 /// Disable sync for a shared mailbox and record an error message.
 pub async fn disable_shared_mailbox_sync_with_error(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     mailbox_id: &str,
     error: &str,
@@ -550,7 +550,7 @@ pub async fn disable_shared_mailbox_sync_with_error(
 /// Used to detect revoked access - compare against currently-available
 /// shared accounts to find entries that should be disabled.
 pub async fn get_all_shared_mailbox_ids(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<Vec<String>, String> {
     let aid = account_id.to_string();
@@ -575,7 +575,7 @@ pub async fn get_all_shared_mailbox_ids(
 /// Used by JMAP principal resolution to associate a JMAP shared account
 /// with its owner's email address for send identity auto-selection.
 pub async fn set_shared_mailbox_email(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     mailbox_id: &str,
     email: &str,
@@ -599,7 +599,7 @@ pub async fn set_shared_mailbox_email(
 
 /// Get the email address for a shared mailbox, if resolved.
 pub async fn get_shared_mailbox_email(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     mailbox_id: &str,
 ) -> Result<Option<String>, String> {

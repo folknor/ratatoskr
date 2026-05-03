@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use db::db::DbState;
+use db::db::ReadDbState;
 
 use super::client::GraphClient;
 
@@ -140,7 +140,7 @@ pub struct SubscriptionRecord {
 /// `"/me/messages"` or `"/me/mailFolders/{id}/messages"`.
 pub async fn create_subscription(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     resource: &str,
     notification_url: &str,
@@ -191,7 +191,7 @@ pub async fn create_subscription(
 /// Sends `PATCH /subscriptions/{id}` with a new expiration time.
 pub async fn renew_subscription(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     subscription_id: &str,
     expiration_minutes: Option<u32>,
 ) -> Result<String, String> {
@@ -222,7 +222,7 @@ pub async fn renew_subscription(
 /// Sends `DELETE /subscriptions/{id}` and removes the local DB record.
 pub async fn delete_subscription(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     subscription_id: &str,
 ) -> Result<(), String> {
     let path = format!("/subscriptions/{subscription_id}");
@@ -246,7 +246,7 @@ pub async fn delete_subscription(
 /// List all active subscriptions from the Graph API.
 pub async fn list_subscriptions(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<Vec<SubscriptionResponse>, String> {
     let response: SubscriptionListResponse = client.get_json("/subscriptions", db).await?;
     Ok(response.value)
@@ -276,7 +276,7 @@ pub fn parse_notification_payload(body: &str) -> Result<NotificationPayload, Str
 /// Should be called periodically (e.g. every sync cycle).
 pub async fn check_and_renew_subscriptions(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<(), String> {
     let subs = load_graph_subscriptions(db, account_id).await?;
@@ -453,7 +453,7 @@ pub fn is_expiring_soon(expiration_iso: &str, threshold_minutes: i64) -> bool {
 // ---------------------------------------------------------------------------
 
 async fn save_graph_subscription(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     subscription_id: &str,
     resource: &str,
@@ -483,7 +483,7 @@ async fn save_graph_subscription(
 
 /// Load all subscriptions for a given account from the local DB.
 pub async fn load_graph_subscriptions(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<Vec<SubscriptionRecord>, String> {
     let aid = account_id.to_string();
@@ -520,7 +520,7 @@ pub async fn load_graph_subscriptions(
 }
 
 async fn delete_graph_subscription_record(
-    db: &DbState,
+    db: &ReadDbState,
     subscription_id: &str,
 ) -> Result<(), String> {
     let sid = subscription_id.to_string();
@@ -536,7 +536,7 @@ async fn delete_graph_subscription_record(
 }
 
 async fn update_graph_subscription_expiry(
-    db: &DbState,
+    db: &ReadDbState,
     subscription_id: &str,
     new_expiry: &str,
 ) -> Result<(), String> {

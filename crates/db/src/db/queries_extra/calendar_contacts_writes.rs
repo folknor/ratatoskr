@@ -7,7 +7,7 @@
 //! `crates/gmail/src/contacts/other_contacts.rs` are routed through `db` APIs.
 //!
 //! Each function takes `&Connection` (sync); callers wrap in
-//! `DbState::with_conn(...)` if they need async dispatch.
+//! `ReadDbState::with_conn(...)` if they need async dispatch.
 
 use rusqlite::{Connection, OptionalExtension, params};
 

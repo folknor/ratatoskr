@@ -1,10 +1,10 @@
-use super::super::DbState;
+use super::super::ReadDbState;
 use super::super::types::{DbAllowlistEntry, DbNotificationVip, DbPhishingAllowlistEntry};
 use crate::db::query_as;
 use rusqlite::params;
 
 pub async fn db_add_to_allowlist(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     account_id: String,
     sender_address: String,
@@ -21,7 +21,7 @@ pub async fn db_add_to_allowlist(
 }
 
 pub async fn db_get_allowlisted_senders(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     sender_addresses: Vec<String>,
 ) -> Result<Vec<String>, String> {
@@ -64,7 +64,7 @@ pub async fn db_get_allowlisted_senders(
 }
 
 pub async fn db_add_vip_sender(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     account_id: String,
     email: String,
@@ -83,7 +83,7 @@ pub async fn db_add_vip_sender(
 }
 
 pub async fn db_remove_vip_sender(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     email: String,
 ) -> Result<(), String> {
@@ -99,7 +99,7 @@ pub async fn db_remove_vip_sender(
 }
 
 pub async fn db_is_vip_sender(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     email: String,
 ) -> Result<bool, String> {
@@ -116,7 +116,7 @@ pub async fn db_is_vip_sender(
     .await
 }
 
-pub async fn db_get_vip_senders(db: &DbState, account_id: String) -> Result<Vec<String>, String> {
+pub async fn db_get_vip_senders(db: &ReadDbState, account_id: String) -> Result<Vec<String>, String> {
     db.with_conn(move |conn| {
         let mut stmt = conn
             .prepare("SELECT email_address FROM notification_vips WHERE account_id = ?1")
@@ -132,7 +132,7 @@ pub async fn db_get_vip_senders(db: &DbState, account_id: String) -> Result<Vec<
 }
 
 pub async fn db_get_all_vip_senders(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<DbNotificationVip>, String> {
     db.with_conn(move |conn| {
@@ -148,7 +148,7 @@ pub async fn db_get_all_vip_senders(
 }
 
 pub async fn db_is_allowlisted(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     sender_address: String,
 ) -> Result<bool, String> {
@@ -167,7 +167,7 @@ pub async fn db_is_allowlisted(
 }
 
 pub async fn db_remove_from_allowlist(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     sender_address: String,
 ) -> Result<(), String> {
@@ -184,7 +184,7 @@ pub async fn db_remove_from_allowlist(
 }
 
 pub async fn db_get_allowlist_for_account(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<DbAllowlistEntry>, String> {
     db.with_conn(move |conn| {
@@ -200,7 +200,7 @@ pub async fn db_get_allowlist_for_account(
 }
 
 pub async fn db_is_phishing_allowlisted(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     sender_address: String,
 ) -> Result<bool, String> {
@@ -219,7 +219,7 @@ pub async fn db_is_phishing_allowlisted(
 }
 
 pub async fn db_add_to_phishing_allowlist(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     sender_address: String,
 ) -> Result<(), String> {
@@ -237,7 +237,7 @@ pub async fn db_add_to_phishing_allowlist(
 }
 
 pub async fn db_remove_from_phishing_allowlist(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     sender_address: String,
 ) -> Result<(), String> {
@@ -254,7 +254,7 @@ pub async fn db_remove_from_phishing_allowlist(
 }
 
 pub async fn db_get_phishing_allowlist(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<DbPhishingAllowlistEntry>, String> {
     db.with_conn(move |conn| {

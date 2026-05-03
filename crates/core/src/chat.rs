@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use common::types::ProviderCtx;
-use db::db::DbState;
+use db::db::ReadDbState;
 use store::body_store::BodyStoreState;
 use store::inline_image_store::InlineImageStoreState;
 
@@ -58,7 +58,7 @@ pub struct ChatInlineImage {
 /// Inserts into `chat_contacts`, scans existing threads for 1:1 eligibility,
 /// sets `is_chat_thread` on qualifying threads, and computes initial summary.
 pub async fn designate_chat_contact(
-    db: &DbState,
+    db: &ReadDbState,
     email: &str,
     user_emails: &[String],
 ) -> Result<(), String> {
@@ -78,7 +78,7 @@ pub async fn designate_chat_contact(
 /// Remove chat contact designation.
 ///
 /// Clears `is_chat_thread` on all affected threads and deletes the contact row.
-pub async fn undesignate_chat_contact(db: &DbState, email: &str) -> Result<(), String> {
+pub async fn undesignate_chat_contact(db: &ReadDbState, email: &str) -> Result<(), String> {
     let email = email.to_lowercase();
 
     db.with_conn(move |conn| crate::db::queries_extra::chat::undesignate_chat_contact_sync(conn, &email))
@@ -93,7 +93,7 @@ pub async fn undesignate_chat_contact(db: &DbState, email: &str) -> Result<(), S
 /// pairs that had unread messages, so the caller can dispatch provider
 /// mark-read against each of them.
 pub async fn mark_chat_read_local(
-    db: &DbState,
+    db: &ReadDbState,
     email: &str,
 ) -> Result<Vec<(String, String)>, String> {
     let email = email.to_lowercase();
@@ -176,7 +176,7 @@ pub async fn mark_chat_read_remote(
 }
 
 /// List all chat contacts with sidebar summary data.
-pub async fn get_chat_contacts(db: &DbState) -> Result<Vec<ChatContactSummary>, String> {
+pub async fn get_chat_contacts(db: &ReadDbState) -> Result<Vec<ChatContactSummary>, String> {
     db.with_conn(|conn| {
         crate::db::queries_extra::chat::get_chat_contacts_sync(conn).map(|rows| {
             rows.into_iter()
@@ -203,7 +203,7 @@ pub async fn get_chat_contacts(db: &DbState) -> Result<Vec<ChatContactSummary>, 
 /// Bodies are loaded from `body_store`; inline image bytes are resolved via
 /// `inline_image_store` so the UI can render them directly.
 pub async fn get_chat_timeline(
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_image_store: &InlineImageStoreState,
     email: &str,

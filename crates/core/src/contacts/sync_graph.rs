@@ -3,13 +3,13 @@
 //! SQL lives in `db::queries_extra::contacts`. This module keeps
 //! HTTP/JSON helpers and provides async wrappers.
 
-use crate::db::DbState;
+use crate::db::ReadDbState;
 
 // Re-export types from db.
 pub use crate::db::queries_extra::contacts::GraphServerInfo;
 
 /// After Graph contacts sync completes, enrich with account_id and server_id.
-pub async fn enrich_graph_contacts(db: &DbState, account_id: &str) -> Result<usize, String> {
+pub async fn enrich_graph_contacts(db: &ReadDbState, account_id: &str) -> Result<usize, String> {
     let aid = account_id.to_string();
     db.with_conn(move |conn| {
         crate::db::queries_extra::contacts::enrich_graph_contacts_sync(conn, &aid)
@@ -38,7 +38,7 @@ pub fn build_graph_contact_update_body(
 
 /// Look up the Graph contact ID and account for a contact email.
 pub async fn get_graph_contact_server_info(
-    db: &DbState,
+    db: &ReadDbState,
     email: String,
 ) -> Result<Option<GraphServerInfo>, String> {
     db.with_conn(move |conn| {

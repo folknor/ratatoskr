@@ -8,7 +8,7 @@ use tokio::sync::{Mutex, RwLock};
 use common::crypto;
 use common::http::{self, RetryConfig};
 use common::token::{self, TokenState};
-use db::db::DbState;
+use db::db::ReadDbState;
 
 const GMAIL_API_BASE: &str = "https://www.googleapis.com/gmail/v1/users/me";
 const RETRY_CONFIG: RetryConfig = RetryConfig {
@@ -47,7 +47,7 @@ pub fn new_gmail_state(encryption_key: [u8; 32]) -> GmailState {
 impl GmailClient {
     /// Create a Gmail client by reading account credentials from the database.
     pub async fn from_account(
-        db: &DbState,
+        db: &ReadDbState,
         account_id: &str,
         encryption_key: [u8; 32],
     ) -> Result<Self, String> {
@@ -85,13 +85,13 @@ impl GmailClient {
 
     /// Return a valid access token, refreshing if needed.
     /// Used by the TS calendar provider via `gmail_get_access_token` command.
-    pub async fn get_access_token(&self, db: &DbState) -> Result<String, String> {
+    pub async fn get_access_token(&self, db: &ReadDbState) -> Result<String, String> {
         self.ensure_valid_token(db).await
     }
 
     /// Force-refresh the access token and return the new one.
     /// Used by the TS calendar provider after a 401 response.
-    pub async fn force_refresh_token(&self, db: &DbState) -> Result<String, String> {
+    pub async fn force_refresh_token(&self, db: &ReadDbState) -> Result<String, String> {
         self.force_refresh(db).await
     }
 
@@ -104,7 +104,7 @@ impl GmailClient {
     }
 
     /// Make an authenticated GET request to the Gmail API.
-    pub async fn get<T: DeserializeOwned>(&self, path: &str, db: &DbState) -> Result<T, String> {
+    pub async fn get<T: DeserializeOwned>(&self, path: &str, db: &ReadDbState) -> Result<T, String> {
         let url = format!("{GMAIL_API_BASE}{path}");
         self.request::<T, ()>(&url, "GET", None, db).await
     }
@@ -113,7 +113,7 @@ impl GmailClient {
     pub async fn get_absolute<T: DeserializeOwned>(
         &self,
         url: &str,
-        db: &DbState,
+        db: &ReadDbState,
     ) -> Result<T, String> {
         self.request::<T, ()>(url, "GET", None, db).await
     }
@@ -123,7 +123,7 @@ impl GmailClient {
         &self,
         path: &str,
         body: &B,
-        db: &DbState,
+        db: &ReadDbState,
     ) -> Result<T, String> {
         let url = format!("{GMAIL_API_BASE}{path}");
         self.request(&url, "POST", Some(body), db).await
@@ -134,7 +134,7 @@ impl GmailClient {
         &self,
         path: &str,
         body: &B,
-        db: &DbState,
+        db: &ReadDbState,
     ) -> Result<T, String> {
         let url = format!("{GMAIL_API_BASE}{path}");
         self.request(&url, "PUT", Some(body), db).await
@@ -145,7 +145,7 @@ impl GmailClient {
         &self,
         path: &str,
         body: &B,
-        db: &DbState,
+        db: &ReadDbState,
     ) -> Result<T, String> {
         let url = format!("{GMAIL_API_BASE}{path}");
         self.request(&url, "PATCH", Some(body), db).await
@@ -156,7 +156,7 @@ impl GmailClient {
         &self,
         url: &str,
         body: &B,
-        db: &DbState,
+        db: &ReadDbState,
     ) -> Result<T, String> {
         self.request(url, "POST", Some(body), db).await
     }
@@ -166,7 +166,7 @@ impl GmailClient {
         &self,
         url: &str,
         body: &B,
-        db: &DbState,
+        db: &ReadDbState,
     ) -> Result<T, String> {
         self.request(url, "PUT", Some(body), db).await
     }
@@ -176,14 +176,14 @@ impl GmailClient {
         &self,
         url: &str,
         body: &B,
-        db: &DbState,
+        db: &ReadDbState,
     ) -> Result<T, String> {
         self.request(url, "PATCH", Some(body), db).await
     }
 
     /// Make an authenticated DELETE request to an absolute URL.
     /// Returns `()` - no response body expected.
-    pub async fn delete_absolute(&self, url: &str, db: &DbState) -> Result<(), String> {
+    pub async fn delete_absolute(&self, url: &str, db: &ReadDbState) -> Result<(), String> {
         let access_token = self.ensure_valid_token(db).await?;
         let response = self
             .execute_with_retry(url, "DELETE", None::<&()>, &access_token)
@@ -203,7 +203,7 @@ impl GmailClient {
 
     /// Make an authenticated DELETE request to the Gmail API.
     /// Returns `()` - no response body expected.
-    pub async fn delete(&self, path: &str, db: &DbState) -> Result<(), String> {
+    pub async fn delete(&self, path: &str, db: &ReadDbState) -> Result<(), String> {
         let url = format!("{GMAIL_API_BASE}{path}");
         let access_token = self.ensure_valid_token(db).await?;
         let response = self
@@ -233,7 +233,7 @@ impl GmailClient {
         url: &str,
         method: &str,
         body: Option<&B>,
-        db: &DbState,
+        db: &ReadDbState,
     ) -> Result<T, String> {
         log::debug!("[Gmail] {method} {url}");
         let access_token = self.ensure_valid_token(db).await?;
@@ -318,7 +318,7 @@ impl GmailClient {
     }
 
     /// Get a valid access token, refreshing if needed.
-    async fn ensure_valid_token(&self, db: &DbState) -> Result<String, String> {
+    async fn ensure_valid_token(&self, db: &ReadDbState) -> Result<String, String> {
         // Fast path: read lock, return if valid
         {
             let state = self.inner.token.read().await;
@@ -334,7 +334,7 @@ impl GmailClient {
     ///
     /// Sets the expiry to the past so the double-check inside `do_refresh`
     /// won't short-circuit with a stale (server-revoked) token.
-    async fn force_refresh(&self, db: &DbState) -> Result<String, String> {
+    async fn force_refresh(&self, db: &ReadDbState) -> Result<String, String> {
         {
             let mut state = self.inner.token.write().await;
             state.expires_at = 0;
@@ -343,7 +343,7 @@ impl GmailClient {
     }
 
     /// Perform the actual token refresh, with mutex to coalesce concurrent refreshes.
-    async fn do_refresh(&self, db: &DbState) -> Result<String, String> {
+    async fn do_refresh(&self, db: &ReadDbState) -> Result<String, String> {
         // Acquire refresh lock - only one refresh at a time
         let _guard = self.inner.refresh_lock.lock().await;
 
@@ -448,7 +448,7 @@ fn read_account_tokens(
 
 /// Persist a refreshed access token (encrypted) to the database.
 async fn persist_refreshed_token(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     access_token: &str,
     expires_at: i64,

@@ -5,7 +5,7 @@
 
 use crate::actions::provider::create_provider;
 use crate::body_store::BodyStoreState;
-use crate::db::DbState;
+use crate::db::ReadDbState;
 use crate::search::SearchState;
 use common::types::ProviderCtx;
 use store::inline_image_store::InlineImageStoreState;
@@ -15,7 +15,7 @@ use store::inline_image_store::InlineImageStoreState;
 /// Constructs the provider client internally. The caller provides
 /// pre-initialized stores and a progress reporter.
 pub async fn sync_delta_for_account(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     encryption_key: [u8; 32],
     body_store: &BodyStoreState,

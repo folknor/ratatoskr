@@ -23,7 +23,7 @@
 //! The bridge task coalesces notifications within a 500ms window to avoid
 //! spawning concurrent syncs for the same account.
 
-use crate::db::DbState;
+use crate::db::ReadDbState;
 
 /// How long to wait after a state change before forwarding the notification,
 /// coalescing any additional changes that arrive in the window.
@@ -36,7 +36,7 @@ const PUSH_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(500)
 /// strings through `notify_tx`. Returns immediately after setup; the
 /// bridge task runs until the push connection dies or the app shuts down.
 pub async fn start_jmap_push_for_account(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     email: &str,
     encryption_key: [u8; 32],

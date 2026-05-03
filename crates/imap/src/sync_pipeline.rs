@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries_extra::{
     AttachmentInsertRow, LabelWriteRow, MessageInsertRow, insert_attachments, insert_messages,
     upsert_labels,
@@ -210,7 +210,7 @@ impl DbInsertData {
 
 /// Store a chunk of converted messages to all four subsystems.
 pub(crate) async fn store_chunk(
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,

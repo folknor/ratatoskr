@@ -1,4 +1,4 @@
-use super::super::DbState;
+use super::super::ReadDbState;
 use super::super::types::{DbLocalDraft, DbScheduledEmail, DbSendAsAlias, DbSignature, DbTemplate};
 use super::dynamic_update;
 use crate::db::from_row::FromRow;
@@ -6,7 +6,7 @@ use crate::db::{query_as, query_one};
 use rusqlite::params;
 
 pub async fn db_get_templates_for_account(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<DbTemplate>, String> {
     db.with_conn(move |conn| {
@@ -22,7 +22,7 @@ pub async fn db_get_templates_for_account(
 }
 
 pub async fn db_insert_template(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: Option<String>,
     name: String,
     subject: Option<String>,
@@ -46,7 +46,7 @@ pub async fn db_insert_template(
 // TODO(refactor): wrap fields in an UpdateTemplateParams struct.
 #[allow(clippy::too_many_arguments)]
 pub async fn db_update_template(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     name: Option<String>,
     subject: Option<String>,
@@ -74,7 +74,7 @@ pub async fn db_update_template(
     .await
 }
 
-pub async fn db_delete_template(db: &DbState, id: String) -> Result<(), String> {
+pub async fn db_delete_template(db: &ReadDbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM templates WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
@@ -91,7 +91,7 @@ const SIG_COLS: &str = "id, account_id, name, body_html, body_text, \
     server_html_hash, last_synced_at, created_at";
 
 pub async fn db_get_signatures_for_account(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<DbSignature>, String> {
     db.with_conn(move |conn| {
@@ -105,7 +105,7 @@ pub async fn db_get_signatures_for_account(
 }
 
 /// Get all signatures across all accounts (for the settings UI).
-pub async fn db_get_all_signatures(db: &DbState) -> Result<Vec<DbSignature>, String> {
+pub async fn db_get_all_signatures(db: &ReadDbState) -> Result<Vec<DbSignature>, String> {
     db.with_conn(move |conn| {
         let sql = format!(
             "SELECT {SIG_COLS} FROM signatures \
@@ -117,7 +117,7 @@ pub async fn db_get_all_signatures(db: &DbState) -> Result<Vec<DbSignature>, Str
 }
 
 pub async fn db_get_default_signature(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Option<DbSignature>, String> {
     db.with_conn(move |conn| {
@@ -133,7 +133,7 @@ pub async fn db_get_default_signature(
 /// Get the reply-default signature for an account. Falls back to
 /// `is_default` if no `is_reply_default` is set.
 pub async fn db_get_reply_signature(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Option<DbSignature>, String> {
     db.with_conn(move |conn| {
@@ -158,7 +158,7 @@ pub struct InsertSignatureParams {
     pub is_reply_default: bool,
 }
 
-pub async fn db_insert_signature(db: &DbState, p: InsertSignatureParams) -> Result<String, String> {
+pub async fn db_insert_signature(db: &ReadDbState, p: InsertSignatureParams) -> Result<String, String> {
     log::info!(
         "Inserting signature: account_id={}, name={}",
         p.account_id,
@@ -213,7 +213,7 @@ pub struct UpdateSignatureParams {
     pub is_reply_default: Option<bool>,
 }
 
-pub async fn db_update_signature(db: &DbState, p: UpdateSignatureParams) -> Result<(), String> {
+pub async fn db_update_signature(db: &ReadDbState, p: UpdateSignatureParams) -> Result<(), String> {
     log::info!("Updating signature: id={}", p.id);
     db.with_conn(move |conn| {
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
@@ -259,7 +259,7 @@ pub async fn db_update_signature(db: &DbState, p: UpdateSignatureParams) -> Resu
     .await
 }
 
-pub async fn db_delete_signature(db: &DbState, id: String) -> Result<(), String> {
+pub async fn db_delete_signature(db: &ReadDbState, id: String) -> Result<(), String> {
     log::info!("Deleting signature: id={id}");
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM signatures WHERE id = ?1", params![id])
@@ -274,7 +274,7 @@ pub async fn db_delete_signature(db: &DbState, id: String) -> Result<(), String>
 
 /// Reorder signatures for an account. `ordered_ids` lists signature IDs in
 /// the desired display order; each one receives `sort_order = index`.
-pub async fn db_reorder_signatures(db: &DbState, ordered_ids: Vec<String>) -> Result<(), String> {
+pub async fn db_reorder_signatures(db: &ReadDbState, ordered_ids: Vec<String>) -> Result<(), String> {
     db.with_conn(move |conn| {
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         for (i, sig_id) in ordered_ids.iter().enumerate() {
@@ -295,7 +295,7 @@ pub async fn db_reorder_signatures(db: &DbState, ordered_ids: Vec<String>) -> Re
 /// Set the reply-default signature for an account (clears old reply-default
 /// in a transaction).
 pub async fn db_set_reply_default_signature(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     signature_id: String,
 ) -> Result<(), String> {
@@ -326,7 +326,7 @@ pub async fn db_set_reply_default_signature(
 /// 3. For new compose: use `is_default`.
 /// 4. If no default is set: return `None`.
 pub async fn db_resolve_signature_for_compose(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     from_email: Option<String>,
     is_reply: bool,
@@ -386,7 +386,7 @@ fn get_signature_account_id(
 }
 
 pub async fn db_get_aliases_for_account(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<DbSendAsAlias>, String> {
     db.with_conn(move |conn| {
@@ -404,7 +404,7 @@ pub async fn db_get_aliases_for_account(
 // TODO(refactor): wrap fields in an UpsertAliasParams struct.
 #[allow(clippy::too_many_arguments)]
 pub async fn db_upsert_alias(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     email: String,
     display_name: Option<String>,
@@ -449,7 +449,7 @@ pub async fn db_upsert_alias(
 }
 
 pub async fn db_get_default_alias(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Option<DbSendAsAlias>, String> {
     db.with_conn(move |conn| {
@@ -475,7 +475,7 @@ pub async fn db_get_default_alias(
 }
 
 pub async fn db_set_default_alias(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     alias_id: String,
 ) -> Result<(), String> {
@@ -497,7 +497,7 @@ pub async fn db_set_default_alias(
     .await
 }
 
-pub async fn db_delete_alias(db: &DbState, id: String) -> Result<(), String> {
+pub async fn db_delete_alias(db: &ReadDbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM send_as_aliases WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
@@ -569,7 +569,7 @@ fn exec_save_local_draft(
 }
 
 pub async fn db_save_local_draft(
-    db: &DbState,
+    db: &ReadDbState,
     params: SaveLocalDraftParams,
 ) -> Result<(), String> {
     db.with_conn(move |conn| exec_save_local_draft(conn, &params))
@@ -591,7 +591,7 @@ pub fn db_mark_queued_drafts_failed_sync(conn: &crate::db::Connection) -> Result
     .map_err(|e| e.to_string())
 }
 
-pub async fn db_get_local_draft(db: &DbState, id: String) -> Result<Option<DbLocalDraft>, String> {
+pub async fn db_get_local_draft(db: &ReadDbState, id: String) -> Result<Option<DbLocalDraft>, String> {
     db.with_conn(move |conn| {
         query_one::<DbLocalDraft>(conn, "SELECT * FROM local_drafts WHERE id = ?1", &[&id])
     })
@@ -599,7 +599,7 @@ pub async fn db_get_local_draft(db: &DbState, id: String) -> Result<Option<DbLoc
 }
 
 pub async fn db_get_unsynced_drafts(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<DbLocalDraft>, String> {
     db.with_conn(move |conn| {
@@ -613,7 +613,7 @@ pub async fn db_get_unsynced_drafts(
 }
 
 pub async fn db_mark_draft_synced(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     remote_draft_id: String,
 ) -> Result<(), String> {
@@ -628,7 +628,7 @@ pub async fn db_mark_draft_synced(
     .await
 }
 
-pub async fn db_delete_local_draft(db: &DbState, id: String) -> Result<(), String> {
+pub async fn db_delete_local_draft(db: &ReadDbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM local_drafts WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
@@ -638,7 +638,7 @@ pub async fn db_delete_local_draft(db: &DbState, id: String) -> Result<(), Strin
 }
 
 pub async fn db_get_pending_scheduled_emails(
-    db: &DbState,
+    db: &ReadDbState,
     now: i64,
 ) -> Result<Vec<DbScheduledEmail>, String> {
     db.with_conn(move |conn| {
@@ -656,7 +656,7 @@ pub async fn db_get_pending_scheduled_emails(
 }
 
 pub async fn db_get_scheduled_emails_for_account(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<DbScheduledEmail>, String> {
     db.with_conn(move |conn| {
@@ -676,7 +676,7 @@ pub async fn db_get_scheduled_emails_for_account(
 // TODO(refactor): 14 args - migrate to a ScheduledEmailParams struct.
 #[allow(clippy::too_many_arguments)]
 pub async fn db_insert_scheduled_email(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     to_addresses: String,
     cc_addresses: Option<String>,
@@ -722,7 +722,7 @@ pub async fn db_insert_scheduled_email(
 }
 
 pub async fn db_update_scheduled_email_status(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     status: String,
 ) -> Result<(), String> {
@@ -737,7 +737,7 @@ pub async fn db_update_scheduled_email_status(
     .await
 }
 
-pub async fn db_delete_scheduled_email(db: &DbState, id: String) -> Result<(), String> {
+pub async fn db_delete_scheduled_email(db: &ReadDbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM scheduled_emails WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;

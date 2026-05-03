@@ -1,9 +1,9 @@
-use crate::db::DbState;
+use crate::db::ReadDbState;
 use crate::db::FromRow;
 use crate::db::types::{ContactAttachmentRow, ContactStats, RecentThread, SameDomainContact};
 use rusqlite::params;
 
-pub async fn db_get_contact_stats(db: &DbState, email: String) -> Result<ContactStats, String> {
+pub async fn db_get_contact_stats(db: &ReadDbState, email: String) -> Result<ContactStats, String> {
     log::debug!("Loading contact stats: email={email}");
     db.with_conn(move |conn| {
         let normalized = email.to_lowercase();
@@ -19,7 +19,7 @@ pub async fn db_get_contact_stats(db: &DbState, email: String) -> Result<Contact
 }
 
 pub async fn db_get_contacts_from_same_domain(
-    db: &DbState,
+    db: &ReadDbState,
     email: String,
     limit: Option<i64>,
 ) -> Result<Vec<SameDomainContact>, String> {
@@ -50,7 +50,7 @@ pub async fn db_get_contacts_from_same_domain(
 }
 
 pub async fn db_get_latest_auth_result(
-    db: &DbState,
+    db: &ReadDbState,
     email: String,
 ) -> Result<Option<String>, String> {
     db.with_conn(move |conn| {
@@ -70,7 +70,7 @@ pub async fn db_get_latest_auth_result(
 }
 
 pub async fn db_get_recent_threads_with_contact(
-    db: &DbState,
+    db: &ReadDbState,
     email: String,
     limit: Option<i64>,
 ) -> Result<Vec<RecentThread>, String> {
@@ -95,7 +95,7 @@ pub async fn db_get_recent_threads_with_contact(
 }
 
 pub async fn db_get_attachments_from_contact(
-    db: &DbState,
+    db: &ReadDbState,
     email: String,
     limit: Option<i64>,
 ) -> Result<Vec<ContactAttachmentRow>, String> {

@@ -5,7 +5,7 @@
 //! are routed through `db` APIs.
 //!
 //! Each function takes `&Connection` (sync); callers wrap in
-//! `DbState::with_conn(...)` if they need async dispatch.
+//! `ReadDbState::with_conn(...)` if they need async dispatch.
 
 use rusqlite::{Connection, params};
 

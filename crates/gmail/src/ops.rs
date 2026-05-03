@@ -7,7 +7,7 @@ use common::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
     ProviderTestResult, SyncResult,
 };
-use db::db::DbState;
+use db::db::ReadDbState;
 
 use super::client::GmailClient;
 
@@ -455,7 +455,7 @@ fn build_reaction_mime(
 #[allow(clippy::too_many_arguments)]
 pub async fn send_reaction(
     client: &GmailClient,
-    db: &DbState,
+    db: &ReadDbState,
     from: &str,
     to: &str,
     original_message_id: &str,

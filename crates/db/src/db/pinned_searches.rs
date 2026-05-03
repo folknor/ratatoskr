@@ -2,7 +2,7 @@ use rusqlite::params;
 
 use super::from_row::query_as;
 use super::types::DbThread;
-use super::DbState;
+use super::ReadDbState;
 
 /// Stored pinned-search metadata and snapshot ownership.
 #[derive(Debug, Clone)]
@@ -17,7 +17,7 @@ pub struct DbPinnedSearch {
 
 /// Create a pinned search or update the existing row for the same query.
 pub async fn db_create_or_update_pinned_search(
-    db: &DbState,
+    db: &ReadDbState,
     query: String,
     thread_ids: Vec<(String, String)>,
     scope_account_id: Option<String>,
@@ -81,7 +81,7 @@ pub async fn db_create_or_update_pinned_search(
 
 /// Update an existing pinned search and replace its thread snapshot.
 pub async fn db_update_pinned_search(
-    db: &DbState,
+    db: &ReadDbState,
     id: i64,
     query: String,
     thread_ids: Vec<(String, String)>,
@@ -137,7 +137,7 @@ pub async fn db_update_pinned_search(
     .await
 }
 
-pub async fn db_delete_pinned_search(db: &DbState, id: i64) -> Result<(), String> {
+pub async fn db_delete_pinned_search(db: &ReadDbState, id: i64) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM pinned_searches WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
@@ -146,7 +146,7 @@ pub async fn db_delete_pinned_search(db: &DbState, id: i64) -> Result<(), String
     .await
 }
 
-pub async fn db_list_pinned_searches(db: &DbState) -> Result<Vec<DbPinnedSearch>, String> {
+pub async fn db_list_pinned_searches(db: &ReadDbState) -> Result<Vec<DbPinnedSearch>, String> {
     db.with_conn(|conn| {
         let mut stmt = conn
             .prepare(
@@ -174,7 +174,7 @@ pub async fn db_list_pinned_searches(db: &DbState) -> Result<Vec<DbPinnedSearch>
 }
 
 pub async fn db_get_pinned_search_thread_ids(
-    db: &DbState,
+    db: &ReadDbState,
     pinned_search_id: i64,
 ) -> Result<Vec<(String, String)>, String> {
     db.with_conn(move |conn| {
@@ -197,7 +197,7 @@ pub async fn db_get_pinned_search_thread_ids(
 }
 
 pub async fn db_get_threads_by_ids(
-    db: &DbState,
+    db: &ReadDbState,
     ids: Vec<(String, String)>,
 ) -> Result<Vec<DbThread>, String> {
     if ids.is_empty() {
@@ -259,7 +259,7 @@ pub async fn db_get_threads_by_ids(
 }
 
 pub async fn db_get_recent_search_queries(
-    db: &DbState,
+    db: &ReadDbState,
     limit: usize,
 ) -> Result<Vec<String>, String> {
     db.with_conn(move |conn| {
@@ -279,7 +279,7 @@ pub async fn db_get_recent_search_queries(
     .await
 }
 
-pub async fn db_delete_all_pinned_searches(db: &DbState) -> Result<u64, String> {
+pub async fn db_delete_all_pinned_searches(db: &ReadDbState) -> Result<u64, String> {
     db.with_conn(|conn| {
         let deleted = conn
             .execute("DELETE FROM pinned_searches", [])
@@ -290,7 +290,7 @@ pub async fn db_delete_all_pinned_searches(db: &DbState) -> Result<u64, String> 
 }
 
 pub async fn db_expire_stale_pinned_searches(
-    db: &DbState,
+    db: &ReadDbState,
     max_age_secs: i64,
 ) -> Result<u64, String> {
     db.with_conn(move |conn| {

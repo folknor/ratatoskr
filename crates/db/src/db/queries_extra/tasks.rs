@@ -1,4 +1,4 @@
-use super::super::DbState;
+use super::super::ReadDbState;
 use super::super::types::{DbTask, DbTaskTag};
 use super::dynamic_update;
 use rusqlite::{Row, params};
@@ -36,7 +36,7 @@ fn row_to_task_tag(row: &Row<'_>) -> rusqlite::Result<DbTaskTag> {
 }
 
 pub async fn db_get_tasks_for_account(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: Option<String>,
     include_completed: Option<bool>,
 ) -> Result<Vec<DbTask>, String> {
@@ -68,7 +68,7 @@ pub async fn db_get_tasks_for_account(
     .await
 }
 
-pub async fn db_get_task_by_id(db: &DbState, id: String) -> Result<Option<DbTask>, String> {
+pub async fn db_get_task_by_id(db: &ReadDbState, id: String) -> Result<Option<DbTask>, String> {
     db.with_conn(move |conn| {
         let mut stmt = conn
             .prepare("SELECT * FROM tasks WHERE id = ?1")
@@ -86,7 +86,7 @@ pub async fn db_get_task_by_id(db: &DbState, id: String) -> Result<Option<DbTask
 }
 
 pub async fn db_get_tasks_for_thread(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     thread_id: String,
 ) -> Result<Vec<DbTask>, String> {
@@ -105,7 +105,7 @@ pub async fn db_get_tasks_for_thread(
     .await
 }
 
-pub async fn db_get_subtasks(db: &DbState, parent_id: String) -> Result<Vec<DbTask>, String> {
+pub async fn db_get_subtasks(db: &ReadDbState, parent_id: String) -> Result<Vec<DbTask>, String> {
     db.with_conn(move |conn| {
         let mut stmt = conn
             .prepare(
@@ -122,7 +122,7 @@ pub async fn db_get_subtasks(db: &DbState, parent_id: String) -> Result<Vec<DbTa
 
 #[allow(clippy::too_many_arguments)]
 pub async fn db_insert_task(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     account_id: Option<String>,
     title: String,
@@ -163,7 +163,7 @@ pub async fn db_insert_task(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn db_update_task(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     title: Option<String>,
     description: Option<String>,
@@ -219,7 +219,7 @@ pub async fn db_update_task(
     .await
 }
 
-pub async fn db_delete_task(db: &DbState, id: String) -> Result<(), String> {
+pub async fn db_delete_task(db: &ReadDbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM tasks WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
@@ -228,7 +228,7 @@ pub async fn db_delete_task(db: &DbState, id: String) -> Result<(), String> {
     .await
 }
 
-pub async fn db_complete_task(db: &DbState, id: String) -> Result<(), String> {
+pub async fn db_complete_task(db: &ReadDbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         let now = chrono::Utc::now().timestamp();
         conn.execute(
@@ -241,7 +241,7 @@ pub async fn db_complete_task(db: &DbState, id: String) -> Result<(), String> {
     .await
 }
 
-pub async fn db_uncomplete_task(db: &DbState, id: String) -> Result<(), String> {
+pub async fn db_uncomplete_task(db: &ReadDbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         let now = chrono::Utc::now().timestamp();
         conn.execute(
@@ -254,7 +254,7 @@ pub async fn db_uncomplete_task(db: &DbState, id: String) -> Result<(), String> 
     .await
 }
 
-pub async fn db_reorder_tasks(db: &DbState, task_ids: Vec<String>) -> Result<(), String> {
+pub async fn db_reorder_tasks(db: &ReadDbState, task_ids: Vec<String>) -> Result<(), String> {
     db.with_conn(move |conn| {
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         let now = chrono::Utc::now().timestamp();
@@ -274,7 +274,7 @@ pub async fn db_reorder_tasks(db: &DbState, task_ids: Vec<String>) -> Result<(),
 }
 
 pub async fn db_get_incomplete_task_count(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: Option<String>,
 ) -> Result<i64, String> {
     db.with_conn(move |conn| {
@@ -289,7 +289,7 @@ pub async fn db_get_incomplete_task_count(
 }
 
 pub async fn db_get_task_tags(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: Option<String>,
 ) -> Result<Vec<DbTaskTag>, String> {
     db.with_conn(move |conn| {
@@ -305,7 +305,7 @@ pub async fn db_get_task_tags(
 }
 
 pub async fn db_upsert_task_tag(
-    db: &DbState,
+    db: &ReadDbState,
     tag: String,
     account_id: Option<String>,
     color: Option<String>,
@@ -324,7 +324,7 @@ pub async fn db_upsert_task_tag(
 }
 
 pub async fn db_delete_task_tag(
-    db: &DbState,
+    db: &ReadDbState,
     tag: String,
     account_id: Option<String>,
 ) -> Result<(), String> {

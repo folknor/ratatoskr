@@ -3,7 +3,7 @@ use rusqlite::OptionalExtension;
 use common::crypto::{decrypt_if_needed, encrypt_value};
 use common::http::shared_http_client;
 use common::token::{get_refresh_lock, oauth_token_endpoint, refresh_oauth_token};
-use db::db::DbState;
+use db::db::ReadDbState;
 use smtp::types::SmtpConfig;
 
 use super::types::ImapConfig;
@@ -46,7 +46,7 @@ fn map_security(security: Option<&str>) -> String {
 }
 
 async fn load_account_record(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<AccountConfigRecord, String> {
     let aid = account_id.to_string();
@@ -91,7 +91,7 @@ async fn load_account_record(
 }
 
 async fn ensure_oauth_access_token(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     encryption_key: &[u8; 32],
     record: &AccountConfigRecord,
@@ -168,7 +168,7 @@ async fn ensure_oauth_access_token(
 }
 
 async fn resolve_account_password(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     encryption_key: &[u8; 32],
     record: &AccountConfigRecord,
@@ -237,7 +237,7 @@ fn smtp_config_from_record(
 }
 
 pub async fn load_imap_config(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<ImapConfig, String> {
@@ -248,7 +248,7 @@ pub async fn load_imap_config(
 }
 
 pub async fn load_smtp_config(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<SmtpConfig, String> {
@@ -259,7 +259,7 @@ pub async fn load_smtp_config(
 }
 
 pub async fn load_both_configs(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     encryption_key: &[u8; 32],
 ) -> Result<ImapAndSmtpConfig, String> {

@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::db::DbState;
+use crate::db::ReadDbState;
 use crate::db::types::DbScheduledEmail;
 
 // ── Delegation types ────────────────────────────────────────
@@ -146,7 +146,7 @@ pub fn determine_send_delegation(provider_type: &str) -> SendDelegation {
 
 /// Determine delegation for an account by looking up its provider in the DB.
 pub async fn determine_send_delegation_for_account(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<SendDelegation, String> {
     let provider = crate::db::queries::get_provider_type(db, account_id).await?;
@@ -165,7 +165,7 @@ pub async fn determine_send_delegation_for_account(
 /// - `SendNow` if overdue by less than 24 hours
 /// - `NeedsReview` if overdue by more than 24 hours
 pub async fn check_overdue_scheduled_emails(
-    db: &DbState,
+    db: &ReadDbState,
     now_unix: i64,
 ) -> Result<Vec<OverdueAction>, String> {
     db.with_conn(move |conn| {
@@ -194,7 +194,7 @@ pub async fn check_overdue_scheduled_emails(
 /// - `SendNow` → sets status to `"sending"` (caller should then actually send)
 /// - `NeedsReview` → sets status to `"needs_review"`
 pub async fn apply_overdue_resolution(
-    db: &DbState,
+    db: &ReadDbState,
     email_id: String,
     resolution: OverdueResolution,
 ) -> Result<(), String> {
@@ -212,7 +212,7 @@ pub async fn apply_overdue_resolution(
 /// Returns the list of emails marked as `SendNow` (status set to `"sending"`)
 /// that the caller should actually dispatch.
 pub async fn process_overdue_emails(
-    db: &DbState,
+    db: &ReadDbState,
     now_unix: i64,
 ) -> Result<Vec<DbScheduledEmail>, String> {
     let actions = check_overdue_scheduled_emails(db, now_unix).await?;
@@ -233,7 +233,7 @@ pub async fn process_overdue_emails(
 ///
 /// Sets the status to `"delegated"` and records the remote message ID.
 pub async fn mark_delegated(
-    db: &DbState,
+    db: &ReadDbState,
     email_id: String,
     remote_message_id: String,
 ) -> Result<(), String> {
@@ -249,7 +249,7 @@ pub async fn mark_delegated(
 
 /// Record a send failure with error details and increment the retry count.
 pub async fn mark_failed(
-    db: &DbState,
+    db: &ReadDbState,
     email_id: String,
     error_message: String,
 ) -> Result<(), String> {

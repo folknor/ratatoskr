@@ -6,7 +6,7 @@ mod stores;
 use std::collections::HashSet;
 
 use common::types::{ProviderCtx, SyncResult};
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries_extra::{
     UpsertCalendarEventParams, delete_event_by_remote_id_sync, save_calendar_sync_token_sync,
     upsert_calendar_event_sync, upsert_calendar_sync,
@@ -40,7 +40,7 @@ const BATCH_SIZE: usize = 50;
 struct SyncCtx<'a> {
     client: &'a GraphClient,
     account_id: &'a str,
-    db: &'a DbState,
+    db: &'a ReadDbState,
     body_store: &'a BodyStoreState,
     inline_images: &'a InlineImageStoreState,
     search: &'a SearchState,
@@ -467,7 +467,7 @@ async fn filter_pending_ops(
 async fn graph_calendar_delta_sync(
     client: &GraphClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<(), String> {
     use super::calendar_sync::{graph_list_calendars, graph_sync_calendar_events};
 
@@ -489,7 +489,7 @@ async fn graph_calendar_delta_sync(
 
 /// Upsert discovered Graph calendars into the database.
 async fn upsert_graph_calendars(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     calendars: &[super::calendar_sync::GraphCalendarInfo],
 ) -> Result<(), String> {
@@ -529,7 +529,7 @@ async fn upsert_graph_calendars(
 
 /// Load visible calendars (id, remote_id, sync_token) for an account.
 async fn load_visible_graph_calendars(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<Vec<(String, String, Option<String>)>, String> {
     let aid = account_id.to_string();
@@ -558,7 +558,7 @@ async fn load_visible_graph_calendars(
 /// Persist synced calendar events and update the delta link.
 #[allow(clippy::too_many_lines)]
 async fn persist_graph_calendar_events(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     calendar_id: &str,
     result: super::calendar_sync::GraphCalendarSyncResult,

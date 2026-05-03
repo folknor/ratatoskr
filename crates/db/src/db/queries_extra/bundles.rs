@@ -1,4 +1,4 @@
-use super::super::DbState;
+use super::super::ReadDbState;
 use super::super::sql_fragments::LATEST_MESSAGE_SUBQUERY;
 use super::super::types::{
     BundleSummary, BundleSummarySingle, DbBundleRule, ThreadBundleWithManual, ThreadInfoRow,
@@ -9,7 +9,7 @@ use crate::db::{query_as, query_one};
 use rusqlite::params;
 
 pub async fn db_set_thread_bundle(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     thread_id: String,
     bundle: String,
@@ -29,7 +29,7 @@ pub async fn db_set_thread_bundle(
 }
 
 pub async fn db_get_bundle_rules(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<DbBundleRule>, String> {
     db.with_conn(move |conn| {
@@ -43,7 +43,7 @@ pub async fn db_get_bundle_rules(
 }
 
 pub async fn db_get_bundle_summaries(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     categories: Vec<String>,
 ) -> Result<Vec<BundleSummary>, String> {
@@ -130,7 +130,7 @@ pub async fn db_get_bundle_summaries(
 }
 
 pub async fn db_get_held_thread_ids(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<String>, String> {
     db.with_conn(move |conn| {
@@ -157,7 +157,7 @@ pub async fn db_get_held_thread_ids(
 }
 
 pub async fn db_get_bundle_rule(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     bundle: String,
 ) -> Result<Option<DbBundleRule>, String> {
@@ -172,7 +172,7 @@ pub async fn db_get_bundle_rule(
 }
 
 pub async fn db_set_bundle_rule(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     bundle: String,
     is_bundled: bool,
@@ -195,7 +195,7 @@ pub async fn db_set_bundle_rule(
 }
 
 pub async fn db_hold_thread(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     thread_id: String,
     bundle: String,
@@ -216,7 +216,7 @@ pub async fn db_hold_thread(
 }
 
 pub async fn db_is_thread_held(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     thread_id: String,
     now: i64,
@@ -235,7 +235,7 @@ pub async fn db_is_thread_held(
 }
 
 pub async fn db_release_held_threads(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     bundle: String,
 ) -> Result<i64, String> {
@@ -252,7 +252,7 @@ pub async fn db_release_held_threads(
 }
 
 pub async fn db_update_last_delivered(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     bundle: String,
     now: i64,
@@ -269,7 +269,7 @@ pub async fn db_update_last_delivered(
 }
 
 pub async fn db_get_bundle_summary(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     bundle: String,
 ) -> Result<BundleSummarySingle, String> {
@@ -314,7 +314,7 @@ pub async fn db_get_bundle_summary(
 }
 
 pub async fn db_get_thread_bundle(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     thread_id: String,
 ) -> Result<Option<String>, String> {
@@ -334,7 +334,7 @@ pub async fn db_get_thread_bundle(
 }
 
 pub async fn db_get_thread_bundle_with_manual(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     thread_id: String,
 ) -> Result<Option<ThreadBundleWithManual>, String> {
@@ -354,7 +354,7 @@ pub async fn db_get_thread_bundle_with_manual(
 }
 
 pub async fn db_get_recent_rule_bundled_thread_ids(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     limit: Option<i64>,
 ) -> Result<Vec<ThreadInfoRow>, String> {
@@ -366,7 +366,7 @@ pub async fn db_get_recent_rule_bundled_thread_ids(
 }
 
 pub async fn db_set_thread_bundles_batch(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     categories: Vec<(String, String)>,
 ) -> Result<(), String> {
@@ -390,7 +390,7 @@ pub async fn db_set_thread_bundles_batch(
 }
 
 pub async fn db_get_unbundled_inbox_thread_ids(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     limit: Option<i64>,
 ) -> Result<Vec<ThreadInfoRow>, String> {

@@ -14,7 +14,7 @@ use common::types::{
     AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
     ProviderTestResult, SyncResult,
 };
-use db::db::DbState;
+use db::db::ReadDbState;
 
 use super::client::GraphClient;
 use super::types::{
@@ -723,7 +723,7 @@ pub async fn create_reference_attachment(
     file_name: &str,
     file_size: Option<i64>,
     provider_type: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<(), String> {
     let enc_id = urlencoding::encode(message_id);
     let me = client.api_path_prefix();

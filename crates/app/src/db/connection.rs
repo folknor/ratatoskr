@@ -1,5 +1,5 @@
 use std::path::Path;
-use rtsk::db::{Connection, DbState, ReadWriteDb};
+use rtsk::db::{Connection, ReadDbState, ReadWriteDb};
 
 // ── DB connection ───────────────────────────────────────
 
@@ -25,11 +25,11 @@ impl Db {
         })
     }
 
-    pub fn read_db_state(&self) -> DbState {
+    pub fn read_db_state(&self) -> ReadDbState {
         self.inner.read()
     }
 
-    pub fn write_db_state(&self) -> DbState {
+    pub fn write_db_state(&self) -> ReadDbState {
         self.inner.write()
     }
 

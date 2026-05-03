@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use rusqlite::params;
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries_extra::{
     ContactWriteRow, delete_contact_by_email_and_source_sync, upsert_contact_sync,
 };
@@ -21,7 +21,7 @@ use super::types::{CONTACT_SELECT, GraphContact, GraphContactFolder, ODataCollec
 pub(crate) async fn graph_contacts_initial_sync(
     client: &GraphClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<(), String> {
     log::info!("[Graph] Starting initial contact sync for account {account_id}");
     let folders = fetch_contact_folders(client, db).await?;
@@ -51,7 +51,7 @@ pub(crate) async fn graph_contacts_initial_sync(
 pub(crate) async fn graph_contacts_delta_sync(
     client: &GraphClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<(), String> {
     let tokens = sync_state::load_graph_contact_delta_tokens(db, account_id).await?;
     if tokens.is_empty() {
@@ -87,7 +87,7 @@ pub(crate) async fn graph_contacts_delta_sync(
 #[allow(dead_code)] // wired in once Graph contact sync ships
 async fn fetch_contact_folders(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<Vec<GraphContactFolder>, String> {
     let mut folders = Vec::new();
     let mut next_link: Option<String> = None;
@@ -118,7 +118,7 @@ async fn fetch_contact_folders(
 async fn full_sync_contact_folder(
     client: &GraphClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     folder_id: &str,
 ) -> Result<(), String> {
     let contacts = fetch_folder_contacts(client, db, folder_id).await?;
@@ -143,7 +143,7 @@ async fn full_sync_contact_folder(
 
 async fn fetch_folder_contacts(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     folder_id: &str,
 ) -> Result<Vec<GraphContact>, String> {
     let mut contacts = Vec::new();
@@ -182,7 +182,7 @@ async fn fetch_folder_contacts(
 async fn sync_contact_folder_delta(
     client: &GraphClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     folder_id: &str,
     delta_link: &str,
 ) -> Result<(), String> {
@@ -253,7 +253,7 @@ async fn sync_contact_folder_delta(
 
 async fn bootstrap_contact_delta_token(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     folder_id: &str,
 ) -> Result<String, String> {
     let enc_folder_id = urlencoding::encode(folder_id);

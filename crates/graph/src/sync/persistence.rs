@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries_extra::{
     AttachmentInsertRow, MessageInsertRow, delete_message_reaction,
     insert_attachments, insert_messages, upsert_message_reaction,
@@ -366,7 +366,7 @@ fn insert_exchange_reactions(
 /// Returns the number of messages whose reactions were updated.
 pub(super) async fn refresh_reactions_for_recent_messages(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<usize, String> {
     // Find message IDs that have existing reaction rows (excluding the __count__ metadata)

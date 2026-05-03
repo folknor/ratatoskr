@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use search::SearchState;
 use store::body_store::BodyStoreState;
 
@@ -33,7 +33,7 @@ pub(crate) async fn sync_flags_on_session(
     session: &mut super::connection::ImapSession,
     folder_path: &str,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<u64, String> {
     // Throttle: only check every FLAG_SYNC_INTERVAL_SECS
     let now = chrono::Utc::now().timestamp();
@@ -110,7 +110,7 @@ pub async fn sync_flags_without_condstore(
     config: &ImapConfig,
     folder_path: &str,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<u64, String> {
     let mut session = connect(config).await?;
     let result = sync_flags_on_session(&mut session, folder_path, account_id, db).await;
@@ -130,7 +130,7 @@ async fn detect_deleted_on_session(
     session: &mut super::connection::ImapSession,
     folder_path: &str,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<Vec<String>, String> {
     // Throttle: only check every DELETION_CHECK_INTERVAL_SECS
     let now = chrono::Utc::now().timestamp();
@@ -198,7 +198,7 @@ pub async fn detect_deleted_messages(
     config: &ImapConfig,
     folder_path: &str,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<Vec<String>, String> {
     let mut session = connect(config).await?;
     let result = detect_deleted_on_session(&mut session, folder_path, account_id, db).await;
@@ -216,7 +216,7 @@ pub async fn detect_deleted_messages(
 pub async fn run_deletion_detection(
     config: &ImapConfig,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     search: &SearchState,
     syncable_folders: &[&super::types::ImapFolder],

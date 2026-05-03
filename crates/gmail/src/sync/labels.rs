@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use super::super::client::GmailClient;
 use super::super::types::{GmailLabel, GmailSendAs};
 use super::SyncCtx;
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries_extra::{LabelWriteRow, upsert_labels};
 
 // ---------------------------------------------------------------------------
@@ -242,7 +242,7 @@ async fn push_signature_to_gmail(
     client: &GmailClient,
     send_as_email: &str,
     html: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<(), String> {
     client
         .update_send_as_signature(send_as_email, html, db)

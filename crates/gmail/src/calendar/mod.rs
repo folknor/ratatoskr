@@ -6,7 +6,7 @@
 mod storage;
 pub mod types;
 
-use db::db::DbState;
+use db::db::ReadDbState;
 
 use super::client::GmailClient;
 use types::{CalendarListEntry, CalendarListResponse, EventListResponse, GoogleCalendarEvent};
@@ -21,7 +21,7 @@ const CALENDAR_API_BASE: &str = "https://www.googleapis.com/calendar/v3";
 pub async fn sync_calendar_list(
     client: &GmailClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<Vec<CalendarInfo>, String> {
     let entries = list_all_calendars(client, db).await?;
 
@@ -61,7 +61,7 @@ pub struct CalendarInfo {
 /// Paginate `calendarList.list` to fetch all calendars.
 async fn list_all_calendars(
     client: &GmailClient,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<Vec<CalendarListEntry>, String> {
     let mut all = Vec::new();
     let mut page_token: Option<String> = None;
@@ -94,7 +94,7 @@ pub async fn sync_calendar_events(
     client: &GmailClient,
     account_id: &str,
     cal: &CalendarInfo,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<(), String> {
     let sync_token = storage::load_sync_token(db, &cal.local_id).await?;
 
@@ -121,7 +121,7 @@ async fn full_event_sync(
     client: &GmailClient,
     account_id: &str,
     cal: &CalendarInfo,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<(), String> {
     let now = chrono::Utc::now();
     let time_min = (now - chrono::Duration::days(30))
@@ -179,7 +179,7 @@ async fn incremental_event_sync(
     account_id: &str,
     cal: &CalendarInfo,
     sync_token: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<(), String> {
     let encoded_cal_id = urlencoding::encode(&cal.remote_id);
     let base_url = format!(
@@ -237,7 +237,7 @@ pub async fn create_event(
     client: &GmailClient,
     calendar_remote_id: &str,
     event: &GoogleCalendarEvent,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<GoogleCalendarEvent, String> {
     let encoded = urlencoding::encode(calendar_remote_id);
     let url = format!("{CALENDAR_API_BASE}/calendars/{encoded}/events");
@@ -252,7 +252,7 @@ pub async fn update_event(
     calendar_remote_id: &str,
     event_id: &str,
     event: &GoogleCalendarEvent,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<GoogleCalendarEvent, String> {
     let encoded_cal = urlencoding::encode(calendar_remote_id);
     let encoded_event = urlencoding::encode(event_id);
@@ -265,7 +265,7 @@ pub async fn delete_event(
     client: &GmailClient,
     calendar_remote_id: &str,
     event_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<(), String> {
     let encoded_cal = urlencoding::encode(calendar_remote_id);
     let encoded_event = urlencoding::encode(event_id);
@@ -281,7 +281,7 @@ pub async fn delete_event(
 pub async fn sync_calendars(
     client: &GmailClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<(), String> {
     let cals = sync_calendar_list(client, account_id, db).await?;
 

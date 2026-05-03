@@ -7,7 +7,7 @@
 //! handled by the wrapper functions in `sync.rs`.
 
 use common::types::{ProviderCtx, SyncResult};
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 use search::SearchState;
 use store::body_store::BodyStoreState;
@@ -29,7 +29,7 @@ const SHARED_MAILBOX_INITIAL_SYNC_DAYS: i64 = 30;
 pub async fn sync_shared_mailbox(
     primary_client: &GraphClient,
     mailbox_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
@@ -110,7 +110,7 @@ pub async fn sync_shared_mailbox(
 /// Returns a list of `(mailbox_id, result)` pairs for the caller to log/report.
 pub async fn sync_all_shared_mailboxes(
     primary_client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,

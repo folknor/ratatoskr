@@ -1,4 +1,4 @@
-use super::super::DbState;
+use super::super::ReadDbState;
 use super::dynamic_update;
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -48,7 +48,7 @@ pub struct UpdateAccountParams {
 /// Synchronous account creation - callable from any `&Connection`.
 ///
 /// This is the single source of truth for the INSERT statement. Both
-/// the async `db_create_account` (via `DbState`) and the app crate's
+/// the async `db_create_account` (via `ReadDbState`) and the app crate's
 /// `Db::with_write_conn` use this function.
 pub fn create_account_sync(
     conn: &Connection,
@@ -139,7 +139,7 @@ pub fn account_exists_by_email_sync(conn: &Connection, email: &str) -> Result<bo
 
 /// Create a new account and return its generated ID.
 pub async fn db_create_account(
-    db: &DbState,
+    db: &ReadDbState,
     params: CreateAccountParams,
 ) -> Result<String, String> {
     db.with_conn(move |conn| create_account_sync(conn, &params))
@@ -149,7 +149,7 @@ pub async fn db_create_account(
 /// Synchronous account update - callable from any `&Connection`.
 ///
 /// This is the single source of truth for the update logic. Both the async
-/// `db_update_account` (via `DbState`) and the app crate's
+/// `db_update_account` (via `ReadDbState`) and the app crate's
 /// `Db::with_write_conn` use this function.
 pub fn update_account_sync(
     conn: &Connection,
@@ -181,7 +181,7 @@ pub fn update_account_sync(
 /// Update an account's editable metadata fields. Only fields that are `Some`
 /// in `params` are changed.
 pub async fn db_update_account(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     params: UpdateAccountParams,
 ) -> Result<(), String> {
@@ -196,7 +196,7 @@ pub async fn db_update_account(
 
 /// Update only the account color.
 pub async fn db_update_account_color(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     color: String,
 ) -> Result<(), String> {
@@ -212,7 +212,7 @@ pub async fn db_update_account_color(
 }
 
 /// Update only the account name.
-pub async fn db_update_account_name(db: &DbState, id: String, name: String) -> Result<(), String> {
+pub async fn db_update_account_name(db: &ReadDbState, id: String, name: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute(
             "UPDATE accounts SET account_name = ?1 WHERE id = ?2",
@@ -226,7 +226,7 @@ pub async fn db_update_account_name(db: &DbState, id: String, name: String) -> R
 
 /// Batch-update sort order for multiple accounts.
 pub async fn db_update_account_sort_order(
-    db: &DbState,
+    db: &ReadDbState,
     updates: Vec<(String, i64)>,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
@@ -614,7 +614,7 @@ pub fn get_account_auth_info_sync(
 }
 
 /// Check whether an account with the given email already exists.
-pub async fn db_account_exists_by_email(db: &DbState, email: String) -> Result<bool, String> {
+pub async fn db_account_exists_by_email(db: &ReadDbState, email: String) -> Result<bool, String> {
     db.with_conn(move |conn| account_exists_by_email_sync(conn, &email))
         .await
 }

@@ -1,9 +1,9 @@
 //! Calendar database operations for the Gmail provider.
 //!
-//! Uses raw SQL via `DbState::with_conn` to avoid a circular dependency
+//! Uses raw SQL via `ReadDbState::with_conn` to avoid a circular dependency
 //! on `rtsk` (which contains `queries_extra::calendars`).
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries_extra::{
     CalendarAttendeeWriteRow, CalendarReminderWriteRow, UpsertCalendarEventParams,
     delete_event_by_remote_id_sync, load_calendar_sync_token_sync, replace_event_attendees_sync,
@@ -19,7 +19,7 @@ use super::types::GoogleCalendarEvent;
 /// Upsert a calendar entry. Returns the local UUID for the calendar.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn upsert_calendar(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     remote_id: &str,
     display_name: Option<&str>,
@@ -49,7 +49,7 @@ pub(super) async fn upsert_calendar(
 
 /// Load the sync token for a calendar.
 pub(super) async fn load_sync_token(
-    db: &DbState,
+    db: &ReadDbState,
     calendar_id: &str,
 ) -> Result<Option<String>, String> {
     let cid = calendar_id.to_string();
@@ -58,7 +58,7 @@ pub(super) async fn load_sync_token(
 
 /// Save (or clear) the sync token for a calendar.
 pub(super) async fn save_sync_token(
-    db: &DbState,
+    db: &ReadDbState,
     calendar_id: &str,
     token: Option<&str>,
 ) -> Result<(), String> {
@@ -72,7 +72,7 @@ pub(super) async fn save_sync_token(
 /// Upsert a Google Calendar event into the database, including attendees
 /// and reminders.
 pub(super) async fn upsert_event(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     cal: &CalendarInfo,
     event: &GoogleCalendarEvent,
@@ -176,7 +176,7 @@ pub(super) async fn upsert_event(
 
 /// Delete an event by its remote (Google) event ID within a specific calendar.
 pub(super) async fn delete_event_by_remote_id(
-    db: &DbState,
+    db: &ReadDbState,
     calendar_local_id: &str,
     remote_event_id: &str,
 ) -> Result<(), String> {

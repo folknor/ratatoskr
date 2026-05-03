@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::client::list_shared_folders;
 use super::connection::{ImapSession, discover_myrights, discover_namespaces};
 use super::types::{ImapFolder, NamespaceType};
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries_extra::{
     PublicFolderItemRow, PublicFolderRow, get_public_folder_sync_depth,
     update_public_folder_rights, upsert_public_folder_items, upsert_public_folders,
@@ -75,7 +75,7 @@ pub fn parse_rights(rights: &str) -> ImapFolderRights {
 /// 3. Upserts into the `public_folders` table
 pub async fn discover_imap_public_folders(
     session: &mut ImapSession,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<Vec<ImapPublicFolder>, String> {
     let namespace_info = discover_namespaces(session).await?;
@@ -121,7 +121,7 @@ pub async fn discover_imap_public_folders(
 /// and update the `public_folders` row with the resolved permissions.
 pub async fn check_folder_rights(
     session: &mut ImapSession,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_path: &str,
 ) -> Result<ImapFolderRights, String> {
@@ -152,7 +152,7 @@ pub async fn check_folder_rights(
 /// regular IMAP sync but persists to `public_folder_items`.
 pub async fn sync_imap_public_folder(
     session: &mut ImapSession,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_path: &str,
 ) -> Result<PublicFolderSyncResult, String> {
@@ -214,7 +214,7 @@ pub async fn sync_imap_public_folder(
 /// Uses the decoded folder path as `folder_id` since IMAP folders don't have
 /// opaque IDs like EWS - the path IS the identifier.
 async fn persist_discovered_folders(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folders: &[ImapFolder],
 ) -> Result<(), String> {
@@ -252,7 +252,7 @@ async fn persist_discovered_folders(
 
 /// Load sync state for a public folder.
 async fn load_sync_state(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
 ) -> Result<(Option<i64>, Option<i64>), String> {
@@ -281,7 +281,7 @@ async fn load_sync_state(
 
 /// Save sync state after a sync run.
 async fn save_sync_state(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
     last_sync_timestamp: i64,
@@ -304,7 +304,7 @@ async fn save_sync_state(
 
 /// Load sync_depth_days from `public_folder_pins` for a folder. Defaults to 30.
 async fn load_sync_depth_days(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
 ) -> Result<i32, String> {
@@ -316,7 +316,7 @@ async fn load_sync_depth_days(
 
 /// Upsert fetched messages into `public_folder_items`. Returns count of new items.
 async fn upsert_public_folder_items_imap(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
     messages: &[super::types::ImapMessage],

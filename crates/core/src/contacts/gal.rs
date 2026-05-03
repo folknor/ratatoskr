@@ -3,14 +3,14 @@
 //! SQL lives in `db::queries_extra::contacts`. This module keeps
 //! HTTP fetch logic and cache-age orchestration.
 
-use crate::db::DbState;
+use crate::db::ReadDbState;
 
 // Re-export the entry type from db.
 pub use crate::db::queries_extra::contacts::GalEntry;
 
 /// Store fetched GAL entries in the cache for a given account (full refresh).
 pub async fn cache_gal_entries(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     entries: Vec<GalEntry>,
 ) -> Result<usize, String> {
@@ -29,7 +29,7 @@ pub async fn cache_gal_entries(
 /// Paginates using `@odata.nextLink` until all users are fetched.
 pub async fn fetch_graph_gal(
     client: &graph::client::GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<Vec<GalEntry>, String> {
     let select = "displayName,mail,businessPhones,companyName,jobTitle,department";
     let mut entries = Vec::new();
@@ -87,7 +87,7 @@ pub async fn fetch_graph_gal(
 /// Returns an empty vec if the scope is not granted (403).
 pub async fn fetch_google_gal(
     client: &gmail::client::GmailClient,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<Vec<GalEntry>, String> {
     let mut entries = Vec::new();
     let mut page_token: Option<String> = None;
@@ -171,7 +171,7 @@ pub async fn fetch_google_gal(
 /// appropriate fetch function. Returns the number of entries cached,
 /// or 0 if the cache was fresh or the provider doesn't support GAL.
 pub async fn refresh_gal_for_account(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     encryption_key: [u8; 32],
 ) -> Result<usize, String> {
@@ -215,7 +215,7 @@ pub async fn refresh_gal_for_account(
 }
 
 /// Record that a GAL refresh was performed for an account.
-async fn record_gal_refresh(db: &DbState, account_id: String) -> Result<(), String> {
+async fn record_gal_refresh(db: &ReadDbState, account_id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         crate::db::queries_extra::contacts::record_gal_refresh_sync(conn, &account_id)
     })
@@ -223,7 +223,7 @@ async fn record_gal_refresh(db: &DbState, account_id: String) -> Result<(), Stri
 }
 
 /// Get the timestamp of the last GAL refresh attempt for an account.
-pub async fn gal_cache_age(db: &DbState, account_id: String) -> Result<Option<i64>, String> {
+pub async fn gal_cache_age(db: &ReadDbState, account_id: String) -> Result<Option<i64>, String> {
     db.with_conn(move |conn| {
         crate::db::queries_extra::contacts::gal_cache_age_sync(conn, &account_id)
     })

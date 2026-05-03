@@ -1,5 +1,5 @@
 // Re-export foundation types from db
-pub use db::db::DbState;
+pub use db::db::ReadDbState;
 pub use db::db::ReadWriteDb;
 pub use db::db::Connection;
 pub use db::db::Row;

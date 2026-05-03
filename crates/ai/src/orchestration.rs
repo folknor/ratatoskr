@@ -6,7 +6,7 @@ use crate::types::{
     AiCompleter, AiCompletionRequest, AiError, AiMessageInput, AiSearchResult, AutoDraftMode,
     ExtractedTask, TextTransformType, ThreadBundle, ThreadForBundling, WritingStyleProfile,
 };
-use rtsk::db::DbState;
+use rtsk::db::ReadDbState;
 
 // ---------------------------------------------------------------------------
 // Internal formatting helpers
@@ -52,7 +52,7 @@ fn truncate(s: &str, max: usize) -> String {
 /// Summarize an email thread, using a cache to avoid redundant AI calls.
 pub async fn summarize_thread(
     ai: &dyn AiCompleter,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     thread_id: &str,
     messages: &[AiMessageInput],
@@ -94,7 +94,7 @@ pub async fn summarize_thread(
 /// Generate three short reply options for a thread.
 pub async fn generate_smart_replies(
     ai: &dyn AiCompleter,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     thread_id: &str,
     messages: &[AiMessageInput],
@@ -403,7 +403,7 @@ pub async fn generate_reply(
 /// Analyze writing style from sent email samples and store the profile.
 pub async fn analyze_writing_style(
     ai: &dyn AiCompleter,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     sent_messages: &[AiMessageInput],
 ) -> Result<WritingStyleProfile, AiError> {
@@ -457,7 +457,7 @@ pub async fn analyze_writing_style(
 /// Generate an auto-draft reply for a thread, caching the result.
 pub async fn generate_auto_draft(
     ai: &dyn AiCompleter,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     thread_id: &str,
     messages: &[AiMessageInput],
@@ -533,7 +533,7 @@ pub async fn generate_auto_draft(
 // ---------------------------------------------------------------------------
 
 async fn db_get_cache(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     thread_id: &str,
     cache_type: &str,
@@ -549,7 +549,7 @@ async fn db_get_cache(
 }
 
 async fn db_set_cache(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     thread_id: &str,
     cache_type: &str,

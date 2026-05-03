@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use db::progress::ProgressReporter;
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use search::SearchState;
 use store::body_store::BodyStoreState;
 use store::inline_image_store::InlineImageStoreState;
@@ -39,7 +39,7 @@ fn compute_since_date(days_back: i64) -> String {
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 pub async fn imap_delta_sync(
     _progress: &dyn ProgressReporter,
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
@@ -447,7 +447,7 @@ async fn fetch_folder_uids(
     folder: &super::types::ImapFolder,
     folder_label_id: &str,
     since_date: &str,
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
@@ -513,7 +513,7 @@ async fn fetch_uids_on_session(
     folder: &super::types::ImapFolder,
     folder_label_id: &str,
     uids: &[u32],
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
@@ -579,7 +579,7 @@ async fn process_folder_delta(
     saved: &sync_pipeline::FolderSyncState,
     delta: &DeltaCheckResult,
     days_back: i64,
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,

@@ -3,14 +3,14 @@ use graph::calendar_sync::{
     graph_list_calendars, graph_sync_calendar_events, graph_update_event,
 };
 use graph::client::GraphClient;
-use rtsk::db::DbState;
+use rtsk::db::ReadDbState;
 
 use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
 
 /// List calendars for a Graph/Microsoft account.
 pub async fn graph_calendar_list_calendars_impl(
     _account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     client: &GraphClient,
 ) -> Result<Vec<CalendarInfoDto>, String> {
     let calendars = graph_list_calendars(client, db).await?;
@@ -32,7 +32,7 @@ pub async fn graph_calendar_sync_events_impl(
     _account_id: &str,
     calendar_remote_id: &str,
     sync_token: Option<String>,
-    db: &DbState,
+    db: &ReadDbState,
     client: &GraphClient,
 ) -> Result<CalendarSyncResultDto, String> {
     let result =
@@ -56,7 +56,7 @@ pub async fn graph_calendar_sync_events_impl(
 /// Create a calendar event via Graph API.
 pub async fn graph_calendar_create_event_impl(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     calendar_remote_id: &str,
     event: serde_json::Value,
 ) -> Result<CalendarEventDto, String> {
@@ -68,7 +68,7 @@ pub async fn graph_calendar_create_event_impl(
 /// Update a calendar event via Graph API.
 pub async fn graph_calendar_update_event_impl(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     remote_event_id: &str,
     event: serde_json::Value,
 ) -> Result<CalendarEventDto, String> {
@@ -79,7 +79,7 @@ pub async fn graph_calendar_update_event_impl(
 /// Delete a calendar event via Graph API.
 pub async fn graph_calendar_delete_event_impl(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     remote_event_id: &str,
 ) -> Result<(), String> {
     graph_delete_event(client, db, remote_event_id).await

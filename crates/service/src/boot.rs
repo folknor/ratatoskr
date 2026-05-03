@@ -49,7 +49,7 @@ pub(crate) struct BootContext {
     /// DB connection opened during boot. Held past the boot sequence so
     /// Phase 2's relocated action service can construct its `ActionContext`
     /// from it without re-opening the file. `Arc<Mutex<Connection>>` matches
-    /// the shape `DbState::from_arc` expects.
+    /// the shape `ReadDbState::from_arc` expects.
     #[allow(dead_code)]
     pub(crate) db_conn: Arc<Mutex<Connection>>,
     /// Highest applied schema version after migrations completed. Echoed

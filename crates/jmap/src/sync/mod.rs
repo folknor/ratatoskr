@@ -7,7 +7,7 @@ use jmap_client::core::query::QueryResponse;
 use jmap_client::email;
 use serde::Serialize;
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 use search::SearchState;
 use store::body_store::BodyStoreState;
@@ -39,7 +39,7 @@ pub struct JmapSyncResult {
 pub(crate) struct SyncCtx<'a> {
     pub client: &'a JmapClient,
     pub account_id: &'a str,
-    pub db: &'a DbState,
+    pub db: &'a ReadDbState,
     pub body_store: &'a BodyStoreState,
     pub inline_images: &'a InlineImageStoreState,
     pub search: &'a SearchState,
@@ -80,7 +80,7 @@ pub async fn jmap_initial_sync(
     client: &JmapClient,
     account_id: &str,
     days_back: i64,
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
@@ -235,7 +235,7 @@ pub(crate) async fn query_email_page_for(
 pub async fn jmap_delta_sync(
     client: &JmapClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
@@ -477,7 +477,7 @@ async fn filter_pending_ops(
 // ---------------------------------------------------------------------------
 
 async fn save_sync_state(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     state_type: &str,
     state: &str,
@@ -486,7 +486,7 @@ async fn save_sync_state(
 }
 
 async fn load_sync_state(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     state_type: &str,
 ) -> Result<Option<String>, String> {
@@ -554,7 +554,7 @@ pub(crate) fn emit_progress(ctx: &SyncCtx<'_>, phase: &str, current: u64, total:
 ///    are no longer in the Session (access revoked server-side).
 ///
 /// Does not fail the overall sync - discovery errors are logged and skipped.
-pub(crate) async fn discover_shared_accounts(client: &JmapClient, account_id: &str, db: &DbState) {
+pub(crate) async fn discover_shared_accounts(client: &JmapClient, account_id: &str, db: &ReadDbState) {
     let session = client.inner().session();
 
     // Collect non-personal accounts from the Session.
@@ -637,7 +637,7 @@ pub(crate) async fn discover_shared_accounts(client: &JmapClient, account_id: &s
 pub(crate) async fn resolve_shared_account_identities(
     client: &JmapClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) {
     let inner = client.inner();
     let session = inner.session();
@@ -780,7 +780,7 @@ async fn fetch_principal_email(
 ///
 /// On any mailbox-related notification, re-runs session discovery to pick up
 /// grants or revocations. Non-fatal - errors are logged and skipped.
-pub(crate) async fn poll_share_notifications(client: &JmapClient, account_id: &str, db: &DbState) {
+pub(crate) async fn poll_share_notifications(client: &JmapClient, account_id: &str, db: &ReadDbState) {
     let inner = client.inner();
     let session = inner.session();
 

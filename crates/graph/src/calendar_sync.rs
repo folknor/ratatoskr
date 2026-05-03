@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use db::db::DbState;
+use db::db::ReadDbState;
 
 use super::client::GraphClient;
 use super::types::ODataCollection;
@@ -276,7 +276,7 @@ pub struct GraphCalendarSyncResult {
 /// List all calendars for the authenticated user.
 pub async fn graph_list_calendars(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<Vec<GraphCalendarInfo>, String> {
     let me = client.api_path_prefix();
     let response: ODataCollection<GraphCalendar> = client
@@ -310,7 +310,7 @@ pub async fn graph_list_calendars(
 /// If `None`, performs a full sync fetching events from 90 days ago to 365 days ahead.
 pub async fn graph_sync_calendar_events(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     calendar_remote_id: &str,
     delta_link: Option<&str>,
 ) -> Result<GraphCalendarSyncResult, String> {
@@ -384,7 +384,7 @@ pub async fn graph_sync_calendar_events(
 /// Create a new event on a calendar.
 pub async fn graph_create_event(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     calendar_remote_id: &str,
     event: &GraphEventCreate,
 ) -> Result<GraphCalendarEvent, String> {
@@ -401,7 +401,7 @@ pub async fn graph_create_event(
 /// Uses PATCH to update the event, then re-fetches to get the full response.
 pub async fn graph_update_event(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     remote_event_id: &str,
     event: &serde_json::Value,
 ) -> Result<GraphCalendarEvent, String> {
@@ -424,7 +424,7 @@ pub async fn graph_update_event(
 /// Delete an event.
 pub async fn graph_delete_event(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     remote_event_id: &str,
 ) -> Result<(), String> {
     let me = client.api_path_prefix();

@@ -3,7 +3,7 @@
 //! SQL lives in `db::queries_extra::contacts`. This module re-exports
 //! the `seen` crate's public API and provides async wrappers.
 
-use crate::db::DbState;
+use crate::db::ReadDbState;
 
 // Re-export the `seen` crate's public API through core.
 pub use seen::{
@@ -19,7 +19,7 @@ pub use crate::db::queries_extra::contacts::SeenAddressStats;
 // ---------------------------------------------------------------------------
 
 /// Promote a seen address to a full contact.
-pub async fn promote_seen_to_contact(db: &DbState, email: String) -> Result<(), String> {
+pub async fn promote_seen_to_contact(db: &ReadDbState, email: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         crate::db::queries_extra::contacts::promote_seen_to_contact_sync(conn, &email)
     })
@@ -28,7 +28,7 @@ pub async fn promote_seen_to_contact(db: &DbState, email: String) -> Result<(), 
 
 /// Get aggregated statistics for a seen email address.
 pub async fn get_seen_address_stats(
-    db: &DbState,
+    db: &ReadDbState,
     email: String,
 ) -> Result<Option<SeenAddressStats>, String> {
     db.with_conn(move |conn| {

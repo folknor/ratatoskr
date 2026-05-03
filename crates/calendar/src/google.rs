@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use gmail::client::GmailClient;
-use rtsk::db::DbState;
+use rtsk::db::ReadDbState;
 use rtsk::provider::http;
 
 use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
@@ -93,7 +93,7 @@ struct GoogleEventListResponse {
 
 pub async fn google_calendar_list_calendars_impl(
     _account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     client: &GmailClient,
 ) -> Result<Vec<CalendarInfoDto>, String> {
     let http = shared_http_client();
@@ -124,7 +124,7 @@ pub async fn google_calendar_sync_events_impl(
     account_id: &str,
     calendar_remote_id: &str,
     sync_token: Option<String>,
-    db: &DbState,
+    db: &ReadDbState,
     client: &GmailClient,
 ) -> Result<CalendarSyncResultDto, String> {
     let _ = account_id;
@@ -212,7 +212,7 @@ pub async fn google_calendar_sync_events_impl(
 
 pub async fn google_calendar_fetch_events_impl(
     client: &GmailClient,
-    db: &DbState,
+    db: &ReadDbState,
     calendar_remote_id: &str,
     time_min: &str,
     time_max: &str,
@@ -238,7 +238,7 @@ pub async fn google_calendar_fetch_events_impl(
 
 pub async fn google_calendar_create_event_impl(
     client: &GmailClient,
-    db: &DbState,
+    db: &ReadDbState,
     calendar_remote_id: &str,
     event: serde_json::Value,
 ) -> Result<CalendarEventDto, String> {
@@ -252,7 +252,7 @@ pub async fn google_calendar_create_event_impl(
 
 pub async fn google_calendar_update_event_impl(
     client: &GmailClient,
-    db: &DbState,
+    db: &ReadDbState,
     calendar_remote_id: &str,
     remote_event_id: &str,
     event: serde_json::Value,
@@ -269,7 +269,7 @@ pub async fn google_calendar_update_event_impl(
 
 pub async fn google_calendar_delete_event_impl(
     client: &GmailClient,
-    db: &DbState,
+    db: &ReadDbState,
     calendar_remote_id: &str,
     remote_event_id: &str,
 ) -> Result<(), String> {
@@ -284,7 +284,7 @@ pub async fn google_calendar_delete_event_impl(
 async fn google_calendar_request<T: serde::de::DeserializeOwned>(
     http: &reqwest::Client,
     client: &GmailClient,
-    db: &DbState,
+    db: &ReadDbState,
     url: &str,
 ) -> Result<T, String> {
     google_calendar_request_with_body::<T>(http, client, db, "GET", url, None).await
@@ -293,7 +293,7 @@ async fn google_calendar_request<T: serde::de::DeserializeOwned>(
 async fn google_calendar_request_with_body<T: serde::de::DeserializeOwned>(
     http: &reqwest::Client,
     client: &GmailClient,
-    db: &DbState,
+    db: &ReadDbState,
     method: &str,
     url: &str,
     json_body: Option<serde_json::Value>,
@@ -316,7 +316,7 @@ async fn google_calendar_request_with_body<T: serde::de::DeserializeOwned>(
 async fn google_calendar_request_empty(
     http: &reqwest::Client,
     client: &GmailClient,
-    db: &DbState,
+    db: &ReadDbState,
     method: &str,
     url: &str,
 ) -> Result<(), String> {

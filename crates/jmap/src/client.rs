@@ -6,7 +6,7 @@ use tokio::sync::RwLock;
 use common::crypto::{decrypt_if_needed, encrypt_value};
 use common::http::shared_http_client;
 use common::token::{get_refresh_lock, oauth_token_endpoint, refresh_oauth_token};
-use db::db::DbState;
+use db::db::ReadDbState;
 
 /// Cached mailbox list entry: (mailbox_id, role, name).
 pub type MailboxListEntry = (String, Option<String>, String);
@@ -25,7 +25,7 @@ pub struct JmapClient {
     mailbox_cache: Arc<RwLock<MailboxCache>>,
 
     // ── OAuth infrastructure (only used when auth_method == "oauth2") ────
-    db: Option<DbState>,
+    db: Option<ReadDbState>,
     account_id: String,
     encryption_key: Option<[u8; 32]>,
     auth_method: String,
@@ -227,7 +227,7 @@ impl JmapClient {
     /// Reads credentials from the database and connects using either Basic
     /// or Bearer auth depending on the account's `auth_method`.
     pub async fn from_account(
-        db: &DbState,
+        db: &ReadDbState,
         account_id: &str,
         encryption_key: &[u8; 32],
     ) -> Result<Self, String> {

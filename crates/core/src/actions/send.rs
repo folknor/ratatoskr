@@ -24,7 +24,7 @@ pub async fn send_email(ctx: &ActionContext, request: SendRequest) -> ActionOutc
     //    Both are sync - combine them to avoid two spawn_blocking round-trips.
     //
     //    Both `db_save_local_draft` and `mark_draft_sending` are async helpers
-    //    that take `&DbState`. Inside spawn_blocking we already hold the Mutex
+    //    that take `&ReadDbState`. Inside spawn_blocking we already hold the Mutex
     //    lock, so we inline the equivalent SQL rather than calling the async
     //    helpers. The validation logic is identical.
     let db = ctx.db.clone();

@@ -3,7 +3,7 @@
 //! SQL lives in `db::queries_extra::contacts`. This module keeps
 //! source-priority decisions and orchestration.
 
-use crate::db::DbState;
+use crate::db::ReadDbState;
 
 // ---------------------------------------------------------------------------
 // Domain types (stay in core)
@@ -33,7 +33,7 @@ pub struct MergeResult {
 // ---------------------------------------------------------------------------
 
 /// Find duplicate contacts by email address.
-pub async fn find_duplicates(db: &DbState) -> Result<Vec<DuplicatePair>, String> {
+pub async fn find_duplicates(db: &ReadDbState) -> Result<Vec<DuplicatePair>, String> {
     db.with_conn(move |conn| {
         let rows = crate::db::queries_extra::contacts::find_contact_duplicates_sync(
             conn,
@@ -62,7 +62,7 @@ pub async fn find_duplicates(db: &DbState) -> Result<Vec<DuplicatePair>, String>
 ///
 /// Each pair is merged independently. Partial success is preserved:
 /// if one pair fails, earlier successes are not rolled back.
-pub async fn auto_merge_duplicates(db: &DbState) -> Result<MergeResult, String> {
+pub async fn auto_merge_duplicates(db: &ReadDbState) -> Result<MergeResult, String> {
     let duplicates = find_duplicates(db).await?;
     let mut merged_count = 0;
     let mut skipped_count = 0;
@@ -86,7 +86,7 @@ pub async fn auto_merge_duplicates(db: &DbState) -> Result<MergeResult, String> 
 
 /// Merge two specific contacts by their IDs.
 pub async fn merge_contacts(
-    db: &DbState,
+    db: &ReadDbState,
     keep_id: String,
     merge_id: String,
 ) -> Result<(), String> {
@@ -109,7 +109,7 @@ fn source_priority(source: &str) -> u8 {
     }
 }
 
-async fn auto_merge_one(db: &DbState, pair: &DuplicatePair) -> Result<bool, String> {
+async fn auto_merge_one(db: &ReadDbState, pair: &DuplicatePair) -> Result<bool, String> {
     let primary_prio = source_priority(&pair.primary_source);
     let secondary_prio = source_priority(&pair.secondary_source);
 

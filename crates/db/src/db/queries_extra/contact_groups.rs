@@ -2,12 +2,12 @@ use std::collections::HashSet;
 
 use rusqlite::{OptionalExtension, params};
 
-use super::super::DbState;
+use super::super::ReadDbState;
 use super::super::types::{DbContactGroup, DbContactGroupMember};
 use super::contacts::ExpandedGroupContact;
 use crate::db::from_row::FromRow;
 
-pub async fn db_create_contact_group(db: &DbState, id: String, name: String) -> Result<(), String> {
+pub async fn db_create_contact_group(db: &ReadDbState, id: String, name: String) -> Result<(), String> {
     log::debug!("Creating contact group: id={id}, name={name}");
     db.with_conn(move |conn| {
         conn.execute(
@@ -20,7 +20,7 @@ pub async fn db_create_contact_group(db: &DbState, id: String, name: String) -> 
     .await
 }
 
-pub async fn db_update_contact_group(db: &DbState, id: String, name: String) -> Result<(), String> {
+pub async fn db_update_contact_group(db: &ReadDbState, id: String, name: String) -> Result<(), String> {
     log::debug!("Updating contact group: id={id}, name={name}");
     db.with_conn(move |conn| {
         conn.execute(
@@ -33,7 +33,7 @@ pub async fn db_update_contact_group(db: &DbState, id: String, name: String) -> 
     .await
 }
 
-pub async fn db_delete_contact_group(db: &DbState, id: String) -> Result<(), String> {
+pub async fn db_delete_contact_group(db: &ReadDbState, id: String) -> Result<(), String> {
     log::debug!("Deleting contact group: id={id}");
     db.with_conn(move |conn| {
         let tx = conn
@@ -61,7 +61,7 @@ pub async fn db_delete_contact_group(db: &DbState, id: String) -> Result<(), Str
     })
 }
 
-pub async fn db_get_all_contact_groups(db: &DbState) -> Result<Vec<DbContactGroup>, String> {
+pub async fn db_get_all_contact_groups(db: &ReadDbState) -> Result<Vec<DbContactGroup>, String> {
     db.with_conn(move |conn| {
         let mut stmt = conn
             .prepare(
@@ -80,7 +80,7 @@ pub async fn db_get_all_contact_groups(db: &DbState) -> Result<Vec<DbContactGrou
     .await
 }
 
-pub async fn db_get_contact_group(db: &DbState, id: String) -> Result<DbContactGroup, String> {
+pub async fn db_get_contact_group(db: &ReadDbState, id: String) -> Result<DbContactGroup, String> {
     db.with_conn(move |conn| {
         conn.query_row(
             "SELECT g.id, g.name,
@@ -97,7 +97,7 @@ pub async fn db_get_contact_group(db: &DbState, id: String) -> Result<DbContactG
 }
 
 pub async fn db_get_contact_group_members(
-    db: &DbState,
+    db: &ReadDbState,
     group_id: String,
 ) -> Result<Vec<DbContactGroupMember>, String> {
     db.with_conn(move |conn| {
@@ -118,7 +118,7 @@ pub async fn db_get_contact_group_members(
 }
 
 pub async fn db_add_contact_group_member(
-    db: &DbState,
+    db: &ReadDbState,
     group_id: String,
     member_type: String,
     member_value: String,
@@ -149,7 +149,7 @@ pub async fn db_add_contact_group_member(
 }
 
 pub async fn db_remove_contact_group_member(
-    db: &DbState,
+    db: &ReadDbState,
     group_id: String,
     member_type: String,
     member_value: String,
@@ -175,7 +175,7 @@ pub async fn db_remove_contact_group_member(
 }
 
 pub async fn db_search_contact_groups(
-    db: &DbState,
+    db: &ReadDbState,
     query: String,
     limit: i64,
 ) -> Result<Vec<DbContactGroup>, String> {
@@ -202,7 +202,7 @@ pub async fn db_search_contact_groups(
 }
 
 pub async fn db_find_contact_group_id_by_name(
-    db: &DbState,
+    db: &ReadDbState,
     name: String,
 ) -> Result<Option<String>, String> {
     db.with_conn(move |conn| {
@@ -218,7 +218,7 @@ pub async fn db_find_contact_group_id_by_name(
 }
 
 pub async fn db_expand_contact_group(
-    db: &DbState,
+    db: &ReadDbState,
     group_id: String,
 ) -> Result<Vec<String>, String> {
     db.with_conn(move |conn| {
@@ -233,7 +233,7 @@ pub async fn db_expand_contact_group(
 }
 
 pub async fn db_expand_contact_group_with_names(
-    db: &DbState,
+    db: &ReadDbState,
     group_id: String,
 ) -> Result<Vec<ExpandedGroupContact>, String> {
     db.with_conn(move |conn| expand_group_with_names_sync(conn, &group_id)).await
@@ -252,7 +252,7 @@ pub struct MatchedGroup {
 /// found; if multiple groups have the same member set the choice is
 /// arbitrary but stable per scan order.
 pub async fn db_find_group_matching_emails(
-    db: &DbState,
+    db: &ReadDbState,
     emails: Vec<String>,
 ) -> Result<Option<MatchedGroup>, String> {
     let target: HashSet<String> = emails.into_iter().map(|e| e.to_lowercase()).collect();

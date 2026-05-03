@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use jmap_client::calendar::CalendarGet;
 use jmap_client::calendar_event::CalendarEventGet;
 
-use db::db::DbState;
+use db::db::ReadDbState;
 
 use crate::client::JmapClient;
 
@@ -43,7 +43,7 @@ pub struct JmapCalendarInfo {
 pub async fn sync_calendar_list(
     client: &JmapClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<Vec<JmapCalendarInfo>, String> {
     let inner = client.inner();
     let mut request = inner.build();
@@ -113,7 +113,7 @@ pub async fn sync_all_events(
     client: &JmapClient,
     account_id: &str,
     calendars: &[JmapCalendarInfo],
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<(), String> {
     // Build a remote_id -> local_id lookup for calendar assignment
     let cal_map: HashMap<&str, &str> = calendars
@@ -166,7 +166,7 @@ pub async fn sync_events_delta(
     client: &JmapClient,
     account_id: &str,
     calendars: &[JmapCalendarInfo],
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<(), String> {
     let cal_map: HashMap<&str, &str> = calendars
         .iter()
@@ -245,7 +245,7 @@ pub async fn sync_events_delta(
 pub async fn sync_calendars(
     client: &JmapClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<(), String> {
     let cals = sync_calendar_list(client, account_id, db).await?;
 

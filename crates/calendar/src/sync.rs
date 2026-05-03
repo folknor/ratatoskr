@@ -2,7 +2,7 @@ use rusqlite::{OptionalExtension, Row, params};
 
 use gmail::client::GmailState;
 use graph::client::GraphState;
-use rtsk::db::DbState;
+use rtsk::db::ReadDbState;
 use rtsk::db::queries_extra::{
     CalendarEventRow, delete_calendar_event_by_remote_id, get_calendar_id_by_remote_id,
     DiscoveredCalendar, update_calendar_sync_token, upsert_calendar_event_row,
@@ -16,7 +16,7 @@ use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
 
 pub async fn calendar_sync_account_impl(
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     gmail: &GmailState,
     graph: &GraphState,
 ) -> Result<(), String> {
@@ -75,10 +75,10 @@ pub async fn calendar_sync_account_impl(
 /// Convenience entry point for syncing a single account's calendars.
 ///
 /// Constructs ephemeral `GmailState` / `GraphState` internally so callers
-/// only need `DbState` + encryption key (same pattern as `sync_delta_for_account`).
+/// only need `ReadDbState` + encryption key (same pattern as `sync_delta_for_account`).
 pub async fn calendar_sync_account(
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     encryption_key: [u8; 32],
 ) -> Result<(), String> {
     let gmail = gmail::client::new_gmail_state(encryption_key);
@@ -87,7 +87,7 @@ pub async fn calendar_sync_account(
 }
 
 pub async fn upsert_discovered_calendars_impl(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     provider: &str,
     calendars: Vec<CalendarInfoDto>,
@@ -117,7 +117,7 @@ pub async fn upsert_discovered_calendars_impl(
 }
 
 pub async fn apply_calendar_sync_result_impl(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     calendar_remote_id: &str,
     sync_result: CalendarSyncResultDto,
@@ -155,7 +155,7 @@ pub async fn apply_calendar_sync_result_impl(
 }
 
 pub async fn upsert_provider_events_impl(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     calendar_remote_id: &str,
     events: Vec<CalendarEventDto>,
@@ -180,7 +180,7 @@ pub async fn upsert_provider_events_impl(
 }
 
 pub async fn delete_provider_event_impl(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     calendar_remote_id: &str,
     remote_event_id: &str,
@@ -198,7 +198,7 @@ pub async fn delete_provider_event_impl(
 }
 
 pub async fn load_visible_calendars(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<Vec<DbCalendar>, String> {
     let account_id = account_id.to_string();
@@ -243,7 +243,7 @@ fn row_to_db_calendar(row: &Row<'_>) -> rusqlite::Result<DbCalendar> {
 
 async fn sync_google_calendar_account(
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     gmail: &GmailState,
 ) -> Result<(), String> {
     let client = gmail.get(account_id).await?;
@@ -268,7 +268,7 @@ async fn sync_google_calendar_account(
 
 async fn sync_graph_calendar_account(
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     graph: &GraphState,
 ) -> Result<(), String> {
     let client = graph.get(account_id).await?;
@@ -293,7 +293,7 @@ async fn sync_graph_calendar_account(
 
 async fn sync_caldav_calendar_account(
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     encryption_key: &[u8; 32],
 ) -> Result<(), String> {
     let config =
@@ -331,7 +331,7 @@ async fn sync_caldav_calendar_account(
 
 async fn run_caldav_sync_attempt(
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     config: &super::caldav::CaldavAccountConfig,
     persist_after_build: bool,
 ) -> Result<(), String> {

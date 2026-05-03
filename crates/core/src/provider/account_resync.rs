@@ -1,14 +1,14 @@
 use std::path::Path;
 
 use crate::body_store::BodyStoreState;
-use crate::db::DbState;
+use crate::db::ReadDbState;
 use crate::inline_image_store::InlineImageStoreState;
 
 /// Prepare an account for full resync by deleting all messages, threads,
 /// and sync state, then cleaning up orphaned inline images and enforcing
 /// the attachment cache limit.
 pub async fn prepare_account_resync(
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     app_data_dir: &Path,

@@ -1,10 +1,10 @@
-use super::super::DbState;
+use super::super::ReadDbState;
 use super::super::types::{DbFollowUpReminder, DbQuickStep, TriggeredFollowUp};
 use crate::db::from_row::FromRow;
 use rusqlite::params;
 
 pub async fn db_insert_follow_up_reminder(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     account_id: String,
     thread_id: String,
@@ -26,7 +26,7 @@ pub async fn db_insert_follow_up_reminder(
 }
 
 pub async fn db_get_follow_up_for_thread(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     thread_id: String,
 ) -> Result<Option<DbFollowUpReminder>, String> {
@@ -50,7 +50,7 @@ pub async fn db_get_follow_up_for_thread(
 }
 
 pub async fn db_cancel_follow_up_for_thread(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     thread_id: String,
 ) -> Result<(), String> {
@@ -67,7 +67,7 @@ pub async fn db_cancel_follow_up_for_thread(
 }
 
 pub async fn db_get_active_follow_up_thread_ids(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     thread_ids: Vec<String>,
 ) -> Result<Vec<String>, String> {
@@ -109,7 +109,7 @@ pub async fn db_get_active_follow_up_thread_ids(
     .await
 }
 
-pub async fn db_check_follow_up_reminders(db: &DbState) -> Result<Vec<TriggeredFollowUp>, String> {
+pub async fn db_check_follow_up_reminders(db: &ReadDbState) -> Result<Vec<TriggeredFollowUp>, String> {
     db.with_conn(move |conn| {
         let now = i64::try_from(
             std::time::SystemTime::now()
@@ -188,7 +188,7 @@ pub async fn db_check_follow_up_reminders(db: &DbState) -> Result<Vec<TriggeredF
 }
 
 pub async fn db_get_quick_steps_for_account(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<DbQuickStep>, String> {
     db.with_conn(move |conn| {
@@ -206,7 +206,7 @@ pub async fn db_get_quick_steps_for_account(
 }
 
 pub async fn db_get_enabled_quick_steps_for_account(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<DbQuickStep>, String> {
     db.with_conn(move |conn| {
@@ -224,7 +224,7 @@ pub async fn db_get_enabled_quick_steps_for_account(
     .await
 }
 
-pub async fn db_insert_quick_step(db: &DbState, step: DbQuickStep) -> Result<(), String> {
+pub async fn db_insert_quick_step(db: &ReadDbState, step: DbQuickStep) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute(
             "INSERT INTO quick_steps (id, account_id, name, description, shortcut, actions_json, icon, is_enabled, continue_on_error)
@@ -247,7 +247,7 @@ pub async fn db_insert_quick_step(db: &DbState, step: DbQuickStep) -> Result<(),
     .await
 }
 
-pub async fn db_update_quick_step(db: &DbState, step: DbQuickStep) -> Result<(), String> {
+pub async fn db_update_quick_step(db: &ReadDbState, step: DbQuickStep) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute(
             "UPDATE quick_steps SET name = ?2, description = ?3, shortcut = ?4,
@@ -270,7 +270,7 @@ pub async fn db_update_quick_step(db: &DbState, step: DbQuickStep) -> Result<(),
     .await
 }
 
-pub async fn db_delete_quick_step(db: &DbState, id: String) -> Result<(), String> {
+pub async fn db_delete_quick_step(db: &ReadDbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM quick_steps WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;

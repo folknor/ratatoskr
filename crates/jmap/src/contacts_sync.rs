@@ -16,7 +16,7 @@
 
 use rusqlite::params;
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries_extra::{
     ContactWriteRow, delete_contact_by_server_id_and_source_sync, upsert_contact_sync,
 };
@@ -196,7 +196,7 @@ fn extract_notes(card: &jmap_client::contact_card::ContactCard) -> Option<String
 pub async fn jmap_contacts_initial_sync(
     client: &JmapClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<usize, String> {
     log::info!("[JMAP-Contacts] Starting initial sync for account {account_id}");
 
@@ -260,7 +260,7 @@ pub async fn jmap_contacts_initial_sync(
 pub async fn jmap_contacts_delta_sync(
     client: &JmapClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<usize, String> {
     let state = sync_state::load_jmap_sync_state(db, account_id, "ContactCard").await?;
     let Some(mut since_state) = state else {
@@ -439,7 +439,7 @@ pub struct JmapContactServerInfo {
 
 /// Look up the JMAP server ID and account for a contact email.
 pub async fn get_jmap_contact_server_info(
-    db: &DbState,
+    db: &ReadDbState,
     email: String,
 ) -> Result<Option<JmapContactServerInfo>, String> {
     db.with_conn(move |conn| {

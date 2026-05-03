@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use serde::Deserialize;
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries_extra::{
     ContactGroupRow, delete_contact_group_by_id, delete_contact_group_members,
     delete_contact_groups_for_account_by_source, insert_contact_group_member_email,
@@ -100,7 +100,7 @@ pub struct GraphGroupMember {
 /// recursive expansion and cycle detection server-side.
 pub async fn resolve_group_members(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     group_id: &str,
 ) -> Result<GroupResolutionResult, String> {
     let enc_id = urlencoding::encode(group_id);
@@ -145,7 +145,7 @@ pub async fn resolve_group_members(
 /// and filters to only mail-enabled groups.
 pub async fn fetch_user_groups(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<Vec<ExchangeGroup>, String> {
     let prefix = client.api_path_prefix();
     let initial_url = format!(
@@ -185,7 +185,7 @@ pub async fn fetch_user_groups(
 /// Returns the count of synced groups.
 pub(crate) async fn sync_exchange_groups(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<usize, String> {
     log::debug!("[Graph] Syncing Exchange groups for account {account_id}");
@@ -370,7 +370,7 @@ fn prune_stale_groups(
     Ok(())
 }
 
-async fn prune_all_account_groups(db: &DbState, account_id: &str) -> Result<(), String> {
+async fn prune_all_account_groups(db: &ReadDbState, account_id: &str) -> Result<(), String> {
     let aid = account_id.to_string();
     db.with_conn(move |conn| {
         delete_contact_groups_for_account_by_source(conn, &aid, "exchange")

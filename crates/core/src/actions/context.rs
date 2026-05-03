@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::body_store::BodyStoreState;
-use crate::db::DbState;
+use crate::db::ReadDbState;
 use crate::search::SearchState;
 use store::inline_image_store::InlineImageStoreState;
 
@@ -14,7 +14,7 @@ use store::inline_image_store::InlineImageStoreState;
 /// callers never see `ProviderCtx`.
 #[derive(Clone)]
 pub struct ActionContext {
-    pub db: DbState,
+    pub db: ReadDbState,
     pub body_store: BodyStoreState,
     pub inline_images: InlineImageStoreState,
     pub search: SearchState,

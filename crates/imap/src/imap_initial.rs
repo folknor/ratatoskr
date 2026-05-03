@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use db::progress::{self, ProgressReporter};
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use search::SearchState;
 use store::body_store::BodyStoreState;
 use store::inline_image_store::InlineImageStoreState;
@@ -54,7 +54,7 @@ fn emit_progress(progress: &dyn ProgressReporter, event: &SyncProgressEvent) {
 #[allow(clippy::too_many_arguments)]
 pub async fn imap_initial_sync(
     progress: &dyn ProgressReporter,
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
@@ -339,7 +339,7 @@ pub async fn imap_initial_sync(
 #[allow(clippy::cognitive_complexity, clippy::too_many_lines)]
 async fn sync_single_folder(
     progress: &dyn ProgressReporter,
-    db: &DbState,
+    db: &ReadDbState,
     body_store: &BodyStoreState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,

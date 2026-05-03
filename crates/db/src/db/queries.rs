@@ -7,7 +7,7 @@ use super::sql_fragments::{
 use super::types::{
     CategoryCount, DbAttachment, DbContact, DbLabel, DbThread, ThreadCategoryRow, ThreadInfoRow,
 };
-use super::DbState;
+use super::ReadDbState;
 
 /// Read a single value from the `settings` table, returning `Ok(None)` when
 /// the key does not exist.
@@ -525,7 +525,7 @@ pub fn get_thread_count(
     }
 }
 
-pub async fn get_provider_type(db: &DbState, account_id: &str) -> Result<String, String> {
+pub async fn get_provider_type(db: &ReadDbState, account_id: &str) -> Result<String, String> {
     let aid = account_id.to_string();
     db.with_conn(move |conn| {
         let mut stmt = conn

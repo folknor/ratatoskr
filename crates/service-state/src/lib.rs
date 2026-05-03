@@ -46,7 +46,7 @@ impl WriteDbState {
     /// removed in task 3 once the connection pool moves into a
     /// private `db::ConnectionPool` type and `WriteDbState` consumes
     /// it directly.
-    pub fn from_db_state(state: &db::db::DbState) -> Self {
+    pub fn from_db_state(state: &db::db::ReadDbState) -> Self {
         Self::from_arc(state.conn())
     }
 

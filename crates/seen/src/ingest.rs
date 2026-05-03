@@ -1,6 +1,6 @@
 use rusqlite::{Connection, params};
 
-use db::db::DbState;
+use db::db::ReadDbState;
 
 use super::parse::extract_observations;
 use super::types::{AddressObservation, Direction, ObservationParams};
@@ -134,7 +134,7 @@ pub(crate) fn get_self_emails(conn: &Connection, account_id: &str) -> Result<Vec
 /// Looks up account email + aliases, extracts observations, and upserts.
 /// Errors are logged but do not fail the sync.
 pub async fn ingest_from_messages<T: MessageAddresses + Send + Sync + 'static>(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     messages: &[T],
 ) {

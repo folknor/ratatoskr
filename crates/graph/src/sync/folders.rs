@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use common::types::ProviderCtx;
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries_extra::{LabelWriteRow, upsert_labels};
 
 use super::super::client::GraphClient;
@@ -124,7 +124,7 @@ async fn persist_labels(ctx: &ProviderCtx<'_>, folder_map: &FolderMap) -> Result
 /// Fetch messages from a single folder with a date filter.
 pub(super) async fn fetch_folder_messages(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     folder_id: &str,
     since_iso: &str,
     folder_map: &FolderMap,
@@ -173,7 +173,7 @@ pub(super) async fn fetch_folder_messages(
 /// uses `get_absolute()` consistently for OData pagination.
 async fn fetch_all_folders(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<Vec<GraphMailFolder>, String> {
     let mut all = Vec::new();
     let mut next_link: Option<String> = None;
@@ -209,7 +209,7 @@ async fn fetch_all_folders(
 /// Recursively fetch child folders of a given parent.
 fn fetch_child_folders<'a>(
     client: &'a GraphClient,
-    db: &'a DbState,
+    db: &'a ReadDbState,
     parent_id: &'a str,
 ) -> futures::future::BoxFuture<'a, Result<Vec<GraphMailFolder>, String>> {
     Box::pin(async move {

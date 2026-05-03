@@ -1,4 +1,4 @@
-use crate::db::DbState;
+use crate::db::ReadDbState;
 use crate::db::FromRow;
 use crate::db::types::DbContact;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -10,7 +10,7 @@ pub struct ExpandedGroupContact {
 }
 
 pub async fn db_get_all_contacts(
-    db: &DbState,
+    db: &ReadDbState,
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> Result<Vec<DbContact>, String> {
@@ -32,7 +32,7 @@ pub async fn db_get_all_contacts(
 }
 
 pub async fn db_upsert_contact(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     email: String,
     display_name: Option<String>,
@@ -57,7 +57,7 @@ pub async fn db_upsert_contact(
 }
 
 pub async fn db_update_contact(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     display_name: Option<String>,
 ) -> Result<(), String> {
@@ -80,7 +80,7 @@ pub async fn db_update_contact(
 }
 
 pub async fn db_update_contact_notes(
-    db: &DbState,
+    db: &ReadDbState,
     email: String,
     notes: Option<String>,
 ) -> Result<(), String> {
@@ -97,7 +97,7 @@ pub async fn db_update_contact_notes(
 }
 
 pub async fn db_find_contact_id_by_email(
-    db: &DbState,
+    db: &ReadDbState,
     email: String,
 ) -> Result<Option<String>, String> {
     db.with_conn(move |conn| {
@@ -166,7 +166,7 @@ pub fn db_upsert_contact_full(
     Ok(())
 }
 
-pub async fn db_delete_contact(db: &DbState, id: String) -> Result<(), String> {
+pub async fn db_delete_contact(db: &ReadDbState, id: String) -> Result<(), String> {
     log::info!("Deleting contact: id={id}");
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM contacts WHERE id = ?1", params![id])
@@ -180,7 +180,7 @@ pub async fn db_delete_contact(db: &DbState, id: String) -> Result<(), String> {
 }
 
 pub async fn db_update_contact_avatar(
-    db: &DbState,
+    db: &ReadDbState,
     email: String,
     avatar_url: String,
 ) -> Result<(), String> {

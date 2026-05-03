@@ -5,7 +5,7 @@
 
 use crate::ews::{EwsClient, EwsFolder, EwsHeaders, EwsItem};
 use crate::parse::parse_iso_datetime;
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries_extra::{
     PublicFolderItemRow, PublicFolderRow, delete_all_public_folder_items,
     delete_public_folder_pin, delete_stale_public_folder_items, get_pinned_folder_ids,
@@ -92,7 +92,7 @@ async fn fetch_all_item_ids(
 
 /// Load sync state for a folder. Returns `(last_sync_timestamp, last_full_scan_at)`.
 async fn load_sync_state(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
 ) -> Result<(Option<i64>, Option<i64>), String> {
@@ -123,7 +123,7 @@ async fn load_sync_state(
 
 /// Save sync state after a sync run.
 async fn save_sync_state(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
     last_sync_timestamp: i64,
@@ -148,7 +148,7 @@ async fn save_sync_state(
 
 /// Upsert items into `public_folder_items`. Returns `(new_count, updated_count)`.
 async fn upsert_items(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
     items: Vec<EwsItem>,
@@ -179,7 +179,7 @@ async fn upsert_items(
 
 /// Delete local items not present on the server. Returns deletion count.
 async fn delete_stale_items(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
     server_item_ids: &[String],
@@ -195,7 +195,7 @@ async fn delete_stale_items(
 
 /// Load sync_depth_days from `public_folder_pins` for a folder. Returns default 30 if missing.
 async fn load_sync_depth_days(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
 ) -> Result<i32, String> {
@@ -206,7 +206,7 @@ async fn load_sync_depth_days(
 }
 
 /// Load all pinned folder IDs with sync_enabled = 1.
-async fn load_pinned_folder_ids(db: &DbState, account_id: &str) -> Result<Vec<String>, String> {
+async fn load_pinned_folder_ids(db: &ReadDbState, account_id: &str) -> Result<Vec<String>, String> {
     let account_id = account_id.to_string();
     db.with_conn(move |conn| get_pinned_folder_ids(conn, &account_id))
         .await
@@ -222,7 +222,7 @@ async fn load_pinned_folder_ids(db: &DbState, account_id: &str) -> Result<Vec<St
 pub async fn sync_pinned_public_folder(
     ews: &EwsClient,
     access_token: &str,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
     headers: &EwsHeaders,
@@ -293,7 +293,7 @@ pub async fn sync_pinned_public_folder(
 pub async fn sync_all_pinned_folders(
     ews: &EwsClient,
     access_token: &str,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     headers: &EwsHeaders,
 ) -> Result<Vec<(String, Result<PublicFolderSyncResult, String>)>, String> {
@@ -337,7 +337,7 @@ pub async fn sync_all_pinned_folders(
 
 /// Pin a public folder for offline sync.
 pub async fn pin_public_folder(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
     sync_depth_days: Option<i32>,
@@ -351,7 +351,7 @@ pub async fn pin_public_folder(
 
 /// Unpin a public folder - removes pin, local items, and sync state.
 pub async fn unpin_public_folder(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
 ) -> Result<(), String> {
@@ -379,7 +379,7 @@ pub async fn unpin_public_folder(
 pub async fn browse_public_folders(
     ews: &EwsClient,
     access_token: &str,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     parent_folder_id: &str,
     headers: &EwsHeaders,

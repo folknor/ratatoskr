@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::db::DbState;
+use crate::db::ReadDbState;
 use crate::db::queries_extra::calendars::{
     UpsertCalendarEventParams, db_delete_events_for_calendar, db_update_calendar_sync_token,
     db_upsert_calendar, db_upsert_calendar_event,
@@ -34,7 +34,7 @@ pub struct CalDavSyncResult {
 /// 4. Upsert events to DB, prune deleted events
 pub async fn sync_caldav_calendars(
     client: &CalDavClient,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<CalDavSyncResult, String> {
     // Step 1: Discover calendars
@@ -115,7 +115,7 @@ pub async fn sync_caldav_calendars(
 /// Returns `(upserted_count, deleted_count)`.
 async fn sync_calendar_events(
     client: &CalDavClient,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     calendar_id: &str,
     calendar_href: &str,
@@ -301,7 +301,7 @@ async fn sync_calendar_events(
 /// distinguish overrides from masters when reaping abandoned overrides
 /// after a multi-VEVENT resource shrinks.
 async fn upsert_parsed_event(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     calendar_id: &str,
     uri: &str,
@@ -449,7 +449,7 @@ fn make_google_event_id(uid: &str, recurrence_id: Option<&str>) -> String {
 /// return left stale local attendee rows behind whenever a remote
 /// update cleared the list. (Round 3 #27.)
 async fn sync_event_attendees(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     google_event_id: &str,
     event: &parse::ParsedVEvent,
@@ -489,7 +489,7 @@ async fn sync_event_attendees(
 /// insert), so an empty list is what removes stale local VALARM rows
 /// after a remote update clears them. (Round 3 #27.)
 async fn sync_event_reminders(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     google_event_id: &str,
     event: &parse::ParsedVEvent,
@@ -521,7 +521,7 @@ async fn sync_event_reminders(
 // ---------------------------------------------------------------------------
 
 /// Load the stored ctag for a calendar from the calendars table.
-async fn load_calendar_ctag(db: &DbState, calendar_id: &str) -> Result<Option<String>, String> {
+async fn load_calendar_ctag(db: &ReadDbState, calendar_id: &str) -> Result<Option<String>, String> {
     let cid = calendar_id.to_string();
     db.with_conn(move |conn| {
         crate::db::queries_extra::caldav_sync::load_calendar_ctag_sync(conn, &cid)
@@ -530,7 +530,7 @@ async fn load_calendar_ctag(db: &DbState, calendar_id: &str) -> Result<Option<St
 }
 
 async fn load_stored_etags(
-    db: &DbState,
+    db: &ReadDbState,
     calendar_id: &str,
 ) -> Result<HashMap<String, String>, String> {
     let cid = calendar_id.to_string();
@@ -545,7 +545,7 @@ async fn load_stored_etags(
 /// Use this when incremental sync gets confused or for first-time sync.
 pub async fn full_resync_calendar(
     client: &CalDavClient,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     calendar_id: &str,
     calendar_href: &str,

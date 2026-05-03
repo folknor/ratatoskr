@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use rusqlite::params;
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries_extra::{
     ContactWriteRow, delete_contact_by_email_and_source_sync, upsert_contact_sync,
 };
@@ -27,7 +27,7 @@ const PERSON_FIELDS: &str = "names,emailAddresses,phoneNumbers,organizations,pho
 pub async fn sync_google_contacts(
     client: &GmailClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<SyncContactsResult, String> {
     let existing_token = sync_state::load_google_contacts_sync_token(db, account_id).await?;
 
@@ -54,7 +54,7 @@ pub async fn sync_google_contacts(
 async fn full_sync(
     client: &GmailClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<SyncContactsResult, String> {
     let mut all_persons = Vec::new();
     let mut page_token: Option<String> = None;
@@ -126,7 +126,7 @@ async fn full_sync(
 async fn incremental_sync(
     client: &GmailClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     sync_token: &str,
 ) -> Result<SyncContactsResult, String> {
     let mut upserts = Vec::new();

@@ -3,14 +3,14 @@
 //! SQL lives in `db::queries_extra::contacts`. This module keeps
 //! HTTP/JSON helpers and provides async wrappers.
 
-use crate::db::DbState;
+use crate::db::ReadDbState;
 
 // Re-export types from db.
 pub use crate::db::queries_extra::contacts::{GoogleContactFields, GoogleServerInfo};
 
 /// After Google contacts sync completes, enrich with phone, company, etc.
 pub async fn enrich_google_contacts(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     persons: &[GoogleContactFields],
 ) -> Result<usize, String> {
@@ -86,7 +86,7 @@ pub fn build_google_contact_update_body(
 
 /// Look up the Google resource name and current server data for a contact.
 pub async fn get_google_contact_server_info(
-    db: &DbState,
+    db: &ReadDbState,
     email: String,
 ) -> Result<Option<GoogleServerInfo>, String> {
     db.with_conn(move |conn| {

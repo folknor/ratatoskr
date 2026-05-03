@@ -1,4 +1,4 @@
-use super::super::DbState;
+use super::super::ReadDbState;
 use super::super::types::{
     BackfillRow, CachedAttachmentRow, ImapMessageRow, SnoozedThread, SpecialFolderRow,
     SubscriptionEntry,
@@ -19,7 +19,7 @@ SELECT id, account_id, thread_id, from_address, from_name, to_addresses FROM (
 ) WHERE rn = 1";
 
 pub async fn db_get_snoozed_threads_due(
-    db: &DbState,
+    db: &ReadDbState,
     now: i64,
 ) -> Result<Vec<SnoozedThread>, String> {
     db.with_conn(move |conn| {
@@ -50,7 +50,7 @@ pub fn get_calendar_default_view_sync(conn: &crate::db::Connection) -> Result<Op
 
 #[allow(clippy::too_many_arguments)]
 pub async fn db_record_unsubscribe_action(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     account_id: String,
     thread_id: String,
@@ -76,7 +76,7 @@ pub async fn db_record_unsubscribe_action(
 }
 
 pub async fn db_get_subscriptions(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<SubscriptionEntry>, String> {
     db.with_conn(move |conn| {
@@ -106,7 +106,7 @@ pub async fn db_get_subscriptions(
 }
 
 pub async fn db_get_unsubscribe_status(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     from_address: String,
 ) -> Result<Option<String>, String> {
@@ -124,7 +124,7 @@ pub async fn db_get_unsubscribe_status(
 }
 
 pub async fn db_get_imap_uids_for_messages(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     message_ids: Vec<String>,
 ) -> Result<Vec<ImapMessageRow>, String> {
@@ -159,7 +159,7 @@ pub async fn db_get_imap_uids_for_messages(
 }
 
 pub async fn db_find_special_folder(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     special_use: String,
     fallback_label_id: Option<String>,
@@ -193,7 +193,7 @@ pub async fn db_find_special_folder(
 }
 
 pub async fn db_update_message_imap_folder(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     message_ids: Vec<String>,
     new_folder: String,
@@ -227,7 +227,7 @@ pub async fn db_update_message_imap_folder(
 }
 
 pub async fn db_update_attachment_cached(
-    db: &DbState,
+    db: &ReadDbState,
     attachment_id: String,
     local_path: String,
     cache_size: i64,
@@ -243,7 +243,7 @@ pub async fn db_update_attachment_cached(
     .await
 }
 
-pub async fn db_get_attachment_cache_size(db: &DbState) -> Result<i64, String> {
+pub async fn db_get_attachment_cache_size(db: &ReadDbState) -> Result<i64, String> {
     db.with_conn(move |conn| {
         let total: i64 = conn
             .query_row(
@@ -258,7 +258,7 @@ pub async fn db_get_attachment_cache_size(db: &DbState) -> Result<i64, String> {
 }
 
 pub async fn db_get_oldest_cached_attachments(
-    db: &DbState,
+    db: &ReadDbState,
     limit: i64,
 ) -> Result<Vec<CachedAttachmentRow>, String> {
     db.with_conn(move |conn| {
@@ -276,7 +276,7 @@ pub async fn db_get_oldest_cached_attachments(
 }
 
 pub async fn db_clear_attachment_cache_entry(
-    db: &DbState,
+    db: &ReadDbState,
     attachment_id: String,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
@@ -290,7 +290,7 @@ pub async fn db_clear_attachment_cache_entry(
     .await
 }
 
-pub async fn db_clear_all_attachment_cache(db: &DbState) -> Result<(), String> {
+pub async fn db_clear_all_attachment_cache(db: &ReadDbState) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute(
             "UPDATE attachments SET local_path = NULL, cached_at = NULL, cache_size = NULL WHERE cached_at IS NOT NULL",
@@ -302,7 +302,7 @@ pub async fn db_clear_all_attachment_cache(db: &DbState) -> Result<(), String> {
     .await
 }
 
-pub async fn db_count_cached_by_hash(db: &DbState, content_hash: String) -> Result<i64, String> {
+pub async fn db_count_cached_by_hash(db: &ReadDbState, content_hash: String) -> Result<i64, String> {
     db.with_conn(move |conn| {
         conn.query_row(
             "SELECT COUNT(*) AS cnt FROM attachments WHERE content_hash = ?1 AND cached_at IS NOT NULL",
@@ -315,7 +315,7 @@ pub async fn db_count_cached_by_hash(db: &DbState, content_hash: String) -> Resu
 }
 
 pub async fn db_get_inbox_threads_for_backfill(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     batch_size: i64,
     offset: i64,
@@ -346,7 +346,7 @@ pub async fn db_get_inbox_threads_for_backfill(
 }
 
 pub async fn db_update_scheduled_email_attachments(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     attachment_data: String,
 ) -> Result<(), String> {
@@ -371,7 +371,7 @@ pub async fn db_update_scheduled_email_attachments(
 }
 
 pub async fn db_query_raw_select(
-    db: &DbState,
+    db: &ReadDbState,
     sql: String,
     params: Vec<serde_json::Value>,
 ) -> Result<Vec<serde_json::Map<String, serde_json::Value>>, String> {

@@ -97,7 +97,7 @@ pub fn reconcile_velo_rename(app_data_dir: &Path) -> Result<(), String> {
 
 /// Apply the standard `PRAGMA` set the Service / UI use after opening a
 /// connection. Extracted so the Service boot sequence and the existing
-/// `DbState::init` / `ReadWriteDb::init` use the same canonical pragmas.
+/// `ReadDbState::init` / `ReadWriteDb::init` use the same canonical pragmas.
 pub fn apply_standard_pragmas(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
@@ -115,20 +115,20 @@ pub fn apply_standard_pragmas(conn: &Connection) -> Result<(), String> {
 /// operations are blocking I/O. All queries run via [`with_conn`] which
 /// dispatches to `spawn_blocking` so the tokio async runtime is never blocked.
 #[derive(Clone)]
-pub struct DbState {
+pub struct ReadDbState {
     conn: Arc<Mutex<Connection>>,
 }
 
-impl DbState {
+impl ReadDbState {
     /// Access the underlying connection Arc for synchronous use.
     pub fn conn(&self) -> Arc<Mutex<Connection>> {
         Arc::clone(&self.conn)
     }
 
-    /// Create a `DbState` from an existing connection Arc.
+    /// Create a `ReadDbState` from an existing connection Arc.
     ///
     /// Useful for bridging between the app crate's `Db` connection and core
-    /// CRUD functions that expect `&DbState`.
+    /// CRUD functions that expect `&ReadDbState`.
     pub fn from_arc(conn: Arc<Mutex<Connection>>) -> Self {
         Self { conn }
     }
@@ -180,8 +180,8 @@ impl DbState {
 
 #[derive(Clone)]
 pub struct ReadWriteDb {
-    read: DbState,
-    write: DbState,
+    read: ReadDbState,
+    write: ReadDbState,
 }
 
 impl ReadWriteDb {
@@ -202,8 +202,8 @@ impl ReadWriteDb {
         migrations::run_all(&write)?;
 
         Ok(Self {
-            read: DbState::from_arc(Arc::new(Mutex::new(read))),
-            write: DbState::from_arc(Arc::new(Mutex::new(write))),
+            read: ReadDbState::from_arc(Arc::new(Mutex::new(read))),
+            write: ReadDbState::from_arc(Arc::new(Mutex::new(write))),
         })
     }
 
@@ -217,16 +217,16 @@ impl ReadWriteDb {
     pub fn open_existing(app_data_dir: &Path) -> Result<Self, String> {
         let (read, write) = open_read_write_conns(app_data_dir)?;
         Ok(Self {
-            read: DbState::from_arc(Arc::new(Mutex::new(read))),
-            write: DbState::from_arc(Arc::new(Mutex::new(write))),
+            read: ReadDbState::from_arc(Arc::new(Mutex::new(read))),
+            write: ReadDbState::from_arc(Arc::new(Mutex::new(write))),
         })
     }
 
-    pub fn read(&self) -> DbState {
+    pub fn read(&self) -> ReadDbState {
         self.read.clone()
     }
 
-    pub fn write(&self) -> DbState {
+    pub fn write(&self) -> ReadDbState {
         self.write.clone()
     }
 }

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries_extra::{delete_seen_address_google_other, upsert_seen_address_google_other};
 use sync::state as sync_state;
 
@@ -23,7 +23,7 @@ const OTHER_CONTACTS_READ_MASK: &str = "names,emailAddresses,phoneNumbers,photos
 pub async fn sync_google_other_contacts(
     client: &GmailClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<SyncContactsResult, String> {
     let existing_token = sync_state::load_google_other_contacts_sync_token(db, account_id).await?;
 
@@ -51,7 +51,7 @@ pub async fn sync_google_other_contacts(
 async fn full_sync(
     client: &GmailClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<SyncContactsResult, String> {
     let mut all_persons = Vec::new();
     let mut page_token: Option<String> = None;
@@ -121,7 +121,7 @@ async fn full_sync(
 async fn incremental_sync(
     client: &GmailClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     sync_token: &str,
 ) -> Result<SyncContactsResult, String> {
     let mut upserts = Vec::new();

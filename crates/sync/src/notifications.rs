@@ -5,13 +5,13 @@ use rusqlite::Connection;
 use crate::bundling::AiBundlingCandidate;
 use crate::filters::FilterableMessage;
 use crate::types::NotificationCandidate;
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries::load_recent_rule_bundled_threads;
 
 /// Check settings and return threads that need AI bundling
 /// (inbox classification into Primary/Updates/Promotions/Social/Newsletters).
 pub async fn get_ai_bundling_candidates(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<Vec<AiBundlingCandidate>, String> {
     let account_id = account_id.to_string();
@@ -42,7 +42,7 @@ pub async fn get_ai_bundling_candidates(
 /// Returns an empty list when `is_delta` is false (initial sync) or
 /// when notifications are disabled in settings.
 pub async fn evaluate_notifications(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     messages: &[FilterableMessage],
     is_delta: bool,

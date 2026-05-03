@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use db::db::DbState;
+use db::db::ReadDbState;
 
 use super::client::GraphClient;
 
@@ -76,7 +76,7 @@ struct UploadStatusResponse {
 pub async fn create_upload_session(
     client: &GraphClient,
     filename: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<UploadSession, String> {
     log::debug!("[OneDrive] Creating upload session for '{filename}'");
     let encoded_path = encode_onedrive_path(filename);
@@ -209,7 +209,7 @@ pub async fn create_sharing_link(
     client: &GraphClient,
     item_id: &str,
     scope: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<String, String> {
     let path = format!("/me/drive/items/{item_id}/createLink");
 

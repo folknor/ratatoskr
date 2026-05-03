@@ -4,7 +4,7 @@ use base64::Engine as _;
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Serialize};
 
-use crate::db::DbState;
+use crate::db::ReadDbState;
 
 // Re-export the storage type from db.
 pub use crate::db::queries_extra::cloud_attachments::CloudAttachment;
@@ -283,7 +283,7 @@ struct SharesDriveItemFile {
 pub async fn enrich_onedrive_link(
     client: &GraphClient,
     cloud_url: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<CloudMetadata, String> {
     let encoded = encode_sharing_url(cloud_url);
     let path = format!("/shares/{encoded}/driveItem?$select=name,size,file");

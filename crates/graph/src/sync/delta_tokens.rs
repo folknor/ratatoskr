@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use db::db::DbState;
+use db::db::ReadDbState;
 
 use super::super::client::GraphClient;
 use super::super::types::{MESSAGE_SELECT, ODataCollection, REACTIONS_EXPAND};
@@ -17,7 +17,7 @@ use sync::state as sync_state;
 /// the initial fetch.
 pub(super) async fn bootstrap_delta_token(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     folder_id: &str,
 ) -> Result<String, String> {
     let enc_folder_id = urlencoding::encode(folder_id);
@@ -56,7 +56,7 @@ pub(super) async fn bootstrap_delta_token(
 /// Routes to shared mailbox storage when the client is scoped to one.
 pub(super) async fn save_delta_token(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
     delta_link: &str,
@@ -77,7 +77,7 @@ pub(super) async fn save_delta_token(
 /// Routes to shared mailbox storage when the client is scoped to one.
 pub(super) async fn load_delta_tokens(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
 ) -> Result<HashMap<String, String>, String> {
     match client.mailbox_id() {
@@ -95,7 +95,7 @@ pub(super) async fn load_delta_tokens(
 /// pick up new messages starting from the next cycle.
 pub(super) async fn bootstrap_delta_token_latest(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     folder_id: &str,
 ) -> Result<String, String> {
     let enc_folder_id = urlencoding::encode(folder_id);
@@ -118,7 +118,7 @@ pub(super) async fn bootstrap_delta_token_latest(
 /// Routes to shared mailbox storage when the client is scoped to one.
 pub(super) async fn delete_delta_token(
     client: &GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     folder_id: &str,
 ) -> Result<(), String> {

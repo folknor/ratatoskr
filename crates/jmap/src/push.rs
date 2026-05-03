@@ -15,7 +15,7 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, mpsc, watch};
 
-use db::db::DbState;
+use db::db::ReadDbState;
 
 use super::client::JmapClient;
 
@@ -122,7 +122,7 @@ pub fn create_push_channel() -> (mpsc::Sender<StateChange>, mpsc::Receiver<State
 pub async fn start_push(
     client: &JmapClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     change_tx: mpsc::Sender<StateChange>,
 ) -> Result<JmapPushManager, String> {
     let inner = client.inner();
@@ -215,7 +215,7 @@ async fn push_connection_loop(
     state: Arc<RwLock<PushState>>,
     mut shutdown_rx: watch::Receiver<bool>,
     change_tx: mpsc::Sender<StateChange>,
-    db: &DbState,
+    db: &ReadDbState,
 ) {
     let mut consecutive_failures: u32 = 0;
     let mut last_push_state = initial_push_state;
@@ -303,7 +303,7 @@ async fn connect_and_listen(
     state: &Arc<RwLock<PushState>>,
     shutdown_rx: &mut watch::Receiver<bool>,
     change_tx: &mpsc::Sender<StateChange>,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<Option<String>, String> {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::http::HeaderValue;
@@ -479,7 +479,7 @@ fn backoff_duration(consecutive_failures: u32) -> std::time::Duration {
 // DB persistence helpers
 // ---------------------------------------------------------------------------
 
-async fn load_push_state(db: &DbState, account_id: &str) -> Result<Option<String>, String> {
+async fn load_push_state(db: &ReadDbState, account_id: &str) -> Result<Option<String>, String> {
     let aid = account_id.to_string();
     db.with_conn(move |conn| {
         let mut stmt = conn
@@ -499,7 +499,7 @@ async fn load_push_state(db: &DbState, account_id: &str) -> Result<Option<String
     .await
 }
 
-async fn save_push_enabled(db: &DbState, account_id: &str, ws_url: &str) {
+async fn save_push_enabled(db: &ReadDbState, account_id: &str, ws_url: &str) {
     let aid = account_id.to_string();
     let url = ws_url.to_string();
     if let Err(e) = db
@@ -519,7 +519,7 @@ async fn save_push_enabled(db: &DbState, account_id: &str, ws_url: &str) {
     }
 }
 
-async fn save_push_disabled(db: &DbState, account_id: &str, failures: u32) {
+async fn save_push_disabled(db: &ReadDbState, account_id: &str, failures: u32) {
     let aid = account_id.to_string();
     if let Err(e) = db
         .with_conn(move |conn| {
@@ -536,7 +536,7 @@ async fn save_push_disabled(db: &DbState, account_id: &str, failures: u32) {
     }
 }
 
-async fn save_connected_at(db: &DbState, account_id: &str) {
+async fn save_connected_at(db: &ReadDbState, account_id: &str) {
     let aid = account_id.to_string();
     if let Err(e) = db
         .with_conn(move |conn| {
@@ -553,7 +553,7 @@ async fn save_connected_at(db: &DbState, account_id: &str) {
     }
 }
 
-async fn save_consecutive_failures(db: &DbState, account_id: &str, failures: u32) {
+async fn save_consecutive_failures(db: &ReadDbState, account_id: &str, failures: u32) {
     let aid = account_id.to_string();
     if let Err(e) = db
         .with_conn(move |conn| {
@@ -570,7 +570,7 @@ async fn save_consecutive_failures(db: &DbState, account_id: &str, failures: u32
     }
 }
 
-async fn save_last_push_state(db: &DbState, account_id: &str, push_state: &str) {
+async fn save_last_push_state(db: &ReadDbState, account_id: &str, push_state: &str) {
     let aid = account_id.to_string();
     let ps = push_state.to_string();
     if let Err(e) = db

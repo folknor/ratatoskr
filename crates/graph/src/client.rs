@@ -8,7 +8,7 @@ use tokio::sync::{Mutex, RwLock, Semaphore};
 use common::crypto;
 use common::http::{self, RetryConfig};
 use common::token::{self, TokenState};
-use db::db::DbState;
+use db::db::ReadDbState;
 
 use super::folder_mapper::FolderMap;
 
@@ -62,7 +62,7 @@ pub fn new_graph_state(encryption_key: [u8; 32]) -> GraphState {
 impl GraphClient {
     /// Create a Graph client by reading account credentials from the database.
     pub async fn from_account(
-        db: &DbState,
+        db: &ReadDbState,
         account_id: &str,
         encryption_key: [u8; 32],
     ) -> Result<Self, String> {
@@ -198,14 +198,14 @@ impl GraphClient {
     pub async fn get_json<T: DeserializeOwned>(
         &self,
         path: &str,
-        db: &DbState,
+        db: &ReadDbState,
     ) -> Result<T, String> {
         let url = format!("{GRAPH_API_BASE}{path}");
         self.request::<T, ()>(&url, "GET", None, db).await
     }
 
     /// Authenticated GET returning raw bytes (for attachment `/$value`).
-    pub async fn get_bytes(&self, path: &str, db: &DbState) -> Result<Vec<u8>, String> {
+    pub async fn get_bytes(&self, path: &str, db: &ReadDbState) -> Result<Vec<u8>, String> {
         let url = format!("{GRAPH_API_BASE}{path}");
         self.request_bytes(&url, db).await
     }
@@ -215,7 +215,7 @@ impl GraphClient {
         &self,
         path: &str,
         body: &B,
-        db: &DbState,
+        db: &ReadDbState,
     ) -> Result<T, String> {
         let url = format!("{GRAPH_API_BASE}{path}");
         self.request(&url, "POST", Some(body), db).await
@@ -226,7 +226,7 @@ impl GraphClient {
         &self,
         path: &str,
         body: &B,
-        db: &DbState,
+        db: &ReadDbState,
     ) -> Result<T, String> {
         let url = format!("{GRAPH_API_BETA}{path}");
         self.request(&url, "POST", Some(body), db).await
@@ -237,7 +237,7 @@ impl GraphClient {
         &self,
         path: &str,
         body: Option<&B>,
-        db: &DbState,
+        db: &ReadDbState,
     ) -> Result<(), String> {
         let url = format!("{GRAPH_API_BASE}{path}");
         let access_token = self.ensure_valid_token(db).await?;
@@ -266,7 +266,7 @@ impl GraphClient {
         &self,
         path: &str,
         body: &B,
-        db: &DbState,
+        db: &ReadDbState,
     ) -> Result<(), String> {
         let url = format!("{GRAPH_API_BASE}{path}");
         let access_token = self.ensure_valid_token(db).await?;
@@ -291,7 +291,7 @@ impl GraphClient {
     }
 
     /// Authenticated DELETE against the Graph API.
-    pub async fn delete(&self, path: &str, db: &DbState) -> Result<(), String> {
+    pub async fn delete(&self, path: &str, db: &ReadDbState) -> Result<(), String> {
         let url = format!("{GRAPH_API_BASE}{path}");
         let access_token = self.ensure_valid_token(db).await?;
         let _permit = self
@@ -362,7 +362,7 @@ impl GraphClient {
     pub async fn post_batch(
         &self,
         batch: &super::types::BatchRequest,
-        db: &DbState,
+        db: &ReadDbState,
     ) -> Result<super::types::BatchResponse, String> {
         self.post("/$batch", batch, db).await
     }
@@ -371,7 +371,7 @@ impl GraphClient {
     pub async fn get_absolute<T: DeserializeOwned>(
         &self,
         url: &str,
-        db: &DbState,
+        db: &ReadDbState,
     ) -> Result<T, String> {
         self.request::<T, ()>(url, "GET", None, db).await
     }
@@ -386,7 +386,7 @@ impl GraphClient {
         url: &str,
         method: &str,
         body: Option<&B>,
-        db: &DbState,
+        db: &ReadDbState,
     ) -> Result<T, String> {
         log::debug!("[Graph] {method} {url}");
         let access_token = self.ensure_valid_token(db).await?;
@@ -415,7 +415,7 @@ impl GraphClient {
     }
 
     /// Request returning raw bytes (for `/$value` endpoints).
-    async fn request_bytes(&self, url: &str, db: &DbState) -> Result<Vec<u8>, String> {
+    async fn request_bytes(&self, url: &str, db: &ReadDbState) -> Result<Vec<u8>, String> {
         let access_token = self.ensure_valid_token(db).await?;
         let _permit = self
             .inner
@@ -502,7 +502,7 @@ impl GraphClient {
     }
 
     /// Get a valid access token, refreshing if needed.
-    async fn ensure_valid_token(&self, db: &DbState) -> Result<String, String> {
+    async fn ensure_valid_token(&self, db: &ReadDbState) -> Result<String, String> {
         {
             let state = self.inner.token.read().await;
             if !state.needs_refresh() {
@@ -516,7 +516,7 @@ impl GraphClient {
     ///
     /// Sets the expiry to the past so the double-check inside `do_refresh`
     /// won't short-circuit with a stale (server-revoked) token.
-    async fn force_refresh(&self, db: &DbState) -> Result<String, String> {
+    async fn force_refresh(&self, db: &ReadDbState) -> Result<String, String> {
         {
             let mut state = self.inner.token.write().await;
             state.expires_at = 0;
@@ -525,7 +525,7 @@ impl GraphClient {
     }
 
     /// Perform the actual token refresh, coalesced via mutex.
-    async fn do_refresh(&self, db: &DbState) -> Result<String, String> {
+    async fn do_refresh(&self, db: &ReadDbState) -> Result<String, String> {
         let _guard = self.inner.refresh_lock.lock().await;
 
         // Double-check: another task might have already refreshed
@@ -614,7 +614,7 @@ fn read_account_tokens(
 
 /// Persist a refreshed access token (encrypted) to the database.
 async fn persist_refreshed_token(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     access_token: &str,
     expires_at: i64,

@@ -1,4 +1,4 @@
-use super::super::DbState;
+use super::super::ReadDbState;
 use super::super::types::DbAccount;
 use rusqlite::{Row, params};
 
@@ -46,14 +46,14 @@ fn row_to_account(row: &Row<'_>) -> rusqlite::Result<DbAccount> {
     })
 }
 
-pub async fn db_get_all_accounts(db: &DbState) -> Result<Vec<DbAccount>, String> {
+pub async fn db_get_all_accounts(db: &ReadDbState) -> Result<Vec<DbAccount>, String> {
     db.with_conn(move |conn| {
         get_all_accounts_sync(conn)
     })
     .await
 }
 
-pub async fn db_get_account(db: &DbState, id: String) -> Result<Option<DbAccount>, String> {
+pub async fn db_get_account(db: &ReadDbState, id: String) -> Result<Option<DbAccount>, String> {
     db.with_conn(move |conn| {
         get_account_sync(conn, &id)
     })
@@ -61,7 +61,7 @@ pub async fn db_get_account(db: &DbState, id: String) -> Result<Option<DbAccount
 }
 
 pub async fn db_get_account_by_email(
-    db: &DbState,
+    db: &ReadDbState,
     email: String,
 ) -> Result<Option<DbAccount>, String> {
     db.with_conn(move |conn| {
@@ -106,7 +106,7 @@ pub fn get_active_account_ids_sync(conn: &rusqlite::Connection) -> Result<Vec<St
         .map_err(|e| e.to_string())
 }
 
-pub async fn db_delete_account(db: &DbState, id: String) -> Result<(), String> {
+pub async fn db_delete_account(db: &ReadDbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM accounts WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;

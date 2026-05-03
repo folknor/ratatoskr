@@ -1,4 +1,4 @@
-use super::super::super::DbState;
+use super::super::super::ReadDbState;
 use super::super::super::types::{DbCalendar, DbCalendarAttendee, DbCalendarEvent, DbCalendarReminder};
 use crate::db::from_row::FromRow;
 use rusqlite::params;
@@ -32,7 +32,7 @@ const REMINDER_COLS: &str = "\
 
 #[allow(clippy::too_many_arguments)]
 pub async fn db_upsert_calendar(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     provider: String,
     remote_id: String,
@@ -64,7 +64,7 @@ pub async fn db_upsert_calendar(
 }
 
 pub async fn db_get_calendars_for_account(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<DbCalendar>, String> {
     db.with_conn(move |conn| {
@@ -83,7 +83,7 @@ pub async fn db_get_calendars_for_account(
 }
 
 pub async fn db_get_visible_calendars(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<DbCalendar>, String> {
     db.with_conn(move |conn| {
@@ -102,7 +102,7 @@ pub async fn db_get_visible_calendars(
 }
 
 pub async fn db_set_calendar_visibility(
-    db: &DbState,
+    db: &ReadDbState,
     calendar_id: String,
     visible: bool,
 ) -> Result<(), String> {
@@ -118,7 +118,7 @@ pub async fn db_set_calendar_visibility(
 }
 
 pub async fn db_update_calendar_sync_token(
-    db: &DbState,
+    db: &ReadDbState,
     calendar_id: String,
     sync_token: Option<String>,
     ctag: Option<String>,
@@ -135,7 +135,7 @@ pub async fn db_update_calendar_sync_token(
 }
 
 pub async fn db_delete_calendars_for_account(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
@@ -150,7 +150,7 @@ pub async fn db_delete_calendars_for_account(
 }
 
 pub async fn db_get_calendar_by_id(
-    db: &DbState,
+    db: &ReadDbState,
     calendar_id: String,
 ) -> Result<Option<DbCalendar>, String> {
     db.with_conn(move |conn| {
@@ -418,7 +418,7 @@ pub fn delete_event_by_remote_id_sync(
 }
 
 pub async fn db_upsert_calendar_event(
-    db: &DbState,
+    db: &ReadDbState,
     p: UpsertCalendarEventParams,
 ) -> Result<(), String> {
     log::info!(
@@ -482,7 +482,7 @@ pub async fn db_upsert_calendar_event(
 }
 
 pub async fn db_get_calendar_events_in_range(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     start_time: i64,
     end_time: i64,
@@ -508,7 +508,7 @@ pub async fn db_get_calendar_events_in_range(
 }
 
 pub async fn db_get_calendar_events_in_range_multi(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     calendar_ids: Vec<String>,
     start_time: i64,
@@ -549,7 +549,7 @@ pub async fn db_get_calendar_events_in_range_multi(
 }
 
 pub async fn db_delete_events_for_calendar(
-    db: &DbState,
+    db: &ReadDbState,
     calendar_id: String,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
@@ -577,7 +577,7 @@ pub async fn db_delete_events_for_calendar(
 }
 
 pub async fn db_get_event_by_remote_id(
-    db: &DbState,
+    db: &ReadDbState,
     calendar_id: String,
     remote_event_id: String,
 ) -> Result<Option<DbCalendarEvent>, String> {
@@ -597,7 +597,7 @@ pub async fn db_get_event_by_remote_id(
 }
 
 pub async fn db_delete_event_by_remote_id(
-    db: &DbState,
+    db: &ReadDbState,
     calendar_id: String,
     remote_event_id: String,
 ) -> Result<(), String> {
@@ -625,7 +625,7 @@ pub async fn db_delete_event_by_remote_id(
     .await
 }
 
-pub async fn db_delete_calendar_event(db: &DbState, event_id: String) -> Result<(), String> {
+pub async fn db_delete_calendar_event(db: &ReadDbState, event_id: String) -> Result<(), String> {
     log::info!("Deleting calendar event: id={event_id}");
     db.with_conn(move |conn| {
         // Cascade: delete attendees and reminders before the event.
@@ -655,7 +655,7 @@ pub async fn db_delete_calendar_event(db: &DbState, event_id: String) -> Result<
 // ── Attendee queries ───────────────────────────────────────
 
 pub async fn db_get_event_attendees(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     event_id: String,
 ) -> Result<Vec<DbCalendarAttendee>, String> {
@@ -676,7 +676,7 @@ pub async fn db_get_event_attendees(
 }
 
 pub async fn db_upsert_event_attendee(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     event_id: String,
     email: String,
@@ -699,7 +699,7 @@ pub async fn db_upsert_event_attendee(
 }
 
 pub async fn db_delete_attendees_for_event(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     event_id: String,
 ) -> Result<(), String> {
@@ -717,7 +717,7 @@ pub async fn db_delete_attendees_for_event(
 // ── Reminder queries ───────────────────────────────────────
 
 pub async fn db_get_event_reminders(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     event_id: String,
 ) -> Result<Vec<DbCalendarReminder>, String> {
@@ -738,7 +738,7 @@ pub async fn db_get_event_reminders(
 }
 
 pub async fn db_add_event_reminder(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     event_id: String,
     minutes_before: i64,
@@ -757,7 +757,7 @@ pub async fn db_add_event_reminder(
 }
 
 pub async fn db_delete_reminders_for_event(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     event_id: String,
 ) -> Result<(), String> {
@@ -970,7 +970,7 @@ pub fn delete_calendar_event_sync(
 
 // ── All-account calendar queries (for unified calendar) ────
 
-pub async fn db_get_all_visible_calendars(db: &DbState) -> Result<Vec<DbCalendar>, String> {
+pub async fn db_get_all_visible_calendars(db: &ReadDbState) -> Result<Vec<DbCalendar>, String> {
     db.with_conn(move |conn| {
         let mut stmt = conn
             .prepare(&format!(

@@ -6,7 +6,7 @@ use rusqlite::{Connection, params};
 /// Separate SQLite database for compressed email bodies.
 ///
 /// Bodies are stored as zlib-compressed BLOBs, keeping the metadata DB small.
-/// Same `Mutex<Connection>` + `spawn_blocking` pattern as `DbState`.
+/// Same `Mutex<Connection>` + `spawn_blocking` pattern as `ReadDbState`.
 #[derive(Clone)]
 pub struct BodyStoreState {
     conn: Arc<Mutex<Connection>>,

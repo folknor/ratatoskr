@@ -4,7 +4,7 @@ use rusqlite::OptionalExtension;
 
 use rtsk::caldav::client::{AuthMethod, CalDavClient};
 use rtsk::caldav::parse::parse_icalendar;
-use rtsk::db::DbState;
+use rtsk::db::ReadDbState;
 use rtsk::db::queries_extra::{clear_account_caldav_urls, set_account_caldav_discovered_urls};
 
 use super::types::{CalendarEventDto, CalendarInfoDto};
@@ -37,7 +37,7 @@ impl CaldavAccountConfig {
 
 pub async fn caldav_list_calendars_impl(
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
     encryption_key: &[u8; 32],
 ) -> Result<Vec<CalendarInfoDto>, String> {
     let config = load_caldav_account_config(db, encryption_key, account_id).await?;
@@ -78,7 +78,7 @@ pub async fn caldav_list_calendars_impl(
 }
 
 pub async fn caldav_create_event_impl(
-    db: &DbState,
+    db: &ReadDbState,
     encryption_key: &[u8; 32],
     account_id: &str,
     calendar_remote_id: &str,
@@ -97,7 +97,7 @@ pub async fn caldav_create_event_impl(
 }
 
 pub async fn caldav_update_event_impl(
-    db: &DbState,
+    db: &ReadDbState,
     encryption_key: &[u8; 32],
     account_id: &str,
     remote_event_id: &str,
@@ -203,7 +203,7 @@ fn synthesize_event_dto(
 }
 
 pub async fn caldav_delete_event_impl(
-    db: &DbState,
+    db: &ReadDbState,
     encryption_key: &[u8; 32],
     account_id: &str,
     remote_event_id: &str,
@@ -215,7 +215,7 @@ pub async fn caldav_delete_event_impl(
 }
 
 pub async fn load_caldav_account_config(
-    db: &DbState,
+    db: &ReadDbState,
     encryption_key: &[u8; 32],
     account_id: &str,
 ) -> Result<CaldavAccountConfig, String> {
@@ -317,7 +317,7 @@ pub async fn build_client_from_config(
 /// hosting provider that kept the same credentials but changed the DAV
 /// root). Best-effort: a write failure is logged and swallowed so the
 /// caller can still attempt rediscovery in-memory.
-pub async fn clear_persisted_caldav_urls(db: &DbState, account_id: &str) {
+pub async fn clear_persisted_caldav_urls(db: &ReadDbState, account_id: &str) {
     let account_id = account_id.to_string();
     let result = db
         .with_conn(move |conn| clear_account_caldav_urls(conn, &account_id))
@@ -335,7 +335,7 @@ pub async fn clear_persisted_caldav_urls(db: &DbState, account_id: &str) {
 /// discovery already succeeded and the operation that triggered the build
 /// can proceed regardless.
 pub async fn persist_discovery_results(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     principal_url: Option<&str>,
     home_url: Option<&str>,

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use db::db::DbState;
+use db::db::ReadDbState;
 use rusqlite::Connection;
 
 /// Synchronous version: check which thread IDs have pending local operations.
@@ -29,7 +29,7 @@ pub fn get_blocked_thread_ids(
 
 /// Async version: check which thread IDs have pending local operations.
 pub async fn blocked_thread_ids(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     thread_ids: Vec<String>,
 ) -> Result<HashSet<String>, String> {

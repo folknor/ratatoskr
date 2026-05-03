@@ -1,4 +1,4 @@
-use super::DbState;
+use super::ReadDbState;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
@@ -66,7 +66,7 @@ fn backoff_schedule(operation_type: &str) -> &'static [i64] {
 /// replaces the old params rather than being dropped as a duplicate).
 #[allow(clippy::too_many_arguments)]
 pub async fn db_pending_ops_enqueue(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     account_id: String,
     operation_type: String,
@@ -99,7 +99,7 @@ pub async fn db_pending_ops_enqueue(
 }
 
 pub async fn db_pending_ops_get(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: Option<String>,
     limit: Option<i64>,
 ) -> Result<Vec<PendingOperation>, String> {
@@ -145,7 +145,7 @@ pub async fn db_pending_ops_get(
 }
 
 pub async fn db_pending_ops_update_status(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     status: String,
     error_message: Option<String>,
@@ -161,7 +161,7 @@ pub async fn db_pending_ops_update_status(
     .await
 }
 
-pub async fn db_pending_ops_delete(db: &DbState, id: String) -> Result<(), String> {
+pub async fn db_pending_ops_delete(db: &ReadDbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM pending_operations WHERE id = ?1", params![id])
             .map_err(|e| format!("delete op: {e}"))?;
@@ -175,7 +175,7 @@ pub async fn db_pending_ops_delete(db: &DbState, id: String) -> Result<(), Strin
 /// Catches both 'pending' and 'executing' status - but cannot stop an
 /// already in-flight provider call.
 pub async fn db_pending_ops_cancel_for_resource(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     resource_id: String,
     operation_type: String,
@@ -193,7 +193,7 @@ pub async fn db_pending_ops_cancel_for_resource(
     .await
 }
 
-pub async fn db_pending_ops_increment_retry(db: &DbState, id: String) -> Result<(), String> {
+pub async fn db_pending_ops_increment_retry(db: &ReadDbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         let (retry_count, max_retries, operation_type): (i64, i64, String) = conn
             .query_row(
@@ -245,7 +245,7 @@ fn now_epoch() -> Result<i64, String> {
     .map_err(|_| "current time exceeds i64 range".to_string())
 }
 
-pub async fn db_pending_ops_count(db: &DbState, account_id: Option<String>) -> Result<i64, String> {
+pub async fn db_pending_ops_count(db: &ReadDbState, account_id: Option<String>) -> Result<i64, String> {
     db
         .with_conn(move |conn| {
             if let Some(ref aid) = account_id {
@@ -268,7 +268,7 @@ pub async fn db_pending_ops_count(db: &DbState, account_id: Option<String>) -> R
 }
 
 pub async fn db_pending_ops_failed_count(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: Option<String>,
 ) -> Result<i64, String> {
     db
@@ -293,7 +293,7 @@ pub async fn db_pending_ops_failed_count(
 }
 
 pub async fn db_pending_ops_for_resource(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     resource_id: String,
 ) -> Result<Vec<PendingOperation>, String> {
@@ -314,7 +314,7 @@ pub async fn db_pending_ops_for_resource(
 }
 
 pub async fn db_pending_ops_compact(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: Option<String>,
 ) -> Result<i64, String> {
     db.with_conn(move |conn| compact_queue(conn, account_id.as_deref()))
@@ -322,7 +322,7 @@ pub async fn db_pending_ops_compact(
 }
 
 pub async fn db_pending_ops_clear_failed(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: Option<String>,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
@@ -343,7 +343,7 @@ pub async fn db_pending_ops_clear_failed(
 
 /// Reset any operations stuck in 'executing' back to 'pending'.
 /// Called at startup to recover from crash/forced quit.
-pub async fn db_pending_ops_recover_executing(db: &DbState) -> Result<i64, String> {
+pub async fn db_pending_ops_recover_executing(db: &ReadDbState) -> Result<i64, String> {
     db.with_conn(move |conn| {
         let count = conn
             .execute(
@@ -398,7 +398,7 @@ pub fn db_pending_ops_recover_on_boot_sync(
 }
 
 pub async fn db_pending_ops_retry_failed(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: Option<String>,
 ) -> Result<(), String> {
     db

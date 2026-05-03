@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use log::{info, warn};
 
-use crate::db::DbState;
+use crate::db::ReadDbState;
 use store::attachment_cache::hash_bytes;
 
 // ---------------------------------------------------------------------------
@@ -153,7 +153,7 @@ pub async fn fetch_google_contact_photo(
 ///
 /// Returns the absolute file path of the cached photo.
 pub async fn cache_photo(
-    db: &DbState,
+    db: &ReadDbState,
     cache_dir: &Path,
     email: &str,
     account_id: &str,
@@ -209,7 +209,7 @@ pub async fn cache_photo(
 ///
 /// Returns `None` if no cache entry exists.
 pub async fn get_cached_photo_path(
-    db: &DbState,
+    db: &ReadDbState,
     email: &str,
     account_id: &str,
 ) -> Result<Option<String>, String> {
@@ -230,7 +230,7 @@ pub async fn get_cached_photo_path(
 ///
 /// Returns the number of evicted entries.
 pub async fn evict_photos_to_size(
-    db: &DbState,
+    db: &ReadDbState,
     cache_dir: &Path,
     max_bytes: u64,
 ) -> Result<usize, String> {
@@ -298,7 +298,7 @@ pub async fn evict_photos_to_size(
 /// Fetches photos for contacts that either have no cached photo or have a
 /// stale cache entry (etag mismatch). Returns the count of photos fetched.
 pub async fn sync_contact_photos(
-    db: &DbState,
+    db: &ReadDbState,
     cache_dir: &Path,
     http: &reqwest::Client,
     access_token: &str,
@@ -322,7 +322,7 @@ pub async fn sync_contact_photos(
 
 /// Sync photos for Graph (Exchange) contacts.
 async fn sync_graph_photos(
-    db: &DbState,
+    db: &ReadDbState,
     cache_dir: &Path,
     http: &reqwest::Client,
     access_token: &str,
@@ -373,7 +373,7 @@ async fn sync_graph_photos(
 
 /// Sync photos for Google contacts.
 async fn sync_google_photos(
-    db: &DbState,
+    db: &ReadDbState,
     cache_dir: &Path,
     http: &reqwest::Client,
     account_id: &str,

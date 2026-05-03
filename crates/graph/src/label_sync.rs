@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use super::client::GraphClient;
-use db::db::DbState;
+use db::db::ReadDbState;
 use db::db::queries_extra::{LabelWriteRow, upsert_labels};
 use label_colors::preset_colors;
 
@@ -27,7 +27,7 @@ struct CategoryListResponse {
 pub async fn graph_label_sync(
     client: &GraphClient,
     account_id: &str,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<usize, String> {
     let response: CategoryListResponse =
         client.get_json("/me/outlook/masterCategories", db).await?;

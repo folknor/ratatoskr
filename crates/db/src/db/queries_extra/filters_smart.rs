@@ -1,11 +1,11 @@
-use super::super::DbState;
+use super::super::ReadDbState;
 use super::super::types::{DbFilterRule, DbSmartFolder, DbSmartLabelRule, SortOrderItem};
 use super::dynamic_update;
 use crate::db::from_row::FromRow;
 use rusqlite::params;
 
 pub async fn db_get_filters_for_account(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<DbFilterRule>, String> {
     db.with_conn(move |conn| {
@@ -23,7 +23,7 @@ pub async fn db_get_filters_for_account(
 }
 
 pub async fn db_insert_filter(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     account_id: String,
     name: String,
@@ -51,7 +51,7 @@ pub async fn db_insert_filter(
 }
 
 pub async fn db_update_filter(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     name: Option<String>,
     criteria_json: Option<String>,
@@ -77,7 +77,7 @@ pub async fn db_update_filter(
     .await
 }
 
-pub async fn db_delete_filter(db: &DbState, id: String) -> Result<(), String> {
+pub async fn db_delete_filter(db: &ReadDbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM filter_rules WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
@@ -87,7 +87,7 @@ pub async fn db_delete_filter(db: &DbState, id: String) -> Result<(), String> {
 }
 
 pub async fn db_get_smart_folders(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: Option<String>,
 ) -> Result<Vec<DbSmartFolder>, String> {
     db.with_conn(move |conn| {
@@ -119,7 +119,7 @@ pub async fn db_get_smart_folders(
 }
 
 pub async fn db_get_smart_folder_by_id(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
 ) -> Result<Option<DbSmartFolder>, String> {
     db.with_conn(move |conn| {
@@ -139,7 +139,7 @@ pub async fn db_get_smart_folder_by_id(
 }
 
 pub async fn db_insert_smart_folder(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     name: String,
     query: String,
@@ -167,7 +167,7 @@ pub async fn db_insert_smart_folder(
 }
 
 pub async fn db_update_smart_folder(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     name: Option<String>,
     query: Option<String>,
@@ -193,7 +193,7 @@ pub async fn db_update_smart_folder(
     .await
 }
 
-pub async fn db_delete_smart_folder(db: &DbState, id: String) -> Result<(), String> {
+pub async fn db_delete_smart_folder(db: &ReadDbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM smart_folders WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
@@ -203,7 +203,7 @@ pub async fn db_delete_smart_folder(db: &DbState, id: String) -> Result<(), Stri
 }
 
 pub async fn db_update_smart_folder_sort_order(
-    db: &DbState,
+    db: &ReadDbState,
     orders: Vec<SortOrderItem>,
 ) -> Result<(), String> {
     db.with_conn(move |conn| {
@@ -220,7 +220,7 @@ pub async fn db_update_smart_folder_sort_order(
 }
 
 pub async fn db_get_smart_label_rules_for_account(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Vec<DbSmartLabelRule>, String> {
     db.with_conn(move |conn| {
@@ -239,7 +239,7 @@ pub async fn db_get_smart_label_rules_for_account(
 }
 
 pub async fn db_insert_smart_label_rule(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     account_id: String,
     label_id: String,
@@ -267,7 +267,7 @@ pub async fn db_insert_smart_label_rule(
 }
 
 pub async fn db_update_smart_label_rule(
-    db: &DbState,
+    db: &ReadDbState,
     id: String,
     label_id: Option<String>,
     ai_description: Option<String>,
@@ -293,7 +293,7 @@ pub async fn db_update_smart_label_rule(
     .await
 }
 
-pub async fn db_delete_smart_label_rule(db: &DbState, id: String) -> Result<(), String> {
+pub async fn db_delete_smart_label_rule(db: &ReadDbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM smart_label_rules WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;

@@ -4,14 +4,14 @@
 //! because the calendar provider write APIs use typed clients (`GmailClient`,
 //! `GraphClient`, `JmapClient`) that are not on the `ProviderOps` trait.
 //! The `calendar` crate already depends on `core` (for `ActionContext`,
-//! `ActionOutcome`, `DbState`) and has access to all provider write functions.
+//! `ActionOutcome`, `ReadDbState`) and has access to all provider write functions.
 //! Adding `calendar` as a dependency of `core` would create a circular dep.
 
 use gmail::client::GmailClient;
 use graph::client::GraphClient;
 use jmap::client::JmapClient;
 use rtsk::actions::{ActionContext, ActionError, ActionOutcome, MutationLog};
-use rtsk::db::DbState;
+use rtsk::db::ReadDbState;
 use rtsk::db::queries_extra::{set_calendar_event_etag, set_calendar_event_remote_id_and_etag};
 
 use super::caldav::{caldav_create_event_impl, caldav_delete_event_impl, caldav_update_event_impl};
@@ -56,7 +56,7 @@ enum CalendarProvider {
 /// Same routing logic as `calendar_sync_account_impl`: checks
 /// `calendar_provider` column first, falls back to `provider`.
 async fn create_calendar_provider(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: &str,
     encryption_key: [u8; 32],
 ) -> Result<CalendarProvider, ActionError> {

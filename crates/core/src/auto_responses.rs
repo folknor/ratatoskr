@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::db::DbState;
+use crate::db::ReadDbState;
 
 // ── Unified model ──────────────────────────────────────
 
@@ -65,7 +65,7 @@ impl ExternalAudience {
 
 /// Get the cached auto-response config for an account.
 pub async fn db_get_auto_response(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
 ) -> Result<Option<AutoResponseConfig>, String> {
     db.with_conn(move |conn| {
@@ -89,7 +89,7 @@ pub async fn db_get_auto_response(
 
 /// Cache an auto-response config for an account (upsert).
 pub async fn db_upsert_auto_response(
-    db: &DbState,
+    db: &ReadDbState,
     account_id: String,
     config: AutoResponseConfig,
 ) -> Result<(), String> {
@@ -143,7 +143,7 @@ fn normalize_dotnet_datetime(s: &str) -> String {
 /// `GET /me/mailboxSettings/automaticRepliesSetting`
 pub async fn fetch_graph_auto_response(
     client: &graph::client::GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<AutoResponseConfig, String> {
     let resp: serde_json::Value = client
         .get_json("/me/mailboxSettings/automaticRepliesSetting", db)
@@ -189,7 +189,7 @@ pub async fn fetch_graph_auto_response(
 /// `PATCH /me/mailboxSettings`
 pub async fn push_graph_auto_response(
     client: &graph::client::GraphClient,
-    db: &DbState,
+    db: &ReadDbState,
     config: &AutoResponseConfig,
 ) -> Result<(), String> {
     let status = if !config.enabled {
@@ -240,7 +240,7 @@ pub async fn push_graph_auto_response(
 /// `GET /users/me/settings/vacation`
 pub async fn fetch_gmail_auto_response(
     client: &gmail::client::GmailClient,
-    db: &DbState,
+    db: &ReadDbState,
 ) -> Result<AutoResponseConfig, String> {
     let resp: serde_json::Value = client
         .get("/settings/vacation", db)
@@ -303,7 +303,7 @@ pub async fn fetch_gmail_auto_response(
 /// `PUT /users/me/settings/vacation`
 pub async fn push_gmail_auto_response(
     client: &gmail::client::GmailClient,
-    db: &DbState,
+    db: &ReadDbState,
     config: &AutoResponseConfig,
 ) -> Result<(), String> {
     let mut body = serde_json::json!({
