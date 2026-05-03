@@ -1,6 +1,6 @@
 use crate::boot;
 use crate::handlers;
-use crate::lifecycle::ServiceLifecycle;
+use crate::lifecycle::{ServiceLifecycle, ShutdownCause};
 use futures_util::FutureExt;
 use serde_json::Value;
 use service_api::{
@@ -30,8 +30,16 @@ where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    run_service_with_io_and_lifecycle(reader, writer, ServiceLifecycle::new(None), app_data_dir)
-        .await
+    // Mirror production by passing the same app_data_dir into the lifecycle
+    // (`ServiceLifecycle::new(Some(_))`). Previously this construction used
+    // `None`, which made `clear_sentinel` / `drain` no-ops and meant the
+    // in-process integration tests could not exercise the sentinel write/
+    // clear path even though the boot sequence ran against the same dir.
+    // Phase 3+ recovery tests need the in-process harness to drive the
+    // sentinel-absent recovery trigger; aligning the lifecycle wiring here
+    // unblocks those without a separate test entry point.
+    let lifecycle = ServiceLifecycle::new(Some(app_data_dir.clone()));
+    run_service_with_io_and_lifecycle(reader, writer, lifecycle, app_data_dir).await
 }
 
 pub(crate) async fn run_service_with_io_and_lifecycle<R, W>(
@@ -207,7 +215,22 @@ where
     boot_handle.abort();
     let _ = boot_handle.await;
 
-    let flushed_ok = panic_safe_drain(&lifecycle).await;
+    // Determine the shutdown cause. Order matters: BootFailure dominates
+    // (a boot failure that races a Shutdown request still wins because the
+    // Service is exiting non-zero); otherwise a pending Shutdown id means
+    // the UI asked for a graceful drain; otherwise the loop exited via
+    // SIGTERM-handler / stdin-EOF / parent-death, which all collapse into
+    // `Unrequested`. Only `GracefulRequest` writes the `clean_shutdown`
+    // sentinel; the others leave it absent so Phase 3+ recovery fires.
+    let cause = if boot_exit_code.is_some() {
+        ShutdownCause::BootFailure
+    } else if pending_shutdown_id.is_some() {
+        ShutdownCause::GracefulRequest
+    } else {
+        ShutdownCause::Unrequested
+    };
+
+    let flushed_ok = panic_safe_drain(&lifecycle, cause).await;
     if !flushed_ok {
         log::warn!("shutdown drain completed with errors");
     }
@@ -235,7 +258,6 @@ where
             let result = serde_json::to_value(ShutdownResponse { flushed_ok })
                 .map_err(|error| ServiceError::Internal(error.to_string()));
             send_handler_response(&out_tx, id, result).await;
-            lifecycle.request_shutdown();
         }
     }
 
@@ -329,8 +351,8 @@ async fn drain_in_flight(handlers: &mut JoinSet<()>) {
     }
 }
 
-async fn panic_safe_drain(lifecycle: &ServiceLifecycle) -> bool {
-    match AssertUnwindSafe(lifecycle.drain()).catch_unwind().await {
+async fn panic_safe_drain(lifecycle: &ServiceLifecycle, cause: ShutdownCause) -> bool {
+    match AssertUnwindSafe(lifecycle.drain(cause)).catch_unwind().await {
         Ok(value) => value,
         Err(panic) => {
             log::error!("shutdown drain panicked: {}", panic_message(panic.as_ref()));

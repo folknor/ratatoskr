@@ -173,6 +173,10 @@ pub(crate) fn terminal_failure_user_message(reason: &BootFailureReason) -> Strin
             }
             BootExitCode::MigrationFailure => "Database migration failed.".to_string(),
             BootExitCode::HandshakeFailure => "Service handshake failed.".to_string(),
+            BootExitCode::LockIoFailure => {
+                "Could not acquire the Ratatoskr instance lock (check disk space and \
+                 directory permissions).".to_string()
+            }
         },
         BootFailureReason::Classified(BootClassification::UnexpectedExit { code }) => {
             match code {
@@ -362,12 +366,20 @@ impl ServiceClient {
         let notifications: Arc<NotificationQueue> =
             Arc::new(NotificationQueue::new(NOTIFICATION_QUEUE_CAP));
 
+        // current_generation is initialized to the same value the first
+        // reader_task will capture (`generation = 1` below). Without this
+        // alignment, the window between `Arc::new(...)` and
+        // `install_running_state(spawned, 1)` would have the reader see
+        // a live generation of 0 while its captured generation is 1, and
+        // `reader_should_enqueue` would drop legitimate first-boot
+        // `boot.progress` notifications as stale. install_running_state's
+        // store(1) below is now idempotent rather than load-bearing.
         let client = Arc::new(Self {
             state: Mutex::new(None),
             pending: Arc::clone(&pending),
             next_id: Arc::clone(&next_id),
             notifications: Arc::clone(&notifications),
-            current_generation: AtomicU32::new(0),
+            current_generation: AtomicU32::new(1),
             is_shutting_down: AtomicBool::new(false),
             respawn_config,
             respawn_attempts: Mutex::new(VecDeque::new()),
@@ -821,6 +833,32 @@ impl ServiceClient {
             return;
         }
 
+        // A clean exit (code 0) with `is_shutting_down` already false means
+        // the Service exited of its own accord without the UI requesting
+        // it - a contract violation per
+        // `BootClassification::from_exit_code`'s doc-comment ("Service that
+        // exited 0 without going through `client.shutdown()` is broken").
+        // Emit Terminal directly rather than letting code 0 fall through
+        // the deterministic-boot-failure check below (`from_i32(0)` is
+        // None so the path would proceed to crashloop accounting + a
+        // respawn that would either hit the same self-exit again or
+        // succeed-then-self-exit forever). The is_shutting_down branch at
+        // :811 already short-circuits the legitimate Shutdown-ack races.
+        if let Some(status) = exit_status
+            && status.code() == Some(0)
+        {
+            log::error!(
+                "service exited cleanly (code 0) without a Shutdown request; emitting Terminal",
+            );
+            let _ = respawn
+                .spawn_event_tx
+                .send(SpawnEvent::Terminal(ClientError::BootFailure {
+                    classification: BootClassification::UnexpectedExit { code: Some(0) },
+                }))
+                .await;
+            return;
+        }
+
         // If the dying Service exited with a deterministic boot-failure
         // code, respawning would hit the same failure. The
         // single-instance-lock case (AnotherInstanceRunning) is interesting:
@@ -927,6 +965,26 @@ impl ServiceClient {
         }
         self.install_running_state(spawned, new_gen);
 
+        // Run the post-install handshake; on failure tear down the freshly
+        // installed RunningState before propagating. Without this teardown
+        // a Terminal classification leaves the new Service running unmanaged
+        // (e.g. VersionMismatch: a fully healthy Service stays alive against
+        // an unbumped UI; SchemaVersionChanged: the Service holds a DB whose
+        // schema we just declared incompatible) until the App drops the Arc.
+        match self.handshake_post_install(respawn, new_gen).await {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                self.tear_down_installed_state(&error).await;
+                Err(error)
+            }
+        }
+    }
+
+    async fn handshake_post_install(
+        self: &Arc<Self>,
+        respawn: &RespawnConfig,
+        new_gen: u32,
+    ) -> Result<(), ClientError> {
         let ping: HealthPingResponse = self.request(RequestParams::HealthPing).await?;
         if ping.version != PROTOCOL_VERSION {
             return Err(ClientError::VersionMismatch {
@@ -1002,6 +1060,42 @@ impl ServiceClient {
             .send(SpawnEvent::BootReady(response))
             .await;
         Ok(())
+    }
+
+    /// Tear down a `RunningState` that was just installed but failed the
+    /// post-install handshake. Mirrors the early-bail teardown at the top
+    /// of `respawn()` but operates on installed state rather than a fresh
+    /// `SpawnedSubprocess`. Used to keep `Terminal` from leaving an
+    /// unmanaged child process alive across the iced unwind window.
+    async fn tear_down_installed_state(&self, reason: &ClientError) {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(state) = state {
+            let RunningState {
+                mut child,
+                stdin_tx,
+                reader_handle,
+                writer_handle,
+                heartbeat_handle,
+                ..
+            } = state;
+            log::warn!(
+                "tearing down respawned Service after post-install failure: {reason}",
+            );
+            reader_handle.abort();
+            writer_handle.abort();
+            heartbeat_handle.abort();
+            drop(stdin_tx);
+            if let Err(error) = child.start_kill() {
+                log::warn!(
+                    "start_kill on post-install-failed child failed: {error}",
+                );
+            }
+            let _ = tokio::time::timeout(Duration::from_millis(200), child.wait()).await;
+        }
     }
 }
 
@@ -1318,6 +1412,18 @@ async fn run_spawn_flow(
     }
 }
 
+/// Hard limit on consecutive `parse_service_message` failures. A Service
+/// emitting persistent malformed JSON (memory corruption, a transitive C-FFI
+/// dep that prints into the IPC pipe past the stdio defense, future protocol
+/// skew that the wire codec doesn't recognise) is genuinely broken; without
+/// a cap, the reader_task warns forever and never triggers the crash handler.
+/// `FrameError` already triggers respawn at the framing layer; this caps the
+/// JSON-decode-error path at a comparable threshold.
+///
+/// Counter resets on every successful parse so a single malformed line in a
+/// healthy stream doesn't accumulate indefinitely.
+const MAX_CONSECUTIVE_PARSE_ERRORS: u32 = 10;
+
 async fn reader_task<R>(
     stdout: R,
     pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>>,
@@ -1328,52 +1434,71 @@ async fn reader_task<R>(
     R: tokio::io::AsyncRead + Unpin,
 {
     let mut lines = BoundedLineReader::new(stdout, service_api::MAX_FRAME_BYTES);
+    let mut consecutive_parse_errors: u32 = 0;
     loop {
         match lines.next_line().await {
             Ok(Some(line)) => match parse_service_message(&line) {
-                Ok(ParsedServiceMessage::Response {
-                    id: Some(id),
-                    response,
-                }) => {
-                    dispatch_response(&pending, id, response);
-                }
-                Ok(ParsedServiceMessage::Response { id: None, response }) => {
-                    // An uncorrelated response means the Service answered
-                    // a request whose id was null (parse error before the
-                    // dispatch could correlate). Log only the discriminant
-                    // and, for errors, the JSON-RPC code/message - never
-                    // the success payload, which can carry user content
-                    // (message bodies, search queries, etc.) once Phase 2+
-                    // methods land.
-                    match response {
-                        ServiceResponse::Success(_) => {
-                            log::warn!(
-                                "service returned uncorrelated success (payload redacted)",
-                            );
+                Ok(parsed) => {
+                    consecutive_parse_errors = 0;
+                    match parsed {
+                        ParsedServiceMessage::Response {
+                            id: Some(id),
+                            response,
+                        } => {
+                            dispatch_response(&pending, id, response);
                         }
-                        ServiceResponse::Error(error) => {
-                            log::warn!(
-                                "service returned uncorrelated error code={} message={}",
-                                error.code,
-                                error.message,
-                            );
+                        ParsedServiceMessage::Response { id: None, response } => {
+                            // An uncorrelated response means the Service
+                            // answered a request whose id was null (parse
+                            // error before the dispatch could correlate).
+                            // Log only the discriminant and, for errors,
+                            // the JSON-RPC code/message - never the
+                            // success payload, which can carry user
+                            // content (message bodies, search queries,
+                            // etc.) once Phase 2+ methods land.
+                            match response {
+                                ServiceResponse::Success(_) => {
+                                    log::warn!(
+                                        "service returned uncorrelated success (payload redacted)",
+                                    );
+                                }
+                                ServiceResponse::Error(error) => {
+                                    log::warn!(
+                                        "service returned uncorrelated error code={} message={}",
+                                        error.code,
+                                        error.message,
+                                    );
+                                }
+                            }
+                        }
+                        ParsedServiceMessage::Notification(notification) => {
+                            let live = weak_client.upgrade().map(|c| c.current_generation());
+                            if !reader_should_enqueue(generation, live) {
+                                log::debug!(
+                                    "reader_task(gen={generation}): dropping stale notification \
+                                     (current_generation now {live:?})",
+                                );
+                                continue;
+                            }
+                            let tagged = tag_notification_with_generation(notification, generation);
+                            notifications.enqueue(tagged).await;
                         }
                     }
-                }
-                Ok(ParsedServiceMessage::Notification(notification)) => {
-                    let live = weak_client.upgrade().map(|c| c.current_generation());
-                    if !reader_should_enqueue(generation, live) {
-                        log::debug!(
-                            "reader_task(gen={generation}): dropping stale notification \
-                             (current_generation now {live:?})",
-                        );
-                        continue;
-                    }
-                    let tagged = tag_notification_with_generation(notification, generation);
-                    notifications.enqueue(tagged).await;
                 }
                 Err(error) => {
-                    log::warn!("failed to parse service message: {error}");
+                    consecutive_parse_errors = consecutive_parse_errors.saturating_add(1);
+                    log::warn!(
+                        "failed to parse service message ({consecutive_parse_errors} consecutive): {error}",
+                    );
+                    if consecutive_parse_errors >= MAX_CONSECUTIVE_PARSE_ERRORS {
+                        log::error!(
+                            "reader_task(gen={generation}): {MAX_CONSECUTIVE_PARSE_ERRORS} \
+                             consecutive parse errors; treating as Service crash",
+                        );
+                        fail_pending(&pending);
+                        trigger_crash_handler(&weak_client, generation);
+                        return;
+                    }
                 }
             },
             Ok(None) => {
@@ -1434,34 +1559,22 @@ pub(crate) fn reader_should_enqueue(captured: u32, live: Option<u32>) -> bool {
 /// side (item 15) can drop notifications from a dying-but-still-flushing
 /// reader.
 ///
-/// **Phase 2+ contract**: every state-changing notification variant
-/// added to `service_api::Notification` MUST gain a `service_generation:
-/// u32` field on its payload AND an arm here that overwrites it with the
-/// reader's captured generation. Pair with the matching arm in
-/// `Notification::service_generation()` (in `crates/service-api/src/
-/// notification.rs`) which exposes the field for the dispatch-side
-/// guard. The compiler enforces exhaustive match in this function, so
-/// adding a new variant without an arm is a compile error; the danger
-/// is a contributor adding the variant + an arm here that returns the
-/// payload unchanged (no generation tagging), which would silently
-/// reintroduce the cross-respawn race.
-///
-/// Side-effecting Phase 2 candidates that MUST be tagged:
+/// **Phase 2+ contract**: per-variant tag/get logic now lives inside
+/// `Notification::set_service_generation` / `service_generation` in
+/// `crates/service-api/src/notification.rs`, where the get/set pair is
+/// adjacent and the payload struct must implement `WithGeneration` to
+/// participate. Side-effecting Phase 2 candidates that MUST be tagged:
 /// - `action.completed` (action service)
 /// - `push.event` (provider push delivery)
 /// - `OperationOutcome` (any future generic outcome notification)
 ///
 /// Untagged variants are reserved for synthetic / test-only payloads.
 fn tag_notification_with_generation(
-    notification: Notification,
+    mut notification: Notification,
     generation: u32,
 ) -> Notification {
-    match notification {
-        Notification::BootProgress(mut progress) => {
-            progress.service_generation = generation;
-            Notification::BootProgress(progress)
-        }
-    }
+    notification.set_service_generation(generation);
+    notification
 }
 
 /// Dispatch-side guard for stale notifications. The reader task tags every
@@ -1605,21 +1718,33 @@ async fn request_value_raw(
     let (tx, rx) = oneshot::channel();
     pending.insert(id, tx);
     let mut guard = PendingGuard::new(pending, id);
-    if stdin_tx.send(bytes).await.is_err() {
-        return Err(ClientError::ServiceCrashed);
-    }
+
+    // Bound BOTH `stdin_tx.send` and the response `rx` by the per-method
+    // timeout so a wedged Service whose writer mpsc has filled cannot park
+    // `send` indefinitely. Heartbeat is the load-bearing case: previously
+    // the timeout only wrapped `rx`, so a full STDIN_QUEUE_CAP would leave
+    // the heartbeat parked on send and silently disable the "Service
+    // genuinely dead" detector. Sharing the budget keeps the common path
+    // (send completes in microseconds) unchanged.
+    let body = async {
+        stdin_tx
+            .send(bytes)
+            .await
+            .map_err(|_| ClientError::ServiceCrashed)?;
+        match rx.await {
+            Ok(response) => response,
+            Err(_) => Err(ClientError::ServiceCrashed),
+        }
+    };
     let response = match params.timeout() {
-        RequestTimeoutKind::Finite(timeout) => match tokio::time::timeout(timeout, rx).await {
+        RequestTimeoutKind::Finite(timeout) => match tokio::time::timeout(timeout, body).await {
             Ok(response) => response,
             Err(_) => return Err(ClientError::Timeout),
         },
-        RequestTimeoutKind::Infinite => rx.await,
+        RequestTimeoutKind::Infinite => body.await,
     };
     guard.disarm();
-    match response {
-        Ok(result) => result,
-        Err(_) => Err(ClientError::ServiceCrashed),
-    }
+    response
 }
 
 struct PendingGuard<'a> {
@@ -1838,6 +1963,80 @@ mod tests {
     // - the test variant lives behind `#[cfg(test)]` in the service-api
     // crate and is not visible from the app crate's tests.
 
+    /// Production-variant catalog for the cross-respawn dispatch contract.
+    /// Returns one of each non-test `Notification` variant the UI can
+    /// receive on the wire, so the round-trip test below proves
+    /// tag→dispatch flips for every variant.
+    ///
+    /// **Phase 2+ contract**: when adding a new state-changing variant to
+    /// `service_api::Notification` (e.g. `action.completed`, `push.event`,
+    /// `OperationOutcome`), add an entry here. If you forget, the
+    /// round-trip test won't grow with the new variant - silently
+    /// permitting a regression where `set_service_generation`
+    /// or `service_generation` skips the new arm. The catalog is the
+    /// testable counterpart to the `WithGeneration` trait + the
+    /// adjacent get/set methods on `Notification`.
+    fn production_notification_catalog() -> Vec<Notification> {
+        use service_api::{BootPhase, BootProgress};
+        let phases = [
+            BootPhase::LoadingKey,
+            BootPhase::OpeningDatabase,
+            BootPhase::Migrating {
+                current: 1,
+                total: 1,
+            },
+            BootPhase::RecoveringPendingOps,
+            BootPhase::SweepingQueuedDrafts,
+            BootPhase::BackfillingThreadParticipants,
+        ];
+        phases
+            .into_iter()
+            .map(|phase| {
+                Notification::BootProgress(BootProgress {
+                    phase,
+                    message: None,
+                    // Untagged: must be overwritten by the reader.
+                    service_generation: 0,
+                })
+            })
+            .collect()
+    }
+
+    /// Catalog-driven regression test: every production notification
+    /// variant must round-trip cleanly through tag → dispatch.
+    /// Specifically:
+    ///   - `tag_notification_with_generation(n, G)` must result in
+    ///     `n.service_generation() == Some(G)` (not None - that would
+    ///     silently disable the cross-respawn drop), and
+    ///   - dispatch must pass under `live=G` and drop under `live=G+1`.
+    ///
+    /// If a future PR adds a `Notification` variant without (a) updating
+    /// `set_service_generation` to call `WithGeneration::set_generation`
+    /// on the payload, or (b) adding the variant to
+    /// `production_notification_catalog`, this test catches the gap.
+    #[test]
+    fn every_production_notification_round_trips_through_tagging() {
+        for notification in production_notification_catalog() {
+            let method = notification.method_name();
+            let tagged = tag_notification_with_generation(notification, 7);
+            assert_eq!(
+                tagged.service_generation(),
+                Some(7),
+                "set_service_generation must overwrite the tag for production \
+                 variant '{method}'. Returning None disables the cross-respawn \
+                 drop and reintroduces the race scope item 20 closed.",
+            );
+            assert!(
+                notification_should_dispatch(&tagged, 7),
+                "matching generation must dispatch for variant '{method}'",
+            );
+            assert!(
+                !notification_should_dispatch(&tagged, 8),
+                "mismatched generation must drop for variant '{method}'",
+            );
+        }
+    }
+
     /// AnotherInstanceRunning is the one terminal-failure case with a
     /// genuinely user-actionable message: the user can quit the other
     /// running instance and try again. Pin the wording so a refactor
@@ -1863,6 +2062,7 @@ mod tests {
             BootExitCode::KeyLoadFailure,
             BootExitCode::MigrationFailure,
             BootExitCode::HandshakeFailure,
+            BootExitCode::LockIoFailure,
         ]
         .into_iter()
         .map(|code| {

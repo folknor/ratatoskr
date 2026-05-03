@@ -186,7 +186,7 @@ pub(crate) fn claim_stdio() -> io::Result<SavedStdio> {
 #[cfg(windows)]
 fn redirect_crt_fds_to_nul() -> io::Result<()> {
     use std::fs::OpenOptions;
-    use std::os::windows::io::IntoRawHandle;
+    use std::os::windows::io::{FromRawHandle, IntoRawHandle};
 
     // _O_BINARY: skip CRT text-mode CR/LF translation. We want raw NUL
     // semantics either way; the constant matters only if any caller later
@@ -234,7 +234,7 @@ fn redirect_crt_fds_to_nul() -> io::Result<()> {
 pub(crate) fn adopt_into_runtime(
     saved: SavedStdio,
 ) -> io::Result<(tokio::fs::File, tokio::fs::File)> {
-    use std::os::windows::io::IntoRawHandle;
+    use std::os::windows::io::{FromRawHandle, IntoRawHandle};
 
     // SAFETY: `stdin_handle` / `stdout_handle` are owned handles produced by
     // DuplicateHandle; `into_raw_handle` transfers ownership into the new

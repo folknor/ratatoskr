@@ -639,11 +639,22 @@ impl BootingApp {
             return crate::ui::widgets::empty_placeholder("", "");
         }
         let label = self.splash.label();
-        // For Migrating, always show the count - even if the Service emitted
-        // a human-readable message, the user benefits from seeing concrete
-        // progress on a long migration. For other phases, fall back to the
-        // optional message, then a generic placeholder.
+        // For Migrating, show the count alongside the human-readable
+        // message - the count gives concrete progress on a long migration
+        // even when the message text is generic. Suppress the trailing
+        // `(0/N)` fraction on the pre-commit "Starting migration 1 of N"
+        // frame, since the message already names the index and the
+        // appended `(0/N)` reads as a contradiction. For other phases,
+        // fall back to the optional message, then a generic placeholder.
         let detail = match self.splash.phase {
+            Some(service_api::BootPhase::Migrating { current: 0, total }) => match self
+                .splash
+                .message
+                .as_deref()
+            {
+                Some(msg) => msg.to_string(),
+                None => format!("Starting migration 1 of {total}"),
+            },
             Some(service_api::BootPhase::Migrating { current, total }) => {
                 match self.splash.message.as_deref() {
                     Some(msg) => format!("{msg} ({current}/{total})"),

@@ -34,7 +34,7 @@
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::path::{Path, PathBuf};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 /// 32-byte AES-256-GCM key. Implements `Zeroize` on drop so the key bytes
 /// don't linger in freed memory after callers finish using them. Callers
@@ -159,10 +159,19 @@ pub fn load_encryption_key(app_data_dir: &Path) -> Result<SecretKey, LoadError> 
     };
 
     log::debug!("loading encryption key from {}", path.display());
-    let contents = open_and_read(&path)?;
+    // `contents` and `decoded` carry the raw key material; both go through
+    // `Zeroizing` so the bytes are wiped on every exit path (success, the
+    // wrong-length error, the all-zero release path) rather than waiting
+    // for the allocator to overwrite them. Without this, a heap inspection
+    // of the Service process between key load and the next allocation
+    // would surface plaintext key bytes in the `String` and `Vec<u8>`
+    // intermediate buffers that drop normally otherwise.
+    let contents: Zeroizing<String> = Zeroizing::new(open_and_read(&path)?);
 
     let trimmed = contents.trim();
-    let decoded = STANDARD.decode(trimmed).map_err(LoadError::InvalidBase64)?;
+    let decoded: Zeroizing<Vec<u8>> = Zeroizing::new(
+        STANDARD.decode(trimmed).map_err(LoadError::InvalidBase64)?,
+    );
     if decoded.len() != 32 {
         return Err(LoadError::WrongLength {
             expected: 32,
@@ -185,8 +194,8 @@ pub fn load_encryption_key(app_data_dir: &Path) -> Result<SecretKey, LoadError> 
                 path.display(),
             );
         } else {
-            // Zero the decoded buffer before bailing so the byte pattern
-            // doesn't linger in the heap allocation that backs `decoded`.
+            // Zero the local stack buffer before bailing. (`contents` and
+            // `decoded` zeroize via their `Zeroizing` wrappers on drop.)
             buf.zeroize();
             return Err(LoadError::AllZeroInRelease { path });
         }

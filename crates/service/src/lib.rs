@@ -93,7 +93,7 @@ pub fn run_service_blocking() -> ! {
                 "failed to acquire instance lock at {}: {error}",
                 app_data_dir.display()
             );
-            std::process::exit(1);
+            std::process::exit(BootExitCode::LockIoFailure.as_i32());
         }
     };
 

@@ -1,6 +1,37 @@
 use crate::boot::{BootPhaseKind, BootProgress};
 use serde::{Deserialize, Serialize};
 
+/// Marker + accessor trait for notification payloads that carry a
+/// Service-incarnation generation tag for cross-respawn dispatch
+/// filtering. Implement on every payload struct whose parent
+/// `Notification` arm needs the cross-respawn drop guarantee
+/// (`BootProgress` today; future `ActionCompleted`, `PushEvent`,
+/// `OperationOutcome`, etc.).
+///
+/// The trait exists so that `Notification::service_generation()` and
+/// `Notification::set_service_generation()` dispatch through a method
+/// rather than naming a struct field. A future contributor adding a
+/// new tagged payload must implement the trait, which forces them to
+/// (a) put the `service_generation: u32` field on the payload and
+/// (b) decide that the variant is in fact tagged. Test-only /
+/// informational notifications that carry no UI state effect (e.g.
+/// `TestEcho`) intentionally do NOT implement this trait; their
+/// `service_generation()` arm returns `None` and dispatch never filters
+/// them.
+pub trait WithGeneration {
+    fn generation(&self) -> u32;
+    fn set_generation(&mut self, generation: u32);
+}
+
+impl WithGeneration for BootProgress {
+    fn generation(&self) -> u32 {
+        self.service_generation
+    }
+    fn set_generation(&mut self, generation: u32) {
+        self.service_generation = generation;
+    }
+}
+
 /// Per-class coalesce key. The queue compares `CoalesceKey` for equality
 /// when deciding whether a new entry replaces an existing one; the type is
 /// constructed at enqueue time, never serialized onto the wire (the wire
@@ -75,32 +106,53 @@ impl Notification {
 
     /// The Service-incarnation generation tag carried by this notification,
     /// if the variant has one. The reader task overwrites this value with
-    /// its own captured generation at enqueue time; the dispatch side
-    /// compares against the live `ServiceClient::current_generation` and
-    /// drops mismatches (scope item 20 of `phase-1.5-plan.md`). Variants
-    /// that have no need for the cross-respawn discriminator (currently
-    /// only the test variant) return `None`, which the dispatch side
-    /// treats as "always dispatch".
+    /// its own captured generation at enqueue time
+    /// (`set_service_generation` below); the dispatch side compares against
+    /// the live `ServiceClient::current_generation` and drops mismatches
+    /// (scope item 20 of `phase-1.5-plan.md`). Variants that have no need
+    /// for the cross-respawn discriminator (currently only the test
+    /// variant) return `None`, which the dispatch side treats as
+    /// "always dispatch".
     ///
     /// **Phase 2+ contract**: every state-changing notification variant
-    /// MUST return `Some(generation)`. Side-effecting notifications (e.g.
-    /// the upcoming `action.completed`, `push.event`, `OperationOutcome`)
-    /// from a dying Service incarnation must not be applied to UI state
+    /// MUST return `Some(generation)` and have a matching arm in
+    /// `set_service_generation` that calls `.set_generation()` on the
+    /// payload. Side-effecting notifications (e.g. the upcoming
+    /// `action.completed`, `push.event`, `OperationOutcome`) from a
+    /// dying Service incarnation must not be applied to UI state
     /// belonging to the new incarnation - they would, for example, mark
     /// an action complete that the respawned action service never
-    /// dispatched. Returning `None` from such a variant silently disables
-    /// the cross-respawn guard and reintroduces the race scope item 20
-    /// closed. The compiler enforces exhaustive match here, so adding a
-    /// new variant without an arm is a compile error; choosing the wrong
-    /// arm is a contract violation, not a compile error - hence this
-    /// doc-comment gate. Pair with the matching gate in
-    /// `tag_notification_with_generation` inside
-    /// `crates/app/src/service_client.rs`.
+    /// dispatched. Returning `None` from such a variant silently
+    /// disables the cross-respawn guard and reintroduces the race scope
+    /// item 20 closed. Routing through the `WithGeneration` trait means
+    /// the payload struct must opt in (which forces the field to exist)
+    /// and the get/set pair lives in adjacent methods so they cannot
+    /// drift. The compiler enforces exhaustive match here, so adding a
+    /// new variant without an arm is a compile error; choosing the
+    /// wrong arm is a contract violation, not a compile error - hence
+    /// this doc-comment gate.
     pub fn service_generation(&self) -> Option<u32> {
         match self {
-            Self::BootProgress(progress) => Some(progress.service_generation),
+            Self::BootProgress(progress) => Some(progress.generation()),
             #[cfg(test)]
             Self::TestEcho { .. } => None,
+        }
+    }
+
+    /// Overwrite the Service-incarnation generation tag on this
+    /// notification. Mirrors `service_generation` and **must** stay
+    /// in sync with it: every variant whose `service_generation()` returns
+    /// `Some(_)` must here delegate to `WithGeneration::set_generation`
+    /// on the payload. The reader task in
+    /// `crates/app/src/service_client.rs` calls this on every notification
+    /// before enqueue.
+    ///
+    /// Variants that don't carry a generation field (test-only) are no-ops.
+    pub fn set_service_generation(&mut self, generation: u32) {
+        match self {
+            Self::BootProgress(progress) => progress.set_generation(generation),
+            #[cfg(test)]
+            Self::TestEcho { .. } => {}
         }
     }
 }

@@ -122,12 +122,16 @@ impl BootSharedState {
         {
             let mut guard = self.result.lock().expect("boot result poisoned");
             if guard.is_some() {
-                // Double-signal would normally be a programming error - the
-                // boot task is the sole producer here. Logging at debug
-                // makes the situation visible if a future refactor adds a
-                // second call site (e.g., a retry path) so the silent
-                // no-op doesn't hide the bug.
-                log::debug!("BootSharedState::signal_ready called twice; second call ignored");
+                // Double-signal is a "should never happen" - the boot task
+                // is the sole producer. A Phase 2 retry path that calls
+                // `signal_ready` twice with different results would
+                // silently lose the second one; warn so the situation is
+                // visible in the rolling log without forcing a debug
+                // build.
+                log::warn!(
+                    "BootSharedState::signal_ready called twice; second call ignored - \
+                     this is a programming error, the boot task should signal exactly once",
+                );
             } else {
                 *guard = Some(result);
             }
@@ -382,9 +386,15 @@ where
 
 /// Per-account thread-participants backfill. Reads accounts + cross-account
 /// send-identity emails synchronously, then runs `backfill_thread_participants
-/// _for_account_sync` for each account. The helper itself is idempotent
-/// (returns 0 when an account already has any participants row), so this is
-/// safe to call on every boot.
+/// _for_account_sync` for each account. The helper itself is idempotent (it
+/// scans only threads that have no participants row), so this is safe to
+/// call on every boot.
+///
+/// Returns Err if any per-account backfill fails. The outer caller turns
+/// that into a `recovery_warnings` entry on `BootReadyResponse`; per-
+/// account detail stays in the rolling log file. Without this propagation
+/// the UI would see `BootReady` with no warning even though a subset of
+/// accounts had partial state repair.
 fn run_backfill_for_all_accounts(conn: &Connection) -> Result<(), String> {
     let accounts = get_all_accounts_sync(conn)?;
     if accounts.is_empty() {
@@ -400,6 +410,8 @@ fn run_backfill_for_all_accounts(conn: &Connection) -> Result<(), String> {
             user_emails.push(lower);
         }
     }
+    let total_accounts = accounts.len();
+    let mut failed_accounts: Vec<String> = Vec::new();
     for account in accounts {
         match backfill_thread_participants_for_account_sync(conn, &account.id, &user_emails) {
             Ok(0) => {}
@@ -407,13 +419,24 @@ fn run_backfill_for_all_accounts(conn: &Connection) -> Result<(), String> {
                 "[chat] thread_participants backfill rebuilt {count} threads for {}",
                 account.id
             ),
-            Err(error) => log::warn!(
-                "[chat] thread_participants backfill for {} failed: {error}",
-                account.id
-            ),
+            Err(error) => {
+                log::warn!(
+                    "[chat] thread_participants backfill for {} failed: {error}",
+                    account.id
+                );
+                failed_accounts.push(account.id.clone());
+            }
         }
     }
-    Ok(())
+    if failed_accounts.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} of {total_accounts} account(s) failed: {}",
+            failed_accounts.len(),
+            failed_accounts.join(", "),
+        ))
+    }
 }
 
 /// Outcome of the synchronous DB open + migration step. A struct rather
@@ -499,5 +522,86 @@ mod tests {
         // The DB connection is held under Arc<Mutex<>>; verify we can
         // acquire it (the shape Phase 2's ActionContext expects).
         let _guard = ctx.db_conn.lock().expect("db_conn mutex");
+    }
+
+    /// `signal_ready` symmetry: the success path must populate both
+    /// `result` (Some(Ok)) and `context` (Some(_)); the failure path
+    /// must populate `result` (Some(Err)) and leave `context` empty.
+    /// A future refactor that swaps the args, drops the `if let Some(ctx)`
+    /// guard, or otherwise breaks the pairing would only show up in a
+    /// downstream Phase 2 test today; this catches it at the boot crate.
+    #[test]
+    fn signal_ready_symmetry_success_populates_context() {
+        let state = BootSharedState::new();
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        let ctx = BootContext {
+            encryption_key: SecretKey::from_bytes([1u8; 32]),
+            db_conn: Arc::new(Mutex::new(conn)),
+            schema_version: 100,
+            migrations_applied: 0,
+            recovery_warnings: Vec::new(),
+        };
+        let response = BootReadyResponse {
+            ready: true,
+            schema_version: 100,
+            migrations_applied: 0,
+            recovery_warnings: Vec::new(),
+        };
+        state.signal_ready(Ok(response.clone()), Some(ctx));
+        let got_result = state
+            .result
+            .lock()
+            .expect("result mutex")
+            .clone();
+        assert!(matches!(got_result, Some(Ok(_))));
+        let context_present = state
+            .context
+            .lock()
+            .expect("context mutex")
+            .is_some();
+        assert!(context_present, "success must populate context");
+    }
+
+    #[test]
+    fn signal_ready_symmetry_failure_leaves_context_empty() {
+        let state = BootSharedState::new();
+        state.signal_ready(Err(BootFailure::KeyLoadFailure), None);
+        let got_result = state
+            .result
+            .lock()
+            .expect("result mutex")
+            .clone();
+        assert!(matches!(got_result, Some(Err(BootFailure::KeyLoadFailure))));
+        let context_present = state
+            .context
+            .lock()
+            .expect("context mutex")
+            .is_some();
+        assert!(!context_present, "failure must NOT populate context");
+    }
+
+    /// Second `signal_ready` is a no-op: the first result wins, the
+    /// second is logged at warn (see implementation) and dropped.
+    /// Locks the contract that prevents a Phase 2 retry path from
+    /// silently flipping a Service from "ready" to "failed" (or vice
+    /// versa) after the first signal.
+    #[test]
+    fn signal_ready_second_call_is_no_op() {
+        let state = BootSharedState::new();
+        let response = BootReadyResponse {
+            ready: true,
+            schema_version: 100,
+            migrations_applied: 0,
+            recovery_warnings: Vec::new(),
+        };
+        state.signal_ready(Ok(response.clone()), None);
+        // Second call with a different result: must not overwrite.
+        state.signal_ready(Err(BootFailure::MigrationFailure), None);
+        let got_result = state
+            .result
+            .lock()
+            .expect("result mutex")
+            .clone();
+        assert!(matches!(got_result, Some(Ok(_))));
     }
 }

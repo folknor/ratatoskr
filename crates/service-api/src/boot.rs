@@ -22,6 +22,12 @@ pub enum BootExitCode {
     /// zero key; Phase 1.5 makes this fatal so auto-respawn never widens the
     /// window where data lands under the zero key.
     KeyLoadFailure = 73,
+    /// Non-contention IO failure on the instance lock file (disk full,
+    /// permission flip on the data dir, etc.). Distinct from the generic
+    /// runtime exit-code-1 (`UnexpectedExit { Some(1) }`) so the UI can
+    /// surface a path-specific message naming `<app_data>/ratatoskr.lock`
+    /// rather than the catch-all "Service exited unexpectedly".
+    LockIoFailure = 74,
 }
 
 impl BootExitCode {
@@ -35,6 +41,7 @@ impl BootExitCode {
             71 => Some(Self::AnotherInstanceRunning),
             72 => Some(Self::MigrationFailure),
             73 => Some(Self::KeyLoadFailure),
+            74 => Some(Self::LockIoFailure),
             _ => None,
         }
     }
@@ -205,6 +212,7 @@ mod tests {
             BootExitCode::AnotherInstanceRunning,
             BootExitCode::MigrationFailure,
             BootExitCode::KeyLoadFailure,
+            BootExitCode::LockIoFailure,
         ] {
             assert_eq!(BootExitCode::from_i32(code.as_i32()), Some(code));
         }
@@ -222,6 +230,7 @@ mod tests {
             BootExitCode::AnotherInstanceRunning,
             BootExitCode::MigrationFailure,
             BootExitCode::KeyLoadFailure,
+            BootExitCode::LockIoFailure,
         ] {
             let value = code.as_i32();
             assert_ne!(value, 0);
