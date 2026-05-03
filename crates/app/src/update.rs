@@ -182,6 +182,24 @@ impl ReadyApp {
                 Task::none()
             }
             Message::ServiceNotification(notification) => {
+                // Drop notifications from a dying-but-still-flushing reader
+                // after a respawn (item 15 of phase-1.5-plan.md). Phase 1.5
+                // production has only BootProgress, which after the
+                // Booting -> Ready transition is uninteresting to ReadyApp
+                // anyway; the gen-check is in place so Phase 2+
+                // notifications (action.completed, push.event, etc.) hit
+                // the same guard without further plumbing.
+                let current_gen = self
+                    .service_client
+                    .as_ref()
+                    .map(|c| c.current_generation())
+                    .unwrap_or(0);
+                if !crate::service_client::notification_should_dispatch(
+                    &notification,
+                    current_gen,
+                ) {
+                    return Task::none();
+                }
                 log::debug!("Service notification: {}", notification.method_name());
                 Task::none()
             }

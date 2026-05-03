@@ -72,6 +72,22 @@ impl Notification {
             Self::TestEcho { .. } => "test.echo",
         }
     }
+
+    /// The Service-incarnation generation tag carried by this notification,
+    /// if the variant has one. The reader task overwrites this value with
+    /// its own captured generation at enqueue time; the dispatch side
+    /// compares against the live `ServiceClient::current_generation` and
+    /// drops mismatches (scope item 20 of `phase-1.5-plan.md`). Variants
+    /// that have no need for the cross-respawn discriminator (currently
+    /// only the test variant) return `None`, which the dispatch side
+    /// treats as "always dispatch".
+    pub fn service_generation(&self) -> Option<u32> {
+        match self {
+            Self::BootProgress(progress) => Some(progress.service_generation),
+            #[cfg(test)]
+            Self::TestEcho { .. } => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -187,6 +203,24 @@ mod tests {
             service_generation: 0,
         });
         assert_eq!(progress.method_name(), "boot.progress");
+    }
+
+    #[test]
+    fn service_generation_returns_payload_value_for_boot_progress() {
+        let n = Notification::BootProgress(BootProgress {
+            phase: BootPhase::OpeningDatabase,
+            message: None,
+            service_generation: 13,
+        });
+        assert_eq!(n.service_generation(), Some(13));
+    }
+
+    #[test]
+    fn service_generation_is_none_for_variants_without_the_field() {
+        let n = Notification::TestEcho {
+            value: "x".to_string(),
+        };
+        assert_eq!(n.service_generation(), None);
     }
 
     #[test]

@@ -550,8 +550,23 @@ impl BootingApp {
                 eprintln!("[ui] fatal: service boot failed: {detail}");
                 BootingUpdate::Stay(iced::exit())
             }
-            Message::ServiceNotification(service_api::Notification::BootProgress(progress)) => {
-                self.splash.apply(progress);
+            Message::ServiceNotification(notification) => {
+                let current_gen = self
+                    .service_client
+                    .as_ref()
+                    .map(|c| c.current_generation())
+                    .unwrap_or(0);
+                if !crate::service_client::notification_should_dispatch(
+                    &notification,
+                    current_gen,
+                ) {
+                    return BootingUpdate::Stay(Task::none());
+                }
+                match notification {
+                    service_api::Notification::BootProgress(progress) => {
+                        self.splash.apply(progress);
+                    }
+                }
                 BootingUpdate::Stay(Task::none())
             }
             Message::WindowCloseRequested(id) if id == self.main_window_id => {

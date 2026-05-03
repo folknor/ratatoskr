@@ -330,6 +330,15 @@ impl ServiceClient {
         Arc::clone(&self.notifications)
     }
 
+    /// Live Service-incarnation counter. The reader task tags every
+    /// notification with the generation it captured at spawn time;
+    /// `notification_should_dispatch` compares the tag against this value
+    /// to drop notifications from a dying-but-still-flushing reader after
+    /// a respawn (scope item 20 of `phase-1.5-plan.md`).
+    pub fn current_generation(&self) -> u32 {
+        self.current_generation.load(Ordering::SeqCst)
+    }
+
     /// Returns the child Service's PID while the child is still alive.
     /// Used by integration tests to verify that the OS-level process exits
     /// after explicit shutdown or after the client is dropped.
@@ -1051,6 +1060,36 @@ fn tag_notification_with_generation(
     }
 }
 
+/// Dispatch-side guard for stale notifications. The reader task tags every
+/// outgoing notification with its captured generation at enqueue time
+/// (`tag_notification_with_generation`); `handle_crash` bumps
+/// `ServiceClient::current_generation` before any new spawn. Notifications
+/// queued by a dying reader (whose tag matches the now-stale generation)
+/// must NOT be applied to UI state belonging to the new incarnation - they
+/// would smear the splash with phases from the prior boot, or in Phase 2+
+/// apply an `action.completed` to a respawned action service that never
+/// dispatched the action in the first place.
+///
+/// Returns `true` iff the notification should be dispatched. Drops at
+/// `debug` level otherwise. Variants whose `service_generation()` is `None`
+/// (no cross-respawn discriminator needed) always dispatch.
+pub fn notification_should_dispatch(
+    notification: &Notification,
+    current_generation: u32,
+) -> bool {
+    match notification.service_generation() {
+        // `gen` is a reserved keyword in edition 2024.
+        Some(tagged) if tagged != current_generation => {
+            log::debug!(
+                "dropping stale notification {} (tagged={tagged}, current={current_generation})",
+                notification.method_name(),
+            );
+            false
+        }
+        _ => true,
+    }
+}
+
 /// Spawn a `handle_crash` task on the client iff the Weak still points at
 /// a live ServiceClient. The reader/heartbeat task itself returns
 /// immediately after this; the spawned task drives the respawn or the
@@ -1305,8 +1344,7 @@ mod tests {
 
     /// The reader's BootProgress tagging path overwrites whatever the Service
     /// emitted with the reader's own generation. Item 15 leans on this for
-    /// its dispatch-side drop; the unit test pins the contract before the
-    /// dispatch-side lands.
+    /// its dispatch-side drop.
     #[test]
     fn tag_notification_overwrites_boot_progress_generation() {
         let n = Notification::BootProgress(service_api::BootProgress {
@@ -1321,5 +1359,64 @@ mod tests {
                 assert_eq!(bp.service_generation, 7);
             }
         }
+    }
+
+    /// Stale notification (gen != current) drops at dispatch.
+    #[test]
+    fn notification_should_dispatch_drops_stale_boot_progress() {
+        let stale = Notification::BootProgress(service_api::BootProgress {
+            phase: service_api::BootPhase::Migrating {
+                current: 1,
+                total: 10,
+            },
+            message: None,
+            service_generation: 1,
+        });
+        assert!(!notification_should_dispatch(&stale, 2));
+    }
+
+    /// Current notification (gen == current) dispatches normally.
+    #[test]
+    fn notification_should_dispatch_passes_current_boot_progress() {
+        let current = Notification::BootProgress(service_api::BootProgress {
+            phase: service_api::BootPhase::LoadingKey,
+            message: None,
+            service_generation: 5,
+        });
+        assert!(notification_should_dispatch(&current, 5));
+    }
+
+    // The "variants without a generation field always dispatch" path is
+    // covered by `service_api::tests::service_generation_is_none_for_variants_without_the_field`
+    // - the test variant lives behind `#[cfg(test)]` in the service-api
+    // crate and is not visible from the app crate's tests.
+
+    /// End-to-end: tag a notification with the reader's gen, then run the
+    /// dispatch-side check after a generation bump. The notification must
+    /// be dropped. This is the unit-level proof that the reader+dispatch
+    /// pipeline closes the cross-respawn race per scope item 20.
+    #[test]
+    fn reader_tag_plus_dispatch_drop_filters_stale_notification() {
+        let untagged = Notification::BootProgress(service_api::BootProgress {
+            phase: service_api::BootPhase::OpeningDatabase,
+            message: None,
+            service_generation: 0,
+        });
+        // Reader was spawned at gen=1 and tags accordingly.
+        let tagged = tag_notification_with_generation(untagged, 1);
+        // A respawn happens; current_generation bumps to 2. The notification
+        // (still tagged with the old reader's gen=1) must not pass dispatch.
+        assert!(!notification_should_dispatch(&tagged, 2));
+        // After-the-fact sanity: a notification tagged with the current gen
+        // (i.e., from the new reader) does pass.
+        let fresh = tag_notification_with_generation(
+            Notification::BootProgress(service_api::BootProgress {
+                phase: service_api::BootPhase::OpeningDatabase,
+                message: None,
+                service_generation: 0,
+            }),
+            2,
+        );
+        assert!(notification_should_dispatch(&fresh, 2));
     }
 }
