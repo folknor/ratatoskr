@@ -22,10 +22,10 @@ use db::db::queries_extra::{
     get_all_accounts_sync, get_all_send_identity_emails,
 };
 use db::db::{Connection, apply_standard_pragmas, migrations, reconcile_velo_rename};
-use service_api::{BootExitCode, BootPhase};
+use service_api::{BootExitCode, BootPhase, BootReadyResponse};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
-use tokio::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use tokio::sync::{Notify, mpsc};
 
 /// Service-side boot artifacts loaded once at boot. Phase 2's `ActionContext`
 /// will consume the encryption key + DB connection from here once the action
@@ -43,23 +43,77 @@ pub(crate) struct BootContext {
     pub(crate) db_conn: Arc<Mutex<Connection>>,
     /// Highest applied schema version after migrations completed. Echoed
     /// to the UI in `BootReadyResponse`.
-    #[allow(dead_code)]
     pub(crate) schema_version: u32,
     /// Number of migrations actually applied this boot. 0 on a healthy
     /// repeat boot; non-zero only on first-run or after a schema bump.
-    #[allow(dead_code)]
     pub(crate) migrations_applied: u32,
 }
 
-/// Process-wide singleton populated by `run_boot_sequence` on success. Phase
-/// 2 consumes it from the action handler; Phase 1.5 just stashes it for that
-/// future use. `OnceLock` semantics rule out double-population if a future
-/// commit accidentally invokes the boot sequence twice in the same process.
-pub(crate) static BOOT_CONTEXT: OnceLock<BootContext> = OnceLock::new();
+/// Per-Service-instance boot state. The boot task populates `result` (and
+/// `context` on success) and fires `notify`; the `boot.ready` handler reads
+/// from `result`.
+///
+/// Held per `run_service_with_io_and_lifecycle` invocation rather than as a
+/// process-wide singleton so in-process tests can spawn multiple harnesses
+/// without colliding on `OnceLock::set`. Phase 2 will introduce its own
+/// per-instance state for the relocated `ActionContext`.
+pub(crate) struct BootSharedState {
+    notify: Notify,
+    result: Mutex<Option<Result<BootReadyResponse, BootFailure>>>,
+    #[allow(dead_code)]
+    context: Mutex<Option<BootContext>>,
+}
+
+impl BootSharedState {
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            notify: Notify::new(),
+            result: Mutex::new(None),
+            context: Mutex::new(None),
+        })
+    }
+
+    /// Park until `signal_ready` fires. The boot.ready handler calls this.
+    pub(crate) async fn wait_for_ready(&self) -> Result<BootReadyResponse, BootFailure> {
+        loop {
+            if let Some(result) = self.result.lock().expect("boot result poisoned").clone() {
+                return result;
+            }
+            // Build the waiter BEFORE re-checking `result` to avoid losing a
+            // `notify_waiters()` that fires between the check and the await.
+            let waiter = self.notify.notified();
+            tokio::pin!(waiter);
+            if let Some(result) = self.result.lock().expect("boot result poisoned").clone() {
+                return result;
+            }
+            waiter.as_mut().await;
+        }
+    }
+
+    fn signal_ready(
+        &self,
+        result: Result<BootReadyResponse, BootFailure>,
+        context: Option<BootContext>,
+    ) {
+        {
+            let mut guard = self.result.lock().expect("boot result poisoned");
+            if guard.is_none() {
+                *guard = Some(result);
+            }
+        }
+        if let Some(ctx) = context {
+            let mut guard = self.context.lock().expect("boot context poisoned");
+            if guard.is_none() {
+                *guard = Some(ctx);
+            }
+        }
+        self.notify.notify_waiters();
+    }
+}
 
 /// Discriminant of why the boot sequence failed. The caller maps this to a
 /// `BootExitCode` via `as_exit_code()`.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BootFailure {
     KeyLoadFailure,
     MigrationFailure,
@@ -82,13 +136,39 @@ impl BootFailure {
 /// (which pumps notifications) never starve waiting on `rusqlite` /
 /// `std::fs::read_to_string`.
 ///
-/// On success, populates `BOOT_CONTEXT` and returns `Ok(())`. On fatal
-/// failure, returns `Err(BootFailure)`; the caller drives the actual
-/// process exit.
+/// On success, populates `state.context` and signals
+/// `state.result(Ok(BootReadyResponse))`. On failure, signals
+/// `state.result(Err(BootFailure))` and returns the failure to the caller;
+/// the dispatch loop drives the actual process exit.
 pub(crate) async fn run_boot_sequence(
     out_tx: mpsc::Sender<Vec<u8>>,
     app_data_dir: PathBuf,
+    state: Arc<BootSharedState>,
 ) -> Result<(), BootFailure> {
+    let inner = run_boot_sequence_inner(out_tx, app_data_dir).await;
+    let (result, context) = match inner {
+        Ok(ctx) => (
+            Ok(BootReadyResponse {
+                ready: true,
+                schema_version: ctx.schema_version,
+                migrations_applied: ctx.migrations_applied,
+            }),
+            Some(ctx),
+        ),
+        Err(failure) => (Err(failure), None),
+    };
+    let outcome = match &result {
+        Ok(_) => Ok(()),
+        Err(failure) => Err(*failure),
+    };
+    state.signal_ready(result, context);
+    outcome
+}
+
+async fn run_boot_sequence_inner(
+    out_tx: mpsc::Sender<Vec<u8>>,
+    app_data_dir: PathBuf,
+) -> Result<BootContext, BootFailure> {
     boot_progress::emit(&out_tx, BootPhase::LoadingKey, None);
 
     let key = match tokio::task::spawn_blocking({
@@ -174,21 +254,12 @@ pub(crate) async fn run_boot_sequence(
         log::warn!("thread-participants backfill failed: {error}");
     }
 
-    let context = BootContext {
+    Ok(BootContext {
         encryption_key: key,
         db_conn: conn,
         schema_version,
         migrations_applied,
-    };
-    if BOOT_CONTEXT.set(context).is_err() {
-        // OnceLock::set returns Err if already set. The boot sequence runs
-        // exactly once per process, so reaching this arm means a future
-        // commit accidentally invoked it twice. Log loudly but do not fail
-        // - the existing populated context is still correct.
-        log::warn!("BOOT_CONTEXT already populated; ignoring duplicate set");
-    }
-
-    Ok(())
+    })
 }
 
 /// Run a synchronous recovery step inside `spawn_blocking` against a shared

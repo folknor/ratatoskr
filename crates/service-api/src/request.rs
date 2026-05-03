@@ -65,13 +65,20 @@ impl RequestParams {
         }
     }
 
-    /// Requests that bypass the per-handler semaphore. `health.ping` keeps
-    /// the heartbeat alive under load; `boot.ready` is special-cased because
-    /// it parks on a `Notify` until the boot sequence completes (it must not
-    /// occupy a permit while parked) and because the dispatch loop's
-    /// admission cap also keys off this flag, so a flood of slow handlers
-    /// cannot starve the boot handshake.
-    pub fn bypasses_semaphore(&self) -> bool {
+    /// Requests that bypass BOTH the per-handler semaphore and the dispatch-
+    /// loop admission cap.
+    ///
+    /// `health.ping` keeps the heartbeat alive under load; `boot.ready` is
+    /// special-cased because it parks on a `Notify` until the boot sequence
+    /// completes (occupying a semaphore permit while parked would let a long
+    /// migration starve other handlers) and because flooding the dispatch
+    /// loop with slow requests would otherwise be able to push the boot
+    /// handshake out past the admission cap.
+    ///
+    /// Renamed from `bypasses_semaphore` in Phase 1.5 to reflect the dual
+    /// role - the dispatch loop's `ADMISSION_CAP` gate also keys off this
+    /// flag.
+    pub fn bypasses_admission(&self) -> bool {
         matches!(self, Self::HealthPing | Self::BootReady)
     }
 
@@ -182,8 +189,18 @@ mod tests {
     }
 
     #[test]
-    fn boot_ready_bypasses_semaphore() {
-        assert!(RequestParams::BootReady.bypasses_semaphore());
+    fn boot_ready_bypasses_admission() {
+        assert!(RequestParams::BootReady.bypasses_admission());
+    }
+
+    #[test]
+    fn health_ping_bypasses_admission() {
+        assert!(RequestParams::HealthPing.bypasses_admission());
+    }
+
+    #[test]
+    fn shutdown_does_not_bypass_admission() {
+        assert!(!RequestParams::Shutdown.bypasses_admission());
     }
 
     #[test]

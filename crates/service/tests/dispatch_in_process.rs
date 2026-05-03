@@ -1,6 +1,7 @@
 use service_api::{
-    BootExitCode, BoundedLineReader, HealthPingResponse, JsonRpcRequest, ParsedServiceMessage,
-    RequestParams, ServiceResponse, ShutdownResponse, parse_service_message, write_message,
+    BootExitCode, BootReadyResponse, BoundedLineReader, HealthPingResponse, JsonRpcRequest,
+    ParsedServiceMessage, RequestParams, ServiceResponse, ShutdownResponse, parse_service_message,
+    write_message,
 };
 use std::path::PathBuf;
 use tokio::io::{AsyncWriteExt, DuplexStream};
@@ -306,6 +307,69 @@ async fn concurrent_ping_ids_are_correlated() -> TestResult {
     assert_eq!(seen.first().copied(), Some(1));
     assert_eq!(seen.last().copied(), Some(100));
 
+    shutdown(harness).await
+}
+
+/// `boot.ready` returns a `BootReadyResponse` after the boot sequence
+/// completes. Verifies the handler unblocks once `BOOT_RESULT` is populated
+/// and that the response carries the expected schema_version /
+/// migrations_applied for a fresh DB.
+#[tokio::test]
+async fn boot_ready_returns_after_sequence_completes() -> TestResult {
+    let mut harness = spawn_harness_with_suffix("boot_ready_completes");
+    write_request(&mut harness.stdin, 1, RequestParams::BootReady).await?;
+    let (id, response) = read_response(&mut harness.stdout).await?;
+    assert_eq!(id, Some(1));
+    let ServiceResponse::Success(value) = response else {
+        return Err(std::io::Error::other("expected boot.ready success").into());
+    };
+    let ready: BootReadyResponse = serde_json::from_value(value)?;
+    assert!(ready.ready, "boot.ready must return ready=true");
+    assert_eq!(
+        ready.schema_version, 100,
+        "fresh DB should be at schema v100"
+    );
+    assert_eq!(
+        ready.migrations_applied, 1,
+        "fresh DB should apply exactly the v100 migration"
+    );
+    shutdown(harness).await
+}
+
+/// `health.ping` continues to round-trip while `boot.ready` is in flight.
+/// Verifies the dispatch loop's bypass: a parked boot.ready handler does
+/// not block other requests through the admission cap.
+#[tokio::test]
+async fn health_ping_works_concurrently_with_boot_ready() -> TestResult {
+    let mut harness = spawn_harness_with_suffix("concurrent_ping_during_boot");
+    // Issue boot.ready first; it may complete before we read its response,
+    // but the dispatch loop must answer health.ping in the same window
+    // regardless.
+    write_request(&mut harness.stdin, 1, RequestParams::BootReady).await?;
+    write_request(&mut harness.stdin, 2, RequestParams::HealthPing).await?;
+
+    // Collect both responses (in any order).
+    let (mut saw_ready, mut saw_ping) = (false, false);
+    for _ in 0..2 {
+        let (id, response) = read_response(&mut harness.stdout).await?;
+        match id {
+            Some(1) => {
+                assert!(matches!(response, ServiceResponse::Success(_)));
+                saw_ready = true;
+            }
+            Some(2) => {
+                assert!(matches!(response, ServiceResponse::Success(_)));
+                saw_ping = true;
+            }
+            other => {
+                return Err(std::io::Error::other(format!(
+                    "unexpected response id {other:?}"
+                ))
+                .into());
+            }
+        }
+    }
+    assert!(saw_ready && saw_ping);
     shutdown(harness).await
 }
 

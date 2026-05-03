@@ -55,6 +55,12 @@ where
     let mut lines = BoundedLineReader::new(reader, service_api::MAX_FRAME_BYTES);
     let mut pending_shutdown_id: Option<u64> = None;
 
+    // Per-instance boot state. The boot task signals success/failure on it;
+    // the boot.ready handler awaits readiness via `wait_for_ready`. Held in
+    // an Arc so tests that spawn multiple Service instances don't collide on
+    // a process-wide singleton.
+    let boot_state = boot::BootSharedState::new();
+
     // Boot sequence runs concurrently with the dispatch loop so health.ping
     // continues to round-trip while migrations / key load run. On fatal boot
     // failure the sequence posts the boot exit code via `boot_failure_tx`;
@@ -64,8 +70,11 @@ where
     let boot_handle = tokio::spawn({
         let out_tx = out_tx.clone();
         let app_data_dir = app_data_dir.clone();
+        let boot_state = Arc::clone(&boot_state);
         async move {
-            if let Err(failure) = boot::run_boot_sequence(out_tx, app_data_dir).await {
+            if let Err(failure) =
+                boot::run_boot_sequence(out_tx, app_data_dir, boot_state).await
+            {
                 let _ = boot_failure_tx.send(failure.as_exit_code()).await;
             }
         }
@@ -97,6 +106,7 @@ where
                             &inflight,
                             &mut handlers_in_flight,
                             started_at,
+                            &boot_state,
                         ).await {
                             HandleOutcome::Continue => {}
                             HandleOutcome::Shutdown(id) => {
@@ -188,6 +198,7 @@ async fn handle_line(
     inflight: &Arc<Semaphore>,
     handlers_in_flight: &mut JoinSet<()>,
     started_at: Instant,
+    boot_state: &Arc<boot::BootSharedState>,
 ) -> HandleOutcome {
     match parse_client_message(line) {
         Ok(ParsedClientMessage::Request {
@@ -203,7 +214,7 @@ async fn handle_line(
             // Non-bypass requests must fit under ADMISSION_CAP - beyond that
             // we synchronously reject with Backpressure rather than spawning
             // unbounded waiters.
-            if !params.bypasses_semaphore() && handlers_in_flight.len() >= ADMISSION_CAP {
+            if !params.bypasses_admission() && handlers_in_flight.len() >= ADMISSION_CAP {
                 send_handler_response(out_tx, id, Err(ServiceError::Backpressure)).await;
                 return HandleOutcome::Continue;
             }
@@ -214,6 +225,7 @@ async fn handle_line(
                 Arc::clone(inflight),
                 started_at,
                 handlers_in_flight,
+                Arc::clone(boot_state),
             );
             HandleOutcome::Continue
         }
@@ -271,6 +283,7 @@ fn spawn_handler(
     inflight: Arc<Semaphore>,
     started_at: Instant,
     handlers_in_flight: &mut JoinSet<()>,
+    boot_state: Arc<boot::BootSharedState>,
 ) {
     let method = params.method_name();
     // Framing-layer logging hook: record method + id only at dispatch entry.
@@ -285,7 +298,7 @@ fn spawn_handler(
         // loop's stdin read whenever MAX_IN_FLIGHT slow handlers are
         // running, queuing fast methods behind slow ones. The dispatch
         // loop's ADMISSION_CAP gate keeps the number of waiters bounded.
-        let _permit = if params.bypasses_semaphore() {
+        let _permit = if params.bypasses_admission() {
             None
         } else {
             match inflight.acquire_owned().await {
@@ -305,7 +318,7 @@ fn spawn_handler(
                 }
             }
         };
-        let result = dispatch_with_panic_safety(params, started_at).await;
+        let result = dispatch_with_panic_safety(params, started_at, boot_state).await;
         // Framing-layer logging hook: record outcome discriminant only.
         // The error variant name lands; the error message does not, since
         // ServiceError::Panic and ServiceError::Internal can carry caller-
@@ -336,9 +349,10 @@ fn error_outcome_kind(error: &ServiceError) -> &'static str {
 async fn dispatch_with_panic_safety(
     params: RequestParams,
     started_at: Instant,
+    boot_state: Arc<boot::BootSharedState>,
 ) -> Result<Value, ServiceError> {
     let method = params.method_name();
-    let result = AssertUnwindSafe(handlers::dispatch(params, started_at))
+    let result = AssertUnwindSafe(handlers::dispatch(params, started_at, boot_state))
         .catch_unwind()
         .await;
     match result {
