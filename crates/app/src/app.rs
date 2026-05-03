@@ -768,7 +768,22 @@ impl App {
 
     pub(crate) fn daemon_theme(&self, window_id: iced::window::Id) -> Theme {
         match self {
-            App::Booting(_) => Theme::custom(String::from("Dark"), iced::theme::palette::Seed::DARK),
+            // Honour the AppearanceChanged event the BootingApp may have
+            // already stashed: if the OS reported Light mode before
+            // boot.ready arrived, render the splash in Light too. Without
+            // this, the splash always paints Dark and then re-themes on
+            // the Booting -> Ready transition, producing a flash. The
+            // stash is None until the first AppearanceChanged arrives,
+            // which on most systems happens within milliseconds of
+            // iced::daemon startup; falling back to Dark is the
+            // pre-existing behaviour and matches the safest default for
+            // an OS that never delivers an appearance event.
+            App::Booting(b) => match b.appearance_mode {
+                Some(crate::appearance::Mode::Light) => {
+                    Theme::custom(String::from("Light"), iced::theme::palette::Seed::LIGHT)
+                }
+                _ => Theme::custom(String::from("Dark"), iced::theme::palette::Seed::DARK),
+            },
             App::Ready(r) => r.daemon_theme(window_id),
         }
     }
@@ -784,6 +799,106 @@ impl App {
         match self {
             App::Booting(b) => b.subscription(),
             App::Ready(r) => r.subscription(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod booting_update_tests {
+    use super::{BootingApp, BootingUpdate, SplashState};
+    use crate::message::Message;
+
+    fn make_booting() -> BootingApp {
+        BootingApp {
+            main_window_id: iced::window::Id::unique(),
+            splash: SplashState::default(),
+            service_client: None,
+            service_notifications: None,
+            appearance_mode: None,
+        }
+    }
+
+    fn assert_stay_noop(outcome: &BootingUpdate) {
+        match outcome {
+            BootingUpdate::Stay(_) => {}
+            BootingUpdate::Transition(_, _) => {
+                panic!("expected Stay; got Transition - whitelisted variants must not transition")
+            }
+        }
+    }
+
+    /// AppearanceChanged is "forward" per the message.rs whitelist: stash on
+    /// BootingApp, replay after Booting -> Ready transition. The stash is the
+    /// observable side effect; assert it lands.
+    #[test]
+    fn appearance_changed_is_stashed_for_replay_after_ready_transition() {
+        let mut booting = make_booting();
+        assert!(booting.appearance_mode.is_none());
+        let outcome = booting.update(Message::AppearanceChanged(crate::appearance::Mode::Light));
+        assert_stay_noop(&outcome);
+        assert_eq!(booting.appearance_mode, Some(crate::appearance::Mode::Light));
+    }
+
+    /// Modal-key + window-geometry events are explicit-drop arms in the
+    /// whitelist: they reach BootingApp::update, do nothing, and return
+    /// Stay(Task::none()). The catch-all is NOT involved here - that arm is
+    /// only for Message variants the explicit list doesn't name. Locks in
+    /// "drop with no panic, no state change."
+    #[test]
+    fn explicit_drop_variants_return_stay_without_state_change() {
+        let mut booting = make_booting();
+        let size = iced::Size::new(800.0, 600.0);
+        let point = iced::Point::new(0.0, 0.0);
+        let cases: Vec<Message> = vec![
+            Message::Noop,
+            Message::WindowResized(booting.main_window_id, size),
+            Message::WindowMoved(booting.main_window_id, point),
+            Message::ModifiersChanged(iced::keyboard::Modifiers::empty()),
+        ];
+        for msg in cases {
+            let label = format!("{msg:?}");
+            let outcome = booting.update(msg);
+            assert!(
+                matches!(outcome, BootingUpdate::Stay(_)),
+                "{label} must Stay, no Transition"
+            );
+            // None of these messages should populate appearance_mode or the
+            // service-client slot. The splash should also stay in its
+            // default state since no BootProgress arrived.
+            assert!(booting.appearance_mode.is_none(), "{label} mutated appearance");
+            assert!(booting.service_client.is_none(), "{label} populated client");
+            assert!(booting.splash.phase.is_none(), "{label} mutated splash");
+        }
+    }
+
+    /// Catch-all arm: any non-whitelisted Message must land on Stay without
+    /// panicking. The previous behavior (a `discriminant(...)` debug log)
+    /// did not crash, but we are locking in the contract that future Message
+    /// variants added without an explicit BootingApp row also do not crash.
+    /// Use a few representative variants from across the Message enum.
+    #[test]
+    fn non_whitelisted_variants_drop_safely_without_panic() {
+        let mut booting = make_booting();
+        // Pick variants from different message families that are not in
+        // the whitelist (sync, search, snooze, palette, etc.)
+        let cases: Vec<Message> = vec![
+            Message::SyncTick,
+            Message::SnoozeTick,
+            Message::ExpiryTick,
+            Message::Compose,
+            Message::FocusSearch,
+            Message::ToggleSettings,
+            Message::Escape,
+            Message::ChatReadMarked,
+            Message::SetAppMode(crate::app::AppMode::Mail),
+        ];
+        for msg in cases {
+            let label = format!("{msg:?}");
+            let outcome = booting.update(msg);
+            assert!(
+                matches!(outcome, BootingUpdate::Stay(_)),
+                "non-whitelisted {label} must Stay, never Transition or panic"
+            );
         }
     }
 }

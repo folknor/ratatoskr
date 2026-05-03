@@ -65,9 +65,25 @@ pub enum BootClassification {
 }
 
 impl BootClassification {
-    /// Compute the classification for a child that exited before its first
-    /// `BootReady` was observed. Callers must NOT invoke this once `BootReady`
-    /// has fired - a clean shutdown after readiness is not a boot failure.
+    /// Map a child process's exit code to a classification.
+    ///
+    /// Always produces a classification - the caller decides whether to
+    /// surface it as fatal. The two production call sites:
+    /// - `elevate_initial_boot_error` (pre-BootReady): a child that exited
+    ///   before answering boot.ready. Code 0 here is `UnexpectedExit { Some(0) }`
+    ///   per scope item 7 of phase-1.5-plan.md - a Service that exits 0
+    ///   before answering boot.ready is broken.
+    /// - `handle_crash` crashloop branch (post-BootReady): the Service
+    ///   crashed unexpectedly after going Ready. Reaching this path
+    ///   implies the crash was not a clean shutdown (clean shutdown sets
+    ///   `is_shutting_down = true`, which `handle_crash` checks for and
+    ///   bails before reaching the classification step). Code 0 here is
+    ///   still `UnexpectedExit { Some(0) }` and still surfaces fatally,
+    ///   because a Service that exited 0 without going through
+    ///   `client.shutdown()` is broken.
+    ///
+    /// The "do not call after a clean shutdown" contract lives at the call
+    /// sites, not here: this function is total over `Option<i32>`.
     pub fn from_exit_code(code: Option<i32>) -> Self {
         match code {
             Some(value) => match BootExitCode::from_i32(value) {
@@ -246,6 +262,31 @@ mod tests {
             BootClassification::from_exit_code(None),
             BootClassification::UnexpectedExit { code: None },
         );
+    }
+
+    /// Code 0 is `UnexpectedExit { Some(0) }` regardless of whether the
+    /// caller is reasoning about pre- or post-BootReady. The "post-BootReady
+    /// clean shutdown" case is filtered at the call sites (handle_crash
+    /// bails on `is_shutting_down`); reaching from_exit_code with code 0
+    /// post-BootReady means the Service exited 0 unexpectedly, which is
+    /// still broken. Locks in the contract from the doc-comment - without
+    /// this test, a refactor that special-cased Some(0) to "no
+    /// classification" would silently break the post-BootReady crashloop
+    /// branch's terminal-failure surfacing.
+    #[test]
+    fn boot_classification_zero_is_unexpected_exit_in_both_phases() {
+        // Pre-BootReady code 0: per scope item 7 of phase-1.5-plan.md, a
+        // Service that exits 0 before answering boot.ready is broken.
+        let pre = BootClassification::from_exit_code(Some(0));
+        assert_eq!(pre, BootClassification::UnexpectedExit { code: Some(0) });
+
+        // Post-BootReady code 0: the same classification is produced. The
+        // clean-shutdown filter lives at the call site, not in this
+        // function. Both phases share the encoding so terminal-failure
+        // surfacing is uniform across the spawn flow.
+        let post = BootClassification::from_exit_code(Some(0));
+        assert_eq!(post, BootClassification::UnexpectedExit { code: Some(0) });
+        assert_eq!(pre, post);
     }
 
     #[test]

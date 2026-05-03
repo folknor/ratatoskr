@@ -259,4 +259,66 @@ mod tests {
         queue.close();
         assert_eq!(queue.recv().await, None);
     }
+
+    /// End-to-end smoke for the per-phase coalesce contract using real
+    /// `Notification::BootProgress` payloads (the discrepancies-doc test
+    /// asked specifically for queue-level coverage with actual wire types,
+    /// not just the synthetic Mock harness above). Layout:
+    ///   Migrating(1, 10) -> LoadingKey -> Migrating(5, 10) -> OpeningDatabase
+    /// expected order out:
+    ///   Migrating(5, 10), LoadingKey, OpeningDatabase
+    /// Migrating(1, 10) is replaced in-slot by Migrating(5, 10) (per-phase
+    /// `BootPhaseKind::Migrating` coalesce key); LoadingKey and
+    /// OpeningDatabase have distinct `BootPhaseKind`s so they remain as
+    /// independent entries that retain their wire arrival order. A
+    /// regression that collapsed every BootProgress under a single
+    /// CoalesceKey would surface here as LoadingKey vanishing into the
+    /// latest Migrating frame.
+    #[tokio::test]
+    async fn boot_progress_per_phase_coalesce_keeps_other_phases_independent() {
+        use service_api::{BootPhase, BootProgress};
+
+        fn boot_progress(phase: BootPhase) -> Notification {
+            Notification::BootProgress(BootProgress {
+                phase,
+                message: None,
+                service_generation: 0,
+            })
+        }
+
+        let queue: NotificationQueue<Notification> = NotificationQueue::new(16);
+        queue
+            .enqueue(boot_progress(BootPhase::Migrating { current: 1, total: 10 }))
+            .await;
+        queue.enqueue(boot_progress(BootPhase::LoadingKey)).await;
+        queue
+            .enqueue(boot_progress(BootPhase::Migrating { current: 5, total: 10 }))
+            .await;
+        queue.enqueue(boot_progress(BootPhase::OpeningDatabase)).await;
+
+        // Migrating(1, 10) was replaced in-slot by Migrating(5, 10), so the
+        // first slot now carries the latter. LoadingKey and OpeningDatabase
+        // remain as independent entries in the order they arrived.
+        let phases: Vec<BootPhase> = {
+            let mut collected = Vec::new();
+            for _ in 0..3 {
+                let Notification::BootProgress(p) = queue.recv().await.expect("recv");
+                collected.push(p.phase);
+            }
+            collected
+        };
+        assert_eq!(
+            phases,
+            vec![
+                BootPhase::Migrating { current: 5, total: 10 },
+                BootPhase::LoadingKey,
+                BootPhase::OpeningDatabase,
+            ],
+            "per-phase coalesce must collapse only Migrating; LoadingKey and \
+             OpeningDatabase must remain as ordered independent entries"
+        );
+
+        queue.close();
+        assert!(queue.recv().await.is_none());
+    }
 }

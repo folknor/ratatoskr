@@ -17,25 +17,20 @@ The classification-asserting tests, partial-velo-rename unit tests, the
 crashloop tracker, the stale-notification race fix, the artificial-delay
 `boot_ready_blocks_until_sequence_completes` integration test,
 `boot_progress_notifications_emitted_in_order`,
-`health_ping_succeeds_during_long_migration` (real artificial migration
-delay), corrupt-DB `MigrationFailure`, multi-step migration progress
-callback, `BootingApp::view`/`SplashState` per-phase, instance_lock
-panic-survival, and `pending_request_fails_at_respawn` (combined with the
-follow-up succeeds half) have all landed. The remaining gaps:
+`health_ping_succeeds_during_long_migration`, corrupt-DB
+`MigrationFailure`, multi-step migration progress callback,
+`BootingApp::view`/`SplashState` per-phase, instance_lock panic-survival,
+`pending_request_fails_at_respawn` (combined with the follow-up succeeds
+half), `BootingApp::update` whitelist drop coverage, `BootClassification`
+`code == 0` post-BootReady, the per-phase coalesce queue test with real
+`BootProgress` payloads, and the `BootContext` cfg-test smoke have all
+landed. The remaining gaps:
 
 **Integration tests (in-process):**
 
 - `stale_notifications_dropped_after_generation_bump` - covered as unit
   tests in `service_client.rs`; the full reader -> queue -> subscription
   -> BootingApp pipeline is uncovered at the integration level.
-
-**Unit tests:**
-
-- `service: per-phase coalesce keeps Migrating collapsed in the queue` -
-  covered indirectly by `service-api` unit tests, but no test exercises
-  the actual queue with real `BootProgress` payloads.
-- `app: BootingApp::update whitelist drops` - implicit via the catch-all,
-  but no test asserts dropped variants log at debug rather than panic.
 
 **Real-subprocess tests:**
 
@@ -85,13 +80,10 @@ sites share code.
   escalation policies.** `Drop` / `async_drop_wait`: 200ms abort budget
   for handles -> 1s wait -> SIGKILL -> 500ms poll.
   `wait_with_kill_watchdog`: 5s wait -> `start_kill` -> 1s second wait.
-  Two separate kill-escalation paths with different budgets. Probably
-  fine, but unifying through a helper would prevent drift.
-- **`BootingApp::daemon_theme` ignores the stashed `appearance_mode`.**
-  `crates/app/src/app.rs:712-717` returns `Theme::custom("Dark", DARK)`
-  unconditionally for Booting; `appearance_mode` is captured during
-  Booting and applied only after transition. The splash flashes Dark and
-  then settles. Cosmetic.
+  The budgets are intentionally different (Drop is the user-quit path
+  with ~1.7s patience; respawn has ~6s) and unifying through a helper
+  would lose the distinction. Worth a contract comment naming the
+  rationale.
 - **`SchemaVersionChanged` `None` branch defensive capture.**
   `crates/app/src/service_client.rs`. The `None` branch logs warn and
   captures `*guard = Some(response.clone())`. If a subsequent respawn
@@ -114,14 +106,5 @@ sites share code.
   plan's stated 1.0.** `crates/app/src/app.rs:719-724`. The system-
   detected default is more correct than a hardcoded 1.0 (high-DPI
   displays). Improvement on the plan; mention in the next plan revision.
-- **`BootClassification` test for `code == 0 AND BootReady already
-  observed` not present.** Plan calls out that pre-BootReady `code == 0`
-  is `UnexpectedExit { code: Some(0) }` (broken), and post-BootReady is
-  "no classification produced" - only the doc-comment encodes the latter.
 - **`#[cfg(test)]` `test.echo` notification variant.** Exists to verify
   wire round-trip but not actively used; can stay or go.
-- **`BootContext` fields `#[allow(dead_code)]` for Phase 2.** Marked as
-  scaffold; the TODO comment now points at "Phase 2 reads these via
-  ActionContext". Consider a `#[cfg(test)]` smoke that constructs and
-  reads from `BootContext` so a future Phase 2 PR doesn't quietly find
-  that a field was dropped.

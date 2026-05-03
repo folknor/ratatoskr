@@ -460,3 +460,38 @@ fn open_db_and_migrate(
         migrations_applied,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Smoke test that constructs a `BootContext` and reads every field.
+    /// The struct is `#[allow(dead_code)]` on the encryption key + DB
+    /// connection until Phase 2's action service starts consuming them; if
+    /// a future PR drops a field thinking it was unused, the dead_code
+    /// allow would silence the unused-field warning AND this test would
+    /// fail to compile, surfacing the loss before it lands. Locks the
+    /// scaffold-for-Phase-2 contract.
+    #[test]
+    fn boot_context_constructs_with_every_field_readable() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        let ctx = BootContext {
+            encryption_key: [9u8; 32],
+            db_conn: Arc::new(Mutex::new(conn)),
+            schema_version: 100,
+            migrations_applied: 1,
+            recovery_warnings: vec!["pending-ops recovery".to_string()],
+        };
+        // Read every field; if Phase 2 drops one of these, the test stops
+        // compiling.
+        assert_eq!(ctx.encryption_key[0], 9);
+        assert_eq!(ctx.encryption_key.len(), 32);
+        assert_eq!(ctx.schema_version, 100);
+        assert_eq!(ctx.migrations_applied, 1);
+        assert_eq!(ctx.recovery_warnings.len(), 1);
+        assert_eq!(ctx.recovery_warnings[0], "pending-ops recovery");
+        // The DB connection is held under Arc<Mutex<>>; verify we can
+        // acquire it (the shape Phase 2's ActionContext expects).
+        let _guard = ctx.db_conn.lock().expect("db_conn mutex");
+    }
+}
