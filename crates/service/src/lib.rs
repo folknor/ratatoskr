@@ -66,6 +66,12 @@ pub fn run_service_blocking() -> ! {
         }
     };
 
+    // 5. Best-effort cleanup of stale `service.<pid>.log*` files older than
+    //    24 h that don't belong to the current PID. Without this the per-
+    //    PID log naming would let any pathological respawn loop turn the
+    //    logs dir into thousands of files.
+    logging::cleanup_stale_logs(&app_data_dir);
+
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_name("ratatoskr-service")
@@ -82,7 +88,7 @@ pub fn run_service_blocking() -> ! {
         let lifecycle = lifecycle::ServiceLifecycle::new(Some(app_data_dir));
         sigterm::spawn(lifecycle.clone());
 
-        // 5. Wrap the saved FDs/HANDLEs into tokio I/O types now that we
+        // 6. Wrap the saved FDs/HANDLEs into tokio I/O types now that we
         //    have a runtime context.
         match stdio_defense::adopt_into_runtime(saved_stdio) {
             Ok((stdin, stdout)) => {
