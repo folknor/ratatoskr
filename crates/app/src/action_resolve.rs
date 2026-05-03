@@ -245,6 +245,17 @@ pub fn completion_behavior(op: &MailOperation) -> CompletionBehavior {
             undo: UndoBehavior::Reversible,
             success_label: "Snoozed",
         },
+        // Phase 2 task 14: Unsnooze is the inverse of Snooze, dispatched
+        // by the undo path. View stays on the inbox (the thread
+        // re-enters it); not user-reversible (clicking undo on an undo
+        // would just resnooze, but we don't surface that in the UI -
+        // the original undo entry already matches the original snooze).
+        MailOperation::Unsnooze => CompletionBehavior {
+            view_effect: ViewEffect::Stays,
+            post_success: PostSuccessEffect::RefreshNav,
+            undo: UndoBehavior::Irreversible,
+            success_label: "Unsnoozed",
+        },
     }
 }
 

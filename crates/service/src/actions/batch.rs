@@ -254,6 +254,7 @@ fn is_local_only(op: &MailOperation) -> bool {
         MailOperation::SetPinned { .. }
             | MailOperation::SetMuted { .. }
             | MailOperation::Snooze { .. }
+            | MailOperation::Unsnooze
     )
 }
 
@@ -305,7 +306,8 @@ async fn dispatch_with_provider(
         // Local-only ops routed through provider path in mixed batches
         op @ (MailOperation::SetPinned { .. }
         | MailOperation::SetMuted { .. }
-        | MailOperation::Snooze { .. }) => {
+        | MailOperation::Snooze { .. }
+        | MailOperation::Unsnooze) => {
             dispatch_local_only(ctx, op, account_id, thread_id).await
         }
     }
@@ -365,6 +367,10 @@ async fn op_local(
             let outcome = snooze::snooze(ctx, account_id, thread_id, *until).await;
             Ok(outcome.is_success())
         }
+        MailOperation::Unsnooze => {
+            let outcome = snooze::unsnooze(ctx, account_id, thread_id).await;
+            Ok(outcome.is_success())
+        }
     }
 }
 
@@ -379,7 +385,8 @@ async fn dispatch_local_only(
         MailOperation::SetPinned { to } => pin::pin(ctx, account_id, thread_id, *to).await,
         MailOperation::SetMuted { to } => mute::mute(ctx, account_id, thread_id, *to).await,
         MailOperation::Snooze { until } => snooze::snooze(ctx, account_id, thread_id, *until).await,
-        _ => unreachable!("only pin/mute/snooze are local-only"),
+        MailOperation::Unsnooze => snooze::unsnooze(ctx, account_id, thread_id).await,
+        _ => unreachable!("only pin/mute/snooze/unsnooze are local-only"),
     }
 }
 
@@ -406,7 +413,8 @@ fn enqueue_params(op: &MailOperation) -> (&'static str, String) {
         ),
         MailOperation::SetPinned { .. }
         | MailOperation::SetMuted { .. }
-        | MailOperation::Snooze { .. } => {
+        | MailOperation::Snooze { .. }
+        | MailOperation::Unsnooze => {
             unreachable!("local-only actions don't enqueue")
         }
     }
@@ -427,6 +435,7 @@ fn op_name(op: &MailOperation) -> &'static str {
         MailOperation::SetPinned { .. } => "pin",
         MailOperation::SetMuted { .. } => "mute",
         MailOperation::Snooze { .. } => "snooze",
+        MailOperation::Unsnooze => "unsnooze",
     }
 }
 

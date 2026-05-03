@@ -176,6 +176,19 @@ impl ReadyApp {
         &mut self,
         plan: crate::action_resolve::ActionExecutionPlan,
     ) -> Task<Message> {
+        self.dispatch_plan_with_undo(plan, None)
+    }
+
+    /// Variant of `dispatch_plan` that marks the plan as the inverse
+    /// of a previously-completed action. The completion handler fires
+    /// `Message::UndoCompleted` (toast + nav + thread-list reload)
+    /// instead of `Message::ActionCompleted` (per-behavior
+    /// post-success effects), preserving the pre-Phase-2 undo UX.
+    pub(crate) fn dispatch_plan_with_undo(
+        &mut self,
+        plan: crate::action_resolve::ActionExecutionPlan,
+        undo_description: Option<String>,
+    ) -> Task<Message> {
         if plan.operations.is_empty() {
             return Task::none();
         }
@@ -272,6 +285,7 @@ impl ReadyApp {
                 outcomes: Vec::new(),
                 state: crate::app::PlanState::Pending,
                 applied_outcomes: std::collections::HashSet::new(),
+                undo_description,
             },
         );
 
@@ -499,6 +513,7 @@ impl ReadyApp {
             mut outcomes,
             state: _,
             applied_outcomes: _,
+            undo_description,
         } = state;
         // Release the per-target throttle entries so a follow-up action
         // against the same threads dispatches without the 200 ms wait.
@@ -541,10 +556,20 @@ impl ReadyApp {
         }
         let outcomes_vec: Vec<rtsk::actions::ActionOutcome> =
             outcomes.into_iter().map(|(_, o)| o).collect();
-        Task::done(Message::ActionCompleted {
-            plan,
-            outcomes: outcomes_vec,
-        })
+        // Phase 2 task 14: inverse plans dispatched by an undo route
+        // through `Message::UndoCompleted` (toast + nav + thread-list
+        // reload) so the pre-Phase-2 undo UX is preserved.
+        if let Some(desc) = undo_description {
+            Task::done(Message::UndoCompleted {
+                desc,
+                outcomes: outcomes_vec,
+            })
+        } else {
+            Task::done(Message::ActionCompleted {
+                plan,
+                outcomes: outcomes_vec,
+            })
+        }
     }
 
     /// Rollback optimistic mutations when dispatch cannot proceed (I4).
@@ -707,228 +732,265 @@ impl ReadyApp {
 
     // ── Undo dispatch ───────────────────────────────────────
 
+    /// Undo a previously-completed action by dispatching the inverse
+    /// plan via the standard `action.execute_plan` IPC path.
+    ///
+    /// Phase 2 task 14: undo no longer runs in-process via
+    /// `ActionContext`; instead each `MailUndoPayload` is converted to
+    /// an `ActionExecutionPlan` whose operations are the per-payload
+    /// inverses, and dispatched through the same `dispatch_plan` that
+    /// regular actions use. The plan's `behavior.undo` is set to
+    /// `Irreversible` so the inverse plan does not push another undo
+    /// entry (no redo support today).
+    ///
+    /// `pending_operations` cancellation is still UI-side: when the
+    /// original action's retryable failure has parked it in the retry
+    /// queue, the inverse arriving Service-side would race the retry.
+    /// Cancel before dispatch so the inverse wins. This is a write
+    /// against `ReadDbState` (escape hatch); Phase 6's UI write-surface
+    /// lockdown removes it.
     pub(crate) fn dispatch_undo(
         &mut self,
-        entry: cmdk::UndoEntry<crate::action_resolve::MailUndoPayload>,
+        entry: &cmdk::UndoEntry<crate::action_resolve::MailUndoPayload>,
     ) -> Task<Message> {
-        let Some(mut ctx) = self.action_ctx() else {
-            self.status_bar.show_confirmation(
-                "\u{26A0} Undo unavailable \u{2014} action service not initialized".to_string(),
-            );
-            return Task::none();
-        };
-        ctx.suppress_pending_enqueue = true;
+        use crate::action_resolve as ar;
+        use rtsk::actions::MailOperation;
 
-        let desc = entry.description.clone();
-        Task::perform(
-            async move {
-                let mut all_outcomes = Vec::new();
-                // C8: payload execution order is stored entry order
-                for payload in &entry.payloads {
-                    all_outcomes.extend(execute_undo_compensation(&ctx, payload).await);
+        // Cancel any pending-ops entries that would re-fire the
+        // original action while the inverse runs. Best-effort: a
+        // failed cancel just means a redundant retry, not a
+        // correctness bug (the inverse and the retry would both write
+        // to the same end-state and the worker's idempotent
+        // application drops the duplicate outcome).
+        let cancel_targets: Vec<(String, String, &'static str)> = entry
+            .payloads
+            .iter()
+            .flat_map(undo_cancel_targets)
+            .collect();
+        if !cancel_targets.is_empty() {
+            let db = self.db.read_db_state();
+            tokio::spawn(async move {
+                use rtsk::db::pending_ops::db_pending_ops_cancel_for_resource;
+                for (account_id, resource_id, op_type) in cancel_targets {
+                    let _ = db_pending_ops_cancel_for_resource(
+                        &db,
+                        account_id,
+                        resource_id,
+                        op_type.to_string(),
+                    )
+                    .await;
                 }
-                (desc, all_outcomes)
-            },
-            |(desc, outcomes)| Message::UndoCompleted { desc, outcomes },
-        )
+            });
+        }
+
+        // Build operations from the payload list. Each payload yields
+        // one MailOperation per thread (uniform inverse). The plan's
+        // behavior is keyed off the first op's category for the toast
+        // text; we override `undo` to `Irreversible` so no redo entry
+        // gets pushed.
+        let mut operations: Vec<(String, String, MailOperation)> = Vec::new();
+        for payload in &entry.payloads {
+            for (account_id, thread_id, op) in undo_payload_to_ops(payload) {
+                operations.push((account_id, thread_id, op));
+            }
+        }
+        if operations.is_empty() {
+            log::debug!("dispatch_undo: empty inverse plan; nothing to do");
+            return Task::none();
+        }
+        // Inverse plans don't push another undo entry (no redo). The
+        // success_label and post-success effect don't matter for the
+        // inverse plan because `undo_description` routes the
+        // completion to `Message::UndoCompleted`, which has its own
+        // toast + nav + thread-list reload logic.
+        let mut behavior = ar::completion_behavior(&operations[0].2);
+        behavior.undo = ar::UndoBehavior::Irreversible;
+
+        let plan = ar::ActionExecutionPlan {
+            operations,
+            behavior,
+            compensation: ar::CompensationContext::None,
+            optimistic: Vec::new(),
+        };
+        self.dispatch_plan_with_undo(plan, Some(entry.description.clone()))
     }
 }
 
-// ── Undo compensation ───────────────────────────────────────────────
+// ── Undo helpers ────────────────────────────────────────────────────
 
-/// Execute undo compensation for a single payload.
-async fn execute_undo_compensation(
-    ctx: &rtsk::actions::ActionContext,
+/// Convert a `MailUndoPayload` to a list of `(account, thread, MailOperation)`
+/// inverse operations. One `MailOperation` per `(payload variant, thread_id)`
+/// pair.
+fn undo_payload_to_ops(
     payload: &crate::action_resolve::MailUndoPayload,
-) -> Vec<ActionOutcome> {
+) -> Vec<(String, String, rtsk::actions::MailOperation)> {
     use crate::action_resolve::MailUndoPayload;
-    use rtsk::actions;
-    use rtsk::db::pending_ops::db_pending_ops_cancel_for_resource;
-
+    use rtsk::actions::MailOperation;
     match payload {
-        MailUndoPayload::Archive {
-            account_id,
-            thread_ids,
-        } => {
-            let mut outcomes = Vec::with_capacity(thread_ids.len());
+        MailUndoPayload::Archive { account_id, thread_ids } => {
             let inbox = TagId::from("INBOX");
-            for tid in thread_ids {
-                let _ = db_pending_ops_cancel_for_resource(
-                    &ctx.db,
-                    account_id.clone(),
-                    tid.clone(),
-                    "archive".to_string(),
-                )
-                .await;
-                outcomes.push(actions::add_label(ctx, account_id, tid, &inbox).await);
-            }
-            outcomes
+            thread_ids
+                .iter()
+                .map(|tid| {
+                    (
+                        account_id.clone(),
+                        tid.clone(),
+                        MailOperation::AddLabel { label_id: inbox.clone() },
+                    )
+                })
+                .collect()
         }
-        MailUndoPayload::Trash {
-            account_id,
-            thread_ids,
-            source,
-        } => {
-            let mut outcomes = Vec::with_capacity(thread_ids.len());
-            for tid in thread_ids {
-                let _ = db_pending_ops_cancel_for_resource(
-                    &ctx.db,
-                    account_id.clone(),
-                    tid.clone(),
-                    "trash".to_string(),
-                )
-                .await;
-                let outcome = if let Some(folder) = source {
-                    actions::move_to_folder(ctx, account_id, tid, folder, None).await
+        MailUndoPayload::Trash { account_id, thread_ids, source } => thread_ids
+            .iter()
+            .map(|tid| {
+                let op = if let Some(folder) = source {
+                    MailOperation::MoveToFolder {
+                        dest: folder.clone(),
+                        source: None,
+                    }
                 } else {
-                    let inbox = TagId::from("INBOX");
-                    actions::add_label(ctx, account_id, tid, &inbox).await
+                    MailOperation::AddLabel {
+                        label_id: TagId::from("INBOX"),
+                    }
                 };
-                outcomes.push(outcome);
-            }
-            outcomes
-        }
-        MailUndoPayload::MoveToFolder {
-            account_id,
-            thread_ids,
-            source,
-        } => {
-            let mut outcomes = Vec::with_capacity(thread_ids.len());
-            for tid in thread_ids {
-                let _ = db_pending_ops_cancel_for_resource(
-                    &ctx.db,
+                (account_id.clone(), tid.clone(), op)
+            })
+            .collect(),
+        MailUndoPayload::MoveToFolder { account_id, thread_ids, source } => thread_ids
+            .iter()
+            .map(|tid| {
+                (
                     account_id.clone(),
                     tid.clone(),
-                    "moveToFolder".to_string(),
+                    MailOperation::MoveToFolder {
+                        dest: source.clone(),
+                        source: None,
+                    },
                 )
-                .await;
-                outcomes.push(actions::move_to_folder(ctx, account_id, tid, source, None).await);
-            }
-            outcomes
-        }
-        MailUndoPayload::SetSpam {
-            account_id,
-            thread_ids,
-            was_spam,
-        } => {
-            let mut outcomes = Vec::with_capacity(thread_ids.len());
-            for tid in thread_ids {
-                let _ = db_pending_ops_cancel_for_resource(
-                    &ctx.db,
+            })
+            .collect(),
+        MailUndoPayload::SetSpam { account_id, thread_ids, was_spam } => thread_ids
+            .iter()
+            .map(|tid| {
+                (
                     account_id.clone(),
                     tid.clone(),
-                    "spam".to_string(),
+                    MailOperation::SetSpam { to: *was_spam },
                 )
-                .await;
-                outcomes.push(actions::spam(ctx, account_id, tid, *was_spam).await);
-            }
-            outcomes
-        }
-        MailUndoPayload::SetRead {
-            account_id,
-            thread_ids,
-            was_read,
-        } => {
-            let mut outcomes = Vec::with_capacity(thread_ids.len());
-            for tid in thread_ids {
-                let _ = db_pending_ops_cancel_for_resource(
-                    &ctx.db,
+            })
+            .collect(),
+        MailUndoPayload::SetRead { account_id, thread_ids, was_read } => thread_ids
+            .iter()
+            .map(|tid| {
+                (
                     account_id.clone(),
                     tid.clone(),
-                    "markRead".to_string(),
+                    MailOperation::SetRead { to: *was_read },
                 )
-                .await;
-                outcomes.push(actions::mark_read(ctx, account_id, tid, *was_read).await);
-            }
-            outcomes
-        }
-        MailUndoPayload::SetStarred {
-            account_id,
-            thread_ids,
-            was_starred,
-        } => {
-            let mut outcomes = Vec::with_capacity(thread_ids.len());
-            for tid in thread_ids {
-                let _ = db_pending_ops_cancel_for_resource(
-                    &ctx.db,
+            })
+            .collect(),
+        MailUndoPayload::SetStarred { account_id, thread_ids, was_starred } => thread_ids
+            .iter()
+            .map(|tid| {
+                (
                     account_id.clone(),
                     tid.clone(),
-                    "star".to_string(),
+                    MailOperation::SetStarred { to: *was_starred },
                 )
-                .await;
-                outcomes.push(actions::star(ctx, account_id, tid, *was_starred).await);
-            }
-            outcomes
-        }
-        MailUndoPayload::SetPinned {
-            account_id,
-            thread_ids,
-            was_pinned,
-        } => {
-            let mut outcomes = Vec::with_capacity(thread_ids.len());
-            for tid in thread_ids {
-                outcomes.push(actions::pin(ctx, account_id, tid, *was_pinned).await);
-            }
-            outcomes
-        }
-        MailUndoPayload::SetMuted {
-            account_id,
-            thread_ids,
-            was_muted,
-        } => {
-            let mut outcomes = Vec::with_capacity(thread_ids.len());
-            for tid in thread_ids {
-                outcomes.push(actions::mute(ctx, account_id, tid, *was_muted).await);
-            }
-            outcomes
-        }
-        MailUndoPayload::AddLabel {
-            account_id,
-            thread_ids,
-            label_id,
-        } => {
-            let mut outcomes = Vec::with_capacity(thread_ids.len());
-            for tid in thread_ids {
-                let _ = db_pending_ops_cancel_for_resource(
-                    &ctx.db,
+            })
+            .collect(),
+        MailUndoPayload::SetPinned { account_id, thread_ids, was_pinned } => thread_ids
+            .iter()
+            .map(|tid| {
+                (
                     account_id.clone(),
                     tid.clone(),
-                    "addLabel".to_string(),
+                    MailOperation::SetPinned { to: *was_pinned },
                 )
-                .await;
-                outcomes.push(actions::remove_label(ctx, account_id, tid, label_id).await);
-            }
-            outcomes
-        }
-        MailUndoPayload::RemoveLabel {
-            account_id,
-            thread_ids,
-            label_id,
-        } => {
-            let mut outcomes = Vec::with_capacity(thread_ids.len());
-            for tid in thread_ids {
-                let _ = db_pending_ops_cancel_for_resource(
-                    &ctx.db,
+            })
+            .collect(),
+        MailUndoPayload::SetMuted { account_id, thread_ids, was_muted } => thread_ids
+            .iter()
+            .map(|tid| {
+                (
                     account_id.clone(),
                     tid.clone(),
-                    "removeLabel".to_string(),
+                    MailOperation::SetMuted { to: *was_muted },
                 )
-                .await;
-                outcomes.push(actions::add_label(ctx, account_id, tid, label_id).await);
-            }
-            outcomes
-        }
-        MailUndoPayload::Snooze {
-            account_id,
-            thread_ids,
-        } => {
-            let mut outcomes = Vec::with_capacity(thread_ids.len());
-            for tid in thread_ids {
-                outcomes.push(actions::unsnooze(ctx, account_id, tid).await);
-            }
-            outcomes
-        }
+            })
+            .collect(),
+        MailUndoPayload::AddLabel { account_id, thread_ids, label_id } => thread_ids
+            .iter()
+            .map(|tid| {
+                (
+                    account_id.clone(),
+                    tid.clone(),
+                    MailOperation::RemoveLabel { label_id: label_id.clone() },
+                )
+            })
+            .collect(),
+        MailUndoPayload::RemoveLabel { account_id, thread_ids, label_id } => thread_ids
+            .iter()
+            .map(|tid| {
+                (
+                    account_id.clone(),
+                    tid.clone(),
+                    MailOperation::AddLabel { label_id: label_id.clone() },
+                )
+            })
+            .collect(),
+        MailUndoPayload::Snooze { account_id, thread_ids } => thread_ids
+            .iter()
+            .map(|tid| {
+                (
+                    account_id.clone(),
+                    tid.clone(),
+                    MailOperation::Unsnooze,
+                )
+            })
+            .collect(),
     }
+}
+
+/// `(account_id, resource_id, operation_type)` triples whose
+/// pending-ops entries should be cancelled before the inverse plan
+/// dispatches. The original action's pending retry would otherwise
+/// fight the inverse on the next drainer pass.
+fn undo_cancel_targets(
+    payload: &crate::action_resolve::MailUndoPayload,
+) -> Vec<(String, String, &'static str)> {
+    use crate::action_resolve::MailUndoPayload;
+    let (account_id, thread_ids, op_type): (&String, &Vec<String>, &'static str) = match payload {
+        MailUndoPayload::Archive { account_id, thread_ids } => (account_id, thread_ids, "archive"),
+        MailUndoPayload::Trash { account_id, thread_ids, .. } => (account_id, thread_ids, "trash"),
+        MailUndoPayload::MoveToFolder { account_id, thread_ids, .. } => {
+            (account_id, thread_ids, "moveToFolder")
+        }
+        MailUndoPayload::SetSpam { account_id, thread_ids, .. } => {
+            (account_id, thread_ids, "spam")
+        }
+        MailUndoPayload::SetRead { account_id, thread_ids, .. } => {
+            (account_id, thread_ids, "markRead")
+        }
+        MailUndoPayload::SetStarred { account_id, thread_ids, .. } => {
+            (account_id, thread_ids, "star")
+        }
+        MailUndoPayload::AddLabel { account_id, thread_ids, .. } => {
+            (account_id, thread_ids, "addLabel")
+        }
+        MailUndoPayload::RemoveLabel { account_id, thread_ids, .. } => {
+            (account_id, thread_ids, "removeLabel")
+        }
+        // Pin/Mute/Snooze are local-only: they never enqueue into
+        // pending_operations, so there is nothing to cancel.
+        MailUndoPayload::SetPinned { .. }
+        | MailUndoPayload::SetMuted { .. }
+        | MailUndoPayload::Snooze { .. } => return Vec::new(),
+    };
+    thread_ids
+        .iter()
+        .map(|tid| (account_id.clone(), tid.clone(), op_type))
+        .collect()
 }
 
 // ── Snooze resurface ─────────────────────────────────────────

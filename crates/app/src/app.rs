@@ -224,6 +224,12 @@ pub(crate) struct PendingActionPlan {
     /// failures might still need toast logic at `ActionCompleted`
     /// time, but a duplicate must not double-push.
     pub(crate) applied_outcomes: std::collections::HashSet<u32>,
+    /// Set when this plan is the inverse dispatched by an undo (Phase
+    /// 2 task 14). Carries the original action's description so the
+    /// completion handler can fire `Message::UndoCompleted` (toast +
+    /// nav + thread-list reload) instead of `Message::ActionCompleted`
+    /// (toast + per-behavior post-success effects).
+    pub(crate) undo_description: Option<String>,
 }
 
 impl ReadyApp {

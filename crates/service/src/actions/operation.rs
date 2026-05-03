@@ -48,4 +48,9 @@ pub enum MailOperation {
     Snooze {
         until: i64,
     },
+    /// Inverse of `Snooze` (Phase 2 task 14): restore a snoozed thread
+    /// to the inbox and clear the snooze timestamp. Local-only - no
+    /// provider has a universal snooze API, so the undo path is purely
+    /// a DB mutation.
+    Unsnooze,
 }

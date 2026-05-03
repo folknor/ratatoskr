@@ -102,6 +102,7 @@ pub enum WireMailOperation {
     AddLabel { label_id: WireTagId },
     RemoveLabel { label_id: WireTagId },
     Snooze { until: i64 },
+    Unsnooze,
 }
 
 // ---------------------------------------------------------------------------

@@ -610,7 +610,7 @@ impl ReadyApp {
             }
             Message::Undo => {
                 if let Some(entry) = self.undo_stack.pop() {
-                    return self.dispatch_undo(entry);
+                    return self.dispatch_undo(&entry);
                 }
                 Task::none()
             }

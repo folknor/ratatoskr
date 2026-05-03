@@ -76,6 +76,7 @@ pub fn to_wire_op(op: &MailOperation) -> WireMailOperation {
             label_id: tag_to_wire(label_id),
         },
         MailOperation::Snooze { until } => WireMailOperation::Snooze { until: *until },
+        MailOperation::Unsnooze => WireMailOperation::Unsnooze,
     }
 }
 
@@ -161,6 +162,7 @@ mod tests {
                 label_id: TagId("personal".into()),
             },
             MailOperation::Snooze { until: 1_700_000_000 },
+            MailOperation::Unsnooze,
         ];
         for op in cases {
             let wire = to_wire_op(&op);

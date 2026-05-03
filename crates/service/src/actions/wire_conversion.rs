@@ -42,6 +42,7 @@ pub(crate) fn wire_to_mail(op: WireMailOperation) -> MailOperation {
             label_id: wire_tag_to_tag(label_id),
         },
         WireMailOperation::Snooze { until } => MailOperation::Snooze { until },
+        WireMailOperation::Unsnooze => MailOperation::Unsnooze,
     }
 }
 
@@ -72,6 +73,7 @@ pub(crate) fn mail_to_wire(op: MailOperation) -> WireMailOperation {
             label_id: tag_to_wire(label_id),
         },
         MailOperation::Snooze { until } => WireMailOperation::Snooze { until },
+        MailOperation::Unsnooze => WireMailOperation::Unsnooze,
     }
 }
 
@@ -127,6 +129,7 @@ mod tests {
                 label_id: WireTagId("work".into()),
             },
             WireMailOperation::Snooze { until: 1_700_000_000 },
+            WireMailOperation::Unsnooze,
         ];
         for w in cases {
             let m = wire_to_mail(w.clone());
