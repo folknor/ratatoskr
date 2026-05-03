@@ -178,7 +178,11 @@ impl App {
         let sync_reporter = Arc::new(reporter);
 
         let (jmap_push_tx, jmap_push_receiver) = create_jmap_push_channel();
-        let service_notifications = Arc::new(std::sync::Mutex::new(None));
+        // Placeholder queue until the Service is ready; replaced in
+        // Message::ServiceReady with the spawned client's queue. Cap matches
+        // service_client::NOTIFICATION_QUEUE_CAP.
+        let service_notifications: ServiceNotificationReceiver =
+            Arc::new(crate::notification_queue::NotificationQueue::new(1024));
 
         let body_store = match db::threads::init_body_store() {
             Ok(bs) => Some(bs),

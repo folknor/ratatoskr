@@ -1,3 +1,4 @@
+use crate::notification_queue::NotificationQueue;
 use crate::service_client::ServiceNotificationReceiver;
 use iced::Subscription;
 use iced::advanced::graphics::futures::subscription;
@@ -8,7 +9,7 @@ use service_api::Notification;
 use std::sync::Arc;
 
 struct ServiceNotificationRecipe {
-    receiver: ServiceNotificationReceiver,
+    queue: Arc<NotificationQueue>,
 }
 
 impl subscription::Recipe for ServiceNotificationRecipe {
@@ -24,16 +25,10 @@ impl subscription::Recipe for ServiceNotificationRecipe {
         self: Box<Self>,
         _input: subscription::EventStream,
     ) -> BoxStream<'static, Notification> {
-        let taken = self.receiver.lock().ok().and_then(|mut guard| guard.take());
-
-        match taken {
-            Some(rx) => iced::futures::stream::unfold(rx, |mut rx| async {
-                let notification = rx.recv().await?;
-                Some((notification, rx))
-            })
-            .boxed(),
-            None => iced::futures::stream::empty().boxed(),
-        }
+        iced::futures::stream::unfold(self.queue, |queue| async move {
+            queue.recv().await.map(|notification| (notification, queue))
+        })
+        .boxed()
     }
 }
 
@@ -41,6 +36,6 @@ pub(crate) fn service_notification_subscription(
     receiver: &ServiceNotificationReceiver,
 ) -> Subscription<Notification> {
     subscription::from_recipe(ServiceNotificationRecipe {
-        receiver: Arc::clone(receiver),
+        queue: Arc::clone(receiver),
     })
 }

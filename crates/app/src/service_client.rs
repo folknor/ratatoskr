@@ -1,3 +1,4 @@
+use crate::notification_queue::NotificationQueue;
 use dashmap::DashMap;
 use serde::de::DeserializeOwned;
 use service_api::{
@@ -18,8 +19,7 @@ use tokio::sync::{mpsc, oneshot};
 const STDIN_QUEUE_CAP: usize = 1024;
 const NOTIFICATION_QUEUE_CAP: usize = 1024;
 
-pub(crate) type ServiceNotificationReceiver =
-    Arc<Mutex<Option<mpsc::Receiver<Notification>>>>;
+pub(crate) type ServiceNotificationReceiver = Arc<NotificationQueue>;
 
 pub struct ServiceClient {
     child: Mutex<Option<Child>>,
@@ -73,15 +73,15 @@ impl ServiceClient {
         let stdin = child.stdin.take().ok_or(ClientError::NotConnected)?;
         let stdout = child.stdout.take().ok_or(ClientError::NotConnected)?;
         let (stdin_tx, stdin_rx) = mpsc::channel(STDIN_QUEUE_CAP);
-        let (notification_tx, notification_rx) = mpsc::channel(NOTIFICATION_QUEUE_CAP);
         let pending = Arc::new(DashMap::new());
         let next_id = Arc::new(AtomicU64::new(1));
-        let notifications = Arc::new(Mutex::new(Some(notification_rx)));
+        let notifications: Arc<NotificationQueue> =
+            Arc::new(NotificationQueue::new(NOTIFICATION_QUEUE_CAP));
 
         let reader_handle = tokio::spawn(reader_task(
             stdout,
             Arc::clone(&pending),
-            notification_tx,
+            Arc::clone(&notifications),
         ));
         let writer_handle = tokio::spawn(writer_task(stdin, stdin_rx));
 
@@ -295,6 +295,10 @@ impl Drop for ServiceClient {
             self.poll_for_exit(Duration::from_millis(500));
         }
 
+        // Unblock any subscription consumer still parked in `recv()` so it
+        // can unwind cleanly instead of waiting on a queue that will never
+        // see another producer.
+        self.notifications.close();
         fail_pending(&self.pending);
     }
 }
@@ -357,7 +361,7 @@ fn take_join_handle(
 async fn reader_task<R>(
     stdout: R,
     pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>>,
-    notifications: mpsc::Sender<Notification>,
+    notifications: Arc<NotificationQueue>,
 ) where
     R: tokio::io::AsyncRead + Unpin,
 {
@@ -417,18 +421,8 @@ fn client_error_from_rpc(error: JsonRpcErrorObject) -> ClientError {
     }
 }
 
-async fn enqueue_notification(
-    notifications: &mpsc::Sender<Notification>,
-    notification: Notification,
-) {
-    match notification.class() {
-        service_api::NotificationClass::MustDeliver => {
-            let _ = notifications.send(notification).await;
-        }
-        service_api::NotificationClass::Coalesce { .. } | service_api::NotificationClass::Drop => {
-            let _ = notifications.try_send(notification);
-        }
-    }
+async fn enqueue_notification(notifications: &NotificationQueue, notification: Notification) {
+    notifications.enqueue(notification).await;
 }
 
 async fn writer_task<W>(mut stdin: W, mut stdin_rx: mpsc::Receiver<Vec<u8>>)

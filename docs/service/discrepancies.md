@@ -22,34 +22,14 @@ Plan section 13 requires a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 
 
 `crates/service/src/stdio_defense.rs` only has a `cfg(unix)` impl. `lib.rs` falls through to `tokio::io::stdin()` / `tokio::io::stdout()` on Windows (`crates/service/src/lib.rs:48-53`). Plan section 11 requires "Windows: equivalent via `DuplicateHandle` + `SetStdHandle` against `NUL`". A stray `println!` in any transitive dep will desync the JSON-RPC framing on Windows.
 
-### 3. NotificationClass routing does not match the plan
-
-`crates/app/src/service_client.rs`:
-
-```rust
-match notification.class() {
-    MustDeliver => { let _ = notifications.send(notification).await; }
-    Coalesce { .. } | Drop => { let _ = notifications.try_send(notification); }
-}
-```
-
-Plan section 8:
-
-- `Coalesce { key }`: latest-wins on the enqueue side - find existing entry for the same key and overwrite. Implementation does no key lookup and does not coalesce.
-- `Drop`: drop oldest under queue pressure. Implementation drops the newest (`try_send` rejects on full).
-
-The empty `Notification` enum means nothing exercises this in Phase 1, but the framework is supposed to "land so Phase 2 plugs in cleanly the next day"; today Phase 2 will rewrite this routing immediately.
-
-### 6. Notification framework is not round-trip-tested
-
-`crates/service-api/src/notification.rs` has `pub enum Notification {}` with `#[serde(tag = "method", content = "params")]` and `Serialize` / `Deserialize` derives. The Phase 1 framework is supposed to "land so Phase 2 plugs in cleanly the next day", but no test ever sends a notification through the wire end-to-end with a feature-gated test variant. The synthetic JSON object built in `parse_service_message` (`{"method": ..., "params": ...}`) needs to round-trip cleanly with `tag = "method", content = "params"` semantics; that contract is currently unverified.
-
 ## Missing tests promised by the plan
 
 In-tree tests today:
 
 - `crates/service-api/src/error.rs`: `ServiceError` round-trips through `JsonRpcErrorObject.data` (3 unit tests).
+- `crates/service-api/src/notification.rs`: `Notification` round-trips through serde + `parse_service_message`; class + method_name lookup (4 unit tests, gated on a `#[cfg(test)] TestEcho` variant).
 - `crates/service/tests/dispatch_in_process.rs`: ping happy path, malformed JSON, oversize frame, EOF, concurrent fan-out, invalid UTF-8 returns parse-error and loop continues, invalid request correlates parse-error to extracted id (7 tests).
+- `crates/app/src/notification_queue.rs`: Coalesce replaces existing entry by key, Coalesce preserves slot when replacing, Drop evicts oldest under pressure, MustDeliver blocks producer when full, close unblocks recv with None, cross-class FIFO is preserved (6 unit tests over a `Classifiable` mock).
 - `crates/app/tests/service_subprocess.rs`: spawn + ping + shutdown via the wire (1 test).
 
 Promised by plan section 13 / 20-21 but not present:

@@ -30,6 +30,7 @@ mod helpers;
 mod icon;
 mod main_view;
 mod message;
+mod notification_queue;
 mod pop_out;
 pub mod service_client;
 mod service_subscription;
