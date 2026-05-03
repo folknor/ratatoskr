@@ -170,16 +170,25 @@ impl ReadyApp {
             // Compose
             Message::Compose => self.open_compose_window(ComposeMode::New),
             Message::Noop => Task::none(),
-            // Service{ChildSpawned,BootReady,BootFailed} are dispatched by
-            // BootingApp, never reach ReadyApp. If they arrive here it's
-            // because the spawn flow re-fired post-handshake (a future
-            // respawn loop, scope item 14) - log + drop until that wiring
-            // lands.
-            Message::ServiceChildSpawned(_)
-            | Message::ServiceBootReady(_)
-            | Message::ServiceBootFailed(_) => {
-                log::debug!("ReadyApp dropped post-handshake spawn-flow message");
+            // Service{ChildSpawned,BootReady} re-fire post-handshake when a
+            // respawn cycles (scope item 14). The App's notification
+            // subscription is still bound to the same Arc<NotificationQueue>
+            // and the schema-version sanity check already ran in
+            // handle_crash, so there's nothing for ReadyApp to do here -
+            // log at debug as a respawn breadcrumb.
+            Message::ServiceChildSpawned(_) | Message::ServiceBootReady(_) => {
+                log::debug!("ReadyApp observed post-handshake respawn event");
                 Task::none()
+            }
+            // ServiceBootFailed reaching ReadyApp means a respawn attempt
+            // failed (e.g., the new Service exited with a deterministic
+            // BootExitCode, or the new boot.ready handshake itself errored).
+            // Phase 1.5 surfaces this as a fatal error and exits cleanly,
+            // identical to the boot-time path; Phase 8's UI status indicator
+            // will replace the iced::exit() with an in-app banner.
+            Message::ServiceBootFailed(reason) => {
+                let _ = crate::service_client::surface_terminal_failure(&reason);
+                iced::exit()
             }
             Message::ServiceNotification(notification) => {
                 // Drop notifications from a dying-but-still-flushing reader

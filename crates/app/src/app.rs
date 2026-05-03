@@ -442,7 +442,11 @@ fn spawn_event_stream(
                             Message::ServiceBootReady(response)
                         }
                         crate::service_client::SpawnEvent::Terminal(error) => {
-                            Message::ServiceBootFailed(error.to_string())
+                            Message::ServiceBootFailed(
+                                crate::service_client::BootFailureReason::from_client_error(
+                                    &error,
+                                ),
+                            )
                         }
                     };
                     if output.try_send(msg).is_err() {
@@ -545,9 +549,8 @@ impl BootingApp {
                 );
                 BootingUpdate::Transition(Box::new(ready), task)
             }
-            Message::ServiceBootFailed(detail) => {
-                log::error!("Service boot failed (fatal): {detail}");
-                eprintln!("[ui] fatal: service boot failed: {detail}");
+            Message::ServiceBootFailed(reason) => {
+                let _ = crate::service_client::surface_terminal_failure(&reason);
                 BootingUpdate::Stay(iced::exit())
             }
             Message::ServiceNotification(notification) => {

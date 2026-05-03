@@ -90,6 +90,72 @@ impl std::fmt::Debug for ServiceClient {
     }
 }
 
+/// Reason for a fatal Service boot failure surfaced through
+/// `Message::ServiceBootFailed`. Carries the structured classification when
+/// the dying child's exit code matched a known `BootExitCode`, or a plain
+/// detail string for everything else (UI-side spawn IO failures, version
+/// mismatch, in-flight ServiceCrashed, request timeout). `ClientError`
+/// itself is not `Clone` (because `std::io::Error` is not), and iced
+/// Messages must be `Clone`, so this is the wire-friendly projection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BootFailureReason {
+    Classified(BootClassification),
+    Other(String),
+}
+
+impl BootFailureReason {
+    /// Map the various `ClientError` shapes onto a reason suitable for the
+    /// terminal-failure handler. The classified path keeps the structured
+    /// info so the UI can surface a friendlier message for the
+    /// `AnotherInstanceRunning` case; everything else falls back to the
+    /// `Display` of the error.
+    pub fn from_client_error(error: &ClientError) -> Self {
+        match error {
+            ClientError::BootFailure { classification } => {
+                Self::Classified(*classification)
+            }
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+/// Compute the user-visible message for a terminal boot failure. The
+/// `AnotherInstanceRunning` case is the only one with a genuinely
+/// user-actionable message ("Ratatoskr is already running"); everything
+/// else gets a technical message logged for the next launch's diagnosis
+/// per scope item 16's "no UI plumbing for the error dialog yet" exit
+/// criterion.
+pub fn terminal_failure_user_message(reason: &BootFailureReason) -> String {
+    match reason {
+        BootFailureReason::Classified(BootClassification::BootFailure { code }) => match code {
+            BootExitCode::AnotherInstanceRunning => {
+                "Ratatoskr is already running.".to_string()
+            }
+            BootExitCode::KeyLoadFailure => {
+                "Encryption key missing or unreadable.".to_string()
+            }
+            BootExitCode::MigrationFailure => "Database migration failed.".to_string(),
+            BootExitCode::HandshakeFailure => "Service handshake failed.".to_string(),
+        },
+        BootFailureReason::Classified(BootClassification::UnexpectedExit { code }) => {
+            match code {
+                Some(code) => format!("Service exited unexpectedly (code {code})."),
+                None => "Service exited unexpectedly (no exit code; signaled).".to_string(),
+            }
+        }
+        BootFailureReason::Other(detail) => format!("Service boot failed: {detail}"),
+    }
+}
+
+/// Log + stderr-write the terminal-failure message. Returns the message
+/// string so the iced handler can use it (and so tests can assert on it).
+pub fn surface_terminal_failure(reason: &BootFailureReason) -> String {
+    let message = terminal_failure_user_message(reason);
+    log::error!("Fatal: {message}");
+    eprintln!("[ui] fatal: {message}");
+    message
+}
+
 /// Events emitted by the two-phase spawn flow on the receiver returned by
 /// [`ServiceClient::spawn_with_events`].
 ///
@@ -1390,6 +1456,102 @@ mod tests {
     // covered by `service_api::tests::service_generation_is_none_for_variants_without_the_field`
     // - the test variant lives behind `#[cfg(test)]` in the service-api
     // crate and is not visible from the app crate's tests.
+
+    /// AnotherInstanceRunning is the one terminal-failure case with a
+    /// genuinely user-actionable message: the user can quit the other
+    /// running instance and try again. Pin the wording so a refactor
+    /// can't silently degrade the message.
+    #[test]
+    fn terminal_message_for_another_instance_is_user_friendly() {
+        let reason = BootFailureReason::Classified(BootClassification::BootFailure {
+            code: BootExitCode::AnotherInstanceRunning,
+        });
+        assert_eq!(
+            terminal_failure_user_message(&reason),
+            "Ratatoskr is already running.",
+        );
+    }
+
+    /// Each known BootExitCode maps to a distinct user message - distinct
+    /// is what matters; a refactor that collapses two of them into the same
+    /// string should fail this test.
+    #[test]
+    fn terminal_messages_for_known_codes_are_distinct() {
+        let messages: Vec<String> = [
+            BootExitCode::AnotherInstanceRunning,
+            BootExitCode::KeyLoadFailure,
+            BootExitCode::MigrationFailure,
+            BootExitCode::HandshakeFailure,
+        ]
+        .into_iter()
+        .map(|code| {
+            terminal_failure_user_message(&BootFailureReason::Classified(
+                BootClassification::BootFailure { code },
+            ))
+        })
+        .collect();
+        let mut sorted = messages.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), messages.len(), "messages must be distinct");
+    }
+
+    /// UnexpectedExit prints whichever exit code we observed, distinguishing
+    /// signal-killed (None) from "exited with an unknown numeric code"
+    /// (Some(n)) so the diagnostic in the log files isn't ambiguous.
+    #[test]
+    fn terminal_message_for_unexpected_exit_includes_code() {
+        let with_code = BootFailureReason::Classified(BootClassification::UnexpectedExit {
+            code: Some(42),
+        });
+        assert!(
+            terminal_failure_user_message(&with_code).contains("42"),
+            "unexpected-exit message should contain the code",
+        );
+        let signal = BootFailureReason::Classified(BootClassification::UnexpectedExit {
+            code: None,
+        });
+        assert!(
+            terminal_failure_user_message(&signal).contains("signaled"),
+            "no-code path should mention 'signaled' so log readers know it was a signal",
+        );
+    }
+
+    /// `BootFailureReason::Other` is the catch-all for non-classified
+    /// failures (UI-side spawn IO error, version mismatch, request
+    /// timeout). The detail string is included verbatim.
+    #[test]
+    fn terminal_message_for_other_includes_detail() {
+        let reason = BootFailureReason::Other("specific upstream failure".to_string());
+        assert!(
+            terminal_failure_user_message(&reason).contains("specific upstream failure"),
+        );
+    }
+
+    /// `BootFailureReason::from_client_error` keeps the structured
+    /// classification when the upstream error is `ClientError::BootFailure`,
+    /// and falls back to `Other(detail)` for everything else. This is what
+    /// the spawn_event_stream conversion relies on.
+    #[test]
+    fn from_client_error_preserves_classification() {
+        let classified = ClientError::BootFailure {
+            classification: BootClassification::BootFailure {
+                code: BootExitCode::KeyLoadFailure,
+            },
+        };
+        match BootFailureReason::from_client_error(&classified) {
+            BootFailureReason::Classified(BootClassification::BootFailure {
+                code: BootExitCode::KeyLoadFailure,
+            }) => {}
+            other => panic!("expected Classified KeyLoadFailure, got {other:?}"),
+        }
+
+        let crashed = ClientError::ServiceCrashed;
+        match BootFailureReason::from_client_error(&crashed) {
+            BootFailureReason::Other(_) => {}
+            other => panic!("expected Other, got {other:?}"),
+        }
+    }
 
     /// End-to-end: tag a notification with the reader's gen, then run the
     /// dispatch-side check after a generation bump. The notification must

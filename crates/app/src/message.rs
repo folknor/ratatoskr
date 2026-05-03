@@ -16,7 +16,10 @@
 // New variants added in commit 13 (the ones that drive the spawn flow):
 //   ServiceChildSpawned(Arc<ServiceClient>)        - handle (populate client)
 //   ServiceBootReady(BootReadyResponse)            - handle (transition Ready)
-//   ServiceBootFailed(BootClassification)          - handle (log + iced::exit)
+//   ServiceBootFailed(BootFailureReason)           - handle (log + iced::exit;
+//                                                    AnotherInstanceRunning
+//                                                    gets a friendly message,
+//                                                    everything else technical)
 //
 // Existing Service-related:
 //   ServiceReady (Result<Arc<ServiceClient>, _>)   - REPLACED in commit 13 by
@@ -143,9 +146,14 @@ pub enum Message {
     /// the encryption key, recovered pending ops, swept queued drafts, and
     /// backfilled thread participants. The App transitions Booting -> Ready.
     ServiceBootReady(service_api::BootReadyResponse),
-    /// Spawn or boot.ready failed. The App logs and exits cleanly via
-    /// iced::exit().
-    ServiceBootFailed(String),
+    /// Spawn or boot.ready failed - or, after the App has reached Ready,
+    /// `handle_crash`'s respawn attempt itself failed. Both paths land
+    /// here. The App logs the user-visible message via
+    /// `service_client::surface_terminal_failure` and exits cleanly via
+    /// `iced::exit()`. `BootFailureReason::Classified(...AnotherInstanceRunning)`
+    /// is the one case that gets a user-friendly message; everything else
+    /// gets a technical message per scope item 16 of phase-1.5-plan.md.
+    ServiceBootFailed(crate::service_client::BootFailureReason),
     ServiceNotification(service_api::Notification),
     ServiceShutdownComplete(Result<(), String>),
     ToggleSettings,
