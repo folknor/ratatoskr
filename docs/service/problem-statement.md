@@ -320,6 +320,16 @@ Every place the UI process writes to durable state today, mapped to the phase th
 
 Anything not in this table is either (a) read-only from the UI's perspective and stays UI-side, or (b) we missed it - in which case each phase planning session has explicit homework to grep for `with_write_conn` / `db.execute` / similar in UI code and reconcile. **Grep alone is not sufficient.** Some UI handlers obtain a `read_db_state()` and then call into a function that internally opens a transaction and writes (the chat read-on-view path is the canonical example: `handlers/chat.rs` -> `read_db_state()` -> `mark_chat_read_local_sync` -> `tx.execute`). Each phase planning session must also walk the call graph from any UI-side `read_db_state()` user looking for downstream `Transaction::execute` / `with_write_conn` calls.
 
+**Phase 2 status (as landed).** Of the seven Phase 2 entries above:
+- ✓ Action service mutations (archive / label / star / etc.) - relocated. UI calls `client.execute_plan(...)`.
+- ✓ Pending-ops retry queue - drains Service-side on each action-worker wakeup.
+- ✓ Undo - inverse plan dispatched via the standard `action.execute_plan` IPC.
+- ✗ Compose send - DEFERRED. The bytes-ownership transfer (staging→vault) plus journal `kind = 'send'` and SMTP-on-worker is non-trivial; not yet landed.
+- ✓ Snooze resurfacing - Service-side runner triggered by `pending_ops.kick`; UI tick fires the kick and reloads nav after a 1.5 s grace window.
+- ✓ Chat read-on-view - `action.mark_chat_read` IPC; Service runs local DB write in the handler and provider mark-read on the worker.
+
+The `service-state` crate boundary holds: a UI source file that tries `use service_state::WriteDbState` does not link. Body / inline / search write halves still construct UI-side until Phase 3 (sync) and Phase 6 (rest); the global lockdown is Phase 6.
+
 ## Cross-store crash consistency
 
 The Service writes to four durable stores: SQLite (main + `bodies.db`), pack files, Tantivy, inline-image store. A crash mid-sequence can leave inter-store inconsistencies: `attachments` row written but pack append not fsync'd; Tantivy doc references a body the body store hasn't durably committed; etc. Each store has its own crash-safe recovery (SQLite WAL, append-only pack scan, Tantivy uncommitted-segment cleanup) but cross-store reconciliation is not free.

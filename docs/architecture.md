@@ -41,9 +41,13 @@ That includes:
 
 ### Action service as mutation gate
 
-Every email state mutation (archive, delete, star, move, label, etc.) must flow through `core::actions::*`. This is the single path that coordinates local DB mutation + provider dispatch + pending-ops + undo tokens + in-flight guards.
+Every email state mutation (archive, delete, star, move, label, send, snooze, mark-chat-read, etc.) must flow through the action service. As of Phase 2 the *execution* surface lives in `service::actions::*` (the relocated home; `core::actions` keeps a shim that re-exports the public API). UI handlers no longer call the execution functions directly - they build an `ActionExecutionPlan`, convert to `ActionWirePlan`, and dispatch via `client.execute_plan(...)`. The Service journals the plan, signals the worker, and per-operation `OperationOutcome` + final `ActionCompleted` notifications stream back over IPC.
 
-**Enforcement:** The 7 thread-action DB helpers (`set_thread_read`, `set_thread_starred`, `set_thread_pinned`, `set_thread_muted`, `delete_thread`, `add_thread_label`, `remove_thread_label`) are `pub(crate)` - the app crate cannot call them directly. New email-action DB helpers should follow the same pattern.
+**Enforcement:**
+- **Crate boundary** (`docs/service/problem-statement.md` § "Type-level enforcement"). `WriteDbState` is constructed in the `service-state` crate; `app` does not depend on `service-state`, so a UI source file that tries `use service_state::WriteDbState` fails to resolve. Body / inline / search write halves stay UI-side until Phase 3 (sync) and Phase 6 (rest); the global lockdown lands at Phase 6.
+- **Thread-action DB helpers** (`set_thread_read`, `set_thread_starred`, `set_thread_pinned`, `set_thread_muted`, `delete_thread`, `add_thread_label`, `remove_thread_label`) are `pub(crate)` - the app crate cannot call them directly.
+- **`ActionProviderCtx`** (`crates/common/src/types.rs`) carries only `account_id` / `&ReadDbState` / `&dyn ProgressReporter` - no `&SearchState` field, so action methods cannot write to the Tantivy index. A regression test in `common::types::tests` enforces the exhaustive-destructure shape.
+- **Tri-state in-flight tracking** (`crates/app/src/app.rs::PlanState`). UI plans live as `Pending` / `Acked` / `AckUnknown`; `ServiceCrashed` while `Pending` defers rollback to post-respawn `action.job_status` reconciliation, while `ServiceCrashed` while `Acked` does nothing because the journal will replay.
 
 ### Provider trait as abstraction layer
 
@@ -92,17 +96,19 @@ The `labels` table stores both. Provider-native concepts must be normalized into
 
 ## Adding a New Email Action
 
-The action pipeline flows: `MailActionIntent → resolve_intent → build_execution_plan → batch_execute → handle_action_completed`. Adding a new action requires:
+The action pipeline flows: `MailActionIntent → resolve_intent → build_execution_plan → ActionWirePlan → action.execute_plan IPC → service::actions::batch_execute → OperationOutcome notifications → handle_action_completed`. Adding a new action requires:
 
-1. **Variant in `MailActionIntent`** (`action_resolve.rs`) - the user intent
-2. **Variant in `MailOperation`** (`core/actions/operation.rs`) - the core execution type
-3. **Arm in `resolve_intent()`** - collapses intent + UI context into operation + compensation
-4. **Arm in `completion_behavior()`** - defines view effect, post-success effect, undo behavior, toast label. Compiler-enforced exhaustive match.
-5. **Core action function** (e.g., `core/actions/my_action.rs`) - local DB mutation + provider dispatch
-6. **Arms in `batch.rs` routing** (`dispatch_with_provider`, `op_local`, `enqueue_params`, `op_name`) - route `MailOperation` to the action function
-7. **`MailUndoPayload` variant + compensation arm** (`action_resolve.rs`, `commands.rs`) - if reversible
+1. **Variant in `MailActionIntent`** (`crates/app/src/action_resolve.rs`) - the user intent.
+2. **Variant in `MailOperation`** (`crates/service/src/actions/operation.rs`) - the canonical execution type.
+3. **Variant in `WireMailOperation`** (`crates/service-api/src/action.rs`) - the serializable wire mirror, 1:1 with `MailOperation`.
+4. **Arm in `to_wire_op` / `wire_to_mail`** (`crates/app/src/action_wire.rs` and `crates/service/src/actions/wire_conversion.rs`) - exhaustive matches catch a missing mirror at compile time.
+5. **Arm in `resolve_intent()`** - collapses intent + UI context into operation + compensation.
+6. **Arm in `completion_behavior()`** - defines view effect, post-success effect, undo behavior, toast label. Compiler-enforced exhaustive match.
+7. **Service-side action function** (e.g., `crates/service/src/actions/my_action.rs`) - local DB mutation + provider dispatch.
+8. **Arms in `batch.rs` routing** (`dispatch_with_provider`, `op_local`, `enqueue_params`, `op_name`) - route `MailOperation` to the action function.
+9. **`MailUndoPayload` variant + compensation arm** (`action_resolve.rs`, `commands.rs::undo_payload_to_ops`) - if reversible. Phase 2's undo path goes through `dispatch_plan_with_undo`, which dispatches the inverse plan via the standard `action.execute_plan` IPC.
 
-**Enforcement:** `MailOperation` is an exhaustive enum. Adding a variant produces compiler errors in `completion_behavior()`, `dispatch_with_provider`, `op_local`, `enqueue_params`, `op_name`, and `build_standard_undo_payloads`. No wildcards - you cannot silently miss a dispatch site.
+**Enforcement:** `MailOperation` is an exhaustive enum, mirrored 1:1 by `WireMailOperation`. Adding a variant produces compiler errors in `completion_behavior()`, `dispatch_with_provider`, `op_local`, `enqueue_params`, `op_name`, `to_wire_op`, `wire_to_mail`, and `build_standard_undo_payloads`. No wildcards - a missing site is a compile error.
 
 Toggle actions (boolean state flips) need only the `MailOperation` variant and a `ToggleField` entry - `build_execution_plan` handles per-thread resolution, optimistic UI, and rollback generically.
 
@@ -122,9 +128,9 @@ These are verified, adopted project-wide, and should be followed for all new wor
 
 **Config shadow pattern** - Formal: `PreferencesState`. Implicit (clone-on-open): Account editor, Contact editor, Group editor, Calendar event editor, Signature editor. Editors work on a shadow copy and commit on save.
 
-**`ProgressReporter` trait** - All event emission from core goes through `&dyn ProgressReporter`. The app provides its own implementation.
+**`ProgressReporter` trait** - All event emission from core goes through `&dyn ProgressReporter`. The app provides its own implementation; the Service-side relocated action service uses `service::progress::IpcProgressReporter` which serializes events into `Notification::SyncProgress` frames over IPC.
 
-**State types are `Clone`** - `DbState`, `BodyStoreState`, `InlineImageStoreState`, `SearchState`, `AppCryptoState` all wrap `Arc<Mutex<_>>` and implement `Clone`.
+**State types are `Clone`** - `ReadDbState`, `BodyStoreState`, `InlineImageStoreState`, `SearchState`, `AppCryptoState` all wrap `Arc<Mutex<_>>` and implement `Clone`. Phase 2 split the read/write halves of `DbState` into `db::ReadDbState` (UI side, exposes read methods) and `service_state::WriteDbState` (Service-only, constructed inside the `service-state` crate that the `app` crate does not depend on - see "Action service as mutation gate" above for the crate-boundary enforcement). The body / inline-image / search write halves remain UI-side until Phase 3 (sync) and Phase 6 (rest); the global lockdown lands at Phase 6.
 
 **In-flight task handles for per-entity background work** - When the app dispatches a long-running per-entity Task (currently: per-account delta sync, in `App.sync_handles: HashMap<String, iced::task::Handle>`), it wraps the dispatch with `Task::abortable()`, stashes the handle keyed by the entity id, and (1) skips re-dispatch when an entry already exists, (2) removes the entry on the completion message, (3) calls `handle.abort()` when the underlying entity is deleted. The completion handler also drops results for entities that no longer exist - defense in depth against stale messages. Caveat: `Handle::abort` cancels at the next yield point, so writes already in-flight are not undone - external-store cleanup must run after the abort, and tightly racy writes still need per-entity generation checks at the write site.
 
