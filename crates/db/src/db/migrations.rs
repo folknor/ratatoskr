@@ -72,7 +72,41 @@ static MIGRATIONS: &[Migration] = &[Migration {
 }];
 
 /// Run all pending migrations. Called once at startup.
-pub fn run_all(conn: &Connection) -> Result<(), String> {
+///
+/// Convenience wrapper for `run_all_with_progress` with a no-op callback.
+/// Returns the number of migrations actually applied (0 if the DB was
+/// already up to date).
+pub fn run_all(conn: &Connection) -> Result<u32, String> {
+    run_all_with_progress(conn, &mut |_, _| {})
+}
+
+/// Run all pending migrations, invoking `progress(current, total)` once per
+/// migration that actually applies. `current` is 1-based; `total` is the
+/// total number of migrations the runner is going to apply this call. The
+/// callback fires AFTER the migration commits (so on crash the user-visible
+/// "now applying N/M" never overstates progress).
+///
+/// Phase 1.5 ships with a single v100 migration, so the callback fires
+/// at most once per fresh DB; the per-step callback exists for future
+/// multi-migration releases.
+///
+/// Contract for migration authors (see scope item 19 of
+/// `docs/service/phase-1.5-plan.md`):
+/// - Each migration must wrap in a single SQLite transaction; the runner's
+///   BEGIN / COMMIT around `m.sql` is the canonical shape.
+/// - If a future migration MUST batch into multiple committed transactions
+///   (per-row backfills), each batch must be idempotent and resumable, AND
+///   the `_migrations` row must NOT be inserted until every batch has
+///   committed - a partial-apply that lacks the row will be re-run from
+///   scratch on the next boot.
+/// - `progress(current, total)` may emit values that go BACKWARDS on
+///   respawn (first run got to 4/10, second run starts at 0/10). The wire-
+///   side per-phase coalesce key handles compaction; the splash UX of
+///   "moving backwards on respawn" is an accepted user-visible behaviour.
+pub fn run_all_with_progress(
+    conn: &Connection,
+    progress: &mut dyn FnMut(u32, u32),
+) -> Result<u32, String> {
     // Ensure migrations table exists
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS _migrations (
@@ -114,11 +148,13 @@ pub fn run_all(conn: &Connection) -> Result<(), String> {
     }
 
     // ── Run pending migrations ─────────────────────────────────
-    for m in MIGRATIONS {
-        if applied.contains(&m.version) {
-            continue;
-        }
-
+    let pending: Vec<&Migration> = MIGRATIONS
+        .iter()
+        .filter(|m| !applied.contains(&m.version))
+        .collect();
+    let total = u32::try_from(pending.len()).unwrap_or(u32::MAX);
+    let mut applied_count: u32 = 0;
+    for (index, m) in pending.iter().enumerate() {
         log::info!("Running migration v{}: {}", m.version, m.description);
 
         conn.execute_batch("BEGIN")
@@ -137,10 +173,34 @@ pub fn run_all(conn: &Connection) -> Result<(), String> {
         .map_err(|e| format!("record migration: {e}"))?;
         conn.execute_batch("COMMIT")
             .map_err(|e| format!("commit: {e}"))?;
+
+        applied_count = applied_count.saturating_add(1);
+        let current = u32::try_from(index).unwrap_or(u32::MAX).saturating_add(1);
+        progress(current, total);
     }
 
     log::info!("All migrations applied.");
-    Ok(())
+    Ok(applied_count)
+}
+
+/// Read the highest applied schema version from the `_migrations` table.
+/// Returns 0 if the table doesn't exist or has no rows. Used by the Service
+/// boot sequence to populate `BootReadyResponse.schema_version`.
+pub fn current_schema_version(conn: &Connection) -> Result<u32, String> {
+    let exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='_migrations'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("query schema version: {e}"))?;
+    if exists == 0 {
+        return Ok(0);
+    }
+    let max_version: Option<u32> = conn
+        .query_row("SELECT MAX(version) FROM _migrations", [], |row| row.get(0))
+        .map_err(|e| format!("query max version: {e}"))?;
+    Ok(max_version.unwrap_or(0))
 }
 
 #[cfg(test)]

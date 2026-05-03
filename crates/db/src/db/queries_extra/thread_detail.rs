@@ -597,6 +597,7 @@ pub fn fetch_thread_bodies(
 /// Pure computation - no DB locks required. Attaches bodies to messages,
 /// detects message ownership, and generates collapsed summaries.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
+#[allow(clippy::needless_pass_by_value)]
 pub fn assemble_thread_detail(
     db_data: ThreadDbData,
     body_map: BodyMap,

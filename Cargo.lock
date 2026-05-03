@@ -6292,6 +6292,7 @@ name = "service"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "db",
  "dirs",
  "fs2",
  "futures-util",

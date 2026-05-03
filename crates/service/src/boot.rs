@@ -16,19 +16,34 @@
 
 use crate::boot_progress;
 use crate::key_load;
+use db::db::{Connection, apply_standard_pragmas, migrations, reconcile_velo_rename};
 use service_api::{BootExitCode, BootPhase};
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::mpsc;
 
 /// Service-side boot artifacts loaded once at boot. Phase 2's `ActionContext`
-/// will consume the encryption key from here once the action service moves
-/// across the boundary; until then the field is held but unused (the UI
-/// keeps its own key load for its existing `ActionContext`). The
-/// `allow(dead_code)` on the field resolves when Phase 2's handler reads it.
+/// will consume the encryption key + DB connection from here once the action
+/// service moves across the boundary; until then the fields are held but
+/// unused (the UI keeps its own key + DB load). The `allow(dead_code)`
+/// resolves when Phase 2's handler reads them.
 pub(crate) struct BootContext {
     #[allow(dead_code)]
     pub(crate) encryption_key: [u8; 32],
+    /// DB connection opened during boot. Held past the boot sequence so
+    /// Phase 2's relocated action service can construct its `ActionContext`
+    /// from it without re-opening the file. `Arc<Mutex<Connection>>` matches
+    /// the shape `DbState::from_arc` expects.
+    #[allow(dead_code)]
+    pub(crate) db_conn: Arc<Mutex<Connection>>,
+    /// Highest applied schema version after migrations completed. Echoed
+    /// to the UI in `BootReadyResponse`.
+    #[allow(dead_code)]
+    pub(crate) schema_version: u32,
+    /// Number of migrations actually applied this boot. 0 on a healthy
+    /// repeat boot; non-zero only on first-run or after a schema bump.
+    #[allow(dead_code)]
+    pub(crate) migrations_applied: u32,
 }
 
 /// Process-wide singleton populated by `run_boot_sequence` on success. Phase
@@ -42,12 +57,14 @@ pub(crate) static BOOT_CONTEXT: OnceLock<BootContext> = OnceLock::new();
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum BootFailure {
     KeyLoadFailure,
+    MigrationFailure,
 }
 
 impl BootFailure {
     pub(crate) fn as_exit_code(self) -> BootExitCode {
         match self {
             Self::KeyLoadFailure => BootExitCode::KeyLoadFailure,
+            Self::MigrationFailure => BootExitCode::MigrationFailure,
         }
     }
 }
@@ -92,8 +109,38 @@ pub(crate) async fn run_boot_sequence(
         }
     };
 
+    boot_progress::emit(&out_tx, BootPhase::OpeningDatabase, None);
+
+    let migrate_outcome = tokio::task::spawn_blocking({
+        let dir = app_data_dir.clone();
+        let progress_tx = out_tx.clone();
+        move || open_db_and_migrate(&dir, &progress_tx)
+    })
+    .await;
+
+    let (conn, schema_version, migrations_applied) = match migrate_outcome {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) => {
+            log::error!(
+                "DB open / migration failed for {}: {error}",
+                app_data_dir.display(),
+            );
+            return Err(BootFailure::MigrationFailure);
+        }
+        Err(join_error) => {
+            log::error!(
+                "DB open / migration task panicked for {}: {join_error}",
+                app_data_dir.display(),
+            );
+            return Err(BootFailure::MigrationFailure);
+        }
+    };
+
     let context = BootContext {
         encryption_key: key,
+        db_conn: Arc::new(Mutex::new(conn)),
+        schema_version,
+        migrations_applied,
     };
     if BOOT_CONTEXT.set(context).is_err() {
         // OnceLock::set returns Err if already set. The boot sequence runs
@@ -104,4 +151,31 @@ pub(crate) async fn run_boot_sequence(
     }
 
     Ok(())
+}
+
+/// Synchronous DB open + migration step. Runs inside `spawn_blocking` so
+/// `rusqlite`'s blocking I/O never starves the dispatch task or the
+/// notification writer. Per-step migration progress is pumped via
+/// `boot_progress::emit` from the migration runner's callback (try_send is
+/// safe from blocking threads since `mpsc::Sender::try_send` is non-async).
+fn open_db_and_migrate(
+    app_data_dir: &std::path::Path,
+    out_tx: &mpsc::Sender<Vec<u8>>,
+) -> Result<(Connection, u32, u32), String> {
+    reconcile_velo_rename(app_data_dir)?;
+    let db_path = app_data_dir.join("ratatoskr.db");
+    let conn = Connection::open(&db_path)
+        .map_err(|e| format!("open db {}: {e}", db_path.display()))?;
+    apply_standard_pragmas(&conn)?;
+
+    let mut progress = |current: u32, total: u32| {
+        boot_progress::emit(
+            out_tx,
+            BootPhase::Migrating { current, total },
+            None,
+        );
+    };
+    let migrations_applied = migrations::run_all_with_progress(&conn, &mut progress)?;
+    let schema_version = migrations::current_schema_version(&conn)?;
+    Ok((conn, schema_version, migrations_applied))
 }
