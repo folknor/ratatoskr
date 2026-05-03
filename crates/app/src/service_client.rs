@@ -261,32 +261,97 @@ impl ServiceClient {
 
 impl Drop for ServiceClient {
     fn drop(&mut self) {
-        abort_handle(&self.reader_handle);
-        abort_handle(&self.heartbeat_handle);
-        abort_handle(&self.writer_handle);
+        let reader = take_join_handle(&self.reader_handle);
+        let heartbeat = take_join_handle(&self.heartbeat_handle);
+        let writer = take_join_handle(&self.writer_handle);
+        for handle in [reader.as_ref(), heartbeat.as_ref(), writer.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            handle.abort();
+        }
         let _ = self.stdin_tx.take();
 
-        let started = Instant::now();
-        while started.elapsed() < Duration::from_millis(200) {
-            if self.try_wait_child() {
-                break;
+        // The dropped writer task carries the ChildStdin handle; awaiting its
+        // abort lets the pipe close so the Service sees EOF and exits cleanly.
+        // Without driving the runtime here, the abort never makes progress
+        // before this Drop returns and we'd fall through to SIGKILL every
+        // time on a busy worker. block_in_place + Handle::block_on works on
+        // a multi-threaded runtime; single-threaded falls back to polling.
+        match runtime_for_block_on() {
+            Some(handle) => {
+                tokio::task::block_in_place(|| {
+                    handle.block_on(self.async_drop_wait(reader, heartbeat, writer));
+                });
             }
-            std::thread::sleep(Duration::from_millis(10));
+            None => {
+                drop((reader, heartbeat, writer));
+                self.poll_for_exit(Duration::from_millis(1200));
+            }
         }
+
         if !self.try_wait_child() {
             self.kill_child();
+            self.poll_for_exit(Duration::from_millis(500));
         }
 
         fail_pending(&self.pending);
     }
 }
 
-fn abort_handle(handle: &Mutex<Option<tokio::task::JoinHandle<()>>>) {
-    if let Ok(mut guard) = handle.lock()
-        && let Some(handle) = guard.take()
-    {
-        handle.abort();
+impl ServiceClient {
+    async fn async_drop_wait(
+        &self,
+        reader: Option<tokio::task::JoinHandle<()>>,
+        heartbeat: Option<tokio::task::JoinHandle<()>>,
+        writer: Option<tokio::task::JoinHandle<()>>,
+    ) {
+        let abort_deadline = Duration::from_millis(200);
+        let abort_started = Instant::now();
+        for handle in [reader, heartbeat, writer].into_iter().flatten() {
+            let remaining = abort_deadline.saturating_sub(abort_started.elapsed());
+            if remaining.is_zero() {
+                continue;
+            }
+            let _ = tokio::time::timeout(remaining, handle).await;
+        }
+        let exit_deadline = Duration::from_secs(1);
+        let exit_started = Instant::now();
+        while exit_started.elapsed() < exit_deadline {
+            if self.try_wait_child() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
+
+    fn poll_for_exit(&self, deadline: Duration) {
+        let started = Instant::now();
+        while started.elapsed() < deadline {
+            if self.try_wait_child() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+fn runtime_for_block_on() -> Option<tokio::runtime::Handle> {
+    let handle = tokio::runtime::Handle::try_current().ok()?;
+    if matches!(
+        handle.runtime_flavor(),
+        tokio::runtime::RuntimeFlavor::MultiThread
+    ) {
+        Some(handle)
+    } else {
+        None
+    }
+}
+
+fn take_join_handle(
+    slot: &Mutex<Option<tokio::task::JoinHandle<()>>>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    slot.lock().ok().and_then(|mut guard| guard.take())
 }
 
 async fn reader_task<R>(

@@ -40,42 +40,6 @@ Plan section 8:
 
 The empty `Notification` enum means nothing exercises this in Phase 1, but the framework is supposed to "land so Phase 2 plugs in cleanly the next day"; today Phase 2 will rewrite this routing immediately.
 
-### 4. Drop ordering omits the await-with-deadline step and uses `std::thread::sleep`
-
-`crates/app/src/service_client.rs` Drop impl:
-
-```rust
-abort_handle(&self.reader_handle);
-abort_handle(&self.heartbeat_handle);
-abort_handle(&self.writer_handle);
-let _ = self.stdin_tx.take();
-
-let started = Instant::now();
-while started.elapsed() < Duration::from_millis(200) {
-    if self.try_wait_child() { break; }
-    std::thread::sleep(Duration::from_millis(10));
-}
-if !self.try_wait_child() { self.kill_child(); }
-fail_pending(&self.pending);
-```
-
-Two issues:
-
-- Plan section 5 step 2 ("Await tasks with a short deadline (200 ms)") is omitted entirely. The plan-sketch comment notes that awaiting from sync `Drop` is awkward, but the abort handles must drop before the underlying `ChildStdin` / `ChildStdout` close, and aborts only progress when the runtime gets a chance to drive the tasks.
-- The 200 ms wait uses `std::thread::sleep`, blocking the calling thread without yielding to the runtime. If `Drop` runs from inside a tokio worker (e.g. the iced quit path), the aborted tasks may not make any progress during the wait, and the path falls through to `kill_child()` (SIGKILL) every time. Polling via `tokio::task::block_in_place` + `tokio::time::sleep`, or simply holding a `tokio::runtime::Handle` and `block_on`-ing a timeout future, would actually let the abort propagate.
-
-### 5. Linux Service stdio uses `tokio::fs::File` for pipes
-
-`crates/service/src/stdio_defense.rs`:
-
-```rust
-let stdin = unsafe { std::fs::File::from_raw_fd(stdin_fd) };
-let stdout = unsafe { std::fs::File::from_raw_fd(stdout_fd) };
-Ok((tokio::fs::File::from_std(stdin), tokio::fs::File::from_std(stdout)))
-```
-
-`tokio::fs::File` is for regular files: it dispatches every read / write onto a blocking-pool thread. For pipes you want epoll-driven readiness via something like `tokio::io::unix::AsyncFd` (or the explicit `tokio::process::ChildStdin` / `ChildStdout` types if you can keep them attached). As written, every `BoundedLineReader::next_line` call holds a blocking-pool thread for the duration of the read.
-
 ### 6. Notification framework is not round-trip-tested
 
 `crates/service-api/src/notification.rs` has `pub enum Notification {}` with `#[serde(tag = "method", content = "params")]` and `Serialize` / `Deserialize` derives. The Phase 1 framework is supposed to "land so Phase 2 plugs in cleanly the next day", but no test ever sends a notification through the wire end-to-end with a feature-gated test variant. The synthetic JSON object built in `parse_service_message` (`{"method": ..., "params": ...}`) needs to round-trip cleanly with `tag = "method", content = "params"` semantics; that contract is currently unverified.
