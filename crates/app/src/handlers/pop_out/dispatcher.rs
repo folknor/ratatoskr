@@ -5,7 +5,7 @@ use iced::Task;
 use crate::pop_out::compose::{ComposeAttachment, ComposeMessage};
 use crate::pop_out::message_view::{MessageViewMessage, RenderingMode};
 use crate::pop_out::{PopOutMessage, PopOutWindow};
-use crate::{App, Message};
+use crate::{Message, ReadyApp};
 
 use super::compose_clipboard::{
     dispatch_paste_group_match, field_token_count, handle_compose_copy_or_cut,
@@ -13,7 +13,7 @@ use super::compose_clipboard::{
 };
 use super::message_view::handle_message_view_update;
 
-impl App {
+impl ReadyApp {
     /// Route a `PopOutMessage` to the correct pop-out window handler.
     pub(crate) fn handle_pop_out_message(
         &mut self,

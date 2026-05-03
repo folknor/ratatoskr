@@ -1,11 +1,11 @@
 use iced::Task;
 
 use crate::pop_out::PopOutWindow;
-use crate::{App, Message};
+use crate::{Message, ReadyApp};
 
 use rtsk::actions::SendAttachment;
 
-impl App {
+impl ReadyApp {
     /// Build a MIME message from the compose state, save it to the draft row
     /// as base64url in the `attachments` column, mark the draft `'queued'`,
     /// Validate compose state, build a SendRequest, and dispatch to the

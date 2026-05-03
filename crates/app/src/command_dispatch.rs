@@ -2,8 +2,8 @@ use cmdk::{CommandArgs, CommandContext, CommandId, ViewType};
 use rtsk::scope::ViewScope;
 use types::SidebarSelection;
 
-use crate::App;
 use crate::Message;
+use crate::ReadyApp;
 
 // ── Supporting enums ────────────────────────────────────
 
@@ -99,7 +99,7 @@ pub enum KeyEventMessage {
 /// Snapshot the app model into a `CommandContext` for registry queries.
 ///
 /// Called frequently (every key event). Must not perform DB access or block.
-pub fn build_context(app: &App) -> CommandContext {
+pub fn build_context(app: &ReadyApp) -> CommandContext {
     let selected_thread_ids = selected_thread_ids(app);
     let active_message_id = None; // Reading pane doesn't expose this yet
     let (current_view, current_label_id) = current_view_and_label(app);
@@ -145,7 +145,7 @@ pub fn build_context(app: &App) -> CommandContext {
 /// Returns `(may_remove_items, may_set_seen, may_set_keywords, may_submit)`.
 /// All `None` when the folder has no rights data (provider doesn't report ACL,
 /// or we're in a universal/smart folder view).
-fn current_mailbox_rights(app: &App) -> (Option<bool>, Option<bool>, Option<bool>, Option<bool>) {
+fn current_mailbox_rights(app: &ReadyApp) -> (Option<bool>, Option<bool>, Option<bool>, Option<bool>) {
     let rights = app
         .sidebar
         .selection
@@ -176,7 +176,7 @@ fn current_mailbox_rights(app: &App) -> (Option<bool>, Option<bool>, Option<bool
     }
 }
 
-fn selected_thread_ids(app: &App) -> Vec<String> {
+fn selected_thread_ids(app: &ReadyApp) -> Vec<String> {
     app.thread_list
         .selected_thread
         .and_then(|idx| app.thread_list.threads.get(idx))
@@ -188,7 +188,7 @@ fn selected_thread_ids(app: &App) -> Vec<String> {
 ///
 /// Checks non-sidebar state first (settings, calendar, search, chat),
 /// then derives from `sidebar.selection`.
-fn current_view_and_label(app: &App) -> (ViewType, Option<String>) {
+fn current_view_and_label(app: &ReadyApp) -> (ViewType, Option<String>) {
     if app.show_settings {
         return (ViewType::Settings, None);
     }
@@ -228,7 +228,7 @@ fn current_view_and_label(app: &App) -> (ViewType, Option<String>) {
 ///
 /// When scoped to a single account, also resolves `ProviderKind` from
 /// the account's `provider` field so availability predicates work.
-fn active_account_info(app: &App) -> (Option<String>, Option<cmdk::ProviderKind>) {
+fn active_account_info(app: &ReadyApp) -> (Option<String>, Option<cmdk::ProviderKind>) {
     // 1. Derive account from the current view scope.
     let scope_account: Option<&str> = match &app.sidebar.selected_scope {
         ViewScope::Account(id) => Some(id.as_str()),
@@ -287,7 +287,7 @@ struct ThreadState {
 /// `is_muted` and `is_pinned` are read from the app-layer `Thread` struct.
 /// `in_trash`, `in_spam`, and `is_draft` are derived from the current
 /// navigation context (sidebar label or `NavigationTarget`).
-fn selected_thread_state(app: &App) -> ThreadState {
+fn selected_thread_state(app: &ReadyApp) -> ThreadState {
     let thread = app
         .thread_list
         .selected_thread
@@ -340,7 +340,7 @@ fn nav_msg(selection: SidebarSelection) -> Message {
     })
 }
 
-pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
+pub fn dispatch_command(id: CommandId, app: &ReadyApp) -> Option<Message> {
     match id {
         // Navigation - direct
         CommandId::NavNext => dispatch_nav_next(app),
@@ -484,7 +484,7 @@ pub fn dispatch_command(id: CommandId, app: &App) -> Option<Message> {
 }
 
 /// NavNext: select the next thread in the list.
-fn dispatch_nav_next(app: &App) -> Option<Message> {
+fn dispatch_nav_next(app: &ReadyApp) -> Option<Message> {
     let current = app.thread_list.selected_thread.unwrap_or(0);
     let next = current.saturating_add(1);
     if next < app.thread_list.threads.len() {
@@ -497,7 +497,7 @@ fn dispatch_nav_next(app: &App) -> Option<Message> {
 }
 
 /// NavPrev: select the previous thread in the list.
-fn dispatch_nav_prev(app: &App) -> Option<Message> {
+fn dispatch_nav_prev(app: &ReadyApp) -> Option<Message> {
     let current = app.thread_list.selected_thread?;
     if current > 0 {
         Some(Message::ThreadList(
@@ -511,7 +511,7 @@ fn dispatch_nav_prev(app: &App) -> Option<Message> {
 /// NavOpen: open the currently selected thread.
 ///
 /// Uses SelectThread to ensure the thread is selected (triggering detail load).
-fn dispatch_nav_open(app: &App) -> Option<Message> {
+fn dispatch_nav_open(app: &ReadyApp) -> Option<Message> {
     let idx = app.thread_list.selected_thread?;
     if idx < app.thread_list.threads.len() {
         Some(Message::ThreadList(

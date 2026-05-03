@@ -1,4 +1,4 @@
-use crate::app::App;
+use crate::app::ReadyApp;
 use crate::db::{self, Db, Thread};
 use crate::message::Message;
 use iced::Task;
@@ -16,7 +16,7 @@ use rtsk::scope::ViewScope;
 use std::sync::Arc;
 use types::{Bundle, FeatureView, SidebarSelection};
 
-impl App {
+impl ReadyApp {
     pub(crate) fn current_scope(&self) -> &ViewScope {
         &self.sidebar.selected_scope
     }

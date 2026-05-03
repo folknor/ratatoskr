@@ -4,7 +4,7 @@ use iced::Task;
 
 use crate::pop_out::message_view::{MessageViewMessage, MessageViewState, RenderingMode};
 use crate::pop_out::{PopOutMessage, PopOutWindow};
-use crate::{App, Message};
+use crate::{Message, ReadyApp};
 
 pub(super) fn handle_message_view_update(
     state: &mut MessageViewState,
@@ -138,7 +138,7 @@ fn synthesize_pseudo_source(state: &MessageViewState) -> String {
     out
 }
 
-impl App {
+impl ReadyApp {
     /// Dispatch body + attachment loads for a message view window.
     pub(crate) fn dispatch_message_view_loads(
         &self,

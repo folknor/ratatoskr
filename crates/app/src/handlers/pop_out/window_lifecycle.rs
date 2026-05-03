@@ -8,9 +8,9 @@ use crate::ui::layout::{
     MESSAGE_VIEW_DEFAULT_HEIGHT, MESSAGE_VIEW_DEFAULT_WIDTH, MESSAGE_VIEW_MIN_HEIGHT,
     MESSAGE_VIEW_MIN_WIDTH,
 };
-use crate::{App, Message};
+use crate::{Message, ReadyApp};
 
-impl App {
+impl ReadyApp {
     /// Open a message view pop-out for the message at `message_index` in the
     /// reading pane's thread messages list.
     pub(crate) fn open_message_view_window(&mut self, message_index: usize) -> Task<Message> {

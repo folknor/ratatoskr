@@ -1,4 +1,4 @@
-use crate::app::{App, CHORD_TIMEOUT};
+use crate::app::{CHORD_TIMEOUT, ReadyApp};
 use crate::command_dispatch::KeyEventMessage;
 use crate::handlers;
 use crate::handlers::provider::jmap_push_subscription;
@@ -8,7 +8,7 @@ use crate::ui::settings::SettingsMessage;
 use crate::ui::status_bar::sync_progress_subscription;
 use crate::{appearance, component::Component};
 
-impl App {
+impl ReadyApp {
     pub(crate) fn subscription(&self) -> iced::Subscription<Message> {
         let mut subs = vec![
             appearance::subscription().map(Message::AppearanceChanged),

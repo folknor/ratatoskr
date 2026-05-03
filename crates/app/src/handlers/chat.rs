@@ -3,9 +3,9 @@ use iced::Task;
 use crate::ui::chat_timeline::{
     CHAT_SCROLLABLE_ID, CHAT_TIMELINE_PAGE, ChatTimeline, ChatTimelineEvent,
 };
-use crate::{App, Message};
+use crate::{Message, ReadyApp};
 
-impl App {
+impl ReadyApp {
     /// Enter chat view for a contact.
     pub(crate) fn enter_chat_view(&mut self, email: &str) -> Task<Message> {
         // Lowercase at the boundary so the active-row highlight in the

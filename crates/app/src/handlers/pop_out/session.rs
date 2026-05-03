@@ -10,9 +10,9 @@ use crate::pop_out::{CalendarPopOutGeometry, PopOutWindow};
 use crate::ui::layout::{
     COMPOSE_MIN_HEIGHT, COMPOSE_MIN_WIDTH, MESSAGE_VIEW_MIN_HEIGHT, MESSAGE_VIEW_MIN_WIDTH,
 };
-use crate::{APP_DATA_DIR, App, Message};
+use crate::{APP_DATA_DIR, Message, ReadyApp};
 
-impl App {
+impl ReadyApp {
     /// Save the full session state (main window + all pop-out windows) to disk.
     pub(crate) fn save_session_state(&self) {
         let data_dir = APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
@@ -164,7 +164,7 @@ impl App {
     }
 }
 
-impl App {
+impl ReadyApp {
     /// Hydrate a session-restored compose pop-out with its draft state, or
     /// close the window if the draft no longer exists. The window is
     /// already open at this point - `restore_pop_out_windows` opened it at

@@ -3,9 +3,9 @@ use std::sync::Arc;
 use iced::Task;
 
 use crate::ui::add_account::{AddAccountEvent, AddAccountWizard};
-use crate::{App, Message, load_accounts};
+use crate::{Message, ReadyApp, load_accounts};
 
-impl App {
+impl ReadyApp {
     pub(crate) fn handle_add_account_event(&mut self, event: AddAccountEvent) -> Task<Message> {
         match event {
             AddAccountEvent::AccountAdded(ref _account_id) => {

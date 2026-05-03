@@ -1,10 +1,10 @@
 use iced::Task;
 
 use crate::command_dispatch::NavigationTarget;
-use crate::{App, Message};
+use crate::{Message, ReadyApp};
 use rtsk::scope::ViewScope;
 
-impl App {
+impl ReadyApp {
     /// Handle navigation to a specific target.
     ///
     /// Sidebar-backed targets update `sidebar.selection` directly.

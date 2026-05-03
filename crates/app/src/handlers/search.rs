@@ -5,7 +5,7 @@ use iced::Task;
 use crate::db::{self, Thread};
 use crate::ui::sidebar::truncate_query;
 use crate::ui::thread_list::ThreadListMode;
-use crate::{App, Message};
+use crate::{Message, ReadyApp};
 use rtsk::db::types::AccountScope;
 use rtsk::scope::ViewScope;
 
@@ -228,7 +228,7 @@ fn execution_scope_to_account_scope(scope: &SearchScope) -> AccountScope {
 
 // ── Search handling ────────────────────────────────────
 
-impl App {
+impl ReadyApp {
     fn record_search_restore_origin(&mut self) {
         if self.thread_list.mode == ThreadListMode::Folder {
             self.was_in_folder_view = true;
@@ -679,7 +679,7 @@ impl App {
 
 // ── Pinned search handling ─────────────────────────────
 
-impl App {
+impl ReadyApp {
     pub(crate) fn handle_pinned_searches_loaded(
         &mut self,
         result: Result<Vec<db::PinnedSearch>, String>,
@@ -892,7 +892,7 @@ fn thread_matches_scope(thread: &Thread, scope: &AccountScope) -> bool {
     }
 }
 
-fn pinned_search_scope_name(app: &App, ps: &db::PinnedSearch) -> String {
+fn pinned_search_scope_name(app: &ReadyApp, ps: &db::PinnedSearch) -> String {
     let Some(account_id) = ps.scope_account_id.as_deref() else {
         return "All Accounts".to_string();
     };
@@ -913,7 +913,7 @@ fn pinned_search_scope_name(app: &App, ps: &db::PinnedSearch) -> String {
 
 // ── Search phases 2+4 methods ──────────────────────────
 
-impl App {
+impl ReadyApp {
     pub(crate) fn handle_refresh_pinned_search(&mut self, id: i64) -> Task<Message> {
         if !self.pinned_searches.iter().any(|ps| ps.id == id) {
             return Task::none();

@@ -6,11 +6,11 @@ use crate::db::{ContactEntry, Db};
 use crate::pop_out::PopOutMessage;
 use crate::pop_out::compose::{ComposeMessage, ComposeState};
 use crate::ui::settings::SettingsMessage;
-use crate::{App, Message};
+use crate::{Message, ReadyApp};
 
 // ── Settings-panel contact/group CRUD ──────────────────
 
-impl App {
+impl ReadyApp {
     pub(crate) fn handle_load_contacts(&self, filter: String) -> Task<Message> {
         let db = Arc::clone(&self.db);
         let db2 = Arc::clone(&self.db);

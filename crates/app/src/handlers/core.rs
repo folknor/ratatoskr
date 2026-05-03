@@ -1,4 +1,4 @@
-use crate::app::{App, AppMode};
+use crate::app::{AppMode, ReadyApp};
 use crate::component::Component;
 use crate::db;
 use crate::handlers;
@@ -18,7 +18,7 @@ use iced::Task;
 use rtsk::scope::ViewScope;
 use std::sync::Arc;
 
-impl App {
+impl ReadyApp {
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub(crate) fn handle_sidebar(&mut self, msg: SidebarMessage) -> Task<Message> {
         let (task, event) = self.sidebar.update(msg);

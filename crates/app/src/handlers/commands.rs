@@ -1,13 +1,13 @@
 use iced::Task;
 
 use crate::command_dispatch;
-use crate::{APP_DATA_DIR, App, Message};
+use crate::{APP_DATA_DIR, Message, ReadyApp};
 use cmdk::{CommandArgs, CommandId, KeyBinding, OptionItem};
 use rtsk::actions::{ActionOutcome, TagId};
 use rtsk::scope::ViewScope;
 
 #[allow(dead_code)] // Keybinding override API; not yet wired into the settings UI.
-impl App {
+impl ReadyApp {
     /// Save keybinding overrides to disk. Call this after any mutation
     /// to `self.binding_table` overrides (`set_override`, `unbind`,
     /// `remove_override`, `reset_all`).
@@ -568,7 +568,7 @@ async fn execute_undo_compensation(
 
 // ── Snooze resurface ─────────────────────────────────────────
 
-impl App {
+impl ReadyApp {
     /// Check for snoozed threads that are due and unsnooze them.
     pub(crate) fn handle_snooze_tick(&self) -> Task<Message> {
         let Some(ctx) = self.action_ctx() else {

@@ -1,4 +1,4 @@
-use crate::app::App;
+use crate::app::ReadyApp;
 use crate::component::Component;
 use crate::message::Message;
 use crate::pop_out::PopOutWindow;
@@ -11,7 +11,7 @@ use crate::{app::AppMode, handlers};
 use iced::Task;
 use std::sync::Arc;
 
-impl App {
+impl ReadyApp {
     /// Central message dispatch. Each arm should be a ONE-LINE delegation
     /// to a handler method in `handlers/*.rs`. Do not inline logic here.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
@@ -170,32 +170,16 @@ impl App {
             // Compose
             Message::Compose => self.open_compose_window(ComposeMode::New),
             Message::Noop => Task::none(),
-            Message::ServiceChildSpawned(client) => {
-                self.service_notifications = client.notifications();
-                self.service_client = Some(client);
-                self.status = "Service connected, awaiting boot.ready...".to_string();
+            // Service{ChildSpawned,BootReady,BootFailed} are dispatched by
+            // BootingApp, never reach ReadyApp. If they arrive here it's
+            // because the spawn flow re-fired post-handshake (a future
+            // respawn loop, scope item 14) - log + drop until that wiring
+            // lands.
+            Message::ServiceChildSpawned(_)
+            | Message::ServiceBootReady(_)
+            | Message::ServiceBootFailed(_) => {
+                log::debug!("ReadyApp dropped post-handshake spawn-flow message");
                 Task::none()
-            }
-            Message::ServiceBootReady(response) => {
-                log::info!(
-                    "Service boot.ready: schema_version={}, migrations_applied={}",
-                    response.schema_version,
-                    response.migrations_applied,
-                );
-                self.status = "Service ready".to_string();
-                Task::none()
-            }
-            Message::ServiceBootFailed(detail) => {
-                // Service boot failure is terminal in Phase 1.5: a UI
-                // without a healthy Service cannot proceed past the
-                // boot-time write surfaces (migrations, key load,
-                // pending-ops recovery) the Service now owns. Log the
-                // classification and exit cleanly. Phase 8 wraps this in
-                // backoff + respawn + a UI status indicator; Phase 1.5
-                // exits deterministically.
-                log::error!("Service boot failed (fatal): {detail}");
-                eprintln!("[ui] fatal: service boot failed: {detail}");
-                iced::exit()
             }
             Message::ServiceNotification(notification) => {
                 log::debug!("Service notification: {}", notification.method_name());

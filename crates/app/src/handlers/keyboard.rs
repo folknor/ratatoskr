@@ -3,10 +3,10 @@ use iced::Task;
 use crate::command_dispatch::{self, KeyEventMessage};
 use crate::pop_out::PopOutWindow;
 use crate::ui::thread_list::{ThreadListMessage, TypeaheadDirection};
-use crate::{App, Message, PendingChord};
+use crate::{Message, PendingChord, ReadyApp};
 use cmdk::{Chord, CommandId, ResolveResult};
 
-impl App {
+impl ReadyApp {
     pub(crate) fn handle_key_event(&mut self, msg: KeyEventMessage) -> Task<Message> {
         match msg {
             KeyEventMessage::KeyPressed {

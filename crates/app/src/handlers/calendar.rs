@@ -7,9 +7,9 @@ use crate::ui::calendar::{
     CalendarEventData, CalendarMessage, CalendarWorkflow, EditorSession, EventField,
     EventTextField, ViewingSurface,
 };
-use crate::{App, Message};
+use crate::{Message, ReadyApp};
 
-impl App {
+impl ReadyApp {
     pub(crate) fn handle_calendar(&mut self, cal_msg: CalendarMessage) -> Task<Message> {
         match cal_msg {
             CalendarMessage::SelectDate(date) => {

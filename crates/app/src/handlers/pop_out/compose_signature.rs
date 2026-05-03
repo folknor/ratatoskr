@@ -4,9 +4,9 @@ use iced::Task;
 
 use crate::pop_out::compose::{ComposeMessage, ComposeMode};
 use crate::pop_out::{PopOutMessage, PopOutWindow};
-use crate::{App, Message};
+use crate::{Message, ReadyApp};
 
-impl App {
+impl ReadyApp {
     /// When the user changes the "From" account, update the compose state
     /// and dispatch a signature resolution task for the new account.
     pub(crate) fn handle_compose_from_account_changed(

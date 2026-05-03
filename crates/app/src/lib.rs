@@ -37,17 +37,14 @@ mod ui;
 mod update;
 mod window_state;
 
-pub use app::{App, AppMode, Divider};
+pub use app::{App, AppMode, Divider, ReadyApp};
 pub(crate) use app::PendingChord;
 pub(crate) use helpers::load_accounts;
 pub use message::Message;
 pub use service_client::ServiceClient;
 
-use db::Db;
 use std::path::PathBuf;
-use std::sync::Arc;
 
-pub(crate) static DB: std::sync::OnceLock<Arc<Db>> = std::sync::OnceLock::new();
 pub(crate) static APP_DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 pub(crate) static DEFAULT_SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
 
@@ -89,8 +86,10 @@ pub fn run() -> iced::Result {
         .expect("no data dir")
         .join("org.folknor.ratatoskr");
 
-    let db = Db::open(&app_data_dir).map_err(|e| iced::Error::WindowCreationFailed(e.into()))?;
-    let _ = DB.set(Arc::new(db));
+    // The DB is no longer opened here. Phase 1.5 makes the Service the
+    // canonical owner of boot-time DB work (migrations, recovery, sweep,
+    // backfill); the UI's `ReadyApp::from_boot_ready` opens its own
+    // read-side DbState after the Service handshake completes.
 
     let detected_scale = display::detect_default_scale();
     let _ = DEFAULT_SCALE.set(detected_scale);
@@ -112,7 +111,7 @@ pub fn run() -> iced::Result {
     let mut app = iced::daemon(App::boot, App::update, App::view)
         .title(App::title)
         .theme(App::daemon_theme)
-        .scale_factor(|app, _window| app.settings.scale)
+        .scale_factor(|app, _window| app.scale_factor())
         .subscription(App::subscription)
         .default_font(font::text());
 

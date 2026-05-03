@@ -3,9 +3,9 @@ use iced::Task;
 use crate::command_dispatch;
 use crate::component::Component;
 use crate::ui::palette::{PaletteEvent, PaletteMessage};
-use crate::{App, Message};
+use crate::{Message, ReadyApp};
 
-impl App {
+impl ReadyApp {
     /// Dispatch a palette message through the component and handle events.
     ///
     /// Before dispatching, injects the current `CommandContext` into message

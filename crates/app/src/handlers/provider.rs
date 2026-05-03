@@ -12,7 +12,7 @@ use iced::futures::StreamExt;
 use iced::futures::stream::BoxStream;
 use iced::{Subscription, Task};
 
-use crate::{App, Message};
+use crate::{Message, ReadyApp};
 
 // ── JMAP push subscription ─────────────────────────────────────────
 
@@ -67,7 +67,7 @@ pub fn jmap_push_subscription(receiver: &JmapPushReceiver) -> Subscription<Strin
 
 // ── Sync dispatch & push setup ──────────────────────────────────────
 
-impl App {
+impl ReadyApp {
     /// Dispatch a delta sync for a specific account as a background task.
     ///
     /// Skips dispatch if a sync for the same account is already in-flight -

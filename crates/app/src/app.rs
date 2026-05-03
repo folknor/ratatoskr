@@ -50,7 +50,7 @@ pub(crate) struct PendingChord {
     pub(crate) first: Chord,
 }
 
-pub struct App {
+pub struct ReadyApp {
     pub(crate) db: Arc<Db>,
     pub(crate) sidebar: Sidebar,
     pub(crate) thread_list: ThreadList,
@@ -146,17 +146,33 @@ pub struct App {
     pub(crate) service_notifications: ServiceNotificationReceiver,
 }
 
-impl App {
-    pub(crate) fn boot() -> (Self, Task<Message>) {
-        let db = Arc::clone(crate::DB.get().expect("DB not initialized"));
+impl ReadyApp {
+    /// Construct the `Ready` half of the app state machine. Called from
+    /// `BootingApp::update` when `Message::ServiceBootReady` arrives. Does
+    /// the heavy bootstrap work (DB open, accounts/sidebar/calendar load,
+    /// action_ctx construction) the original `App::boot` did synchronously
+    /// before Phase 1.5; the Service has already migrated the schema by
+    /// this point so the UI's local DB open is fast.
+    pub(crate) fn from_boot_ready(
+        boot_response: &service_api::BootReadyResponse,
+        main_window_id: iced::window::Id,
+        service_client: Arc<ServiceClient>,
+        service_notifications: ServiceNotificationReceiver,
+    ) -> (Self, Task<Message>) {
+        log::info!(
+            "Service boot.ready: schema_version={}, migrations_applied={}",
+            boot_response.schema_version,
+            boot_response.migrations_applied,
+        );
+        let data_dir = crate::APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
+        let db = Arc::new(
+            Db::open(data_dir).expect("UI-side DB open after Service handshake"),
+        );
         let db_ref = Arc::clone(&db);
         let db_ref2 = Arc::clone(&db);
         let db_ref3 = Arc::clone(&db);
         let db_ref4 = Arc::clone(&db);
-        let data_dir = crate::APP_DATA_DIR.get().expect("APP_DATA_DIR not set");
         let window = window_state::WindowState::load(data_dir);
-
-        let (main_window_id, open_task) = iced::window::open(window.to_window_settings());
 
         let mut registry = CommandRegistry::new();
         let mut binding_table = BindingTable::new(&registry, current_platform());
@@ -178,11 +194,6 @@ impl App {
         let sync_reporter = Arc::new(reporter);
 
         let (jmap_push_tx, jmap_push_receiver) = create_jmap_push_channel();
-        // Placeholder queue until the Service is ready; replaced in
-        // Message::ServiceChildSpawned with the spawned client's queue. Cap
-        // matches service_client::NOTIFICATION_QUEUE_CAP.
-        let service_notifications: ServiceNotificationReceiver =
-            Arc::new(crate::notification_queue::NotificationQueue::new(1024));
 
         let body_store = match db::threads::init_body_store() {
             Ok(bs) => Some(bs),
@@ -268,7 +279,7 @@ impl App {
             reading_pane: ReadingPane::new(),
             settings: Settings::with_scale(*crate::DEFAULT_SCALE.get().unwrap_or(&1.0)),
             status_bar: StatusBar::new(),
-            status: "Loading...".to_string(),
+            status: "Service ready".to_string(),
             mode: appearance::Mode::Dark,
             app_mode: AppMode::Mail,
             calendar: CalendarState::with_default_view(calendar_default_view),
@@ -316,7 +327,7 @@ impl App {
             inline_image_store,
             encryption_key,
             action_ctx,
-            service_client: None,
+            service_client: Some(service_client),
             service_notifications,
         };
 
@@ -334,19 +345,7 @@ impl App {
         let mut session_tasks = app.restore_pop_out_windows(&session);
 
         let load_gen = app.nav_generation.next();
-        // Two-phase Service spawn (Phase 1.5 commit 11). The receiver emits
-        // SpawnEvent::ChildSpawned -> Message::ServiceChildSpawned (App now
-        // holds the client and can subscribe to notifications), followed by
-        // SpawnEvent::BootReady -> Message::ServiceBootReady (boot
-        // sequence complete). On any failure, SpawnEvent::Terminal ->
-        // Message::ServiceBootFailed -> iced::exit().
-        let spawn_stream =
-            spawn_event_stream(crate::service_client::ServiceClient::spawn_with_events(
-                data_dir.clone(),
-            ));
         let mut boot_tasks = vec![
-            open_task.discard(),
-            spawn_stream,
             Task::perform(
                 async move { (load_gen, crate::helpers::load_accounts(db_ref).await) },
                 |(g, result)| Message::AccountsLoaded(g, result),
@@ -371,9 +370,9 @@ impl App {
             Task::done(Message::GalRefreshTick),
         ];
 
-        // Pending-ops crash recovery used to run here. As of Phase 1.5 it
-        // runs Service-side during the boot sequence (DB-only variant);
-        // the UI no longer dispatches recover_on_boot from App::boot.
+        // Pending-ops crash recovery, queued-drafts sweep, and thread-
+        // participants backfill all run Service-side now (Phase 1.5
+        // commits 7-9).
 
         // Snooze resurface on boot: unsnooze threads that became due while the app was closed.
         boot_tasks.push(Task::done(Message::SnoozeTick));
@@ -453,4 +452,263 @@ fn spawn_event_stream(
             }
         },
     ))
+}
+
+/// Splash state rendered while in `Booting`. Updated on each
+/// `Message::ServiceNotification(BootProgress)` so the user sees migration
+/// progress during the slow boot.ready round-trip.
+#[derive(Debug, Default)]
+pub(crate) struct SplashState {
+    /// Current boot phase reported by the Service. None means "awaiting
+    /// first BootProgress" (typically very brief).
+    pub(crate) phase: Option<service_api::BootPhase>,
+    /// Optional human-readable message from the Service.
+    pub(crate) message: Option<String>,
+}
+
+impl SplashState {
+    fn apply(&mut self, progress: service_api::BootProgress) {
+        self.phase = Some(progress.phase);
+        self.message = progress.message;
+    }
+
+    /// Default user-visible label per phase.
+    fn label(&self) -> &'static str {
+        match self.phase {
+            None => "Connecting to Service...",
+            Some(service_api::BootPhase::LoadingKey) => "Loading encryption key...",
+            Some(service_api::BootPhase::OpeningDatabase) => "Opening database...",
+            Some(service_api::BootPhase::Migrating { .. }) => "Migrating database...",
+            Some(service_api::BootPhase::RecoveringPendingOps) => {
+                "Recovering pending operations..."
+            }
+            Some(service_api::BootPhase::SweepingQueuedDrafts) => "Sweeping queued drafts...",
+            Some(service_api::BootPhase::BackfillingThreadParticipants) => {
+                "Backfilling thread participants..."
+            }
+        }
+    }
+}
+
+/// The `Booting` half of the App state machine. Active from `iced::daemon`
+/// startup until the Service answers `boot.ready`. Holds only what's needed
+/// to render the splash and process the boot-flow messages whitelisted in
+/// `crates/app/src/message.rs`.
+///
+/// Transitions to `App::Ready` on `Message::ServiceBootReady` via
+/// `ReadyApp::from_boot_ready`. The user's deferred preferences (the only
+/// non-default state we care about during Booting) carry over via the
+/// stashed `appearance_mode`.
+pub struct BootingApp {
+    pub(crate) main_window_id: iced::window::Id,
+    pub(crate) splash: SplashState,
+    pub(crate) service_client: Option<Arc<ServiceClient>>,
+    pub(crate) service_notifications: Option<ServiceNotificationReceiver>,
+    /// AppearanceChanged events that arrive while Booting are stashed here
+    /// and applied after ReadyApp construction so the user's first sight of
+    /// the real UI matches their system theme.
+    pub(crate) appearance_mode: Option<appearance::Mode>,
+}
+
+/// Outcome of `BootingApp::update`. The dispatcher uses this to decide
+/// whether to stay in `Booting` (returning the task as-is) or transition to
+/// `Ready` (replacing `*self` with `App::Ready(box ready)` and firing the
+/// boxed task).
+pub enum BootingUpdate {
+    Stay(Task<Message>),
+    Transition(Box<ReadyApp>, Task<Message>),
+}
+
+impl BootingApp {
+    pub(crate) fn update(&mut self, message: Message) -> BootingUpdate {
+        match message {
+            Message::ServiceChildSpawned(client) => {
+                self.service_notifications = Some(client.notifications());
+                self.service_client = Some(client);
+                self.splash.message =
+                    Some("Service connected, awaiting boot.ready...".to_string());
+                BootingUpdate::Stay(Task::none())
+            }
+            Message::ServiceBootReady(response) => {
+                let client = self
+                    .service_client
+                    .take()
+                    .expect("ServiceChildSpawned must precede ServiceBootReady");
+                let notifications = self.service_notifications.take().unwrap_or_else(|| {
+                    Arc::new(crate::notification_queue::NotificationQueue::new(1024))
+                });
+                let (ready, task) = ReadyApp::from_boot_ready(
+                    &response,
+                    self.main_window_id,
+                    client,
+                    notifications,
+                );
+                BootingUpdate::Transition(Box::new(ready), task)
+            }
+            Message::ServiceBootFailed(detail) => {
+                log::error!("Service boot failed (fatal): {detail}");
+                eprintln!("[ui] fatal: service boot failed: {detail}");
+                BootingUpdate::Stay(iced::exit())
+            }
+            Message::ServiceNotification(service_api::Notification::BootProgress(progress)) => {
+                self.splash.apply(progress);
+                BootingUpdate::Stay(Task::none())
+            }
+            Message::WindowCloseRequested(id) if id == self.main_window_id => {
+                BootingUpdate::Stay(iced::exit())
+            }
+            Message::AppearanceChanged(mode) => {
+                self.appearance_mode = Some(mode);
+                BootingUpdate::Stay(Task::none())
+            }
+            Message::WindowResized(_, _)
+            | Message::WindowMoved(_, _)
+            | Message::WindowCloseRequested(_)
+            | Message::Noop
+            | Message::ModifiersChanged(_) => BootingUpdate::Stay(Task::none()),
+            other => {
+                log::debug!(
+                    "BootingApp dropped message variant {:?} (whitelist per phase-1.5-plan scope item 21)",
+                    std::mem::discriminant(&other),
+                );
+                BootingUpdate::Stay(Task::none())
+            }
+        }
+    }
+
+    pub(crate) fn view(&self, window_id: iced::window::Id) -> iced::Element<'_, Message> {
+        if window_id != self.main_window_id {
+            return crate::ui::widgets::empty_placeholder("", "");
+        }
+        let label = self.splash.label();
+        let detail = self.splash.message.clone().unwrap_or_else(|| {
+            if let Some(service_api::BootPhase::Migrating { current, total }) = self.splash.phase {
+                format!("Migration {current} of {total}")
+            } else {
+                "Ratatoskr is starting...".to_string()
+            }
+        });
+        iced::widget::container(
+            iced::widget::column![
+                iced::widget::text("Ratatoskr").size(28),
+                iced::widget::Space::new().height(iced::Length::Fixed(12.0)),
+                iced::widget::text(label).size(16),
+                iced::widget::Space::new().height(iced::Length::Fixed(4.0)),
+                iced::widget::text(detail).size(12),
+            ]
+            .align_x(iced::Alignment::Center),
+        )
+        .center_x(iced::Length::Fill)
+        .center_y(iced::Length::Fill)
+        .into()
+    }
+
+    pub(crate) fn title(&self, _window_id: iced::window::Id) -> String {
+        "Ratatoskr - Starting".to_string()
+    }
+
+    pub(crate) fn subscription(&self) -> iced::Subscription<Message> {
+        let mut subs = vec![
+            appearance::subscription().map(Message::AppearanceChanged),
+            iced::window::resize_events().map(|(id, size)| Message::WindowResized(id, size)),
+            iced::window::close_requests().map(Message::WindowCloseRequested),
+        ];
+        if let Some(notifications) = self.service_notifications.as_ref() {
+            subs.push(
+                crate::service_subscription::service_notification_subscription(notifications)
+                    .map(Message::ServiceNotification),
+            );
+        }
+        iced::Subscription::batch(subs)
+    }
+}
+
+/// Top-level state machine. `App::Booting` is the initial state; it
+/// transitions to `App::Ready` exactly once when the Service answers
+/// `boot.ready` (via `Message::ServiceBootReady`).
+pub enum App {
+    Booting(BootingApp),
+    Ready(Box<ReadyApp>),
+}
+
+impl App {
+    pub(crate) fn boot() -> (Self, Task<Message>) {
+        let data_dir = crate::APP_DATA_DIR
+            .get()
+            .expect("APP_DATA_DIR must be set before iced::daemon::run");
+        let window = window_state::WindowState::load(data_dir);
+        let (main_window_id, open_task) = iced::window::open(window.to_window_settings());
+
+        let booting = BootingApp {
+            main_window_id,
+            splash: SplashState::default(),
+            service_client: None,
+            service_notifications: None,
+            appearance_mode: None,
+        };
+
+        // Two-phase Service spawn. The receiver emits ChildSpawned ->
+        // BootReady (or Terminal on failure). BootingApp::update consumes
+        // those messages and triggers the Booting -> Ready transition.
+        let spawn_stream =
+            spawn_event_stream(crate::service_client::ServiceClient::spawn_with_events(
+                data_dir.clone(),
+            ));
+
+        (
+            App::Booting(booting),
+            Task::batch([open_task.discard(), spawn_stream]),
+        )
+    }
+
+    pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
+        match self {
+            App::Booting(booting) => match booting.update(message) {
+                BootingUpdate::Stay(task) => task,
+                BootingUpdate::Transition(mut ready, task) => {
+                    if let Some(mode) = booting.appearance_mode.take() {
+                        ready.mode = mode;
+                    }
+                    *self = App::Ready(ready);
+                    task
+                }
+            },
+            App::Ready(ready) => ready.update(message),
+        }
+    }
+
+    pub(crate) fn view(&self, window_id: iced::window::Id) -> iced::Element<'_, Message> {
+        match self {
+            App::Booting(b) => b.view(window_id),
+            App::Ready(r) => r.view(window_id),
+        }
+    }
+
+    pub(crate) fn title(&self, window_id: iced::window::Id) -> String {
+        match self {
+            App::Booting(b) => b.title(window_id),
+            App::Ready(r) => r.title(window_id),
+        }
+    }
+
+    pub(crate) fn daemon_theme(&self, window_id: iced::window::Id) -> Theme {
+        match self {
+            App::Booting(_) => Theme::custom(String::from("Dark"), iced::theme::palette::Seed::DARK),
+            App::Ready(r) => r.daemon_theme(window_id),
+        }
+    }
+
+    pub(crate) fn scale_factor(&self) -> f32 {
+        match self {
+            App::Booting(_) => *crate::DEFAULT_SCALE.get().unwrap_or(&1.0),
+            App::Ready(r) => r.settings.scale,
+        }
+    }
+
+    pub(crate) fn subscription(&self) -> iced::Subscription<Message> {
+        match self {
+            App::Booting(b) => b.subscription(),
+            App::Ready(r) => r.subscription(),
+        }
+    }
 }

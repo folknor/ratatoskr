@@ -3,7 +3,7 @@ use std::sync::Arc;
 use iced::Task;
 
 use crate::pop_out::PopOutWindow;
-use crate::{App, Message};
+use crate::{Message, ReadyApp};
 
 use rtsk::db::queries_extra::{
     SaveLocalDraftParams, db_save_local_draft, db_save_local_draft_sync,
@@ -60,7 +60,7 @@ fn draft_params_from_compose(
     }
 }
 
-impl App {
+impl ReadyApp {
     /// Returns true if at least one compose pop-out window exists.
     /// Computed from `pop_out_windows` - no manual bookkeeping needed.
     pub(crate) fn composer_is_open(&self) -> bool {

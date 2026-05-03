@@ -5,9 +5,9 @@ use iced::Task;
 use crate::db::Db;
 use crate::pop_out::message_view::MessageViewMessage;
 use crate::pop_out::{PopOutMessage, PopOutWindow};
-use crate::{App, Message};
+use crate::{Message, ReadyApp};
 
-impl App {
+impl ReadyApp {
     /// Handle Save As action from the overflow menu.
     pub(crate) fn handle_save_as(&self, window_id: iced::window::Id) -> Task<Message> {
         let Some(PopOutWindow::MessageView(state)) = self.pop_out_windows.get(&window_id) else {

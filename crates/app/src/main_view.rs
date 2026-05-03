@@ -1,4 +1,4 @@
-use crate::app::{App, AppMode, DIVIDER_WIDTH, Divider};
+use crate::app::{AppMode, DIVIDER_WIDTH, Divider, ReadyApp};
 use crate::command_dispatch;
 use crate::component::Component;
 use crate::message::Message;
@@ -12,7 +12,7 @@ use cmdk::current_platform;
 use iced::widget::{Space, column, container, mouse_area, row, stack};
 use iced::{Element, Length, Point, Task};
 
-impl App {
+impl ReadyApp {
     pub(crate) fn view(&self, window_id: iced::window::Id) -> Element<'_, Message> {
         if window_id == self.main_window_id {
             return self.view_main_window();
