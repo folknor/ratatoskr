@@ -1410,10 +1410,27 @@ pub(crate) fn reader_should_enqueue(captured: u32, live: Option<u32>) -> bool {
     matches!(live, Some(current) if current == captured)
 }
 
-/// Tag `BootProgress` with the reader's fixed generation so the dispatch
+/// Tag a notification with the reader's fixed generation so the dispatch
 /// side (item 15) can drop notifications from a dying-but-still-flushing
-/// reader. Phase 2+ adds new notification variants; each one needs a similar
-/// generation field if the dispatch must distinguish across respawns.
+/// reader.
+///
+/// **Phase 2+ contract**: every state-changing notification variant
+/// added to `service_api::Notification` MUST gain a `service_generation:
+/// u32` field on its payload AND an arm here that overwrites it with the
+/// reader's captured generation. Pair with the matching arm in
+/// `Notification::service_generation()` (in `crates/service-api/src/
+/// notification.rs`) which exposes the field for the dispatch-side
+/// guard. The compiler enforces exhaustive match in this function, so
+/// adding a new variant without an arm is a compile error; the danger
+/// is a contributor adding the variant + an arm here that returns the
+/// payload unchanged (no generation tagging), which would silently
+/// reintroduce the cross-respawn race.
+///
+/// Side-effecting Phase 2 candidates that MUST be tagged:
+/// - `action.completed` (action service)
+/// - `push.event` (provider push delivery)
+/// - `OperationOutcome` (any future generic outcome notification)
+/// Untagged variants are reserved for synthetic / test-only payloads.
 fn tag_notification_with_generation(
     notification: Notification,
     generation: u32,
@@ -1758,6 +1775,41 @@ mod tests {
             service_generation: 5,
         });
         assert!(notification_should_dispatch(&current, 5));
+    }
+
+    /// Wire-up between `tag_notification_with_generation` (reader-side)
+    /// and `notification_should_dispatch` (consumer-side): a notification
+    /// tagged with generation N must dispatch under live=N and must NOT
+    /// dispatch under live=M (M != N). Locks the contract that the two
+    /// functions agree on which field carries the cross-respawn
+    /// discriminator. A future Phase 2 PR that adds a new tagged
+    /// notification variant should extend this test with the new payload
+    /// to verify both functions reach the same field.
+    #[test]
+    fn tag_and_dispatch_agree_on_boot_progress_generation() {
+        let untagged = Notification::BootProgress(service_api::BootProgress {
+            phase: service_api::BootPhase::OpeningDatabase,
+            message: None,
+            // Untagged: the Service emits 0 here; the reader is expected
+            // to overwrite with its captured generation.
+            service_generation: 0,
+        });
+        let tagged_for_5 = tag_notification_with_generation(untagged.clone(), 5);
+        assert_eq!(tagged_for_5.service_generation(), Some(5));
+        assert!(
+            notification_should_dispatch(&tagged_for_5, 5),
+            "tag(N) -> dispatch(live=N) must pass"
+        );
+        assert!(
+            !notification_should_dispatch(&tagged_for_5, 6),
+            "tag(N) -> dispatch(live=N+1) must drop"
+        );
+
+        // Re-tagging with a different value must replace, not accumulate.
+        let retagged = tag_notification_with_generation(tagged_for_5, 7);
+        assert_eq!(retagged.service_generation(), Some(7));
+        assert!(notification_should_dispatch(&retagged, 7));
+        assert!(!notification_should_dispatch(&retagged, 5));
     }
 
     // The "variants without a generation field always dispatch" path is

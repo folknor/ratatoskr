@@ -81,6 +81,21 @@ impl Notification {
     /// that have no need for the cross-respawn discriminator (currently
     /// only the test variant) return `None`, which the dispatch side
     /// treats as "always dispatch".
+    ///
+    /// **Phase 2+ contract**: every state-changing notification variant
+    /// MUST return `Some(generation)`. Side-effecting notifications (e.g.
+    /// the upcoming `action.completed`, `push.event`, `OperationOutcome`)
+    /// from a dying Service incarnation must not be applied to UI state
+    /// belonging to the new incarnation - they would, for example, mark
+    /// an action complete that the respawned action service never
+    /// dispatched. Returning `None` from such a variant silently disables
+    /// the cross-respawn guard and reintroduces the race scope item 20
+    /// closed. The compiler enforces exhaustive match here, so adding a
+    /// new variant without an arm is a compile error; choosing the wrong
+    /// arm is a contract violation, not a compile error - hence this
+    /// doc-comment gate. Pair with the matching gate in
+    /// `tag_notification_with_generation` inside
+    /// `crates/app/src/service_client.rs`.
     pub fn service_generation(&self) -> Option<u32> {
         match self {
             Self::BootProgress(progress) => Some(progress.service_generation),

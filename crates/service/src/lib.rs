@@ -169,6 +169,17 @@ pub(crate) fn test_fake_version() -> Option<u32> {
     None
 }
 
+/// Test-only flag: when set, the dispatch loop ignores stdin EOF and
+/// parks indefinitely instead of exiting. Simulates a wedged Service
+/// (panic-handler that doesn't terminate, kernel-level lock contention,
+/// etc.) so the client-Drop kill-escalation path can be exercised
+/// end-to-end. Triggered by `--test-hang-on-stdin-eof` on the command
+/// line; off in production builds.
+#[cfg(feature = "test-helpers")]
+pub(crate) fn test_hang_on_stdin_eof() -> bool {
+    std::env::args().any(|arg| arg == "--test-hang-on-stdin-eof")
+}
+
 fn default_app_data_dir() -> PathBuf {
     if let Some(dev_dir) = workspace_dev_data_dir() {
         return dev_dir;

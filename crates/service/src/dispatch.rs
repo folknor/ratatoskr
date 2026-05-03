@@ -133,6 +133,29 @@ where
                     }
                     Ok(None) => {
                         log::info!("service stdin closed");
+                        // Test-only: simulate a wedged Service that
+                        // doesn't terminate on stdin EOF (panic-handler
+                        // loop, kernel-level contention, etc.). Park
+                        // indefinitely so the client's Drop /
+                        // wait_with_kill_watchdog escalation paths can be
+                        // exercised end-to-end. The `tokio::select!`
+                        // around this arm means lifecycle.notified()
+                        // could still wake us if a SIGTERM arrives, but
+                        // that is also what real production deadlocks
+                        // would do; the test client uses SIGKILL via
+                        // start_kill which the kernel handles outside
+                        // the runtime.
+                        #[cfg(feature = "test-helpers")]
+                        if crate::test_hang_on_stdin_eof() {
+                            log::warn!(
+                                "test-hang-on-stdin-eof: ignoring stdin EOF, parking forever",
+                            );
+                            // 1 hour is effectively forever for test
+                            // purposes; the test client SIGKILLs us long
+                            // before this returns.
+                            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                            break;
+                        }
                         break;
                     }
                     Err(FrameError::TooLarge) => {

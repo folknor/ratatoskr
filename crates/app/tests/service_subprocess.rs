@@ -1038,3 +1038,358 @@ fn pid_is_alive(pid: u32) -> std::io::Result<bool> {
         _ => Err(err),
     }
 }
+
+/// Crashloop-threshold tripping. `record_respawn_and_check_crashloop`
+/// fires Terminal after `CRASHLOOP_THRESHOLD` (3) respawns within
+/// `CRASHLOOP_WINDOW` (30s). The classification logic and the threshold-
+/// firing are unit-tested in `service_client.rs`, but the end-to-end
+/// path - SIGKILL the child, observe respawn, repeat until threshold
+/// trips and Terminal arrives instead of another ChildSpawned - is
+/// uncovered. This is the only stop on a fast post-Ready crash loop
+/// until Phase 8 replaces it with exponential backoff; flagged by arch
+/// review as missing.
+///
+/// Each kill -> respawn cycle takes ~1.5-2s (1s cooldown + spawn +
+/// boot.ready), so three cycles fit comfortably in the 30s window. The
+/// test drives the cycle three times and asserts the third kill
+/// produces `Terminal`, not another `ChildSpawned`.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn crashloop_threshold_emits_terminal_after_third_crash() -> TestResult {
+    let binary = binary_path()?;
+    let data_dir = DataDirGuard::new("crashloop_threshold")?;
+    let mut events = ServiceClient::spawn_with_events_for_test(
+        std::path::PathBuf::from(binary),
+        data_dir.path().to_path_buf(),
+        Vec::new(),
+    );
+
+    // Walk to the first BootReady so the respawn machinery is armed
+    // (handle_crash defers when first_boot_ready is None).
+    let client = match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        events.recv(),
+    )
+    .await
+    .map_err(|_| std::io::Error::other("ChildSpawned timeout"))?
+    .ok_or_else(|| std::io::Error::other("event stream closed"))?
+    {
+        SpawnEvent::ChildSpawned(c) => c,
+        other => return Err(std::io::Error::other(format!(
+            "expected ChildSpawned, got {other:?}"
+        ))
+        .into()),
+    };
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
+        .await
+        .map_err(|_| std::io::Error::other("first BootReady timeout"))?;
+
+    // First two kills must produce respawn (ChildSpawned + BootReady).
+    // Third kill must produce Terminal (threshold trips).
+    for cycle in 1..=2 {
+        let pid = client
+            .child_pid()
+            .ok_or_else(|| std::io::Error::other("no pid for kill"))?;
+        let pid_signed = i32::try_from(pid).map_err(std::io::Error::other)?;
+        // SAFETY: SIGKILL on a known PID held alive by the
+        // ServiceClient's child handle.
+        let kill_result = unsafe { libc::kill(pid_signed, libc::SIGKILL) };
+        if kill_result != 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+
+        // Respawn emits ChildSpawned then BootReady.
+        let respawn_first =
+            tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
+                .await
+                .map_err(|_| {
+                    std::io::Error::other(format!(
+                        "cycle {cycle}: respawn ChildSpawned timeout"
+                    ))
+                })?
+                .ok_or_else(|| std::io::Error::other("event stream closed"))?;
+        match respawn_first {
+            SpawnEvent::ChildSpawned(_) => {}
+            other => return Err(std::io::Error::other(format!(
+                "cycle {cycle}: expected respawn ChildSpawned, got {other:?}"
+            ))
+            .into()),
+        }
+        let respawn_second =
+            tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
+                .await
+                .map_err(|_| {
+                    std::io::Error::other(format!(
+                        "cycle {cycle}: respawn BootReady timeout"
+                    ))
+                })?
+                .ok_or_else(|| std::io::Error::other("event stream closed"))?;
+        match respawn_second {
+            SpawnEvent::BootReady(_) => {}
+            other => return Err(std::io::Error::other(format!(
+                "cycle {cycle}: expected respawn BootReady, got {other:?}"
+            ))
+            .into()),
+        }
+    }
+
+    // Third kill - threshold trips, Terminal must arrive instead of
+    // another ChildSpawned.
+    let pid = client
+        .child_pid()
+        .ok_or_else(|| std::io::Error::other("no pid for third kill"))?;
+    let pid_signed = i32::try_from(pid).map_err(std::io::Error::other)?;
+    // SAFETY: same as above.
+    let kill_result = unsafe { libc::kill(pid_signed, libc::SIGKILL) };
+    if kill_result != 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+
+    let terminal = tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
+        .await
+        .map_err(|_| std::io::Error::other("Terminal timeout on third crash"))?
+        .ok_or_else(|| std::io::Error::other("event stream closed"))?;
+    match terminal {
+        SpawnEvent::Terminal(error) => {
+            // The threshold-fired Terminal classification carries the
+            // dying child's exit code (None for SIGKILL on Unix). The
+            // important bit is that we got Terminal, not another
+            // ChildSpawned - the loop has been short-circuited.
+            log::info!("crashloop threshold tripped, got: {error:?}");
+        }
+        other => return Err(std::io::Error::other(format!(
+            "third kill should have tripped crashloop and emitted Terminal; got {other:?}"
+        ))
+        .into()),
+    }
+
+    // After Terminal, the receiver should close (no more events).
+    let after = tokio::time::timeout(std::time::Duration::from_secs(2), events.recv()).await;
+    match after {
+        Ok(None) => {} // channel closed - expected
+        Ok(Some(other)) => {
+            return Err(std::io::Error::other(format!(
+                "no more events expected after Terminal; got {other:?}"
+            ))
+            .into());
+        }
+        Err(_) => {} // timeout is also acceptable - no event arrived
+    }
+
+    Ok(())
+}
+
+/// End-to-end stale-notification dispatch coverage. The reader-side gate
+/// (`reader_should_enqueue`) and dispatch-side gate
+/// (`notification_should_dispatch`) are unit-tested in
+/// `crates/app/src/service_client.rs`; this test runs the FULL pipeline
+/// reader -> NotificationQueue -> consumer drain across a real spawn ->
+/// SIGKILL -> respawn cycle. Without this, a regression that wired the
+/// reader-side gate against the wrong generation source (or dropped the
+/// dispatch-side check entirely) would still pass every existing test.
+///
+/// Test shape:
+/// 1. Spawn Service A; drive to BootReady.
+/// 2. Drain whatever boot.progress notifications boot A queued.
+/// 3. SIGKILL the child to trigger a respawn.
+/// 4. Wait for respawn ChildSpawned + BootReady.
+/// 5. Drain notifications from the queue; assert every one carries the
+///    live generation. Any tagged with the dying generation must NOT
+///    have been enqueued (caught by reader-side gate) or - if the race
+///    landed it in the queue before the gate fired - must have been
+///    filtered out at consumer drain (the dispatch-side gate).
+///
+/// The shared NotificationQueue survives the respawn, so we can poll it
+/// from a single fixed handle across the whole flow.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn stale_notifications_dropped_after_generation_bump_end_to_end() -> TestResult {
+    let binary = binary_path()?;
+    let data_dir = DataDirGuard::new("stale_notif_e2e")?;
+    let mut events = ServiceClient::spawn_with_events_for_test(
+        std::path::PathBuf::from(binary),
+        data_dir.path().to_path_buf(),
+        Vec::new(),
+    );
+
+    // Walk to ChildSpawned + BootReady on the original Service.
+    let client = match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        events.recv(),
+    )
+    .await
+    .map_err(|_| std::io::Error::other("ChildSpawned timeout"))?
+    .ok_or_else(|| std::io::Error::other("event stream closed"))?
+    {
+        SpawnEvent::ChildSpawned(c) => c,
+        other => return Err(std::io::Error::other(format!(
+            "expected ChildSpawned, got {other:?}"
+        ))
+        .into()),
+    };
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
+        .await
+        .map_err(|_| std::io::Error::other("BootReady timeout"))?;
+
+    let initial_gen = client.current_generation();
+    assert_eq!(
+        initial_gen, 1,
+        "first incarnation should have generation 1; got {initial_gen}"
+    );
+
+    let initial_pid = client
+        .child_pid()
+        .ok_or_else(|| std::io::Error::other("initial child has no pid"))?;
+
+    // Drain whatever Service A queued onto the shared NotificationQueue
+    // before we SIGKILL it. The drain proves the queue is empty before
+    // the respawn so any post-respawn read can only see post-respawn
+    // notifications (or stale ones that escaped the gate, which we
+    // assert against below).
+    let queue = client.notifications();
+    while tokio::time::timeout(std::time::Duration::from_millis(100), queue.recv())
+        .await
+        .is_ok()
+    {}
+
+    // SIGKILL the original Service. Reader observes EOF, fires
+    // handle_crash, generation is bumped, respawn launches.
+    let pid_signed = i32::try_from(initial_pid).map_err(std::io::Error::other)?;
+    // SAFETY: SIGKILL on a known PID held alive by the ServiceClient's
+    // child handle. The client keeps the PID stable until wait().
+    let kill_result = unsafe { libc::kill(pid_signed, libc::SIGKILL) };
+    if kill_result != 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+
+    // Wait for respawn ChildSpawned + BootReady.
+    let respawn_first = tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
+        .await
+        .map_err(|_| std::io::Error::other("respawn ChildSpawned timeout"))?
+        .ok_or_else(|| std::io::Error::other("event stream closed"))?;
+    match respawn_first {
+        SpawnEvent::ChildSpawned(_) => {}
+        other => return Err(std::io::Error::other(format!(
+            "expected respawn ChildSpawned, got {other:?}"
+        ))
+        .into()),
+    }
+    let respawn_second = tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
+        .await
+        .map_err(|_| std::io::Error::other("respawn BootReady timeout"))?
+        .ok_or_else(|| std::io::Error::other("event stream closed"))?;
+    match respawn_second {
+        SpawnEvent::BootReady(_) => {}
+        other => return Err(std::io::Error::other(format!(
+            "expected respawn BootReady, got {other:?}"
+        ))
+        .into()),
+    }
+
+    let live_gen = client.current_generation();
+    assert!(
+        live_gen > initial_gen,
+        "respawn must bump current_generation; was {initial_gen}, still {live_gen}"
+    );
+
+    // Now drain everything the queue contains and assert no notification
+    // carries the dying generation. This is the property the discrepancy
+    // wanted covered end-to-end. We allow up to 500ms of post-respawn
+    // drain to catch any in-flight notifications from either incarnation.
+    let drain_deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+    let mut drained: Vec<service_api::Notification> = Vec::new();
+    while std::time::Instant::now() < drain_deadline {
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            queue.recv(),
+        )
+        .await
+        {
+            Ok(Some(n)) => drained.push(n),
+            Ok(None) => break,
+            Err(_) => {} // timeout - keep polling until drain_deadline
+        }
+    }
+
+    // For every drained notification, its tagged generation must equal
+    // the live generation - either because the reader-side gate
+    // (reader_should_enqueue) refused to enqueue stale ones, or because
+    // they didn't arrive in the first place. In any case, no stale
+    // generation should leak through.
+    for n in &drained {
+        if let Some(tagged) = n.service_generation() {
+            assert_eq!(
+                tagged, live_gen,
+                "drained notification with stale generation {tagged} (live={live_gen}): {n:?}"
+            );
+        }
+    }
+
+    let _ = client.shutdown().await;
+    Ok(())
+}
+
+/// Drop a ServiceClient whose child Service is wedged: the dispatch loop
+/// is parked on a sleep instead of exiting on stdin EOF (simulating a
+/// panic-handler that doesn't terminate, kernel-level lock contention,
+/// etc.). The pre-existing
+/// `dropping_client_terminates_child_within_one_second` test verifies the
+/// happy path where the Service exits cleanly on EOF; this test verifies
+/// the kill-escalation path that is the only line of defense when the
+/// happy path doesn't fire. Without this test, a regression that removed
+/// `start_kill` from Drop's escalation would not be caught.
+///
+/// Acceptance: child is dead within ~2.5s of `drop(client)`. The Drop
+/// path's budget is 200ms abort + 1s exit_deadline + start_kill + 500ms
+/// poll = ~1.7s; we leave headroom for runtime jitter and test-host
+/// load.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn deadlocked_service_drop_escalates_to_kill() -> TestResult {
+    let binary = binary_path()?;
+    let data_dir = DataDirGuard::new("drop_escalates_to_kill")?;
+    // --test-hang-on-stdin-eof tells the Service to ignore stdin EOF
+    // and park indefinitely instead of exiting cleanly. Drop must
+    // SIGKILL it.
+    let client = ServiceClient::spawn_for_test(
+        Path::new(binary),
+        data_dir.path(),
+        &["--test-hang-on-stdin-eof"],
+    )
+    .await?;
+    let pid = client
+        .child_pid()
+        .ok_or_else(|| std::io::Error::other("child has no pid"))?;
+
+    // Sanity: the wedged Service is alive before we drop the client.
+    assert!(pid_is_alive(pid)?, "Service should be running before drop");
+
+    let started = std::time::Instant::now();
+    drop(client);
+
+    // The wedged Service does not exit on stdin EOF; Drop's
+    // start_kill + 500ms poll must fire to terminate it. Budget is
+    // ~1.7s in production; we allow up to 3s for runtime jitter on
+    // a loaded test host.
+    let deadline = std::time::Duration::from_millis(3000);
+    while started.elapsed() < deadline {
+        if !pid_is_alive(pid)? {
+            // Sanity: Drop must have escalated to kill, not waited for
+            // a hung clean-shutdown path. The wall time should be at
+            // least ~1s (the exit_deadline budget that has to expire
+            // before start_kill fires) but well under the 3s ceiling.
+            let elapsed = started.elapsed();
+            assert!(
+                elapsed >= std::time::Duration::from_millis(800),
+                "Drop returned in {elapsed:?}; expected at least ~1s waiting for the hung child before SIGKILL escalates"
+            );
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    Err(std::io::Error::other(format!(
+        "wedged Service pid {pid} still alive {:?} after Drop; SIGKILL escalation did not fire",
+        started.elapsed()
+    ))
+    .into())
+}
