@@ -1,7 +1,9 @@
+mod boot;
 mod boot_progress;
 mod dispatch;
 mod handlers;
 mod instance_lock;
+mod key_load;
 mod lifecycle;
 mod logging;
 pub mod parent_death;
@@ -86,14 +88,20 @@ pub fn run_service_blocking() -> ! {
     };
 
     let exit_code = runtime.block_on(async move {
-        let lifecycle = lifecycle::ServiceLifecycle::new(Some(app_data_dir));
+        let lifecycle = lifecycle::ServiceLifecycle::new(Some(app_data_dir.clone()));
         sigterm::spawn(lifecycle.clone());
 
         // 6. Wrap the saved FDs/HANDLEs into tokio I/O types now that we
         //    have a runtime context.
         match stdio_defense::adopt_into_runtime(saved_stdio) {
             Ok((stdin, stdout)) => {
-                dispatch::run_service_with_io_and_lifecycle(stdin, stdout, lifecycle).await
+                dispatch::run_service_with_io_and_lifecycle(
+                    stdin,
+                    stdout,
+                    lifecycle,
+                    app_data_dir,
+                )
+                .await
             }
             Err(error) => {
                 log::error!("failed to adopt service stdio into runtime: {error}");

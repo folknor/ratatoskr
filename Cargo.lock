@@ -227,6 +227,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 name = "app"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "cal",
  "chrono",
  "cmdk",
@@ -6290,6 +6291,7 @@ dependencies = [
 name = "service"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "dirs",
  "fs2",
  "futures-util",

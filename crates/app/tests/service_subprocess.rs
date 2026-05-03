@@ -12,12 +12,26 @@ type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 /// RAII handle for the per-test data directory. Removes the dir when dropped
 /// (panic-on-test-failure included) so smoke runs don't accumulate stray
 /// `target/service-smoke-*` directories.
+///
+/// Writes a dummy `ratatoskr.key` so the Service's boot-time key load
+/// succeeds. Tests that need the missing-key case use
+/// `DataDirGuard::without_key`.
 struct DataDirGuard {
     path: PathBuf,
 }
 
 impl DataDirGuard {
     fn new(suffix: &str) -> std::io::Result<Self> {
+        let guard = Self::create(suffix)?;
+        write_dummy_key(&guard.path)?;
+        Ok(guard)
+    }
+
+    fn without_key(suffix: &str) -> std::io::Result<Self> {
+        Self::create(&format!("nokey-{suffix}"))
+    }
+
+    fn create(suffix: &str) -> std::io::Result<Self> {
         let path = std::env::current_dir()?
             .join("target")
             .join(format!("service-smoke-{}-{}", std::process::id(), suffix));
@@ -29,6 +43,13 @@ impl DataDirGuard {
     fn path(&self) -> &Path {
         &self.path
     }
+}
+
+fn write_dummy_key(dir: &Path) -> std::io::Result<()> {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    let key_bytes = [0u8; 32];
+    let encoded = STANDARD.encode(key_bytes);
+    std::fs::write(dir.join("ratatoskr.key"), encoded)
 }
 
 impl Drop for DataDirGuard {
@@ -105,14 +126,17 @@ async fn read_response<R>(
 where
     R: tokio::io::AsyncRead + Unpin,
 {
-    let line = stdout
-        .next_line()
-        .await?
-        .ok_or_else(|| std::io::Error::other("service closed stdout"))?;
-    match parse_service_message(&line)? {
-        ParsedServiceMessage::Response { id, response } => Ok((id, response)),
-        ParsedServiceMessage::Notification(_) => {
-            Err(std::io::Error::other("unexpected notification").into())
+    // The boot sequence emits `boot.progress` notifications concurrently
+    // with the dispatch loop, so we may see one or more notifications
+    // before the response we're waiting on. Skip them and keep reading.
+    loop {
+        let line = stdout
+            .next_line()
+            .await?
+            .ok_or_else(|| std::io::Error::other("service closed stdout"))?;
+        match parse_service_message(&line)? {
+            ParsedServiceMessage::Response { id, response } => return Ok((id, response)),
+            ParsedServiceMessage::Notification(_) => continue,
         }
     }
 }
@@ -339,6 +363,41 @@ async fn pending_request_fails_with_service_crashed_when_child_killed() -> TestR
         )
         .into()),
     }
+}
+
+/// Spawning a Service against a data dir without a `ratatoskr.key` file
+/// must exit with `BootExitCode::KeyLoadFailure` (code 73) - that's the
+/// terminal-failure signal the UI maps to "Encryption key missing or
+/// unreadable" rather than treating it as a generic crash.
+#[tokio::test(flavor = "multi_thread")]
+async fn missing_key_file_exits_with_key_load_failure_code() -> TestResult {
+    let binary = binary_path()?;
+    let data_dir = DataDirGuard::without_key("missing_key")?;
+    let mut child = Command::new(binary)
+        .arg("--service")
+        .arg("--app-data-dir")
+        .arg(data_dir.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()?;
+    // Hold the parent's writer end of stdin so `child.wait()` does NOT drop
+    // it (tokio::process::Child::wait() implicitly drops self.stdin.take()
+    // to keep blocked children from hanging forever, but here we want the
+    // boot sequence to fail on its own terms - on stdin EOF the dispatch
+    // loop would break before the key-load step finishes).
+    let _stdin_keepalive = child
+        .stdin
+        .take()
+        .ok_or_else(|| std::io::Error::other("child has no stdin"))?;
+    let status = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await??;
+    assert_eq!(
+        status.code(),
+        Some(BootExitCode::KeyLoadFailure.as_i32()),
+        "expected KeyLoadFailure (73), got {status:?}"
+    );
+    Ok(())
 }
 
 /// Two `--service` instances against the same data dir: the first takes the

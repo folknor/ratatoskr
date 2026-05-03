@@ -1,7 +1,8 @@
 use service_api::{
-    BoundedLineReader, HealthPingResponse, JsonRpcRequest, ParsedServiceMessage, RequestParams,
-    ServiceResponse, ShutdownResponse, parse_service_message, write_message,
+    BootExitCode, BoundedLineReader, HealthPingResponse, JsonRpcRequest, ParsedServiceMessage,
+    RequestParams, ServiceResponse, ShutdownResponse, parse_service_message, write_message,
 };
+use std::path::PathBuf;
 use tokio::io::{AsyncWriteExt, DuplexStream};
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
@@ -10,20 +11,88 @@ struct Harness {
     stdin: DuplexStream,
     stdout: BoundedLineReader<DuplexStream>,
     service: tokio::task::JoinHandle<i32>,
+    _data_dir: TestDataDir,
 }
 
-fn spawn_harness() -> Harness {
+/// Per-test data dir with a dummy `ratatoskr.key` so the boot sequence's
+/// key-load step succeeds. Removed on drop to keep `target/` tidy.
+struct TestDataDir {
+    path: PathBuf,
+}
+
+impl TestDataDir {
+    fn new(suffix: &str) -> std::io::Result<Self> {
+        let path = std::env::current_dir()?
+            .join("target")
+            .join(format!(
+                "dispatch-in-process-{}-{}-{}",
+                std::process::id(),
+                suffix,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            ));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path)?;
+        write_dummy_key(&path)?;
+        Ok(Self { path })
+    }
+
+    fn without_key(suffix: &str) -> std::io::Result<Self> {
+        let path = std::env::current_dir()?
+            .join("target")
+            .join(format!(
+                "dispatch-in-process-nokey-{}-{}-{}",
+                std::process::id(),
+                suffix,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            ));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path)?;
+        Ok(Self { path })
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+impl Drop for TestDataDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+fn write_dummy_key(dir: &std::path::Path) -> std::io::Result<()> {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    let key_bytes = [0u8; 32];
+    let encoded = STANDARD.encode(key_bytes);
+    std::fs::write(dir.join("ratatoskr.key"), encoded)
+}
+
+fn spawn_harness_with_suffix(suffix: &str) -> Harness {
+    let data_dir = TestDataDir::new(suffix).expect("create test data dir");
     let (client_stdin, service_stdin) = tokio::io::duplex(1024 * 1024);
     let (service_stdout, client_stdout) = tokio::io::duplex(1024 * 1024);
     let service = tokio::spawn(service::run_service_with_io(
         service_stdin,
         service_stdout,
+        data_dir.path().to_path_buf(),
     ));
     Harness {
         stdin: client_stdin,
         stdout: BoundedLineReader::new(client_stdout, service_api::MAX_FRAME_BYTES),
         service,
+        _data_dir: data_dir,
     }
+}
+
+fn spawn_harness() -> Harness {
+    spawn_harness_with_suffix("default")
 }
 
 #[tokio::test]
@@ -240,6 +309,33 @@ async fn concurrent_ping_ids_are_correlated() -> TestResult {
     shutdown(harness).await
 }
 
+/// Boot sequence with a missing `ratatoskr.key` returns the
+/// `BootExitCode::KeyLoadFailure` exit code. Verifies the boot-failure
+/// signal propagates from the spawn_blocking key-load step through the
+/// dispatch loop's `boot_failure_rx` and out as the run_service_with_io
+/// return value, without calling `std::process::exit` (which would kill
+/// the test runner).
+#[tokio::test]
+async fn boot_sequence_returns_key_load_failure_when_key_file_is_missing() -> TestResult {
+    let data_dir = TestDataDir::without_key("missing_key").expect("create test data dir");
+    let (_client_stdin, service_stdin) = tokio::io::duplex(1024 * 1024);
+    let (service_stdout, _client_stdout) = tokio::io::duplex(1024 * 1024);
+    let service = tokio::spawn(service::run_service_with_io(
+        service_stdin,
+        service_stdout,
+        data_dir.path().to_path_buf(),
+    ));
+    let exit_code = tokio::time::timeout(std::time::Duration::from_secs(5), service)
+        .await
+        .map_err(|_| std::io::Error::other("service did not exit on missing key"))??;
+    assert_eq!(
+        exit_code,
+        BootExitCode::KeyLoadFailure.as_i32(),
+        "expected KeyLoadFailure (73), got {exit_code}"
+    );
+    Ok(())
+}
+
 async fn write_request(
     stdin: &mut DuplexStream,
     id: u64,
@@ -252,19 +348,28 @@ async fn write_request(
 async fn read_response(
     stdout: &mut BoundedLineReader<DuplexStream>,
 ) -> TestResult<(Option<u64>, ServiceResponse)> {
-    let line = stdout
-        .next_line()
-        .await?
-        .ok_or_else(|| std::io::Error::other("service closed stdout"))?;
-    match parse_service_message(&line) {
-        Ok(ParsedServiceMessage::Response { id, response }) => Ok((id, response)),
-        Ok(ParsedServiceMessage::Notification(_)) => {
-            Err(std::io::Error::other("unexpected notification").into())
+    // The boot sequence emits `boot.progress` notifications concurrently
+    // with the dispatch loop, so we may see one or more notifications
+    // before the response we're waiting on. Skip them and keep reading
+    // until a Response frame arrives.
+    loop {
+        let line = stdout
+            .next_line()
+            .await?
+            .ok_or_else(|| std::io::Error::other("service closed stdout"))?;
+        match parse_service_message(&line) {
+            Ok(ParsedServiceMessage::Response { id, response }) => return Ok((id, response)),
+            Ok(ParsedServiceMessage::Notification(_)) => {
+                // Notifications during boot are expected; keep reading.
+                continue;
+            }
+            Err(error) => {
+                return Err(std::io::Error::other(format!(
+                    "parse_service_message failed: {error}\nline: {line}"
+                ))
+                .into());
+            }
         }
-        Err(error) => Err(std::io::Error::other(format!(
-            "parse_service_message failed: {error}\nline: {line}"
-        ))
-        .into()),
     }
 }
 

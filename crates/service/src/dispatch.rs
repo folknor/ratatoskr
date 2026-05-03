@@ -1,13 +1,15 @@
+use crate::boot;
 use crate::handlers;
 use crate::lifecycle::ServiceLifecycle;
 use futures_util::FutureExt;
 use serde_json::Value;
 use service_api::{
-    BoundedLineReader, FrameError, JsonRpcErrorObject, JsonRpcErrorResponse,
+    BootExitCode, BoundedLineReader, FrameError, JsonRpcErrorObject, JsonRpcErrorResponse,
     JsonRpcSuccessResponse, ParsedClientMessage, RequestParams, ServiceError, ShutdownResponse,
     encode_message, parse_client_message,
 };
 use std::panic::AssertUnwindSafe;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -23,18 +25,20 @@ const MAX_IN_FLIGHT: usize = 64;
 /// so a pathological client cannot balloon Service memory by flooding stdin.
 const ADMISSION_CAP: usize = 2 * MAX_IN_FLIGHT;
 
-pub async fn run_service_with_io<R, W>(reader: R, writer: W) -> i32
+pub async fn run_service_with_io<R, W>(reader: R, writer: W, app_data_dir: PathBuf) -> i32
 where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    run_service_with_io_and_lifecycle(reader, writer, ServiceLifecycle::new(None)).await
+    run_service_with_io_and_lifecycle(reader, writer, ServiceLifecycle::new(None), app_data_dir)
+        .await
 }
 
 pub(crate) async fn run_service_with_io_and_lifecycle<R, W>(
     reader: R,
     writer: W,
     lifecycle: ServiceLifecycle,
+    app_data_dir: PathBuf,
 ) -> i32
 where
     R: AsyncRead + Unpin + Send + 'static,
@@ -51,6 +55,24 @@ where
     let mut lines = BoundedLineReader::new(reader, service_api::MAX_FRAME_BYTES);
     let mut pending_shutdown_id: Option<u64> = None;
 
+    // Boot sequence runs concurrently with the dispatch loop so health.ping
+    // continues to round-trip while migrations / key load run. On fatal boot
+    // failure the sequence posts the boot exit code via `boot_failure_tx`;
+    // the dispatch loop's select! breaks out on that event so the Service
+    // exits promptly with the right code.
+    let (boot_failure_tx, mut boot_failure_rx) = mpsc::channel::<BootExitCode>(1);
+    let boot_handle = tokio::spawn({
+        let out_tx = out_tx.clone();
+        let app_data_dir = app_data_dir.clone();
+        async move {
+            if let Err(failure) = boot::run_boot_sequence(out_tx, app_data_dir).await {
+                let _ = boot_failure_tx.send(failure.as_exit_code()).await;
+            }
+        }
+    });
+
+    let mut boot_exit_code: Option<BootExitCode> = None;
+
     loop {
         // Reap any tasks that have completed since the last iteration so
         // `handlers_in_flight.len()` reflects truly-still-running handlers
@@ -59,6 +81,11 @@ where
 
         tokio::select! {
             () = lifecycle.notified() => {
+                break;
+            }
+            Some(code) = boot_failure_rx.recv() => {
+                log::error!("boot sequence failed; exit code {}", code.as_i32());
+                boot_exit_code = Some(code);
                 break;
             }
             line = lines.next_line() => {
@@ -113,6 +140,12 @@ where
     // stopped reading new requests by the time we reach this point.
     drain_in_flight(&mut handlers_in_flight).await;
 
+    // Reap the boot task so any boot-sequence panic surfaces in the log
+    // rather than vanishing at process exit. We don't need the result -
+    // the boot_failure_rx already delivered it during the dispatch loop.
+    boot_handle.abort();
+    let _ = boot_handle.await;
+
     let flushed_ok = panic_safe_drain(&lifecycle).await;
     if !flushed_ok {
         log::warn!("shutdown drain completed with errors");
@@ -135,7 +168,11 @@ where
 
     drop(out_tx);
     let _ = writer_handle.await;
-    0
+
+    match boot_exit_code {
+        Some(code) => code.as_i32(),
+        None => 0,
+    }
 }
 
 enum HandleOutcome {

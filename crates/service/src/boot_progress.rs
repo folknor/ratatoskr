@@ -28,9 +28,7 @@ use tokio::sync::mpsc;
 /// either way.
 ///
 /// Phase 1.5 commit 5 lands the helper. Commits 6 through 9 call it from
-/// the per-phase boot work that those commits introduce; the
-/// `allow(dead_code)` resolves once the first per-phase commit lands.
-#[allow(dead_code)]
+/// the per-phase boot work that those commits introduce.
 pub(crate) fn emit(out_tx: &mpsc::Sender<Vec<u8>>, phase: BootPhase, message: Option<String>) {
     let notification = Notification::BootProgress(BootProgress {
         phase,
