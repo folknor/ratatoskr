@@ -402,7 +402,10 @@ impl ServiceClient {
 
         client.install_running_state(spawned, generation);
 
-        let ping: HealthPingResponse = match client.request(RequestParams::HealthPing).await {
+        let ping: HealthPingResponse = match client
+            .request_or_observe_child_exit(RequestParams::HealthPing)
+            .await
+        {
             Ok(ping) => ping,
             Err(error) => {
                 // The Service exited or crashed before answering the version-
@@ -440,6 +443,73 @@ impl ServiceClient {
     /// return `NotConnected`. That's fine because callers only use this on
     /// the terminal-failure path - the client is on its way to being
     /// dropped anyway.
+    /// Run a request and, in parallel, observe `Child::try_wait` on a
+    /// short interval. Returns the request result if it resolves first;
+    /// returns `Err(ClientError::ServiceCrashed)` immediately when the
+    /// child is observed to have exited.
+    ///
+    /// **Why this exists.** The reader task fails the pending oneshot
+    /// on EOF, which under typical load resolves the request quickly.
+    /// Under heavy parallel-test scheduling pressure or production
+    /// overload, the reader task can be starved long enough that the
+    /// per-request timeout ceiling (5 s `health.ping`, 600 s `boot.ready`)
+    /// becomes the actual wall time before the request fails - which
+    /// produces flaky tests and slow terminal-failure surfacing in
+    /// production. `try_wait` is non-blocking and signal-driven on
+    /// Unix; the observer thread can fire even when the reader is
+    /// stalled. The Phase 2 plan named this as a Phase 8 carry-forward;
+    /// we land the structural fix here because the test cohort that
+    /// depends on it is growing, not Phase 8.
+    ///
+    /// On exit-first, the caller is expected to feed
+    /// `Err(ServiceCrashed)` into `elevate_initial_boot_error` to
+    /// project the dying child's exit code into a structured
+    /// `BootFailure`.
+    async fn request_or_observe_child_exit<R>(
+        self: &Arc<Self>,
+        params: RequestParams,
+    ) -> Result<R, ClientError>
+    where
+        R: DeserializeOwned,
+    {
+        let request_future = self.request::<R>(params);
+        let exit_future = self.observe_child_exit();
+        tokio::pin!(request_future);
+        tokio::pin!(exit_future);
+        tokio::select! {
+            result = &mut request_future => result,
+            () = &mut exit_future => Err(ClientError::ServiceCrashed),
+        }
+    }
+
+    /// Poll `Child::try_wait` on a 50 ms interval. Returns when the
+    /// child has exited, or when the running state has been torn down
+    /// (which happens during shutdown / elevate / Drop).
+    ///
+    /// `try_wait` requires `&mut Child`, so this holds the state lock
+    /// briefly per poll - microseconds, since `try_wait` is a
+    /// non-blocking `waitpid(WNOHANG)` on Unix and the equivalent
+    /// `WaitForSingleObject(0)` shape on Windows.
+    async fn observe_child_exit(self: &Arc<Self>) {
+        const POLL_INTERVAL: Duration = Duration::from_millis(50);
+        loop {
+            let exited = {
+                let mut guard = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+                match guard.as_mut() {
+                    Some(state) => matches!(state.child.try_wait(), Ok(Some(_))),
+                    // No state means we're tearing down (shutdown / Drop).
+                    // Treat as "no longer running" so the caller can
+                    // unwind without waiting.
+                    None => true,
+                }
+            };
+            if exited {
+                return;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    }
+
     async fn elevate_initial_boot_error(self: &Arc<Self>, original: ClientError) -> ClientError {
         // Already structured - nothing to elevate.
         match &original {
@@ -1384,7 +1454,7 @@ async fn run_spawn_flow(
         return;
     }
     let response: Result<BootReadyResponse, ClientError> =
-        client.request(RequestParams::BootReady).await;
+        client.request_or_observe_child_exit(RequestParams::BootReady).await;
     match response {
         Ok(response) => {
             // Stash for the schema-version sanity check on every subsequent

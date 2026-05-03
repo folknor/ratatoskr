@@ -75,7 +75,8 @@ Use `brokkr` (not `cargo`) for check/test. It runs a gremlins scan (banned Unico
   - `-N, --repeat <N>` - run the test N times per sweep (flaky-test hunting).
   - `-j, --jobs <N>` - parallel cargo compile jobs.
   - `--raw` - bypass output filtering, print everything cargo emits.
-  - Example: `brokkr test -p common truncates_without_splitting` or `brokkr test -p calendar extract_tag_value_flattens_nested_text -N 5`.
+  - `--debug` - build and run the test in dev profile instead of release. Use this for subprocess-lifecycle / IPC / boot-path tests where release-LTO compile time (3-4 min for the full workspace) dominates wall time and the optimization level doesn't change the behavior under test. `BROKKR_TEST_BIN_DIR` points at `<target>/debug` accordingly.
+  - Example: `brokkr test -p common truncates_without_splitting` or `brokkr test -p calendar extract_tag_value_flattens_nested_text -N 5` or `brokkr test -p app terminal_failure_at_initial_boot_does_not_respawn --debug`.
 - `cargo run -p app` - run the iced app (requires a seeded DB, see `crates/app/seed-db.py`)
 
 Fall back to raw `cargo check`/`cargo test` only when you need to bypass clippy gating for a targeted run.
