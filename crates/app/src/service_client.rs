@@ -2,9 +2,9 @@ use crate::notification_queue::NotificationQueue;
 use dashmap::DashMap;
 use serde::de::DeserializeOwned;
 use service_api::{
-    BoundedLineReader, HealthPingResponse, JsonRpcErrorObject, JsonRpcRequest, Notification,
-    ParsedServiceMessage, PROTOCOL_VERSION, RequestParams, RequestTimeoutKind, ServiceError,
-    ServiceResponse, ShutdownResponse, encode_message, parse_service_message,
+    BootClassification, BoundedLineReader, HealthPingResponse, JsonRpcErrorObject, JsonRpcRequest,
+    Notification, ParsedServiceMessage, PROTOCOL_VERSION, RequestParams, RequestTimeoutKind,
+    ServiceError, ServiceResponse, ShutdownResponse, encode_message, parse_service_message,
 };
 use std::path::Path;
 use std::sync::{
@@ -58,6 +58,20 @@ pub enum ClientError {
     NotConnected,
     #[error("protocol version mismatch: ui={ui}, service={service}")]
     VersionMismatch { ui: u32, service: u32 },
+    /// Service boot exited before answering `boot.ready`. Distinct from
+    /// `ServiceCrashed` (which means the running Service died after going
+    /// Ready) and `VersionMismatch` (which means the protocol negotiation
+    /// itself disagreed). Callers pattern-match on the classification to
+    /// surface the right user message:
+    /// - `BootFailure { code: AnotherInstanceRunning }`: "Ratatoskr is
+    ///   already running."
+    /// - `BootFailure { code: KeyLoadFailure }`: "Encryption key missing
+    ///   or unreadable."
+    /// - `BootFailure { code: MigrationFailure }`: "Database migration
+    ///   failed."
+    /// - `UnexpectedExit { .. }`: "Service exited unexpectedly."
+    #[error("service boot failure: {classification:?}")]
+    BootFailure { classification: BootClassification },
     #[error("response deserialize: {0}")]
     Deserialize(#[from] serde_json::Error),
 }
