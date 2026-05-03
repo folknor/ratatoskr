@@ -170,6 +170,27 @@ impl App {
             // Compose
             Message::Compose => self.open_compose_window(ComposeMode::New),
             Message::Noop => Task::none(),
+            Message::ServiceReady(Ok(client)) => {
+                self.service_notifications = client.notifications();
+                self.service_client = Some(client);
+                self.status = "Service ready".to_string();
+                Task::none()
+            }
+            Message::ServiceReady(Err(error)) => {
+                log::error!("Service failed to start: {error}");
+                self.status = format!("Service failed: {error}");
+                Task::none()
+            }
+            Message::ServiceNotification(notification) => {
+                log::debug!("Service notification: {}", notification.method_name());
+                Task::none()
+            }
+            Message::ServiceShutdownComplete(result) => {
+                if let Err(error) = result {
+                    log::warn!("Service shutdown failed: {error}");
+                }
+                iced::exit()
+            }
 
             // Command system
             Message::KeyEvent(msg) => self.handle_key_event(msg),
@@ -613,4 +634,3 @@ impl App {
         }
     }
 }
-

@@ -11,8 +11,9 @@ workspace = true
 # Workspace deps
 serde.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
+tokio = { workspace = true, features = ["io-util", "process", "rt-multi-thread", "macros", "sync", "time"] }
 chrono.workspace = true
+thiserror.workspace = true
 
 # Crate-specific deps
 #iced = { git = "https://github.com/squidowl/iced", rev = "b201e4f", default-features = false, features = [
@@ -41,9 +42,15 @@ mundy = { version = "0.2", default-features = false, features = ["color-scheme",
 display-info = "0.5"
 rfd = "0.17"
 store = { path = "../stores" }
+service-api = { path = "../service-api" }
+service = { path = "../service" }
+dashmap = "6"
 mime_guess = "2"
 dev-seed = { path = "../dev-seed", optional = true }
 hotpath = { workspace = true, optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [features]
 default = ["dev-seed"]

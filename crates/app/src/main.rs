@@ -31,6 +31,8 @@ mod icon;
 mod main_view;
 mod message;
 mod pop_out;
+pub mod service_client;
+mod service_subscription;
 mod subscription;
 mod ui;
 mod update;
@@ -40,6 +42,7 @@ pub use app::{App, AppMode, Divider};
 pub(crate) use app::PendingChord;
 pub(crate) use helpers::load_accounts;
 pub use message::Message;
+pub use service_client::ServiceClient;
 
 use db::Db;
 use std::path::PathBuf;
@@ -51,6 +54,10 @@ pub(crate) static DEFAULT_SCALE: std::sync::OnceLock<f32> = std::sync::OnceLock:
 
 #[allow(clippy::unwrap_in_result)]
 fn main() -> iced::Result {
+    if std::env::args().any(|arg| arg == "--service") {
+        service::run_service_blocking();
+    }
+
     env_logger::init();
     log::info!("Ratatoskr starting");
     #[cfg(feature = "hotpath")]

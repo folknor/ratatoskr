@@ -37,6 +37,9 @@ pub enum Message {
     // Existing UI
     Compose,
     Noop,
+    ServiceReady(Result<std::sync::Arc<crate::ServiceClient>, String>),
+    ServiceNotification(service_api::Notification),
+    ServiceShutdownComplete(Result<(), String>),
     ToggleSettings,
     AppearanceChanged(appearance::Mode),
     DividerDragStart(Divider),

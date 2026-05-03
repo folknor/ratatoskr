@@ -1,0 +1,453 @@
+use dashmap::DashMap;
+use serde::de::DeserializeOwned;
+use service_api::{
+    BoundedLineReader, HealthPingResponse, JsonRpcErrorObject, JsonRpcRequest, Notification,
+    ParsedServiceMessage, PROTOCOL_VERSION, RequestParams, RequestTimeoutKind, ServiceError,
+    ServiceResponse, ShutdownResponse, encode_message, parse_service_message,
+};
+use std::path::Path;
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU64, Ordering},
+};
+use std::time::{Duration, Instant};
+use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::process::{Child, Command};
+use tokio::sync::{mpsc, oneshot};
+
+const STDIN_QUEUE_CAP: usize = 1024;
+const NOTIFICATION_QUEUE_CAP: usize = 1024;
+
+pub(crate) type ServiceNotificationReceiver =
+    Arc<Mutex<Option<mpsc::Receiver<Notification>>>>;
+
+pub struct ServiceClient {
+    child: Mutex<Option<Child>>,
+    stdin_tx: Option<mpsc::Sender<Vec<u8>>>,
+    pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>>,
+    next_id: Arc<AtomicU64>,
+    notifications: ServiceNotificationReceiver,
+    reader_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    writer_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    heartbeat_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+impl std::fmt::Debug for ServiceClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServiceClient").finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ClientError {
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("service error: {0}")]
+    Service(#[from] ServiceError),
+    #[error("request timeout")]
+    Timeout,
+    #[error("service crashed")]
+    ServiceCrashed,
+    #[error("not connected")]
+    NotConnected,
+    #[error("protocol version mismatch: ui={ui}, service={service}")]
+    VersionMismatch { ui: u32, service: u32 },
+    #[error("response deserialize: {0}")]
+    Deserialize(#[from] serde_json::Error),
+}
+
+impl ServiceClient {
+    pub(crate) async fn spawn(app_data_dir: &Path) -> Result<Arc<Self>, ClientError> {
+        let mut command = Command::new(std::env::current_exe()?);
+        command
+            .arg("--service")
+            .arg("--app-data-dir")
+            .arg(app_data_dir)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::inherit())
+            .kill_on_drop(false);
+        service::parent_death::configure_command(&mut command)?;
+
+        let mut child = command.spawn()?;
+        let stdin = child.stdin.take().ok_or(ClientError::NotConnected)?;
+        let stdout = child.stdout.take().ok_or(ClientError::NotConnected)?;
+        let (stdin_tx, stdin_rx) = mpsc::channel(STDIN_QUEUE_CAP);
+        let (notification_tx, notification_rx) = mpsc::channel(NOTIFICATION_QUEUE_CAP);
+        let pending = Arc::new(DashMap::new());
+        let next_id = Arc::new(AtomicU64::new(1));
+        let notifications = Arc::new(Mutex::new(Some(notification_rx)));
+
+        let reader_handle = tokio::spawn(reader_task(
+            stdout,
+            Arc::clone(&pending),
+            notification_tx,
+        ));
+        let writer_handle = tokio::spawn(writer_task(stdin, stdin_rx));
+
+        let client = Arc::new(Self {
+            child: Mutex::new(Some(child)),
+            stdin_tx: Some(stdin_tx),
+            pending,
+            next_id,
+            notifications,
+            reader_handle: Mutex::new(Some(reader_handle)),
+            writer_handle: Mutex::new(Some(writer_handle)),
+            heartbeat_handle: Mutex::new(None),
+        });
+
+        let ping: HealthPingResponse = client.request(RequestParams::HealthPing).await?;
+        if ping.version != PROTOCOL_VERSION {
+            return Err(ClientError::VersionMismatch {
+                ui: PROTOCOL_VERSION,
+                service: ping.version,
+            });
+        }
+        log::info!("Service ready (pid={})", ping.pid);
+
+        let heartbeat = tokio::spawn(heartbeat_task(
+            client.stdin_tx.as_ref().ok_or(ClientError::NotConnected)?.clone(),
+            Arc::clone(&client.pending),
+            Arc::clone(&client.next_id),
+        ));
+        if let Ok(mut guard) = client.heartbeat_handle.lock() {
+            *guard = Some(heartbeat);
+        }
+
+        Ok(client)
+    }
+
+    pub(crate) async fn request<R>(&self, params: RequestParams) -> Result<R, ClientError>
+    where
+        R: DeserializeOwned,
+    {
+        let value = self.request_value(params).await?;
+        serde_json::from_value(value).map_err(ClientError::from)
+    }
+
+    pub(crate) async fn shutdown(&self) -> Result<(), ClientError> {
+        let request_result = self.request::<ShutdownResponse>(RequestParams::Shutdown).await;
+        match request_result {
+            Ok(_) => {
+                if self.wait_for_exit(Duration::from_secs(2)).await {
+                    return Ok(());
+                }
+            }
+            Err(ClientError::Timeout) => {
+                log::warn!("service shutdown request timed out, sending SIGTERM");
+            }
+            Err(error) => {
+                log::warn!("service shutdown request failed: {error}");
+            }
+        }
+
+        self.send_sigterm();
+        if self.wait_for_exit(Duration::from_secs(5)).await {
+            return Ok(());
+        }
+        self.kill_child();
+        let _ = self.wait_for_exit(Duration::from_secs(1)).await;
+        Ok(())
+    }
+
+    pub(crate) fn notifications(&self) -> ServiceNotificationReceiver {
+        Arc::clone(&self.notifications)
+    }
+
+    async fn request_value(
+        &self,
+        params: RequestParams,
+    ) -> Result<serde_json::Value, ClientError> {
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let request = JsonRpcRequest::new(id, &params);
+        let bytes = encode_message(&request)?;
+        let (tx, rx) = oneshot::channel();
+        self.pending.insert(id, tx);
+
+        let Some(stdin_tx) = self.stdin_tx.as_ref() else {
+            self.pending.remove(&id);
+            return Err(ClientError::NotConnected);
+        };
+
+        if stdin_tx.send(bytes).await.is_err() {
+            self.pending.remove(&id);
+            return Err(ClientError::ServiceCrashed);
+        }
+
+        let response = match params.timeout() {
+            RequestTimeoutKind::Finite(timeout) => match tokio::time::timeout(timeout, rx).await {
+                Ok(response) => response,
+                Err(_) => {
+                    self.pending.remove(&id);
+                    return Err(ClientError::Timeout);
+                }
+            },
+            RequestTimeoutKind::Infinite => rx.await,
+        };
+
+        match response {
+            Ok(result) => result,
+            Err(_) => Err(ClientError::ServiceCrashed),
+        }
+    }
+
+    async fn wait_for_exit(&self, timeout: Duration) -> bool {
+        let started = Instant::now();
+        while started.elapsed() < timeout {
+            if self.try_wait_child() {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        self.try_wait_child()
+    }
+
+    fn try_wait_child(&self) -> bool {
+        let Ok(mut guard) = self.child.lock() else {
+            return true;
+        };
+        let Some(child) = guard.as_mut() else {
+            return true;
+        };
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                log::info!("service exited with status {status}");
+                *guard = None;
+                true
+            }
+            Ok(None) => false,
+            Err(error) => {
+                log::warn!("failed to wait for service child: {error}");
+                true
+            }
+        }
+    }
+
+    fn send_sigterm(&self) {
+        #[cfg(unix)]
+        {
+            let Ok(guard) = self.child.lock() else {
+                return;
+            };
+            let Some(child) = guard.as_ref() else {
+                return;
+            };
+            let Some(pid) = child.id() else {
+                return;
+            };
+            let pid = match i32::try_from(pid) {
+                Ok(pid) => pid,
+                Err(error) => {
+                    log::warn!("service pid conversion failed: {error}");
+                    return;
+                }
+            };
+            let result = unsafe { libc::kill(pid, libc::SIGTERM) };
+            if result != 0 {
+                log::warn!("failed to send SIGTERM to service: {}", std::io::Error::last_os_error());
+            }
+        }
+    }
+
+    fn kill_child(&self) {
+        let Ok(mut guard) = self.child.lock() else {
+            return;
+        };
+        let Some(child) = guard.as_mut() else {
+            return;
+        };
+        if let Err(error) = child.start_kill() {
+            log::warn!("failed to kill service child: {error}");
+        }
+    }
+}
+
+impl Drop for ServiceClient {
+    fn drop(&mut self) {
+        abort_handle(&self.reader_handle);
+        abort_handle(&self.heartbeat_handle);
+        abort_handle(&self.writer_handle);
+        let _ = self.stdin_tx.take();
+
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_millis(200) {
+            if self.try_wait_child() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if !self.try_wait_child() {
+            self.kill_child();
+        }
+
+        fail_pending(&self.pending);
+    }
+}
+
+fn abort_handle(handle: &Mutex<Option<tokio::task::JoinHandle<()>>>) {
+    if let Ok(mut guard) = handle.lock()
+        && let Some(handle) = guard.take()
+    {
+        handle.abort();
+    }
+}
+
+async fn reader_task<R>(
+    stdout: R,
+    pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>>,
+    notifications: mpsc::Sender<Notification>,
+) where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut lines = BoundedLineReader::new(stdout, service_api::MAX_FRAME_BYTES);
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) => match parse_service_message(&line) {
+                Ok(ParsedServiceMessage::Response {
+                    id: Some(id),
+                    response,
+                }) => {
+                    dispatch_response(&pending, id, response);
+                }
+                Ok(ParsedServiceMessage::Response { id: None, response }) => {
+                    log::warn!("service returned uncorrelated response: {response:?}");
+                }
+                Ok(ParsedServiceMessage::Notification(notification)) => {
+                    enqueue_notification(&notifications, notification).await;
+                }
+                Err(error) => {
+                    log::warn!("failed to parse service message: {error}");
+                }
+            },
+            Ok(None) => {
+                fail_pending(&pending);
+                return;
+            }
+            Err(error) => {
+                log::warn!("service stdout frame error: {error}");
+                fail_pending(&pending);
+                return;
+            }
+        }
+    }
+}
+
+fn dispatch_response(
+    pending: &DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>,
+    id: u64,
+    response: ServiceResponse,
+) {
+    let Some((_, sender)) = pending.remove(&id) else {
+        log::debug!("dropping response for unknown service request id {id}");
+        return;
+    };
+    let result = match response {
+        ServiceResponse::Success(value) => Ok(value),
+        ServiceResponse::Error(error) => Err(client_error_from_rpc(error)),
+    };
+    let _ = sender.send(result);
+}
+
+fn client_error_from_rpc(error: JsonRpcErrorObject) -> ClientError {
+    ClientError::Service(ServiceError::Internal(error.message))
+}
+
+async fn enqueue_notification(
+    notifications: &mpsc::Sender<Notification>,
+    notification: Notification,
+) {
+    match notification.class() {
+        service_api::NotificationClass::MustDeliver => {
+            let _ = notifications.send(notification).await;
+        }
+        service_api::NotificationClass::Coalesce { .. } | service_api::NotificationClass::Drop => {
+            let _ = notifications.try_send(notification);
+        }
+    }
+}
+
+async fn writer_task<W>(mut stdin: W, mut stdin_rx: mpsc::Receiver<Vec<u8>>)
+where
+    W: AsyncWrite + Unpin,
+{
+    while let Some(bytes) = stdin_rx.recv().await {
+        if let Err(error) = stdin.write_all(&bytes).await {
+            log::warn!("service stdin write failed: {error}");
+            break;
+        }
+        if let Err(error) = stdin.flush().await {
+            log::warn!("service stdin flush failed: {error}");
+            break;
+        }
+    }
+}
+
+async fn heartbeat_task(
+    stdin_tx: mpsc::Sender<Vec<u8>>,
+    pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>>,
+    next_id: Arc<AtomicU64>,
+) {
+    let mut interval = tokio::time::interval(Duration::from_secs(30));
+    loop {
+        interval.tick().await;
+        let started = Instant::now();
+        let result = request_value_raw(
+            &stdin_tx,
+            &pending,
+            &next_id,
+            RequestParams::HealthPing,
+        )
+        .await;
+        match result {
+            Ok(value) => match serde_json::from_value::<HealthPingResponse>(value) {
+                Ok(_) => log::debug!("service heartbeat ok in {:?}", started.elapsed()),
+                Err(error) => log::warn!("service heartbeat decode failed: {error}"),
+            },
+            Err(error) => {
+                log::warn!("service heartbeat failed: {error}");
+                return;
+            }
+        }
+    }
+}
+
+async fn request_value_raw(
+    stdin_tx: &mpsc::Sender<Vec<u8>>,
+    pending: &Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>>,
+    next_id: &Arc<AtomicU64>,
+    params: RequestParams,
+) -> Result<serde_json::Value, ClientError> {
+    let id = next_id.fetch_add(1, Ordering::SeqCst);
+    let bytes = encode_message(&JsonRpcRequest::new(id, &params))?;
+    let (tx, rx) = oneshot::channel();
+    pending.insert(id, tx);
+    if stdin_tx.send(bytes).await.is_err() {
+        pending.remove(&id);
+        return Err(ClientError::ServiceCrashed);
+    }
+    match params.timeout() {
+        RequestTimeoutKind::Finite(timeout) => match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(ClientError::ServiceCrashed),
+            Err(_) => {
+                pending.remove(&id);
+                Err(ClientError::Timeout)
+            }
+        },
+        RequestTimeoutKind::Infinite => match rx.await {
+            Ok(result) => result,
+            Err(_) => Err(ClientError::ServiceCrashed),
+        },
+    }
+}
+
+fn fail_pending(
+    pending: &DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>,
+) {
+    let ids: Vec<u64> = pending.iter().map(|entry| *entry.key()).collect();
+    for id in ids {
+        if let Some((_, sender)) = pending.remove(&id) {
+            let _ = sender.send(Err(ClientError::ServiceCrashed));
+        }
+    }
+}

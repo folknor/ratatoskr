@@ -4,6 +4,7 @@ use crate::db::{self, Db};
 use crate::handlers::provider::{JmapPushReceiver, create_jmap_push_channel};
 use crate::message::Message;
 use crate::pop_out::{self, PopOutWindow};
+use crate::service_client::{ServiceClient, ServiceNotificationReceiver};
 use crate::ui::add_account::AddAccountWizard;
 use crate::ui::calendar::{CalendarState, CalendarView};
 use crate::ui::palette::Palette;
@@ -139,6 +140,10 @@ pub struct App {
     /// Action service context - the authoritative write path for email mutations.
     /// `None` if stores failed to initialize at boot (degraded mode).
     pub(crate) action_ctx: Option<rtsk::actions::ActionContext>,
+
+    // Service process scaffold
+    pub(crate) service_client: Option<Arc<ServiceClient>>,
+    pub(crate) service_notifications: ServiceNotificationReceiver,
 }
 
 impl App {
@@ -173,6 +178,7 @@ impl App {
         let sync_reporter = Arc::new(reporter);
 
         let (jmap_push_tx, jmap_push_receiver) = create_jmap_push_channel();
+        let service_notifications = Arc::new(std::sync::Mutex::new(None));
 
         let body_store = match db::threads::init_body_store() {
             Ok(bs) => Some(bs),
@@ -306,6 +312,8 @@ impl App {
             inline_image_store,
             encryption_key,
             action_ctx,
+            service_client: None,
+            service_notifications,
         };
 
         if let Some((ui_snap, settings_snap)) = bootstrap {
@@ -329,6 +337,17 @@ impl App {
         let load_gen = app.nav_generation.next();
         let mut boot_tasks = vec![
             open_task.discard(),
+            Task::perform(
+                {
+                    let app_data_dir = data_dir.clone();
+                    async move {
+                        crate::service_client::ServiceClient::spawn(&app_data_dir)
+                            .await
+                            .map_err(|error| error.to_string())
+                    }
+                },
+                Message::ServiceReady,
+            ),
             Task::perform(
                 async move { (load_gen, crate::helpers::load_accounts(db_ref).await) },
                 |(g, result)| Message::AccountsLoaded(g, result),

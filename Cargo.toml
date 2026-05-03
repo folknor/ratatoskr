@@ -3,6 +3,8 @@ resolver = "2"
 members = [
 "crates/db",
 "crates/core",
+"crates/service-api",
+"crates/service",
 "crates/app",
 "crates/squeeze",
 "crates/cmdk",
@@ -84,6 +86,8 @@ todo = "deny"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+thiserror = "2"
+futures-util = "0.3"
 
 # Async runtime
 tokio = { version = "1.52.1" }

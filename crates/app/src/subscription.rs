@@ -3,6 +3,7 @@ use crate::command_dispatch::KeyEventMessage;
 use crate::handlers;
 use crate::handlers::provider::jmap_push_subscription;
 use crate::message::Message;
+use crate::service_subscription::service_notification_subscription;
 use crate::ui::settings::SettingsMessage;
 use crate::ui::status_bar::sync_progress_subscription;
 use crate::{appearance, component::Component};
@@ -49,6 +50,13 @@ impl App {
             jmap_push_subscription(&self.jmap_push_receiver)
                 .map(|account_id| Message::SyncComplete(account_id, Ok(()))),
         ];
+
+        if self.service_client.is_some() {
+            subs.push(
+                service_notification_subscription(&self.service_notifications)
+                    .map(Message::ServiceNotification),
+            );
+        }
 
         if self.pending_chord.is_some() {
             subs.push(

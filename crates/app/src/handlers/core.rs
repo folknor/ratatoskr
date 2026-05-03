@@ -849,7 +849,19 @@ impl App {
                 .collect();
             self.pop_out_windows.clear();
             tasks.push(iced::window::close(id));
-            tasks.push(iced::exit());
+            if let Some(service_client) = self.service_client.clone() {
+                tasks.push(Task::perform(
+                    async move {
+                        service_client
+                            .shutdown()
+                            .await
+                            .map_err(|error| error.to_string())
+                    },
+                    Message::ServiceShutdownComplete,
+                ));
+            } else {
+                tasks.push(iced::exit());
+            }
             return Task::batch(tasks);
         }
 
@@ -1087,4 +1099,3 @@ impl App {
         self.thread_list.set_context(folder_name, scope_name);
     }
 }
-
