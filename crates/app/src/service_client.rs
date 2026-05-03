@@ -692,6 +692,23 @@ impl ServiceClient {
         self.request(RequestParams::ActionJobStatus { plan_id }).await
     }
 
+    /// Mark every unread message in a contact's chat threads as read
+    /// (Phase 2 task 15 / scope item 18c).
+    ///
+    /// The Service runs the local DB write inside the request handler
+    /// and journals the affected threads as a quiet job. The worker
+    /// dispatches provider mark-read against each thread and emits a
+    /// final `ActionCompleted` (no per-operation `OperationOutcome`
+    /// notifications - quiet jobs suppress them). UI fires this
+    /// fire-and-forget on chat entry; the ack is informational.
+    pub async fn mark_chat_read(
+        &self,
+        chat_email: String,
+    ) -> Result<service_api::MarkChatReadAck, ClientError> {
+        self.request(RequestParams::ActionMarkChatRead { chat_email })
+            .await
+    }
+
     /// Send a fire-and-forget UI -> Service notification (Phase 2 plan
     /// scope item 11). No correlation map entry, no oneshot channel,
     /// no timeout. Returns `Ok(())` on successful enqueue into the

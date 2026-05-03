@@ -33,9 +33,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use db::db::ReadDbState;
 use db::db::action_journal::{
-    JobTerminalStatus, LeasedOp, OpStatusCounts, OpTerminalStatus, ReplayableOp,
-    count_ops_by_status, finalize_job, lease_next_ready_op, mark_op_terminal,
-    unemitted_terminal_ops,
+    JobTerminalStatus, LeasedOp, LeasedQuietJob, OpStatusCounts, OpTerminalStatus, ReplayableOp,
+    count_ops_by_status, finalize_job, lease_next_ready_op, lease_next_ready_quiet_job,
+    mark_op_terminal, unemitted_terminal_ops,
 };
 use service_api::{
     ActionCompleted, Notification, OperationId, OperationOutcome, OperationResult, PlanId,
@@ -45,7 +45,11 @@ use tokio::sync::mpsc;
 
 use super::context::ActionContext;
 use super::outcome::{ActionError, ActionOutcome, RemoteFailureKind};
+use super::pending::enqueue_if_retryable;
+use super::provider::create_provider;
 use super::wire_conversion::wire_to_mail;
+use common::types::ActionProviderCtx;
+use db::progress::NoopProgressReporter;
 use crate::boot::BootSharedState;
 use crate::boot_progress::enqueue_notification;
 
@@ -105,6 +109,10 @@ async fn run(
     loop {
         boot_state.await_action_worker_wakeup().await;
         drain_one_pass(&action_ctx, &out_tx, &owner_bytes).await;
+        // Phase 2 task 15: drain any queued mark_chat_read jobs. These
+        // are quiet (no per-op outcomes); the worker emits one final
+        // `ActionCompleted` per finalized job.
+        drain_mark_chat_read_jobs(&action_ctx, &out_tx, &owner_bytes).await;
         // Phase 2 task 18: each wakeup also drains the transient-retry
         // queue (`pending_operations`). Sharing a wakeup signal with
         // the journal drain keeps the worker single-purpose; both
@@ -114,6 +122,106 @@ async fn run(
         // trigger does the same work.
         super::pending::process_pending_ops(&action_ctx).await;
     }
+}
+
+async fn drain_mark_chat_read_jobs(
+    ctx: &ActionContext,
+    out_tx: &mpsc::Sender<Vec<u8>>,
+    owner: &[u8; 16],
+) {
+    loop {
+        let job = match lease_next_quiet_job_via_blocking(ctx, "mark_chat_read", owner).await {
+            Ok(Some(job)) => job,
+            Ok(None) => return,
+            Err(error) => {
+                log::warn!("action worker: mark_chat_read lease query failed: {error}");
+                return;
+            }
+        };
+        if let Err(error) = run_mark_chat_read(ctx, out_tx, &job).await {
+            log::warn!(
+                "action worker: mark_chat_read job {:?} failed: {error}",
+                job.job_id,
+            );
+            // Best-effort: finalize the job as failed so the lease
+            // clears. Recovery would otherwise reset and retry, which
+            // is fine, but is wasteful when the failure was due to
+            // payload deserialization (deterministic).
+            let summary = PlanSummary {
+                total: 0,
+                local_only: 0,
+                remote_succeeded: 0,
+                remote_failed: 0,
+                conflicts: 0,
+            };
+            let summary_blob = serde_json::to_vec(&summary).unwrap_or_default();
+            let conn = ctx.db.conn();
+            let job_id_bytes = job.job_id;
+            let _ = tokio::task::spawn_blocking(move || {
+                let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
+                finalize_job(&conn, &job_id_bytes, JobTerminalStatus::Failed, &summary_blob)
+            })
+            .await;
+        }
+    }
+}
+
+async fn lease_next_quiet_job_via_blocking(
+    ctx: &ActionContext,
+    kind: &'static str,
+    owner: &[u8; 16],
+) -> Result<Option<LeasedQuietJob>, String> {
+    let conn = ctx.db.conn();
+    let owner = *owner;
+    tokio::task::spawn_blocking(move || {
+        let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
+        lease_next_ready_quiet_job(&conn, kind, &owner, LEASE_DURATION_MS)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking: {e}"))?
+}
+
+async fn run_mark_chat_read(
+    ctx: &ActionContext,
+    out_tx: &mpsc::Sender<Vec<u8>>,
+    job: &LeasedQuietJob,
+) -> Result<(), String> {
+    use crate::handlers::JournaledChatRead;
+    let payload: JournaledChatRead = serde_json::from_slice(&job.payload)
+        .map_err(|e| format!("deserialize JournaledChatRead: {e}"))?;
+    let total = u32::try_from(payload.affected.len()).unwrap_or(u32::MAX);
+    mark_chat_read_remote(ctx, payload.affected).await;
+
+    // Finalize the job. Treat as Completed - mark_chat_read_remote
+    // enqueues retryable failures into pending_operations rather
+    // than surfacing them, so we cannot distinguish a partial
+    // failure from a clean run at this layer. The pending_ops
+    // periodic drainer eventually reconciles.
+    let summary = PlanSummary {
+        total,
+        local_only: 0,
+        remote_succeeded: total,
+        remote_failed: 0,
+        conflicts: 0,
+    };
+    let summary_blob =
+        serde_json::to_vec(&summary).map_err(|e| format!("serialize PlanSummary: {e}"))?;
+    let conn = ctx.db.conn();
+    let job_id_bytes = job.job_id;
+    tokio::task::spawn_blocking(move || {
+        let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
+        finalize_job(&conn, &job_id_bytes, JobTerminalStatus::Completed, &summary_blob)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking finalize_job: {e}"))??;
+
+    let completion = ActionCompleted {
+        plan_id: PlanId(uuid::Uuid::from_bytes(job.job_id)),
+        summary,
+        service_generation: 0,
+    };
+    enqueue_notification(out_tx, &Notification::ActionCompleted(completion));
+    Ok(())
 }
 
 fn build_action_context(
@@ -395,6 +503,71 @@ fn action_outcome_to_wire(outcome: ActionOutcome) -> (OpTerminalStatus, Operatio
                 },
             ),
         },
+    }
+}
+
+/// Service-side equivalent of `core::chat::mark_chat_read_remote`.
+///
+/// Phase 2 task 15: dispatched by the worker after the
+/// `mark_chat_read` handler journals affected threads. Per-account
+/// provider, sequential per-thread dispatch within an account; failed
+/// remote calls enqueue a pending op for the periodic retry. The
+/// chat read-state mutation has already committed locally inside the
+/// handler; this is best-effort remote propagation.
+async fn mark_chat_read_remote(ctx: &ActionContext, affected: Vec<(String, String)>) {
+    if affected.is_empty() {
+        return;
+    }
+    let mut by_account: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for (aid, tid) in affected {
+        by_account.entry(aid).or_default().push(tid);
+    }
+    for (account_id, thread_ids) in by_account {
+        let provider = match create_provider(&ctx.db, &account_id, ctx.encryption_key).await {
+            Ok(p) => p,
+            Err(error) => {
+                for thread_id in &thread_ids {
+                    let outcome = ActionOutcome::LocalOnly {
+                        reason: ActionError::remote(error.clone()),
+                        retryable: true,
+                    };
+                    enqueue_if_retryable(
+                        ctx,
+                        &outcome,
+                        &account_id,
+                        "markRead",
+                        thread_id,
+                        r#"{"read":true}"#,
+                    )
+                    .await;
+                }
+                continue;
+            }
+        };
+        for thread_id in thread_ids {
+            let provider_ctx = ActionProviderCtx {
+                account_id: &account_id,
+                db: &ctx.db,
+                progress: &NoopProgressReporter,
+            };
+            let outcome = match provider.mark_read(&provider_ctx, &thread_id, true).await {
+                Ok(()) => ActionOutcome::Success,
+                Err(error) => ActionOutcome::LocalOnly {
+                    reason: ActionError::remote(error.to_string()),
+                    retryable: true,
+                },
+            };
+            enqueue_if_retryable(
+                ctx,
+                &outcome,
+                &account_id,
+                "markRead",
+                &thread_id,
+                r#"{"read":true}"#,
+            )
+            .await;
+        }
     }
 }
 

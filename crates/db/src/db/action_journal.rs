@@ -177,6 +177,105 @@ pub fn insert_mail_plan(
     Ok(now)
 }
 
+/// Insert a quiet single-row job with no `action_job_ops` rows.
+///
+/// Used by Phase 2 task 15 (`mark_chat_read`) and similar
+/// non-mail-thread jobs where the per-job state lives entirely in the
+/// payload BLOB. The handler writes the row inside the request future
+/// (so the durability boundary is the same as `insert_mail_plan`),
+/// then signals the worker. The worker picks the row up via
+/// `lease_next_ready_quiet_job`, runs the `kind`-specific work, and
+/// finalizes via `finalize_job`.
+///
+/// `kind` MUST be a value the schema CHECK constraint accepts
+/// (currently `mail_plan` / `send` / `mark_chat_read`); the row gets
+/// `quiet = 1`.
+pub fn insert_quiet_job(
+    conn: &Connection,
+    job_id: &[u8; 16],
+    kind: &str,
+    account_id: &str,
+    payload: &[u8],
+) -> Result<i64, String> {
+    let now: i64 = conn
+        .query_row("SELECT unixepoch()", [], |row| row.get(0))
+        .map_err(|e| format!("insert_quiet_job now: {e}"))?;
+    conn.execute(
+        "INSERT INTO action_jobs (\
+             job_id, kind, account_id, status, quiet, payload, \
+             created_at, updated_at\
+         ) VALUES (?1, ?2, ?3, 'queued', 1, ?4, ?5, ?5)",
+        params![job_id.as_slice(), kind, account_id, payload, now],
+    )
+    .map_err(|e| format!("insert_quiet_job: {e}"))?;
+    Ok(now)
+}
+
+/// A leased quiet job (no `action_job_ops` rows) ready for execution.
+#[derive(Debug, Clone)]
+pub struct LeasedQuietJob {
+    pub job_id: [u8; 16],
+    pub kind: String,
+    pub account_id: String,
+    pub payload: Vec<u8>,
+}
+
+/// Atomically pick the next ready quiet job of the given kind and
+/// transition it from `queued` to `executing` with the worker
+/// incarnation as owner. Used by the Phase 2 task 15 / 17 / 13
+/// quiet-job paths.
+///
+/// SQLite's `UPDATE ... RETURNING` (3.35+) gives single-round-trip
+/// atomicity. The `action_jobs_status_account` index covers the
+/// inner SELECT.
+pub fn lease_next_ready_quiet_job(
+    conn: &Connection,
+    kind: &str,
+    worker_owner: &[u8; 16],
+    lease_duration_ms: i64,
+) -> Result<Option<LeasedQuietJob>, String> {
+    type LeaseRow = (Vec<u8>, String, String, Vec<u8>);
+    let row: Option<LeaseRow> = conn
+        .query_row(
+            "UPDATE action_jobs SET \
+                 status = 'executing', \
+                 lease_owner = ?1, \
+                 lease_expires_at = unixepoch('subsec') * 1000 + ?2, \
+                 updated_at = unixepoch() \
+             WHERE job_id = ( \
+                 SELECT job_id FROM action_jobs \
+                 WHERE kind = ?3 AND status = 'queued' \
+                 ORDER BY created_at \
+                 LIMIT 1 \
+             ) \
+             RETURNING job_id, kind, account_id, payload",
+            params![worker_owner.as_slice(), lease_duration_ms, kind],
+            |row| {
+                Ok((
+                    row.get::<_, Vec<u8>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Vec<u8>>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| format!("lease_next_ready_quiet_job: {e}"))?;
+    let Some((job_id_bytes, kind, account_id, payload)) = row else {
+        return Ok(None);
+    };
+    let job_id: [u8; 16] = job_id_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| "lease_next_ready_quiet_job: job_id is not 16 bytes".to_string())?;
+    Ok(Some(LeasedQuietJob {
+        job_id,
+        kind,
+        account_id,
+        payload,
+    }))
+}
+
 // ---------------------------------------------------------------------------
 // Worker-side lease (Phase 2 task 9)
 // ---------------------------------------------------------------------------

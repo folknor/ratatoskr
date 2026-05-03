@@ -58,25 +58,25 @@ impl ReadyApp {
         Task::batch([timeline_load, contacts_reload, mark_read_task])
     }
 
-    /// Mark every unread message in the contact's chat threads as read,
-    /// locally first (single transaction), then dispatch provider mark-read
-    /// per affected thread fire-and-forget. This is a navigation side
-    /// effect: no toasts, no undo, no action-completion handler.
+    /// Mark every unread message in the contact's chat threads as read.
+    ///
+    /// Phase 2 task 15: the local DB write + remote dispatch both run
+    /// Service-side via the `action.mark_chat_read` IPC. The Service
+    /// resolves affected threads in the handler, journals them as a
+    /// quiet job, and runs provider mark-read on the worker. The UI
+    /// fires-and-forgets - the ack is informational. Failed IPC
+    /// (Service crashed, Service unreachable) gets logged and dropped:
+    /// the next chat entry retries, and chat read state is a
+    /// navigation side effect (no toast, no undo).
     fn mark_chat_read(&self, email: &str) -> Task<Message> {
-        let db_state = self.db.read_db_state();
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            return Task::none();
+        };
         let email = email.to_string();
-        let action_ctx = self.action_ctx.clone();
         Task::perform(
             async move {
-                let affected = match rtsk::chat::mark_chat_read_local(&db_state, &email).await {
-                    Ok(a) => a,
-                    Err(e) => {
-                        log::warn!("mark_chat_read_local failed for {email}: {e}");
-                        return;
-                    }
-                };
-                if let Some(ctx) = action_ctx {
-                    rtsk::chat::mark_chat_read_remote(&ctx, affected).await;
+                if let Err(error) = client.mark_chat_read(email.clone()).await {
+                    log::warn!("mark_chat_read IPC failed for {email}: {error}");
                 }
             },
             |()| Message::ChatReadMarked,

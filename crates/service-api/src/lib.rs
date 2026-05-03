@@ -11,8 +11,8 @@ mod version;
 
 pub use action::{
     ActionCompleted, ActionPlanAck, ActionWireOperation, ActionWirePlan, JobStatusResponse,
-    OperationId, OperationOutcome, OperationResult, PlanId, PlanSummary, RemoteFailure,
-    SyncProgress, WireFolderId, WireJobStatus, WireMailOperation, WireTagId,
+    MarkChatReadAck, OperationId, OperationOutcome, OperationResult, PlanId, PlanSummary,
+    RemoteFailure, SyncProgress, WireFolderId, WireJobStatus, WireMailOperation, WireTagId,
 };
 pub use client_notification::{ClientNotification, JsonRpcClientNotification};
 pub use boot::{

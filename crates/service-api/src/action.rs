@@ -240,6 +240,23 @@ impl WithGeneration for ActionCompleted {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
+// mark_chat_read (action.mark_chat_read)
+// ---------------------------------------------------------------------------
+
+/// Acked response for `action.mark_chat_read`. Phase 2 plan scope item
+/// 18c: the chat read-on-view side effect relocates as a quiet job.
+/// The handler runs the local DB mutation, journals the affected
+/// threads as `kind = 'mark_chat_read'`, and returns this ack. The
+/// worker emits a final `ActionCompleted` after the remote dispatch
+/// finishes; no per-operation `OperationOutcome` notifications fire
+/// for quiet jobs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarkChatReadAck {
+    pub job_id: PlanId,
+    pub journaled: bool,
+}
+
+// ---------------------------------------------------------------------------
 // Job status query (action.job_status)
 // ---------------------------------------------------------------------------
 

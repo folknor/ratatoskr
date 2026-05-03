@@ -1,10 +1,13 @@
 mod action;
+mod action_mark_chat_read;
 mod action_status;
 mod boot;
 mod health;
 mod pending_ops_kick;
 #[cfg(feature = "test-helpers")]
 mod test_helpers;
+
+pub(crate) use action_mark_chat_read::JournaledChatRead;
 
 use crate::boot::BootSharedState;
 use serde_json::Value;
@@ -31,6 +34,9 @@ pub(crate) async fn dispatch(
         RequestParams::ActionExecutePlan { plan } => action::handle(&boot_state, plan).await,
         RequestParams::ActionJobStatus { plan_id } => {
             action_status::handle(&boot_state, plan_id).await
+        }
+        RequestParams::ActionMarkChatRead { chat_email } => {
+            action_mark_chat_read::handle(&boot_state, chat_email).await
         }
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPanic => test_helpers::panic_handle().await,

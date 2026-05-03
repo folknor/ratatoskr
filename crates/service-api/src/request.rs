@@ -39,6 +39,12 @@ pub enum RequestParams {
     /// Read-only SELECT against the journal; the 5 s timeout is
     /// conservative. Doesn't bypass admission - it's just a fast query.
     ActionJobStatus { plan_id: PlanId },
+    /// Phase 2 plan scope item 18c: the chat read-on-view side effect
+    /// relocates as a quiet journal job. Handler resolves affected
+    /// threads, runs the local DB write, journals the affected list
+    /// for deterministic replay, returns `MarkChatReadAck`. Worker
+    /// dispatches provider mark-read against each thread.
+    ActionMarkChatRead { chat_email: String },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -64,6 +70,7 @@ impl RequestParams {
             Self::BootReady => "boot.ready",
             Self::ActionExecutePlan { .. } => "action.execute_plan",
             Self::ActionJobStatus { .. } => "action.job_status",
+            Self::ActionMarkChatRead { .. } => "action.mark_chat_read",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -94,6 +101,9 @@ impl RequestParams {
             // the handler returns).
             Self::ActionExecutePlan { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             Self::ActionJobStatus { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            // Handler-only budget: mark_chat_read_local + journal + ack.
+            // Provider mark-read happens on the worker.
+            Self::ActionMarkChatRead { .. } => RequestTimeoutKind::Finite(Duration::from_secs(10)),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
@@ -134,6 +144,9 @@ impl RequestParams {
             Self::BootReady => Value::Null,
             Self::ActionExecutePlan { plan } => serde_json::json!({ "plan": plan }),
             Self::ActionJobStatus { plan_id } => serde_json::json!({ "plan_id": plan_id }),
+            Self::ActionMarkChatRead { chat_email } => {
+                serde_json::json!({ "chat_email": chat_email })
+            }
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -176,6 +189,17 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("action.job_status params: {e}"))?;
                 Ok(Self::ActionJobStatus { plan_id: p.plan_id })
+            }
+            "action.mark_chat_read" => {
+                #[derive(Deserialize)]
+                struct P {
+                    chat_email: String,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("action.mark_chat_read params: {e}"))?;
+                Ok(Self::ActionMarkChatRead {
+                    chat_email: p.chat_email,
+                })
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {
