@@ -26,6 +26,9 @@ log = "0.4"
 hotpath = { workspace = true, optional = true }
 
 
+[dev-dependencies]
+tempfile = "3"
+
 [features]
 hotpath = ["dep:hotpath", "hotpath/hotpath"]
 hotpath-alloc = ["hotpath", "hotpath/hotpath-alloc"]

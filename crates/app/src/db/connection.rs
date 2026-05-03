@@ -8,13 +8,20 @@ pub struct Db {
 }
 
 impl Db {
+    /// Open the UI's view of the DB after the Service has signaled
+    /// `boot.ready`. Routes through `ReadWriteDb::open_existing` (no rename
+    /// reconciliation, no migrations) since the Service owns those as part of
+    /// the boot sequence. Calling `ReadWriteDb::init` here would re-run the
+    /// rename and the migration runner from the UI process - both correct
+    /// (idempotent) but contradicting "the Service is the only writer" and
+    /// adding a redundant migration check on every boot.
     pub fn open(app_data_dir: &Path) -> Result<Self, String> {
         let db_path = app_data_dir.join("ratatoskr.db");
         if !db_path.exists() {
             return Err(format!("database not found: {}", db_path.display()));
         }
         Ok(Self {
-            inner: ReadWriteDb::init(app_data_dir)?,
+            inner: ReadWriteDb::open_existing(app_data_dir)?,
         })
     }
 
