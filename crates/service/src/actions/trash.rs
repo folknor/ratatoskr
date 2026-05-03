@@ -1,3 +1,13 @@
+//! Trash action.
+//!
+//! Trash is reversible (the underlying message stays in the provider
+//! Trash mailbox until it ages out), so the search-index entry stays
+//! around by design while in Trash. The Phase 2 search-index contract
+//! described on `permanent_delete.rs` applies to the eventual
+//! permanent-delete that resolves a Trash. No action-time Tantivy
+//! writes happen here either; the type system enforces it via
+//! `ActionProviderCtx`'s lack of a `&SearchState` field.
+
 use common::ops::ProviderOps;
 use common::types::ActionProviderCtx;
 

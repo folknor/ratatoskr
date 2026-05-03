@@ -141,3 +141,25 @@ pub struct ProviderProfile {
     pub email: String,
     pub name: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Phase 2 task 16 regression guard: action-side `ProviderCtx`
+    /// does not expose `&SearchState`. The action methods on
+    /// `ProviderOps` take `ActionProviderCtx`, and Phase 2
+    /// deliberately defers the Tantivy writer relocation to Phase 3 -
+    /// so any action-time search write would be a type error. The
+    /// destructure below is exhaustive (no `..` rest pattern): a
+    /// future `search` field on `ActionProviderCtx` fails to compile,
+    /// forcing the design conversation.
+    #[allow(dead_code)]
+    fn action_provider_ctx_destructure_is_exhaustive(ctx: &ActionProviderCtx<'_>) {
+        let ActionProviderCtx {
+            account_id: _,
+            db: _,
+            progress: _,
+        } = ctx;
+    }
+}
