@@ -10,6 +10,10 @@ use super::client::list_shared_folders;
 use super::connection::{ImapSession, discover_myrights, discover_namespaces};
 use super::types::{ImapFolder, NamespaceType};
 use db::db::DbState;
+use db::db::queries_extra::{
+    PublicFolderItemRow, PublicFolderRow, get_public_folder_sync_depth,
+    update_public_folder_rights, upsert_public_folder_items, upsert_public_folders,
+};
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -133,21 +137,7 @@ pub async fn check_folder_rights(
     let can_delete = rights.can_delete;
 
     db.with_conn(move |conn| {
-        conn.execute(
-            "UPDATE public_folders \
-             SET can_read = ?3, can_create_items = ?4, can_modify = ?5, can_delete = ?6 \
-             WHERE account_id = ?1 AND folder_id = ?2",
-            rusqlite::params![
-                account_id,
-                folder_path,
-                can_read as i32,
-                can_insert as i32,
-                can_write as i32,
-                can_delete as i32,
-            ],
-        )
-        .map_err(|e| format!("update folder rights: {e}"))?;
-        Ok(())
+        update_public_folder_rights(conn, &account_id, &folder_path, can_read, can_insert, can_write, can_delete)
     })
     .await?;
 
@@ -206,7 +196,7 @@ pub async fn sync_imap_public_folder(
 
     // Persist messages to public_folder_items
     let new_items =
-        upsert_public_folder_items(db, account_id, folder_path, &fetch_result.messages).await?;
+        upsert_public_folder_items_imap(db, account_id, folder_path, &fetch_result.messages).await?;
 
     save_sync_state(db, account_id, folder_path, now).await?;
 
@@ -232,49 +222,30 @@ async fn persist_discovered_folders(
     let folders: Vec<ImapFolder> = folders.to_vec();
 
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "INSERT INTO public_folders \
-                 (account_id, folder_id, parent_id, display_name, folder_class, \
-                  unread_count, total_count, can_create_items, can_modify, can_delete, can_read) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
-                 ON CONFLICT(account_id, folder_id) DO UPDATE SET \
-                   parent_id = excluded.parent_id, \
-                   display_name = excluded.display_name, \
-                   folder_class = excluded.folder_class, \
-                   unread_count = excluded.unread_count, \
-                   total_count = excluded.total_count, \
-                   can_read = excluded.can_read",
-            )
-            .map_err(|e| format!("prepare persist_discovered_folders: {e}"))?;
-
-        for f in &folders {
-            // Derive parent from path using delimiter
-            let parent_id = f
-                .path
-                .rsplit_once(&f.delimiter)
-                .map(|(parent, _)| parent.to_string());
-
-            // folder_class: IMAP doesn't have folder classes, default to IPM.Note (mail)
-            let folder_class = "IPM.Note";
-
-            stmt.execute(rusqlite::params![
-                account_id,
-                f.path, // folder_id = decoded path
-                parent_id,
-                f.name, // display_name = last path segment
-                folder_class,
-                f.unseen, // unread_count
-                f.exists, // total_count
-                0,        // can_create_items - unknown until MYRIGHTS
-                0,        // can_modify - unknown until MYRIGHTS
-                0,        // can_delete - unknown until MYRIGHTS
-                1i32,     // can_read - assume readable (we listed it)
-            ])
-            .map_err(|e| format!("upsert public folder {}: {e}", f.path))?;
-        }
-
-        Ok(())
+        let rows: Vec<PublicFolderRow> = folders
+            .iter()
+            .map(|f| {
+                let parent_id = f
+                    .path
+                    .rsplit_once(&f.delimiter)
+                    .map(|(parent, _)| parent.to_string());
+                PublicFolderRow {
+                    account_id: account_id.clone(),
+                    folder_id: f.path.clone(),
+                    parent_id,
+                    display_name: f.name.clone(),
+                    folder_class: "IPM.Note".to_string(),
+                    unread_count: f.unseen,
+                    total_count: f.exists,
+                    // Permissions unknown until MYRIGHTS; assume readable
+                    can_read: true,
+                    can_create_items: false,
+                    can_modify: false,
+                    can_delete: false,
+                }
+            })
+            .collect();
+        upsert_public_folders(conn, &rows)
     })
     .await
 }
@@ -339,22 +310,12 @@ async fn load_sync_depth_days(
 ) -> Result<i32, String> {
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
-    db.with_conn(move |conn| {
-        let depth = conn
-            .query_row(
-                "SELECT sync_depth_days FROM public_folder_pins \
-                 WHERE account_id = ?1 AND folder_id = ?2",
-                rusqlite::params![account_id, folder_id],
-                |row| row.get::<_, i32>("sync_depth_days"),
-            )
-            .unwrap_or(30);
-        Ok(depth)
-    })
-    .await
+    db.with_conn(move |conn| get_public_folder_sync_depth(conn, &account_id, &folder_id))
+        .await
 }
 
 /// Upsert fetched messages into `public_folder_items`. Returns count of new items.
-async fn upsert_public_folder_items(
+async fn upsert_public_folder_items_imap(
     db: &DbState,
     account_id: &str,
     folder_id: &str,
@@ -365,56 +326,31 @@ async fn upsert_public_folder_items(
     let messages: Vec<super::types::ImapMessage> = messages.to_vec();
 
     db.with_conn(move |conn| {
-        let mut new_count = 0usize;
+        // Build rows, skipping messages without a stable Message-ID
+        let rows: Vec<PublicFolderItemRow> = messages
+            .iter()
+            .filter_map(|msg| {
+                let item_id = msg.message_id.as_deref().unwrap_or("").to_string();
+                if item_id.is_empty() {
+                    return None;
+                }
+                Some(PublicFolderItemRow {
+                    account_id: account_id.clone(),
+                    folder_id: folder_id.clone(),
+                    item_id,
+                    change_key: None,
+                    subject: msg.subject.clone(),
+                    sender_email: msg.from_address.clone(),
+                    sender_name: msg.from_name.clone(),
+                    received_at: Some(msg.date),
+                    body_preview: msg.snippet.clone(),
+                    is_read: msg.is_read,
+                    item_class: "IPM.Note".to_string(),
+                })
+            })
+            .collect();
 
-        let mut stmt = conn
-            .prepare(
-                "INSERT INTO public_folder_items \
-                 (account_id, folder_id, item_id, subject, sender_email, sender_name, \
-                  received_at, body_preview, is_read, item_class) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
-                 ON CONFLICT(account_id, item_id) DO UPDATE SET \
-                   subject = excluded.subject, \
-                   is_read = excluded.is_read, \
-                   body_preview = excluded.body_preview",
-            )
-            .map_err(|e| format!("prepare upsert_public_folder_items: {e}"))?;
-
-        let mut exists_stmt = conn
-            .prepare("SELECT 1 FROM public_folder_items WHERE account_id = ?1 AND item_id = ?2")
-            .map_err(|e| format!("prepare exists check: {e}"))?;
-
-        for msg in &messages {
-            // Use message_id as item_id; fall back to UID-based ID
-            let item_id = msg.message_id.as_deref().unwrap_or("").to_string();
-            if item_id.is_empty() {
-                // Skip messages without a Message-ID - we need a stable identifier
-                continue;
-            }
-
-            let is_new = exists_stmt
-                .query_row(rusqlite::params![account_id, item_id], |_| Ok(()))
-                .is_err();
-
-            stmt.execute(rusqlite::params![
-                account_id,
-                folder_id,
-                item_id,
-                msg.subject,
-                msg.from_address,
-                msg.from_name,
-                msg.date,
-                msg.snippet,
-                msg.is_read as i32,
-                "IPM.Note",
-            ])
-            .map_err(|e| format!("upsert public folder item {item_id}: {e}"))?;
-
-            if is_new {
-                new_count += 1;
-            }
-        }
-
+        let (new_count, _updated_count) = upsert_public_folder_items(conn, &rows)?;
         Ok(new_count)
     })
     .await

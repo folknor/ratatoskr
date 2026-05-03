@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 use xxhash_rust::xxh3::xxh3_64;
 
 use db::db::DbState;
+use db::db::queries_extra::{
+    AttachmentCacheInfo, clear_attachment_cache_fields_batch, count_cached_attachment_refs,
+    find_attachment_cache_info, get_cached_attachments_oldest_first,
+    get_total_cached_attachment_size, update_attachment_cache_fields,
+};
 
 use crate::inline_image_store::InlineImageStoreState;
 
@@ -100,48 +105,24 @@ pub(crate) fn encode_base64(data: &[u8]) -> String {
 }
 
 // ── DB helpers (run inside with_conn closures) ──────────────
+//
+// The canonical SQL implementations live in
+// `db::db::queries_extra::provider_sync_writes`. Re-export the info type so
+// call sites inside this module stay unchanged.
 
-/// Look up an attachment's cache info by message + provider-agnostic remote attachment ID.
-///
-/// The attachments table still carries legacy per-provider columns, so this
-/// helper checks both the Gmail and IMAP ID slots under the hood.
+/// Look up an attachment's cache info by message + provider-agnostic remote
+/// attachment ID.  Delegates to the shared `db` helper.
 pub fn find_cache_info(
     conn: &rusqlite::Connection,
     account_id: &str,
     message_id: &str,
     remote_attachment_id: &str,
-) -> Result<Option<CacheInfo>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, content_hash, mime_type \
-             FROM attachments \
-             WHERE account_id = ?1 AND message_id = ?2 \
-               AND (gmail_attachment_id = ?3 OR imap_part_id = ?3) \
-             LIMIT 1",
-        )
-        .map_err(|e| format!("prepare cache lookup: {e}"))?;
-
-    let mut rows = stmt
-        .query_map(
-            rusqlite::params![account_id, message_id, remote_attachment_id],
-            |row| {
-                Ok(CacheInfo {
-                    id: row.get("id")?,
-                    content_hash: row.get("content_hash")?,
-                    mime_type: row.get("mime_type")?,
-                })
-            },
-        )
-        .map_err(|e| format!("query cache lookup: {e}"))?;
-
-    match rows.next() {
-        Some(Ok(info)) => Ok(Some(info)),
-        Some(Err(e)) => Err(format!("read cache row: {e}")),
-        None => Ok(None),
-    }
+) -> Result<Option<AttachmentCacheInfo>, String> {
+    find_attachment_cache_info(conn, account_id, message_id, remote_attachment_id)
 }
 
-/// Update an attachment's cache fields after storing to disk.
+/// Update an attachment's cache fields after storing to disk.  Delegates to
+/// the shared `db` helper.
 pub fn update_cache_fields(
     conn: &rusqlite::Connection,
     attachment_id: &str,
@@ -149,21 +130,7 @@ pub fn update_cache_fields(
     cache_size: i64,
     content_hash: &str,
 ) -> Result<(), String> {
-    conn.execute(
-        "UPDATE attachments \
-         SET local_path = ?1, cached_at = unixepoch(), cache_size = ?2, content_hash = ?3 \
-         WHERE id = ?4",
-        rusqlite::params![local_path, cache_size, content_hash, attachment_id],
-    )
-    .map_err(|e| format!("update attachment cache: {e}"))?;
-    Ok(())
-}
-
-/// Cache info for a single attachment row.
-pub struct CacheInfo {
-    pub id: String,
-    pub content_hash: Option<String>,
-    pub mime_type: Option<String>,
+    update_attachment_cache_fields(conn, attachment_id, local_path, cache_size, content_hash)
 }
 
 async fn attachment_cache_max_bytes(db: &DbState) -> Result<i64, String> {
@@ -191,95 +158,36 @@ pub async fn enforce_cache_limit(db: &DbState, app_data_dir: &Path) -> Result<()
     // then delete files outside the lock.
     let files_to_delete: Vec<String> = db
         .with_conn(move |conn| {
-            let current_size: i64 = conn
-                .query_row(
-                    "SELECT COALESCE(SUM(cache_size), 0) AS total \
-                     FROM attachments WHERE cached_at IS NOT NULL",
-                    [],
-                    |row| row.get("total"),
-                )
-                .map_err(|e| format!("query attachment cache size: {e}"))?;
-
+            let current_size = get_total_cached_attachment_size(conn)?;
             if current_size <= max_bytes {
                 return Ok(Vec::new());
             }
 
-            // Fetch oldest-first cached attachments so we can walk them until
-            // we've freed enough space.
-            let mut stmt = conn
-                .prepare(
-                    "SELECT id, local_path, content_hash, cache_size \
-                     FROM attachments \
-                     WHERE cached_at IS NOT NULL \
-                     ORDER BY cached_at ASC",
-                )
-                .map_err(|e| format!("prepare eviction query: {e}"))?;
-
-            let rows: Vec<(String, String, Option<String>, i64)> = stmt
-                .query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>("id")?,
-                        row.get::<_, String>("local_path")?,
-                        row.get::<_, Option<String>>("content_hash")?,
-                        row.get::<_, i64>("cache_size")?,
-                    ))
-                })
-                .map_err(|e| format!("query eviction candidates: {e}"))?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| format!("read eviction row: {e}"))?;
+            let rows = get_cached_attachments_oldest_first(conn)?;
 
             let mut freed: i64 = 0;
             let excess = current_size - max_bytes;
             let mut ids_to_clear = Vec::new();
             let mut candidates = Vec::new(); // (local_path, content_hash)
 
-            for (id, local_path, content_hash, size) in rows {
+            for row in rows {
                 if freed >= excess {
                     break;
                 }
-                freed = freed.saturating_add(size);
-                ids_to_clear.push(id);
-                candidates.push((local_path, content_hash));
+                freed = freed.saturating_add(row.cache_size);
+                ids_to_clear.push(row.attachment_id);
+                candidates.push((row.local_path, row.content_hash));
             }
 
             // Batch-clear all evicted rows in one statement.
-            if !ids_to_clear.is_empty() {
-                let placeholders: String = ids_to_clear
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| format!("?{}", i + 1))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-
-                let sql = format!(
-                    "UPDATE attachments \
-                     SET local_path = NULL, cached_at = NULL, cache_size = NULL \
-                     WHERE id IN ({placeholders})"
-                );
-
-                let params: Vec<&dyn rusqlite::types::ToSql> = ids_to_clear
-                    .iter()
-                    .map(|s| s as &dyn rusqlite::types::ToSql)
-                    .collect();
-
-                conn.execute(&sql, params.as_slice())
-                    .map_err(|e| format!("batch clear attachment cache: {e}"))?;
-            }
+            clear_attachment_cache_fields_batch(conn, &ids_to_clear)?;
 
             // Determine which files to actually delete (skip if another row
             // still references the same content hash).
             let mut files = Vec::new();
             for (local_path, content_hash) in candidates {
                 let still_referenced = if let Some(ref hash) = content_hash {
-                    let count: i64 = conn
-                        .query_row(
-                            "SELECT COUNT(*) AS cnt FROM attachments \
-                             WHERE content_hash = ?1 AND cached_at IS NOT NULL",
-                            rusqlite::params![hash],
-                            |row| row.get("cnt"),
-                        )
-                        .map_err(|e| format!("count remaining cache refs: {e}"))?;
-                    count > 0
+                    count_cached_attachment_refs(conn, hash)? > 0
                 } else {
                     false
                 };

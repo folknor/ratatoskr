@@ -1,7 +1,11 @@
 use std::collections::HashMap;
 
 use db::db::DbState;
-use db::db::queries_extra::{AttachmentInsertRow, MessageInsertRow, insert_attachments, insert_messages};
+use db::db::queries_extra::{
+    AttachmentInsertRow, MessageInsertRow, delete_message_reaction,
+    insert_attachments, insert_messages, upsert_message_reaction,
+    upsert_message_reaction_update_type,
+};
 
 use super::super::client::GraphClient;
 use super::super::parse::ParsedGraphMessage;
@@ -318,29 +322,28 @@ fn insert_exchange_reactions(
     for msg in messages {
         // Insert the owner's reaction if present
         if let Some(emoji) = &msg.owner_reaction_type {
-            tx.execute(
-                "INSERT INTO message_reactions \
-                 (message_id, account_id, reactor_email, reactor_name, reaction_type, reacted_at, source) \
-                 VALUES (?1, ?2, ?3, NULL, ?4, ?5, 'exchange_native') \
-                 ON CONFLICT(message_id, account_id, reactor_email, reaction_type) DO UPDATE SET \
-                   reacted_at = ?5",
-                rusqlite::params![msg.base.id, account_id, owner_email, emoji, msg.base.date],
-            )
-            .map_err(|e| format!("insert exchange reaction: {e}"))?;
+            upsert_message_reaction(
+                tx,
+                &msg.base.id,
+                account_id,
+                &owner_email,
+                emoji,
+                Some(msg.base.date),
+                "exchange_native",
+            )?;
         }
 
         // Store the total reactions count as a metadata row so we know
         // there are other reactions beyond the owner's.
         if let Some(count) = msg.reactions_count {
-            tx.execute(
-                "INSERT INTO message_reactions \
-                 (message_id, account_id, reactor_email, reactor_name, reaction_type, reacted_at, source) \
-                 VALUES (?1, ?2, '__count__', NULL, ?3, NULL, 'exchange_native') \
-                 ON CONFLICT(message_id, account_id, reactor_email, reaction_type) DO UPDATE SET \
-                   reaction_type = ?3",
-                rusqlite::params![msg.base.id, account_id, count.to_string()],
-            )
-            .map_err(|e| format!("insert exchange reaction count: {e}"))?;
+            upsert_message_reaction_update_type(
+                tx,
+                &msg.base.id,
+                account_id,
+                "__count__",
+                &count.to_string(),
+                "exchange_native",
+            )?;
         }
     }
 
@@ -492,42 +495,31 @@ pub(super) async fn refresh_reactions_for_recent_messages(
                     let mut count: usize = 0;
                     for (msg_id, owner_reaction, reactions_count) in &reaction_updates {
                         if let Some(emoji) = owner_reaction {
-                            let changes = tx
-                                .execute(
-                                    "INSERT INTO message_reactions \
-                                     (message_id, account_id, reactor_email, reactor_name, \
-                                      reaction_type, reacted_at, source) \
-                                     VALUES (?1, ?2, ?3, NULL, ?4, NULL, 'exchange_native') \
-                                     ON CONFLICT(message_id, account_id, reactor_email, reaction_type) \
-                                     DO UPDATE SET reaction_type = ?4",
-                                    rusqlite::params![msg_id, aid3, email, emoji],
-                                )
-                                .map_err(|e| format!("upsert reaction: {e}"))?;
-                            if changes > 0 {
-                                count += 1;
-                            }
+                            // Use update-type variant: on conflict, update reaction_type
+                            // (emoji may change even if the row already exists).
+                            upsert_message_reaction_update_type(
+                                &tx,
+                                msg_id,
+                                &aid3,
+                                &email,
+                                emoji,
+                                "exchange_native",
+                            )?;
+                            count += 1;
                         } else {
                             // Owner reaction was removed - delete the row if it exists
-                            tx.execute(
-                                "DELETE FROM message_reactions \
-                                 WHERE message_id = ?1 AND account_id = ?2 \
-                                   AND reactor_email = ?3 AND source = 'exchange_native'",
-                                rusqlite::params![msg_id, aid3, email],
-                            )
-                            .map_err(|e| format!("delete removed reaction: {e}"))?;
+                            delete_message_reaction(&tx, msg_id, &aid3, &email, "exchange_native")?;
                         }
 
                         if let Some(c) = reactions_count {
-                            tx.execute(
-                                "INSERT INTO message_reactions \
-                                 (message_id, account_id, reactor_email, reactor_name, \
-                                  reaction_type, reacted_at, source) \
-                                 VALUES (?1, ?2, '__count__', NULL, ?3, NULL, 'exchange_native') \
-                                 ON CONFLICT(message_id, account_id, reactor_email, reaction_type) \
-                                 DO UPDATE SET reaction_type = ?3",
-                                rusqlite::params![msg_id, aid3, c.to_string()],
-                            )
-                            .map_err(|e| format!("upsert reaction count: {e}"))?;
+                            upsert_message_reaction_update_type(
+                                &tx,
+                                msg_id,
+                                &aid3,
+                                "__count__",
+                                &c.to_string(),
+                                "exchange_native",
+                            )?;
                         }
                     }
 

@@ -194,16 +194,11 @@ pub async fn imap_delta_sync(
             .collect();
         if !keyword_caps.is_empty() {
             let all_support = keyword_caps.iter().all(|&cap| cap);
-            let cap_val = i64::from(all_support);
             let aid = account_id.to_string();
             let db2 = db.clone();
             let _ = db2
                 .with_conn(move |conn| {
-                    conn.execute(
-                        "UPDATE accounts SET supports_keywords = ?1 WHERE id = ?2",
-                        rusqlite::params![cap_val, aid],
-                    )
-                    .map_err(|e| format!("persist keyword cap: {e}"))
+                    db::db::queries_extra::set_account_supports_keywords(conn, &aid, all_support)
                 })
                 .await;
         }

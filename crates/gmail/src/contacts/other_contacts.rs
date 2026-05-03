@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use db::db::DbState;
+use db::db::queries_extra::{delete_seen_address_google_other, upsert_seen_address_google_other};
 use sync::state as sync_state;
 
 use super::super::client::GmailClient;
@@ -231,25 +232,7 @@ fn persist_other_contacts(
         let display_name = extract_display_name(person, &email);
 
         // Upsert into seen_addresses - don't overwrite locally-observed data
-        conn.execute(
-            "INSERT INTO seen_addresses \
-             (email, account_id, display_name, display_name_source, source, \
-              first_seen_at, last_seen_at) \
-             VALUES (?1, ?2, ?3, 'google_other', 'google_other', ?4, ?4) \
-             ON CONFLICT(account_id, email) DO UPDATE SET \
-               display_name = CASE \
-                 WHEN seen_addresses.source = 'google_other' \
-                   THEN COALESCE(excluded.display_name, seen_addresses.display_name) \
-                 ELSE seen_addresses.display_name \
-               END, \
-               display_name_source = CASE \
-                 WHEN seen_addresses.source = 'google_other' THEN 'google_other' \
-                 ELSE seen_addresses.display_name_source \
-               END, \
-               last_seen_at = MAX(seen_addresses.last_seen_at, excluded.last_seen_at)",
-            rusqlite::params![email, account_id, display_name, now],
-        )
-        .map_err(|e| format!("upsert google other contact: {e}"))?;
+        upsert_seen_address_google_other(conn, &email, account_id, Some(&display_name), now)?;
 
         // Track the mapping for deletion handling
         conn.execute(
@@ -300,12 +283,7 @@ fn delete_other_contact(
             .map_err(|e| format!("count remaining other contact mappings: {e}"))?;
 
         if remaining == 0 {
-            conn.execute(
-                "DELETE FROM seen_addresses \
-                 WHERE email = ?1 AND account_id = ?2 AND source = 'google_other'",
-                rusqlite::params![email, account_id],
-            )
-            .map_err(|e| format!("delete orphaned google other contact: {e}"))?;
+            delete_seen_address_google_other(conn, email, account_id)?;
         }
     }
 

@@ -415,13 +415,7 @@ pub async fn recover_on_boot(ctx: &ActionContext) {
     let result = tokio::task::spawn_blocking(move || {
         let conn = db.conn();
         let conn = conn.lock().map_err(|e| format!("db lock: {e}"))?;
-        let count = conn
-            .execute(
-                "UPDATE local_drafts SET sync_status = 'failed' WHERE sync_status = 'sending'",
-                [],
-            )
-            .map_err(|e| format!("recover sending drafts: {e}"))?;
-        Ok::<_, String>(count)
+        db::db::queries_extra::mark_sending_drafts_failed(&conn)
     })
     .await;
 

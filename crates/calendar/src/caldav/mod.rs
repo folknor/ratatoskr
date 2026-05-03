@@ -5,6 +5,7 @@ use rusqlite::OptionalExtension;
 use rtsk::caldav::client::{AuthMethod, CalDavClient};
 use rtsk::caldav::parse::parse_icalendar;
 use rtsk::db::DbState;
+use rtsk::db::queries_extra::{clear_account_caldav_urls, set_account_caldav_discovered_urls};
 
 use super::types::{CalendarEventDto, CalendarInfoDto};
 
@@ -319,16 +320,7 @@ pub async fn build_client_from_config(
 pub async fn clear_persisted_caldav_urls(db: &DbState, account_id: &str) {
     let account_id = account_id.to_string();
     let result = db
-        .with_conn(move |conn| {
-            conn.execute(
-                "UPDATE accounts
-                    SET caldav_principal_url = NULL,
-                        caldav_home_url = NULL
-                  WHERE id = ?1",
-                rusqlite::params![account_id],
-            )
-            .map_err(|e| e.to_string())
-        })
+        .with_conn(move |conn| clear_account_caldav_urls(conn, &account_id))
         .await;
     if let Err(e) = result {
         log::warn!("Failed to clear persisted CalDAV URLs: {e}");
@@ -356,15 +348,12 @@ pub async fn persist_discovery_results(
     let home = home_url.map(String::from);
     let result = db
         .with_conn(move |conn| {
-            conn.execute(
-                "UPDATE accounts
-                    SET caldav_principal_url = COALESCE(?2, caldav_principal_url),
-                        caldav_home_url = COALESCE(?3, caldav_home_url)
-                  WHERE id = ?1",
-                rusqlite::params![account_id, principal, home],
+            set_account_caldav_discovered_urls(
+                conn,
+                &account_id,
+                principal.as_deref(),
+                home.as_deref(),
             )
-            .map(|_| ())
-            .map_err(|e| e.to_string())
         })
         .await;
     if let Err(err) = result {

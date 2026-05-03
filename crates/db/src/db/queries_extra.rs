@@ -41,6 +41,9 @@ pub mod search_fallback;
 pub mod send_identity;
 pub mod thread_persistence;
 mod tasks;
+pub mod account_sync_writes;
+pub mod provider_sync_writes;
+pub mod calendar_contacts_writes;
 
 pub use action_helpers::*;
 pub use accounts_crud::*;
@@ -80,6 +83,9 @@ pub use search_fallback::*;
 pub use send_identity::*;
 pub use thread_persistence::*;
 pub use tasks::*;
+pub use account_sync_writes::*;
+pub use provider_sync_writes::*;
+pub use calendar_contacts_writes::*;
 
 pub(super) fn dynamic_update(
     conn: &Connection,

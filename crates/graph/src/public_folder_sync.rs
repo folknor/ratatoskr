@@ -6,6 +6,12 @@
 use crate::ews::{EwsClient, EwsFolder, EwsHeaders, EwsItem};
 use crate::parse::parse_iso_datetime;
 use db::db::DbState;
+use db::db::queries_extra::{
+    PublicFolderItemRow, PublicFolderRow, delete_all_public_folder_items,
+    delete_public_folder_pin, delete_stale_public_folder_items, get_pinned_folder_ids,
+    get_public_folder_sync_depth, pin_public_folder as db_pin_public_folder,
+    upsert_public_folder_items, upsert_public_folders,
+};
 
 /// Result of syncing a single pinned public folder.
 #[derive(Debug, Default)]
@@ -150,71 +156,23 @@ async fn upsert_items(
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
     db.with_conn(move |conn| {
-        let mut new_count = 0usize;
-        let mut updated_count = 0usize;
-
-        let mut insert_stmt = conn
-            .prepare(
-                "INSERT INTO public_folder_items \
-                 (account_id, folder_id, item_id, change_key, subject, sender_email, sender_name, received_at, body_preview, is_read, item_class) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
-                 ON CONFLICT(account_id, item_id) DO UPDATE SET \
-                   change_key = excluded.change_key, \
-                   subject = excluded.subject, \
-                   is_read = excluded.is_read, \
-                   body_preview = excluded.body_preview",
-            )
-            .map_err(|e| format!("prepare upsert_items: {e}"))?;
-
-        let mut exists_stmt = conn
-            .prepare(
-                "SELECT change_key FROM public_folder_items WHERE account_id = ?1 AND item_id = ?2",
-            )
-            .map_err(|e| format!("prepare exists check: {e}"))?;
-
-        for item in &items {
-            let received_ts = item
-                .received_at
-                .as_deref()
-                .and_then(parse_iso8601_to_unix);
-
-            // Check if this item already exists (and if change_key differs)
-            let existing_ck: Option<Option<String>> = exists_stmt
-                .query_row(rusqlite::params![account_id, item.item_id], |row| {
-                    row.get::<_, Option<String>>("change_key")
-                })
-                .ok();
-
-            let is_update = match &existing_ck {
-                Some(ck) => ck.as_deref() != item.change_key.as_deref(),
-                None => false,
-            };
-            let is_new = existing_ck.is_none();
-
-            insert_stmt
-                .execute(rusqlite::params![
-                    account_id,
-                    folder_id,
-                    item.item_id,
-                    item.change_key,
-                    item.subject,
-                    item.sender_email,
-                    item.sender_name,
-                    received_ts,
-                    item.body_preview,
-                    item.is_read as i32,
-                    item.item_class,
-                ])
-                .map_err(|e| format!("upsert item {}: {e}", item.item_id))?;
-
-            if is_new {
-                new_count += 1;
-            } else if is_update {
-                updated_count += 1;
-            }
-        }
-
-        Ok((new_count, updated_count))
+        let rows: Vec<PublicFolderItemRow> = items
+            .iter()
+            .map(|item| PublicFolderItemRow {
+                account_id: account_id.clone(),
+                folder_id: folder_id.clone(),
+                item_id: item.item_id.clone(),
+                change_key: item.change_key.clone(),
+                subject: item.subject.clone(),
+                sender_email: item.sender_email.clone(),
+                sender_name: item.sender_name.clone(),
+                received_at: item.received_at.as_deref().and_then(parse_iso8601_to_unix),
+                body_preview: item.body_preview.clone(),
+                is_read: item.is_read,
+                item_class: item.item_class.clone(),
+            })
+            .collect();
+        upsert_public_folder_items(conn, &rows)
     })
     .await
 }
@@ -229,43 +187,8 @@ async fn delete_stale_items(
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
     let server_ids: Vec<String> = server_item_ids.to_vec();
-
     db.with_conn(move |conn| {
-        if server_ids.is_empty() {
-            // If server returns 0 items, delete everything local for this folder
-            let deleted = conn
-                .execute(
-                    "DELETE FROM public_folder_items WHERE account_id = ?1 AND folder_id = ?2",
-                    rusqlite::params![account_id, folder_id],
-                )
-                .map_err(|e| format!("delete_stale_items (all): {e}"))?;
-            return Ok(deleted);
-        }
-
-        // Build a parameterized IN clause
-        let placeholders: Vec<String> = (0..server_ids.len())
-            .map(|i| format!("?{}", i + 3))
-            .collect();
-        let sql = format!(
-            "DELETE FROM public_folder_items \
-             WHERE account_id = ?1 AND folder_id = ?2 AND item_id NOT IN ({})",
-            placeholders.join(", ")
-        );
-
-        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-        params.push(Box::new(account_id));
-        params.push(Box::new(folder_id));
-        for id in &server_ids {
-            params.push(Box::new(id.clone()));
-        }
-
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(AsRef::as_ref).collect();
-
-        let deleted = conn
-            .execute(&sql, param_refs.as_slice())
-            .map_err(|e| format!("delete_stale_items: {e}"))?;
-        Ok(deleted)
+        delete_stale_public_folder_items(conn, &account_id, &folder_id, &server_ids)
     })
     .await
 }
@@ -278,44 +201,15 @@ async fn load_sync_depth_days(
 ) -> Result<i32, String> {
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
-    db.with_conn(move |conn| {
-        let depth = conn
-            .query_row(
-                "SELECT sync_depth_days FROM public_folder_pins \
-                 WHERE account_id = ?1 AND folder_id = ?2",
-                rusqlite::params![account_id, folder_id],
-                |row| row.get::<_, i32>("sync_depth_days"),
-            )
-            .unwrap_or(30);
-        Ok(depth)
-    })
-    .await
+    db.with_conn(move |conn| get_public_folder_sync_depth(conn, &account_id, &folder_id))
+        .await
 }
 
 /// Load all pinned folder IDs with sync_enabled = 1.
 async fn load_pinned_folder_ids(db: &DbState, account_id: &str) -> Result<Vec<String>, String> {
     let account_id = account_id.to_string();
-    db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT folder_id FROM public_folder_pins \
-                 WHERE account_id = ?1 AND sync_enabled = 1",
-            )
-            .map_err(|e| format!("prepare load_pinned_folder_ids: {e}"))?;
-
-        let rows = stmt
-            .query_map(rusqlite::params![account_id], |row| {
-                row.get::<_, String>("folder_id")
-            })
-            .map_err(|e| format!("query load_pinned_folder_ids: {e}"))?;
-
-        let mut ids = Vec::new();
-        for row in rows {
-            ids.push(row.map_err(|e| format!("row error: {e}"))?);
-        }
-        Ok(ids)
-    })
-    .await
+    db.with_conn(move |conn| get_pinned_folder_ids(conn, &account_id))
+        .await
 }
 
 // ── Public API ───────────────────────────────────────────────
@@ -451,20 +345,8 @@ pub async fn pin_public_folder(
     let account_id = account_id.to_string();
     let folder_id = folder_id.to_string();
     let depth = sync_depth_days.unwrap_or(30);
-
-    db.with_conn(move |conn| {
-        conn.execute(
-            "INSERT INTO public_folder_pins (account_id, folder_id, sync_enabled, sync_depth_days) \
-             VALUES (?1, ?2, 1, ?3) \
-             ON CONFLICT(account_id, folder_id) DO UPDATE SET \
-               sync_enabled = 1, \
-               sync_depth_days = excluded.sync_depth_days",
-            rusqlite::params![account_id, folder_id, depth],
-        )
-        .map_err(|e| format!("pin_public_folder: {e}"))?;
-        Ok(())
-    })
-    .await
+    db.with_conn(move |conn| db_pin_public_folder(conn, &account_id, &folder_id, depth))
+        .await
 }
 
 /// Unpin a public folder - removes pin, local items, and sync state.
@@ -477,24 +359,14 @@ pub async fn unpin_public_folder(
     let folder_id = folder_id.to_string();
 
     db.with_conn(move |conn| {
-        conn.execute(
-            "DELETE FROM public_folder_pins WHERE account_id = ?1 AND folder_id = ?2",
-            rusqlite::params![account_id, folder_id],
-        )
-        .map_err(|e| format!("unpin delete pins: {e}"))?;
-
-        conn.execute(
-            "DELETE FROM public_folder_items WHERE account_id = ?1 AND folder_id = ?2",
-            rusqlite::params![account_id, folder_id],
-        )
-        .map_err(|e| format!("unpin delete items: {e}"))?;
-
+        delete_public_folder_pin(conn, &account_id, &folder_id)?;
+        delete_all_public_folder_items(conn, &account_id, &folder_id)?;
+        // public_folder_sync_state is sync-owned; keep its SQL here per architecture.md
         conn.execute(
             "DELETE FROM public_folder_sync_state WHERE account_id = ?1 AND folder_id = ?2",
             rusqlite::params![account_id, folder_id],
         )
         .map_err(|e| format!("unpin delete sync_state: {e}"))?;
-
         Ok(())
     })
     .await
@@ -522,43 +394,23 @@ pub async fn browse_public_folders(
     let folders_clone = folders.clone();
 
     db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "INSERT INTO public_folders \
-                 (account_id, folder_id, parent_id, display_name, folder_class, \
-                  unread_count, total_count, can_create_items, can_modify, can_delete, can_read) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
-                 ON CONFLICT(account_id, folder_id) DO UPDATE SET \
-                   parent_id = excluded.parent_id, \
-                   display_name = excluded.display_name, \
-                   folder_class = excluded.folder_class, \
-                   unread_count = excluded.unread_count, \
-                   total_count = excluded.total_count, \
-                   can_create_items = excluded.can_create_items, \
-                   can_modify = excluded.can_modify, \
-                   can_delete = excluded.can_delete, \
-                   can_read = excluded.can_read",
-            )
-            .map_err(|e| format!("prepare browse_public_folders: {e}"))?;
-
-        for f in &folders_clone {
-            stmt.execute(rusqlite::params![
-                account_id_owned,
-                f.folder_id,
-                parent_id_owned,
-                f.display_name,
-                f.folder_class,
-                f.unread_count,
-                f.total_count,
-                f.effective_rights.create_contents as i32,
-                f.effective_rights.modify as i32,
-                f.effective_rights.delete as i32,
-                f.effective_rights.read as i32,
-            ])
-            .map_err(|e| format!("upsert folder {}: {e}", f.folder_id))?;
-        }
-
-        Ok(())
+        let rows: Vec<PublicFolderRow> = folders_clone
+            .iter()
+            .map(|f| PublicFolderRow {
+                account_id: account_id_owned.clone(),
+                folder_id: f.folder_id.clone(),
+                parent_id: Some(parent_id_owned.clone()),
+                display_name: f.display_name.clone(),
+                folder_class: f.folder_class.clone().unwrap_or_else(|| "IPM.Note".to_string()),
+                unread_count: f.unread_count,
+                total_count: f.total_count,
+                can_read: f.effective_rights.read,
+                can_create_items: f.effective_rights.create_contents,
+                can_modify: f.effective_rights.modify,
+                can_delete: f.effective_rights.delete,
+            })
+            .collect();
+        upsert_public_folders(conn, &rows)
     })
     .await?;
 

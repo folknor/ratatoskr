@@ -1,9 +1,13 @@
 use std::collections::HashSet;
 
-use rusqlite::params;
 use serde::Deserialize;
 
 use db::db::DbState;
+use db::db::queries_extra::{
+    ContactGroupRow, delete_contact_group_by_id, delete_contact_group_members,
+    delete_contact_groups_for_account_by_source, insert_contact_group_member_email,
+    list_contact_groups_for_account_by_source, upsert_contact_group,
+};
 
 use super::client::GraphClient;
 
@@ -301,27 +305,18 @@ fn upsert_group(
     group: &ExchangeGroup,
 ) -> Result<(), String> {
     let local_id = format!("exchange-{account_id}-{}", group.id);
-
-    conn.execute(
-        "INSERT INTO contact_groups (id, name, source, account_id, server_id, email, group_type) \
-         VALUES (?1, ?2, 'exchange', ?3, ?4, ?5, ?6) \
-         ON CONFLICT(id) DO UPDATE SET \
-           name = excluded.name, \
-           email = excluded.email, \
-           group_type = excluded.group_type, \
-           updated_at = unixepoch()",
-        params![
-            local_id,
-            group.display_name,
-            account_id,
-            group.id,
-            group.email,
-            group.group_type.as_str(),
-        ],
+    upsert_contact_group(
+        conn,
+        &ContactGroupRow {
+            id: local_id,
+            name: group.display_name.clone(),
+            source: "exchange".to_string(),
+            account_id: account_id.to_string(),
+            server_id: group.id.clone(),
+            email: group.email.clone(),
+            group_type: group.group_type.as_str().to_string(),
+        },
     )
-    .map_err(|e| format!("upsert group: {e}"))?;
-
-    Ok(())
 }
 
 fn persist_group_members(
@@ -337,19 +332,10 @@ fn persist_group_members(
         .map_err(|e| format!("begin tx: {e}"))?;
 
     // Clear existing members for this group and repopulate
-    tx.execute(
-        "DELETE FROM contact_group_members WHERE group_id = ?1",
-        params![local_id],
-    )
-    .map_err(|e| format!("clear group members: {e}"))?;
+    delete_contact_group_members(&tx, &local_id)?;
 
     for member in members {
-        tx.execute(
-            "INSERT OR IGNORE INTO contact_group_members (group_id, member_type, member_value) \
-             VALUES (?1, 'email', ?2)",
-            params![local_id, member.email],
-        )
-        .map_err(|e| format!("insert group member: {e}"))?;
+        insert_contact_group_member_email(&tx, &local_id, &member.email)?;
     }
 
     tx.commit().map_err(|e| format!("commit tx: {e}"))?;
@@ -361,32 +347,17 @@ fn prune_stale_groups(
     account_id: &str,
     seen_server_ids: &HashSet<String>,
 ) -> Result<(), String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, server_id FROM contact_groups \
-             WHERE account_id = ?1 AND source = 'exchange'",
-        )
-        .map_err(|e| format!("prepare stale group lookup: {e}"))?;
+    let all_groups = list_contact_groups_for_account_by_source(conn, account_id, "exchange")?;
 
-    let stale: Vec<String> = stmt
-        .query_map(params![account_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(|e| format!("query stale groups: {e}"))?
-        .filter_map(Result::ok)
+    let stale: Vec<String> = all_groups
+        .into_iter()
         .filter(|(_, server_id)| !seen_server_ids.contains(server_id))
         .map(|(local_id, _)| local_id)
         .collect();
 
-    drop(stmt);
-
     for local_id in &stale {
         // Members cascade-deleted via FK
-        conn.execute(
-            "DELETE FROM contact_groups WHERE id = ?1",
-            params![local_id],
-        )
-        .map_err(|e| format!("delete stale group: {e}"))?;
+        delete_contact_group_by_id(conn, local_id)?;
     }
 
     if !stale.is_empty() {
@@ -402,12 +373,7 @@ fn prune_stale_groups(
 async fn prune_all_account_groups(db: &DbState, account_id: &str) -> Result<(), String> {
     let aid = account_id.to_string();
     db.with_conn(move |conn| {
-        conn.execute(
-            "DELETE FROM contact_groups WHERE account_id = ?1 AND source = 'exchange'",
-            params![aid],
-        )
-        .map_err(|e| format!("prune all account groups: {e}"))?;
-        Ok(())
+        delete_contact_groups_for_account_by_source(conn, &aid, "exchange")
     })
     .await
 }

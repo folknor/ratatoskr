@@ -3,6 +3,11 @@ use rusqlite::{OptionalExtension, Row, params};
 use gmail::client::GmailState;
 use graph::client::GraphState;
 use rtsk::db::DbState;
+use rtsk::db::queries_extra::{
+    CalendarEventRow, delete_calendar_event_by_remote_id, get_calendar_id_by_remote_id,
+    DiscoveredCalendar, update_calendar_sync_token, upsert_calendar_event_row,
+    upsert_discovered_calendar,
+};
 use rtsk::db::types::DbCalendar;
 
 use super::google::{google_calendar_list_calendars_impl, google_calendar_sync_events_impl};
@@ -92,32 +97,18 @@ pub async fn upsert_discovered_calendars_impl(
     db.with_conn(move |conn| {
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         for calendar in calendars {
-            let existing_id: Option<String> = tx
-                .query_row(
-                    "SELECT id FROM calendars WHERE account_id = ?1 AND remote_id = ?2",
-                    params![&account_id, &calendar.remote_id],
-                    |row| row.get("id"),
-                )
-                .optional()
-                .map_err(|e| e.to_string())?;
-            let id = existing_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-            tx.execute(
-                "INSERT INTO calendars (id, account_id, provider, remote_id, display_name, color, is_primary, can_edit)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-                 ON CONFLICT(account_id, remote_id) DO UPDATE SET
-                   display_name = ?5, color = ?6, is_primary = ?7, can_edit = ?8, updated_at = unixepoch()",
-                params![
-                    &id,
-                    &account_id,
-                    &provider,
-                    &calendar.remote_id,
-                    &calendar.display_name,
-                    &calendar.color,
-                    calendar.is_primary as i64,
-                    calendar.can_edit as i64,
-                ],
-            )
-            .map_err(|e| e.to_string())?;
+            upsert_discovered_calendar(
+                &tx,
+                &DiscoveredCalendar {
+                    account_id: &account_id,
+                    provider: &provider,
+                    remote_id: &calendar.remote_id,
+                    display_name: &calendar.display_name,
+                    color: calendar.color.as_deref(),
+                    is_primary: calendar.is_primary,
+                    can_edit: calendar.can_edit,
+                },
+            )?;
         }
         tx.commit().map_err(|e| e.to_string())?;
         Ok(())
@@ -134,42 +125,27 @@ pub async fn apply_calendar_sync_result_impl(
     let account_id = account_id.to_string();
     let calendar_remote_id = calendar_remote_id.to_string();
     db.with_conn(move |conn| {
-        let calendar_id: String = conn
-            .query_row(
-                "SELECT id FROM calendars WHERE account_id = ?1 AND remote_id = ?2",
-                params![account_id, calendar_remote_id],
-                |row| row.get("id"),
-            )
-            .map_err(|e| e.to_string())?;
+        let calendar_id: String = get_calendar_id_by_remote_id(conn, &account_id, &calendar_remote_id)?
+            .ok_or_else(|| format!("calendar not found: account={account_id} remote={calendar_remote_id}"))?;
 
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
 
         for event in sync_result.created.into_iter().chain(sync_result.updated) {
-            upsert_calendar_event(&tx, &account_id, &calendar_id, &event)?;
+            let row = calendar_event_dto_to_row(&account_id, &calendar_id, &event);
+            upsert_calendar_event_row(&tx, &row)?;
         }
 
         for remote_event_id in sync_result.deleted_remote_ids {
-            tx.execute(
-                "DELETE FROM calendar_events WHERE calendar_id = ?1 AND remote_event_id = ?2",
-                params![calendar_id, remote_event_id],
-            )
-            .map_err(|e| e.to_string())?;
+            delete_calendar_event_by_remote_id(&tx, &calendar_id, &remote_event_id)?;
         }
 
         if sync_result.new_sync_token.is_some() || sync_result.new_ctag.is_some() {
-            tx.execute(
-                "UPDATE calendars
-                 SET sync_token = COALESCE(?1, sync_token),
-                     ctag = COALESCE(?2, ctag),
-                     updated_at = unixepoch()
-                 WHERE id = ?3",
-                params![
-                    sync_result.new_sync_token,
-                    sync_result.new_ctag,
-                    calendar_id
-                ],
-            )
-            .map_err(|e| e.to_string())?;
+            update_calendar_sync_token(
+                &tx,
+                &calendar_id,
+                sync_result.new_sync_token.as_deref(),
+                sync_result.new_ctag.as_deref(),
+            )?;
         }
 
         tx.commit().map_err(|e| e.to_string())?;
@@ -187,21 +163,15 @@ pub async fn upsert_provider_events_impl(
     let account_id = account_id.to_string();
     let calendar_remote_id = calendar_remote_id.to_string();
     db.with_conn(move |conn| {
-        let calendar_id: String = conn
-            .query_row(
-                "SELECT id FROM calendars WHERE account_id = ?1 AND remote_id = ?2",
-                params![account_id, calendar_remote_id],
-                |row| row.get("id"),
-            )
-            .optional()
-            .map_err(|e| e.to_string())?
+        let calendar_id: String = get_calendar_id_by_remote_id(conn, &account_id, &calendar_remote_id)?
             .ok_or_else(|| {
                 format!("Calendar with remote_id '{calendar_remote_id}' not found for account '{account_id}'")
             })?;
 
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         for event in events {
-            upsert_calendar_event(&tx, &account_id, &calendar_id, &event)?;
+            let row = calendar_event_dto_to_row(&account_id, &calendar_id, &event);
+            upsert_calendar_event_row(&tx, &row)?;
         }
         tx.commit().map_err(|e| e.to_string())?;
         Ok(())
@@ -219,19 +189,9 @@ pub async fn delete_provider_event_impl(
     let calendar_remote_id = calendar_remote_id.to_string();
     let remote_event_id = remote_event_id.to_string();
     db.with_conn(move |conn| {
-        let calendar_id: String = conn
-            .query_row(
-                "SELECT id FROM calendars WHERE account_id = ?1 AND remote_id = ?2",
-                params![account_id, calendar_remote_id],
-                |row| row.get("id"),
-            )
-            .map_err(|e| e.to_string())?;
-
-        conn.execute(
-            "DELETE FROM calendar_events WHERE calendar_id = ?1 AND remote_event_id = ?2",
-            params![calendar_id, remote_event_id],
-        )
-        .map_err(|e| e.to_string())?;
+        let calendar_id: String = get_calendar_id_by_remote_id(conn, &account_id, &calendar_remote_id)?
+            .ok_or_else(|| format!("calendar not found: account={account_id} remote={calendar_remote_id}"))?;
+        delete_calendar_event_by_remote_id(conn, &calendar_id, &remote_event_id)?;
         Ok(())
     })
     .await
@@ -390,55 +350,36 @@ async fn run_caldav_sync_attempt(
         .map(|_| ())
 }
 
-pub fn upsert_calendar_event(
-    tx: &rusqlite::Transaction<'_>,
+/// Convert a `CalendarEventDto` from the provider layer into the DB-crate row
+/// type, binding account and calendar context.
+pub fn calendar_event_dto_to_row(
     account_id: &str,
     calendar_id: &str,
     event: &CalendarEventDto,
-) -> Result<(), String> {
-    let id = uuid::Uuid::new_v4().to_string();
-    tx.execute(
-        "INSERT INTO calendar_events (id, account_id, google_event_id, summary, description, \
-             location, start_time, end_time, is_all_day, status, organizer_email, attendees_json, \
-             html_link, calendar_id, remote_event_id, etag, ical_data, uid, title, timezone, \
-             recurrence_rule, organizer_name, rsvp_status, created_at, availability, visibility)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22, ?23, unixepoch(), ?24, ?25)
-         ON CONFLICT(account_id, google_event_id) DO UPDATE SET
-           summary = ?4, description = ?5, location = ?6, start_time = ?7, end_time = ?8,
-           is_all_day = ?9, status = ?10, organizer_email = ?11, attendees_json = ?12,
-           html_link = ?13, calendar_id = ?14, remote_event_id = ?15, etag = ?16,
-           ical_data = ?17, uid = ?18, title = ?19, timezone = ?20, recurrence_rule = ?21,
-           organizer_name = ?22, rsvp_status = ?23, availability = ?24, visibility = ?25,
-           updated_at = unixepoch()",
-        params![
-            id,
-            account_id,
-            event.remote_event_id,
-            event.summary,
-            event.description,
-            event.location,
-            event.start_time,
-            event.end_time,
-            event.is_all_day as i64,
-            event.status,
-            event.organizer_email,
-            event.attendees_json,
-            event.html_link,
-            calendar_id,
-            event.remote_event_id,
-            event.etag,
-            event.ical_data,
-            event.uid,
-            event.title,
-            event.timezone,
-            event.recurrence_rule,
-            event.organizer_name,
-            event.rsvp_status,
-            event.availability,
-            event.visibility,
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+) -> CalendarEventRow {
+    CalendarEventRow {
+        account_id: account_id.to_string(),
+        remote_event_id: event.remote_event_id.clone(),
+        calendar_id: calendar_id.to_string(),
+        summary: event.summary.clone(),
+        description: event.description.clone(),
+        location: event.location.clone(),
+        start_time: event.start_time,
+        end_time: event.end_time,
+        is_all_day: event.is_all_day,
+        status: event.status.clone(),
+        organizer_email: event.organizer_email.clone(),
+        attendees_json: event.attendees_json.clone(),
+        html_link: event.html_link.clone(),
+        etag: event.etag.clone(),
+        ical_data: event.ical_data.clone(),
+        uid: event.uid.clone(),
+        title: event.title.clone(),
+        timezone: event.timezone.clone(),
+        recurrence_rule: event.recurrence_rule.clone(),
+        organizer_name: event.organizer_name.clone(),
+        rsvp_status: event.rsvp_status.clone(),
+        availability: event.availability.clone(),
+        visibility: event.visibility.clone(),
+    }
 }

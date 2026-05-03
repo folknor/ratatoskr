@@ -4,6 +4,7 @@ use db::db::DbState;
 use db::db::queries_extra::{
     AttachmentInsertRow, LabelWriteRow, MessageInsertRow, insert_attachments, insert_messages,
     upsert_labels,
+    get_thread_id_for_imap_uid, recompute_thread_read_starred, set_message_imap_flags,
 };
 use search::{SearchDocument, SearchState};
 use seen::MessageAddresses;
@@ -570,43 +571,22 @@ pub fn apply_flag_changes(
     let mut affected_threads: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for change in changes {
-        // Update message flags
-        let count = tx
-            .execute(
-                "UPDATE messages SET is_read = ?1, is_starred = ?2 \
-                 WHERE account_id = ?3 AND imap_folder = ?4 AND imap_uid = ?5",
-                rusqlite::params![
-                    change.is_read,
-                    change.is_starred,
-                    account_id,
-                    folder,
-                    i64::from(change.uid),
-                ],
-            )
-            .map_err(|e| format!("update message flags: {e}"))?;
+        // Update message flags via shared db helper
+        let count =
+            set_message_imap_flags(&tx, account_id, folder, i64::from(change.uid), change.is_read, change.is_starred)?;
         updated += count as u64;
 
         // Collect affected thread IDs for reaggregation
-        if let Ok(tid) = tx.query_row(
-            "SELECT thread_id FROM messages \
-             WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid = ?3",
-            rusqlite::params![account_id, folder, i64::from(change.uid)],
-            |row| row.get::<_, String>("thread_id"),
-        ) {
+        if let Some(tid) =
+            get_thread_id_for_imap_uid(&tx, account_id, folder, i64::from(change.uid))?
+        {
             affected_threads.insert(tid);
         }
     }
 
     // Reaggregate thread-level is_read/is_starred from constituent messages
     for tid in &affected_threads {
-        tx.execute(
-            "UPDATE threads SET \
-               is_read = (SELECT MIN(is_read) FROM messages WHERE account_id = ?1 AND thread_id = ?2), \
-               is_starred = (SELECT MAX(is_starred) FROM messages WHERE account_id = ?1 AND thread_id = ?2) \
-             WHERE account_id = ?1 AND id = ?2",
-            rusqlite::params![account_id, tid],
-        )
-        .map_err(|e| format!("reaggregate thread flags: {e}"))?;
+        recompute_thread_read_starred(&tx, account_id, tid)?;
     }
 
     // Sync custom keywords to the unified labels system.
@@ -616,14 +596,8 @@ pub fn apply_flag_changes(
             continue;
         }
         // Look up the thread_id for this message
-        let thread_id: Option<String> = tx
-            .query_row(
-                "SELECT thread_id FROM messages \
-                 WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid = ?3",
-                rusqlite::params![account_id, folder, i64::from(change.uid)],
-                |row| row.get(0),
-            )
-            .ok();
+        let thread_id: Option<String> =
+            get_thread_id_for_imap_uid(&tx, account_id, folder, i64::from(change.uid)).ok().flatten();
         let Some(ref tid) = thread_id else { continue };
 
         for kw in &change.keywords {

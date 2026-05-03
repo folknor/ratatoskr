@@ -12,6 +12,7 @@ use graph::client::GraphClient;
 use jmap::client::JmapClient;
 use rtsk::actions::{ActionContext, ActionError, ActionOutcome, MutationLog};
 use rtsk::db::DbState;
+use rtsk::db::queries_extra::{set_calendar_event_etag, set_calendar_event_remote_id_and_etag};
 
 use super::caldav::{caldav_create_event_impl, caldav_delete_event_impl, caldav_update_event_impl};
 use super::google::{
@@ -428,9 +429,11 @@ pub async fn create_calendar_event(
             let _ = tokio::task::spawn_blocking(move || {
                 let conn = db.conn();
                 if let Ok(conn) = conn.lock() {
-                    let _ = conn.execute(
-                        "UPDATE calendar_events SET remote_event_id = ?1, etag = ?2 WHERE id = ?3",
-                        rusqlite::params![dto.remote_event_id, dto.etag, eid],
+                    let _ = set_calendar_event_remote_id_and_etag(
+                        &conn,
+                        &eid,
+                        &dto.remote_event_id,
+                        dto.etag.as_deref(),
                     );
                 }
             })
@@ -589,10 +592,7 @@ pub async fn update_calendar_event(
                         &conn, &eid, &params,
                     );
                     // Also update etag from provider response
-                    let _ = conn.execute(
-                        "UPDATE calendar_events SET etag = ?1 WHERE id = ?2",
-                        rusqlite::params![dto.etag, eid],
-                    );
+                    let _ = set_calendar_event_etag(&conn, &eid, dto.etag.as_deref());
                 }
             })
             .await;
