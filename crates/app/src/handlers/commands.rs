@@ -998,48 +998,46 @@ fn undo_cancel_targets(
 // ── Snooze resurface ─────────────────────────────────────────
 
 impl ReadyApp {
-    /// Check for snoozed threads that are due and unsnooze them.
+    /// Phase 2 task 17: snooze resurfacing runs Service-side. The UI's
+    /// 60 s `SnoozeTick` fires a `pending_ops.kick` that wakes the
+    /// action worker; the worker walks the snooze table and unsnoozes
+    /// due threads via the relocated `snooze::unsnooze` action.
+    ///
+    /// The follow-up nav + thread-list reload runs after a 1.5 s
+    /// delay so the worker's drain has time to commit. The 1.5 s is
+    /// invisible to the user (the cadence is 60 s; a 1.5 s lag is
+    /// well below perception). A future Phase 3 refinement could
+    /// introduce a `nav.changed` notification that closes this
+    /// window; for v1 the timer is enough.
     pub(crate) fn handle_snooze_tick(&self) -> Task<Message> {
-        let Some(ctx) = self.action_ctx() else {
+        let Some(client) = self.service_client.as_ref().cloned() else {
             return Task::none();
         };
-        Task::perform(
+        let kick = Task::perform(
             async move {
-                let now = chrono::Utc::now().timestamp();
-                let due = rtsk::db::queries_extra::db_get_snoozed_threads_due(&ctx.db, now).await?;
-                if due.is_empty() {
-                    return Ok(0);
+                if let Err(error) = client
+                    .send_notification(service_api::ClientNotification::PendingOpsKick)
+                    .await
+                {
+                    log::debug!("snooze tick kick failed: {error}");
                 }
-                let mut success_count = 0usize;
-                for thread in &due {
-                    let outcome =
-                        rtsk::actions::unsnooze(&ctx, &thread.account_id, &thread.id).await;
-                    match outcome {
-                        rtsk::actions::ActionOutcome::Success => {
-                            success_count += 1;
-                        }
-                        rtsk::actions::ActionOutcome::Failed { error } => {
-                            log::error!(
-                                "Failed to unsnooze thread {}: {}",
-                                thread.id,
-                                error.user_message()
-                            );
-                        }
-                        _ => {}
-                    }
-                }
-                if success_count > 0 {
-                    log::info!("Snooze resurface: unsnoozed {success_count} thread(s)");
-                }
-                Ok(success_count)
             },
-            Message::SnoozeResurfaceComplete,
-        )
+            |()| Message::Noop,
+        );
+        // Schedule the follow-up reload via a synthetic
+        // SnoozeResurfaceComplete with `Ok(1)` (any non-zero count
+        // triggers `load_navigation_and_threads`). 1.5 s gives the
+        // worker time to drain.
+        let reload = Task::perform(
+            async {
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            },
+            |()| Message::SnoozeResurfaceComplete(Ok(1)),
+        );
+        Task::batch([kick, reload])
     }
 
     /// After unsnoozing due threads, reload navigation (unread counts) and thread list.
-    // NOTE: The methods above this line are the Phase A boundary.
-    // Below: snooze tick (unchanged) + adapter functions.
     pub(crate) fn handle_snooze_resurface_complete(
         &mut self,
         result: Result<usize, String>,

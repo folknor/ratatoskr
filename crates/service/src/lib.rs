@@ -3,6 +3,7 @@ mod boot;
 mod boot_progress;
 pub mod progress;
 pub mod send;
+mod snooze_runner;
 
 /// Re-export test-helpers knobs for the in-process integration tests so
 /// they can drive the artificial boot delay without `pub mod boot` leaking

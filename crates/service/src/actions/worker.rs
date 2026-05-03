@@ -113,6 +113,11 @@ async fn run(
         // are quiet (no per-op outcomes); the worker emits one final
         // `ActionCompleted` per finalized job.
         drain_mark_chat_read_jobs(&action_ctx, &out_tx, &owner_bytes).await;
+        // Phase 2 task 17: walk the snooze table for due threads and
+        // unsnooze them via the standard `snooze::unsnooze` action.
+        // Triggered by `pending_ops.kick`; same wakeup as the journal
+        // / pending-ops drains.
+        crate::snooze_runner::drain_due_snoozes(&action_ctx).await;
         // Phase 2 task 18: each wakeup also drains the transient-retry
         // queue (`pending_operations`). Sharing a wakeup signal with
         // the journal drain keeps the worker single-purpose; both
