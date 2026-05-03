@@ -6,21 +6,7 @@ The implementation lives across `crates/service-api/`, `crates/service/`, `crate
 
 ## Critical gaps vs. plan
 
-### 1. Windows parent-death is unimplemented
-
-`crates/service/src/parent_death/windows.rs` is a stub:
-
-```rust
-pub(super) fn configure_command(_command: &mut tokio::process::Command) -> io::Result<()> {
-    Ok(())
-}
-```
-
-Plan section 13 requires a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` plus `assign_process_to_job`. Without it, killing the UI on Windows leaves an orphan Service. Plan explicitly scopes Windows into v1 ("v1: Linux + Windows; macOS deferred to post-1.0").
-
-### 2. Windows stdio corruption defense is unimplemented
-
-`crates/service/src/stdio_defense.rs` only has a `cfg(unix)` impl. `lib.rs` falls through to `tokio::io::stdin()` / `tokio::io::stdout()` on Windows (`crates/service/src/lib.rs:48-53`). Plan section 11 requires "Windows: equivalent via `DuplicateHandle` + `SetStdHandle` against `NUL`". A stray `println!` in any transitive dep will desync the JSON-RPC framing on Windows.
+> **Windows verification still required.** The Job Object parent-death tie-up and the `DuplicateHandle` + `SetStdHandle(NUL)` stdio defense have code in tree but have **not been run on a Windows machine** - the author was on Linux. Plan's manual test matrix entries that need a real Windows session before Phase 1 can be promoted: spawn UI, kill UI via Task Manager, verify Service exits immediately (KILL_ON_JOB_CLOSE); spawn UI, quit normally, verify Service exits cleanly with the sentinel; verify a transitive `println!` from inside the Service lands in NUL rather than the JSON-RPC pipe.
 
 ## Missing tests promised by the plan
 

@@ -32,24 +32,14 @@ pub fn run_service_blocking() -> ! {
         let lifecycle = lifecycle::ServiceLifecycle::new(Some(app_data_dir));
         sigterm::spawn(lifecycle.clone());
 
-        #[cfg(unix)]
-        {
-            match stdio_defense::claim_stdio() {
-                Ok((stdin, stdout)) => {
-                    dispatch::run_service_with_io_and_lifecycle(stdin, stdout, lifecycle).await
-                }
-                Err(error) => {
-                    log::error!("failed to claim service stdio: {error}");
-                    1
-                }
+        match stdio_defense::claim_stdio() {
+            Ok((stdin, stdout)) => {
+                dispatch::run_service_with_io_and_lifecycle(stdin, stdout, lifecycle).await
             }
-        }
-
-        #[cfg(windows)]
-        {
-            let stdin = tokio::io::stdin();
-            let stdout = tokio::io::stdout();
-            dispatch::run_service_with_io_and_lifecycle(stdin, stdout, lifecycle).await
+            Err(error) => {
+                log::error!("failed to claim service stdio: {error}");
+                1
+            }
         }
     });
 

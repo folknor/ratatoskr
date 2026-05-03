@@ -30,6 +30,12 @@ pub struct ServiceClient {
     reader_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     writer_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     heartbeat_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Cross-platform parent-death tie-up. Held for the lifetime of the
+    /// client so the OS-level safety net (Job Object on Windows) survives
+    /// any failure in our explicit Drop teardown. Listed last so it drops
+    /// after every other field, making the kill-on-job-close fire only as
+    /// a true last-resort.
+    _process_guard: service::parent_death::ProcessGuard,
 }
 
 impl std::fmt::Debug for ServiceClient {
@@ -68,8 +74,14 @@ impl ServiceClient {
             .stderr(std::process::Stdio::inherit())
             .kill_on_drop(false);
         service::parent_death::configure_command(&mut command)?;
+        let process_guard = service::parent_death::ProcessGuard::new()?;
 
         let mut child = command.spawn()?;
+        // Assign immediately; on Windows the kill-on-job-close protection
+        // only fires for processes already in the Job. The window between
+        // spawn and assign is small but non-zero; explicit shutdown via the
+        // request/timeout/SIGKILL path remains the primary teardown.
+        process_guard.assign(&child)?;
         let stdin = child.stdin.take().ok_or(ClientError::NotConnected)?;
         let stdout = child.stdout.take().ok_or(ClientError::NotConnected)?;
         let (stdin_tx, stdin_rx) = mpsc::channel(STDIN_QUEUE_CAP);
@@ -94,6 +106,7 @@ impl ServiceClient {
             reader_handle: Mutex::new(Some(reader_handle)),
             writer_handle: Mutex::new(Some(writer_handle)),
             heartbeat_handle: Mutex::new(None),
+            _process_guard: process_guard,
         });
 
         let ping: HealthPingResponse = client.request(RequestParams::HealthPing).await?;
