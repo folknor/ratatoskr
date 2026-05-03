@@ -98,6 +98,22 @@ impl BootSharedState {
     /// The loop survives a future refactor that might use `notify_one` or
     /// add a spurious-wakeup path; keeping it costs one extra mutex check
     /// in the unreachable case.
+    /// Get a clone of the DB connection arc once boot has populated
+    /// `context`. Returns `None` if boot is still in flight or has not
+    /// run (which is a contract violation for any caller other than the
+    /// boot task itself - by the time `boot.ready` returns, `context`
+    /// is populated and stays so for the lifetime of the Service).
+    ///
+    /// Used by handlers (`action.job_status` today; the action service
+    /// handler+worker in task 9) that need to query the journal after
+    /// boot. Cloning the `Arc` lets the handler drive its own
+    /// `spawn_blocking` against the connection without holding the
+    /// `BootSharedState` mutex across the blocking work.
+    pub(crate) fn db_conn(&self) -> Option<Arc<Mutex<Connection>>> {
+        let guard = self.context.lock().expect("boot context poisoned");
+        guard.as_ref().map(|ctx| Arc::clone(&ctx.db_conn))
+    }
+
     pub(crate) async fn wait_for_ready(&self) -> Result<BootReadyResponse, BootFailure> {
         loop {
             if let Some(result) = self.result.lock().expect("boot result poisoned").clone() {

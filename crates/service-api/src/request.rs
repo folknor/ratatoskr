@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 
-use crate::action::ActionWirePlan;
+use crate::action::{ActionWirePlan, PlanId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestTimeoutKind {
@@ -30,6 +30,15 @@ pub enum RequestParams {
     /// rows + signal `tokio::sync::Notify`). The worker has no IPC
     /// timeout - it runs to completion or until respawn.
     ActionExecutePlan { plan: ActionWirePlan },
+    /// Look up the journaled status of a previously-submitted plan.
+    /// Used by the UI's `AckUnknown` reconciliation path (Phase 2 plan
+    /// scope item 11 / 18d): after a `boot.ready` post-respawn, the UI
+    /// calls this for every plan whose ack was lost on the wire to
+    /// resolve to either `Acked` (Journaled) or `RollBack` (NotFound).
+    ///
+    /// Read-only SELECT against the journal; the 5 s timeout is
+    /// conservative. Doesn't bypass admission - it's just a fast query.
+    ActionJobStatus { plan_id: PlanId },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -54,6 +63,7 @@ impl RequestParams {
             Self::Shutdown => "shutdown",
             Self::BootReady => "boot.ready",
             Self::ActionExecutePlan { .. } => "action.execute_plan",
+            Self::ActionJobStatus { .. } => "action.job_status",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -83,6 +93,7 @@ impl RequestParams {
             // because the dispatch loop sends the response only after
             // the handler returns).
             Self::ActionExecutePlan { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            Self::ActionJobStatus { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
@@ -122,6 +133,7 @@ impl RequestParams {
             Self::Shutdown => Value::Null,
             Self::BootReady => Value::Null,
             Self::ActionExecutePlan { plan } => serde_json::json!({ "plan": plan }),
+            Self::ActionJobStatus { plan_id } => serde_json::json!({ "plan_id": plan_id }),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -155,6 +167,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("action.execute_plan params: {e}"))?;
                 Ok(Self::ActionExecutePlan { plan: p.plan })
+            }
+            "action.job_status" => {
+                #[derive(Deserialize)]
+                struct P {
+                    plan_id: PlanId,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("action.job_status params: {e}"))?;
+                Ok(Self::ActionJobStatus { plan_id: p.plan_id })
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {

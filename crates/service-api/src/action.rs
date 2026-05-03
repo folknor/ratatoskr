@@ -238,6 +238,49 @@ impl WithGeneration for ActionCompleted {
 // Sync progress wire type
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Job status query (action.job_status)
+// ---------------------------------------------------------------------------
+
+/// Wire-side status discriminator for a journaled action job.
+/// 1:1 mirror of `db::db::action_journal::JobStatus`; lives here so
+/// `service-api` doesn't depend on `db`. Conversion happens at the
+/// handler edge (`crates/service/src/handlers/action_status.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WireJobStatus {
+    Queued,
+    Leased,
+    Executing,
+    Completed,
+    Partial,
+    Failed,
+}
+
+/// Response shape for `action.job_status`. Backs the Phase 2 plan
+/// scope item 18d reconciliation flow: the UI calls this after
+/// `boot.ready` post-respawn for every plan in `AckUnknown` state
+/// to resolve to either `Acked` (`Journaled`) or `RollBack` (`NotFound`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum JobStatusResponse {
+    /// No journal row exists for this plan_id. The Service crashed
+    /// before the handler committed, OR the IPC was dropped before
+    /// the handler ran. UI's optimistic state is wrong; roll back.
+    NotFound,
+    /// Journal row exists. UI's optimistic state is correct; the
+    /// worker (or its respawn replacement) will replay outcomes,
+    /// the per-plan `applied_outcomes` set dedupes any duplicates
+    /// the UI already saw.
+    Journaled {
+        status: WireJobStatus,
+        /// Serialized `PlanSummary` blob, populated when the job has
+        /// reached a terminal status. `None` while in flight.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        summary: Option<Vec<u8>>,
+    },
+}
+
 /// Generic progress event from Service-side action / sync runs.
 ///
 /// `IpcProgressReporter` (in `crates/service/src/progress.rs`) is the

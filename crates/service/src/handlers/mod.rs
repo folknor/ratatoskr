@@ -1,3 +1,4 @@
+mod action_status;
 mod boot;
 mod health;
 #[cfg(feature = "test-helpers")]
@@ -34,6 +35,9 @@ pub(crate) async fn dispatch(
         RequestParams::ActionExecutePlan { .. } => Err(ServiceError::Internal(
             "action.execute_plan handler not yet implemented (Phase 2 task 9)".into(),
         )),
+        RequestParams::ActionJobStatus { plan_id } => {
+            action_status::handle(&boot_state, plan_id).await
+        }
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPanic => test_helpers::panic_handle().await,
         #[cfg(feature = "test-helpers")]
