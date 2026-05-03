@@ -170,15 +170,23 @@ impl ReadyApp {
             // Compose
             Message::Compose => self.open_compose_window(ComposeMode::New),
             Message::Noop => Task::none(),
-            // Service{ChildSpawned,BootReady} re-fire post-handshake when a
-            // respawn cycles (scope item 14). The App's notification
-            // subscription is still bound to the same Arc<NotificationQueue>
-            // and the schema-version sanity check already ran in
-            // handle_crash, so there's nothing for ReadyApp to do here -
-            // log at debug as a respawn breadcrumb.
-            Message::ServiceChildSpawned(_) | Message::ServiceBootReady(_) => {
+            // ServiceChildSpawned re-fires post-handshake on every
+            // respawn cycle. The notification subscription is bound to
+            // the same Arc<NotificationQueue> across respawns, so this
+            // is informational - log a breadcrumb and move on.
+            Message::ServiceChildSpawned(_) => {
                 log::debug!("ReadyApp observed post-handshake respawn event");
                 Task::none()
+            }
+            // ServiceBootReady re-fires after every successful respawn
+            // handshake (Phase 1.5 scope item 14). Phase 2 scope item 11
+            // / 18d: this is the trigger for `action.job_status`
+            // reconciliation - any plan stuck in `AckUnknown` since the
+            // last incarnation needs to resolve before the UI dispatches
+            // any new action against the same accounts.
+            Message::ServiceBootReady(_response) => {
+                log::debug!("ReadyApp observed post-handshake respawn event");
+                self.kickoff_post_respawn_reconcile()
             }
             // ServiceBootFailed reaching ReadyApp means a respawn attempt
             // failed (e.g., the new Service exited with a deterministic
@@ -223,8 +231,11 @@ impl ReadyApp {
                     }
                 }
             }
-            Message::ActionDispatched { plan_id, result } => {
-                self.handle_action_dispatched(plan_id, result)
+            Message::ActionDispatched { plan_id, outcome } => {
+                self.handle_action_dispatched(plan_id, outcome)
+            }
+            Message::JobStatusResolved { plan_id, result } => {
+                self.handle_job_status_resolved(plan_id, result)
             }
             Message::ServiceShutdownComplete(result) => {
                 if let Err(error) = result {

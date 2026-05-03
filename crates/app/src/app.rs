@@ -157,13 +157,37 @@ pub struct ReadyApp {
     /// `Message::ActionCompleted` carrying the assembled domain
     /// outcomes so `handle_action_completed` runs unchanged.
     ///
-    /// Phase 2 task 10 doesn't introduce the full tri-state in_flight
-    /// tracking the plan describes (Pending / Acked / AckUnknown +
-    /// post-respawn `action.job_status` reconciliation). This map is
-    /// the simpler "plan + accumulating outcomes" flavour; the
-    /// reconciliation surface lands with task 11.
+    /// Tri-state per Phase 2 plan scope item 14: `state` distinguishes
+    /// `Pending` (no ack observed yet) / `Acked` (Service journaled
+    /// the plan; replay-safe across respawn) / `AckUnknown` (ack lost
+    /// on the wire; reconciled via `action.job_status` after the next
+    /// `boot.ready`).
     pub(crate) pending_action_plans:
         std::collections::HashMap<service_api::PlanId, PendingActionPlan>,
+}
+
+/// Tri-state for an in-flight action plan per Phase 2 plan scope item 14.
+///
+/// The state is what distinguishes "ServiceCrashed but the plan was
+/// already journaled" (do nothing - the worker will replay) from
+/// "ServiceCrashed before we know if the plan was journaled" (defer
+/// rollback to post-respawn reconciliation via `action.job_status`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlanState {
+    /// IPC future has not resolved. Optimistic state is applied; no
+    /// rollback path triggers yet.
+    Pending,
+    /// `ActionPlanAck { journaled: true }` was observed. Plan is
+    /// durable; `ServiceCrashed` from now on does NOT trigger rollback
+    /// because outcomes will arrive via journal replay after respawn.
+    Acked,
+    /// IPC resolved with `ServiceCrashed` / `Timeout` / wire-corruption
+    /// before an ack was observed. Optimistic state is held; the next
+    /// `boot.ready` post-respawn fires `action.job_status(plan_id)` to
+    /// resolve to either `Acked` (journal row exists -> let replay
+    /// drive completion) or rollback (journal has no row -> the
+    /// optimistic update was wrong, revert it).
+    AckUnknown,
 }
 
 /// State tracked per dispatched action plan while its
@@ -175,6 +199,15 @@ pub(crate) struct PendingActionPlan {
     /// by `operation_id` before firing `Message::ActionCompleted` so
     /// the per-target outcome ordering matches the dispatched plan.
     pub(crate) outcomes: Vec<(u32, rtsk::actions::ActionOutcome)>,
+    pub(crate) state: PlanState,
+    /// Idempotency guard for `OperationOutcome` notifications: replay
+    /// from the journal can re-emit an outcome the UI already saw, and
+    /// per Phase 2 plan scope item 17 the wire is idempotent. Drop the
+    /// duplicate when `applied_outcomes` already contains the
+    /// `operation_id`. Not the same as `outcomes.iter().any(...)`:
+    /// failures might still need toast logic at `ActionCompleted`
+    /// time, but a duplicate must not double-push.
+    pub(crate) applied_outcomes: std::collections::HashSet<u32>,
 }
 
 impl ReadyApp {

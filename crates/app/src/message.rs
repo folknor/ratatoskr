@@ -198,17 +198,32 @@ pub enum Message {
         plan: crate::action_resolve::ActionExecutionPlan,
         outcomes: Vec<rtsk::actions::ActionOutcome>,
     },
-    /// Phase 2 task 10: synchronous response from the IPC
-    /// `action.execute_plan` round-trip. `Ok(plan_id)` means the
-    /// Service durably journaled the plan and is now executing; the
-    /// per-operation `OperationOutcome` notifications + final
-    /// `ActionCompleted` notification will arrive on the
-    /// `ServiceNotification` stream. `Err(_)` means the dispatch
-    /// itself failed (Service unreachable, validation rejected, etc.) -
-    /// the dispatcher rolls back optimistic state and surfaces a toast.
+    /// Synchronous response from the IPC `action.execute_plan`
+    /// round-trip, classified into the tri-state per Phase 2 plan
+    /// scope item 14:
+    ///
+    /// - `Acked`: Service journaled the plan; outcomes will stream on
+    ///   the `ServiceNotification` channel.
+    /// - `AckUnknown`: ack lost on the wire (`ServiceCrashed` /
+    ///   `Timeout` / wire-corruption). Optimistic state is held; the
+    ///   post-`boot.ready` reconciliation flow fires
+    ///   `action.job_status` to resolve.
+    /// - `Failed`: dispatch never reached the journal (validation
+    ///   failure, terminal client error). Roll back and toast.
     ActionDispatched {
         plan_id: service_api::PlanId,
-        result: Result<service_api::ActionPlanAck, String>,
+        outcome: crate::service_client::DispatchOutcome,
+    },
+    /// Result of a post-respawn `action.job_status` query for a plan
+    /// that was in `AckUnknown` state when the Service crashed. Drives
+    /// the reconciliation arm of Phase 2 plan scope item 14: `Journaled`
+    /// promotes the plan to `Acked` (worker replay drives completion);
+    /// `NotFound` rolls back optimistic state and removes the plan.
+    /// `Err(_)` keeps the plan in `AckUnknown` and logs - the next
+    /// respawn will retry.
+    JobStatusResolved {
+        plan_id: service_api::PlanId,
+        result: Result<service_api::JobStatusResponse, String>,
     },
     /// Send completed - carries compose window ID and outcome.
     /// Separate from ActionCompleted because send operates on a compose window,

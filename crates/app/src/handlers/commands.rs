@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use iced::Task;
 
 use crate::command_dispatch;
@@ -188,6 +190,41 @@ impl ReadyApp {
             return Task::none();
         };
 
+        // Account-level reconciliation gate (Phase 2 plan scope item 14):
+        // if any plan touching one of these accounts is in `AckUnknown`
+        // state, dispatching now would let optimistic state pile on top
+        // of unresolved state. Surface a toast and bail; the user can
+        // retry once reconciliation finishes (the post-respawn
+        // `action.job_status` round-trip resolves AckUnknown plans).
+        let touched: std::collections::HashSet<&str> = plan
+            .operations
+            .iter()
+            .map(|(account_id, _, _)| account_id.as_str())
+            .collect();
+        let blocking: Vec<service_api::PlanId> = self
+            .pending_action_plans
+            .iter()
+            .filter(|(_, p)| matches!(p.state, crate::app::PlanState::AckUnknown))
+            .filter(|(_, p)| {
+                p.plan
+                    .operations
+                    .iter()
+                    .any(|(acct, _, _)| touched.contains(acct.as_str()))
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        if !blocking.is_empty() {
+            log::warn!(
+                "dispatch_plan blocked: {} plan(s) on these accounts pending reconciliation",
+                blocking.len(),
+            );
+            self.rollback_optimistic(&plan.optimistic);
+            self.status_bar.show_confirmation(
+                "\u{26A0} Action deferred \u{2014} reconciling previous action".to_string(),
+            );
+            return Task::none();
+        }
+
         // Pre-dispatch invalidation - PRE-IPC, not post-completion.
         // Without these bumps, a stale ThreadsLoaded landing between
         // dispatch and OperationOutcome would overwrite the optimistic
@@ -202,44 +239,163 @@ impl ReadyApp {
             crate::app::PendingActionPlan {
                 plan,
                 outcomes: Vec::new(),
+                state: crate::app::PlanState::Pending,
+                applied_outcomes: std::collections::HashSet::new(),
             },
         );
 
         Task::perform(
-            async move { client.execute_plan(wire_plan).await },
-            move |result| Message::ActionDispatched {
-                plan_id,
-                result: result.map_err(|e| e.to_string()),
+            async move {
+                let result = client.execute_plan(wire_plan).await;
+                crate::service_client::classify_dispatch(result)
             },
+            move |outcome| Message::ActionDispatched { plan_id, outcome },
         )
     }
 
-    /// Synchronous response to `dispatch_plan`'s IPC call. Success
-    /// case: the Service journaled the plan; we wait for the
-    /// `OperationOutcome` / `ActionCompleted` notifications to drive
-    /// the rest. Error case: dispatch never reached the worker, so
-    /// the `OperationOutcome` stream won't fire - we have to clean up
-    /// `pending_action_plans` ourselves and roll back the optimistic
-    /// state.
+    /// Synchronous response to `dispatch_plan`'s IPC call.
+    ///
+    /// Drives the tri-state per Phase 2 plan scope item 14:
+    /// - `Acked`: transition `Pending -> Acked`. Plan is durable; do
+    ///   nothing else - notifications will drive completion.
+    /// - `AckUnknown`: transition `Pending -> AckUnknown`. Hold
+    ///   optimistic state. The post-`boot.ready` reconciliation flow
+    ///   (`handle_post_respawn_reconcile`) will fire
+    ///   `action.job_status` and resolve to either Acked or rollback.
+    /// - `Failed`: roll back optimistic state and remove the plan
+    ///   from `pending_action_plans`. The Service either rejected the
+    ///   plan or the request never went out.
     pub(crate) fn handle_action_dispatched(
         &mut self,
         plan_id: service_api::PlanId,
-        result: Result<service_api::ActionPlanAck, String>,
+        outcome: crate::service_client::DispatchOutcome,
     ) -> Task<Message> {
-        match result {
-            Ok(_ack) => {
-                // Worker is now executing; outcomes will arrive via
-                // notifications. Nothing to do here.
+        use crate::service_client::DispatchOutcome;
+        match outcome {
+            DispatchOutcome::Acked(_ack) => {
+                if let Some(state) = self.pending_action_plans.get_mut(&plan_id) {
+                    state.state = crate::app::PlanState::Acked;
+                } else {
+                    // Plan disappeared between dispatch and ack - the
+                    // ActionCompleted notification raced ahead (plan
+                    // already drained). Nothing to do.
+                    log::debug!(
+                        "ActionDispatched(Acked) for plan {plan_id:?} - already drained",
+                    );
+                }
                 Task::none()
             }
-            Err(error) => {
+            DispatchOutcome::AckUnknown { reason } => {
+                if let Some(state) = self.pending_action_plans.get_mut(&plan_id) {
+                    state.state = crate::app::PlanState::AckUnknown;
+                    log::warn!(
+                        "action plan {plan_id} entered AckUnknown ({reason}); awaiting reconciliation",
+                    );
+                } else {
+                    log::debug!(
+                        "ActionDispatched(AckUnknown) for plan {plan_id:?} - already drained",
+                    );
+                }
+                Task::none()
+            }
+            DispatchOutcome::Failed { reason } => {
                 let pending = self.pending_action_plans.remove(&plan_id);
                 if let Some(state) = pending {
                     self.rollback_optimistic(&state.plan.optimistic);
                 }
-                log::warn!("action plan {plan_id} dispatch failed: {error}");
+                log::warn!("action plan {plan_id} dispatch failed: {reason}");
                 self.status_bar
-                    .show_confirmation(format!("\u{26A0} Action failed: {error}"));
+                    .show_confirmation(format!("\u{26A0} Action failed: {reason}"));
+                Task::none()
+            }
+        }
+    }
+
+    /// Fire one `action.job_status` query per plan in `AckUnknown`
+    /// state (Phase 2 plan scope item 11 / 18d).
+    ///
+    /// Triggered by `Message::ServiceBootReady` after every respawn
+    /// (initial + every subsequent). On the very first boot there are
+    /// no `AckUnknown` plans (nothing has been dispatched yet), so the
+    /// returned task is `Task::none()` - the reconciliation only fires
+    /// on actual respawns. Per-plan response lands as
+    /// `Message::JobStatusResolved` and feeds
+    /// `handle_job_status_resolved`, which drains optimistic state per
+    /// the response.
+    pub(crate) fn kickoff_post_respawn_reconcile(&mut self) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            return Task::none();
+        };
+        let plan_ids: Vec<service_api::PlanId> = self
+            .pending_action_plans
+            .iter()
+            .filter(|(_, p)| matches!(p.state, crate::app::PlanState::AckUnknown))
+            .map(|(id, _)| *id)
+            .collect();
+        if plan_ids.is_empty() {
+            return Task::none();
+        }
+        log::info!(
+            "post-respawn reconcile: querying action.job_status for {} AckUnknown plan(s)",
+            plan_ids.len(),
+        );
+        let tasks: Vec<Task<Message>> = plan_ids
+            .into_iter()
+            .map(|plan_id| {
+                let client = Arc::clone(&client);
+                Task::perform(
+                    async move {
+                        client
+                            .job_status(plan_id)
+                            .await
+                            .map_err(|e| e.to_string())
+                    },
+                    move |result| Message::JobStatusResolved { plan_id, result },
+                )
+            })
+            .collect();
+        Task::batch(tasks)
+    }
+
+    /// Resolve one `AckUnknown` plan via the `action.job_status`
+    /// response.
+    ///
+    /// - `Journaled`: the Service has the plan; transition to `Acked`
+    ///   and let the worker's outcome replay drive completion.
+    /// - `NotFound`: the Service never journaled the plan (it crashed
+    ///   before commit, or the request was dropped); roll back the
+    ///   optimistic state and remove the plan.
+    /// - `Err`: leave the plan in `AckUnknown`. The next respawn will
+    ///   retry the query.
+    pub(crate) fn handle_job_status_resolved(
+        &mut self,
+        plan_id: service_api::PlanId,
+        result: Result<service_api::JobStatusResponse, String>,
+    ) -> Task<Message> {
+        match result {
+            Ok(service_api::JobStatusResponse::Journaled { status, .. }) => {
+                log::info!(
+                    "reconcile plan {plan_id}: Journaled (status={status:?}); promoting to Acked",
+                );
+                if let Some(state) = self.pending_action_plans.get_mut(&plan_id) {
+                    state.state = crate::app::PlanState::Acked;
+                }
+                Task::none()
+            }
+            Ok(service_api::JobStatusResponse::NotFound) => {
+                log::info!("reconcile plan {plan_id}: NotFound; rolling back optimistic state");
+                if let Some(state) = self.pending_action_plans.remove(&plan_id) {
+                    self.rollback_optimistic(&state.plan.optimistic);
+                }
+                self.status_bar.show_confirmation(
+                    "\u{26A0} Action lost during service restart \u{2014} reverted".to_string(),
+                );
+                Task::none()
+            }
+            Err(error) => {
+                log::warn!(
+                    "reconcile plan {plan_id}: query failed ({error}); will retry on next respawn",
+                );
                 Task::none()
             }
         }
@@ -249,6 +405,12 @@ impl ReadyApp {
     /// outcomes accumulator. The companion `ActionCompleted`
     /// notification (handled in `handle_notification_action_completed`)
     /// drains the accumulator and fires `Message::ActionCompleted`.
+    ///
+    /// Idempotency contract per Phase 2 plan scope item 17: replay
+    /// from the journal can re-emit an outcome the UI already saw
+    /// (post-respawn the worker drains every `action_job_ops` row
+    /// whose `outcome IS NOT NULL` for any non-terminal job). The
+    /// `applied_outcomes` set drops the duplicate.
     pub(crate) fn handle_notification_operation_outcome(
         &mut self,
         outcome: service_api::OperationOutcome,
@@ -265,6 +427,14 @@ impl ReadyApp {
             );
             return Task::none();
         };
+        if !state.applied_outcomes.insert(outcome.operation_id.0) {
+            log::debug!(
+                "OperationOutcome plan {:?} op {} already applied - dropping duplicate",
+                outcome.plan_id,
+                outcome.operation_id.0,
+            );
+            return Task::none();
+        }
         let action_outcome = crate::action_wire::wire_outcome_to_action_outcome(outcome.result);
         state.outcomes.push((outcome.operation_id.0, action_outcome));
         Task::none()
@@ -285,7 +455,12 @@ impl ReadyApp {
             );
             return Task::none();
         };
-        let crate::app::PendingActionPlan { plan, mut outcomes } = state;
+        let crate::app::PendingActionPlan {
+            plan,
+            mut outcomes,
+            state: _,
+            applied_outcomes: _,
+        } = state;
         // Sort by operation_id so the outcomes Vec aligns with the
         // plan.operations order (op_id == index into operations).
         outcomes.sort_by_key(|(op_id, _)| *op_id);

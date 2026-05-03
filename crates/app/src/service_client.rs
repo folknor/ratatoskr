@@ -281,6 +281,73 @@ pub enum ClientError {
     Deserialize(#[from] serde_json::Error),
 }
 
+/// Three-way classification of an `action.execute_plan` outcome, used by
+/// the UI's tri-state in-flight tracking (Phase 2 plan scope item 14).
+///
+/// - `Acked`: handler returned `ActionPlanAck { journaled: true }`. The
+///   plan is durable; a subsequent `ServiceCrashed` does NOT trigger
+///   optimistic rollback - the journal-driven worker will replay
+///   outcomes after respawn.
+/// - `AckUnknown`: the IPC future resolved with `ServiceCrashed` or
+///   `Timeout` without an observed ack. The Service may or may not
+///   have journaled the plan (crash after commit while the ack was
+///   still in the OS pipe buffer is observable; so is a client-side
+///   timeout that lost a race against a slow journal commit). The UI
+///   holds optimistic state and resolves via `action.job_status` after
+///   the next `boot.ready`.
+/// - `Failed`: the request never reached the journal (`NotConnected`,
+///   `ServiceError` validation failure, deserialize failure, terminal
+///   `BootFailure` / `SchemaVersionChanged` / `VersionMismatch` /
+///   `SchemaBaselineMissing`). UI rolls back optimistic state and
+///   surfaces a toast.
+///
+/// Classification rule lives next to `ClientError` so adding a new
+/// variant forces an explicit decision (no `_` arm in `classify`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DispatchOutcome {
+    Acked(service_api::ActionPlanAck),
+    AckUnknown { reason: String },
+    Failed { reason: String },
+}
+
+/// Convert an `action.execute_plan` IPC result into a `DispatchOutcome`.
+///
+/// `Acked` short-circuits any rollback. `AckUnknown` defers rollback
+/// until reconciliation. `Failed` rolls back immediately.
+pub fn classify_dispatch(
+    result: Result<service_api::ActionPlanAck, ClientError>,
+) -> DispatchOutcome {
+    match result {
+        Ok(ack) => DispatchOutcome::Acked(ack),
+        Err(ClientError::Timeout) => DispatchOutcome::AckUnknown {
+            reason: "request timeout".to_string(),
+        },
+        Err(ClientError::ServiceCrashed) => DispatchOutcome::AckUnknown {
+            reason: "service crashed".to_string(),
+        },
+        Err(error @ ClientError::Io(_) | error @ ClientError::Deserialize(_)) => {
+            // Wire-corruption errors land in the same bucket as a
+            // crash: we cannot prove the journal write happened OR
+            // didn't, so reconcile rather than guess.
+            DispatchOutcome::AckUnknown {
+                reason: format!("wire error: {error}"),
+            }
+        }
+        Err(error @ ClientError::NotConnected) => DispatchOutcome::Failed {
+            reason: error.to_string(),
+        },
+        Err(error @ ClientError::Service(_)) => DispatchOutcome::Failed {
+            reason: error.to_string(),
+        },
+        Err(error @ ClientError::VersionMismatch { .. })
+        | Err(error @ ClientError::BootFailure { .. })
+        | Err(error @ ClientError::SchemaVersionChanged { .. })
+        | Err(error @ ClientError::SchemaBaselineMissing) => DispatchOutcome::Failed {
+            reason: error.to_string(),
+        },
+    }
+}
+
 impl ServiceClient {
     pub async fn spawn(app_data_dir: &Path) -> Result<Arc<Self>, ClientError> {
         let exe = std::env::current_exe()?;
@@ -608,6 +675,21 @@ impl ServiceClient {
         plan: service_api::ActionWirePlan,
     ) -> Result<service_api::ActionPlanAck, ClientError> {
         self.request(RequestParams::ActionExecutePlan { plan }).await
+    }
+
+    /// Look up the journaled status of a previously-submitted plan.
+    ///
+    /// Drives the post-respawn reconciliation flow (Phase 2 plan scope
+    /// item 11 / 18d): for every plan in `AckUnknown` state, the UI
+    /// resolves to either `Acked` (response is `Journaled`) or
+    /// `RollBack` (response is `NotFound`). The query is a fast
+    /// SELECT against `action_jobs.job_id`; 5 s timeout is the
+    /// conservative default in `RequestParams::ActionJobStatus`.
+    pub async fn job_status(
+        &self,
+        plan_id: service_api::PlanId,
+    ) -> Result<service_api::JobStatusResponse, ClientError> {
+        self.request(RequestParams::ActionJobStatus { plan_id }).await
     }
 
     pub async fn shutdown(&self) -> Result<(), ClientError> {
