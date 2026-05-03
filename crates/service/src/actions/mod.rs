@@ -33,6 +33,7 @@ mod star;
 mod tests;
 mod trash;
 pub(crate) mod wire_conversion;
+pub(crate) mod worker;
 
 pub use archive::archive;
 pub use batch::batch_execute;

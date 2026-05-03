@@ -139,6 +139,16 @@ impl BootSharedState {
         guard.as_ref().map(|ctx| Arc::clone(&ctx.db_conn))
     }
 
+    /// Snapshot the encryption key out of `BootContext` once boot has
+    /// populated it. Returns the raw 32 bytes by copy because the
+    /// action service consumers (`ActionContext::encryption_key`,
+    /// SMTP credential decrypt) take `[u8; 32]`. Returns `None` if
+    /// boot is still in flight or has not run.
+    pub(crate) fn encryption_key(&self) -> Option<[u8; 32]> {
+        let guard = self.context.lock().expect("boot context poisoned");
+        guard.as_ref().map(|ctx| *ctx.encryption_key.expose())
+    }
+
     pub(crate) async fn wait_for_ready(&self) -> Result<BootReadyResponse, BootFailure> {
         loop {
             if let Some(result) = self.result.lock().expect("boot result poisoned").clone() {

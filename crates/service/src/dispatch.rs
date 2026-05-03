@@ -104,6 +104,21 @@ where
         }
     });
 
+    // Phase 2 task 9c: spawn the action worker alongside the boot task.
+    // The worker awaits `boot_state.wait_for_ready()` internally before
+    // touching the journal, so spawn order against the boot task does
+    // not matter. We must abort this handle BEFORE dropping `out_tx`
+    // below: the worker holds a clone of the sender, and
+    // `writer_handle.await` only completes when every sender is
+    // dropped. Without the abort, shutdown hangs forever waiting on
+    // the worker's `out_tx` clone. Any lease the worker held stays in
+    // `leased` until the next boot's `recover_stale_leases` resets it.
+    let action_worker_handle = crate::actions::worker::spawn(
+        Arc::clone(&boot_state),
+        out_tx.clone(),
+        app_data_dir.clone(),
+    );
+
     let mut boot_exit_code: Option<BootExitCode> = None;
 
     loop {
@@ -260,6 +275,13 @@ where
             send_handler_response(&out_tx, id, result).await;
         }
     }
+
+    // Abort the action worker so its `out_tx` clone is dropped. Without
+    // this, `writer_handle.await` below blocks until every sender on
+    // the outbound channel is dropped, which never happens for an
+    // unbounded loop on a long-lived task.
+    action_worker_handle.abort();
+    let _ = action_worker_handle.await;
 
     drop(out_tx);
     let _ = writer_handle.await;
