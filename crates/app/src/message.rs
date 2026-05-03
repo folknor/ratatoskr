@@ -1,3 +1,100 @@
+// ── Phase 1.5 Booting-state audit (per scope item 21 of phase-1.5-plan.md) ──
+//
+// The App state machine introduced in commit 13 splits into `Booting` and
+// `Ready` variants. While in `Booting` (between iced startup and the
+// `boot.ready` handshake completing), most messages are not actionable
+// because the DB / accounts / sidebar are not yet constructed. The
+// dispatcher whitelists a small set of messages and drops everything else
+// at debug level.
+//
+// Behaviour codes:
+//   handle  - dispatcher updates `Booting` state.
+//   drop    - dispatcher logs at debug and discards.
+//   forward - stash on Booting, replay after Booting -> Ready transition
+//             (for messages that affect persistent state like settings).
+//
+// New variants added in commit 13 (the ones that drive the spawn flow):
+//   ServiceChildSpawned(Arc<ServiceClient>)        - handle (populate client)
+//   ServiceBootReady(BootReadyResponse)            - handle (transition Ready)
+//   ServiceBootFailed(BootClassification)          - handle (log + iced::exit)
+//
+// Existing Service-related:
+//   ServiceReady (Result<Arc<ServiceClient>, _>)   - REPLACED in commit 13 by
+//                                                    the three variants above
+//   ServiceNotification(Notification)              - handle (boot.progress
+//                                                    drives splash; other
+//                                                    notifications drop while
+//                                                    Booting)
+//   ServiceShutdownComplete(Result<(), _>)         - drop (no Service exists)
+//
+// Window / appearance:
+//   WindowResized(id, size)                        - handle (apply to single
+//                                                    main window if id matches)
+//   WindowMoved(id, point)                         - handle (same)
+//   WindowCloseRequested(id)                       - handle (iced::exit if main)
+//   AppearanceChanged(mode)                        - forward (stash for Ready)
+//
+// Harmless / no state:
+//   Noop                                           - drop (silent)
+//   ModifiersChanged(modifiers)                    - drop (no UI to apply to)
+//
+// Settings (UI not rendered; the rest of the bootstrap snapshot loads
+// after Booting -> Ready):
+//   Settings(_) | ToggleSettings | SettingsCheckFocus | SetTheme | SetDateDisplay
+//   SetReadingPanePosition | ToggleSidebar | ToggleRightSidebar
+//                                                  - drop
+//
+// Data loading and component messages: all dropped while `Booting` since
+// they reference state types (Db, Sidebar, ThreadList, etc.) that are not
+// constructed until the Booting -> Ready transition. Includes:
+//   AccountsLoaded | NavigationLoaded | ThreadsLoaded
+//   Sidebar(_) | ThreadList(_) | ReadingPane(_) | StatusBar(_)
+//   ThreadDetailLoaded | NavigateTo | EmailAction | ActionCompleted
+//   SendCompleted | ComposeAction | TaskAction | ExecuteCommand
+//   ExecuteParameterized | KeyEvent | Escape | Compose | FocusSearch
+//   FocusSearchBar | SearchBlur | SearchQueryChanged | SearchExecute
+//   SearchCompleted | SearchClear | SearchHistoryLoaded | SearchHere
+//   SaveAsSmartFolder | SmartFolderSaved | ShowHelp
+//
+// Pinned-search and snooze messages: dropped while Booting (the periodic
+// timers will fire again after Booting -> Ready):
+//   PinnedSearchesLoaded | SelectPinnedSearch | DismissPinnedSearch
+//   PinnedSearchDismissed | PinnedSearchPersisted | PinnedSearchesExpired
+//   RefreshPinnedSearch | ExpiryTick | ClearAllPinnedSearches
+//   SnoozeTick | SnoozeResurfaceComplete
+//
+// Sync / account / push: dropped while Booting (Service hasn't reached
+// Ready, so any sync attempt would panic on the missing DB):
+//   SyncTick | SyncCurrentFolder | SyncComplete | SyncProgress
+//   AddAccount | OpenAddAccount | AccountDeleted | AccountUpdated
+//   ReloadSignatures | SignatureOp | SharedMailboxesLoaded
+//   PinnedPublicFoldersLoaded | GalRefreshTick | GalCacheRefreshed
+//   AutoReplyChecked
+//
+// Pop-out windows: dropped (the pop-out dispatch path needs ReadyApp
+// state). The session restorer fires its own pop-out tasks after Ready.
+//   PopOut | OpenMessageView | ComposeDraftTick | LocalDraftLoaded
+//   RestoredComposeLoaded
+//
+// Calendar: dropped (calendar state is loaded after Ready):
+//   Calendar | ToggleAppMode | SetAppMode | SetCalendarView
+//   CalendarToday | CalendarSyncComplete
+//
+// Chat: dropped (chat state requires accounts loaded):
+//   ChatTimeline | ChatTimelineLoaded | ChatOlderLoaded | ChatReadMarked
+//   ChatContactsLoaded
+//
+// Palette / divider: dropped (UI not rendered):
+//   Palette | DividerDragStart | DividerDragMove | DividerDragEnd
+//   DividerHover | DividerUnhover
+//
+// Undo: dropped (no actions to undo before Ready):
+//   Undo | UndoCompleted
+//
+// Future Message variants must include a Booting-state row in this table.
+// The `BootingApp::update` enforces this at runtime by logging unrecognised
+// variants at debug level rather than panicking.
+
 use crate::app::{AppMode, Divider};
 use crate::appearance;
 use crate::command_dispatch::{
