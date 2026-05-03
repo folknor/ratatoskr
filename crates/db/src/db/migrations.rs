@@ -57,6 +57,9 @@ const SCHEMA_V100: &str = concat!(
     // public_folder_sync_state, public_folder_content_routing,
     // chat_contacts, thread_participants
     include_str!("schema/11_collaboration.sql"),
+    "\n",
+    // action_jobs, action_job_ops (Phase 2 sibling-job journal)
+    include_str!("schema/12_actions.sql"),
 );
 
 // PRE-RELEASE POLICY: until we ship a release, schema changes go directly into
