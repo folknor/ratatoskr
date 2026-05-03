@@ -467,6 +467,15 @@ async fn spawn_with_events_emits_child_spawned_then_boot_ready_on_healthy_boot()
 /// in `run_spawn_flow` (if the Service exited first). Both paths land at
 /// the same classified terminal-failure surface so the UI shows the
 /// "Encryption key missing or unreadable" message.
+///
+/// Uses `await_terminal_with_deadline` rather than per-event timeouts:
+/// the implementation's worst-case to-emit time includes the 5s
+/// `HealthPing` ceiling plus elevation (~1s now, ~3s historically), so
+/// any per-event budget at or below 5s would race against the ping
+/// timeout itself and produce intermittent flakes under parallel-test
+/// scheduling pressure (`brokkr check` does not set --test-threads=1
+/// and reviewers explicitly rejected setting it). The helper waits for
+/// `Terminal` regardless of whether `ChildSpawned` fired first.
 #[tokio::test(flavor = "multi_thread")]
 async fn spawn_with_events_emits_terminal_on_missing_key() -> TestResult {
     let binary = binary_path()?;
@@ -477,41 +486,72 @@ async fn spawn_with_events_emits_terminal_on_missing_key() -> TestResult {
         Vec::new(),
     );
 
-    let first = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
-        .await
-        .map_err(|_| std::io::Error::other("first event did not arrive"))?
-        .ok_or_else(|| std::io::Error::other("event stream closed empty"))?;
-    let _client = match first {
-        SpawnEvent::ChildSpawned(client) => client,
-        SpawnEvent::Terminal(error) => {
-            // It's also valid for spawn-time to fail before ChildSpawned if
-            // the version-check ping never gets answered. In that case the
-            // error must already carry the classification.
-            assert_terminal_is_key_load_failure(&error);
-            return Ok(());
-        }
-        SpawnEvent::BootReady(_) => {
-            return Err(std::io::Error::other(
-                "BootReady should not succeed on missing-key dir",
-            )
-            .into());
-        }
-    };
+    let error =
+        await_terminal_with_deadline(&mut events, std::time::Duration::from_secs(30)).await?;
+    assert_terminal_is_key_load_failure(&error);
+    Ok(())
+}
 
-    let second = tokio::time::timeout(std::time::Duration::from_secs(10), events.recv())
-        .await
-        .map_err(|_| std::io::Error::other("Terminal did not arrive in time"))?
-        .ok_or_else(|| std::io::Error::other("event stream closed without second event"))?;
-    match second {
-        SpawnEvent::Terminal(error) => assert_terminal_is_key_load_failure(&error),
-        other => {
-            return Err(std::io::Error::other(format!(
-                "expected Terminal second, got {other:?}"
-            ))
-            .into());
+/// Wait for a `Terminal` event (or unrecoverable failure) on a spawn-event
+/// stream, with one overall deadline rather than per-event timeouts.
+///
+/// **Why this exists**: per-event deadlines on `events.recv()` are
+/// structurally racy when the implementation's worst-case to-emit time
+/// includes a `RequestParams::HealthPing` 5s timeout plus elevation
+/// (~1-3s). A 5s first-event budget is indistinguishable from "the
+/// implementation hit its ping ceiling" - the test would fail with a
+/// generic "first event did not arrive" io::Error before the
+/// implementation could emit `Terminal` correctly. Both arch and bugs
+/// reviewers flagged this anti-pattern explicitly.
+///
+/// The helper consumes events until one of:
+/// - `Terminal(error)` arrives - returns `Ok(error)`. The caller then
+///   asserts the classification.
+/// - `BootReady(_)` arrives - returns Err. A successful boot is invalid
+///   for the no-key tests this helper serves; the caller would have
+///   asserted the same thing inline.
+/// - The stream closes without `Terminal` - returns Err.
+/// - The overall `deadline` expires - returns Err naming the trace of
+///   events seen so far so a CI failure surfaces what actually happened
+///   rather than a bare "did not arrive".
+///
+/// `ChildSpawned` events along the way are recorded but not consumed
+/// terminally; the no-key implementation may emit ChildSpawned before
+/// Terminal (when the version-check ping completed before the Service
+/// died) or skip straight to Terminal (when it didn't).
+async fn await_terminal_with_deadline(
+    events: &mut tokio::sync::mpsc::Receiver<SpawnEvent>,
+    deadline: std::time::Duration,
+) -> Result<ClientError, Box<dyn std::error::Error>> {
+    let started = std::time::Instant::now();
+    let mut saw_child_spawned = false;
+    while started.elapsed() < deadline {
+        let remaining = deadline.saturating_sub(started.elapsed());
+        match tokio::time::timeout(remaining, events.recv()).await {
+            Ok(Some(SpawnEvent::ChildSpawned(_))) => {
+                saw_child_spawned = true;
+            }
+            Ok(Some(SpawnEvent::Terminal(error))) => return Ok(error),
+            Ok(Some(SpawnEvent::BootReady(_))) => {
+                return Err(std::io::Error::other(
+                    "BootReady arrived where only Terminal was valid (no-key data dir)",
+                )
+                .into());
+            }
+            Ok(None) => {
+                return Err(std::io::Error::other(format!(
+                    "event stream closed without Terminal (saw_child_spawned={saw_child_spawned})",
+                ))
+                .into());
+            }
+            Err(_) => break,
         }
     }
-    Ok(())
+    Err(std::io::Error::other(format!(
+        "Terminal did not arrive within {deadline:?} (saw_child_spawned={saw_child_spawned}, elapsed={:?})",
+        started.elapsed(),
+    ))
+    .into())
 }
 
 /// Pin the contract that a missing-key Terminal carries the structured
@@ -989,6 +1029,14 @@ async fn pending_request_fails_at_respawn_then_subsequent_succeeds() -> TestResu
 /// surfaces Terminal). No follow-up events should arrive on the receiver.
 /// Closes the crashloop concern from scope item 15: a missing key file
 /// would otherwise produce one Service-per-second forever.
+///
+/// Like `spawn_with_events_emits_terminal_on_missing_key`, this test
+/// uses `await_terminal_with_deadline` with a generous overall budget
+/// rather than per-event timeouts. Per-event timeouts at or below the
+/// 5s `HealthPing` ceiling produced intermittent flakes under
+/// parallel-test scheduling pressure. After Terminal arrives, the
+/// "no respawn" property is asserted with its own (separate) post-
+/// terminal window.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn terminal_failure_at_initial_boot_does_not_respawn() -> TestResult {
@@ -1000,44 +1048,20 @@ async fn terminal_failure_at_initial_boot_does_not_respawn() -> TestResult {
         Vec::new(),
     );
 
-    let first = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
-        .await
-        .map_err(|_| std::io::Error::other("first event did not arrive"))?
-        .ok_or_else(|| std::io::Error::other("event stream closed empty"))?;
-    let _client = match first {
-        SpawnEvent::ChildSpawned(client) => client,
-        SpawnEvent::Terminal(error) => {
-            // Allowed: spawn might fail before ChildSpawned in some
-            // environments. The classification must still be correct.
-            assert_terminal_is_key_load_failure(&error);
-            return Ok(());
-        }
-        other => {
-            return Err(std::io::Error::other(format!(
-                "expected ChildSpawned or Terminal, got {other:?}",
-            ))
-            .into());
-        }
-    };
-    let second = tokio::time::timeout(std::time::Duration::from_secs(10), events.recv())
-        .await
-        .map_err(|_| std::io::Error::other("Terminal did not arrive in time"))?
-        .ok_or_else(|| std::io::Error::other("event stream closed without Terminal"))?;
-    match second {
-        SpawnEvent::Terminal(error) => assert_terminal_is_key_load_failure(&error),
-        other => {
-            return Err(std::io::Error::other(format!(
-                "expected Terminal, got {other:?}"
-            ))
-            .into());
-        }
-    }
+    let error =
+        await_terminal_with_deadline(&mut events, std::time::Duration::from_secs(30)).await?;
+    assert_terminal_is_key_load_failure(&error);
 
     // Window for respawn would be ~1s sleep + spawn + boot.ready. Wait
-    // longer than that and assert no follow-up event arrives.
-    let result =
+    // longer than that and assert no follow-up event arrives. The
+    // post-Terminal window is independent of the pre-Terminal deadline:
+    // `handle_crash`'s deferral fires immediately on first_boot_ready
+    // being None, so any spurious respawn event would arrive within
+    // a few seconds of Terminal regardless of how long the pre-Terminal
+    // wait took.
+    let post_terminal =
         tokio::time::timeout(std::time::Duration::from_secs(4), events.recv()).await;
-    match result {
+    match post_terminal {
         Ok(Some(unexpected)) => {
             return Err(std::io::Error::other(format!(
                 "expected no respawn after Terminal; got {unexpected:?}"
@@ -1048,8 +1072,8 @@ async fn terminal_failure_at_initial_boot_does_not_respawn() -> TestResult {
             // Sender dropped; that's fine - no respawn fired.
         }
         Err(_) => {
-            // Timeout: no event arrived in the budget window. That's the
-            // pass condition.
+            // Timeout: no event arrived in the post-Terminal window.
+            // That's the pass condition.
         }
     }
     Ok(())

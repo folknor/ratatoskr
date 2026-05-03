@@ -439,7 +439,7 @@ impl ServiceClient {
         // Take the running state and wait briefly for the child to exit. The
         // child has typically already exited by the time we're here (the EOF
         // / writer-task death is what produced `original`); we still need the
-        // wait() to reap it and pull the exit code. A 2 s budget is plenty
+        // wait() to reap it and pull the exit code. A 1 s budget is plenty
         // for an already-dead process; on Linux `waitpid` returns
         // immediately on a zombie.
         let dying_state = {
@@ -458,12 +458,26 @@ impl ServiceClient {
             generation: _,
         } = state;
         drop(stdin_tx);
+        // Run the three handle joins concurrently rather than sequentially.
+        // 200 ms is the budget per handle but the handles are independent
+        // (each is awaiting its own task); concurrent join keeps total
+        // wall-clock at ~200 ms instead of ~600 ms in the worst case
+        // where every join hits the timeout. Empirically these handles
+        // are usually already done by the time we reach elevate (the
+        // EOF / writer-task death is what produced the original error),
+        // so the timeouts almost never fire. Trimming the worst case
+        // matters because tests around this path budget against
+        // `health.ping`'s 5 s timeout + this elevation - any reduction
+        // here gives the test a wider margin against parallel-scheduling
+        // jitter.
         let abort_budget = Duration::from_millis(200);
-        let _ = tokio::time::timeout(abort_budget, reader_handle).await;
-        let _ = tokio::time::timeout(abort_budget, writer_handle).await;
-        let _ = tokio::time::timeout(abort_budget, heartbeat_handle).await;
+        let _ = tokio::join!(
+            tokio::time::timeout(abort_budget, reader_handle),
+            tokio::time::timeout(abort_budget, writer_handle),
+            tokio::time::timeout(abort_budget, heartbeat_handle),
+        );
 
-        let Some(status) = wait_with_kill_watchdog(&mut child, Duration::from_secs(2)).await
+        let Some(status) = wait_with_kill_watchdog(&mut child, Duration::from_secs(1)).await
         else {
             return original;
         };

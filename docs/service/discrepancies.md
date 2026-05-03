@@ -12,6 +12,42 @@ Phase-2 / Phase-8 deferrals or genuinely cosmetic.
 
 ---
 
+## Race spawn_inner's HealthPing against child-exit observation (deferred)
+
+**Flagged by `bugs` review (claude+codex) when investigating an intermittent
+test failure.**
+
+`ServiceClient::spawn_inner` sends `health.ping` with a 5 s timeout. If the
+child has already exited (e.g., boot's `LoadingKey` hit a missing key file),
+the reader_task's EOF detection drops the pending request and returns
+`ServiceCrashed` quickly - typically. Under heavy parallel-test scheduling
+pressure the reader_task can be starved long enough that the 5 s ceiling
+becomes the actual wall time before the request fails.
+
+The implementation should race the ping against direct child-exit
+observation: spawn a background task that awaits `child.wait()` once and
+broadcasts the result via watch/oneshot, then `tokio::select!` between the
+ping future and the child-exit signal in `spawn_inner`. On
+child-exit-first, jump straight to `elevate_initial_boot_error`. The same
+pattern would apply to `boot.ready`'s 600 s timeout.
+
+Phase 1.5 ships with two pragmatic mitigations instead:
+
+1. `elevate_initial_boot_error` runs the three abort-handle joins
+   concurrently via `tokio::join!` (200 ms total instead of 600 ms
+   sequential) and shrinks `wait_with_kill_watchdog` from 2 s to 1 s -
+   the dying child has typically already exited so this is a reap, not
+   a timeout-against-running-child.
+2. The two no-key tests use `await_terminal_with_deadline` with a 30 s
+   overall deadline rather than per-event timeouts, removing the
+   structural ambiguity between "the impl hit its ping timeout" and "the
+   test budget expired" that produced the intermittent flake.
+
+The structural fix in `spawn_inner` is the right long-term answer; defer
+to Phase 2 or whenever the next test-flake against this path forces it.
+
+---
+
 ## Smaller items and nits
 
 - **`from_boot_ready` does heavy synchronous init on the iced runtime
