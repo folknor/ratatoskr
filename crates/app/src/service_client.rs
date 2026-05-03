@@ -97,6 +97,11 @@ impl std::fmt::Debug for ServiceClient {
 /// mismatch, in-flight ServiceCrashed, request timeout). `ClientError`
 /// itself is not `Clone` (because `std::io::Error` is not), and iced
 /// Messages must be `Clone`, so this is the wire-friendly projection.
+/// Visibility note: `pub` (not `pub(crate)`) because `Message::ServiceBootFailed`
+/// is a public variant of the public `Message` enum and carries this type.
+/// Tightening to `pub(crate)` would emit `private_interfaces` warnings.
+/// Constructed only from `from_client_error`; not part of any external API
+/// surface in practice (no external crate imports it).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BootFailureReason {
     Classified(BootClassification),
@@ -109,7 +114,7 @@ impl BootFailureReason {
     /// info so the UI can surface a friendlier message for the
     /// `AnotherInstanceRunning` case; everything else falls back to the
     /// `Display` of the error.
-    pub fn from_client_error(error: &ClientError) -> Self {
+    pub(crate) fn from_client_error(error: &ClientError) -> Self {
         match error {
             ClientError::BootFailure { classification } => {
                 Self::Classified(*classification)
@@ -125,7 +130,7 @@ impl BootFailureReason {
 /// else gets a technical message logged for the next launch's diagnosis
 /// per scope item 16's "no UI plumbing for the error dialog yet" exit
 /// criterion.
-pub fn terminal_failure_user_message(reason: &BootFailureReason) -> String {
+pub(crate) fn terminal_failure_user_message(reason: &BootFailureReason) -> String {
     match reason {
         BootFailureReason::Classified(BootClassification::BootFailure { code }) => match code {
             BootExitCode::AnotherInstanceRunning => {
@@ -149,7 +154,7 @@ pub fn terminal_failure_user_message(reason: &BootFailureReason) -> String {
 
 /// Log + stderr-write the terminal-failure message. Returns the message
 /// string so the iced handler can use it (and so tests can assert on it).
-pub fn surface_terminal_failure(reason: &BootFailureReason) -> String {
+pub(crate) fn surface_terminal_failure(reason: &BootFailureReason) -> String {
     let message = terminal_failure_user_message(reason);
     log::error!("Fatal: {message}");
     eprintln!("[ui] fatal: {message}");
@@ -215,6 +220,13 @@ pub enum ClientError {
     /// - `UnexpectedExit { .. }`: "Service exited unexpectedly."
     #[error("service boot failure: {classification:?}")]
     BootFailure { classification: BootClassification },
+    /// Respawn observed a `boot.ready` whose `schema_version` does not match
+    /// the value captured on the very first `BootReady`. Indicates a binary
+    /// swap underneath the running App; there is no safe state we can keep
+    /// running in, so the client surfaces this as Terminal. Distinct from
+    /// `ServiceCrashed` so the log line names the actual cause.
+    #[error("schema_version changed across respawn: was {was}, now {now}")]
+    SchemaVersionChanged { was: u32, now: u32 },
     #[error("response deserialize: {0}")]
     Deserialize(#[from] serde_json::Error),
 }
@@ -401,7 +413,7 @@ impl ServiceClient {
     /// `notification_should_dispatch` compares the tag against this value
     /// to drop notifications from a dying-but-still-flushing reader after
     /// a respawn (scope item 20 of `phase-1.5-plan.md`).
-    pub fn current_generation(&self) -> u32 {
+    pub(crate) fn current_generation(&self) -> u32 {
         self.current_generation.load(Ordering::SeqCst)
     }
 
@@ -627,8 +639,17 @@ impl ServiceClient {
             return;
         }
 
-        // 1-second cooldown is the v1 crashloop guard. Phase 8 replaces with
-        // exponential backoff + crashloop detection.
+        // 1-second cooldown serves two purposes:
+        // (a) bounds CPU under transient crashes (the v1 crashloop guard;
+        //     Phase 8 replaces with exponential backoff + crashloop
+        //     detection); and
+        // (b) gives the dying child's fs2 file lock time to be released by
+        //     the kernel before the replacement spawn tries to acquire it.
+        //     Without this, the new Service can race the dying child and
+        //     exit AnotherInstanceRunning, which under our terminal-failure
+        //     policy is fatal - turning a recoverable crash into a hard
+        //     exit. Plan item 6 (Architecture / Service-side boot sequence)
+        //     calls this race out explicitly.
         tokio::time::sleep(Duration::from_secs(1)).await;
         if self.is_shutting_down.load(Ordering::SeqCst) {
             return;
@@ -684,13 +705,19 @@ impl ServiceClient {
 
         // Race window: Drop fired between launch_subprocess returning and
         // here. Tear down the new spawn directly (we own everything in
-        // `spawned`) rather than installing it.
+        // `spawned`) rather than installing it. start_kill only sends the
+        // signal; without an awaited wait() the OS retains the PID briefly
+        // as a zombie. Give it a 200 ms budget so the lockfile is released
+        // (the dying parent process has already torn down its own state).
         if self.is_shutting_down.load(Ordering::SeqCst) {
             spawned.reader_handle.abort();
             spawned.writer_handle.abort();
             spawned.heartbeat_handle.abort();
             let mut child = spawned.child;
-            let _ = child.start_kill();
+            if let Err(error) = child.start_kill() {
+                log::warn!("start_kill on aborted-respawn child failed: {error}");
+            }
+            let _ = tokio::time::timeout(Duration::from_millis(200), child.wait()).await;
             return Ok(());
         }
         self.install_running_state(spawned, new_gen);
@@ -715,26 +742,37 @@ impl ServiceClient {
             .await;
 
         let response: BootReadyResponse = self.request(RequestParams::BootReady).await?;
-        let captured_first_check = {
+
+        // Schema-version sanity check vs the first BootReady captured by
+        // run_spawn_flow. handle_crash already deferred the respawn if
+        // first_boot_ready was None, so the None arm here is unreachable in
+        // normal flow; we treat it as defense-in-depth, log a warning, and
+        // capture the response so subsequent respawns at least have a
+        // baseline to compare against.
+        let mismatch: Option<(u32, u32)> = {
             let mut guard = respawn
                 .first_boot_ready
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
             match guard.as_ref() {
-                Some(first) => Some((first.schema_version, response.schema_version)),
+                Some(first) if first.schema_version != response.schema_version => {
+                    Some((first.schema_version, response.schema_version))
+                }
+                Some(_) => None,
                 None => {
+                    log::warn!(
+                        "respawn observed first_boot_ready=None; capturing now (defensive)",
+                    );
                     *guard = Some(response.clone());
                     None
                 }
             }
         };
-        if let Some((was, now)) = captured_first_check
-            && was != now
-        {
+        if let Some((was, now)) = mismatch {
             log::error!(
                 "respawn schema_version changed (was {was}, now {now}); binary swap detected",
             );
-            return Err(ClientError::ServiceCrashed);
+            return Err(ClientError::SchemaVersionChanged { was, now });
         }
 
         let _ = respawn
@@ -916,6 +954,12 @@ struct SpawnedSubprocess {
 /// Used both at initial spawn and on respawn; the only meaningful difference
 /// across calls is the `generation` value the reader and heartbeat tasks
 /// capture and tag their output with.
+///
+/// `weak_client` is held weakly (rather than as `Arc<ServiceClient>`) so the
+/// reader and heartbeat tasks do NOT keep the client alive. They upgrade the
+/// Weak only at crash time to spawn `handle_crash`. If the App has dropped
+/// the client (Drop has fired), the upgrade returns None and the task simply
+/// exits without firing a respawn.
 #[allow(clippy::too_many_arguments)]
 async fn launch_subprocess(
     binary: &Path,
@@ -1139,7 +1183,7 @@ fn tag_notification_with_generation(
 /// Returns `true` iff the notification should be dispatched. Drops at
 /// `debug` level otherwise. Variants whose `service_generation()` is `None`
 /// (no cross-respawn discriminator needed) always dispatch.
-pub fn notification_should_dispatch(
+pub(crate) fn notification_should_dispatch(
     notification: &Notification,
     current_generation: u32,
 ) -> bool {
