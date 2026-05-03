@@ -360,6 +360,43 @@ pub async fn db_pending_ops_recover_executing(db: &DbState) -> Result<i64, Strin
     .await
 }
 
+/// Synchronous DB-only boot recovery callable from the Service's
+/// `spawn_blocking` boot sequence (no `ActionContext` required).
+///
+/// Resets stranded `pending_operations.status = 'executing'` rows to
+/// 'pending' and resurfaces stale `local_drafts.sync_status = 'sending'`
+/// rows as 'failed'. This is the canonical home for the function;
+/// `rtsk::actions::pending::recover_on_boot` is the async sister that
+/// Phase 2's relocated periodic drainer continues to call against the
+/// `ActionContext`-shaped API.
+pub fn db_pending_ops_recover_on_boot_sync(
+    conn: &crate::db::Connection,
+) -> Result<(), String> {
+    let pending_count = conn
+        .execute(
+            "UPDATE pending_operations SET status = 'pending' WHERE status = 'executing'",
+            [],
+        )
+        .map_err(|e| format!("recover executing ops: {e}"))?;
+    if pending_count > 0 {
+        log::info!(
+            "[pending_ops] Recovered {pending_count} stranded executing operations on boot"
+        );
+    }
+
+    let drafts_count = conn
+        .execute(
+            "UPDATE local_drafts SET sync_status = 'failed' WHERE sync_status = 'sending'",
+            [],
+        )
+        .map_err(|e| format!("recover sending drafts: {e}"))?;
+    if drafts_count > 0 {
+        log::info!("[pending_ops] Recovered {drafts_count} stale 'sending' drafts on boot");
+    }
+
+    Ok(())
+}
+
 pub async fn db_pending_ops_retry_failed(
     db: &DbState,
     account_id: Option<String>,
@@ -524,4 +561,130 @@ fn compact_queue(conn: &Connection, account_id: Option<&str>) -> Result<i64, Str
     }
 
     Ok(deleted)
+}
+
+#[cfg(test)]
+mod boot_recovery_tests {
+    use super::*;
+    use crate::db::Connection;
+
+    fn make_conn() -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch(
+            "
+            CREATE TABLE pending_operations (
+                id TEXT PRIMARY KEY,
+                account_id TEXT,
+                operation_type TEXT,
+                resource_id TEXT,
+                params TEXT,
+                status TEXT,
+                retry_count INTEGER DEFAULT 0,
+                max_retries INTEGER DEFAULT 5
+            );
+            CREATE TABLE local_drafts (
+                id TEXT PRIMARY KEY,
+                account_id TEXT,
+                sync_status TEXT
+            );
+            ",
+        )
+        .expect("schema setup");
+        conn
+    }
+
+    #[test]
+    fn resets_executing_pending_ops_to_pending() {
+        let conn = make_conn();
+        conn.execute(
+            "INSERT INTO pending_operations (id, status) VALUES (?1, 'executing')",
+            ["op-1"],
+        )
+        .expect("insert");
+        conn.execute(
+            "INSERT INTO pending_operations (id, status) VALUES (?1, 'pending')",
+            ["op-2"],
+        )
+        .expect("insert");
+        conn.execute(
+            "INSERT INTO pending_operations (id, status) VALUES (?1, 'failed')",
+            ["op-3"],
+        )
+        .expect("insert");
+
+        db_pending_ops_recover_on_boot_sync(&conn).expect("recovery");
+
+        let executing: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pending_operations WHERE status = 'executing'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query");
+        assert_eq!(executing, 0);
+        let pending: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pending_operations WHERE status = 'pending'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query");
+        assert_eq!(pending, 2);
+        let failed: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pending_operations WHERE status = 'failed'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query");
+        assert_eq!(failed, 1);
+    }
+
+    #[test]
+    fn resurfaces_sending_drafts_as_failed() {
+        let conn = make_conn();
+        conn.execute(
+            "INSERT INTO local_drafts (id, sync_status) VALUES (?1, 'sending')",
+            ["draft-1"],
+        )
+        .expect("insert");
+        conn.execute(
+            "INSERT INTO local_drafts (id, sync_status) VALUES (?1, 'draft')",
+            ["draft-2"],
+        )
+        .expect("insert");
+
+        db_pending_ops_recover_on_boot_sync(&conn).expect("recovery");
+
+        let sending: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM local_drafts WHERE sync_status = 'sending'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query");
+        assert_eq!(sending, 0);
+        let failed: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM local_drafts WHERE sync_status = 'failed'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query");
+        assert_eq!(failed, 1);
+        let untouched: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM local_drafts WHERE sync_status = 'draft'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query");
+        assert_eq!(untouched, 1);
+    }
+
+    #[test]
+    fn empty_db_is_a_noop() {
+        let conn = make_conn();
+        db_pending_ops_recover_on_boot_sync(&conn).expect("recovery on empty");
+    }
 }

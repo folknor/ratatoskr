@@ -16,6 +16,11 @@
 
 use crate::boot_progress;
 use crate::key_load;
+use db::db::pending_ops::db_pending_ops_recover_on_boot_sync;
+use db::db::queries_extra::{
+    backfill_thread_participants_for_account_sync, db_mark_queued_drafts_failed_sync,
+    get_all_accounts_sync, get_all_send_identity_emails,
+};
 use db::db::{Connection, apply_standard_pragmas, migrations, reconcile_velo_rename};
 use service_api::{BootExitCode, BootPhase};
 use std::path::PathBuf;
@@ -136,9 +141,42 @@ pub(crate) async fn run_boot_sequence(
         }
     };
 
+    let conn = Arc::new(Mutex::new(conn));
+
+    boot_progress::emit(&out_tx, BootPhase::RecoveringPendingOps, None);
+    if let Err(error) = run_boot_recovery(&conn, "pending-ops recovery", |c| {
+        db_pending_ops_recover_on_boot_sync(c)
+    })
+    .await
+    {
+        log::warn!("pending-ops boot recovery failed: {error}");
+    }
+
+    boot_progress::emit(&out_tx, BootPhase::SweepingQueuedDrafts, None);
+    if let Err(error) = run_boot_recovery(&conn, "queued-drafts sweep", |c| {
+        let count = db_mark_queued_drafts_failed_sync(c)?;
+        if count > 0 {
+            log::info!("[drafts] Resurfaced {count} orphaned 'queued' drafts as 'failed'");
+        }
+        Ok(())
+    })
+    .await
+    {
+        log::warn!("queued-drafts sweep failed: {error}");
+    }
+
+    boot_progress::emit(&out_tx, BootPhase::BackfillingThreadParticipants, None);
+    if let Err(error) = run_boot_recovery(&conn, "thread-participants backfill", |c| {
+        run_backfill_for_all_accounts(c)
+    })
+    .await
+    {
+        log::warn!("thread-participants backfill failed: {error}");
+    }
+
     let context = BootContext {
         encryption_key: key,
-        db_conn: Arc::new(Mutex::new(conn)),
+        db_conn: conn,
         schema_version,
         migrations_applied,
     };
@@ -150,6 +188,68 @@ pub(crate) async fn run_boot_sequence(
         log::warn!("BOOT_CONTEXT already populated; ignoring duplicate set");
     }
 
+    Ok(())
+}
+
+/// Run a synchronous recovery step inside `spawn_blocking` against a shared
+/// `Arc<Mutex<Connection>>`. The dispatch task and the writer task continue
+/// to run on the async side; only the rusqlite work blocks. Errors from
+/// recovery steps are logged at warn (the boot sequence proceeds) - per
+/// scope items 4, 5, and 5a of `phase-1.5-plan.md`, these steps are state
+/// repair, not correctness gates: a failure leaves the DB in the same state
+/// the previous boot left it in, which is no worse than skipping recovery.
+async fn run_boot_recovery<F>(
+    conn: &Arc<Mutex<Connection>>,
+    label: &'static str,
+    f: F,
+) -> Result<(), String>
+where
+    F: FnOnce(&Connection) -> Result<(), String> + Send + 'static,
+{
+    let conn = Arc::clone(conn);
+    tokio::task::spawn_blocking(move || {
+        let conn = conn
+            .lock()
+            .map_err(|e| format!("db lock poisoned during {label}: {e}"))?;
+        f(&conn)
+    })
+    .await
+    .map_err(|e| format!("{label} task panicked: {e}"))?
+}
+
+/// Per-account thread-participants backfill. Reads accounts + cross-account
+/// send-identity emails synchronously, then runs `backfill_thread_participants
+/// _for_account_sync` for each account. The helper itself is idempotent
+/// (returns 0 when an account already has any participants row), so this is
+/// safe to call on every boot.
+fn run_backfill_for_all_accounts(conn: &Connection) -> Result<(), String> {
+    let accounts = get_all_accounts_sync(conn)?;
+    if accounts.is_empty() {
+        return Ok(());
+    }
+    let mut user_emails: Vec<String> = accounts
+        .iter()
+        .map(|a| a.email.to_lowercase())
+        .collect();
+    for email in get_all_send_identity_emails(conn)? {
+        let lower = email.to_lowercase();
+        if !user_emails.contains(&lower) {
+            user_emails.push(lower);
+        }
+    }
+    for account in accounts {
+        match backfill_thread_participants_for_account_sync(conn, &account.id, &user_emails) {
+            Ok(0) => {}
+            Ok(count) => log::info!(
+                "[chat] thread_participants backfill rebuilt {count} threads for {}",
+                account.id
+            ),
+            Err(error) => log::warn!(
+                "[chat] thread_participants backfill for {} failed: {error}",
+                account.id
+            ),
+        }
+    }
     Ok(())
 }
 

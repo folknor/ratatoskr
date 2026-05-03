@@ -20,7 +20,7 @@ use crate::window_state;
 use cmdk::{BindingTable, Chord, CommandRegistry, FocusedRegion, UndoStack, current_platform};
 use iced::{Task, Theme};
 use rtsk::db::queries::{get_settings_bootstrap_snapshot, get_ui_bootstrap_snapshot};
-use rtsk::db::queries_extra::{db_mark_queued_drafts_failed_sync, get_calendar_default_view_sync};
+use rtsk::db::queries_extra::get_calendar_default_view_sync;
 use rtsk::generation::{GenerationCounter, Nav, PopOut, Search, ThreadDetail};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -324,16 +324,11 @@ impl App {
             app.settings.apply_bootstrap(&ui_snap, &settings_snap);
         }
 
-        // Resurface orphaned 'queued' drafts from the old send path.
-        // These were never sent - transition to 'failed' so they're visible
-        // to future outbox UI rather than silently deleting user data.
-        if let Err(e) = app
-            .db
-            .write_db_state()
-            .with_conn_sync(db_mark_queued_drafts_failed_sync)
-        {
-            log::warn!("Failed to resurface orphaned queued drafts: {e}");
-        }
+        // Note: the queued-drafts sweep, pending-ops boot recovery, and
+        // per-account thread_participants backfill that used to run from
+        // here all relocated to the Service's boot sequence in Phase 1.5.
+        // The UI ActionContext below stays UI-side until Phase 2 moves the
+        // action service across the boundary.
 
         // Restore pop-out windows from previous session
         let mut session_tasks = app.restore_pop_out_windows(&session);
@@ -376,17 +371,9 @@ impl App {
             Task::done(Message::GalRefreshTick),
         ];
 
-        // Pending-ops crash recovery: reset stranded 'executing' ops to 'pending',
-        // resurface stale 'sending' drafts as 'failed'.
-        if let Some(ref ctx) = app.action_ctx {
-            let ctx = ctx.clone();
-            boot_tasks.push(Task::perform(
-                async move {
-                    rtsk::actions::pending::recover_on_boot(&ctx).await;
-                },
-                |()| Message::Noop,
-            ));
-        }
+        // Pending-ops crash recovery used to run here. As of Phase 1.5 it
+        // runs Service-side during the boot sequence (DB-only variant);
+        // the UI no longer dispatches recover_on_boot from App::boot.
 
         // Snooze resurface on boot: unsnooze threads that became due while the app was closed.
         boot_tasks.push(Task::done(Message::SnoozeTick));
