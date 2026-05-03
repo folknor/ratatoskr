@@ -144,15 +144,27 @@ impl ReadyApp {
         Task::batch(tasks)
     }
 
-    /// Process pending operations from the retry queue.
-    /// Called on SyncTick alongside delta sync.
+    /// Nudge the Service to drain the `pending_operations` retry queue.
+    ///
+    /// Phase 2 task 18: the periodic drainer runs Service-side; the UI
+    /// is just the trigger so the existing tick policy (focus / online
+    /// state gating) stays UI-owned. Fires a fire-and-forget
+    /// `pending_ops.kick` notification per Phase 2 plan scope item 11.
+    /// Notification class is `Drop`: if the Service's notification pool
+    /// is at capacity, the kick is dropped server-side and the UI's
+    /// next `SyncTick` retries.
     pub(crate) fn process_pending_ops(&self) -> Task<Message> {
-        let Some(ctx) = self.action_ctx() else {
+        let Some(client) = self.service_client.as_ref().cloned() else {
             return Task::none();
         };
         Task::perform(
             async move {
-                rtsk::actions::pending::process_pending_ops(&ctx).await;
+                if let Err(error) = client
+                    .send_notification(service_api::ClientNotification::PendingOpsKick)
+                    .await
+                {
+                    log::debug!("pending_ops.kick send failed: {error}");
+                }
             },
             |()| Message::Noop,
         )

@@ -105,6 +105,14 @@ async fn run(
     loop {
         boot_state.await_action_worker_wakeup().await;
         drain_one_pass(&action_ctx, &out_tx, &owner_bytes).await;
+        // Phase 2 task 18: each wakeup also drains the transient-retry
+        // queue (`pending_operations`). Sharing a wakeup signal with
+        // the journal drain keeps the worker single-purpose; both
+        // queues are typically empty so the extra pass is cheap. The
+        // kick handler (`pending_ops.kick`) and the journal handler
+        // both fire `boot_state.notify_action_worker()` so either
+        // trigger does the same work.
+        super::pending::process_pending_ops(&action_ctx).await;
     }
 }
 
