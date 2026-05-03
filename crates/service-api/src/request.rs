@@ -12,6 +12,11 @@ pub enum RequestTimeoutKind {
 pub enum RequestParams {
     HealthPing,
     Shutdown,
+    /// Sent by the UI after the version-check ping; the Service answers it
+    /// only after migrations + key load + pending-ops recovery + queued-
+    /// drafts sweep + thread-participants backfill have all completed. The
+    /// long timeout (10 minutes) covers a 50 GB-class schema migration.
+    BootReady,
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -34,6 +39,7 @@ impl RequestParams {
         match self {
             Self::HealthPing => "health.ping",
             Self::Shutdown => "shutdown",
+            Self::BootReady => "boot.ready",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -49,6 +55,7 @@ impl RequestParams {
         match self {
             Self::HealthPing => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             Self::Shutdown => RequestTimeoutKind::Finite(Duration::from_secs(30)),
+            Self::BootReady => RequestTimeoutKind::Finite(Duration::from_secs(600)),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
@@ -58,8 +65,14 @@ impl RequestParams {
         }
     }
 
+    /// Requests that bypass the per-handler semaphore. `health.ping` keeps
+    /// the heartbeat alive under load; `boot.ready` is special-cased because
+    /// it parks on a `Notify` until the boot sequence completes (it must not
+    /// occupy a permit while parked) and because the dispatch loop's
+    /// admission cap also keys off this flag, so a flood of slow handlers
+    /// cannot starve the boot handshake.
     pub fn bypasses_semaphore(&self) -> bool {
-        matches!(self, Self::HealthPing)
+        matches!(self, Self::HealthPing | Self::BootReady)
     }
 
     /// Serialize this request's params into the `params` field of the
@@ -73,6 +86,7 @@ impl RequestParams {
         match self {
             Self::HealthPing => Value::Null,
             Self::Shutdown => Value::Null,
+            Self::BootReady => Value::Null,
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -93,6 +107,10 @@ impl RequestParams {
             "shutdown" => {
                 expect_no_params(method, params)?;
                 Ok(Self::Shutdown)
+            }
+            "boot.ready" => {
+                expect_no_params(method, params)?;
+                Ok(Self::BootReady)
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {
@@ -143,5 +161,41 @@ fn expect_no_params(method: &str, params: Option<Value>) -> Result<(), String> {
         Some(Value::Object(map)) if map.is_empty() => Ok(()),
         Some(Value::Null) => Ok(()),
         Some(_) => Err(format!("{method} expects no params")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn boot_ready_timeout_is_ten_minutes() {
+        assert_eq!(
+            RequestParams::BootReady.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(600)),
+        );
+    }
+
+    #[test]
+    fn boot_ready_method_name_is_dotted() {
+        assert_eq!(RequestParams::BootReady.method_name(), "boot.ready");
+    }
+
+    #[test]
+    fn boot_ready_bypasses_semaphore() {
+        assert!(RequestParams::BootReady.bypasses_semaphore());
+    }
+
+    #[test]
+    fn boot_ready_round_trips_from_method_params() {
+        let parsed = RequestParams::from_method_params("boot.ready", None).expect("parse");
+        assert_eq!(parsed, RequestParams::BootReady);
+        let parsed_null =
+            RequestParams::from_method_params("boot.ready", Some(Value::Null)).expect("parse");
+        assert_eq!(parsed_null, RequestParams::BootReady);
+        assert!(
+            RequestParams::from_method_params("boot.ready", Some(serde_json::json!({"x": 1})))
+                .is_err()
+        );
     }
 }

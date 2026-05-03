@@ -1,3 +1,4 @@
+mod boot;
 mod error;
 mod framing;
 mod notification;
@@ -6,6 +7,9 @@ mod request;
 mod response;
 mod version;
 
+pub use boot::{
+    BootClassification, BootExitCode, BootPhase, BootPhaseKind, BootProgress, BootReadyResponse,
+};
 pub use error::{JsonRpcErrorObject, ServiceError};
 pub use framing::{
     BoundedLineReader, FrameError, JsonRpcErrorResponse, JsonRpcRequest, JsonRpcSuccessResponse,

@@ -165,7 +165,7 @@ mod tests {
     fn coalesce_with(key: &str, id: u32) -> Mock {
         Mock {
             class: NotificationClass::Coalesce {
-                key: CoalesceKey::new(key),
+                key: CoalesceKey::test(key),
             },
             id,
         }
