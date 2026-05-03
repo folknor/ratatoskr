@@ -72,7 +72,7 @@ This document is a sketch. Phase scope, interfaces, and risks will firm up when 
 - `<app_data>/logs/service.<pid>.log` exists and contains the boot + heartbeat lines, with no payload contents.
 - In-process integration tests cover: happy-path ping, EOF-during-pending-request, malformed JSON, concurrent ping fan-out (id correlation), version mismatch, spawn failure, panicking handler returns `ServiceError::Panic` and Service stays up, oversize frame rejected without OOM.
 - Real-subprocess smoke tests cover: spawn + ping, spawn + shutdown (clean ack), spawn + drop (no-orphan verification), Linux parent-death (SIGKILL UI, Service exits within 2 s).
-- Manual matrix run on Windows: parent-death detection works on the local platform.
+- Manual matrix in [`manual-test-matrix.md`](manual-test-matrix.md) run on Windows: Job Object parent-death, clean shutdown handshake, and `SetStdHandle(NUL)` stdio corruption defense all observable on a real Windows host.
 
 **Risks / open questions.**
 - The stdio framing helper is more code than it looks: parse errors, frame-size rejection during read, EOF, partial reads, write timeouts, and panic catching all need explicit handling.

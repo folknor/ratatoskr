@@ -519,13 +519,7 @@ Land in Phase 1, using `escargot` to locate the built `app` binary. Cover what i
 
 ### Manual test matrix (run before each phase ships)
 
-- Linux: spawn UI, kill UI with SIGKILL, verify Service exits within 2 s (PR_SET_PDEATHSIG + getppid recheck).
-- Windows: spawn UI, kill UI via Task Manager, verify Service exits immediately (Job Object KILL_ON_JOB_CLOSE).
-- All: spawn UI, quit normally via the app's quit path, verify Service exits cleanly within 30 s (the shutdown-ack timeout); clean-shutdown sentinel present; no zombie processes remain.
-- All: stop the Service externally (`kill <service-pid>`); verify the UI's heartbeat detects it and logs the missed beats. (No respawn yet; that's Phase 1.5.)
-- All: send the Service a SIGTERM (Unix); verify shutdown drain runs (sentinel written) before exit.
-
-A `docs/service/manual-test-matrix.md` lives alongside this plan and gets re-run at the close of every phase that touches lifecycle code (Phases 1, 1.5, 8, 9). Each platform's parent-death module carries a `// MANUAL TEST REQUIRED` comment so the matrix doesn't get lost.
+The full matrix lives in [`manual-test-matrix.md`](manual-test-matrix.md). Linux items are now automated; Windows items 1 - 3 (parent-death via Job Object, clean shutdown via the request/ack handshake, stdio corruption defense) are still manual and must run on a real Windows host before Phase 1 can be promoted. The matrix gets re-run at the close of every phase that touches lifecycle code (Phases 1, 1.5, 8, 9). Each platform's parent-death module carries a `// MANUAL TEST REQUIRED` comment so the matrix doesn't get lost.
 
 ## Open questions
 
