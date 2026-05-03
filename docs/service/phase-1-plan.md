@@ -22,11 +22,19 @@ The deliverable is small and well-scoped on purpose: every later phase plugs int
 4. **Pending-request map.** `DashMap<u64, oneshot::Sender<Result<serde_json::Value, ServiceError>>>` - **not** an untagged response enum. The typed `request()` wrapper deserializes the value into the expected response type after correlating by id. Drop impl drains and rejects every outstanding sender as `ClientError::ServiceCrashed`.
 5. **`ServiceClient::Drop` ordering** is specified, not implicit:
    1. Cancel reader / writer / heartbeat task handles via `JoinHandle::abort()`.
-   2. Await tasks with a short deadline (200 ms).
-   3. Close stdin (Service sees EOF on the read half, exits cleanly).
-   4. Wait briefly for child exit.
+   2. Close stdin (drop the writer's input channel) so the Service sees EOF
+      on the read half and starts exiting on its own. Closing before the
+      handle await drives that EOF promptly - the Service's dispatch loop
+      gets to the shutdown drain while we wait, which is what we want.
+   3. Await aborted handles with a short deadline (200 ms).
+   4. Wait briefly for child exit (1 s).
    5. SIGKILL only if the child is still alive after the wait.
    6. Drain pending map; reject every outstanding sender.
+
+   Steps 2 and 3 are deliberately interleaved relative to a "abort then
+   await then close" reading: closing stdin first gives the Service a
+   reason to actually finish, so the bounded await can succeed for the
+   right reason rather than fall through to SIGKILL on every busy worker.
 6. **Per-method timeout policy.** Declared at the API definition site, not at call sites. Phase 1 table:
    | Method | Timeout |
    |--------|---------|
@@ -43,9 +51,9 @@ The deliverable is small and well-scoped on purpose: every later phase plugs int
 10. **Bounded in-flight handlers.** Service-side dispatch holds at most N (default 64) concurrent handlers via a semaphore; further requests wait rather than ballooning Service memory under a pathological client. **Permit acquired *inside* the spawned handler task**, not in the dispatch loop, so the dispatch loop keeps reading stdin even while 64 slow handlers are in flight. Heartbeat handler bypasses the semaphore.
 11. **Inbound frame cap (4 MiB) enforced *during* read**, not after. Use a bounded line decoder (`tokio_util::codec::LinesCodec::new_with_max_length(MAX_FRAME_BYTES)` or equivalent `read_until` against a `Take`-wrapped reader). A 1 GiB no-newline payload must not OOM the Service before the cap fires. The Phase 1 self-contradiction "uncapped in v1" goes away.
 12. **Heartbeat.** UI sends `health.ping` every 30 s; logs round-trip + missed beats. No respawn (Phase 1.5). Heartbeat handler bypasses the in-flight semaphore so heavy load can't starve it.
-13. **Parent-death detection (v1: Linux + Windows; macOS deferred to post-1.0, design retained in `problem-statement.md`).** Linux closes the parent-died-before-registration race with registration plus a "is the parent still alive?" recheck; Windows avoids the race via Job Object semantics.
-    - Linux: `pre_exec` hook calling `prctl(PR_SET_PDEATHSIG, SIGTERM)` + post-prctl `getppid() == 1` check at startup.
-    - Windows: parent creates a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, assigns the Service to it before spawning. No PID lookup, no PID-reuse race. (`OpenProcess(parent_pid)` after startup is rejected: TOCTOU between exec and OpenProcess on Windows is a real bug class.)
+13. **Parent-death detection (v1: Linux + Windows; macOS deferred to post-1.0, design retained in `problem-statement.md`).** Linux closes the parent-died-before-registration race with registration plus a "is the parent still alive?" recheck; Windows uses Job Object semantics.
+    - Linux: `pre_exec` hook calling `prctl(PR_SET_PDEATHSIG, SIGTERM)` + post-prctl `getppid() == 1` check at startup. The recheck runs as the **first synchronous statement** in `run_service_blocking` - before logger init, panic hook, runtime build - so the fork-to-recheck window is as small as a `getppid` syscall.
+    - Windows: parent creates a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` before spawning the Service, then `AssignProcessToJobObject` immediately after `Command::spawn()` returns. There is a small window between spawn and assign where the Service is not yet in the Job; if the parent dies in that window the Service can outlive it. This is **accepted residual risk** for v1: tightening it would require restructuring around raw `CreateProcess` with `CREATE_SUSPENDED` + assign + `ResumeThread`, and `tokio::process::Command` does not expose that. The PID-reuse race that an `OpenProcess(parent_pid)` lookup would have is avoided here because the parent's `Child` handle keeps the PID stable until assignment. If the manual-test matrix surfaces real-world breakage from the spawn->assign window, the `CreateProcess` restructure is the documented follow-up.
 14. **Clean shutdown.** `shutdown` is a **request**. UI awaits the response with a 30 s timeout, then SIGTERM (no-op on Windows; `start_kill` is `TerminateProcess`-equivalent), then SIGKILL after another 5 s. Service-side SIGTERM handler triggers the same shutdown drain (flush Tantivy, close pack files, write clean-shutdown sentinel) as the request-driven path. No torn writes via the SIGTERM path.
 15. **Version handshake.** First `health.ping` after spawn asserts `response.version == PROTOCOL_VERSION`; mismatch is fatal boot error with a clear "binary mismatch" message. The `health.ping` request envelope shape is **frozen** for v1 - any future Service binary must still parse and respond to a v1 ping (otherwise the handshake catches mismatches only when responses can be parsed at all).
 16. **Panic safety.** Every handler runs inside `AssertUnwindSafe(...).catch_unwind()`. Panics return `ServiceError::Panic { method, message }`; the dispatch loop continues. A panicking PDF extractor in Phase 7 won't kill the Service. **The process-level panic hook writes to the Service log file** before the default behavior runs - otherwise panics in non-handler tasks (e.g. tokio runtime worker threads) vanish in production windowed UI.

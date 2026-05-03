@@ -4,17 +4,24 @@ use futures_util::FutureExt;
 use serde_json::Value;
 use service_api::{
     BoundedLineReader, FrameError, JsonRpcErrorObject, JsonRpcErrorResponse,
-    JsonRpcSuccessResponse, ParsedClientMessage, RequestParams, ServiceError, encode_message,
-    parse_client_message, ShutdownResponse,
+    JsonRpcSuccessResponse, ParsedClientMessage, RequestParams, ServiceError, ShutdownResponse,
+    encode_message, parse_client_message,
 };
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{Semaphore, mpsc};
+use tokio::task::JoinSet;
 
 const OUTBOUND_QUEUE_CAP: usize = 1024;
 const MAX_IN_FLIGHT: usize = 64;
+/// Hard cap on tasks the dispatch loop has spawned but not yet reaped. Sized
+/// at 2x `MAX_IN_FLIGHT`: one set actively executing (holding semaphore
+/// permits), one set waiting briefly for a permit to free up. Beyond this
+/// the request is rejected with `ServiceError::Backpressure` synchronously,
+/// so a pathological client cannot balloon Service memory by flooding stdin.
+const ADMISSION_CAP: usize = 2 * MAX_IN_FLIGHT;
 
 pub async fn run_service_with_io<R, W>(reader: R, writer: W) -> i32
 where
@@ -37,9 +44,19 @@ where
     let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_QUEUE_CAP);
     let writer_handle = tokio::spawn(writer_task(writer, out_rx));
     let inflight = Arc::new(Semaphore::new(MAX_IN_FLIGHT));
+    // Track every spawned handler task so a Shutdown request can drain them
+    // before we ack. Without this, an in-flight Phase 2+ mutation could still
+    // be running when the UI sees `flushed_ok: true` and starts terminating.
+    let mut handlers_in_flight: JoinSet<()> = JoinSet::new();
     let mut lines = BoundedLineReader::new(reader, service_api::MAX_FRAME_BYTES);
+    let mut pending_shutdown_id: Option<u64> = None;
 
     loop {
+        // Reap any tasks that have completed since the last iteration so
+        // `handlers_in_flight.len()` reflects truly-still-running handlers
+        // when we use it as the admission gate below.
+        reap_finished(&mut handlers_in_flight);
+
         tokio::select! {
             () = lifecycle.notified() => {
                 break;
@@ -47,8 +64,18 @@ where
             line = lines.next_line() => {
                 match line {
                     Ok(Some(line)) => {
-                        if handle_line(&line, &out_tx, &inflight, started_at, &lifecycle).await {
-                            break;
+                        match handle_line(
+                            &line,
+                            &out_tx,
+                            &inflight,
+                            &mut handlers_in_flight,
+                            started_at,
+                        ).await {
+                            HandleOutcome::Continue => {}
+                            HandleOutcome::Shutdown(id) => {
+                                pending_shutdown_id = Some(id);
+                                break;
+                            }
                         }
                     }
                     Ok(None) => {
@@ -57,16 +84,19 @@ where
                     }
                     Err(FrameError::TooLarge) => {
                         log::warn!("rejecting oversized frame");
-                        send_error(&out_tx, None, JsonRpcErrorObject::parse_error("frame too large")).await;
+                        try_send_error(
+                            &out_tx,
+                            None,
+                            JsonRpcErrorObject::parse_error("frame too large"),
+                        );
                     }
                     Err(FrameError::InvalidUtf8(error)) => {
                         log::warn!("service frame had invalid utf-8: {error}");
-                        send_error(
+                        try_send_error(
                             &out_tx,
                             None,
                             JsonRpcErrorObject::parse_error("invalid utf-8"),
-                        )
-                        .await;
+                        );
                     }
                     Err(FrameError::Io(error)) => {
                         log::warn!("service frame io error: {error}");
@@ -77,48 +107,104 @@ where
         }
     }
 
+    // Drain in-flight handlers BEFORE running the lifecycle drain. This
+    // ensures any Phase 2+ mutation actually finishes before we write the
+    // sentinel and ack the Shutdown request. The dispatch loop has already
+    // stopped reading new requests by the time we reach this point.
+    drain_in_flight(&mut handlers_in_flight).await;
+
     let flushed_ok = panic_safe_drain(&lifecycle).await;
     if !flushed_ok {
         log::warn!("shutdown drain completed with errors");
     }
+
+    // If the loop exited because of a Shutdown request, ack only after the
+    // drain above completes - `flushed_ok: true` means the sentinel was
+    // written and every in-flight handler has returned.
+    if let Some(id) = pending_shutdown_id {
+        let result = serde_json::to_value(ShutdownResponse { flushed_ok })
+            .map_err(|error| ServiceError::Internal(error.to_string()));
+        send_handler_response(&out_tx, id, result).await;
+        lifecycle.request_shutdown();
+    }
+
     drop(out_tx);
     let _ = writer_handle.await;
     0
+}
+
+enum HandleOutcome {
+    Continue,
+    /// Shutdown request received. Caller should break the dispatch loop and
+    /// ack with the supplied id after the in-flight drain completes.
+    Shutdown(u64),
 }
 
 async fn handle_line(
     line: &str,
     out_tx: &mpsc::Sender<Vec<u8>>,
     inflight: &Arc<Semaphore>,
+    handlers_in_flight: &mut JoinSet<()>,
     started_at: Instant,
-    lifecycle: &ServiceLifecycle,
-) -> bool {
+) -> HandleOutcome {
     match parse_client_message(line) {
         Ok(ParsedClientMessage::Request {
             id,
             params: RequestParams::Shutdown,
-        }) => {
-            let flushed_ok = panic_safe_drain(lifecycle).await;
-            let result = serde_json::to_value(ShutdownResponse { flushed_ok })
-                .map_err(|error| ServiceError::Internal(error.to_string()));
-            send_handler_response(out_tx, id, result).await;
-            lifecycle.request_shutdown();
-            true
-        }
+        }) => HandleOutcome::Shutdown(id),
         Ok(ParsedClientMessage::Request { id, params }) => {
-            spawn_handler(id, params, out_tx.clone(), Arc::clone(inflight), started_at);
-            false
+            // Bypass the admission gate for heartbeat-class requests so a
+            // flood of slow handlers can't starve the UI's health check.
+            // Non-bypass requests must fit under ADMISSION_CAP - beyond that
+            // we synchronously reject with Backpressure rather than spawning
+            // unbounded waiters.
+            if !params.bypasses_semaphore() && handlers_in_flight.len() >= ADMISSION_CAP {
+                send_handler_response(out_tx, id, Err(ServiceError::Backpressure)).await;
+                return HandleOutcome::Continue;
+            }
+            spawn_handler(
+                id,
+                params,
+                out_tx.clone(),
+                Arc::clone(inflight),
+                started_at,
+                handlers_in_flight,
+            );
+            HandleOutcome::Continue
         }
         Err(error) => {
             let response_id = error.extracted_id();
             log::warn!("request parse failed: {error}");
-            send_error(
+            try_send_error(
                 out_tx,
                 response_id,
                 JsonRpcErrorObject::parse_error(error.to_string()),
-            )
-            .await;
-            false
+            );
+            HandleOutcome::Continue
+        }
+    }
+}
+
+/// Reap completed tasks without blocking. Called between dispatch-loop
+/// iterations so the JoinSet's `len()` is an honest count of still-running
+/// handlers when the admission gate consults it.
+fn reap_finished(handlers: &mut JoinSet<()>) {
+    while let Some(result) = handlers.try_join_next() {
+        if let Err(error) = result {
+            log::warn!("in-flight handler join error: {error}");
+        }
+    }
+}
+
+async fn drain_in_flight(handlers: &mut JoinSet<()>) {
+    while let Some(result) = handlers.join_next().await {
+        if let Err(error) = result {
+            // A handler task panic surfaced as a JoinError. The per-handler
+            // catch_unwind already converted handler panics into
+            // ServiceError::Panic, so reaching here implies the wrapper
+            // itself panicked or the task was cancelled. Log and continue
+            // so a single bad handler can't hold up shutdown.
+            log::warn!("in-flight handler join failed during drain: {error}");
         }
     }
 }
@@ -139,8 +225,14 @@ fn spawn_handler(
     out_tx: mpsc::Sender<Vec<u8>>,
     inflight: Arc<Semaphore>,
     started_at: Instant,
+    handlers_in_flight: &mut JoinSet<()>,
 ) {
-    tokio::spawn(async move {
+    handlers_in_flight.spawn(async move {
+        // Acquire the in-flight permit *inside* the spawned task - never
+        // in the dispatch loop. Acquiring upfront would stall the dispatch
+        // loop's stdin read whenever MAX_IN_FLIGHT slow handlers are
+        // running, queuing fast methods behind slow ones. The dispatch
+        // loop's ADMISSION_CAP gate keeps the number of waiters bounded.
         let _permit = if params.bypasses_semaphore() {
             None
         } else {
@@ -221,6 +313,28 @@ async fn send_error(
     match encode_message(&response) {
         Ok(bytes) => {
             let _ = out_tx.send(bytes).await;
+        }
+        Err(error) => {
+            log::error!("failed to encode error response: {error}");
+        }
+    }
+}
+
+/// Non-blocking error send used from the dispatch loop. Awaiting `out_tx.send`
+/// here would stall stdin reads when the outbound queue is full; for parse
+/// errors and frame errors that's the wrong trade - drop the diagnostic and
+/// keep reading.
+fn try_send_error(
+    out_tx: &mpsc::Sender<Vec<u8>>,
+    id: Option<u64>,
+    error: JsonRpcErrorObject,
+) {
+    let response = JsonRpcErrorResponse::new(id, error);
+    match encode_message(&response) {
+        Ok(bytes) => {
+            if let Err(send_err) = out_tx.try_send(bytes) {
+                log::warn!("dropped diagnostic error response: {send_err}");
+            }
         }
         Err(error) => {
             log::error!("failed to encode error response: {error}");

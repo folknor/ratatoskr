@@ -177,9 +177,17 @@ impl App {
                 Task::none()
             }
             Message::ServiceReady(Err(error)) => {
-                log::error!("Service failed to start: {error}");
-                self.status = format!("Service failed: {error}");
-                Task::none()
+                // Service failure at boot is fatal in v1: a UI without the
+                // Service cannot read or write durable state through the
+                // post-Phase-2 architecture. The most common failure today
+                // is `ClientError::VersionMismatch` from a UI/Service binary
+                // skew; the right answer is exit + clear log, not a half-
+                // alive UI that silently no-ops mutations. Phase 1.5 will
+                // wrap this in a respawn loop with crashloop detection;
+                // until then, exit deterministically.
+                log::error!("Service failed to start (fatal): {error}");
+                eprintln!("[ui] fatal: service failed to start: {error}");
+                iced::exit()
             }
             Message::ServiceNotification(notification) => {
                 log::debug!("Service notification: {}", notification.method_name());

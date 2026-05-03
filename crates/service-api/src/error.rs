@@ -11,6 +11,12 @@ pub enum ServiceError {
     UnknownMethod(String),
     #[error("internal error: {0}")]
     Internal(String),
+    /// Service is at its in-flight handler cap. The client should retry after
+    /// previously-in-flight requests complete. Returned synchronously by the
+    /// dispatch loop without spawning a handler task - this is the bounded-
+    /// admission backpressure signal, not a per-handler error.
+    #[error("service at capacity (in-flight admission rejected)")]
+    Backpressure,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +79,13 @@ impl From<ServiceError> for JsonRpcErrorObject {
                 (-32603, format!("handler panic in {method}: {message}"))
             }
             ServiceError::Internal(message) => (-32603, message.clone()),
+            // Server-busy in JSON-RPC 2.0 land: -32000 is the start of the
+            // implementation-defined server error range. Pick a value within
+            // it that's distinguishable from generic Internal.
+            ServiceError::Backpressure => (
+                -32000,
+                "service at capacity (in-flight admission rejected)".to_string(),
+            ),
         };
         Self {
             code,

@@ -48,3 +48,65 @@ impl fmt::Debug for RedactedBytes {
         write!(f, "<redacted len={}>", self.0.len())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The Debug impl must never reveal the inner string content. Anything
+    /// reaching `<app_data>/logs/service.<pid>.log` via a stray `{:?}` print
+    /// is a sensitive-value policy violation; pin the contract here.
+    #[test]
+    fn redacted_string_debug_does_not_reveal_content() {
+        let secret = "OAUTH-BEARER-TOKEN-SHOULD-NOT-LEAK";
+        let value = RedactedString::new(secret);
+        let formatted = format!("{value:?}");
+        assert!(
+            formatted.starts_with("<redacted"),
+            "expected <redacted ...> prefix, got {formatted:?}",
+        );
+        assert!(
+            formatted.contains(&format!("len={}", secret.len())),
+            "expected length annotation, got {formatted:?}",
+        );
+        assert!(
+            !formatted.contains(secret),
+            "Debug output leaked secret: {formatted:?}",
+        );
+    }
+
+    #[test]
+    fn redacted_string_empty_still_redacts() {
+        let value = RedactedString::new("");
+        let formatted = format!("{value:?}");
+        assert_eq!(formatted, "<redacted len=0>");
+    }
+
+    #[test]
+    fn redacted_bytes_debug_does_not_reveal_content() {
+        let secret: Vec<u8> = b"BEARER-TOKEN-PAYLOAD".to_vec();
+        let len = secret.len();
+        let value = RedactedBytes::new(secret.clone());
+        let formatted = format!("{value:?}");
+        assert!(
+            formatted.starts_with("<redacted"),
+            "expected <redacted ...> prefix, got {formatted:?}",
+        );
+        assert!(
+            formatted.contains(&format!("len={len}")),
+            "expected length annotation, got {formatted:?}",
+        );
+        let secret_utf8 = std::str::from_utf8(&secret).expect("ascii fixture");
+        assert!(
+            !formatted.contains(secret_utf8),
+            "Debug output leaked bytes: {formatted:?}",
+        );
+    }
+
+    #[test]
+    fn redacted_bytes_empty_still_redacts() {
+        let value = RedactedBytes::new(Vec::new());
+        let formatted = format!("{value:?}");
+        assert_eq!(formatted, "<redacted len=0>");
+    }
+}

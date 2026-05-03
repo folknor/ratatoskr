@@ -1,5 +1,4 @@
 mod health;
-mod shutdown;
 #[cfg(feature = "test-helpers")]
 mod test_helpers;
 
@@ -7,13 +6,20 @@ use serde_json::Value;
 use service_api::{RequestParams, ServiceError};
 use std::time::Instant;
 
+/// Dispatch a request to its handler.
+///
+/// `RequestParams::Shutdown` is intentionally not handled here - the dispatch
+/// loop intercepts it directly so the drain + sentinel + ack ordering is
+/// explicit at the lifecycle layer. Treat reaching this arm as a bug.
 pub(crate) async fn dispatch(
     params: RequestParams,
     started_at: Instant,
 ) -> Result<Value, ServiceError> {
     match params {
         RequestParams::HealthPing => health::handle(started_at).await,
-        RequestParams::Shutdown => shutdown::handle().await,
+        RequestParams::Shutdown => Err(ServiceError::Internal(
+            "shutdown reached handler dispatch; lifecycle layer should have intercepted".into(),
+        )),
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPanic => test_helpers::panic_handle().await,
         #[cfg(feature = "test-helpers")]

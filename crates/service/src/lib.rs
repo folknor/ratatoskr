@@ -11,6 +11,29 @@ use std::path::PathBuf;
 pub use dispatch::run_service_with_io;
 
 pub fn run_service_blocking() -> ! {
+    // 1. Parent-death recheck - closes the fork-to-recheck window. The
+    //    `pre_exec` PR_SET_PDEATHSIG ran in the child but the parent could
+    //    have died before that hook fired. Run as the first synchronous
+    //    statement so we exit before any allocation, file open, or runtime
+    //    construction wastes work.
+    parent_death::exit_if_parent_missing();
+
+    // 2. Stdio corruption defense - synchronously dup stdin/stdout aside and
+    //    redirect the real slots to /dev/null (Linux) / NUL (Windows). After
+    //    this returns, every transitive `println!`, default tracing-subscriber
+    //    stdout, panic-handler print, etc. lands on the sink instead of the
+    //    JSON-RPC pipe. Lock the contract before the logger init, panic hook,
+    //    runtime build, or any other code runs.
+    let saved_stdio = match stdio_defense::claim_stdio() {
+        Ok(saved) => saved,
+        Err(error) => {
+            eprintln!("[service] failed to claim service stdio: {error}");
+            std::process::exit(1);
+        }
+    };
+
+    // 3. Logging + panic hook. Both write only to the rolling file and
+    //    stderr; never stdout. Safe after the redirect above.
     let app_data_dir = app_data_dir_from_args().unwrap_or_else(default_app_data_dir);
     let _ = logging::init(&app_data_dir);
     logging::install_panic_hook();
@@ -22,22 +45,23 @@ pub fn run_service_blocking() -> ! {
     {
         Ok(runtime) => runtime,
         Err(error) => {
-            eprintln!("[service] failed to create tokio runtime: {error}");
+            log::error!("failed to create tokio runtime: {error}");
             std::process::exit(1);
         }
     };
 
     let exit_code = runtime.block_on(async move {
-        parent_death::exit_if_parent_missing();
         let lifecycle = lifecycle::ServiceLifecycle::new(Some(app_data_dir));
         sigterm::spawn(lifecycle.clone());
 
-        match stdio_defense::claim_stdio() {
+        // 4. Wrap the saved FDs/HANDLEs into tokio I/O types now that we
+        //    have a runtime context.
+        match stdio_defense::adopt_into_runtime(saved_stdio) {
             Ok((stdin, stdout)) => {
                 dispatch::run_service_with_io_and_lifecycle(stdin, stdout, lifecycle).await
             }
             Err(error) => {
-                log::error!("failed to claim service stdio: {error}");
+                log::error!("failed to adopt service stdio into runtime: {error}");
                 1
             }
         }

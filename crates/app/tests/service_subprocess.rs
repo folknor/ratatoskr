@@ -286,6 +286,61 @@ async fn version_mismatch_surfaces_during_handshake() -> TestResult {
     }
 }
 
+/// EOF on the child's stdout (Service crashed / killed mid-request) must
+/// propagate to every pending caller as `ClientError::ServiceCrashed`. The
+/// reader task evicts the pending map on EOF; this test verifies the eviction
+/// is observable end-to-end.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn pending_request_fails_with_service_crashed_when_child_killed() -> TestResult {
+    let binary = binary_path()?;
+    let data_dir = DataDirGuard::new("eof_during_pending")?;
+    let client = ServiceClient::spawn_for_test(Path::new(binary), data_dir.path(), &[]).await?;
+    let pid = client
+        .child_pid()
+        .ok_or_else(|| std::io::Error::other("child has no pid"))?;
+
+    // Issue a long-running request in the background so the request is
+    // genuinely pending when we kill the child. Use TestSlow with a duration
+    // longer than the test's overall budget so the only way the future
+    // resolves is via the EOF eviction path.
+    let request_client = std::sync::Arc::clone(&client);
+    let request_task = tokio::spawn(async move {
+        request_client
+            .request::<()>(RequestParams::TestSlow { millis: 60_000 })
+            .await
+    });
+
+    // Wait briefly for the request to be in-flight on the wire. The handler
+    // is sleeping; the Service has not yet sent a response.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    let pid_signed = i32::try_from(pid).map_err(std::io::Error::other)?;
+    // SAFETY: SIGKILL on a known PID we just spawned. The ServiceClient
+    // holds the Child handle so the kernel keeps the PID stable.
+    let kill_result = unsafe { libc::kill(pid_signed, libc::SIGKILL) };
+    if kill_result != 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(3), request_task)
+        .await
+        .map_err(|_| std::io::Error::other("pending request did not resolve after SIGKILL"))?
+        .map_err(|e| std::io::Error::other(format!("request task join: {e}")))?;
+
+    match outcome {
+        Err(ClientError::ServiceCrashed) => Ok(()),
+        Err(other) => Err(std::io::Error::other(format!(
+            "expected ClientError::ServiceCrashed, got {other:?}"
+        ))
+        .into()),
+        Ok(()) => Err(std::io::Error::other(
+            "pending request unexpectedly succeeded after SIGKILL",
+        )
+        .into()),
+    }
+}
+
 #[cfg(unix)]
 fn pid_is_alive(pid: u32) -> std::io::Result<bool> {
     let pid = i32::try_from(pid).map_err(std::io::Error::other)?;

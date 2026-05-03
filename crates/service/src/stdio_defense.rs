@@ -1,74 +1,121 @@
-#[cfg(unix)]
-pub(crate) fn claim_stdio() -> std::io::Result<(
-    tokio::net::unix::pipe::Receiver,
-    tokio::net::unix::pipe::Sender,
-)> {
+//! Stdio corruption defense.
+//!
+//! Any transitive `println!`, default tracing-subscriber stdout, panic-handler
+//! stdin read, or interactive printing call site that lands on the JSON-RPC
+//! pipe will desynchronize framing irrecoverably. The defense:
+//!
+//! 1. Synchronously duplicate the real stdin/stdout to fresh FDs/HANDLEs that
+//!    only this Service holds, then redirect the global slots to `/dev/null`
+//!    (Linux) or `NUL` (Windows). After this returns, every other call site
+//!    in the process - logger init, panic hooks, transitive prints, default
+//!    tracing - writes to a sink, not the IPC pipe.
+//! 2. Once a tokio runtime exists, wrap the saved FDs/HANDLEs in tokio I/O
+//!    types so the dispatch loop can read/write asynchronously.
+//!
+//! The split exists because tokio's `pipe::Receiver::from_file_unchecked`
+//! and `tokio::fs::File::from_std` require a runtime context. We do the
+//! redirect *before* any other code (so logger init et al. land on the
+//! sink) but the wrapping has to happen later inside `block_on`.
+
+use std::io;
+
+/// Saved real stdin/stdout, holding the resource that the dispatch loop will
+/// later wrap into tokio I/O types. `claim_stdio` produces this synchronously;
+/// `adopt_into_runtime` consumes it inside a runtime context.
+pub(crate) struct SavedStdio {
+    #[cfg(target_os = "linux")]
+    stdin_fd: std::os::fd::OwnedFd,
+    #[cfg(target_os = "linux")]
+    stdout_fd: std::os::fd::OwnedFd,
+    #[cfg(windows)]
+    stdin_handle: std::os::windows::io::OwnedHandle,
+    #[cfg(windows)]
+    stdout_handle: std::os::windows::io::OwnedHandle,
+}
+
+/// Synchronously dup the real stdin/stdout aside and redirect the global
+/// slots to the bit-bucket. Returns the saved descriptors for later wrapping.
+/// Must run before any other Service code so transitive prints/logs/panics
+/// land on the sink rather than the IPC pipe.
+#[cfg(target_os = "linux")]
+pub(crate) fn claim_stdio() -> io::Result<SavedStdio> {
     use std::fs::OpenOptions;
-    use std::os::fd::FromRawFd;
+    use std::os::fd::{FromRawFd, OwnedFd};
 
-    let stdin_fd = unsafe { libc::dup(libc::STDIN_FILENO) };
-    if stdin_fd < 0 {
-        return Err(std::io::Error::last_os_error());
+    let stdin_raw = unsafe { libc::dup(libc::STDIN_FILENO) };
+    if stdin_raw < 0 {
+        return Err(io::Error::last_os_error());
     }
-    let stdout_fd = unsafe { libc::dup(libc::STDOUT_FILENO) };
-    if stdout_fd < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
+    // SAFETY: `dup` returned a fresh, owned fd; transfer ownership.
+    let stdin_fd = unsafe { OwnedFd::from_raw_fd(stdin_raw) };
 
-    set_nonblocking(stdin_fd)?;
-    set_nonblocking(stdout_fd)?;
+    let stdout_raw = unsafe { libc::dup(libc::STDOUT_FILENO) };
+    if stdout_raw < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `dup` returned a fresh, owned fd; transfer ownership.
+    let stdout_fd = unsafe { OwnedFd::from_raw_fd(stdout_raw) };
+
+    set_nonblocking_fd(&stdin_fd)?;
+    set_nonblocking_fd(&stdout_fd)?;
 
     let devnull = OpenOptions::new().read(true).write(true).open("/dev/null")?;
     let devnull_fd = std::os::fd::AsRawFd::as_raw_fd(&devnull);
     if unsafe { libc::dup2(devnull_fd, libc::STDIN_FILENO) } < 0 {
-        return Err(std::io::Error::last_os_error());
+        return Err(io::Error::last_os_error());
     }
     if unsafe { libc::dup2(devnull_fd, libc::STDOUT_FILENO) } < 0 {
-        return Err(std::io::Error::last_os_error());
+        return Err(io::Error::last_os_error());
     }
 
-    let stdin_file = unsafe { std::fs::File::from_raw_fd(stdin_fd) };
-    let stdout_file = unsafe { std::fs::File::from_raw_fd(stdout_fd) };
+    Ok(SavedStdio { stdin_fd, stdout_fd })
+}
+
+/// Wrap the saved descriptors into tokio I/O types. Must run inside a tokio
+/// runtime - `pipe::Receiver::from_file_unchecked` requires it.
+#[cfg(target_os = "linux")]
+pub(crate) fn adopt_into_runtime(
+    saved: SavedStdio,
+) -> io::Result<(
+    tokio::net::unix::pipe::Receiver,
+    tokio::net::unix::pipe::Sender,
+)> {
+    use std::fs::File;
+
+    let stdin_file = File::from(saved.stdin_fd);
+    let stdout_file = File::from(saved.stdout_fd);
     let stdin = tokio::net::unix::pipe::Receiver::from_file_unchecked(stdin_file)?;
     let stdout = tokio::net::unix::pipe::Sender::from_file_unchecked(stdout_file)?;
     Ok((stdin, stdout))
 }
 
-#[cfg(unix)]
-fn set_nonblocking(fd: libc::c_int) -> std::io::Result<()> {
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL, 0) };
+#[cfg(target_os = "linux")]
+fn set_nonblocking_fd(fd: &std::os::fd::OwnedFd) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    let raw = fd.as_raw_fd();
+    let flags = unsafe { libc::fcntl(raw, libc::F_GETFL, 0) };
     if flags < 0 {
-        return Err(std::io::Error::last_os_error());
+        return Err(io::Error::last_os_error());
     }
-    if unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
-        return Err(std::io::Error::last_os_error());
+    if unsafe { libc::fcntl(raw, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+        return Err(io::Error::last_os_error());
     }
     Ok(())
 }
 
-/// Stdio corruption defense for the Windows Service. The C runtime, the
-/// default tracing-subscriber, transitive `println!` sites, and panic
-/// handlers all eventually write to the global stdout HANDLE. Without this
-/// shuffle they would write to the JSON-RPC pipe and desync the framing.
+/// Stdio corruption defense for the Windows Service. Mirrors the Linux
+/// strategy: duplicate the original handles aside, redirect the global
+/// std slots to `NUL`, then later wrap the saved handles into `tokio::fs::File`.
 ///
-/// Strategy mirrors the unix dup-and-replace:
-///   1. Duplicate the original stdin / stdout HANDLEs so we keep working
-///      copies that point at the real pipes.
-///   2. Open `NUL` (Windows's bit-bucket).
-///   3. `SetStdHandle(STD_INPUT_HANDLE / STD_OUTPUT_HANDLE, NUL)` so any
-///      callsite that goes through the global handles writes to NUL.
-///   4. Wrap the saved pipe handles in `tokio::fs::File` for use by the
-///      JSON-RPC dispatch loop.
-///
-/// `tokio::fs::File` dispatches every read / write to the blocking pool;
+/// `tokio::fs::File` dispatches every read/write through the blocking pool;
 /// proper IOCP-driven async pipe handling on Windows is a deeper refactor
-/// (no public tokio API today). This is the same trade-off the unix side
-/// had before the recent `tokio::net::unix::pipe` swap; revisit when tokio
-/// gains a public Windows pipe abstraction.
+/// (no public tokio API today). Revisit when tokio gains a public Windows
+/// pipe abstraction.
 #[cfg(windows)]
-pub(crate) fn claim_stdio() -> std::io::Result<(tokio::fs::File, tokio::fs::File)> {
+pub(crate) fn claim_stdio() -> io::Result<SavedStdio> {
     use std::fs::OpenOptions;
-    use std::os::windows::io::{AsRawHandle, FromRawHandle, IntoRawHandle};
+    use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Foundation::HANDLE;
     use windows_sys::Win32::System::Console::{
         STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
@@ -80,29 +127,45 @@ pub(crate) fn claim_stdio() -> std::io::Result<(tokio::fs::File, tokio::fs::File
     // required.
     let process: HANDLE = unsafe { GetCurrentProcess() };
 
-    let saved_stdin = duplicate_std(process, STD_INPUT_HANDLE)?;
-    let saved_stdout = duplicate_std(process, STD_OUTPUT_HANDLE)?;
+    let stdin_handle = duplicate_std(process, STD_INPUT_HANDLE)?;
+    let stdout_handle = duplicate_std(process, STD_OUTPUT_HANDLE)?;
 
     let nul = OpenOptions::new().read(true).write(true).open("NUL")?;
-    let nul_handle = nul.as_raw_handle() as HANDLE;
+    let nul_raw = nul.as_raw_handle() as HANDLE;
     // SetStdHandle does not duplicate; the kernel records the raw handle as
     // the new STD slot value. Leak the `nul` File so the underlying handle
     // outlives this function and remains valid for any later print. Closing
     // it would invalidate the slot.
     let nul_keepalive = nul;
-    if unsafe { SetStdHandle(STD_INPUT_HANDLE, nul_handle) } == 0 {
-        return Err(std::io::Error::last_os_error());
+    if unsafe { SetStdHandle(STD_INPUT_HANDLE, nul_raw) } == 0 {
+        return Err(io::Error::last_os_error());
     }
-    if unsafe { SetStdHandle(STD_OUTPUT_HANDLE, nul_handle) } == 0 {
-        return Err(std::io::Error::last_os_error());
+    if unsafe { SetStdHandle(STD_OUTPUT_HANDLE, nul_raw) } == 0 {
+        return Err(io::Error::last_os_error());
     }
     std::mem::forget(nul_keepalive);
 
-    // SAFETY: `saved_stdin` / `saved_stdout` are owned handles produced by
+    Ok(SavedStdio {
+        stdin_handle,
+        stdout_handle,
+    })
+}
+
+#[cfg(windows)]
+pub(crate) fn adopt_into_runtime(
+    saved: SavedStdio,
+) -> io::Result<(tokio::fs::File, tokio::fs::File)> {
+    use std::os::windows::io::IntoRawHandle;
+
+    // SAFETY: `stdin_handle` / `stdout_handle` are owned handles produced by
     // DuplicateHandle; `into_raw_handle` transfers ownership into the new
     // `std::fs::File` which then owns the close.
-    let stdin_file = unsafe { std::fs::File::from_raw_handle(saved_stdin.into_raw_handle()) };
-    let stdout_file = unsafe { std::fs::File::from_raw_handle(saved_stdout.into_raw_handle()) };
+    let stdin_file = unsafe {
+        std::fs::File::from_raw_handle(saved.stdin_handle.into_raw_handle())
+    };
+    let stdout_file = unsafe {
+        std::fs::File::from_raw_handle(saved.stdout_handle.into_raw_handle())
+    };
     Ok((
         tokio::fs::File::from_std(stdin_file),
         tokio::fs::File::from_std(stdout_file),
@@ -113,7 +176,7 @@ pub(crate) fn claim_stdio() -> std::io::Result<(tokio::fs::File, tokio::fs::File
 fn duplicate_std(
     process: windows_sys::Win32::Foundation::HANDLE,
     which: windows_sys::Win32::System::Console::STD_HANDLE,
-) -> std::io::Result<std::os::windows::io::OwnedHandle> {
+) -> io::Result<std::os::windows::io::OwnedHandle> {
     use std::os::windows::io::{FromRawHandle, OwnedHandle, RawHandle};
     use windows_sys::Win32::Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle, FALSE, HANDLE};
     use windows_sys::Win32::System::Console::GetStdHandle;
@@ -122,7 +185,7 @@ fn duplicate_std(
     // slot or INVALID_HANDLE_VALUE; we check both null and -1 as invalid.
     let original = unsafe { GetStdHandle(which) };
     if original.is_null() || original as isize == -1 {
-        return Err(std::io::Error::last_os_error());
+        return Err(io::Error::last_os_error());
     }
     let mut duplicated: HANDLE = std::ptr::null_mut();
     // SAFETY: source and target processes are the same (current); `original`
@@ -139,7 +202,7 @@ fn duplicate_std(
         )
     };
     if result == 0 {
-        return Err(std::io::Error::last_os_error());
+        return Err(io::Error::last_os_error());
     }
     // SAFETY: DuplicateHandle gave us ownership of `duplicated`.
     Ok(unsafe { OwnedHandle::from_raw_handle(duplicated as RawHandle) })

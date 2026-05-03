@@ -424,7 +424,25 @@ async fn reader_task<R>(
                     dispatch_response(&pending, id, response);
                 }
                 Ok(ParsedServiceMessage::Response { id: None, response }) => {
-                    log::warn!("service returned uncorrelated response: {response:?}");
+                    // An uncorrelated response means the Service answered
+                    // a request whose id was null (parse error before the
+                    // dispatch could correlate). Log only the discriminant
+                    // and, for errors, the JSON-RPC code/message - never
+                    // the success payload, which can carry user content
+                    // (message bodies, search queries, etc.) once Phase 2+
+                    // methods land.
+                    match response {
+                        ServiceResponse::Success(_) => {
+                            log::warn!("service returned uncorrelated success (payload redacted)");
+                        }
+                        ServiceResponse::Error(error) => {
+                            log::warn!(
+                                "service returned uncorrelated error code={} message={}",
+                                error.code,
+                                error.message,
+                            );
+                        }
+                    }
                 }
                 Ok(ParsedServiceMessage::Notification(notification)) => {
                     enqueue_notification(&notifications, notification).await;
