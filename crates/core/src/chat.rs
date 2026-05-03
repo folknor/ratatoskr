@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use common::types::ProviderCtx;
+use common::types::ActionProviderCtx;
 use db::db::ReadDbState;
 use store::body_store::BodyStoreState;
 use store::inline_image_store::InlineImageStoreState;
@@ -147,12 +147,9 @@ pub async fn mark_chat_read_remote(
         };
 
         for thread_id in thread_ids {
-            let provider_ctx = ProviderCtx {
+            let provider_ctx = ActionProviderCtx {
                 account_id: &account_id,
                 db: &ctx.db,
-                body_store: &ctx.body_store,
-                inline_images: &ctx.inline_images,
-                search: &ctx.search,
                 progress: &NoopProgressReporter,
             };
             let outcome = match provider.mark_read(&provider_ctx, &thread_id, true).await {

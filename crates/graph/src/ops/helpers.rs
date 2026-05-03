@@ -1,4 +1,4 @@
-use common::types::{ProviderCtx, ProviderFolderMutation};
+use common::types::{ActionProviderCtx, ProviderCtx, ProviderFolderMutation};
 
 use super::super::client::GraphClient;
 use super::super::folder_mapper::FolderMap;
@@ -92,7 +92,7 @@ pub(super) async fn delete_folder_delta_token(
 
 /// Query local DB for message IDs belonging to a thread.
 pub(super) async fn query_thread_message_ids(
-    ctx: &ProviderCtx<'_>,
+    ctx: &ActionProviderCtx<'_>,
     thread_id: &str,
 ) -> Result<Vec<String>, String> {
     let tid = thread_id.to_string();
@@ -105,7 +105,7 @@ pub(super) async fn query_thread_message_ids(
 /// Move multiple messages to a destination folder via `/$batch`.
 pub(super) async fn move_messages(
     client: &GraphClient,
-    ctx: &ProviderCtx<'_>,
+    ctx: &ActionProviderCtx<'_>,
     message_ids: &[String],
     destination_id: &str,
 ) -> Result<(), String> {
@@ -136,7 +136,7 @@ pub(super) async fn move_messages(
 /// PATCH multiple messages with the same patch body via `/$batch`.
 pub(super) async fn patch_messages(
     client: &GraphClient,
-    ctx: &ProviderCtx<'_>,
+    ctx: &ActionProviderCtx<'_>,
     message_ids: &[String],
     patch: &GraphMessagePatch,
 ) -> Result<(), String> {
@@ -164,7 +164,7 @@ pub(super) async fn patch_messages(
 /// Delete multiple messages via `/$batch`.
 pub(super) async fn delete_messages(
     client: &GraphClient,
-    ctx: &ProviderCtx<'_>,
+    ctx: &ActionProviderCtx<'_>,
     message_ids: &[String],
 ) -> Result<(), String> {
     let me = client.api_path_prefix();
@@ -191,7 +191,7 @@ pub(super) async fn delete_messages(
 /// Collects per-item errors and returns the first failure if any.
 pub(super) async fn execute_batch(
     client: &GraphClient,
-    ctx: &ProviderCtx<'_>,
+    ctx: &ActionProviderCtx<'_>,
     items: &[BatchRequestItem],
 ) -> Result<(), String> {
     for chunk in items.chunks(BATCH_CHUNK_SIZE) {
@@ -234,7 +234,7 @@ fn content_type_json() -> std::collections::HashMap<String, String> {
 /// multiple messages, falls back to a single GET for one message.
 pub(super) async fn batch_get_categories(
     client: &GraphClient,
-    ctx: &ProviderCtx<'_>,
+    ctx: &ActionProviderCtx<'_>,
     message_ids: &[String],
 ) -> Result<Vec<(String, Vec<String>)>, String> {
     if message_ids.is_empty() {
@@ -312,7 +312,7 @@ pub(super) async fn batch_get_categories(
 /// PATCH categories on multiple messages via `/$batch`.
 pub(super) async fn batch_set_categories(
     client: &GraphClient,
-    ctx: &ProviderCtx<'_>,
+    ctx: &ActionProviderCtx<'_>,
     patches: &[(String, Vec<String>)],
 ) -> Result<(), String> {
     if patches.is_empty() {

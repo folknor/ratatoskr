@@ -11,8 +11,8 @@ use common::error::ProviderError;
 use common::ops::ProviderOps;
 use common::typed_ids::{FolderId, TagId};
 use common::types::{
-    AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
-    ProviderTestResult, SyncResult,
+    ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
+    ProviderProfile, ProviderTestResult, SyncResult,
 };
 use db::db::ReadDbState;
 
@@ -71,7 +71,7 @@ impl ProviderOps for GraphOps {
         Ok(super::sync::graph_delta_sync(&self.client, ctx).await?)
     }
 
-    async fn archive(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn archive(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let folder_map = require_folder_map(&self.client).await?;
         let archive_id = folder_map
             .resolve_folder_id("archive")
@@ -81,7 +81,7 @@ impl ProviderOps for GraphOps {
         Ok(move_messages(&self.client, ctx, &msg_ids, &archive_id).await?)
     }
 
-    async fn trash(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn trash(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let folder_map = require_folder_map(&self.client).await?;
         let trash_id = folder_map
             .resolve_folder_id("TRASH")
@@ -93,7 +93,7 @@ impl ProviderOps for GraphOps {
 
     async fn permanent_delete(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
     ) -> Result<(), ProviderError> {
         let msg_ids = query_thread_message_ids(ctx, thread_id).await?;
@@ -102,7 +102,7 @@ impl ProviderOps for GraphOps {
 
     async fn mark_read(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         read: bool,
     ) -> Result<(), ProviderError> {
@@ -116,7 +116,7 @@ impl ProviderOps for GraphOps {
 
     async fn star(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         starred: bool,
     ) -> Result<(), ProviderError> {
@@ -133,7 +133,7 @@ impl ProviderOps for GraphOps {
 
     async fn spam(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         is_spam: bool,
     ) -> Result<(), ProviderError> {
@@ -149,7 +149,7 @@ impl ProviderOps for GraphOps {
 
     async fn move_to_folder(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         folder_id: &FolderId,
     ) -> Result<(), ProviderError> {
@@ -166,7 +166,7 @@ impl ProviderOps for GraphOps {
 
     async fn add_tag(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         tag_id: &TagId,
     ) -> Result<(), ProviderError> {
@@ -188,7 +188,7 @@ impl ProviderOps for GraphOps {
 
     async fn remove_tag(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         tag_id: &TagId,
     ) -> Result<(), ProviderError> {

@@ -35,6 +35,24 @@ pub struct ProviderCtx<'a> {
     pub progress: &'a dyn ProgressReporter,
 }
 
+/// Narrower context for `ProviderOps` action methods (Phase 2 task 7).
+///
+/// Action methods (`archive`, `trash`, `mark_read`, `star`, `spam`,
+/// `move_to_folder`, `add_tag`, `remove_tag`, `permanent_delete`) issue
+/// HTTP requests to the provider; the local DB write happens UI-side
+/// (now Service-side after task 9) BEFORE the provider call. They
+/// don't need `body_store` / `inline_images` / `search` - those exist
+/// on `ProviderCtx` for the sync-side consumers. Dropping the unused
+/// fields keeps the action-side ctx narrower and means
+/// service-state's writers stay unreachable through this surface
+/// (the type only carries `&ReadDbState`, which `common` already
+/// depends on).
+pub struct ActionProviderCtx<'a> {
+    pub account_id: &'a str,
+    pub db: &'a ReadDbState,
+    pub progress: &'a dyn ProgressReporter,
+}
+
 /// Provider-agnostic folder representation.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -4,8 +4,8 @@ use common::error::ProviderError;
 use common::ops::ProviderOps;
 use common::typed_ids::{FolderId, TagId};
 use common::types::{
-    AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
-    ProviderTestResult, SyncResult,
+    ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
+    ProviderProfile, ProviderTestResult, SyncResult,
 };
 use db::db::ReadDbState;
 
@@ -64,7 +64,7 @@ impl ProviderOps for GmailOps {
         })
     }
 
-    async fn archive(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn archive(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let remove = vec!["INBOX".to_string()];
         self.client
             .modify_thread(thread_id, &[], &remove, ctx.db)
@@ -72,7 +72,7 @@ impl ProviderOps for GmailOps {
         Ok(())
     }
 
-    async fn trash(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn trash(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let add = vec!["TRASH".to_string()];
         let remove = vec!["INBOX".to_string()];
         self.client
@@ -83,7 +83,7 @@ impl ProviderOps for GmailOps {
 
     async fn permanent_delete(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
     ) -> Result<(), ProviderError> {
         self.client.delete_thread(thread_id, ctx.db).await?;
@@ -92,7 +92,7 @@ impl ProviderOps for GmailOps {
 
     async fn mark_read(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         read: bool,
     ) -> Result<(), ProviderError> {
@@ -109,7 +109,7 @@ impl ProviderOps for GmailOps {
 
     async fn star(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         starred: bool,
     ) -> Result<(), ProviderError> {
@@ -126,7 +126,7 @@ impl ProviderOps for GmailOps {
 
     async fn spam(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         is_spam: bool,
     ) -> Result<(), ProviderError> {
@@ -143,7 +143,7 @@ impl ProviderOps for GmailOps {
 
     async fn move_to_folder(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         folder_id: &FolderId,
     ) -> Result<(), ProviderError> {
@@ -156,7 +156,7 @@ impl ProviderOps for GmailOps {
 
     async fn add_tag(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         tag_id: &TagId,
     ) -> Result<(), ProviderError> {
@@ -169,7 +169,7 @@ impl ProviderOps for GmailOps {
 
     async fn remove_tag(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         tag_id: &TagId,
     ) -> Result<(), ProviderError> {

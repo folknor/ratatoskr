@@ -1,5 +1,5 @@
 use common::ops::ProviderOps;
-use common::types::ProviderCtx;
+use common::types::ActionProviderCtx;
 
 use super::context::ActionContext;
 use super::log::MutationLog;
@@ -44,12 +44,9 @@ async fn star_dispatch(
     let mlog = MutationLog::begin("star", account_id, thread_id);
     let params_json = format!(r#"{{"starred":{starred}}}"#);
 
-    let provider_ctx = ProviderCtx {
+    let provider_ctx = ActionProviderCtx {
         account_id,
         db: &ctx.db,
-        body_store: &ctx.body_store,
-        inline_images: &ctx.inline_images,
-        search: &ctx.search,
         progress: &NoopProgressReporter,
     };
 

@@ -11,8 +11,8 @@ use common::error::ProviderError;
 use common::ops::ProviderOps;
 use common::typed_ids::{FolderId, TagId};
 use common::types::{
-    AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation, ProviderProfile,
-    ProviderTestResult, SyncResult,
+    ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
+    ProviderProfile, ProviderTestResult, SyncResult,
 };
 
 use super::client::JmapClient;
@@ -112,7 +112,7 @@ impl ProviderOps for JmapOps {
         })
     }
 
-    async fn archive(&self, _ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn archive(&self, _ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let mailboxes = get_mailbox_list(&self.client).await?;
         let inbox_id = find_mailbox_id_by_role(&mailboxes, "inbox")
@@ -144,7 +144,7 @@ impl ProviderOps for JmapOps {
         Ok(())
     }
 
-    async fn trash(&self, _ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn trash(&self, _ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
         let mailboxes = get_mailbox_list(&self.client).await?;
         let trash_id = find_mailbox_id_by_role(&mailboxes, "trash")
@@ -178,7 +178,7 @@ impl ProviderOps for JmapOps {
 
     async fn permanent_delete(
         &self,
-        _ctx: &ProviderCtx<'_>,
+        _ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
     ) -> Result<(), ProviderError> {
         self.client.ensure_valid_token().await?;
@@ -203,7 +203,7 @@ impl ProviderOps for JmapOps {
 
     async fn mark_read(
         &self,
-        _ctx: &ProviderCtx<'_>,
+        _ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         read: bool,
     ) -> Result<(), ProviderError> {
@@ -231,7 +231,7 @@ impl ProviderOps for JmapOps {
 
     async fn star(
         &self,
-        _ctx: &ProviderCtx<'_>,
+        _ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         starred: bool,
     ) -> Result<(), ProviderError> {
@@ -259,7 +259,7 @@ impl ProviderOps for JmapOps {
 
     async fn spam(
         &self,
-        _ctx: &ProviderCtx<'_>,
+        _ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         is_spam: bool,
     ) -> Result<(), ProviderError> {
@@ -303,7 +303,7 @@ impl ProviderOps for JmapOps {
 
     async fn move_to_folder(
         &self,
-        _ctx: &ProviderCtx<'_>,
+        _ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         folder_id: &FolderId,
     ) -> Result<(), ProviderError> {
@@ -332,7 +332,7 @@ impl ProviderOps for JmapOps {
 
     async fn add_tag(
         &self,
-        _ctx: &ProviderCtx<'_>,
+        _ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         tag_id: &TagId,
     ) -> Result<(), ProviderError> {
@@ -386,7 +386,7 @@ impl ProviderOps for JmapOps {
 
     async fn remove_tag(
         &self,
-        _ctx: &ProviderCtx<'_>,
+        _ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         tag_id: &TagId,
     ) -> Result<(), ProviderError> {

@@ -8,7 +8,7 @@ use common::folder_roles::{imap_name_to_special_use, imap_special_use_to_label_i
 use common::ops::ProviderOps;
 use common::typed_ids::{FolderId, TagId};
 use common::types::{
-    AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
+    ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderParsedAttachment, ProviderParsedMessage, ProviderProfile, ProviderTestResult,
     SyncResult,
 };
@@ -55,8 +55,12 @@ impl ImapOps {
     }
 
     /// Shorthand for loading the IMAP config from the database.
-    async fn load_config(&self, ctx: &ProviderCtx<'_>) -> Result<super::types::ImapConfig, String> {
-        crate::account_config::load_imap_config(ctx.db, ctx.account_id, &self.encryption_key).await
+    async fn load_config(
+        &self,
+        db: &db::db::ReadDbState,
+        account_id: &str,
+    ) -> Result<super::types::ImapConfig, String> {
+        crate::account_config::load_imap_config(db, account_id, &self.encryption_key).await
     }
 }
 
@@ -271,7 +275,7 @@ enum FolderAction {
 /// used by `mark_read` and `star`.
 async fn set_keyword_batched(
     config: &super::types::ImapConfig,
-    ctx: &ProviderCtx<'_>,
+    ctx: &ActionProviderCtx<'_>,
     thread_id: &str,
     tag_id: &str,
     flag_op: &str,
@@ -363,7 +367,7 @@ impl ProviderOps for ImapOps {
         // This trait method is not the primary entry point for IMAP sync, but we
         // wire it through for consistency with the provider abstraction.
         let account_id = ctx.account_id.to_string();
-        let imap_config = self.load_config(ctx).await?;
+        let imap_config = self.load_config(ctx.db, ctx.account_id).await?;
 
         let result = super::imap_initial::imap_initial_sync(
             ctx.progress,
@@ -389,7 +393,7 @@ impl ProviderOps for ImapOps {
         days_back: Option<i64>,
     ) -> Result<SyncResult, ProviderError> {
         let account_id = ctx.account_id.to_string();
-        let imap_config = self.load_config(ctx).await?;
+        let imap_config = self.load_config(ctx.db, ctx.account_id).await?;
         let days_back = days_back.unwrap_or(365);
 
         let result = super::imap_delta::imap_delta_sync(
@@ -412,10 +416,10 @@ impl ProviderOps for ImapOps {
 
     // ── Actions ─────────────────────────────────────────────────────────
 
-    async fn archive(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn archive(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config = self.load_config(ctx).await?;
+        let config = self.load_config(ctx.db, ctx.account_id).await?;
 
         let (refs, archive_folder) = ctx
             .db
@@ -431,10 +435,10 @@ impl ProviderOps for ImapOps {
         Ok(())
     }
 
-    async fn trash(&self, ctx: &ProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
+    async fn trash(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config = self.load_config(ctx).await?;
+        let config = self.load_config(ctx.db, ctx.account_id).await?;
 
         let (refs, trash_folder) = ctx
             .db
@@ -452,12 +456,12 @@ impl ProviderOps for ImapOps {
 
     async fn permanent_delete(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
     ) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config = self.load_config(ctx).await?;
+        let config = self.load_config(ctx.db, ctx.account_id).await?;
 
         let refs = ctx
             .db
@@ -470,13 +474,13 @@ impl ProviderOps for ImapOps {
 
     async fn mark_read(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         read: bool,
     ) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config = self.load_config(ctx).await?;
+        let config = self.load_config(ctx.db, ctx.account_id).await?;
 
         let refs = ctx
             .db
@@ -505,13 +509,13 @@ impl ProviderOps for ImapOps {
 
     async fn star(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         starred: bool,
     ) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config = self.load_config(ctx).await?;
+        let config = self.load_config(ctx.db, ctx.account_id).await?;
 
         let refs = ctx
             .db
@@ -540,13 +544,13 @@ impl ProviderOps for ImapOps {
 
     async fn spam(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         is_spam: bool,
     ) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
-        let config = self.load_config(ctx).await?;
+        let config = self.load_config(ctx.db, ctx.account_id).await?;
 
         let (refs, junk_folder) = ctx
             .db
@@ -570,14 +574,14 @@ impl ProviderOps for ImapOps {
 
     async fn move_to_folder(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         folder_id: &FolderId,
     ) -> Result<(), ProviderError> {
         let account_id = ctx.account_id.to_string();
         let tid = thread_id.to_string();
         let dest = folder_id.as_str().to_string();
-        let config = self.load_config(ctx).await?;
+        let config = self.load_config(ctx.db, ctx.account_id).await?;
 
         let refs = ctx
             .db
@@ -590,21 +594,21 @@ impl ProviderOps for ImapOps {
 
     async fn add_tag(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         tag_id: &TagId,
     ) -> Result<(), ProviderError> {
-        let config = self.load_config(ctx).await?;
+        let config = self.load_config(ctx.db, ctx.account_id).await?;
         set_keyword_batched(&config, ctx, thread_id, tag_id.as_str(), "+FLAGS").await
     }
 
     async fn remove_tag(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &ActionProviderCtx<'_>,
         thread_id: &str,
         tag_id: &TagId,
     ) -> Result<(), ProviderError> {
-        let config = self.load_config(ctx).await?;
+        let config = self.load_config(ctx.db, ctx.account_id).await?;
         set_keyword_batched(&config, ctx, thread_id, tag_id.as_str(), "-FLAGS").await
     }
 
@@ -682,7 +686,7 @@ impl ProviderOps for ImapOps {
         _thread_id: Option<&str>,
     ) -> Result<String, ProviderError> {
         let account_id = ctx.account_id.to_string();
-        let config = self.load_config(ctx).await?;
+        let config = self.load_config(ctx.db, ctx.account_id).await?;
 
         let drafts_folder = ctx
             .db
@@ -731,7 +735,7 @@ impl ProviderOps for ImapOps {
         }
 
         let (folder, uid) = parse_imap_message_id(draft_id, ctx.account_id)?;
-        let config = self.load_config(ctx).await?;
+        let config = self.load_config(ctx.db, ctx.account_id).await?;
 
         with_session!(&config, session => {
             imap_client::delete_messages(&mut session, &folder, &uid.to_string()).await
@@ -749,7 +753,7 @@ impl ProviderOps for ImapOps {
     ) -> Result<AttachmentData, ProviderError> {
         let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
         let part_id = attachment_id.to_string();
-        let config = self.load_config(ctx).await?;
+        let config = self.load_config(ctx.db, ctx.account_id).await?;
 
         let data = with_session!(&config, session => {
             imap_client::fetch_attachment(&mut session, &folder, uid, &part_id).await
@@ -775,7 +779,7 @@ impl ProviderOps for ImapOps {
     ) -> Result<ProviderParsedMessage, ProviderError> {
         let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
         let account_id = ctx.account_id.to_string();
-        let config = self.load_config(ctx).await?;
+        let config = self.load_config(ctx.db, ctx.account_id).await?;
 
         let message = with_session!(&config, session => {
             imap_client::fetch_message_body(&mut session, &folder, uid).await
@@ -809,7 +813,7 @@ impl ProviderOps for ImapOps {
         message_id: &str,
     ) -> Result<String, ProviderError> {
         let (folder, uid) = parse_imap_message_id(message_id, ctx.account_id)?;
-        let config = self.load_config(ctx).await?;
+        let config = self.load_config(ctx.db, ctx.account_id).await?;
 
         Ok(with_session!(&config, session => {
             imap_client::fetch_raw_message(&mut session, &folder, uid).await
@@ -822,7 +826,7 @@ impl ProviderOps for ImapOps {
         &self,
         ctx: &ProviderCtx<'_>,
     ) -> Result<Vec<ProviderFolderEntry>, ProviderError> {
-        let config = self.load_config(ctx).await?;
+        let config = self.load_config(ctx.db, ctx.account_id).await?;
 
         let folders = with_session!(&config, session => {
             imap_client::list_folders(&mut session).await
@@ -897,7 +901,7 @@ impl ProviderOps for ImapOps {
         ctx: &ProviderCtx<'_>,
     ) -> Result<ProviderTestResult, ProviderError> {
         let account_id = ctx.account_id.to_string();
-        let imap_config = self.load_config(ctx).await?;
+        let imap_config = self.load_config(ctx.db, ctx.account_id).await?;
         let smtp_config =
             crate::account_config::load_smtp_config(ctx.db, &account_id, &self.encryption_key)
                 .await?;
