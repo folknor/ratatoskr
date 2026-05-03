@@ -1,4 +1,4 @@
-use app::service_client::{ClientError, ServiceClient};
+use app::service_client::{ClientError, ServiceClient, SpawnEvent};
 use service_api::{
     BootExitCode, BoundedLineReader, HealthPingResponse, JsonRpcRequest, ParsedServiceMessage,
     RequestParams, ServiceResponse, ShutdownResponse, parse_service_message, write_message,
@@ -363,6 +363,113 @@ async fn pending_request_fails_with_service_crashed_when_child_killed() -> TestR
         )
         .into()),
     }
+}
+
+/// `spawn_with_events` against a healthy data dir emits ChildSpawned then
+/// BootReady, in that order. Validates the two-phase contract: the App can
+/// receive the client (and subscribe to notifications) before the slow
+/// boot.ready round-trip completes.
+#[tokio::test(flavor = "multi_thread")]
+async fn spawn_with_events_emits_child_spawned_then_boot_ready_on_healthy_boot()
+-> TestResult {
+    let binary = binary_path()?;
+    let data_dir = DataDirGuard::new("two_phase_happy")?;
+    let mut events = ServiceClient::spawn_with_events_for_test(
+        std::path::PathBuf::from(binary),
+        data_dir.path().to_path_buf(),
+        Vec::new(),
+    );
+
+    let first = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
+        .await
+        .map_err(|_| std::io::Error::other("ChildSpawned did not arrive in time"))?
+        .ok_or_else(|| std::io::Error::other("event stream closed without ChildSpawned"))?;
+    let client = match first {
+        SpawnEvent::ChildSpawned(client) => client,
+        SpawnEvent::BootReady(_) => {
+            return Err(std::io::Error::other("BootReady arrived before ChildSpawned").into());
+        }
+        SpawnEvent::Terminal(error) => {
+            return Err(std::io::Error::other(format!("unexpected Terminal: {error:?}")).into());
+        }
+    };
+
+    let second = tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
+        .await
+        .map_err(|_| std::io::Error::other("BootReady did not arrive in time"))?
+        .ok_or_else(|| std::io::Error::other("event stream closed without BootReady"))?;
+    match second {
+        SpawnEvent::BootReady(response) => {
+            assert!(response.ready);
+            assert_eq!(response.schema_version, 100);
+            assert_eq!(response.migrations_applied, 1);
+        }
+        other => {
+            return Err(std::io::Error::other(format!(
+                "expected BootReady second, got {other:?}"
+            ))
+            .into());
+        }
+    }
+
+    // Tear down cleanly.
+    let _ = client.shutdown().await;
+    Ok(())
+}
+
+/// `spawn_with_events` against a data dir without `ratatoskr.key`: ping
+/// succeeds (Service is up), so ChildSpawned arrives. boot.ready then
+/// fails when the Service exits with KeyLoadFailure. Either the boot.ready
+/// reply carries the Service error, or the Service has already exited and
+/// the request fails with ServiceCrashed - either is a valid Terminal.
+#[tokio::test(flavor = "multi_thread")]
+async fn spawn_with_events_emits_terminal_on_missing_key() -> TestResult {
+    let binary = binary_path()?;
+    let data_dir = DataDirGuard::without_key("two_phase_missing_key")?;
+    let mut events = ServiceClient::spawn_with_events_for_test(
+        std::path::PathBuf::from(binary),
+        data_dir.path().to_path_buf(),
+        Vec::new(),
+    );
+
+    let first = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
+        .await
+        .map_err(|_| std::io::Error::other("first event did not arrive"))?
+        .ok_or_else(|| std::io::Error::other("event stream closed empty"))?;
+    let _client = match first {
+        SpawnEvent::ChildSpawned(client) => client,
+        SpawnEvent::Terminal(error) => {
+            // It's also valid for spawn-time to fail before ChildSpawned if
+            // the version-check ping never gets answered - but with the
+            // Service successfully starting up + answering ping, this path
+            // is unlikely. Fall through with the error.
+            return Err(std::io::Error::other(format!(
+                "expected ChildSpawned (Service should answer ping), got Terminal: {error:?}"
+            ))
+            .into());
+        }
+        SpawnEvent::BootReady(_) => {
+            return Err(std::io::Error::other(
+                "BootReady should not succeed on missing-key dir",
+            )
+            .into());
+        }
+    };
+
+    let second = tokio::time::timeout(std::time::Duration::from_secs(10), events.recv())
+        .await
+        .map_err(|_| std::io::Error::other("Terminal did not arrive in time"))?
+        .ok_or_else(|| std::io::Error::other("event stream closed without second event"))?;
+    match second {
+        SpawnEvent::Terminal(_error) => {}
+        other => {
+            return Err(std::io::Error::other(format!(
+                "expected Terminal second, got {other:?}"
+            ))
+            .into());
+        }
+    }
+    Ok(())
 }
 
 /// Spawning a Service against a data dir without a `ratatoskr.key` file

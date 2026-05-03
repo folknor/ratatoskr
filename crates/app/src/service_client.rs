@@ -2,11 +2,12 @@ use crate::notification_queue::NotificationQueue;
 use dashmap::DashMap;
 use serde::de::DeserializeOwned;
 use service_api::{
-    BootClassification, BoundedLineReader, HealthPingResponse, JsonRpcErrorObject, JsonRpcRequest,
-    Notification, ParsedServiceMessage, PROTOCOL_VERSION, RequestParams, RequestTimeoutKind,
-    ServiceError, ServiceResponse, ShutdownResponse, encode_message, parse_service_message,
+    BootClassification, BootReadyResponse, BoundedLineReader, HealthPingResponse,
+    JsonRpcErrorObject, JsonRpcRequest, Notification, ParsedServiceMessage, PROTOCOL_VERSION,
+    RequestParams, RequestTimeoutKind, ServiceError, ServiceResponse, ShutdownResponse,
+    encode_message, parse_service_message,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU64, Ordering},
@@ -42,6 +43,30 @@ impl std::fmt::Debug for ServiceClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ServiceClient").finish_non_exhaustive()
     }
+}
+
+/// Events emitted by the two-phase spawn flow on the receiver returned by
+/// [`ServiceClient::spawn_with_events`].
+///
+/// The flow is:
+/// 1. Spawn child subprocess.
+/// 2. Verify protocol version via `health.ping`.
+/// 3. Emit `ChildSpawned(client)`. The App can now hold the `ServiceClient`
+///    and subscribe to notifications (e.g. `boot.progress` for splash
+///    rendering).
+/// 4. Issue `boot.ready` with a 600s timeout.
+/// 5. Emit `BootReady(response)` once the Service has migrated, loaded the
+///    key, and finished pending-ops recovery / drafts sweep / participants
+///    backfill. The App transitions Booting -> Ready on this event.
+///
+/// On any failure between those steps the receiver gets a single
+/// `Terminal(error)` event and the channel closes; downstream maps it to
+/// `Message::ServiceBootFailed` and exits via `iced::exit()`.
+#[derive(Debug)]
+pub enum SpawnEvent {
+    ChildSpawned(Arc<ServiceClient>),
+    BootReady(BootReadyResponse),
+    Terminal(ClientError),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -80,6 +105,49 @@ impl ServiceClient {
     pub async fn spawn(app_data_dir: &Path) -> Result<Arc<Self>, ClientError> {
         let exe = std::env::current_exe()?;
         Self::spawn_inner(&exe, app_data_dir, &[]).await
+    }
+
+    /// Two-phase spawn that emits `SpawnEvent`s on the returned receiver.
+    /// The receiver gets `ChildSpawned` after the version-check ping
+    /// succeeds, `BootReady` after the boot.ready handshake completes, and
+    /// `Terminal(error)` on any failure (after which the channel closes).
+    ///
+    /// Phase 1.5's two-phase spawn (per scope item 10 of `phase-1.5-plan.md`)
+    /// is what lets the App subscribe to `boot.progress` notifications
+    /// while migrations run - the splash needs the `ServiceClient` (for the
+    /// notification queue) before the slow `boot.ready` round-trip
+    /// completes.
+    pub fn spawn_with_events(app_data_dir: PathBuf) -> mpsc::Receiver<SpawnEvent> {
+        let exe = std::env::current_exe();
+        let (tx, rx) = mpsc::channel(8);
+        tokio::spawn(async move {
+            let exe = match exe {
+                Ok(exe) => exe,
+                Err(error) => {
+                    let _ = tx
+                        .send(SpawnEvent::Terminal(ClientError::Io(error)))
+                        .await;
+                    return;
+                }
+            };
+            run_spawn_flow(&exe, app_data_dir, Vec::new(), tx).await;
+        });
+        rx
+    }
+
+    /// Test-only variant of `spawn_with_events` that lets tests override the
+    /// binary path and pass extra args. Mirrors `spawn_for_test` in shape.
+    #[cfg(feature = "test-helpers")]
+    pub fn spawn_with_events_for_test(
+        binary: PathBuf,
+        app_data_dir: PathBuf,
+        extra_args: Vec<String>,
+    ) -> mpsc::Receiver<SpawnEvent> {
+        let (tx, rx) = mpsc::channel(8);
+        tokio::spawn(async move {
+            run_spawn_flow(&binary, app_data_dir, extra_args, tx).await;
+        });
+        rx
     }
 
     /// Test-only spawn that lets tests override the binary path and pass
@@ -620,6 +688,45 @@ impl Drop for PendingGuard<'_> {
     fn drop(&mut self) {
         if self.armed {
             self.pending.remove(&self.id);
+        }
+    }
+}
+
+/// Drives the two-phase spawn flow for `spawn_with_events`. Runs the
+/// existing `spawn_inner` (which does spawn + version-check ping), emits
+/// `ChildSpawned`, issues `boot.ready`, and emits `BootReady` or
+/// `Terminal(error)`.
+async fn run_spawn_flow(
+    binary: &Path,
+    app_data_dir: PathBuf,
+    extra_args: Vec<String>,
+    tx: mpsc::Sender<SpawnEvent>,
+) {
+    let extra_arg_refs: Vec<&str> = extra_args.iter().map(String::as_str).collect();
+    let client = match ServiceClient::spawn_inner(binary, &app_data_dir, &extra_arg_refs).await {
+        Ok(client) => client,
+        Err(error) => {
+            let _ = tx.send(SpawnEvent::Terminal(error)).await;
+            return;
+        }
+    };
+    if tx
+        .send(SpawnEvent::ChildSpawned(Arc::clone(&client)))
+        .await
+        .is_err()
+    {
+        // Receiver dropped before we could deliver ChildSpawned; the App
+        // gave up on this spawn. Nothing useful to do; let the client drop.
+        return;
+    }
+    let response: Result<BootReadyResponse, ClientError> =
+        client.request(RequestParams::BootReady).await;
+    match response {
+        Ok(response) => {
+            let _ = tx.send(SpawnEvent::BootReady(response)).await;
+        }
+        Err(error) => {
+            let _ = tx.send(SpawnEvent::Terminal(error)).await;
         }
     }
 }
