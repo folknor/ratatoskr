@@ -164,6 +164,22 @@ pub struct ReadyApp {
     /// `boot.ready`).
     pub(crate) pending_action_plans:
         std::collections::HashMap<service_api::PlanId, PendingActionPlan>,
+
+    /// Client-side action throttle keyed by `(account_id, thread_id)`.
+    ///
+    /// Phase 2 plan scope item 12 + open question 7. Absorbs fast
+    /// double-clicks before they hit the wire so a single user gesture
+    /// produces a single IPC roundtrip; complements the Service-side
+    /// `ActionContext::in_flight` HashSet (which is the canonical
+    /// correctness gate).
+    ///
+    /// Entries expire on `ActionCompleted` arrival (the canonical
+    /// release) OR after 200 ms (the safety valve in case completion
+    /// notifications are lost). 200 ms is the user-perception window
+    /// for an intentional second click - faster than that is a
+    /// double-click.
+    pub(crate) action_throttle:
+        std::collections::HashMap<(String, String), std::time::Instant>,
 }
 
 /// Tri-state for an in-flight action plan per Phase 2 plan scope item 14.
@@ -404,6 +420,7 @@ impl ReadyApp {
             service_client: Some(service_client),
             service_notifications,
             pending_action_plans: std::collections::HashMap::new(),
+            action_throttle: std::collections::HashMap::new(),
         };
 
         if let Some((ui_snap, settings_snap)) = bootstrap {

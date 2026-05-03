@@ -190,6 +190,30 @@ impl ReadyApp {
             return Task::none();
         };
 
+        // Client-side action throttle (Phase 2 plan scope item 12).
+        // Absorbs fast double-clicks before they hit the wire. Entries
+        // expire when `ActionCompleted` arrives, OR after 200 ms as the
+        // safety valve for dropped notifications. Same target inside
+        // the window -> drop and roll back optimistic state silently
+        // (the user cannot perceive the difference between "the click
+        // didn't take" and "the click took but is mid-IPC", and the
+        // first click's outcome will land normally).
+        let now = std::time::Instant::now();
+        let throttle_window = std::time::Duration::from_millis(200);
+        self.action_throttle
+            .retain(|_, t| now.duration_since(*t) < throttle_window);
+        let throttled = plan.operations.iter().any(|(account_id, thread_id, _)| {
+            self.action_throttle
+                .contains_key(&(account_id.clone(), thread_id.clone()))
+        });
+        if throttled {
+            log::debug!(
+                "dispatch_plan dropped: target inside 200ms throttle window (double-click absorbed)",
+            );
+            self.rollback_optimistic(&plan.optimistic);
+            return Task::none();
+        }
+
         // Account-level reconciliation gate (Phase 2 plan scope item 14):
         // if any plan touching one of these accounts is in `AckUnknown`
         // state, dispatching now would let optimistic state pile on top
@@ -231,6 +255,13 @@ impl ReadyApp {
         // update.
         let _ = self.nav_generation.next();
         let _ = self.thread_generation.next();
+
+        // Mark each (account, thread) as recently dispatched so a
+        // double-click within 200 ms is dropped at the throttle gate.
+        for (account_id, thread_id, _) in &plan.operations {
+            self.action_throttle
+                .insert((account_id.clone(), thread_id.clone()), now);
+        }
 
         let plan_id = service_api::PlanId::new_v7();
         let wire_plan = crate::action_wire::to_wire_plan(plan_id, &plan);
@@ -301,6 +332,10 @@ impl ReadyApp {
             DispatchOutcome::Failed { reason } => {
                 let pending = self.pending_action_plans.remove(&plan_id);
                 if let Some(state) = pending {
+                    for (account_id, thread_id, _) in &state.plan.operations {
+                        self.action_throttle
+                            .remove(&(account_id.clone(), thread_id.clone()));
+                    }
                     self.rollback_optimistic(&state.plan.optimistic);
                 }
                 log::warn!("action plan {plan_id} dispatch failed: {reason}");
@@ -385,6 +420,10 @@ impl ReadyApp {
             Ok(service_api::JobStatusResponse::NotFound) => {
                 log::info!("reconcile plan {plan_id}: NotFound; rolling back optimistic state");
                 if let Some(state) = self.pending_action_plans.remove(&plan_id) {
+                    for (account_id, thread_id, _) in &state.plan.operations {
+                        self.action_throttle
+                            .remove(&(account_id.clone(), thread_id.clone()));
+                    }
                     self.rollback_optimistic(&state.plan.optimistic);
                 }
                 self.status_bar.show_confirmation(
@@ -461,6 +500,12 @@ impl ReadyApp {
             state: _,
             applied_outcomes: _,
         } = state;
+        // Release the per-target throttle entries so a follow-up action
+        // against the same threads dispatches without the 200 ms wait.
+        for (account_id, thread_id, _) in &plan.operations {
+            self.action_throttle
+                .remove(&(account_id.clone(), thread_id.clone()));
+        }
         // Sort by operation_id so the outcomes Vec aligns with the
         // plan.operations order (op_id == index into operations).
         outcomes.sort_by_key(|(op_id, _)| *op_id);
