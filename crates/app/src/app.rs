@@ -179,8 +179,8 @@ impl App {
 
         let (jmap_push_tx, jmap_push_receiver) = create_jmap_push_channel();
         // Placeholder queue until the Service is ready; replaced in
-        // Message::ServiceReady with the spawned client's queue. Cap matches
-        // service_client::NOTIFICATION_QUEUE_CAP.
+        // Message::ServiceChildSpawned with the spawned client's queue. Cap
+        // matches service_client::NOTIFICATION_QUEUE_CAP.
         let service_notifications: ServiceNotificationReceiver =
             Arc::new(crate::notification_queue::NotificationQueue::new(1024));
 
@@ -334,19 +334,19 @@ impl App {
         let mut session_tasks = app.restore_pop_out_windows(&session);
 
         let load_gen = app.nav_generation.next();
+        // Two-phase Service spawn (Phase 1.5 commit 11). The receiver emits
+        // SpawnEvent::ChildSpawned -> Message::ServiceChildSpawned (App now
+        // holds the client and can subscribe to notifications), followed by
+        // SpawnEvent::BootReady -> Message::ServiceBootReady (boot
+        // sequence complete). On any failure, SpawnEvent::Terminal ->
+        // Message::ServiceBootFailed -> iced::exit().
+        let spawn_stream =
+            spawn_event_stream(crate::service_client::ServiceClient::spawn_with_events(
+                data_dir.clone(),
+            ));
         let mut boot_tasks = vec![
             open_task.discard(),
-            Task::perform(
-                {
-                    let app_data_dir = data_dir.clone();
-                    async move {
-                        crate::service_client::ServiceClient::spawn(&app_data_dir)
-                            .await
-                            .map_err(|error| error.to_string())
-                    }
-                },
-                Message::ServiceReady,
-            ),
+            spawn_stream,
             Task::perform(
                 async move { (load_gen, crate::helpers::load_accounts(db_ref).await) },
                 |(g, result)| Message::AccountsLoaded(g, result),
@@ -398,6 +398,7 @@ impl App {
         }
     }
 
+    // (helper hoisted above; impl block continues)
     pub(crate) fn daemon_theme(&self, _window_id: iced::window::Id) -> Theme {
         self.theme()
     }
@@ -418,4 +419,38 @@ impl App {
             },
         }
     }
+}
+
+/// Adapter for the two-phase spawn event receiver. Converts each
+/// `SpawnEvent` into the matching `Message` and feeds an iced `Task`
+/// stream. Lives at module scope so the type inference for
+/// `iced::stream::channel` lands on a concrete signature rather than the
+/// closure-context inference that was failing inside `App::boot`.
+fn spawn_event_stream(
+    rx: tokio::sync::mpsc::Receiver<crate::service_client::SpawnEvent>,
+) -> Task<Message> {
+    Task::stream(iced::stream::channel(
+        8,
+        move |mut output: iced::futures::channel::mpsc::Sender<Message>| {
+            let mut rx = rx;
+            async move {
+                while let Some(event) = rx.recv().await {
+                    let msg = match event {
+                        crate::service_client::SpawnEvent::ChildSpawned(client) => {
+                            Message::ServiceChildSpawned(client)
+                        }
+                        crate::service_client::SpawnEvent::BootReady(response) => {
+                            Message::ServiceBootReady(response)
+                        }
+                        crate::service_client::SpawnEvent::Terminal(error) => {
+                            Message::ServiceBootFailed(error.to_string())
+                        }
+                    };
+                    if output.try_send(msg).is_err() {
+                        break;
+                    }
+                }
+            }
+        },
+    ))
 }

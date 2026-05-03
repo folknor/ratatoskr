@@ -170,23 +170,31 @@ impl App {
             // Compose
             Message::Compose => self.open_compose_window(ComposeMode::New),
             Message::Noop => Task::none(),
-            Message::ServiceReady(Ok(client)) => {
+            Message::ServiceChildSpawned(client) => {
                 self.service_notifications = client.notifications();
                 self.service_client = Some(client);
+                self.status = "Service connected, awaiting boot.ready...".to_string();
+                Task::none()
+            }
+            Message::ServiceBootReady(response) => {
+                log::info!(
+                    "Service boot.ready: schema_version={}, migrations_applied={}",
+                    response.schema_version,
+                    response.migrations_applied,
+                );
                 self.status = "Service ready".to_string();
                 Task::none()
             }
-            Message::ServiceReady(Err(error)) => {
-                // Service failure at boot is fatal in v1: a UI without the
-                // Service cannot read or write durable state through the
-                // post-Phase-2 architecture. The most common failure today
-                // is `ClientError::VersionMismatch` from a UI/Service binary
-                // skew; the right answer is exit + clear log, not a half-
-                // alive UI that silently no-ops mutations. Phase 1.5 will
-                // wrap this in a respawn loop with crashloop detection;
-                // until then, exit deterministically.
-                log::error!("Service failed to start (fatal): {error}");
-                eprintln!("[ui] fatal: service failed to start: {error}");
+            Message::ServiceBootFailed(detail) => {
+                // Service boot failure is terminal in Phase 1.5: a UI
+                // without a healthy Service cannot proceed past the
+                // boot-time write surfaces (migrations, key load,
+                // pending-ops recovery) the Service now owns. Log the
+                // classification and exit cleanly. Phase 8 wraps this in
+                // backoff + respawn + a UI status indicator; Phase 1.5
+                // exits deterministically.
+                log::error!("Service boot failed (fatal): {detail}");
+                eprintln!("[ui] fatal: service boot failed: {detail}");
                 iced::exit()
             }
             Message::ServiceNotification(notification) => {

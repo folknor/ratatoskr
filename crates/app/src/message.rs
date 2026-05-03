@@ -134,7 +134,18 @@ pub enum Message {
     // Existing UI
     Compose,
     Noop,
-    ServiceReady(Result<std::sync::Arc<crate::ServiceClient>, String>),
+    /// Phase 1 of the two-phase spawn (commit 11). Subprocess is up, the
+    /// version-check ping succeeded, and the App can now hold the
+    /// ServiceClient so it can subscribe to notifications (esp.
+    /// `boot.progress` for the splash).
+    ServiceChildSpawned(std::sync::Arc<crate::ServiceClient>),
+    /// Phase 2 of the two-phase spawn. The Service has migrated, loaded
+    /// the encryption key, recovered pending ops, swept queued drafts, and
+    /// backfilled thread participants. The App transitions Booting -> Ready.
+    ServiceBootReady(service_api::BootReadyResponse),
+    /// Spawn or boot.ready failed. The App logs and exits cleanly via
+    /// iced::exit().
+    ServiceBootFailed(String),
     ServiceNotification(service_api::Notification),
     ServiceShutdownComplete(Result<(), String>),
     ToggleSettings,
