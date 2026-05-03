@@ -110,17 +110,17 @@ The phase lands as one milestone but with a clean commit-level split: respawn ma
 - In-flight request replay (Phase 8).
 
 **Touchpoints.**
-- `crates/app/src/service_client.rs` - respawn loop, pending-request cleanup on respawn, extended first-ping timeout.
-- `crates/service/src/lib.rs` (boot path) - run schema migrations Service-side; load encryption key (fatal on missing); `pending_ops::recover_on_boot`; single-instance lock; emit `boot.progress` notifications.
-- `crates/app/src/main.rs` and `crates/app/src/app.rs` - boot waits for Service handshake before populating `OnceLock<Arc<Db>>` / constructing `ReadDbState`. Boot-time `db_mark_queued_drafts_failed_sync` removed from UI side.
+- `crates/app/src/service_client.rs` - two-phase spawn (`SpawnEvent::ChildSpawned` / `BootReady` / `Terminal`), respawn loop with `RunningState` + `RespawnConfig`, pending-request cleanup on respawn, dispatch-side stale-notification drop via the per-incarnation `service_generation` tag, `BootFailureReason` + `surface_terminal_failure` for the UI's terminal-failure surface. The 10-minute boot timeout lives on the dedicated `boot.ready` method, not on `health.ping` (which keeps its 5 s timeout for heartbeat use).
+- `crates/service/src/lib.rs` (boot path) - run schema migrations Service-side; load encryption key (fatal on missing); `pending_ops::recover_on_boot`; single-instance lock; emit `boot.progress` notifications with per-`BootPhaseKind` coalesce so each phase compacts independently while the ordered phase sequence reaches the UI.
+- `crates/app/src/main.rs` and `crates/app/src/app.rs` - `App` becomes a `Booting | Ready` state machine; the UI waits for `Message::ServiceBootReady` before constructing `ReadDbState` / loading accounts / populating sidebar. Boot-time `db_mark_queued_drafts_failed_sync` and per-account thread-participants backfill removed from UI side. `crate::DB: OnceLock<Arc<Db>>` is deleted; `crate::APP_DATA_DIR` is retained (it has multiple non-`App::boot` callers and does not depend on the Service handshake).
 
 **Exit criteria.**
-- `kill <service-pid>`; UI logs the crash, spawns a new Service, app continues to function.
-- Pending requests at crash time fail with a clear error, not a hang.
-- Schema migration on a 50 GB DB succeeds without timing out the first ping; UI splash renders migration progress.
-- Two `cargo run -p app` instances against the same data dir: second instance shows "already running" rather than racing on schema.
-- Missing `ratatoskr.key`: Service exits with a clear fatal error rather than silently zero-keying the data dir.
-- `cargo test -p service` includes a respawn integration test.
+- `kill <service-pid>`; UI logs the crash, spawns a new Service, app continues to function. Stale notifications from the dying reader are dropped at dispatch via the generation tag.
+- Pending requests at crash time fail with `ClientError::ServiceCrashed`, not a hang.
+- Schema migration on a 50 GB DB succeeds within `boot.ready`'s 10-minute budget; UI splash renders per-phase migration progress including ordered `Migrating { current, total }` updates.
+- Two `cargo run -p app` instances against the same data dir: second instance exits with `BootExitCode::AnotherInstanceRunning` (code 71); the UI surfaces "Ratatoskr is already running" rather than treating it as a crash. **No respawn loop in the second instance.**
+- Missing `ratatoskr.key`: Service exits with `BootExitCode::KeyLoadFailure` (code 73); UI surfaces a fatal error and `iced::exit()`s. **No respawn loop** - the terminal-failure policy (scope item 15 of `phase-1.5-plan.md`) explicitly does not respawn on deterministic boot codes.
+- `cargo test -p app` includes the respawn integration test (`respawn_after_sigkill_succeeds`) and the terminal-no-respawn integration test (`terminal_failure_at_initial_boot_does_not_respawn`).
 
 **Risks / open questions.**
 - The `OnceLock<Arc<Db>>` refactor is the largest bit of UI-side surgery in this phase. Many sync call sites assume DB is ready at any point in the program. Plan needs to enumerate which sites move to async and which can stay sync (most should be able to access the handle once `App::boot`'s post-handshake task populates it).
