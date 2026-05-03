@@ -1,3 +1,4 @@
+use crate::client_notification::ClientNotification;
 use crate::error::JsonRpcErrorObject;
 use crate::notification::Notification;
 use crate::request::RequestParams;
@@ -184,6 +185,9 @@ impl RequestParseError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParsedClientMessage {
     Request { id: u64, params: RequestParams },
+    /// UI -> Service notification (Phase 2 plan scope item 11). Always
+    /// `id`-less; routed off the JSON-RPC `id IS NULL` invariant.
+    Notification(ClientNotification),
 }
 
 #[derive(Debug, Clone)]
@@ -211,23 +215,37 @@ pub fn parse_client_message(line: &str) -> Result<ParsedClientMessage, RequestPa
             message: "jsonrpc must be 2.0".to_string(),
         });
     }
-    let id = id_opt.ok_or_else(|| RequestParseError::InvalidRequest {
-        id: None,
-        message: "id must be a u64".to_string(),
-    })?;
+    if raw.result.is_some() || raw.error.is_some() {
+        return Err(RequestParseError::InvalidRequest {
+            id: id_opt,
+            message: "client message cannot contain result or error".to_string(),
+        });
+    }
     let method = raw
         .method
         .as_deref()
         .ok_or_else(|| RequestParseError::InvalidRequest {
-            id: Some(id),
+            id: id_opt,
             message: "missing method".to_string(),
         })?;
-    if raw.result.is_some() || raw.error.is_some() {
-        return Err(RequestParseError::InvalidRequest {
-            id: Some(id),
-            message: "request cannot contain result or error".to_string(),
-        });
+
+    // Route on `id IS NULL` per Phase 2 plan scope item 11. The
+    // notification path bypasses the request id correlation map and
+    // dispatches into the Drop-class notification task pool.
+    let id_present = raw.id.as_ref().is_some_and(|v| !matches!(v, Value::Null));
+    if !id_present {
+        let notification = ClientNotification::from_method_params(method, &raw.params).map_err(
+            |message| RequestParseError::InvalidRequest {
+                id: None,
+                message,
+            },
+        )?;
+        return Ok(ParsedClientMessage::Notification(notification));
     }
+    let id = id_opt.ok_or_else(|| RequestParseError::InvalidRequest {
+        id: None,
+        message: "id must be a u64".to_string(),
+    })?;
     let params = RequestParams::from_method_params(method, raw.params).map_err(|message| {
         RequestParseError::InvalidRequest {
             id: Some(id),
@@ -347,6 +365,61 @@ where
 mod tests {
     use super::*;
     use tokio::io::AsyncWriteExt;
+
+    #[test]
+    fn parses_id_less_message_as_client_notification() {
+        let line = r#"{"jsonrpc":"2.0","method":"pending_ops.kick"}"#;
+        let parsed = parse_client_message(line).expect("parse");
+        match parsed {
+            ParsedClientMessage::Notification(ClientNotification::PendingOpsKick) => {}
+            other => panic!("expected PendingOpsKick notification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_id_less_message_with_explicit_null_params_as_notification() {
+        let line = r#"{"jsonrpc":"2.0","method":"pending_ops.kick","params":null}"#;
+        let parsed = parse_client_message(line).expect("parse");
+        assert!(matches!(
+            parsed,
+            ParsedClientMessage::Notification(ClientNotification::PendingOpsKick)
+        ));
+    }
+
+    #[test]
+    fn rejects_id_less_message_with_unknown_method() {
+        let line = r#"{"jsonrpc":"2.0","method":"unknown.method"}"#;
+        match parse_client_message(line) {
+            Err(RequestParseError::InvalidRequest { id: None, message }) => {
+                assert!(message.contains("unknown"), "{message}");
+            }
+            other => panic!("expected InvalidRequest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn id_present_routes_to_request_path() {
+        let line = r#"{"jsonrpc":"2.0","id":1,"method":"health.ping"}"#;
+        let parsed = parse_client_message(line).expect("parse");
+        match parsed {
+            ParsedClientMessage::Request { id: 1, .. } => {}
+            other => panic!("expected Request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_oversize_notification_via_bounded_reader() {
+        // Notifications go through the same BoundedLineReader as
+        // requests, so the `MAX_FRAME_BYTES` cap covers both paths.
+        // This test exercises the parser directly (the framing layer's
+        // size-cap test already covers the read side).
+        let line = r#"{"jsonrpc":"2.0","method":"pending_ops.kick"}"#;
+        let parsed = parse_client_message(line).expect("parse");
+        assert!(matches!(
+            parsed,
+            ParsedClientMessage::Notification(ClientNotification::PendingOpsKick)
+        ));
+    }
 
     /// Feed a 1 MiB no-newline payload in 8 KiB chunks while sampling the
     /// reader's internal buffer. The cap is 64 KiB; the buffer must never

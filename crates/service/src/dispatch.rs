@@ -4,9 +4,9 @@ use crate::lifecycle::{ServiceLifecycle, ShutdownCause};
 use futures_util::FutureExt;
 use serde_json::Value;
 use service_api::{
-    BootExitCode, BoundedLineReader, FrameError, JsonRpcErrorObject, JsonRpcErrorResponse,
-    JsonRpcSuccessResponse, ParsedClientMessage, RequestParams, ServiceError, ShutdownResponse,
-    encode_message, parse_client_message,
+    BootExitCode, BoundedLineReader, ClientNotification, FrameError, JsonRpcErrorObject,
+    JsonRpcErrorResponse, JsonRpcSuccessResponse, ParsedClientMessage, RequestParams, ServiceError,
+    ShutdownResponse, encode_message, parse_client_message,
 };
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
@@ -24,6 +24,13 @@ const MAX_IN_FLIGHT: usize = 64;
 /// the request is rejected with `ServiceError::Backpressure` synchronously,
 /// so a pathological client cannot balloon Service memory by flooding stdin.
 const ADMISSION_CAP: usize = 2 * MAX_IN_FLIGHT;
+/// Cap on UI -> Service notification handlers running concurrently. Phase 2
+/// plan scope item 11: notifications are `Drop`-class - if we already have
+/// `NOTIFY_CAP` running, drop the new inbound rather than queue. A separate
+/// pool from the request `JoinSet` ensures notification load cannot starve
+/// request dispatch: even if the notification handlers are saturated, the
+/// next `health.ping` still goes through immediately.
+const NOTIFY_CAP: usize = 4;
 
 pub async fn run_service_with_io<R, W>(reader: R, writer: W, app_data_dir: PathBuf) -> i32
 where
@@ -68,6 +75,11 @@ where
     // before we ack. Without this, an in-flight Phase 2+ mutation could still
     // be running when the UI sees `flushed_ok: true` and starts terminating.
     let mut handlers_in_flight: JoinSet<()> = JoinSet::new();
+    // Separate pool for UI -> Service notification handlers (Phase 2 plan
+    // scope item 11). Drop-class: at-cap arrivals are dropped, never queued,
+    // so a slow notification handler cannot consume a `MAX_IN_FLIGHT` slot
+    // and cannot starve request dispatch.
+    let mut notifications_in_flight: JoinSet<()> = JoinSet::new();
     let mut lines = BoundedLineReader::new(reader, service_api::MAX_FRAME_BYTES);
     let mut pending_shutdown_id: Option<u64> = None;
 
@@ -126,6 +138,7 @@ where
         // `handlers_in_flight.len()` reflects truly-still-running handlers
         // when we use it as the admission gate below.
         reap_finished(&mut handlers_in_flight);
+        reap_finished(&mut notifications_in_flight);
 
         tokio::select! {
             () = lifecycle.notified() => {
@@ -144,6 +157,7 @@ where
                             &out_tx,
                             &inflight,
                             &mut handlers_in_flight,
+                            &mut notifications_in_flight,
                             started_at,
                             &boot_state,
                         ).await {
@@ -211,6 +225,10 @@ where
     // sentinel and ack the Shutdown request. The dispatch loop has already
     // stopped reading new requests by the time we reach this point.
     drain_in_flight(&mut handlers_in_flight).await;
+    // Notification handlers are best-effort - we wait briefly for them to
+    // finish (so an in-flight `pending_ops.kick`-driven drain can flush its
+    // current batch) but don't let a wedged notification block shutdown.
+    drain_in_flight(&mut notifications_in_flight).await;
 
     // Reap the boot task so any boot-sequence panic surfaces in the log
     // rather than vanishing at process exit. We don't need the result -
@@ -304,6 +322,7 @@ async fn handle_line(
     out_tx: &mpsc::Sender<Vec<u8>>,
     inflight: &Arc<Semaphore>,
     handlers_in_flight: &mut JoinSet<()>,
+    notifications_in_flight: &mut JoinSet<()>,
     started_at: Instant,
     boot_state: &Arc<boot::BootSharedState>,
 ) -> HandleOutcome {
@@ -336,6 +355,25 @@ async fn handle_line(
             );
             HandleOutcome::Continue
         }
+        Ok(ParsedClientMessage::Notification(notification)) => {
+            // Drop-class admission per Phase 2 plan scope item 11. If the
+            // notification pool is at capacity, drop the new inbound. The
+            // UI's tick policy will retry on its next firing; missing one
+            // tick is the documented best-effort guarantee.
+            if notifications_in_flight.len() >= NOTIFY_CAP {
+                log::debug!(
+                    "notification drop method={} pool_full",
+                    notification.method_name(),
+                );
+                return HandleOutcome::Continue;
+            }
+            spawn_notification_handler(
+                notification,
+                notifications_in_flight,
+                Arc::clone(boot_state),
+            );
+            HandleOutcome::Continue
+        }
         Err(error) => {
             let response_id = error.extracted_id();
             log::warn!("request parse failed: {error}");
@@ -347,6 +385,43 @@ async fn handle_line(
             HandleOutcome::Continue
         }
     }
+}
+
+/// Dispatch a UI -> Service notification on the dedicated notification
+/// task pool. No response is sent (notifications are id-less by
+/// definition); the handler runs to completion or is dropped on shutdown.
+fn spawn_notification_handler(
+    notification: ClientNotification,
+    notifications_in_flight: &mut JoinSet<()>,
+    boot_state: Arc<boot::BootSharedState>,
+) {
+    let method = notification.method_name();
+    log::info!("notification dispatch method={method}");
+    notifications_in_flight.spawn(async move {
+        let entered = Instant::now();
+        let result = AssertUnwindSafe(handlers::dispatch_notification(notification, boot_state))
+            .catch_unwind()
+            .await;
+        let elapsed_ms = entered.elapsed().as_millis();
+        match result {
+            Ok(Ok(())) => {
+                log::info!(
+                    "notification dispatch end method={method} elapsed_ms={elapsed_ms} outcome=ok",
+                );
+            }
+            Ok(Err(error)) => {
+                log::warn!(
+                    "notification dispatch end method={method} elapsed_ms={elapsed_ms} outcome=err: {error}",
+                );
+            }
+            Err(panic) => {
+                log::error!(
+                    "notification handler panicked method={method}: {}",
+                    panic_message(panic.as_ref()),
+                );
+            }
+        }
+    });
 }
 
 /// Reap completed tasks without blocking. Called between dispatch-loop

@@ -2,12 +2,13 @@ mod action;
 mod action_status;
 mod boot;
 mod health;
+mod pending_ops_kick;
 #[cfg(feature = "test-helpers")]
 mod test_helpers;
 
 use crate::boot::BootSharedState;
 use serde_json::Value;
-use service_api::{RequestParams, ServiceError};
+use service_api::{ClientNotification, RequestParams, ServiceError};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -39,5 +40,20 @@ pub(crate) async fn dispatch(
         RequestParams::TestSlow { millis } => test_helpers::slow_handle(millis).await,
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPrintln { message } => test_helpers::println_handle(message).await,
+    }
+}
+
+/// Dispatch a UI -> Service notification (Phase 2 plan scope item 11).
+///
+/// No response is emitted - notifications are fire-and-forget by
+/// construction. The handler returns `Result<(), String>` so it can
+/// surface a diagnostic into the dispatch log even though the UI never
+/// observes it directly.
+pub(crate) async fn dispatch_notification(
+    notification: ClientNotification,
+    boot_state: Arc<BootSharedState>,
+) -> Result<(), String> {
+    match notification {
+        ClientNotification::PendingOpsKick => pending_ops_kick::handle(&boot_state).await,
     }
 }

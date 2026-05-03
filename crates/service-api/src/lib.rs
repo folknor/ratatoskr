@@ -1,5 +1,6 @@
 mod action;
 mod boot;
+mod client_notification;
 mod error;
 mod framing;
 mod notification;
@@ -13,6 +14,7 @@ pub use action::{
     OperationId, OperationOutcome, OperationResult, PlanId, PlanSummary, RemoteFailure,
     SyncProgress, WireFolderId, WireJobStatus, WireMailOperation, WireTagId,
 };
+pub use client_notification::{ClientNotification, JsonRpcClientNotification};
 pub use boot::{
     BootClassification, BootExitCode, BootPhase, BootPhaseKind, BootProgress, BootReadyResponse,
 };

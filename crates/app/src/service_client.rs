@@ -692,6 +692,39 @@ impl ServiceClient {
         self.request(RequestParams::ActionJobStatus { plan_id }).await
     }
 
+    /// Send a fire-and-forget UI -> Service notification (Phase 2 plan
+    /// scope item 11). No correlation map entry, no oneshot channel,
+    /// no timeout. Returns `Ok(())` on successful enqueue into the
+    /// outbound writer task; `Err(NotConnected)` if no Service is
+    /// currently bound; `Err(ServiceCrashed)` if the writer task has
+    /// already shut down.
+    ///
+    /// The Service runs notification handlers on a separate task pool
+    /// with `Drop`-class admission (`NOTIFY_CAP`). If that pool is at
+    /// capacity, the Service drops the inbound rather than queue. The
+    /// UI's tick policy is the retry strategy: missing one tick is
+    /// the documented best-effort guarantee.
+    pub async fn send_notification(
+        &self,
+        notification: service_api::ClientNotification,
+    ) -> Result<(), ClientError> {
+        let envelope = service_api::JsonRpcClientNotification::new(&notification);
+        let bytes = encode_message(&envelope)?;
+        let stdin_tx = match self
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+        {
+            Some(state) => state.stdin_tx.clone(),
+            None => return Err(ClientError::NotConnected),
+        };
+        if stdin_tx.send(bytes).await.is_err() {
+            return Err(ClientError::ServiceCrashed);
+        }
+        Ok(())
+    }
+
     pub async fn shutdown(&self) -> Result<(), ClientError> {
         // Tell handle_crash to bail rather than respawning if the dispatch
         // shutdown races with reader-EOF (the Service is exiting; the EOF
