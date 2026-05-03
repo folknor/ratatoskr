@@ -163,28 +163,25 @@ impl ServiceClient {
         let bytes = encode_message(&request)?;
         let (tx, rx) = oneshot::channel();
         self.pending.insert(id, tx);
+        let mut guard = PendingGuard::new(&self.pending, id);
 
         let Some(stdin_tx) = self.stdin_tx.as_ref() else {
-            self.pending.remove(&id);
             return Err(ClientError::NotConnected);
         };
 
         if stdin_tx.send(bytes).await.is_err() {
-            self.pending.remove(&id);
             return Err(ClientError::ServiceCrashed);
         }
 
         let response = match params.timeout() {
             RequestTimeoutKind::Finite(timeout) => match tokio::time::timeout(timeout, rx).await {
                 Ok(response) => response,
-                Err(_) => {
-                    self.pending.remove(&id);
-                    return Err(ClientError::Timeout);
-                }
+                Err(_) => return Err(ClientError::Timeout),
             },
             RequestTimeoutKind::Infinite => rx.await,
         };
 
+        guard.disarm();
         match response {
             Ok(result) => result,
             Err(_) => Err(ClientError::ServiceCrashed),
@@ -349,7 +346,10 @@ fn dispatch_response(
 }
 
 fn client_error_from_rpc(error: JsonRpcErrorObject) -> ClientError {
-    ClientError::Service(ServiceError::Internal(error.message))
+    match error.try_into_service_error() {
+        Ok(service_error) => ClientError::Service(service_error),
+        Err(remaining) => ClientError::Service(ServiceError::Internal(remaining.message)),
+    }
 }
 
 async fn enqueue_notification(
@@ -403,8 +403,11 @@ async fn heartbeat_task(
                 Ok(_) => log::debug!("service heartbeat ok in {:?}", started.elapsed()),
                 Err(error) => log::warn!("service heartbeat decode failed: {error}"),
             },
+            Err(ClientError::Timeout) => {
+                log::warn!("service heartbeat missed (timeout)");
+            }
             Err(error) => {
-                log::warn!("service heartbeat failed: {error}");
+                log::warn!("service heartbeat exiting: {error}");
                 return;
             }
         }
@@ -421,23 +424,52 @@ async fn request_value_raw(
     let bytes = encode_message(&JsonRpcRequest::new(id, &params))?;
     let (tx, rx) = oneshot::channel();
     pending.insert(id, tx);
+    let mut guard = PendingGuard::new(pending, id);
     if stdin_tx.send(bytes).await.is_err() {
-        pending.remove(&id);
         return Err(ClientError::ServiceCrashed);
     }
-    match params.timeout() {
+    let response = match params.timeout() {
         RequestTimeoutKind::Finite(timeout) => match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(ClientError::ServiceCrashed),
-            Err(_) => {
-                pending.remove(&id);
-                Err(ClientError::Timeout)
-            }
+            Ok(response) => response,
+            Err(_) => return Err(ClientError::Timeout),
         },
-        RequestTimeoutKind::Infinite => match rx.await {
-            Ok(result) => result,
-            Err(_) => Err(ClientError::ServiceCrashed),
-        },
+        RequestTimeoutKind::Infinite => rx.await,
+    };
+    guard.disarm();
+    match response {
+        Ok(result) => result,
+        Err(_) => Err(ClientError::ServiceCrashed),
+    }
+}
+
+struct PendingGuard<'a> {
+    pending: &'a DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>,
+    id: u64,
+    armed: bool,
+}
+
+impl<'a> PendingGuard<'a> {
+    fn new(
+        pending: &'a DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>,
+        id: u64,
+    ) -> Self {
+        Self {
+            pending,
+            id,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for PendingGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.pending.remove(&self.id);
+        }
     }
 }
 

@@ -67,15 +67,82 @@ impl JsonRpcErrorObject {
 
 impl From<ServiceError> for JsonRpcErrorObject {
     fn from(error: ServiceError) -> Self {
-        match error {
-            ServiceError::InvalidParams { message, .. } => Self::invalid_params(message),
-            ServiceError::UnknownMethod(method) => {
-                Self::method_not_found(format!("unknown method: {method}"))
+        let data = serde_json::to_value(&error).ok();
+        let (code, message) = match &error {
+            ServiceError::InvalidParams { message, .. } => (-32602, message.clone()),
+            ServiceError::UnknownMethod(method) => (-32601, format!("unknown method: {method}")),
+            ServiceError::Panic { method, message } => {
+                (-32603, format!("handler panic in {method}: {message}"))
             }
-            ServiceError::Panic { message, .. } | ServiceError::Internal(message) => {
-                Self::internal(message)
+            ServiceError::Internal(message) => (-32603, message.clone()),
+            ServiceError::AnotherInstanceRunning => {
+                (-32603, "another instance is running".to_string())
             }
-            ServiceError::AnotherInstanceRunning => Self::internal("another instance is running"),
+        };
+        Self {
+            code,
+            message,
+            data,
         }
+    }
+}
+
+impl JsonRpcErrorObject {
+    /// Recover the original `ServiceError` if it was embedded in `data` by the
+    /// `From<ServiceError>` impl above. Returns `Err(self)` if the payload is
+    /// missing or unrecognizable so the caller can fall back to message-only
+    /// reporting.
+    pub fn try_into_service_error(self) -> Result<ServiceError, Self> {
+        match self.data.as_ref() {
+            Some(value) => match serde_json::from_value::<ServiceError>(value.clone()) {
+                Ok(error) => Ok(error),
+                Err(_) => Err(self),
+            },
+            None => Err(self),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn panic_error_round_trips_through_json_rpc_object() {
+        let original = ServiceError::Panic {
+            method: "health.ping".to_string(),
+            message: "boom".to_string(),
+        };
+        let object = JsonRpcErrorObject::from(original);
+        assert_eq!(object.code, -32603);
+        assert!(object.data.is_some());
+        let recovered = object
+            .try_into_service_error()
+            .expect("data carries the original variant");
+        match recovered {
+            ServiceError::Panic { method, message } => {
+                assert_eq!(method, "health.ping");
+                assert_eq!(message, "boom");
+            }
+            other => panic!("expected Panic, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_method_round_trips_through_json_rpc_object() {
+        let original = ServiceError::UnknownMethod("bogus".to_string());
+        let object = JsonRpcErrorObject::from(original);
+        assert_eq!(object.code, -32601);
+        let recovered = object
+            .try_into_service_error()
+            .expect("data carries the original variant");
+        assert!(matches!(recovered, ServiceError::UnknownMethod(name) if name == "bogus"));
+    }
+
+    #[test]
+    fn missing_data_falls_back_to_self() {
+        let object = JsonRpcErrorObject::parse_error("no payload");
+        let result = object.try_into_service_error();
+        assert!(result.is_err());
     }
 }

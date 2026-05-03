@@ -24,7 +24,7 @@ Plan section 13 requires a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 
 
 ### 3. NotificationClass routing does not match the plan
 
-`crates/app/src/service_client.rs:355-367`:
+`crates/app/src/service_client.rs`:
 
 ```rust
 match notification.class() {
@@ -40,27 +40,9 @@ Plan section 8:
 
 The empty `Notification` enum means nothing exercises this in Phase 1, but the framework is supposed to "land so Phase 2 plugs in cleanly the next day"; today Phase 2 will rewrite this routing immediately.
 
-### 4. `ClientError` flattens every wire error to `Internal`
+### 4. Drop ordering omits the await-with-deadline step and uses `std::thread::sleep`
 
-`crates/app/src/service_client.rs:351-353`:
-
-```rust
-fn client_error_from_rpc(error: JsonRpcErrorObject) -> ClientError {
-    ClientError::Service(ServiceError::Internal(error.message))
-}
-```
-
-Server-side `ServiceError::Panic { method, message }`, `InvalidParams`, `UnknownMethod`, etc. are serialized correctly into structured `JsonRpcErrorObject`, then collapsed back into `ServiceError::Internal` at the client. The error code is also discarded. Plan section 4 calls for the typed `request<R, P>()` wrapper to deserialize into the expected error variants; the in-tree pending map type (`oneshot::Sender<Result<Value, ClientError>>` instead of `Result<Value, ServiceError>`) is the proximate cause.
-
-### 5. Service-side parse-errors never reach the requester
-
-A parse-error response built by the dispatch loop carries `id: null` (`crates/service/src/dispatch.rs:60`, `dispatch.rs:104-110`). On the client, `parse_service_message` parses this as `ParsedServiceMessage::Response { id: None, ... }`, and `reader_task` logs "uncorrelated response" and drops it (`crates/app/src/service_client.rs:312-314`). The requester sits in `pending` until its per-method timeout fires.
-
-The plan's failure-mode test ("malformed JSON returns parse-error and Service stays up") needs the client side to surface this. Either correlate parse-errors back to the most recent in-flight id (best-effort), or have the Service include a `data` field with the failed id when it can be recovered, or make the client treat any error response with `id=null` as "fail the most recent pending entry that posted bytes after the last response". None are perfect; the current behavior (silently drop) is the worst option.
-
-### 6. Drop ordering omits the await-with-deadline step and uses `std::thread::sleep`
-
-`crates/app/src/service_client.rs:265-285`:
+`crates/app/src/service_client.rs` Drop impl:
 
 ```rust
 abort_handle(&self.reader_handle);
@@ -82,9 +64,9 @@ Two issues:
 - Plan section 5 step 2 ("Await tasks with a short deadline (200 ms)") is omitted entirely. The plan-sketch comment notes that awaiting from sync `Drop` is awkward, but the abort handles must drop before the underlying `ChildStdin` / `ChildStdout` close, and aborts only progress when the runtime gets a chance to drive the tasks.
 - The 200 ms wait uses `std::thread::sleep`, blocking the calling thread without yielding to the runtime. If `Drop` runs from inside a tokio worker (e.g. the iced quit path), the aborted tasks may not make any progress during the wait, and the path falls through to `kill_child()` (SIGKILL) every time. Polling via `tokio::task::block_in_place` + `tokio::time::sleep`, or simply holding a `tokio::runtime::Handle` and `block_on`-ing a timeout future, would actually let the abort propagate.
 
-### 7. Linux Service stdio uses `tokio::fs::File` for pipes
+### 5. Linux Service stdio uses `tokio::fs::File` for pipes
 
-`crates/service/src/stdio_defense.rs:24-26`:
+`crates/service/src/stdio_defense.rs`:
 
 ```rust
 let stdin = unsafe { std::fs::File::from_raw_fd(stdin_fd) };
@@ -94,43 +76,7 @@ Ok((tokio::fs::File::from_std(stdin), tokio::fs::File::from_std(stdout)))
 
 `tokio::fs::File` is for regular files: it dispatches every read / write onto a blocking-pool thread. For pipes you want epoll-driven readiness via something like `tokio::io::unix::AsyncFd` (or the explicit `tokio::process::ChildStdin` / `ChildStdout` types if you can keep them attached). As written, every `BoundedLineReader::next_line` call holds a blocking-pool thread for the duration of the read.
 
-### 8. Invalid UTF-8 from a single byte kills the dispatch loop
-
-`crates/service-api/src/framing.rs` returns `FrameError::InvalidUtf8` from `BoundedLineReader::next_line`. The dispatch loop in `crates/service/src/dispatch.rs:62-65` matches only `FrameError::TooLarge` specially; all other errors hit the generic arm and `break`:
-
-```rust
-Err(FrameError::TooLarge) => {
-    log::warn!("rejecting oversized frame");
-    send_error(&out_tx, None, JsonRpcErrorObject::parse_error("frame too large")).await;
-}
-Err(error) => {
-    log::warn!("service frame read failed: {error}");
-    break;
-}
-```
-
-A single garbled byte from any producer takes the whole Service down. UTF-8 failures should follow the parse-error path: emit a parse-error response and keep reading.
-
-### 9. Heartbeat exits permanently after a single timeout
-
-`crates/app/src/service_client.rs:401-410`:
-
-```rust
-match result {
-    Ok(value) => match serde_json::from_value::<HealthPingResponse>(value) {
-        Ok(_) => log::debug!("service heartbeat ok in {:?}", started.elapsed()),
-        Err(error) => log::warn!("service heartbeat decode failed: {error}"),
-    },
-    Err(error) => {
-        log::warn!("service heartbeat failed: {error}");
-        return;
-    }
-}
-```
-
-Any error - including a single `Timeout` - terminates the heartbeat task. Plan section 12 ("every 30 s; logs round-trip + missed beats") implies continued logging across missed beats. Today, after one missed beat, the loop is silent forever. Either keep ticking and logging until `stdin_tx` actually fails, or document that heartbeat is one-shot-on-failure (and adjust the plan).
-
-### 10. Notification framework is not round-trip-tested
+### 6. Notification framework is not round-trip-tested
 
 `crates/service-api/src/notification.rs` has `pub enum Notification {}` with `#[serde(tag = "method", content = "params")]` and `Serialize` / `Deserialize` derives. The Phase 1 framework is supposed to "land so Phase 2 plugs in cleanly the next day", but no test ever sends a notification through the wire end-to-end with a feature-gated test variant. The synthetic JSON object built in `parse_service_message` (`{"method": ..., "params": ...}`) needs to round-trip cleanly with `tag = "method", content = "params"` semantics; that contract is currently unverified.
 
@@ -138,7 +84,8 @@ Any error - including a single `Timeout` - terminates the heartbeat task. Plan s
 
 In-tree tests today:
 
-- `crates/service/tests/dispatch_in_process.rs`: ping happy path, malformed JSON, oversize frame, EOF, concurrent fan-out (5 tests).
+- `crates/service-api/src/error.rs`: `ServiceError` round-trips through `JsonRpcErrorObject.data` (3 unit tests).
+- `crates/service/tests/dispatch_in_process.rs`: ping happy path, malformed JSON, oversize frame, EOF, concurrent fan-out, invalid UTF-8 returns parse-error and loop continues, invalid request correlates parse-error to extracted id (7 tests).
 - `crates/app/tests/service_subprocess.rs`: spawn + ping + shutdown via the wire (1 test).
 
 Promised by plan section 13 / 20-21 but not present:
@@ -151,6 +98,8 @@ Promised by plan section 13 / 20-21 but not present:
 - Spawn + drop `ServiceClient` without `shutdown()`; child exits within 1 s; no orphan.
 - Linux SIGKILL of the parent process: subprocess exits within 2 s via PR_SET_PDEATHSIG.
 - Stdout corruption defense: test-only build path that calls `println!` from a transitive dep; assert the JSON-RPC framing on the saved-FD stdout is unaffected.
+- Heartbeat survives a single timeout: no automated coverage of the "missed beat keeps ticking" path.
+- `PendingGuard` evicts on cancel: no automated coverage of the request-future-dropped-mid-flight path.
 
 Plan section 22 closes with: "Test-only handlers (panic-injecting, version-mismatch) are `#[cfg(test)]`-gated so they cannot ship." Those handlers do not exist yet.
 
@@ -158,54 +107,27 @@ The Phase 1 promotion criterion is "the integration test is green in CI"; the in
 
 ## Smaller correctness issues
 
-### 11. The `Shutdown` request branch bypasses panic safety
-
-`crates/service/src/dispatch.rs:91-97` handles `Shutdown` inline in the dispatch loop (calls `lifecycle.drain().await` and `serde_json::to_value(...)` directly). Other handlers run inside `dispatch_with_panic_safety` (`AssertUnwindSafe(...).catch_unwind()`). A panic in `drain()` (unlikely today, but more likely once Phase 1.5 wires real flush work into it) would take the dispatch loop down without producing a panic-converted response.
-
-### 12. `ServiceLifecycle::drain` is run-once, return-value lies on second call
-
-`crates/service/src/lifecycle.rs:42-57`:
-
-```rust
-pub(crate) async fn drain(&self) -> bool {
-    if self.drained.swap(true, Ordering::SeqCst) {
-        return true;
-    }
-    ...
-}
-```
-
-Subsequent calls return `true` regardless of whether the first call succeeded. The dispatch loop's outer drain (after the loop breaks) and the SIGTERM handler can both race the inline `Shutdown` branch's drain; whoever loses gets `true` even if flushing failed. Cosmetic in Phase 1 (no real flushing yet) but worth fixing before 1.5.
-
-### 13. UI-side `request_value` does not evict on send failure into oneshot drop
-
-`crates/app/src/service_client.rs:177-191`: on `RequestTimeoutKind::Finite` timeout, `pending.remove(&id)` runs. Good. But if the oneshot receiver itself drops (e.g. caller dropped the future before timeout), the entry stays in `pending` until the reader fills it or the Service crashes. The `pending` map can leak entries under cancellation. Plan section 6 says "Expired requests evict their pending entry" - the same hygiene should apply to cancelled-future cleanup.
-
-### 14. `dirs::data_dir()` default writes Service logs to the prod data dir during dev
+### 7. `dirs::data_dir()` default writes Service logs to the prod data dir during dev
 
 `crates/service/src/lib.rs:69-73` falls back to `dirs::data_dir().join("org.folknor.ratatoskr")` when `--app-data-dir` isn't provided. `cargo run -p app -- --service` (suggested as a smoke check in plan section 7) writes its log + `clean_shutdown` sentinel into the production data dir, not the dev one. A `target/`-rooted default would isolate dev runs.
 
-### 15. Reader and Drop both call `fail_pending`
-
-`crates/app/src/service_client.rs:323` (reader EOF/error path) and `service_client.rs:283` (Drop). Two paths race to remove and reject pending senders. Functional, but the plan puts this responsibility solely on Drop ("Drain pending; reject every outstanding sender"). Pick one site - the reader can leave it to Drop, since closing stdin will cause the writer task to exit and Drop runs on `ServiceClient` cleanup.
-
-### 16. `RequestParams::params_value` always returns `{}`
+### 8. `RequestParams::params_value` always returns `{}`
 
 `crates/service-api/src/request.rs:36-40`. Phase 2 will need either struct-shaped enum variants on `RequestParams` or a separate per-method type with `Serialize` / `Deserialize`. Worth restructuring now while the surface is small (two methods).
 
-### 17. `ServiceError::AnotherInstanceRunning` is dead code
+### 9. `ServiceError::AnotherInstanceRunning` is dead code
 
 `crates/service-api/src/error.rs:14-15`. Single-instance lock is Phase 1.5 work. Either remove the variant now and re-add in 1.5, or accept that this code path is unverified. Today the `From<ServiceError>` impl maps it to `JsonRpcErrorObject::internal` with a hardcoded "another instance is running" string, none of which is reachable.
 
-### 18. `panic_message` only handles `&str` and `String` payloads
+### 10. `panic_message` only handles `&str` and `String` payloads
 
 `crates/service/src/dispatch.rs:162-170`. Custom panic types (e.g. `panic!(value)` with arbitrary types) report `"unknown panic payload"`. Acceptable but documents a real loss of detail.
 
-### 19. Smoke test does not exercise `ServiceClient` Drop
+### 11. Smoke test does not exercise `ServiceClient` Drop
 
 `crates/app/tests/service_subprocess.rs` writes requests and reads responses directly through `BoundedLineReader`, never spawning a real `ServiceClient`. The plan's "Spawn + drop without shutdown" path needs the actual `ServiceClient` Drop ordering exercised against a real subprocess. Today nothing tests that path end-to-end.
 
-### 20. Smoke test does not clean up `target/service-smoke-{pid}/`
+### 12. Smoke test does not clean up `target/service-smoke-{pid}/`
 
 `crates/app/tests/service_subprocess.rs:87-91` creates a per-pid directory under `target/` and never removes it. Each run leaves a clean-shutdown sentinel and (eventually) Service log files behind. Trivial; flag for tidying when tests are extended.
 

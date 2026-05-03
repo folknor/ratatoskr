@@ -3,13 +3,13 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use tokio::sync::Notify;
+use tokio::sync::{Notify, OnceCell};
 
 #[derive(Clone)]
 pub(crate) struct ServiceLifecycle {
     notify: Arc<Notify>,
     requested: Arc<AtomicBool>,
-    drained: Arc<AtomicBool>,
+    drain_result: Arc<OnceCell<bool>>,
     app_data_dir: Option<Arc<PathBuf>>,
 }
 
@@ -18,7 +18,7 @@ impl ServiceLifecycle {
         Self {
             notify: Arc::new(Notify::new()),
             requested: Arc::new(AtomicBool::new(false)),
-            drained: Arc::new(AtomicBool::new(false)),
+            drain_result: Arc::new(OnceCell::new()),
             app_data_dir: app_data_dir.map(Arc::new),
         }
     }
@@ -40,9 +40,13 @@ impl ServiceLifecycle {
     }
 
     pub(crate) async fn drain(&self) -> bool {
-        if self.drained.swap(true, Ordering::SeqCst) {
-            return true;
-        }
+        *self
+            .drain_result
+            .get_or_init(|| async { self.run_drain().await })
+            .await
+    }
+
+    async fn run_drain(&self) -> bool {
         let Some(app_data_dir) = self.app_data_dir.as_ref() else {
             return true;
         };

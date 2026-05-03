@@ -59,8 +59,17 @@ where
                         log::warn!("rejecting oversized frame");
                         send_error(&out_tx, None, JsonRpcErrorObject::parse_error("frame too large")).await;
                     }
-                    Err(error) => {
-                        log::warn!("service frame read failed: {error}");
+                    Err(FrameError::InvalidUtf8(error)) => {
+                        log::warn!("service frame had invalid utf-8: {error}");
+                        send_error(
+                            &out_tx,
+                            None,
+                            JsonRpcErrorObject::parse_error("invalid utf-8"),
+                        )
+                        .await;
+                    }
+                    Err(FrameError::Io(error)) => {
+                        log::warn!("service frame io error: {error}");
                         break;
                     }
                 }
@@ -68,7 +77,7 @@ where
         }
     }
 
-    let flushed_ok = lifecycle.drain().await;
+    let flushed_ok = panic_safe_drain(&lifecycle).await;
     if !flushed_ok {
         log::warn!("shutdown drain completed with errors");
     }
@@ -89,7 +98,7 @@ async fn handle_line(
             id,
             params: RequestParams::Shutdown,
         }) => {
-            let flushed_ok = lifecycle.drain().await;
+            let flushed_ok = panic_safe_drain(lifecycle).await;
             let result = serde_json::to_value(ShutdownResponse { flushed_ok })
                 .map_err(|error| ServiceError::Internal(error.to_string()));
             send_handler_response(out_tx, id, result).await;
@@ -101,13 +110,24 @@ async fn handle_line(
             false
         }
         Err(error) => {
+            let response_id = error.extracted_id();
             log::warn!("request parse failed: {error}");
             send_error(
                 out_tx,
-                None,
+                response_id,
                 JsonRpcErrorObject::parse_error(error.to_string()),
             )
             .await;
+            false
+        }
+    }
+}
+
+async fn panic_safe_drain(lifecycle: &ServiceLifecycle) -> bool {
+    match AssertUnwindSafe(lifecycle.drain()).catch_unwind().await {
+        Ok(value) => value,
+        Err(panic) => {
+            log::error!("shutdown drain panicked: {}", panic_message(panic.as_ref()));
             false
         }
     }

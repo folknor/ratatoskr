@@ -155,8 +155,23 @@ struct RawMessage {
 pub enum RequestParseError {
     #[error("malformed json: {0}")]
     MalformedJson(#[from] serde_json::Error),
-    #[error("invalid request: {0}")]
-    InvalidRequest(String),
+    #[error("invalid request: {message}")]
+    InvalidRequest {
+        id: Option<u64>,
+        message: String,
+    },
+}
+
+impl RequestParseError {
+    /// Returns the request id if it was extractable from the wire payload,
+    /// even if validation later failed. Lets the dispatch loop respond with
+    /// a correctly-correlated error instead of `id=null`.
+    pub fn extracted_id(&self) -> Option<u64> {
+        match self {
+            Self::InvalidRequest { id, .. } => *id,
+            Self::MalformedJson(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,20 +196,45 @@ pub enum ParsedServiceMessage {
 
 pub fn parse_client_message(line: &str) -> Result<ParsedClientMessage, RequestParseError> {
     let raw: RawMessage = serde_json::from_str(line)?;
-    require_jsonrpc(&raw)?;
-    let id = parse_id(raw.id.as_ref())?;
+    let id_opt = raw.id.as_ref().and_then(extract_u64);
+
+    if raw.jsonrpc.as_deref() != Some("2.0") {
+        return Err(RequestParseError::InvalidRequest {
+            id: id_opt,
+            message: "jsonrpc must be 2.0".to_string(),
+        });
+    }
+    let id = id_opt.ok_or_else(|| RequestParseError::InvalidRequest {
+        id: None,
+        message: "id must be a u64".to_string(),
+    })?;
     let method = raw
         .method
         .as_deref()
-        .ok_or_else(|| RequestParseError::InvalidRequest("missing method".to_string()))?;
+        .ok_or_else(|| RequestParseError::InvalidRequest {
+            id: Some(id),
+            message: "missing method".to_string(),
+        })?;
     if raw.result.is_some() || raw.error.is_some() {
-        return Err(RequestParseError::InvalidRequest(
-            "request cannot contain result or error".to_string(),
-        ));
+        return Err(RequestParseError::InvalidRequest {
+            id: Some(id),
+            message: "request cannot contain result or error".to_string(),
+        });
     }
-    let params = RequestParams::from_method_params(method, raw.params)
-        .map_err(RequestParseError::InvalidRequest)?;
+    let params = RequestParams::from_method_params(method, raw.params).map_err(|message| {
+        RequestParseError::InvalidRequest {
+            id: Some(id),
+            message,
+        }
+    })?;
     Ok(ParsedClientMessage::Request { id, params })
+}
+
+fn extract_u64(value: &Value) -> Option<u64> {
+    match value {
+        Value::Number(number) => number.as_u64(),
+        _ => None,
+    }
 }
 
 pub fn parse_service_message(line: &str) -> Result<ParsedServiceMessage, RequestParseError> {
@@ -207,9 +247,10 @@ pub fn parse_service_message(line: &str) -> Result<ParsedServiceMessage, Request
                 (Some(result), None) => ServiceResponse::Success(result),
                 (None, Some(error)) => ServiceResponse::Error(error),
                 _ => {
-                    return Err(RequestParseError::InvalidRequest(
-                        "response must contain result or error".to_string(),
-                    ));
+                    return Err(RequestParseError::InvalidRequest {
+                        id: None,
+                        message: "response must contain result or error".to_string(),
+                    });
                 }
             };
             Ok(ParsedServiceMessage::Response { id, response })
@@ -222,36 +263,33 @@ pub fn parse_service_message(line: &str) -> Result<ParsedServiceMessage, Request
             let notification = serde_json::from_value(value)?;
             Ok(ParsedServiceMessage::Notification(notification))
         }
-        _ => Err(RequestParseError::InvalidRequest(
-            "message is neither response nor notification".to_string(),
-        )),
+        _ => Err(RequestParseError::InvalidRequest {
+            id: None,
+            message: "message is neither response nor notification".to_string(),
+        }),
     }
 }
 
 fn require_jsonrpc(raw: &RawMessage) -> Result<(), RequestParseError> {
     match raw.jsonrpc.as_deref() {
         Some("2.0") => Ok(()),
-        _ => Err(RequestParseError::InvalidRequest(
-            "jsonrpc must be 2.0".to_string(),
-        )),
-    }
-}
-
-fn parse_id(id: Option<&Value>) -> Result<u64, RequestParseError> {
-    match id {
-        Some(Value::Number(number)) => number
-            .as_u64()
-            .ok_or_else(|| RequestParseError::InvalidRequest("id must be u64".to_string())),
-        _ => Err(RequestParseError::InvalidRequest(
-            "id must be numeric".to_string(),
-        )),
+        _ => Err(RequestParseError::InvalidRequest {
+            id: None,
+            message: "jsonrpc must be 2.0".to_string(),
+        }),
     }
 }
 
 fn parse_response_id(id: Option<&Value>) -> Result<Option<u64>, RequestParseError> {
     match id {
         None | Some(Value::Null) => Ok(None),
-        Some(_) => parse_id(id).map(Some),
+        Some(value) => match extract_u64(value) {
+            Some(id) => Ok(Some(id)),
+            None => Err(RequestParseError::InvalidRequest {
+                id: None,
+                message: "response id must be a u64".to_string(),
+            }),
+        },
     }
 }
 

@@ -86,6 +86,35 @@ async fn eof_on_stdin_exits_cleanly() -> TestResult {
 }
 
 #[tokio::test]
+async fn invalid_utf8_returns_parse_error_and_loop_continues() -> TestResult {
+    let mut harness = spawn_harness();
+    harness.stdin.write_all(b"\xff\xfe\n").await?;
+    let (id, response) = read_response(&mut harness.stdout).await?;
+    assert_eq!(id, None);
+    assert!(matches!(response, ServiceResponse::Error(_)));
+
+    write_request(&mut harness.stdin, 4, RequestParams::HealthPing).await?;
+    let (id, response) = read_response(&mut harness.stdout).await?;
+    assert_eq!(id, Some(4));
+    assert!(matches!(response, ServiceResponse::Success(_)));
+
+    shutdown(harness).await
+}
+
+#[tokio::test]
+async fn invalid_request_correlates_error_to_extracted_id() -> TestResult {
+    let mut harness = spawn_harness();
+    let bogus = br#"{"jsonrpc":"2.0","id":42,"method":"health.ping","params":{"unexpected":"value"}}"#;
+    harness.stdin.write_all(bogus).await?;
+    harness.stdin.write_all(b"\n").await?;
+    let (id, response) = read_response(&mut harness.stdout).await?;
+    assert_eq!(id, Some(42));
+    assert!(matches!(response, ServiceResponse::Error(_)));
+
+    shutdown(harness).await
+}
+
+#[tokio::test]
 async fn concurrent_ping_ids_are_correlated() -> TestResult {
     let mut harness = spawn_harness();
     for id in 1..=100 {
