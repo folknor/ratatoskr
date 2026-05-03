@@ -150,6 +150,35 @@ pub struct ActionPlanAck {
 // ---------------------------------------------------------------------------
 
 /// Per-operation result emitted by the worker.
+///
+/// **Phase 2 task 25 lockdown** (per `docs/service/phase-2-plan.md`
+/// scope item 18): the wire is narrower than the domain
+/// `core::actions::ActionOutcome` / `ActionError` shape. Provider
+/// taxonomies (HTTP 4xx vs 5xx, network vs auth, etc.) collapse into
+/// `RemoteFailure` with a `retryable` flag; action-pipeline errors
+/// (`NotFound` / `InvalidState`) preserve their semantic distinction
+/// via `ConflictRejected`.
+///
+/// Per-`ActionError`-variant decisions, locked into the wire so a new
+/// variant on either side forces an explicit conversation:
+///
+/// | `ActionError` variant       | Wire mapping                   | Why                                                                    |
+/// |-----------------------------|--------------------------------|------------------------------------------------------------------------|
+/// | `Remote { kind, message }`  | `RemoteFailure { retryable }`  | Provider taxonomy collapses; `retryable` derived from `kind`           |
+/// | `Db(message)`               | `RemoteFailure { retryable: false, .. }` | DB error is treated as a hard remote failure - won't retry      |
+/// | `Build(message)`            | `RemoteFailure { retryable: false, .. }` | Payload construction can never recover                          |
+/// | `NotFound(detail)`          | `ConflictRejected { detail }`  | UI surface differs from generic remote failure - "thread is gone"      |
+/// | `InvalidState(detail)`      | `ConflictRejected { detail }`  | UI surface differs - "already in target state"                         |
+///
+/// `ActionOutcome::NoOp` collapses to `Success` on the wire (the
+/// distinction is documented as a Phase 2 acceptance in
+/// `crates/app/src/action_wire.rs` and may grow a `NoOp` variant
+/// later if the UI's no-op short-circuit becomes load-bearing).
+///
+/// Adding a new `ActionError` variant requires extending this enum
+/// and the worker's `action_outcome_to_wire` mapping. The conversion
+/// is exhaustive (no `_` arms), so the compiler enforces the
+/// contract.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum OperationResult {
@@ -166,15 +195,36 @@ pub enum OperationResult {
     /// The local state was incompatible with the operation (e.g.
     /// archiving a thread that's already archived). UI's optimistic
     /// update was already a no-op; the worker emits this so the UI
-    /// can surface a toast if it wants.
+    /// can surface a toast if it wants. Sourced from
+    /// `ActionError::NotFound` / `ActionError::InvalidState`.
     ConflictRejected { detail: String },
 }
 
-/// Provider-side failure detail. Provider-specific error variants from
-/// `core::actions::ActionError` collapse into this one shape on the
-/// wire to keep `service-api` decoupled from provider error
-/// taxonomies. The retryable flag drives `pending_operations`
+/// Provider-side failure detail.
+///
+/// Provider-specific error variants (HTTP 4xx, 5xx, network errors,
+/// JMAP method errors, IMAP NAK, etc.) all collapse into this one
+/// shape on the wire to keep `service-api` decoupled from provider
+/// error taxonomies. The `retryable` flag is the only piece of
+/// classification the wire carries: it drives `pending_operations`
 /// re-enqueue.
+///
+/// `provider_message` is best-effort human text. It is NOT a stable
+/// machine-readable field - the UI surfaces it in toasts, never
+/// branches on substring matches. Provider error rendering
+/// (HTTP-aware `Network error: ...`, `Server rejected: ...`, etc.)
+/// happens UI-side via `wire_outcome_to_action_outcome` and the
+/// existing `ActionError::user_message`.
+///
+/// `http_status` is set when the provider call hits an HTTP layer
+/// (Gmail / Graph / JMAP); IMAP and local-only paths leave it
+/// `None`. UI display does not depend on this field today; it's
+/// reserved for future telemetry / error-rendering refinements.
+///
+/// Phase 2 lockdown: this is the canonical wire shape. Adding new
+/// fields is an additive wire change; removing a field is breaking
+/// (UI and Service ship as a coupled pair so the breakage is
+/// contained, but bump the type's structure visibly).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteFailure {
     pub provider_message: String,
