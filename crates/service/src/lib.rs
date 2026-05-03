@@ -1,3 +1,4 @@
+mod boot_progress;
 mod dispatch;
 mod handlers;
 mod instance_lock;
