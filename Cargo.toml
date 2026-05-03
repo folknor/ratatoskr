@@ -30,6 +30,7 @@ members = [
 "crates/types",
 "crates/crypto-key",
 "crates/process-lifetime",
+"crates/service-state",
 ]
 
 exclude = [
