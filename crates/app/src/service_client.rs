@@ -2,15 +2,15 @@ use crate::notification_queue::NotificationQueue;
 use dashmap::DashMap;
 use serde::de::DeserializeOwned;
 use service_api::{
-    BootClassification, BootReadyResponse, BoundedLineReader, HealthPingResponse,
+    BootClassification, BootExitCode, BootReadyResponse, BoundedLineReader, HealthPingResponse,
     JsonRpcErrorObject, JsonRpcRequest, Notification, ParsedServiceMessage, PROTOCOL_VERSION,
     RequestParams, RequestTimeoutKind, ServiceError, ServiceResponse, ShutdownResponse,
     encode_message, parse_service_message,
 };
 use std::path::{Path, PathBuf};
 use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicU64, Ordering},
+    Arc, Mutex, PoisonError, Weak,
+    atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
 };
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
@@ -22,20 +22,65 @@ const NOTIFICATION_QUEUE_CAP: usize = 1024;
 
 pub type ServiceNotificationReceiver = Arc<NotificationQueue>;
 
+/// Mutable per-incarnation state. Replaced atomically on every respawn.
+///
+/// The dying child + handles are taken out by `handle_crash` (or by `Drop`,
+/// whichever races first). `pending`, `next_id`, `notifications`, and
+/// `current_generation` live on `ServiceClient` itself because they survive
+/// across respawns.
+struct RunningState {
+    child: Child,
+    stdin_tx: mpsc::Sender<Vec<u8>>,
+    reader_handle: tokio::task::JoinHandle<()>,
+    writer_handle: tokio::task::JoinHandle<()>,
+    heartbeat_handle: tokio::task::JoinHandle<()>,
+    /// Bumped on every successful spawn (initial = 1, then 2, 3, ...). The
+    /// reader task tags every notification with this value at enqueue time;
+    /// `handle_crash(dying_generation)` will only act on the state if the
+    /// matching generation is still installed.
+    generation: u32,
+}
+
+/// Immutable respawn configuration. `None` on the test single-shot
+/// `spawn_for_test` path: those clients tear down on first crash and the
+/// orchestration belongs to the test, not to the client. For the real
+/// `spawn_with_events` path, this struct carries everything `handle_crash`
+/// needs to launch a replacement Service and re-emit `SpawnEvent`s.
+struct RespawnConfig {
+    binary_path: PathBuf,
+    app_data_dir: PathBuf,
+    extra_args: Vec<String>,
+    spawn_event_tx: mpsc::Sender<SpawnEvent>,
+    /// Captured first `BootReadyResponse` for the schema-version sanity
+    /// check on every subsequent respawn. A binary swap that changes the
+    /// schema version under us is fatal: there's no safe state we can keep
+    /// running in. Stored as `Option` so we can capture it the first time
+    /// `boot.ready` returns.
+    first_boot_ready: Mutex<Option<BootReadyResponse>>,
+}
+
 pub struct ServiceClient {
-    child: Mutex<Option<Child>>,
-    stdin_tx: Option<mpsc::Sender<Vec<u8>>>,
+    state: Mutex<Option<RunningState>>,
     pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>>,
     next_id: Arc<AtomicU64>,
     notifications: ServiceNotificationReceiver,
-    reader_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
-    writer_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
-    heartbeat_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Latest generation; bumped before respawn. The dispatch-side drop
+    /// (item 15) compares notifications' tagged generation against this.
+    current_generation: AtomicU32,
+    /// Set by `Drop` to short-circuit any in-flight `handle_crash` respawn.
+    /// `handle_crash` checks before allocating a new child and again before
+    /// installing the new state, so the worst-case race is a respawn that
+    /// raced past the first check and gets cleaned up via the second one.
+    is_shutting_down: AtomicBool,
+    /// Per-client respawn knobs; `None` on the test single-shot spawn path.
+    respawn_config: Option<RespawnConfig>,
     /// Cross-platform parent-death tie-up. Held for the lifetime of the
     /// client so the OS-level safety net (Job Object on Windows) survives
     /// any failure in our explicit Drop teardown. Listed last so it drops
     /// after every other field, making the kill-on-job-close fire only as
-    /// a true last-resort.
+    /// a true last-resort. Reused across respawns: each new child is
+    /// assigned to the same `ProcessGuard` so the safety net stays in place
+    /// for the replacement.
     _process_guard: service::parent_death::ProcessGuard,
 }
 
@@ -62,6 +107,13 @@ impl std::fmt::Debug for ServiceClient {
 /// On any failure between those steps the receiver gets a single
 /// `Terminal(error)` event and the channel closes; downstream maps it to
 /// `Message::ServiceBootFailed` and exits via `iced::exit()`.
+///
+/// On respawn (post-BootReady reader-EOF or heartbeat hard-error per scope
+/// item 16 of `phase-1.5-plan.md`), `handle_crash` re-emits a fresh
+/// `ChildSpawned` followed by another `BootReady` (or `Terminal` if the
+/// respawn handshake fails). The App's notification consumer has already
+/// hooked the shared `NotificationQueue`, so the re-`ChildSpawned` is
+/// informational - the queue itself was preserved across the respawn.
 #[derive(Debug)]
 pub enum SpawnEvent {
     ChildSpawned(Arc<ServiceClient>),
@@ -104,7 +156,7 @@ pub enum ClientError {
 impl ServiceClient {
     pub async fn spawn(app_data_dir: &Path) -> Result<Arc<Self>, ClientError> {
         let exe = std::env::current_exe()?;
-        Self::spawn_inner(&exe, app_data_dir, &[]).await
+        Self::spawn_inner(&exe, app_data_dir, &[], None).await
     }
 
     /// Two-phase spawn that emits `SpawnEvent`s on the returned receiver.
@@ -117,6 +169,11 @@ impl ServiceClient {
     /// while migrations run - the splash needs the `ServiceClient` (for the
     /// notification queue) before the slow `boot.ready` round-trip
     /// completes.
+    ///
+    /// Clients spawned via this path are respawn-enabled: a post-BootReady
+    /// reader-EOF or heartbeat hard-error triggers `handle_crash`, which
+    /// launches a replacement Service and re-emits `ChildSpawned` /
+    /// `BootReady` on the same receiver.
     pub fn spawn_with_events(app_data_dir: PathBuf) -> mpsc::Receiver<SpawnEvent> {
         let exe = std::env::current_exe();
         let (tx, rx) = mpsc::channel(8);
@@ -130,7 +187,7 @@ impl ServiceClient {
                     return;
                 }
             };
-            run_spawn_flow(&exe, app_data_dir, Vec::new(), tx).await;
+            run_spawn_flow(exe, app_data_dir, Vec::new(), tx).await;
         });
         rx
     }
@@ -145,7 +202,7 @@ impl ServiceClient {
     ) -> mpsc::Receiver<SpawnEvent> {
         let (tx, rx) = mpsc::channel(8);
         tokio::spawn(async move {
-            run_spawn_flow(&binary, app_data_dir, extra_args, tx).await;
+            run_spawn_flow(binary, app_data_dir, extra_args, tx).await;
         });
         rx
     }
@@ -154,68 +211,59 @@ impl ServiceClient {
     /// extra args to the Service. Used for spawn-failure (bad binary path)
     /// and version-mismatch (`--test-fake-version=N`) coverage. Compiled
     /// out of release builds via the `test-helpers` feature.
+    ///
+    /// Clients returned from this path have `respawn_config = None`: a
+    /// crash tears down the state and stops, with no respawn attempt. The
+    /// test owns orchestration.
     #[cfg(feature = "test-helpers")]
     pub async fn spawn_for_test(
         binary: &Path,
         app_data_dir: &Path,
         extra_args: &[&str],
     ) -> Result<Arc<Self>, ClientError> {
-        Self::spawn_inner(binary, app_data_dir, extra_args).await
+        Self::spawn_inner(binary, app_data_dir, extra_args, None).await
     }
 
     async fn spawn_inner(
         binary: &Path,
         app_data_dir: &Path,
         extra_args: &[&str],
+        respawn_config: Option<RespawnConfig>,
     ) -> Result<Arc<Self>, ClientError> {
-        let mut command = Command::new(binary);
-        command
-            .arg("--service")
-            .arg("--app-data-dir")
-            .arg(app_data_dir);
-        for arg in extra_args {
-            command.arg(arg);
-        }
-        command
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::inherit())
-            .kill_on_drop(false);
-        service::parent_death::configure_command(&mut command)?;
         let process_guard = service::parent_death::ProcessGuard::new()?;
-
-        let mut child = command.spawn()?;
-        // Assign immediately; on Windows the kill-on-job-close protection
-        // only fires for processes already in the Job. The window between
-        // spawn and assign is small but non-zero; explicit shutdown via the
-        // request/timeout/SIGKILL path remains the primary teardown.
-        process_guard.assign(&child)?;
-        let stdin = child.stdin.take().ok_or(ClientError::NotConnected)?;
-        let stdout = child.stdout.take().ok_or(ClientError::NotConnected)?;
-        let (stdin_tx, stdin_rx) = mpsc::channel(STDIN_QUEUE_CAP);
-        let pending = Arc::new(DashMap::new());
+        let pending: Arc<
+            DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>,
+        > = Arc::new(DashMap::new());
         let next_id = Arc::new(AtomicU64::new(1));
         let notifications: Arc<NotificationQueue> =
             Arc::new(NotificationQueue::new(NOTIFICATION_QUEUE_CAP));
 
-        let reader_handle = tokio::spawn(reader_task(
-            stdout,
-            Arc::clone(&pending),
-            Arc::clone(&notifications),
-        ));
-        let writer_handle = tokio::spawn(writer_task(stdin, stdin_rx));
-
         let client = Arc::new(Self {
-            child: Mutex::new(Some(child)),
-            stdin_tx: Some(stdin_tx),
-            pending,
-            next_id,
-            notifications,
-            reader_handle: Mutex::new(Some(reader_handle)),
-            writer_handle: Mutex::new(Some(writer_handle)),
-            heartbeat_handle: Mutex::new(None),
+            state: Mutex::new(None),
+            pending: Arc::clone(&pending),
+            next_id: Arc::clone(&next_id),
+            notifications: Arc::clone(&notifications),
+            current_generation: AtomicU32::new(0),
+            is_shutting_down: AtomicBool::new(false),
+            respawn_config,
             _process_guard: process_guard,
         });
+
+        let generation: u32 = 1;
+        let spawned = launch_subprocess(
+            binary,
+            app_data_dir,
+            extra_args,
+            &client._process_guard,
+            Arc::clone(&pending),
+            Arc::clone(&next_id),
+            Arc::clone(&notifications),
+            Arc::downgrade(&client),
+            generation,
+        )
+        .await?;
+
+        client.install_running_state(spawned, generation);
 
         let ping: HealthPingResponse = client.request(RequestParams::HealthPing).await?;
         if ping.version != PROTOCOL_VERSION {
@@ -224,18 +272,21 @@ impl ServiceClient {
                 service: ping.version,
             });
         }
-        log::info!("Service ready (pid={})", ping.pid);
-
-        let heartbeat = tokio::spawn(heartbeat_task(
-            client.stdin_tx.as_ref().ok_or(ClientError::NotConnected)?.clone(),
-            Arc::clone(&client.pending),
-            Arc::clone(&client.next_id),
-        ));
-        if let Ok(mut guard) = client.heartbeat_handle.lock() {
-            *guard = Some(heartbeat);
-        }
-
+        log::info!("Service ready (pid={}, gen={generation})", ping.pid);
         Ok(client)
+    }
+
+    fn install_running_state(&self, spawned: SpawnedSubprocess, generation: u32) {
+        let mut guard = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        *guard = Some(RunningState {
+            child: spawned.child,
+            stdin_tx: spawned.stdin_tx,
+            reader_handle: spawned.reader_handle,
+            writer_handle: spawned.writer_handle,
+            heartbeat_handle: spawned.heartbeat_handle,
+            generation,
+        });
+        self.current_generation.store(generation, Ordering::SeqCst);
     }
 
     pub async fn request<R>(&self, params: RequestParams) -> Result<R, ClientError>
@@ -247,6 +298,10 @@ impl ServiceClient {
     }
 
     pub async fn shutdown(&self) -> Result<(), ClientError> {
+        // Tell handle_crash to bail rather than respawning if the dispatch
+        // shutdown races with reader-EOF (the Service is exiting; the EOF
+        // would otherwise look like a crash).
+        self.is_shutting_down.store(true, Ordering::SeqCst);
         let request_result = self.request::<ShutdownResponse>(RequestParams::Shutdown).await;
         match request_result {
             Ok(_) => {
@@ -279,9 +334,9 @@ impl ServiceClient {
     /// Used by integration tests to verify that the OS-level process exits
     /// after explicit shutdown or after the client is dropped.
     pub fn child_pid(&self) -> Option<u32> {
-        let guard = self.child.lock().ok()?;
-        let child = guard.as_ref()?;
-        child.id()
+        let guard = self.state.lock().ok()?;
+        let state = guard.as_ref()?;
+        state.child.id()
     }
 
     async fn request_value(
@@ -295,8 +350,17 @@ impl ServiceClient {
         self.pending.insert(id, tx);
         let mut guard = PendingGuard::new(&self.pending, id);
 
-        let Some(stdin_tx) = self.stdin_tx.as_ref() else {
-            return Err(ClientError::NotConnected);
+        // Clone stdin_tx out of the lock so we don't hold the std::sync::Mutex
+        // across the .send().await below (the `await_holding_lock` clippy
+        // lint is denied workspace-wide).
+        let stdin_tx = match self
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+        {
+            Some(state) => state.stdin_tx.clone(),
+            None => return Err(ClientError::NotConnected),
         };
 
         if stdin_tx.send(bytes).await.is_err() {
@@ -330,16 +394,16 @@ impl ServiceClient {
     }
 
     fn try_wait_child(&self) -> bool {
-        let Ok(mut guard) = self.child.lock() else {
+        let Ok(mut guard) = self.state.lock() else {
             return true;
         };
-        let Some(child) = guard.as_mut() else {
+        let Some(state) = guard.as_mut() else {
+            // No live state: child either never spawned or already torn down.
             return true;
         };
-        match child.try_wait() {
+        match state.child.try_wait() {
             Ok(Some(status)) => {
                 log::info!("service exited with status {status}");
-                *guard = None;
                 true
             }
             Ok(None) => false,
@@ -353,13 +417,13 @@ impl ServiceClient {
     fn send_sigterm(&self) {
         #[cfg(unix)]
         {
-            let Ok(guard) = self.child.lock() else {
+            let Ok(guard) = self.state.lock() else {
                 return;
             };
-            let Some(child) = guard.as_ref() else {
+            let Some(state) = guard.as_ref() else {
                 return;
             };
-            let Some(pid) = child.id() else {
+            let Some(pid) = state.child.id() else {
                 return;
             };
             let pid = match i32::try_from(pid) {
@@ -369,72 +433,304 @@ impl ServiceClient {
                     return;
                 }
             };
+            // SAFETY: SIGTERM on a PID we have an open Child handle for; the
+            // kernel keeps the PID stable until we wait() on the Child.
             let result = unsafe { libc::kill(pid, libc::SIGTERM) };
             if result != 0 {
-                log::warn!("failed to send SIGTERM to service: {}", std::io::Error::last_os_error());
+                log::warn!(
+                    "failed to send SIGTERM to service: {}",
+                    std::io::Error::last_os_error(),
+                );
             }
         }
     }
 
     fn kill_child(&self) {
-        let Ok(mut guard) = self.child.lock() else {
+        let Ok(mut guard) = self.state.lock() else {
             return;
         };
-        let Some(child) = guard.as_mut() else {
+        let Some(state) = guard.as_mut() else {
             return;
         };
-        if let Err(error) = child.start_kill() {
+        if let Err(error) = state.child.start_kill() {
             log::warn!("failed to kill service child: {error}");
         }
+    }
+
+    /// Crash handler. Invoked by the reader task on EOF/frame error and by
+    /// the heartbeat task on a hard error (per scope item 16 of
+    /// `phase-1.5-plan.md`). The `dying_generation` parameter is the
+    /// reader-or-heartbeat task's own captured generation; if a newer
+    /// incarnation has already taken state (concurrent reader EOF +
+    /// heartbeat error, or this is a stale-task callback after a respawn
+    /// has already happened), the call bails immediately.
+    ///
+    /// The respawn algorithm:
+    /// 1. Take the dying state (if its generation still matches; otherwise
+    ///    another `handle_crash` for a newer incarnation already ran).
+    /// 2. Bump current_generation, fail pending requests, drop stdin_tx,
+    ///    wait for the dying child with a 5 s watchdog (escalate to
+    ///    start_kill on timeout), abort the dying tasks.
+    /// 3. Bail if `is_shutting_down` was set (Drop is in progress).
+    /// 4. Bail if `respawn_config` is None (test single-shot path) - the
+    ///    client tears down on first crash.
+    /// 5. Bail if the initial boot hasn't completed yet (first BootReady
+    ///    has not been captured): `run_spawn_flow` owns the Terminal-on-
+    ///    initial-boot-failure surface; respawning here would race it.
+    /// 6. Sleep 1 s (the v1 crashloop bound).
+    /// 7. If the dying exit code matches a deterministic `BootExitCode`
+    ///    variant (Migration / KeyLoad / AnotherInstance), emit `Terminal`
+    ///    and stop - respawning would just hit the same failure.
+    /// 8. Launch a replacement subprocess. On any launch failure, emit
+    ///    `Terminal`. Otherwise install state, run version-check ping,
+    ///    re-emit `ChildSpawned`, run `boot.ready`, schema-version sanity
+    ///    check, re-emit `BootReady`. Any failure during these steps emits
+    ///    `Terminal`.
+    async fn handle_crash(self: Arc<Self>, dying_generation: u32) {
+        let dying_state = {
+            let mut guard = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            match guard.as_ref() {
+                Some(state) if state.generation == dying_generation => guard.take(),
+                _ => None,
+            }
+        };
+        let Some(dying_state) = dying_state else {
+            log::debug!(
+                "handle_crash(gen={dying_generation}): state already replaced; bailing",
+            );
+            return;
+        };
+
+        // Bump current_generation: any notification still queued by the
+        // dying reader task (tagged with `dying_generation`) will fail the
+        // dispatch-side generation check (item 15) and be dropped.
+        self.current_generation.fetch_add(1, Ordering::SeqCst);
+        fail_pending(&self.pending);
+
+        let RunningState {
+            mut child,
+            stdin_tx,
+            reader_handle,
+            writer_handle,
+            heartbeat_handle,
+            generation: _,
+        } = dying_state;
+        drop(stdin_tx);
+
+        let exit_status = wait_with_kill_watchdog(&mut child, Duration::from_secs(5)).await;
+        let abort_budget = Duration::from_millis(200);
+        let _ = tokio::time::timeout(abort_budget, reader_handle).await;
+        let _ = tokio::time::timeout(abort_budget, writer_handle).await;
+        let _ = tokio::time::timeout(abort_budget, heartbeat_handle).await;
+        log::warn!(
+            "service crashed (gen={dying_generation}, exit_status={exit_status:?})",
+        );
+
+        if self.is_shutting_down.load(Ordering::SeqCst) {
+            log::debug!("client is shutting down; not respawning");
+            return;
+        }
+        let Some(respawn) = self.respawn_config.as_ref() else {
+            return;
+        };
+
+        // Defer to run_spawn_flow if the initial boot hasn't finished yet:
+        // the very first crash during the initial `boot.ready` round-trip
+        // would otherwise produce two concurrent respawn drivers (this one
+        // and run_spawn_flow's Err return path racing). run_spawn_flow's
+        // Err-emits-Terminal is what the App expects; let it own that
+        // surface and bail here.
+        if respawn
+            .first_boot_ready
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_none()
+        {
+            log::debug!(
+                "handle_crash: initial boot not yet complete; deferring to run_spawn_flow",
+            );
+            return;
+        }
+
+        // 1-second cooldown is the v1 crashloop guard. Phase 8 replaces with
+        // exponential backoff + crashloop detection.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        if self.is_shutting_down.load(Ordering::SeqCst) {
+            return;
+        }
+
+        // If the dying Service exited with a deterministic boot-failure
+        // code, respawning would hit the same failure. The
+        // single-instance-lock case (AnotherInstanceRunning) is interesting:
+        // the dying Service is gone, so the lock is free; but if the dying
+        // Service exited with that code, somebody else holds the lock and
+        // respawning still won't help. Either way, emit Terminal and stop.
+        if let Some(status) = exit_status
+            && let Some(code) = status.code()
+            && let Some(boot_code) = BootExitCode::from_i32(code)
+        {
+            log::error!(
+                "service exited with deterministic boot failure {boot_code:?}; emitting Terminal",
+            );
+            let _ = respawn
+                .spawn_event_tx
+                .send(SpawnEvent::Terminal(ClientError::BootFailure {
+                    classification: BootClassification::BootFailure { code: boot_code },
+                }))
+                .await;
+            return;
+        }
+
+        if let Err(error) = self.respawn(respawn).await {
+            log::error!("respawn failed: {error}");
+            let _ = respawn
+                .spawn_event_tx
+                .send(SpawnEvent::Terminal(error))
+                .await;
+        }
+    }
+
+    async fn respawn(self: &Arc<Self>, respawn: &RespawnConfig) -> Result<(), ClientError> {
+        let new_gen = self.current_generation.load(Ordering::SeqCst);
+        let extra_arg_refs: Vec<&str> =
+            respawn.extra_args.iter().map(String::as_str).collect();
+        let spawned = launch_subprocess(
+            &respawn.binary_path,
+            &respawn.app_data_dir,
+            &extra_arg_refs,
+            &self._process_guard,
+            Arc::clone(&self.pending),
+            Arc::clone(&self.next_id),
+            Arc::clone(&self.notifications),
+            Arc::downgrade(self),
+            new_gen,
+        )
+        .await?;
+
+        // Race window: Drop fired between launch_subprocess returning and
+        // here. Tear down the new spawn directly (we own everything in
+        // `spawned`) rather than installing it.
+        if self.is_shutting_down.load(Ordering::SeqCst) {
+            spawned.reader_handle.abort();
+            spawned.writer_handle.abort();
+            spawned.heartbeat_handle.abort();
+            let mut child = spawned.child;
+            let _ = child.start_kill();
+            return Ok(());
+        }
+        self.install_running_state(spawned, new_gen);
+
+        let ping: HealthPingResponse = self.request(RequestParams::HealthPing).await?;
+        if ping.version != PROTOCOL_VERSION {
+            return Err(ClientError::VersionMismatch {
+                ui: PROTOCOL_VERSION,
+                service: ping.version,
+            });
+        }
+        log::info!("Service respawned (pid={}, gen={new_gen})", ping.pid);
+
+        // The shared Arc<NotificationQueue> survived the respawn and the
+        // App's notification subscription is still draining it. Re-emitting
+        // ChildSpawned is informational so callers that want to log the
+        // respawn can observe it; the App's subscription does not need to
+        // be re-established.
+        let _ = respawn
+            .spawn_event_tx
+            .send(SpawnEvent::ChildSpawned(Arc::clone(self)))
+            .await;
+
+        let response: BootReadyResponse = self.request(RequestParams::BootReady).await?;
+        let captured_first_check = {
+            let mut guard = respawn
+                .first_boot_ready
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            match guard.as_ref() {
+                Some(first) => Some((first.schema_version, response.schema_version)),
+                None => {
+                    *guard = Some(response.clone());
+                    None
+                }
+            }
+        };
+        if let Some((was, now)) = captured_first_check
+            && was != now
+        {
+            log::error!(
+                "respawn schema_version changed (was {was}, now {now}); binary swap detected",
+            );
+            return Err(ClientError::ServiceCrashed);
+        }
+
+        let _ = respawn
+            .spawn_event_tx
+            .send(SpawnEvent::BootReady(response))
+            .await;
+        Ok(())
     }
 }
 
 impl Drop for ServiceClient {
     fn drop(&mut self) {
-        let reader = take_join_handle(&self.reader_handle);
-        let heartbeat = take_join_handle(&self.heartbeat_handle);
-        let writer = take_join_handle(&self.writer_handle);
-        for handle in [reader.as_ref(), heartbeat.as_ref(), writer.as_ref()]
-            .into_iter()
-            .flatten()
-        {
-            handle.abort();
-        }
-        let _ = self.stdin_tx.take();
+        self.is_shutting_down.store(true, Ordering::SeqCst);
+        let dying_state = self
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
 
-        // The dropped writer task carries the ChildStdin handle; awaiting its
-        // abort lets the pipe close so the Service sees EOF and exits cleanly.
-        // Without driving the runtime here, the abort never makes progress
-        // before this Drop returns and we'd fall through to SIGKILL every
-        // time on a busy worker. block_in_place + Handle::block_on works on
-        // a multi-threaded runtime; single-threaded falls back to polling.
-        //
-        // Single-threaded fallback caveat: on a `current_thread` runtime,
-        // `runtime_for_block_on` returns None, the writer task can't run
-        // because we're occupying the only worker, ChildStdin doesn't
-        // close, the Service never sees EOF, and we go straight to SIGKILL
-        // after the 1.2 s polling budget. Production uses a multi-thread
-        // runtime (iced's daemon, plus the Service's own runtime), so this
-        // only bites tests that pin a current_thread flavor. Documented
-        // rather than fixed: a current_thread-aware Drop would need the
-        // task to drain via a different mechanism (e.g. a dedicated
-        // shutdown thread), which is more machinery than the failure mode
-        // warrants.
-        match runtime_for_block_on() {
-            Some(handle) => {
-                tokio::task::block_in_place(|| {
-                    handle.block_on(self.async_drop_wait(reader, heartbeat, writer));
-                });
-            }
-            None => {
-                drop((reader, heartbeat, writer));
-                self.poll_for_exit(Duration::from_millis(1200));
-            }
-        }
+        if let Some(state) = dying_state {
+            let RunningState {
+                mut child,
+                stdin_tx,
+                reader_handle,
+                writer_handle,
+                heartbeat_handle,
+                ..
+            } = state;
+            reader_handle.abort();
+            writer_handle.abort();
+            heartbeat_handle.abort();
+            drop(stdin_tx);
 
-        if !self.try_wait_child() {
-            self.kill_child();
-            self.poll_for_exit(Duration::from_millis(500));
+            // The aborted writer task carries the ChildStdin handle; awaiting
+            // its abort lets the pipe close so the Service sees EOF and exits
+            // cleanly. Without driving the runtime here, the abort never makes
+            // progress before this Drop returns and we'd fall through to
+            // SIGKILL every time on a busy worker. block_in_place +
+            // Handle::block_on works on a multi-threaded runtime;
+            // single-threaded falls back to polling.
+            //
+            // Single-threaded fallback caveat: on a `current_thread` runtime,
+            // `runtime_for_block_on` returns None, the writer task can't run
+            // because we're occupying the only worker, ChildStdin doesn't
+            // close, the Service never sees EOF, and we go straight to SIGKILL
+            // after the 1.2 s polling budget. Production uses a multi-thread
+            // runtime (iced's daemon, plus the Service's own runtime), so
+            // this only bites tests that pin a current_thread flavor.
+            match runtime_for_block_on() {
+                Some(handle) => {
+                    tokio::task::block_in_place(|| {
+                        handle.block_on(async_drop_wait(
+                            &mut child,
+                            reader_handle,
+                            writer_handle,
+                            heartbeat_handle,
+                        ));
+                    });
+                }
+                None => {
+                    drop((reader_handle, writer_handle, heartbeat_handle));
+                    poll_for_exit_blocking(&mut child, Duration::from_millis(1200));
+                }
+            }
+
+            if !try_wait_child_owned(&mut child) {
+                if let Err(error) = child.start_kill() {
+                    log::warn!("failed to kill service child during Drop: {error}");
+                }
+                poll_for_exit_blocking(&mut child, Duration::from_millis(500));
+            }
         }
 
         // Unblock any subscription consumer still parked in `recv()` so it
@@ -445,39 +741,78 @@ impl Drop for ServiceClient {
     }
 }
 
-impl ServiceClient {
-    async fn async_drop_wait(
-        &self,
-        reader: Option<tokio::task::JoinHandle<()>>,
-        heartbeat: Option<tokio::task::JoinHandle<()>>,
-        writer: Option<tokio::task::JoinHandle<()>>,
-    ) {
-        let abort_deadline = Duration::from_millis(200);
-        let abort_started = Instant::now();
-        for handle in [reader, heartbeat, writer].into_iter().flatten() {
-            let remaining = abort_deadline.saturating_sub(abort_started.elapsed());
-            if remaining.is_zero() {
-                continue;
-            }
-            let _ = tokio::time::timeout(remaining, handle).await;
+async fn async_drop_wait(
+    child: &mut Child,
+    reader_handle: tokio::task::JoinHandle<()>,
+    writer_handle: tokio::task::JoinHandle<()>,
+    heartbeat_handle: tokio::task::JoinHandle<()>,
+) {
+    let abort_deadline = Duration::from_millis(200);
+    let abort_started = Instant::now();
+    for handle in [reader_handle, writer_handle, heartbeat_handle] {
+        let remaining = abort_deadline.saturating_sub(abort_started.elapsed());
+        if remaining.is_zero() {
+            continue;
         }
-        let exit_deadline = Duration::from_secs(1);
-        let exit_started = Instant::now();
-        while exit_started.elapsed() < exit_deadline {
-            if self.try_wait_child() {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
+        let _ = tokio::time::timeout(remaining, handle).await;
+    }
+    let exit_deadline = Duration::from_secs(1);
+    let exit_started = Instant::now();
+    while exit_started.elapsed() < exit_deadline {
+        if try_wait_child_owned(child) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+fn try_wait_child_owned(child: &mut Child) -> bool {
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            log::info!("service exited with status {status}");
+            true
+        }
+        Ok(None) => false,
+        Err(error) => {
+            log::warn!("failed to wait for service child: {error}");
+            true
         }
     }
+}
 
-    fn poll_for_exit(&self, deadline: Duration) {
-        let started = Instant::now();
-        while started.elapsed() < deadline {
-            if self.try_wait_child() {
-                return;
+fn poll_for_exit_blocking(child: &mut Child, deadline: Duration) {
+    let started = Instant::now();
+    while started.elapsed() < deadline {
+        if try_wait_child_owned(child) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Wait for `child` with a watchdog. On timeout, escalate to `start_kill`
+/// and try one more short wait. Returns `Some(status)` if the child exited;
+/// `None` if `wait` errored or both attempts timed out (rare - the OS
+/// should not block on a kill -9'd process).
+async fn wait_with_kill_watchdog(
+    child: &mut Child,
+    watchdog: Duration,
+) -> Option<std::process::ExitStatus> {
+    match tokio::time::timeout(watchdog, child.wait()).await {
+        Ok(Ok(status)) => Some(status),
+        Ok(Err(error)) => {
+            log::warn!("wait failed on dying child: {error}");
+            None
+        }
+        Err(_) => {
+            log::warn!("dying child exceeded {watchdog:?}; escalating to start_kill");
+            if let Err(error) = child.start_kill() {
+                log::warn!("start_kill on dying child failed: {error}");
             }
-            std::thread::sleep(Duration::from_millis(20));
+            tokio::time::timeout(Duration::from_secs(1), child.wait())
+                .await
+                .ok()
+                .and_then(Result::ok)
         }
     }
 }
@@ -486,7 +821,7 @@ fn runtime_for_block_on() -> Option<tokio::runtime::Handle> {
     let handle = tokio::runtime::Handle::try_current().ok()?;
     if matches!(
         handle.runtime_flavor(),
-        tokio::runtime::RuntimeFlavor::MultiThread
+        tokio::runtime::RuntimeFlavor::MultiThread,
     ) {
         Some(handle)
     } else {
@@ -494,16 +829,153 @@ fn runtime_for_block_on() -> Option<tokio::runtime::Handle> {
     }
 }
 
-fn take_join_handle(
-    slot: &Mutex<Option<tokio::task::JoinHandle<()>>>,
-) -> Option<tokio::task::JoinHandle<()>> {
-    slot.lock().ok().and_then(|mut guard| guard.take())
+struct SpawnedSubprocess {
+    child: Child,
+    stdin_tx: mpsc::Sender<Vec<u8>>,
+    reader_handle: tokio::task::JoinHandle<()>,
+    writer_handle: tokio::task::JoinHandle<()>,
+    heartbeat_handle: tokio::task::JoinHandle<()>,
+}
+
+/// Spawn a subprocess and the three IPC tasks (reader/writer/heartbeat).
+/// Used both at initial spawn and on respawn; the only meaningful difference
+/// across calls is the `generation` value the reader and heartbeat tasks
+/// capture and tag their output with.
+#[allow(clippy::too_many_arguments)]
+async fn launch_subprocess(
+    binary: &Path,
+    app_data_dir: &Path,
+    extra_args: &[&str],
+    process_guard: &service::parent_death::ProcessGuard,
+    pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>>,
+    next_id: Arc<AtomicU64>,
+    notifications: Arc<NotificationQueue>,
+    weak_client: Weak<ServiceClient>,
+    generation: u32,
+) -> Result<SpawnedSubprocess, ClientError> {
+    let mut command = Command::new(binary);
+    command
+        .arg("--service")
+        .arg("--app-data-dir")
+        .arg(app_data_dir);
+    for arg in extra_args {
+        command.arg(arg);
+    }
+    command
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit())
+        .kill_on_drop(false);
+    service::parent_death::configure_command(&mut command)?;
+
+    let mut child = command.spawn()?;
+    // Assign immediately; on Windows the kill-on-job-close protection only
+    // fires for processes already in the Job. The window between spawn and
+    // assign is small but non-zero; explicit shutdown via the
+    // request/timeout/SIGKILL path remains the primary teardown.
+    process_guard.assign(&child)?;
+    let stdin = child.stdin.take().ok_or(ClientError::NotConnected)?;
+    let stdout = child.stdout.take().ok_or(ClientError::NotConnected)?;
+    let (stdin_tx, stdin_rx) = mpsc::channel(STDIN_QUEUE_CAP);
+
+    let reader_handle = tokio::spawn(reader_task(
+        stdout,
+        Arc::clone(&pending),
+        notifications,
+        Weak::clone(&weak_client),
+        generation,
+    ));
+    let writer_handle = tokio::spawn(writer_task(stdin, stdin_rx));
+    let heartbeat_handle = tokio::spawn(heartbeat_task(
+        stdin_tx.clone(),
+        pending,
+        next_id,
+        weak_client,
+        generation,
+    ));
+
+    Ok(SpawnedSubprocess {
+        child,
+        stdin_tx,
+        reader_handle,
+        writer_handle,
+        heartbeat_handle,
+    })
+}
+
+/// Drives the two-phase spawn flow for `spawn_with_events`. Builds the
+/// `RespawnConfig` upfront so the resulting client carries everything
+/// `handle_crash` needs to launch a replacement Service. Runs `spawn_inner`
+/// (which does the initial subprocess spawn + version-check ping), emits
+/// `ChildSpawned`, issues `boot.ready`, captures the first response for
+/// the respawn schema-version sanity check, and emits `BootReady` (or
+/// `Terminal(error)` on any failure).
+async fn run_spawn_flow(
+    binary: PathBuf,
+    app_data_dir: PathBuf,
+    extra_args: Vec<String>,
+    tx: mpsc::Sender<SpawnEvent>,
+) {
+    let respawn_config = RespawnConfig {
+        binary_path: binary.clone(),
+        app_data_dir: app_data_dir.clone(),
+        extra_args: extra_args.clone(),
+        spawn_event_tx: tx.clone(),
+        first_boot_ready: Mutex::new(None),
+    };
+
+    let extra_arg_refs: Vec<&str> = extra_args.iter().map(String::as_str).collect();
+    let client = match ServiceClient::spawn_inner(
+        &binary,
+        &app_data_dir,
+        &extra_arg_refs,
+        Some(respawn_config),
+    )
+    .await
+    {
+        Ok(client) => client,
+        Err(error) => {
+            let _ = tx.send(SpawnEvent::Terminal(error)).await;
+            return;
+        }
+    };
+    if tx
+        .send(SpawnEvent::ChildSpawned(Arc::clone(&client)))
+        .await
+        .is_err()
+    {
+        // Receiver dropped before we could deliver ChildSpawned; the App
+        // gave up on this spawn. Nothing useful to do; let the client drop.
+        return;
+    }
+    let response: Result<BootReadyResponse, ClientError> =
+        client.request(RequestParams::BootReady).await;
+    match response {
+        Ok(response) => {
+            // Stash for the schema-version sanity check on every subsequent
+            // respawn (handle_crash compares respawn boot.ready's
+            // schema_version against this one).
+            if let Some(rc) = client.respawn_config.as_ref() {
+                let mut guard = rc
+                    .first_boot_ready
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                *guard = Some(response.clone());
+            }
+            let _ = tx.send(SpawnEvent::BootReady(response)).await;
+        }
+        Err(error) => {
+            let _ = tx.send(SpawnEvent::Terminal(error)).await;
+        }
+    }
 }
 
 async fn reader_task<R>(
     stdout: R,
     pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>>,
     notifications: Arc<NotificationQueue>,
+    weak_client: Weak<ServiceClient>,
+    generation: u32,
 ) where
     R: tokio::io::AsyncRead + Unpin,
 {
@@ -527,7 +999,9 @@ async fn reader_task<R>(
                     // methods land.
                     match response {
                         ServiceResponse::Success(_) => {
-                            log::warn!("service returned uncorrelated success (payload redacted)");
+                            log::warn!(
+                                "service returned uncorrelated success (payload redacted)",
+                            );
                         }
                         ServiceResponse::Error(error) => {
                             log::warn!(
@@ -539,7 +1013,8 @@ async fn reader_task<R>(
                     }
                 }
                 Ok(ParsedServiceMessage::Notification(notification)) => {
-                    enqueue_notification(&notifications, notification).await;
+                    let tagged = tag_notification_with_generation(notification, generation);
+                    notifications.enqueue(tagged).await;
                 }
                 Err(error) => {
                     log::warn!("failed to parse service message: {error}");
@@ -547,15 +1022,44 @@ async fn reader_task<R>(
             },
             Ok(None) => {
                 fail_pending(&pending);
+                trigger_crash_handler(&weak_client, generation);
                 return;
             }
             Err(error) => {
                 log::warn!("service stdout frame error: {error}");
                 fail_pending(&pending);
+                trigger_crash_handler(&weak_client, generation);
                 return;
             }
         }
     }
+}
+
+/// Tag `BootProgress` with the reader's fixed generation so the dispatch
+/// side (item 15) can drop notifications from a dying-but-still-flushing
+/// reader. Phase 2+ adds new notification variants; each one needs a similar
+/// generation field if the dispatch must distinguish across respawns.
+fn tag_notification_with_generation(
+    notification: Notification,
+    generation: u32,
+) -> Notification {
+    match notification {
+        Notification::BootProgress(mut progress) => {
+            progress.service_generation = generation;
+            Notification::BootProgress(progress)
+        }
+    }
+}
+
+/// Spawn a `handle_crash` task on the client iff the Weak still points at
+/// a live ServiceClient. The reader/heartbeat task itself returns
+/// immediately after this; the spawned task drives the respawn or the
+/// Terminal emission.
+fn trigger_crash_handler(weak_client: &Weak<ServiceClient>, generation: u32) {
+    let Some(client) = weak_client.upgrade() else {
+        return;
+    };
+    tokio::spawn(client.handle_crash(generation));
 }
 
 fn dispatch_response(
@@ -581,10 +1085,6 @@ fn client_error_from_rpc(error: JsonRpcErrorObject) -> ClientError {
     }
 }
 
-async fn enqueue_notification(notifications: &NotificationQueue, notification: Notification) {
-    notifications.enqueue(notification).await;
-}
-
 async fn writer_task<W>(mut stdin: W, mut stdin_rx: mpsc::Receiver<Vec<u8>>)
 where
     W: AsyncWrite + Unpin,
@@ -605,6 +1105,8 @@ async fn heartbeat_task(
     stdin_tx: mpsc::Sender<Vec<u8>>,
     pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>>,
     next_id: Arc<AtomicU64>,
+    weak_client: Weak<ServiceClient>,
+    generation: u32,
 ) {
     let mut interval = tokio::time::interval(Duration::from_secs(30));
     loop {
@@ -623,10 +1125,18 @@ async fn heartbeat_task(
                 Err(error) => log::warn!("service heartbeat decode failed: {error}"),
             },
             Err(ClientError::Timeout) => {
-                log::warn!("service heartbeat missed (timeout)");
+                // Per scope item 16: Timeout is transient and does NOT
+                // trigger respawn. A long migration produces a series of
+                // 5 s ping timeouts that the heartbeat must ride out.
+                log::warn!("service heartbeat missed (timeout); not a respawn trigger");
             }
             Err(error) => {
-                log::warn!("service heartbeat exiting: {error}");
+                // Hard error per scope item 16: the writer task died (the
+                // Service is genuinely gone) or the response carried a
+                // non-Timeout error. Trigger the crash handler and exit
+                // this task; a respawn will spawn a new heartbeat.
+                log::warn!("service heartbeat hard error: {error}");
+                trigger_crash_handler(&weak_client, generation);
                 return;
             }
         }
@@ -692,45 +1202,6 @@ impl Drop for PendingGuard<'_> {
     }
 }
 
-/// Drives the two-phase spawn flow for `spawn_with_events`. Runs the
-/// existing `spawn_inner` (which does spawn + version-check ping), emits
-/// `ChildSpawned`, issues `boot.ready`, and emits `BootReady` or
-/// `Terminal(error)`.
-async fn run_spawn_flow(
-    binary: &Path,
-    app_data_dir: PathBuf,
-    extra_args: Vec<String>,
-    tx: mpsc::Sender<SpawnEvent>,
-) {
-    let extra_arg_refs: Vec<&str> = extra_args.iter().map(String::as_str).collect();
-    let client = match ServiceClient::spawn_inner(binary, &app_data_dir, &extra_arg_refs).await {
-        Ok(client) => client,
-        Err(error) => {
-            let _ = tx.send(SpawnEvent::Terminal(error)).await;
-            return;
-        }
-    };
-    if tx
-        .send(SpawnEvent::ChildSpawned(Arc::clone(&client)))
-        .await
-        .is_err()
-    {
-        // Receiver dropped before we could deliver ChildSpawned; the App
-        // gave up on this spawn. Nothing useful to do; let the client drop.
-        return;
-    }
-    let response: Result<BootReadyResponse, ClientError> =
-        client.request(RequestParams::BootReady).await;
-    match response {
-        Ok(response) => {
-            let _ = tx.send(SpawnEvent::BootReady(response)).await;
-        }
-        Err(error) => {
-            let _ = tx.send(SpawnEvent::Terminal(error)).await;
-        }
-    }
-}
-
 fn fail_pending(
     pending: &DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>,
 ) {
@@ -789,10 +1260,14 @@ mod tests {
         let next_id = Arc::new(AtomicU64::new(1));
         let (stdin_tx, mut stdin_rx) = mpsc::channel::<Vec<u8>>(8);
 
+        // Weak::new() never upgrades, so the Timeout-doesn't-respawn
+        // contract is preserved without needing a real ServiceClient.
         let task = tokio::spawn(heartbeat_task(
             stdin_tx.clone(),
             Arc::clone(&pending),
             Arc::clone(&next_id),
+            Weak::<ServiceClient>::new(),
+            1,
         ));
 
         // First interval tick (the initial tick fires immediately on
@@ -826,5 +1301,25 @@ mod tests {
         // Don't await `task` directly because it may still be in a sleep;
         // abort to keep the test fast.
         task.abort();
+    }
+
+    /// The reader's BootProgress tagging path overwrites whatever the Service
+    /// emitted with the reader's own generation. Item 15 leans on this for
+    /// its dispatch-side drop; the unit test pins the contract before the
+    /// dispatch-side lands.
+    #[test]
+    fn tag_notification_overwrites_boot_progress_generation() {
+        let n = Notification::BootProgress(service_api::BootProgress {
+            phase: service_api::BootPhase::LoadingKey,
+            message: None,
+            // Service emits a placeholder; UI must overwrite.
+            service_generation: 0,
+        });
+        let tagged = tag_notification_with_generation(n, 7);
+        match tagged {
+            Notification::BootProgress(bp) => {
+                assert_eq!(bp.service_generation, 7);
+            }
+        }
     }
 }

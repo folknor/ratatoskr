@@ -579,6 +579,191 @@ async fn second_instance_against_same_data_dir_exits_with_already_running() -> T
     Ok(())
 }
 
+/// SIGKILL the running Service mid-session and verify that the
+/// respawn machinery (commit 14) brings up a replacement child and re-emits
+/// `ChildSpawned` + `BootReady` on the same `SpawnEvent` receiver. A
+/// follow-up `health.ping` against the respawned client must succeed,
+/// proving end-to-end that the new state is live.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn respawn_after_sigkill_succeeds() -> TestResult {
+    let binary = binary_path()?;
+    let data_dir = DataDirGuard::new("respawn_after_sigkill")?;
+    let mut events = ServiceClient::spawn_with_events_for_test(
+        std::path::PathBuf::from(binary),
+        data_dir.path().to_path_buf(),
+        Vec::new(),
+    );
+
+    // Initial ChildSpawned + BootReady.
+    let first_event = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
+        .await
+        .map_err(|_| std::io::Error::other("ChildSpawned did not arrive in time"))?
+        .ok_or_else(|| std::io::Error::other("event stream closed without ChildSpawned"))?;
+    let initial_client = match first_event {
+        SpawnEvent::ChildSpawned(client) => client,
+        other => {
+            return Err(std::io::Error::other(format!(
+                "expected initial ChildSpawned, got {other:?}",
+            ))
+            .into());
+        }
+    };
+    let second_event = tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
+        .await
+        .map_err(|_| std::io::Error::other("initial BootReady did not arrive in time"))?
+        .ok_or_else(|| std::io::Error::other("event stream closed without BootReady"))?;
+    match second_event {
+        SpawnEvent::BootReady(_) => {}
+        other => {
+            return Err(std::io::Error::other(format!(
+                "expected initial BootReady, got {other:?}"
+            ))
+            .into());
+        }
+    }
+
+    let initial_pid = initial_client
+        .child_pid()
+        .ok_or_else(|| std::io::Error::other("initial child has no pid"))?;
+    let initial_pid_signed = i32::try_from(initial_pid).map_err(std::io::Error::other)?;
+    // SAFETY: SIGKILL on a known PID held alive by the ServiceClient's
+    // child handle. The client keeps the PID stable until wait().
+    let kill_result = unsafe { libc::kill(initial_pid_signed, libc::SIGKILL) };
+    if kill_result != 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+
+    // Reader observes EOF, fires handle_crash, runs the 1s respawn cooldown,
+    // launches a replacement Service, version-check pings, re-emits
+    // ChildSpawned then BootReady. Budget covers the 1s sleep + spawn +
+    // boot.ready (sub-second on a non-migrating reopen).
+    let respawn_first =
+        tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
+            .await
+            .map_err(|_| std::io::Error::other("respawn ChildSpawned did not arrive in time"))?
+            .ok_or_else(|| std::io::Error::other("event stream closed before respawn"))?;
+    let respawned_client = match respawn_first {
+        SpawnEvent::ChildSpawned(client) => client,
+        other => {
+            return Err(std::io::Error::other(format!(
+                "expected respawn ChildSpawned, got {other:?}",
+            ))
+            .into());
+        }
+    };
+    let respawn_second =
+        tokio::time::timeout(std::time::Duration::from_secs(15), events.recv())
+            .await
+            .map_err(|_| std::io::Error::other("respawn BootReady did not arrive in time"))?
+            .ok_or_else(|| std::io::Error::other("event stream closed before respawn BootReady"))?;
+    match respawn_second {
+        SpawnEvent::BootReady(response) => {
+            assert!(response.ready);
+            assert_eq!(response.schema_version, 100);
+        }
+        other => {
+            return Err(std::io::Error::other(format!(
+                "expected respawn BootReady, got {other:?}",
+            ))
+            .into());
+        }
+    }
+
+    // ServiceClient is the same allocation across the respawn (the App holds
+    // one Arc and respawn replaces internal RunningState in place); proof:
+    // the post-respawn ChildSpawned hands back the same Arc.
+    assert!(
+        std::sync::Arc::ptr_eq(&initial_client, &respawned_client),
+        "respawn must replace state in place; the Arc must be identical",
+    );
+
+    // Sanity: a health.ping against the respawned subprocess must round-trip
+    // through the new RunningState. The new child has a different PID.
+    let respawned_pid = respawned_client
+        .child_pid()
+        .ok_or_else(|| std::io::Error::other("respawned child has no pid"))?;
+    assert_ne!(initial_pid, respawned_pid);
+    let ping: HealthPingResponse = respawned_client
+        .request(RequestParams::HealthPing)
+        .await?;
+    assert_eq!(ping.version, service_api::PROTOCOL_VERSION);
+    assert_eq!(ping.pid, respawned_pid);
+
+    let _ = respawned_client.shutdown().await;
+    Ok(())
+}
+
+/// Boot-time KeyLoadFailure must NOT trigger respawn: handle_crash sees
+/// `first_boot_ready` is None and defers to run_spawn_flow (which already
+/// surfaces Terminal). No follow-up events should arrive on the receiver.
+/// Closes the crashloop concern from scope item 15: a missing key file
+/// would otherwise produce one Service-per-second forever.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn terminal_failure_at_initial_boot_does_not_respawn() -> TestResult {
+    let binary = binary_path()?;
+    let data_dir = DataDirGuard::without_key("terminal_no_respawn")?;
+    let mut events = ServiceClient::spawn_with_events_for_test(
+        std::path::PathBuf::from(binary),
+        data_dir.path().to_path_buf(),
+        Vec::new(),
+    );
+
+    let first = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
+        .await
+        .map_err(|_| std::io::Error::other("first event did not arrive"))?
+        .ok_or_else(|| std::io::Error::other("event stream closed empty"))?;
+    let _client = match first {
+        SpawnEvent::ChildSpawned(client) => client,
+        SpawnEvent::Terminal(_) => {
+            // Allowed: spawn might fail before ChildSpawned in some
+            // environments, in which case there's nothing left to test.
+            return Ok(());
+        }
+        other => {
+            return Err(std::io::Error::other(format!(
+                "expected ChildSpawned or Terminal, got {other:?}",
+            ))
+            .into());
+        }
+    };
+    let second = tokio::time::timeout(std::time::Duration::from_secs(10), events.recv())
+        .await
+        .map_err(|_| std::io::Error::other("Terminal did not arrive in time"))?
+        .ok_or_else(|| std::io::Error::other("event stream closed without Terminal"))?;
+    match second {
+        SpawnEvent::Terminal(_) => {}
+        other => {
+            return Err(std::io::Error::other(format!(
+                "expected Terminal, got {other:?}"
+            ))
+            .into());
+        }
+    }
+
+    // Window for respawn would be ~1s sleep + spawn + boot.ready. Wait
+    // longer than that and assert no follow-up event arrives.
+    let result =
+        tokio::time::timeout(std::time::Duration::from_secs(4), events.recv()).await;
+    match result {
+        Ok(Some(unexpected)) => {
+            return Err(std::io::Error::other(format!(
+                "expected no respawn after Terminal; got {unexpected:?}"
+            ))
+            .into());
+        }
+        Ok(None) => {
+            // Sender dropped; that's fine - no respawn fired.
+        }
+        Err(_) => {
+            // Timeout: no event arrived in the budget window. That's the
+            // pass condition.
+        }
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 fn pid_is_alive(pid: u32) -> std::io::Result<bool> {
     let pid = i32::try_from(pid).map_err(std::io::Error::other)?;
