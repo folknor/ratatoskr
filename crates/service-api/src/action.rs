@@ -307,6 +307,88 @@ pub struct MarkChatReadAck {
 }
 
 // ---------------------------------------------------------------------------
+// Compose send (action.send)
+// ---------------------------------------------------------------------------
+
+/// Wire-side message envelope for a compose-send. Mirrors the
+/// non-attachment fields of the Service-side `SendRequest`. Stays
+/// small (headers + bodies) so the JSON-RPC frame fits comfortably
+/// under the 4 MiB cap regardless of attachment count.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SendWireMessage {
+    pub draft_id: String,
+    pub from: String,
+    pub to: Vec<String>,
+    pub cc: Vec<String>,
+    pub bcc: Vec<String>,
+    pub subject: Option<String>,
+    pub body_html: String,
+    pub body_text: String,
+    pub in_reply_to: Option<String>,
+    pub references: Option<String>,
+    pub thread_id: Option<String>,
+}
+
+/// Per-attachment metadata carried over the wire. The bytes themselves
+/// never travel through JSON-RPC: the UI stages each attachment as a
+/// file under `<app_data>/staging/<send_id>/<index>.bin` and the
+/// handler atomically transfers it into a Service-owned vault before
+/// journaling. `content_hash` is verified against the file contents
+/// during the handler-side transfer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SendWireAttachment {
+    pub source: SendAttachmentSource,
+    pub size: u64,
+    pub mime: String,
+    pub filename: String,
+    pub content_id: Option<String>,
+}
+
+/// Where the Service should look for the attachment bytes during the
+/// handler-side ownership transfer.
+///
+/// Phase 2 ships the `StagingFile` variant only. The
+/// `PackStore { content_hash }` variant from `phase-2-plan.md` scope
+/// item 5 is deferred to Phase 6 when pack-store eviction lands - a
+/// refcount bump in Phase 2 has no eviction to keep alive against.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum SendAttachmentSource {
+    /// Path relative to `<app_data>/staging/<send_id>/`. The handler
+    /// rejects `..` segments, absolute paths, and symlinks (checked
+    /// via `lstat`, not `stat`) before reading the file.
+    StagingFile {
+        relative_path: String,
+        content_hash: [u8; 32],
+    },
+}
+
+/// `action.send` request body. The UI generates the `send_id` (UUIDv7)
+/// before issuing the request so it can correlate the eventual
+/// `ActionCompleted` notification back to the originating compose
+/// window without waiting on the ack.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SendWireRequest {
+    pub send_id: PlanId,
+    pub from_account_id: String,
+    pub message: SendWireMessage,
+    pub attachments: Vec<SendWireAttachment>,
+}
+
+/// Synchronous response to `action.send`. The handler has validated
+/// each staged attachment, transferred bytes into the Service-owned
+/// vault, and journaled the send as a quiet `kind = 'send'` row in
+/// `action_jobs`. From this point a Service crash does NOT lose the
+/// send - the worker reads the journal payload after respawn and
+/// resumes. The UI may now delete its staging directory.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(dead_code, reason = "constructed by handle_send (next commit)")]
+pub struct SendAck {
+    pub send_id: PlanId,
+    pub journaled: bool,
+}
+
+// ---------------------------------------------------------------------------
 // Job status query (action.job_status)
 // ---------------------------------------------------------------------------
 
@@ -559,5 +641,50 @@ mod tests {
         completed.set_generation(42);
         assert_eq!(completed.generation(), 42);
         assert_eq!(completed.service_generation, 42);
+    }
+
+    #[test]
+    fn send_wire_request_round_trips_through_serde() {
+        let req = SendWireRequest {
+            send_id: PlanId::new_v7(),
+            from_account_id: "acc-1".into(),
+            message: SendWireMessage {
+                draft_id: "draft-9".into(),
+                from: "Alice <alice@example.com>".into(),
+                to: vec!["bob@example.com".into()],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: Some("hello".into()),
+                body_html: "<p>hi</p>".into(),
+                body_text: "hi".into(),
+                in_reply_to: None,
+                references: None,
+                thread_id: None,
+            },
+            attachments: vec![SendWireAttachment {
+                source: SendAttachmentSource::StagingFile {
+                    relative_path: "0.bin".into(),
+                    content_hash: [7u8; 32],
+                },
+                size: 1234,
+                mime: "application/pdf".into(),
+                filename: "report.pdf".into(),
+                content_id: None,
+            }],
+        };
+        let json = serde_json::to_value(&req).expect("serialize");
+        let recovered: SendWireRequest = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(req, recovered);
+    }
+
+    #[test]
+    fn send_ack_round_trips_through_serde() {
+        let ack = SendAck {
+            send_id: PlanId::new_v7(),
+            journaled: true,
+        };
+        let json = serde_json::to_value(&ack).expect("serialize");
+        let recovered: SendAck = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(ack, recovered);
     }
 }

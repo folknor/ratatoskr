@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 
-use crate::action::{ActionWirePlan, PlanId};
+use crate::action::{ActionWirePlan, PlanId, SendWireRequest};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestTimeoutKind {
@@ -45,6 +45,25 @@ pub enum RequestParams {
     /// for deterministic replay, returns `MarkChatReadAck`. Worker
     /// dispatches provider mark-read against each thread.
     ActionMarkChatRead { chat_email: String },
+    /// Phase 2 plan scope item 5: compose-send relocates as a quiet
+    /// journal job. Handler validates the request, transfers each
+    /// attachment from `<app_data>/staging/<send_id>/` into a
+    /// Service-owned vault under `<app_data>/send_vault/<send_id>/`
+    /// (atomic rename + SHA-256 verify), journals the send as
+    /// `kind = 'send'`, and returns `SendAck`. Worker reads the
+    /// journaled vault paths, builds the MIME message, and submits
+    /// via SMTP.
+    ///
+    /// 30 s handler timeout covers SHA-256 verification of typical
+    /// attachment payloads (200 MB total verifies in ~400 ms;
+    /// gigabyte-class verifies in a few seconds). SMTP upload itself
+    /// runs on the worker, not the handler.
+    ///
+    /// Boxed to keep the `RequestParams` discriminant compact - the
+    /// inline-bytes-free `SendWireRequest` is still large (HTML + text
+    /// bodies + recipients + attachment metadata for many files) and
+    /// would otherwise dominate the enum size.
+    ActionSend { request: Box<SendWireRequest> },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -71,6 +90,7 @@ impl RequestParams {
             Self::ActionExecutePlan { .. } => "action.execute_plan",
             Self::ActionJobStatus { .. } => "action.job_status",
             Self::ActionMarkChatRead { .. } => "action.mark_chat_read",
+            Self::ActionSend { .. } => "action.send",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -104,6 +124,12 @@ impl RequestParams {
             // Handler-only budget: mark_chat_read_local + journal + ack.
             // Provider mark-read happens on the worker.
             Self::ActionMarkChatRead { .. } => RequestTimeoutKind::Finite(Duration::from_secs(10)),
+            // Handler budget: validate + per-attachment SHA-256 verify
+            // + atomic rename to vault + journal + ack. SMTP is on the
+            // worker. 30 s comfortably covers the verify step for
+            // realistic attachment sizes (gigabyte-class hashes in a
+            // few seconds on commodity hardware).
+            Self::ActionSend { .. } => RequestTimeoutKind::Finite(Duration::from_secs(30)),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
@@ -147,6 +173,7 @@ impl RequestParams {
             Self::ActionMarkChatRead { chat_email } => {
                 serde_json::json!({ "chat_email": chat_email })
             }
+            Self::ActionSend { request } => serde_json::json!({ "request": request }),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -199,6 +226,17 @@ impl RequestParams {
                     .map_err(|e| format!("action.mark_chat_read params: {e}"))?;
                 Ok(Self::ActionMarkChatRead {
                     chat_email: p.chat_email,
+                })
+            }
+            "action.send" => {
+                #[derive(Deserialize)]
+                struct P {
+                    request: SendWireRequest,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("action.send params: {e}"))?;
+                Ok(Self::ActionSend {
+                    request: Box::new(p.request),
                 })
             }
             #[cfg(feature = "test-helpers")]
@@ -342,6 +380,106 @@ mod tests {
             ],
         };
         let original = RequestParams::ActionExecutePlan { plan };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn action_send_method_name_is_dotted() {
+        let req = SendWireRequest {
+            send_id: PlanId::new_v7(),
+            from_account_id: "acc-1".into(),
+            message: crate::action::SendWireMessage {
+                draft_id: "d".into(),
+                from: "a@b".into(),
+                to: vec!["c@d".into()],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: None,
+                body_html: String::new(),
+                body_text: String::new(),
+                in_reply_to: None,
+                references: None,
+                thread_id: None,
+            },
+            attachments: Vec::new(),
+        };
+        assert_eq!(
+            RequestParams::ActionSend {
+                request: Box::new(req),
+            }
+            .method_name(),
+            "action.send",
+        );
+    }
+
+    #[test]
+    fn action_send_timeout_is_thirty_seconds() {
+        let req = SendWireRequest {
+            send_id: PlanId::new_v7(),
+            from_account_id: "acc-1".into(),
+            message: crate::action::SendWireMessage {
+                draft_id: "d".into(),
+                from: "a@b".into(),
+                to: vec!["c@d".into()],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: None,
+                body_html: String::new(),
+                body_text: String::new(),
+                in_reply_to: None,
+                references: None,
+                thread_id: None,
+            },
+            attachments: Vec::new(),
+        };
+        assert_eq!(
+            RequestParams::ActionSend {
+                request: Box::new(req),
+            }
+            .timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(30)),
+        );
+    }
+
+    #[test]
+    fn action_send_round_trips_from_method_params() {
+        use crate::action::{SendAttachmentSource, SendWireAttachment, SendWireMessage};
+
+        let req = SendWireRequest {
+            send_id: PlanId::new_v7(),
+            from_account_id: "acc-1".into(),
+            message: SendWireMessage {
+                draft_id: "draft-9".into(),
+                from: "Alice <alice@example.com>".into(),
+                to: vec!["bob@example.com".into()],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: Some("hello".into()),
+                body_html: "<p>hi</p>".into(),
+                body_text: "hi".into(),
+                in_reply_to: None,
+                references: None,
+                thread_id: None,
+            },
+            attachments: vec![SendWireAttachment {
+                source: SendAttachmentSource::StagingFile {
+                    relative_path: "0.bin".into(),
+                    content_hash: [3u8; 32],
+                },
+                size: 42,
+                mime: "application/pdf".into(),
+                filename: "x.pdf".into(),
+                content_id: None,
+            }],
+        };
+        let original = RequestParams::ActionSend {
+            request: Box::new(req),
+        };
         let parsed = RequestParams::from_method_params(
             original.method_name(),
             Some(original.params_value()),

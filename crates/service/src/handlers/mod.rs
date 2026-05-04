@@ -38,6 +38,9 @@ pub(crate) async fn dispatch(
         RequestParams::ActionMarkChatRead { chat_email } => {
             action_mark_chat_read::handle(&boot_state, chat_email).await
         }
+        RequestParams::ActionSend { request: _ } => Err(ServiceError::Internal(
+            "action.send handler not yet wired (Phase 2 task 3 in flight)".into(),
+        )),
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPanic => test_helpers::panic_handle().await,
         #[cfg(feature = "test-helpers")]
