@@ -355,7 +355,7 @@ These bullets come from `implementation-roadmap.md` Phase 2 § "Phase 1.5 carry-
 
 ## Phase 2 architecture deltas (as shipped)
 
-Areas where the delivered code differs from this plan. The `discrepancies.md` companion tracks the open gaps; the deltas below are settled "this is what shipped" decisions. Read the rest of this plan with these annotations in mind.
+Areas where the delivered code differs from this plan. The deltas below are settled "this is what shipped" decisions; open gaps were rehomed to `implementation-roadmap.md` § Phase 8. Read the rest of this plan with these annotations in mind.
 
 - **`service-state::WriteDbState` is scaffolded, not wired.** The crate exists and exports `WriteDbState`, but no production code constructs it - the action worker and every other Service-side write path go through `ReadDbState::from_arc(...)` and `ReadDbState::conn()`. The promotion criterion "a UI source file that tries `use service_state::WriteDbState` fails to build" passes trivially because nothing constructs the type. The actual Phase 2 invariant is narrower: `common::types::ActionProviderCtx` excludes body / inline / search store handles (regression-tested via exhaustive destructure at `crates/common/src/types.rs`), so action methods can't write to those stores. The full lockdown - `WriteDbState` is the only path to the underlying `Connection` for writes, app crate can't reach it - lands with the global write-surface lockdown in Phase 6. The `ActionDbWrite` / `ActionKeyAccess` traits in `common` mentioned below in scope item 9 also did not ship; the action context just carries `&ReadDbState` directly.
 
