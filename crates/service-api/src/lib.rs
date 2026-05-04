@@ -7,6 +7,7 @@ mod notification;
 mod redacted;
 mod request;
 mod response;
+mod sync;
 mod version;
 
 pub use action::{
@@ -29,4 +30,8 @@ pub use notification::{CoalesceKey, Notification, NotificationClass, WithGenerat
 pub use redacted::{RedactedBytes, RedactedString};
 pub use request::{RequestParams, RequestTimeoutKind};
 pub use response::{HealthPingResponse, ShutdownResponse};
+pub use sync::{
+    IndexCommitted, SyncCancelAccountParams, SyncCancelAck, SyncCompleted, SyncResult, SyncRunId,
+    SyncStartAccountParams, SyncStartAck,
+};
 pub use version::{MAX_FRAME_BYTES, PROTOCOL_VERSION};

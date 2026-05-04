@@ -229,6 +229,18 @@ impl ReadyApp {
                         log::debug!("Service notification: {}", notification.method_name());
                         Task::none()
                     }
+                    service_api::Notification::SyncCompleted(_)
+                    | service_api::Notification::IndexCommitted(_) => {
+                        // Phase 3 task 14 (sync.completed) and task 17
+                        // (index.committed) wire the consumers. Until
+                        // then the variants exist on the wire but no
+                        // app-side handler runs.
+                        log::debug!(
+                            "Service notification (Phase 3 unwired): {}",
+                            notification.method_name()
+                        );
+                        Task::none()
+                    }
                 }
             }
             Message::ActionDispatched { plan_id, outcome } => {

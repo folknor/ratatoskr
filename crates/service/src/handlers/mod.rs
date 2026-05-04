@@ -41,6 +41,16 @@ pub(crate) async fn dispatch(
             action_mark_chat_read::handle(&boot_state, chat_email).await
         }
         RequestParams::ActionSend { request } => action_send::handle(&boot_state, *request).await,
+        // Phase 3 plan task 9 wires these into the SyncRuntime handlers
+        // landing in `crates/service/src/handlers/sync.rs`. Until then,
+        // the variants exist on `RequestParams` (so the wire types
+        // compile) but the handler dispatch refuses them.
+        RequestParams::SyncStartAccount { .. } => Err(ServiceError::Internal(
+            "sync.start_account handler not yet wired; Phase 3 task 9".into(),
+        )),
+        RequestParams::SyncCancelAccount { .. } => Err(ServiceError::Internal(
+            "sync.cancel_account handler not yet wired; Phase 3 task 9".into(),
+        )),
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPanic => test_helpers::panic_handle().await,
         #[cfg(feature = "test-helpers")]

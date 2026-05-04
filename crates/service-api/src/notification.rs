@@ -1,5 +1,6 @@
 use crate::action::{ActionCompleted, OperationOutcome, SyncProgress};
 use crate::boot::{BootPhaseKind, BootProgress};
+use crate::sync::{IndexCommitted, SyncCompleted};
 use serde::{Deserialize, Serialize};
 
 /// Marker + accessor trait for notification payloads that carry a
@@ -102,6 +103,20 @@ pub enum Notification {
     /// flood the queue.
     #[serde(rename = "sync.progress")]
     SyncProgress(SyncProgress),
+    /// Per-run completion from the sync runtime. `MustDeliver`: a
+    /// dropped completion leaves the UI's pending future hanging
+    /// forever (the broadcast subscribers in `pending_syncs` resolve
+    /// only when this notification arrives). Cross-respawn safety via
+    /// `service_generation`. Routed by `run_id`, not `account_id`, so
+    /// multiple waiters per run all resolve cleanly.
+    #[serde(rename = "sync.completed")]
+    SyncCompleted(SyncCompleted),
+    /// Tantivy writer-task post-commit notification. `MustDeliver` on
+    /// the wire taxonomy, with a 30 s send-deadline degrade in the
+    /// writer task (the signal is advisory; the next commit will
+    /// re-trigger the UI's reader reload).
+    #[serde(rename = "index.committed")]
+    IndexCommitted(IndexCommitted),
     /// Test-only variant. Lets the wire round-trip be exercised when no
     /// production payload happens to match a test's needs. Compiled out of
     /// release builds via `#[cfg(test)]`.
@@ -127,6 +142,8 @@ impl Notification {
             Self::SyncProgress(progress) => NotificationClass::Coalesce {
                 key: CoalesceKey::SyncProgress(progress.account_id.clone()),
             },
+            Self::SyncCompleted(_) => NotificationClass::MustDeliver,
+            Self::IndexCommitted(_) => NotificationClass::MustDeliver,
             #[cfg(test)]
             Self::TestEcho { .. } => NotificationClass::Coalesce {
                 key: CoalesceKey::test("test.echo"),
@@ -140,6 +157,8 @@ impl Notification {
             Self::OperationOutcome(_) => "action.operation_outcome",
             Self::ActionCompleted(_) => "action.completed",
             Self::SyncProgress(_) => "sync.progress",
+            Self::SyncCompleted(_) => "sync.completed",
+            Self::IndexCommitted(_) => "index.committed",
             #[cfg(test)]
             Self::TestEcho { .. } => "test.echo",
         }
@@ -178,6 +197,8 @@ impl Notification {
             Self::OperationOutcome(outcome) => Some(outcome.generation()),
             Self::ActionCompleted(completed) => Some(completed.generation()),
             Self::SyncProgress(progress) => Some(progress.generation()),
+            Self::SyncCompleted(completed) => Some(completed.generation()),
+            Self::IndexCommitted(committed) => Some(committed.generation()),
             #[cfg(test)]
             Self::TestEcho { .. } => None,
         }
@@ -198,6 +219,8 @@ impl Notification {
             Self::OperationOutcome(outcome) => outcome.set_generation(generation),
             Self::ActionCompleted(completed) => completed.set_generation(generation),
             Self::SyncProgress(progress) => progress.set_generation(generation),
+            Self::SyncCompleted(completed) => completed.set_generation(generation),
+            Self::IndexCommitted(committed) => committed.set_generation(generation),
             #[cfg(test)]
             Self::TestEcho { .. } => {}
         }
@@ -441,5 +464,122 @@ mod tests {
         let json = serde_json::to_value(&key).expect("serialize");
         let recovered: CoalesceKey = serde_json::from_value(json).expect("deserialize");
         assert_eq!(key, recovered);
+    }
+
+    // -- Phase 3 catalog cases --------------------------------------------
+    //
+    // The catalog is enumerated manually here; a new variant on
+    // `Notification` is a compile error in `class()` /
+    // `method_name()` / `service_generation()` / `set_service_generation()`,
+    // but the *behaviour* of those arms (the right class, the right method
+    // name, the right round-trip) needs an explicit test. SyncCompleted
+    // and IndexCommitted are the Phase 3 additions.
+
+    #[test]
+    fn sync_completed_classifies_as_must_deliver() {
+        use crate::sync::{SyncCompleted, SyncResult, SyncRunId};
+        let n = Notification::SyncCompleted(SyncCompleted {
+            account_id: "a".into(),
+            run_id: SyncRunId::new_v7(),
+            result: SyncResult::Completed,
+            service_generation: 0,
+        });
+        assert!(matches!(n.class(), NotificationClass::MustDeliver));
+    }
+
+    #[test]
+    fn sync_completed_method_name_is_dotted() {
+        use crate::sync::{SyncCompleted, SyncResult, SyncRunId};
+        let n = Notification::SyncCompleted(SyncCompleted {
+            account_id: "a".into(),
+            run_id: SyncRunId::new_v7(),
+            result: SyncResult::Cancelled,
+            service_generation: 0,
+        });
+        assert_eq!(n.method_name(), "sync.completed");
+    }
+
+    #[test]
+    fn sync_completed_service_generation_round_trips() {
+        use crate::sync::{SyncCompleted, SyncResult, SyncRunId};
+        let mut n = Notification::SyncCompleted(SyncCompleted {
+            account_id: "a".into(),
+            run_id: SyncRunId::new_v7(),
+            result: SyncResult::Completed,
+            service_generation: 1,
+        });
+        assert_eq!(n.service_generation(), Some(1));
+        n.set_service_generation(99);
+        assert_eq!(n.service_generation(), Some(99));
+    }
+
+    #[test]
+    fn sync_completed_round_trips_through_parse_service_message() {
+        use crate::sync::{SyncCompleted, SyncResult, SyncRunId};
+        let run_id = SyncRunId::new_v7();
+        let original = Notification::SyncCompleted(SyncCompleted {
+            account_id: "acc-1".into(),
+            run_id,
+            result: SyncResult::Failed("oops".into()),
+            service_generation: 5,
+        });
+        let json = serde_json::to_string(&original).expect("serialize");
+        let line = format!(r#"{{"jsonrpc":"2.0",{}}}"#, &json[1..json.len() - 1]);
+        let parsed = parse_service_message(&line).expect("parse");
+        match parsed {
+            ParsedServiceMessage::Notification(Notification::SyncCompleted(c)) => {
+                assert_eq!(c.account_id, "acc-1");
+                assert_eq!(c.run_id, run_id);
+                assert_eq!(c.result, SyncResult::Failed("oops".into()));
+                assert_eq!(c.service_generation, 5);
+            }
+            other => panic!("expected SyncCompleted notification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn index_committed_classifies_as_must_deliver() {
+        use crate::sync::IndexCommitted;
+        let n = Notification::IndexCommitted(IndexCommitted {
+            service_generation: 0,
+        });
+        assert!(matches!(n.class(), NotificationClass::MustDeliver));
+    }
+
+    #[test]
+    fn index_committed_method_name_is_dotted() {
+        use crate::sync::IndexCommitted;
+        let n = Notification::IndexCommitted(IndexCommitted {
+            service_generation: 0,
+        });
+        assert_eq!(n.method_name(), "index.committed");
+    }
+
+    #[test]
+    fn index_committed_service_generation_round_trips() {
+        use crate::sync::IndexCommitted;
+        let mut n = Notification::IndexCommitted(IndexCommitted {
+            service_generation: 1,
+        });
+        assert_eq!(n.service_generation(), Some(1));
+        n.set_service_generation(99);
+        assert_eq!(n.service_generation(), Some(99));
+    }
+
+    #[test]
+    fn index_committed_round_trips_through_parse_service_message() {
+        use crate::sync::IndexCommitted;
+        let original = Notification::IndexCommitted(IndexCommitted {
+            service_generation: 13,
+        });
+        let json = serde_json::to_string(&original).expect("serialize");
+        let line = format!(r#"{{"jsonrpc":"2.0",{}}}"#, &json[1..json.len() - 1]);
+        let parsed = parse_service_message(&line).expect("parse");
+        match parsed {
+            ParsedServiceMessage::Notification(Notification::IndexCommitted(c)) => {
+                assert_eq!(c.service_generation, 13);
+            }
+            other => panic!("expected IndexCommitted notification, got {other:?}"),
+        }
     }
 }

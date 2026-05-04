@@ -542,7 +542,9 @@ async fn boot_progress_notifications_emitted_in_order() -> TestResult {
             Ok(ParsedServiceMessage::Notification(
                 Notification::OperationOutcome(_)
                 | Notification::ActionCompleted(_)
-                | Notification::SyncProgress(_),
+                | Notification::SyncProgress(_)
+                | Notification::SyncCompleted(_)
+                | Notification::IndexCommitted(_),
             )) => {
                 // Action / sync notifications cannot fire during the
                 // boot sequence (no action.execute_plan is in flight,

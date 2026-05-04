@@ -683,7 +683,9 @@ impl BootingApp {
                     // log so a leaked notification is observable.
                     service_api::Notification::OperationOutcome(_)
                     | service_api::Notification::ActionCompleted(_)
-                    | service_api::Notification::SyncProgress(_) => {
+                    | service_api::Notification::SyncProgress(_)
+                    | service_api::Notification::SyncCompleted(_)
+                    | service_api::Notification::IndexCommitted(_) => {
                         log::debug!(
                             "BootingApp dropped action / sync notification (no plans in flight pre-ready)"
                         );

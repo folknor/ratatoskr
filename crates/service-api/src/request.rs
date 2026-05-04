@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::time::Duration;
 
 use crate::action::{ActionWirePlan, PlanId, SendWireRequest};
+use crate::sync::{SyncCancelAccountParams, SyncStartAccountParams};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestTimeoutKind {
@@ -64,6 +65,24 @@ pub enum RequestParams {
     /// bodies + recipients + attachment metadata for many files) and
     /// would otherwise dominate the enum size.
     ActionSend { request: Box<SendWireRequest> },
+    /// Phase 3 plan scope item 1: kick a sync run for the given account.
+    /// The handler returns within microseconds (acquires the per-account
+    /// map lock, spawns a runner if one is not already in flight, acks).
+    /// Sync work runs in the spawned task; the eventual `sync.completed`
+    /// notification carries the run's outcome.
+    ///
+    /// 5 s timeout: the handler is bounded enqueue + spawn work, never
+    /// blocking on the network.
+    SyncStartAccount { params: SyncStartAccountParams },
+    /// Phase 3 plan scope item 1: cancel an in-flight sync run for the
+    /// given account. Flips the runner's `CancellationToken`; the runner
+    /// observes at the next checkpoint and emits `sync.completed` with
+    /// `Cancelled`. The ack carries the active `run_id` so the caller
+    /// can subscribe and await the cancellation outcome.
+    ///
+    /// 5 s timeout: the handler returns immediately after flipping the
+    /// token; cancellation propagation is asynchronous.
+    SyncCancelAccount { params: SyncCancelAccountParams },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -91,6 +110,8 @@ impl RequestParams {
             Self::ActionJobStatus { .. } => "action.job_status",
             Self::ActionMarkChatRead { .. } => "action.mark_chat_read",
             Self::ActionSend { .. } => "action.send",
+            Self::SyncStartAccount { .. } => "sync.start_account",
+            Self::SyncCancelAccount { .. } => "sync.cancel_account",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -130,6 +151,13 @@ impl RequestParams {
             // realistic attachment sizes (gigabyte-class hashes in a
             // few seconds on commodity hardware).
             Self::ActionSend { .. } => RequestTimeoutKind::Finite(Duration::from_secs(30)),
+            // Handler-only budget: enqueue + spawn (or look up an
+            // existing runner and return the ack). No network or DB
+            // work in the handler path.
+            Self::SyncStartAccount { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            // Handler-only budget: flip the token + return the active
+            // `run_id`. Cancellation propagation is async.
+            Self::SyncCancelAccount { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
@@ -174,6 +202,8 @@ impl RequestParams {
                 serde_json::json!({ "chat_email": chat_email })
             }
             Self::ActionSend { request } => serde_json::json!({ "request": request }),
+            Self::SyncStartAccount { params } => serde_json::json!({ "params": params }),
+            Self::SyncCancelAccount { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -238,6 +268,24 @@ impl RequestParams {
                 Ok(Self::ActionSend {
                     request: Box::new(p.request),
                 })
+            }
+            "sync.start_account" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: SyncStartAccountParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("sync.start_account params: {e}"))?;
+                Ok(Self::SyncStartAccount { params: p.params })
+            }
+            "sync.cancel_account" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: SyncCancelAccountParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("sync.cancel_account params: {e}"))?;
+                Ok(Self::SyncCancelAccount { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {
@@ -479,6 +527,92 @@ mod tests {
         };
         let original = RequestParams::ActionSend {
             request: Box::new(req),
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn sync_start_account_method_name_is_dotted() {
+        let p = RequestParams::SyncStartAccount {
+            params: SyncStartAccountParams {
+                account_id: "acc-1".into(),
+            },
+        };
+        assert_eq!(p.method_name(), "sync.start_account");
+    }
+
+    #[test]
+    fn sync_start_account_timeout_is_five_seconds() {
+        let p = RequestParams::SyncStartAccount {
+            params: SyncStartAccountParams {
+                account_id: "acc-1".into(),
+            },
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn sync_start_account_does_not_bypass_admission() {
+        let p = RequestParams::SyncStartAccount {
+            params: SyncStartAccountParams {
+                account_id: "acc-1".into(),
+            },
+        };
+        assert!(!p.bypasses_admission());
+    }
+
+    #[test]
+    fn sync_start_account_round_trips_from_method_params() {
+        let original = RequestParams::SyncStartAccount {
+            params: SyncStartAccountParams {
+                account_id: "acc-1".into(),
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn sync_cancel_account_method_name_is_dotted() {
+        let p = RequestParams::SyncCancelAccount {
+            params: SyncCancelAccountParams {
+                account_id: "acc-1".into(),
+            },
+        };
+        assert_eq!(p.method_name(), "sync.cancel_account");
+    }
+
+    #[test]
+    fn sync_cancel_account_timeout_is_five_seconds() {
+        let p = RequestParams::SyncCancelAccount {
+            params: SyncCancelAccountParams {
+                account_id: "acc-1".into(),
+            },
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn sync_cancel_account_round_trips_from_method_params() {
+        let original = RequestParams::SyncCancelAccount {
+            params: SyncCancelAccountParams {
+                account_id: "acc-1".into(),
+            },
         };
         let parsed = RequestParams::from_method_params(
             original.method_name(),
