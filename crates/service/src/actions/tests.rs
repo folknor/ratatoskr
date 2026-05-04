@@ -20,7 +20,7 @@ fn make_test_ctx() -> (ActionContext, tempfile::TempDir) {
     let db = ReadDbState::from_arc(Arc::new(Mutex::new(conn)));
 
     // Stores: tempdir-backed
-    let body_store = store::body_store::BodyStoreState::init(tmp.path()).expect("body store");
+    let body_store = store::body_store::BodyStoreReadState::init(tmp.path()).expect("body store");
     let inline_images =
         store::inline_image_store::InlineImageStoreState::init(tmp.path()).expect("inline images");
     let search = search::SearchState::init(tmp.path()).expect("search");

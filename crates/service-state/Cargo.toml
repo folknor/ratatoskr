@@ -12,5 +12,11 @@ workspace = true
 
 [dependencies]
 db = { path = "../db" }
+log = "0.4"
 rusqlite.workspace = true
+store = { path = "../stores" }
 tokio = { workspace = true, features = ["rt"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }

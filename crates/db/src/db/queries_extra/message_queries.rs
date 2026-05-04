@@ -19,7 +19,7 @@ pub struct MessageAttachment {
 ///
 /// NOTE: Message bodies live in the body store (bodies.db), NOT in the
 /// messages table. This function returns the `snippet` as a fallback
-/// for pop-out windows. For full body content, use `BodyStoreState::get()`
+/// for pop-out windows. For full body content, use `BodyStoreReadState::get()`
 /// from `crates/stores/`.
 ///
 /// Returns `(body_text, body_html)`. body_html is always None here.

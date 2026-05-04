@@ -424,8 +424,8 @@ fn build_action_context(
     encryption_key: [u8; 32],
     app_data_dir: &std::path::Path,
 ) -> Result<ActionContext, String> {
-    let body_store = store::body_store::BodyStoreState::init(app_data_dir)
-        .map_err(|e| format!("BodyStoreState::init: {e}"))?;
+    let body_store = store::body_store::BodyStoreReadState::init(app_data_dir)
+        .map_err(|e| format!("BodyStoreReadState::init: {e}"))?;
     let inline_images = store::inline_image_store::InlineImageStoreState::init(app_data_dir)
         .map_err(|e| format!("InlineImageStoreState::init: {e}"))?;
     let search = search::SearchState::init(app_data_dir)

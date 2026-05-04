@@ -4,7 +4,7 @@ use super::{Connection, Row, params};
 
 use super::ReadDbState;
 use super::types::DbMessage;
-use crate::body_store::{BodyStoreState, MessageBody};
+use crate::body_store::{BodyStoreReadState, MessageBody};
 use crate::provider::crypto::{decrypt_value, is_encrypted};
 
 // Re-export everything from db::queries so existing callers keep working.
@@ -162,7 +162,7 @@ fn read_setting_map(
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub async fn get_messages_for_thread(
     db: &ReadDbState,
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     account_id: String,
     thread_id: String,
 ) -> Result<Vec<DbMessage>, String> {

@@ -6,7 +6,7 @@ use db::progress::{self, ProgressReporter};
 
 use db::db::ReadDbState;
 use search::SearchState;
-use store::body_store::BodyStoreState;
+use store::body_store::BodyStoreReadState;
 use store::inline_image_store::InlineImageStoreState;
 use sync::pipeline;
 use sync::threading;
@@ -55,7 +55,7 @@ fn emit_progress(progress: &dyn ProgressReporter, event: &SyncProgressEvent) {
 pub async fn imap_initial_sync(
     progress: &dyn ProgressReporter,
     db: &ReadDbState,
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
     account_id: &str,
@@ -340,7 +340,7 @@ pub async fn imap_initial_sync(
 async fn sync_single_folder(
     progress: &dyn ProgressReporter,
     db: &ReadDbState,
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
     config: &ImapConfig,

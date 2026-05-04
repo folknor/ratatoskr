@@ -13,7 +13,7 @@ use db::db::queries_extra::{
 };
 use db::progress::ProgressReporter;
 use search::SearchState;
-use store::body_store::BodyStoreState;
+use store::body_store::BodyStoreReadState;
 use store::inline_image_store::InlineImageStoreState;
 
 use super::client::GraphClient;
@@ -41,7 +41,7 @@ struct SyncCtx<'a> {
     client: &'a GraphClient,
     account_id: &'a str,
     db: &'a ReadDbState,
-    body_store: &'a BodyStoreState,
+    body_store: &'a BodyStoreReadState,
     inline_images: &'a InlineImageStoreState,
     search: &'a SearchState,
     progress: &'a dyn ProgressReporter,

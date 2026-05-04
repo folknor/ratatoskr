@@ -4,7 +4,7 @@
 //! doesn't need direct provider dependencies.
 
 use crate::actions::provider::create_provider;
-use crate::body_store::BodyStoreState;
+use crate::body_store::BodyStoreReadState;
 use crate::db::ReadDbState;
 use crate::search::SearchState;
 use common::types::ProviderCtx;
@@ -18,7 +18,7 @@ pub async fn sync_delta_for_account(
     db: &ReadDbState,
     account_id: &str,
     encryption_key: [u8; 32],
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
     progress: &dyn db::progress::ProgressReporter,

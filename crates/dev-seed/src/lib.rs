@@ -125,7 +125,7 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
         .map_err(|e| format!("commit: {e}"))?;
 
     // ── Populate body store via the stores API ──────────────
-    let body_store = store::body_store::BodyStoreState::init(app_data_dir)
+    let body_store = store::body_store::BodyStoreReadState::init(app_data_dir)
         .map_err(|e| format!("init body store: {e}"))?;
 
     let bs_conn = body_store.conn();

@@ -1,11 +1,11 @@
 pub use db::db::queries_extra::thread_persistence::*;
 
 use search::{SearchDocument, SearchState};
-use store::body_store::{BodyStoreState, MessageBody};
+use store::body_store::{BodyStoreReadState, MessageBody};
 use store::inline_image_store::{InlineImage, InlineImageStoreState};
 
 pub async fn store_message_bodies<T, FId, FHtml, FText>(
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     messages: &[T],
     provider_name: &str,
     id_of: FId,

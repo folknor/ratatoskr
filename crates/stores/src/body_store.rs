@@ -8,7 +8,7 @@ use rusqlite::{Connection, params};
 /// Bodies are stored as zlib-compressed BLOBs, keeping the metadata DB small.
 /// Same `Mutex<Connection>` + `spawn_blocking` pattern as `ReadDbState`.
 #[derive(Clone)]
-pub struct BodyStoreState {
+pub struct BodyStoreReadState {
     conn: Arc<Mutex<Connection>>,
 }
 
@@ -24,8 +24,44 @@ pub struct MessageBody {
 /// Zlib compression level - 3 gives a good ratio/speed trade-off.
 const ZLIB_LEVEL: u32 = 3;
 
+/// Open (or create) the on-disk body store database. Phase 3 task 2
+/// extracts this so `service-state::BodyStoreWriteState` can open its
+/// own writer-side connection against the same file without
+/// duplicating the pragma + schema-init logic.
+pub fn open_body_store_connection(app_data_dir: &Path) -> Result<Connection, String> {
+    std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
+
+    let db_path = app_data_dir.join("bodies.db");
+    log::info!("Initializing body store at {}", db_path.display());
+    let conn = Connection::open(&db_path).map_err(|e| format!("open body store: {e}"))?;
+
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA temp_store = MEMORY;
+         PRAGMA mmap_size = 2147483648;
+         PRAGMA cache_size = -32000;
+         PRAGMA busy_timeout = 15000;",
+    )
+    .map_err(|e| format!("body store pragmas: {e}"))?;
+
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS bodies (
+            message_id TEXT PRIMARY KEY,
+            body_html  BLOB,
+            body_text  BLOB
+         );",
+    )
+    .map_err(|e| format!("create bodies table: {e}"))?;
+
+    Ok(conn)
+}
+
+/// Zlib-compress a body string. Phase 3 task 2 exposes this so
+/// `service-state::BodyStoreWriteState::put_batch` can drive its own
+/// connection without duplicating the compression code path.
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
-fn compress(data: &str) -> Result<Vec<u8>, String> {
+pub fn compress_body(data: &str) -> Result<Vec<u8>, String> {
     use flate2::Compression;
     use flate2::write::ZlibEncoder;
     use std::io::Write;
@@ -39,6 +75,13 @@ fn compress(data: &str) -> Result<Vec<u8>, String> {
         log::error!("zlib compression finish failed: {e}");
         format!("zlib compress finish: {e}")
     })
+}
+
+// Internal alias used by the existing read-state methods. The pub
+// helper above is the canonical API for cross-crate consumers.
+#[cfg_attr(feature = "hotpath", hotpath::measure)]
+fn compress(data: &str) -> Result<Vec<u8>, String> {
+    compress_body(data)
 }
 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
@@ -58,40 +101,20 @@ fn decompress(data: &[u8]) -> Result<String, String> {
     })
 }
 
-impl BodyStoreState {
+impl BodyStoreReadState {
     /// Access the underlying connection Arc for synchronous use.
     pub fn conn(&self) -> Arc<Mutex<Connection>> {
         Arc::clone(&self.conn)
     }
 
-    /// Open (or create) the body store database.
+    /// Open (or create) the body store database. The Service writer
+    /// half (Phase 3) opens its own connection against the same on-disk
+    /// file via `open_body_store_connection`; SQLite's WAL handles
+    /// multi-reader-single-writer concurrency. The Rust types enforce
+    /// the read/write split at the API surface.
     #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn init(app_data_dir: &Path) -> Result<Self, String> {
-        std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
-
-        let db_path = app_data_dir.join("bodies.db");
-        log::info!("Initializing body store at {}", db_path.display());
-        let conn = Connection::open(&db_path).map_err(|e| format!("open body store: {e}"))?;
-
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;
-             PRAGMA temp_store = MEMORY;
-             PRAGMA mmap_size = 2147483648;
-             PRAGMA cache_size = -32000;
-             PRAGMA busy_timeout = 15000;",
-        )
-        .map_err(|e| format!("body store pragmas: {e}"))?;
-
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS bodies (
-                message_id TEXT PRIMARY KEY,
-                body_html  BLOB,
-                body_text  BLOB
-             );",
-        )
-        .map_err(|e| format!("create bodies table: {e}"))?;
-
+        let conn = open_body_store_connection(app_data_dir)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })

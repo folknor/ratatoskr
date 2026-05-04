@@ -10,7 +10,7 @@ use serde::Serialize;
 use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 use search::SearchState;
-use store::body_store::BodyStoreState;
+use store::body_store::BodyStoreReadState;
 use store::inline_image_store::InlineImageStoreState;
 
 use super::client::JmapClient;
@@ -40,7 +40,7 @@ pub(crate) struct SyncCtx<'a> {
     pub client: &'a JmapClient,
     pub account_id: &'a str,
     pub db: &'a ReadDbState,
-    pub body_store: &'a BodyStoreState,
+    pub body_store: &'a BodyStoreReadState,
     pub inline_images: &'a InlineImageStoreState,
     pub search: &'a SearchState,
     pub progress: &'a dyn ProgressReporter,
@@ -81,7 +81,7 @@ pub async fn jmap_initial_sync(
     account_id: &str,
     days_back: i64,
     db: &ReadDbState,
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
     progress: &dyn ProgressReporter,
@@ -236,7 +236,7 @@ pub async fn jmap_delta_sync(
     client: &JmapClient,
     account_id: &str,
     db: &ReadDbState,
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
     progress: &dyn ProgressReporter,

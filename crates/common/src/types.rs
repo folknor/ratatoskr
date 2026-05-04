@@ -3,7 +3,7 @@ use serde::Serialize;
 use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 use search::SearchState;
-use store::body_store::BodyStoreState;
+use store::body_store::BodyStoreReadState;
 use store::inline_image_store::InlineImageStoreState;
 
 /// Standardized sync result across all providers.
@@ -29,7 +29,7 @@ pub struct AutoSyncResult {
 pub struct ProviderCtx<'a> {
     pub account_id: &'a str,
     pub db: &'a ReadDbState,
-    pub body_store: &'a BodyStoreState,
+    pub body_store: &'a BodyStoreReadState,
     pub inline_images: &'a InlineImageStoreState,
     pub search: &'a SearchState,
     pub progress: &'a dyn ProgressReporter,

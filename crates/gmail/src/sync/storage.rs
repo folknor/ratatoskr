@@ -1,7 +1,7 @@
 use db::db::ReadDbState;
 use db::db::queries_extra::{AttachmentInsertRow, MessageInsertRow, insert_attachments, insert_messages};
 use search::{SearchDocument, SearchState};
-use store::body_store::BodyStoreState;
+use store::body_store::BodyStoreReadState;
 use store::inline_image_store::{InlineImage, InlineImageStoreState};
 
 use super::super::client::GmailClient;
@@ -18,7 +18,7 @@ pub(super) async fn process_single_thread(
     thread_id: &str,
     account_id: &str,
     db: &ReadDbState,
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
 ) -> Result<String, String> {
@@ -268,7 +268,7 @@ fn insert_reactions(
 // Body store helper
 // ---------------------------------------------------------------------------
 
-async fn store_bodies(body_store: &BodyStoreState, messages: &[ParsedGmailMessage]) {
+async fn store_bodies(body_store: &BodyStoreReadState, messages: &[ParsedGmailMessage]) {
     sync_persistence::store_message_bodies(
         body_store,
         messages,

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::body_store::BodyStoreState;
+use crate::body_store::BodyStoreReadState;
 use crate::db::ReadDbState;
 use crate::inline_image_store::InlineImageStoreState;
 
@@ -9,7 +9,7 @@ use crate::inline_image_store::InlineImageStoreState;
 /// the attachment cache limit.
 pub async fn prepare_account_resync(
     db: &ReadDbState,
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     inline_images: &InlineImageStoreState,
     app_data_dir: &Path,
     account_id: &str,

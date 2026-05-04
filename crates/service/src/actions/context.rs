@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use store::body_store::BodyStoreState;
+use store::body_store::BodyStoreReadState;
 use db::db::ReadDbState;
 use search::SearchState;
 use store::inline_image_store::InlineImageStoreState;
@@ -15,7 +15,7 @@ use store::inline_image_store::InlineImageStoreState;
 #[derive(Clone)]
 pub struct ActionContext {
     pub db: ReadDbState,
-    pub body_store: BodyStoreState,
+    pub body_store: BodyStoreReadState,
     pub inline_images: InlineImageStoreState,
     pub search: SearchState,
     pub encryption_key: [u8; 32],

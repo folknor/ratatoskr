@@ -6,7 +6,7 @@ use db::progress::ProgressReporter;
 
 use db::db::ReadDbState;
 use search::SearchState;
-use store::body_store::BodyStoreState;
+use store::body_store::BodyStoreReadState;
 use store::inline_image_store::InlineImageStoreState;
 use sync::pipeline;
 use sync::threading;
@@ -40,7 +40,7 @@ fn compute_since_date(days_back: i64) -> String {
 pub async fn imap_delta_sync(
     _progress: &dyn ProgressReporter,
     db: &ReadDbState,
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
     account_id: &str,
@@ -448,7 +448,7 @@ async fn fetch_folder_uids(
     folder_label_id: &str,
     since_date: &str,
     db: &ReadDbState,
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
     all_threadable: &mut Vec<threading::ThreadableMessage>,
@@ -514,7 +514,7 @@ async fn fetch_uids_on_session(
     folder_label_id: &str,
     uids: &[u32],
     db: &ReadDbState,
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
     all_threadable: &mut Vec<threading::ThreadableMessage>,
@@ -580,7 +580,7 @@ async fn process_folder_delta(
     delta: &DeltaCheckResult,
     days_back: i64,
     db: &ReadDbState,
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
     all_threadable: &mut Vec<threading::ThreadableMessage>,

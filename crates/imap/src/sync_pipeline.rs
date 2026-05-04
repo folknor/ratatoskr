@@ -8,7 +8,7 @@ use db::db::queries_extra::{
 };
 use search::{SearchDocument, SearchState};
 use seen::MessageAddresses;
-use store::body_store::BodyStoreState;
+use store::body_store::BodyStoreReadState;
 use store::inline_image_store::{InlineImage, InlineImageStoreState};
 use sync::persistence;
 
@@ -211,7 +211,7 @@ impl DbInsertData {
 /// Store a chunk of converted messages to all four subsystems.
 pub(crate) async fn store_chunk(
     db: &ReadDbState,
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
     chunk: &[ConvertedMessage],
@@ -297,7 +297,7 @@ impl MessageAddresses for ImapAddressData {
 
 /// Store bodies in the body store (compressed, separate DB).
 /// Fire-and-forget pattern - errors are logged but don't fail the sync.
-pub async fn store_bodies(body_store: &BodyStoreState, messages: &[ConvertedMessage]) {
+pub async fn store_bodies(body_store: &BodyStoreReadState, messages: &[ConvertedMessage]) {
     let bodies: Vec<store::body_store::MessageBody> = messages
         .iter()
         .filter(|m| m.imap_msg.body_html.is_some() || m.imap_msg.body_text.is_some())

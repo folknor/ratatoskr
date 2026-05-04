@@ -1,5 +1,5 @@
 use search::{SearchDocument, SearchState};
-use store::body_store::BodyStoreState;
+use store::body_store::BodyStoreReadState;
 use store::inline_image_store::{InlineImage, InlineImageStoreState};
 
 use super::super::parse::ParsedGraphMessage;
@@ -10,7 +10,7 @@ use sync::{persistence as sync_persistence, progress as sync_progress};
 // Body store helper
 // ---------------------------------------------------------------------------
 
-pub(super) async fn store_bodies(body_store: &BodyStoreState, messages: &[ParsedGraphMessage]) {
+pub(super) async fn store_bodies(body_store: &BodyStoreReadState, messages: &[ParsedGraphMessage]) {
     sync_persistence::store_message_bodies(
         body_store,
         messages,

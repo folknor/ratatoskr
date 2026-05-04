@@ -132,7 +132,7 @@ pub struct ReadyApp {
     pub(crate) jmap_push_receiver: JmapPushReceiver,
 
     /// Body store for loading decompressed message bodies via core.
-    pub(crate) body_store: Option<rtsk::body_store::BodyStoreState>,
+    pub(crate) body_store: Option<rtsk::body_store::BodyStoreReadState>,
     /// Inline image store for CID image resolution.
     pub(crate) inline_image_store: Option<store::inline_image_store::InlineImageStoreState>,
     /// Encryption key for decrypting provider credentials (OAuth tokens,

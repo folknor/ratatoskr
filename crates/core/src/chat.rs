@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use common::types::ActionProviderCtx;
 use db::db::ReadDbState;
-use store::body_store::BodyStoreState;
+use store::body_store::BodyStoreReadState;
 use store::inline_image_store::InlineImageStoreState;
 
 use crate::actions::ActionContext;
@@ -201,7 +201,7 @@ pub async fn get_chat_contacts(db: &ReadDbState) -> Result<Vec<ChatContactSummar
 /// `inline_image_store` so the UI can render them directly.
 pub async fn get_chat_timeline(
     db: &ReadDbState,
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     inline_image_store: &InlineImageStoreState,
     email: &str,
     user_emails: &[String],

@@ -23,6 +23,9 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
 
+pub mod body_store_write;
+pub use body_store_write::BodyStoreWriteState;
+
 /// Service-only writer half of the shared database state.
 ///
 /// Identical in shape to today's `db::DbState`; the rename + pool

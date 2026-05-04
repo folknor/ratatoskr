@@ -10,7 +10,7 @@ use common::types::{ProviderCtx, SyncResult};
 use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 use search::SearchState;
-use store::body_store::BodyStoreState;
+use store::body_store::BodyStoreReadState;
 use store::inline_image_store::InlineImageStoreState;
 use sync::state as sync_state;
 
@@ -30,7 +30,7 @@ pub async fn sync_shared_mailbox(
     primary_client: &GraphClient,
     mailbox_id: &str,
     db: &ReadDbState,
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
     progress: &dyn ProgressReporter,
@@ -111,7 +111,7 @@ pub async fn sync_shared_mailbox(
 pub async fn sync_all_shared_mailboxes(
     primary_client: &GraphClient,
     db: &ReadDbState,
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     inline_images: &InlineImageStoreState,
     search: &SearchState,
     progress: &dyn ProgressReporter,

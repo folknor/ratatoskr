@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use db::db::ReadDbState;
 use search::SearchState;
-use store::body_store::BodyStoreState;
+use store::body_store::BodyStoreReadState;
 
 use super::client;
 use super::connection::connect;
@@ -217,7 +217,7 @@ pub async fn run_deletion_detection(
     config: &ImapConfig,
     account_id: &str,
     db: &ReadDbState,
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     search: &SearchState,
     syncable_folders: &[&super::types::ImapFolder],
     state_map: &HashMap<String, sync_pipeline::FolderSyncState>,

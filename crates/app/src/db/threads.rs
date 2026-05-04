@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use iced::widget::image;
-use rtsk::body_store::BodyStoreState;
+use rtsk::body_store::BodyStoreReadState;
 use rtsk::db::queries_extra::set_attachments_collapsed;
 use rtsk::db::queries_extra::thread_detail::{
     self, ThreadDetail, assemble_thread_detail, fetch_thread_bodies, query_inline_cid_hashes,
@@ -124,7 +124,7 @@ fn convert_attachment(att: thread_detail::ThreadAttachment) -> ThreadAttachment 
 #[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub async fn load_thread_detail(
     db: &Db,
-    body_store: &BodyStoreState,
+    body_store: &BodyStoreReadState,
     inline_image_store: Option<&InlineImageStoreState>,
     account_id: String,
     thread_id: String,
@@ -237,9 +237,9 @@ impl Db {
 }
 
 /// Initialize the body store for loading message bodies.
-pub fn init_body_store() -> Result<BodyStoreState, String> {
+pub fn init_body_store() -> Result<BodyStoreReadState, String> {
     let data_dir = crate::APP_DATA_DIR
         .get()
         .ok_or_else(|| "APP_DATA_DIR not set".to_string())?;
-    BodyStoreState::init(data_dir)
+    BodyStoreReadState::init(data_dir)
 }

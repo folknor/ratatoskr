@@ -6,7 +6,7 @@ use db::db::queries_extra::{
 };
 use search::{SearchDocument, SearchState};
 use store::attachment_cache::hash_bytes;
-use store::body_store::BodyStoreState;
+use store::body_store::BodyStoreReadState;
 use store::inline_image_store::{InlineImage, MAX_INLINE_SIZE};
 
 use super::super::parse::ParsedJmapMessage;
@@ -329,7 +329,7 @@ fn sync_keyword_labels(
 // Body store helper
 // ---------------------------------------------------------------------------
 
-async fn store_bodies(body_store: &BodyStoreState, messages: &[ParsedJmapMessage]) {
+async fn store_bodies(body_store: &BodyStoreReadState, messages: &[ParsedJmapMessage]) {
     sync_persistence::store_message_bodies(
         body_store,
         messages,
