@@ -7,7 +7,7 @@ use db::progress::{self, ProgressReporter};
 use db::db::ReadDbState;
 use search::SearchState;
 use store::body_store::BodyStoreReadState;
-use store::inline_image_store::InlineImageStoreState;
+use store::inline_image_store::InlineImageStoreReadState;
 use sync::pipeline;
 use sync::threading;
 use sync::types::{ImapSyncResult, MessageMeta, SyncProgressEvent};
@@ -56,7 +56,7 @@ pub async fn imap_initial_sync(
     progress: &dyn ProgressReporter,
     db: &ReadDbState,
     body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     search: &SearchState,
     account_id: &str,
     config: &ImapConfig,
@@ -341,7 +341,7 @@ async fn sync_single_folder(
     progress: &dyn ProgressReporter,
     db: &ReadDbState,
     body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     search: &SearchState,
     config: &ImapConfig,
     account_id: &str,

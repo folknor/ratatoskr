@@ -1,6 +1,6 @@
 use search::{SearchDocument, SearchState};
 use store::body_store::BodyStoreReadState;
-use store::inline_image_store::{InlineImage, InlineImageStoreState};
+use store::inline_image_store::{InlineImage, InlineImageStoreReadState};
 
 use super::super::parse::ParsedGraphMessage;
 use super::SyncCtx;
@@ -23,7 +23,7 @@ pub(super) async fn store_bodies(body_store: &BodyStoreReadState, messages: &[Pa
 }
 
 pub(super) async fn store_inline_images(
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     messages: &[ParsedGraphMessage],
 ) {
     let images: Vec<InlineImage> = messages

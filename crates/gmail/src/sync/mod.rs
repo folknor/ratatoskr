@@ -9,7 +9,7 @@ use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 use search::SearchState;
 use store::body_store::BodyStoreReadState;
-use store::inline_image_store::InlineImageStoreState;
+use store::inline_image_store::InlineImageStoreReadState;
 
 use super::client::GmailClient;
 use sync::{progress as sync_progress, state as sync_state};
@@ -26,7 +26,7 @@ pub(crate) struct SyncCtx<'a> {
     pub account_id: &'a str,
     pub db: &'a ReadDbState,
     pub body_store: &'a BodyStoreReadState,
-    pub inline_images: &'a InlineImageStoreState,
+    pub inline_images: &'a InlineImageStoreReadState,
     pub search: &'a SearchState,
     pub progress: &'a dyn ProgressReporter,
 }
@@ -43,7 +43,7 @@ pub async fn gmail_initial_sync(
     days_back: i64,
     db: &ReadDbState,
     body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     search: &SearchState,
     progress: &dyn ProgressReporter,
 ) -> Result<(), String> {
@@ -129,7 +129,7 @@ pub async fn gmail_delta_sync(
     account_id: &str,
     db: &ReadDbState,
     body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     search: &SearchState,
     progress: &dyn ProgressReporter,
 ) -> Result<GmailSyncResult, String> {

@@ -7,14 +7,49 @@ use rusqlite::{Connection, params};
 /// Anything larger falls through to the file-based cache.
 pub const MAX_INLINE_SIZE: usize = 256 * 1024;
 /// Cap the inline image store so signature/logo blobs do not grow forever.
-const MAX_INLINE_STORE_BYTES: u64 = 128 * 1024 * 1024;
+pub const MAX_INLINE_STORE_BYTES: u64 = 128 * 1024 * 1024;
+
+/// Open (or create) the on-disk inline image store database. Phase 3
+/// task 3 extracts this so `service-state::InlineImageStoreWriteState`
+/// can open its own writer-side connection against the same file.
+pub fn open_inline_image_store_connection(app_data_dir: &Path) -> Result<Connection, String> {
+    std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
+
+    let db_path = app_data_dir.join("inline_images.db");
+    log::info!("Initializing inline image store at {}", db_path.display());
+    let conn =
+        Connection::open(&db_path).map_err(|e| format!("open inline image store: {e}"))?;
+
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA temp_store = MEMORY;
+         PRAGMA mmap_size = 268435456;
+         PRAGMA cache_size = -16000;
+         PRAGMA busy_timeout = 15000;",
+    )
+    .map_err(|e| format!("inline image store pragmas: {e}"))?;
+
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS inline_images (
+            content_hash TEXT PRIMARY KEY,
+            data         BLOB NOT NULL,
+            mime_type    TEXT NOT NULL,
+            size         INTEGER NOT NULL,
+            created_at   INTEGER NOT NULL DEFAULT (unixepoch())
+         );",
+    )
+    .map_err(|e| format!("create inline_images table: {e}"))?;
+
+    Ok(conn)
+}
 
 /// Separate SQLite database for small inline images (signatures, logos).
 ///
 /// Content-addressed by xxh3 hash. Identical blobs across messages share
 /// one row. No compression - images are already compressed (PNG, JPEG, GIF).
 #[derive(Clone)]
-pub struct InlineImageStoreState {
+pub struct InlineImageStoreReadState {
     conn: Arc<Mutex<Connection>>,
 }
 
@@ -27,37 +62,13 @@ pub struct InlineImage {
     pub mime_type: String,
 }
 
-impl InlineImageStoreState {
-    /// Open (or create) the inline image store database.
+impl InlineImageStoreReadState {
+    /// Open (or create) the inline image store database. The Service
+    /// writer half (Phase 3) opens its own connection against the same
+    /// on-disk file via `open_inline_image_store_connection`; SQLite
+    /// WAL handles multi-reader-single-writer concurrency.
     pub fn init(app_data_dir: &Path) -> Result<Self, String> {
-        std::fs::create_dir_all(app_data_dir).map_err(|e| format!("create app dir: {e}"))?;
-
-        let db_path = app_data_dir.join("inline_images.db");
-        log::info!("Initializing inline image store at {}", db_path.display());
-        let conn =
-            Connection::open(&db_path).map_err(|e| format!("open inline image store: {e}"))?;
-
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;
-             PRAGMA temp_store = MEMORY;
-             PRAGMA mmap_size = 268435456;
-             PRAGMA cache_size = -16000;
-             PRAGMA busy_timeout = 15000;",
-        )
-        .map_err(|e| format!("inline image store pragmas: {e}"))?;
-
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS inline_images (
-                content_hash TEXT PRIMARY KEY,
-                data         BLOB NOT NULL,
-                mime_type    TEXT NOT NULL,
-                size         INTEGER NOT NULL,
-                created_at   INTEGER NOT NULL DEFAULT (unixepoch())
-             );",
-        )
-        .map_err(|e| format!("create inline_images table: {e}"))?;
-
+        let conn = open_inline_image_store_connection(app_data_dir)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -377,7 +388,7 @@ pub fn find_unreferenced_hashes(
 ///
 /// Call this **before** deleting messages/accounts so cascade-deleted
 /// attachment rows can still be queried. After deletion, pass the result
-/// to `InlineImageStoreState::delete_unreferenced()`.
+/// to `InlineImageStoreReadState::delete_unreferenced()`.
 pub fn collect_inline_hashes_for_account(
     conn: &Connection,
     account_id: &str,

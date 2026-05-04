@@ -11,7 +11,7 @@ use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 use search::SearchState;
 use store::body_store::BodyStoreReadState;
-use store::inline_image_store::InlineImageStoreState;
+use store::inline_image_store::InlineImageStoreReadState;
 use sync::state as sync_state;
 
 use super::client::GraphClient;
@@ -31,7 +31,7 @@ pub async fn sync_shared_mailbox(
     mailbox_id: &str,
     db: &ReadDbState,
     body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     search: &SearchState,
     progress: &dyn ProgressReporter,
     account_id: &str,
@@ -112,7 +112,7 @@ pub async fn sync_all_shared_mailboxes(
     primary_client: &GraphClient,
     db: &ReadDbState,
     body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     search: &SearchState,
     progress: &dyn ProgressReporter,
     account_id: &str,

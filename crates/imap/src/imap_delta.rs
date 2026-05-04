@@ -7,7 +7,7 @@ use db::progress::ProgressReporter;
 use db::db::ReadDbState;
 use search::SearchState;
 use store::body_store::BodyStoreReadState;
-use store::inline_image_store::InlineImageStoreState;
+use store::inline_image_store::InlineImageStoreReadState;
 use sync::pipeline;
 use sync::threading;
 use sync::types::{ImapSyncResult, MessageMeta};
@@ -41,7 +41,7 @@ pub async fn imap_delta_sync(
     _progress: &dyn ProgressReporter,
     db: &ReadDbState,
     body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     search: &SearchState,
     account_id: &str,
     config: &ImapConfig,
@@ -449,7 +449,7 @@ async fn fetch_folder_uids(
     since_date: &str,
     db: &ReadDbState,
     body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     search: &SearchState,
     all_threadable: &mut Vec<threading::ThreadableMessage>,
     all_meta: &mut HashMap<String, MessageMeta>,
@@ -515,7 +515,7 @@ async fn fetch_uids_on_session(
     uids: &[u32],
     db: &ReadDbState,
     body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     search: &SearchState,
     all_threadable: &mut Vec<threading::ThreadableMessage>,
     all_meta: &mut HashMap<String, MessageMeta>,
@@ -581,7 +581,7 @@ async fn process_folder_delta(
     days_back: i64,
     db: &ReadDbState,
     body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     search: &SearchState,
     all_threadable: &mut Vec<threading::ThreadableMessage>,
     all_meta: &mut HashMap<String, MessageMeta>,

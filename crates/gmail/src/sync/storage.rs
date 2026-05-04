@@ -2,7 +2,7 @@ use db::db::ReadDbState;
 use db::db::queries_extra::{AttachmentInsertRow, MessageInsertRow, insert_attachments, insert_messages};
 use search::{SearchDocument, SearchState};
 use store::body_store::BodyStoreReadState;
-use store::inline_image_store::{InlineImage, InlineImageStoreState};
+use store::inline_image_store::{InlineImage, InlineImageStoreReadState};
 
 use super::super::client::GmailClient;
 use super::super::parse::{ParsedGmailMessage, parse_gmail_message};
@@ -19,7 +19,7 @@ pub(super) async fn process_single_thread(
     account_id: &str,
     db: &ReadDbState,
     body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     search: &SearchState,
 ) -> Result<String, String> {
     let thread = client.get_thread(thread_id, "full", db).await?;
@@ -281,7 +281,7 @@ async fn store_bodies(body_store: &BodyStoreReadState, messages: &[ParsedGmailMe
 }
 
 async fn store_inline_images(
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     messages: &[ParsedGmailMessage],
 ) {
     let images: Vec<InlineImage> = messages

@@ -8,7 +8,7 @@ use crate::body_store::BodyStoreReadState;
 use crate::db::ReadDbState;
 use crate::search::SearchState;
 use common::types::ProviderCtx;
-use store::inline_image_store::InlineImageStoreState;
+use store::inline_image_store::InlineImageStoreReadState;
 
 /// Run a delta sync for a single account.
 ///
@@ -19,7 +19,7 @@ pub async fn sync_delta_for_account(
     account_id: &str,
     encryption_key: [u8; 32],
     body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     search: &SearchState,
     progress: &dyn db::progress::ProgressReporter,
 ) -> Result<(), String> {

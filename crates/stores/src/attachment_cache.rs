@@ -11,7 +11,7 @@ use db::db::queries_extra::{
     get_total_cached_attachment_size, update_attachment_cache_fields,
 };
 
-use crate::inline_image_store::InlineImageStoreState;
+use crate::inline_image_store::InlineImageStoreReadState;
 
 /// Data returned when an attachment is fetched (base64-encoded body + size).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,7 +213,7 @@ pub async fn enforce_cache_limit(db: &ReadDbState, app_data_dir: &Path) -> Resul
 /// Check the inline image SQLite store for small cached images.
 pub async fn try_inline_image_hit(
     db: &ReadDbState,
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     account_id: &str,
     message_id: &str,
     attachment_id: &str,
@@ -280,7 +280,7 @@ pub async fn try_cache_hit(
 /// Spawns a background task so the caller is not blocked.
 pub fn cache_after_fetch(
     db: &ReadDbState,
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     app_data_dir: &Path,
     account_id: &str,
     message_id: &str,

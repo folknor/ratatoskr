@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::body_store::BodyStoreReadState;
 use crate::db::ReadDbState;
-use crate::inline_image_store::InlineImageStoreState;
+use crate::inline_image_store::InlineImageStoreReadState;
 
 /// Prepare an account for full resync by deleting all messages, threads,
 /// and sync state, then cleaning up orphaned inline images and enforcing
@@ -10,7 +10,7 @@ use crate::inline_image_store::InlineImageStoreState;
 pub async fn prepare_account_resync(
     db: &ReadDbState,
     body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     app_data_dir: &Path,
     account_id: &str,
 ) -> Result<(), String> {

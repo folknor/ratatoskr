@@ -2,7 +2,7 @@ pub use db::db::queries_extra::thread_persistence::*;
 
 use search::{SearchDocument, SearchState};
 use store::body_store::{BodyStoreReadState, MessageBody};
-use store::inline_image_store::{InlineImage, InlineImageStoreState};
+use store::inline_image_store::{InlineImage, InlineImageStoreReadState};
 
 pub async fn store_message_bodies<T, FId, FHtml, FText>(
     body_store: &BodyStoreReadState,
@@ -41,7 +41,7 @@ pub async fn store_message_bodies<T, FId, FHtml, FText>(
 }
 
 pub async fn store_inline_images(
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     images: Vec<InlineImage>,
     provider_name: &str,
 ) {

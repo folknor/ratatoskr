@@ -9,7 +9,7 @@ use db::db::queries_extra::{
 use search::{SearchDocument, SearchState};
 use seen::MessageAddresses;
 use store::body_store::BodyStoreReadState;
-use store::inline_image_store::{InlineImage, InlineImageStoreState};
+use store::inline_image_store::{InlineImage, InlineImageStoreReadState};
 use sync::persistence;
 
 use super::convert::ConvertedMessage;
@@ -212,7 +212,7 @@ impl DbInsertData {
 pub(crate) async fn store_chunk(
     db: &ReadDbState,
     body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     search: &SearchState,
     chunk: &[ConvertedMessage],
     account_id: &str,
@@ -319,7 +319,7 @@ pub async fn store_bodies(body_store: &BodyStoreReadState, messages: &[Converted
 
 /// Store small inline images in the content-addressed blob store. Fire-and-forget.
 pub async fn store_inline_images(
-    inline_images: &InlineImageStoreState,
+    inline_images: &InlineImageStoreReadState,
     messages: &[ConvertedMessage],
 ) {
     let images: Vec<InlineImage> = messages

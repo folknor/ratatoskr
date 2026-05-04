@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use store::body_store::BodyStoreReadState;
 use db::db::ReadDbState;
 use search::SearchState;
-use store::inline_image_store::InlineImageStoreState;
+use store::inline_image_store::InlineImageStoreReadState;
 
 /// Dependencies needed by the action service.
 ///
@@ -16,7 +16,7 @@ use store::inline_image_store::InlineImageStoreState;
 pub struct ActionContext {
     pub db: ReadDbState,
     pub body_store: BodyStoreReadState,
-    pub inline_images: InlineImageStoreState,
+    pub inline_images: InlineImageStoreReadState,
     pub search: SearchState,
     pub encryption_key: [u8; 32],
     /// When true, `enqueue_if_retryable` is suppressed. Set by the

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use common::types::ActionProviderCtx;
 use db::db::ReadDbState;
 use store::body_store::BodyStoreReadState;
-use store::inline_image_store::InlineImageStoreState;
+use store::inline_image_store::InlineImageStoreReadState;
 
 use crate::actions::ActionContext;
 use crate::actions::pending::enqueue_if_retryable;
@@ -202,7 +202,7 @@ pub async fn get_chat_contacts(db: &ReadDbState) -> Result<Vec<ChatContactSummar
 pub async fn get_chat_timeline(
     db: &ReadDbState,
     body_store: &BodyStoreReadState,
-    inline_image_store: &InlineImageStoreState,
+    inline_image_store: &InlineImageStoreReadState,
     email: &str,
     user_emails: &[String],
     limit: usize,
@@ -301,7 +301,7 @@ pub async fn get_chat_timeline(
             let conn = conn
                 .lock()
                 .map_err(|e| format!("inline image store lock: {e}"))?;
-            InlineImageStoreState::get_batch_sync(&conn, &unique_hashes)
+            InlineImageStoreReadState::get_batch_sync(&conn, &unique_hashes)
         })
         .await
         .map_err(|e| format!("spawn_blocking: {e}"))??

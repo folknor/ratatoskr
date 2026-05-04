@@ -14,7 +14,7 @@ use db::db::queries_extra::{
 use db::progress::ProgressReporter;
 use search::SearchState;
 use store::body_store::BodyStoreReadState;
-use store::inline_image_store::InlineImageStoreState;
+use store::inline_image_store::InlineImageStoreReadState;
 
 use super::client::GraphClient;
 use super::folder_mapper::FolderMap;
@@ -42,7 +42,7 @@ struct SyncCtx<'a> {
     account_id: &'a str,
     db: &'a ReadDbState,
     body_store: &'a BodyStoreReadState,
-    inline_images: &'a InlineImageStoreState,
+    inline_images: &'a InlineImageStoreReadState,
     search: &'a SearchState,
     progress: &'a dyn ProgressReporter,
 }

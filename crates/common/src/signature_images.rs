@@ -5,7 +5,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use xxhash_rust::xxh3::xxh3_64;
 
-use store::inline_image_store::{InlineImage, InlineImageStoreState};
+use store::inline_image_store::{InlineImage, InlineImageStoreReadState};
 
 // ---------------------------------------------------------------------------
 // Regex patterns - compiled once via LazyLock
@@ -107,10 +107,10 @@ pub fn process_signature_images(html: &str) -> ProcessedSignatureImages {
 
 /// Persist extracted signature images into the inline image store.
 ///
-/// Convenience wrapper around [`InlineImageStoreState::put_batch`] that takes
+/// Convenience wrapper around [`InlineImageStoreReadState::put_batch`] that takes
 /// the images from [`process_signature_images`].
 pub async fn store_signature_images(
-    inline_store: &InlineImageStoreState,
+    inline_store: &InlineImageStoreReadState,
     images: Vec<InlineImage>,
 ) -> Result<(), String> {
     inline_store.put_batch(images).await

@@ -24,7 +24,9 @@ use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 
 pub mod body_store_write;
+pub mod inline_image_store_write;
 pub use body_store_write::BodyStoreWriteState;
+pub use inline_image_store_write::InlineImageStoreWriteState;
 
 /// Service-only writer half of the shared database state.
 ///

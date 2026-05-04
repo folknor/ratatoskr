@@ -4,7 +4,7 @@ use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 use search::SearchState;
 use store::body_store::BodyStoreReadState;
-use store::inline_image_store::InlineImageStoreState;
+use store::inline_image_store::InlineImageStoreReadState;
 
 /// Standardized sync result across all providers.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -30,7 +30,7 @@ pub struct ProviderCtx<'a> {
     pub account_id: &'a str,
     pub db: &'a ReadDbState,
     pub body_store: &'a BodyStoreReadState,
-    pub inline_images: &'a InlineImageStoreState,
+    pub inline_images: &'a InlineImageStoreReadState,
     pub search: &'a SearchState,
     pub progress: &'a dyn ProgressReporter,
 }

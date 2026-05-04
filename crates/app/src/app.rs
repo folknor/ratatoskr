@@ -134,7 +134,7 @@ pub struct ReadyApp {
     /// Body store for loading decompressed message bodies via core.
     pub(crate) body_store: Option<rtsk::body_store::BodyStoreReadState>,
     /// Inline image store for CID image resolution.
-    pub(crate) inline_image_store: Option<store::inline_image_store::InlineImageStoreState>,
+    pub(crate) inline_image_store: Option<store::inline_image_store::InlineImageStoreReadState>,
     /// Encryption key for decrypting provider credentials (OAuth tokens,
     /// passwords). Loaded by the Service at boot (BootPhase::LoadingKey)
     /// and again by the UI here as a thin redundancy. Phase 2 plumbs the
@@ -308,7 +308,7 @@ impl ReadyApp {
         };
 
         let inline_image_store =
-            match store::inline_image_store::InlineImageStoreState::init(data_dir) {
+            match store::inline_image_store::InlineImageStoreReadState::init(data_dir) {
                 Ok(store) => Some(store),
                 Err(e) => {
                     log::error!("Failed to init inline image store: {e}");

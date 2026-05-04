@@ -426,8 +426,8 @@ fn build_action_context(
 ) -> Result<ActionContext, String> {
     let body_store = store::body_store::BodyStoreReadState::init(app_data_dir)
         .map_err(|e| format!("BodyStoreReadState::init: {e}"))?;
-    let inline_images = store::inline_image_store::InlineImageStoreState::init(app_data_dir)
-        .map_err(|e| format!("InlineImageStoreState::init: {e}"))?;
+    let inline_images = store::inline_image_store::InlineImageStoreReadState::init(app_data_dir)
+        .map_err(|e| format!("InlineImageStoreReadState::init: {e}"))?;
     let search = search::SearchState::init(app_data_dir)
         .map_err(|e| format!("SearchState::init: {e}"))?;
     Ok(ActionContext {

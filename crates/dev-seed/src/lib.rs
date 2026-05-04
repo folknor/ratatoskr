@@ -176,7 +176,7 @@ pub fn seed_database(config: &Config, app_data_dir: &Path) -> Result<(), String>
 
     // ── Populate inline image store ─────────────────────────
     if !pending_inline_images.is_empty() {
-        let iis = store::inline_image_store::InlineImageStoreState::init(app_data_dir)
+        let iis = store::inline_image_store::InlineImageStoreReadState::init(app_data_dir)
             .map_err(|e| format!("init inline image store: {e}"))?;
         let iis_conn = iis.conn();
         let iis_conn = iis_conn

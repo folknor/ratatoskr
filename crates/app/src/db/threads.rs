@@ -14,7 +14,7 @@ use rtsk::db::queries_extra::thread_detail::{
     self, ThreadDetail, assemble_thread_detail, fetch_thread_bodies, query_inline_cid_hashes,
     query_thread_from_db,
 };
-use store::inline_image_store::InlineImageStoreState;
+use store::inline_image_store::InlineImageStoreReadState;
 
 use super::connection::Db;
 use super::types::{ThreadAttachment, ThreadMessage};
@@ -125,12 +125,12 @@ fn convert_attachment(att: thread_detail::ThreadAttachment) -> ThreadAttachment 
 pub async fn load_thread_detail(
     db: &Db,
     body_store: &BodyStoreReadState,
-    inline_image_store: Option<&InlineImageStoreState>,
+    inline_image_store: Option<&InlineImageStoreReadState>,
     account_id: String,
     thread_id: String,
 ) -> Result<AppThreadDetail, String> {
     let bs_conn = body_store.conn();
-    let iis_conn = inline_image_store.map(InlineImageStoreState::conn);
+    let iis_conn = inline_image_store.map(InlineImageStoreReadState::conn);
     let db_account_id = account_id.clone();
     let db_thread_id = thread_id.clone();
     let (db_data, cid_hashes) = db
@@ -154,7 +154,7 @@ pub async fn load_thread_detail(
                 let iis = iis_conn
                     .lock()
                     .map_err(|e| format!("inline image store lock: {e}"))?;
-                InlineImageStoreState::get_batch_sync(&iis, &cid_hashes)?
+                InlineImageStoreReadState::get_batch_sync(&iis, &cid_hashes)?
                     .into_iter()
                     .map(|(cid, bytes)| (cid, image::Handle::from_bytes(bytes)))
                     .collect()
