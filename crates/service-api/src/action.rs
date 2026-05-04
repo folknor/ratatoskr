@@ -382,7 +382,6 @@ pub struct SendWireRequest {
 /// send - the worker reads the journal payload after respawn and
 /// resumes. The UI may now delete its staging directory.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[allow(dead_code, reason = "constructed by handle_send (next commit)")]
 pub struct SendAck {
     pub send_id: PlanId,
     pub journaled: bool,

@@ -99,17 +99,34 @@ pub(crate) struct BootSharedState {
     /// `wait_for_ready` checks `result` first so it returns
     /// immediately in that case.
     boot_ready_inflight: std::sync::atomic::AtomicBool,
+    /// `<app_data>/` for this Service incarnation. Captured at
+    /// `BootSharedState::new` time so handlers (specifically
+    /// `action.send` for staging-vault path resolution; future
+    /// surfaces likely to follow) can derive paths under
+    /// `<app_data>/` without threading the directory through every
+    /// dispatch signature. Immutable for the lifetime of the
+    /// `BootSharedState`.
+    app_data_dir: PathBuf,
 }
 
 impl BootSharedState {
-    pub(crate) fn new() -> Arc<Self> {
+    pub(crate) fn new(app_data_dir: PathBuf) -> Arc<Self> {
         Arc::new(Self {
             notify: Notify::new(),
             result: Mutex::new(None),
             context: Mutex::new(None),
             action_worker_wakeup: Notify::new(),
             boot_ready_inflight: std::sync::atomic::AtomicBool::new(false),
+            app_data_dir,
         })
+    }
+
+    /// Path to `<app_data>/` for this Service incarnation. Used by
+    /// handlers that need to derive paths under app-data without
+    /// piping the directory through dispatch signatures (e.g.
+    /// `action.send` resolves staging / vault dirs from this).
+    pub(crate) fn app_data_dir(&self) -> &std::path::Path {
+        &self.app_data_dir
     }
 
     /// Try to claim the boot.ready in-flight slot. Returns a guard on
@@ -640,7 +657,7 @@ mod tests {
     /// downstream Phase 2 test today; this catches it at the boot crate.
     #[test]
     fn signal_ready_symmetry_success_populates_context() {
-        let state = BootSharedState::new();
+        let state = BootSharedState::new(PathBuf::new());
         let conn = Connection::open_in_memory().expect("open in-memory db");
         let ctx = BootContext {
             encryption_key: SecretKey::from_bytes([1u8; 32]),
@@ -672,7 +689,7 @@ mod tests {
 
     #[test]
     fn signal_ready_symmetry_failure_leaves_context_empty() {
-        let state = BootSharedState::new();
+        let state = BootSharedState::new(PathBuf::new());
         state.signal_ready(Err(BootFailure::KeyLoadFailure), None);
         let got_result = state
             .result
@@ -695,7 +712,7 @@ mod tests {
     /// versa) after the first signal.
     #[test]
     fn signal_ready_second_call_is_no_op() {
-        let state = BootSharedState::new();
+        let state = BootSharedState::new(PathBuf::new());
         let response = BootReadyResponse {
             ready: true,
             schema_version: 100,

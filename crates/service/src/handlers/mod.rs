@@ -1,5 +1,6 @@
 mod action;
 mod action_mark_chat_read;
+mod action_send;
 mod action_status;
 mod boot;
 mod health;
@@ -8,6 +9,10 @@ mod pending_ops_kick;
 mod test_helpers;
 
 pub(crate) use action_mark_chat_read::JournaledChatRead;
+// JournaledSend / JournaledMessage / JournaledAttachment are consumed
+// by the worker drain in the next commit; re-export when wired.
+#[allow(unused_imports, reason = "JournaledSend wires up in worker drain next commit")]
+pub(crate) use action_send::JournaledSend;
 
 use crate::boot::BootSharedState;
 use serde_json::Value;
@@ -38,9 +43,7 @@ pub(crate) async fn dispatch(
         RequestParams::ActionMarkChatRead { chat_email } => {
             action_mark_chat_read::handle(&boot_state, chat_email).await
         }
-        RequestParams::ActionSend { request: _ } => Err(ServiceError::Internal(
-            "action.send handler not yet wired (Phase 2 task 3 in flight)".into(),
-        )),
+        RequestParams::ActionSend { request } => action_send::handle(&boot_state, *request).await,
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPanic => test_helpers::panic_handle().await,
         #[cfg(feature = "test-helpers")]

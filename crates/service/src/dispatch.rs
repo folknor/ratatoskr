@@ -87,7 +87,7 @@ where
     // the boot.ready handler awaits readiness via `wait_for_ready`. Held in
     // an Arc so tests that spawn multiple Service instances don't collide on
     // a process-wide singleton.
-    let boot_state = boot::BootSharedState::new();
+    let boot_state = boot::BootSharedState::new(app_data_dir.clone());
 
     // Boot sequence runs concurrently with the dispatch loop so health.ping
     // continues to round-trip while migrations / key load run. On fatal boot
