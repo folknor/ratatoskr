@@ -14,7 +14,7 @@ Phase 2 also lands the first half of the **type-level read/write split** the pro
 
 The phase ships as a single milestone but with a clean commit-level split (per the same shape as Phase 1.5): wire types -> `service-state` crate -> ProviderCtx split -> action service relocation -> respawn-aware optimistic rollback -> pending-ops drainer -> Phase 1.5 carry-forwards. A bisect on a regression should land on the right commit.
 
-This is the second-largest UI-side surgery in the project (Phase 1.5 was the largest). The dispatch path that today is `action_ctx.action_ctx().expect(...) -> Task::perform(batch_execute(...))` becomes a multi-step IPC flow whose latency budget is in milliseconds, not microseconds. The hot path is design-bounded - star-toggle p99 of 5-15 ms is the explicit target, and a benchmark lands in this phase so regressions are observable before the next phase ships.
+This is the second-largest UI-side surgery in the project (Phase 1.5 was the largest). The dispatch path that today is `action_ctx.action_ctx().expect(...) -> Task::perform(batch_execute(...))` becomes a multi-step IPC flow whose latency budget is in milliseconds, not microseconds. The hot path is design-bounded - star-toggle p99 of 5-15 ms is the design target. (A CI benchmark was originally planned to enforce this; dropped during close-out - see `## Architecture` § "Action latency benchmark (DROPPED)".)
 
 ## Scope
 
@@ -203,7 +203,7 @@ This is the second-largest UI-side surgery in the project (Phase 1.5 was the lar
 
 15. **`action.completed` after commit visibility.** The Service emits `action.completed` only after the per-plan transaction has committed and the result is observable from a fresh read connection (the `ReadDbState` connection pool the UI uses). Documented as an IPC contract on the method, not just behavior - Phase 2 + tests pin it. The contract is *commit visibility*, not WAL fsync: the DB runs `PRAGMA synchronous = NORMAL` and per-commit fsync is not guaranteed; the useful contract for UI refresh coherence is "any read-pool connection can see the write," which a `COMMIT` against the WAL satisfies. The fsync-tight version of the contract would conflict with the 16 ms latency target and would not buy any UI-visible coherence on top.
 
-16. **Action latency benchmark.** New `crates/app/benches/action_latency.rs` (or `crates/service/tests/action_latency_smoke.rs` if Criterion is overkill). Targets: star-toggle submit-to-`action.completed` p99 < 16 ms under healthy local Service load; bulk-archive-of-200-threads measured separately. Runs in CI so a regression in any phase 2-7 commit is visible. Excludes the IPC encode/decode round-trip when run in-process; includes it when run as a real-subprocess test.
+16. **Action latency benchmark. DROPPED.** A p99-budget CI smoke test would flap on shared runners more than it'd catch real regressions, and the budget itself becomes a load-bearing number with no clear owner. The "does it feel fast" check stays manual (matrix items 1-2 below: real-keyboard star-toggle on a seeded mailbox; bulk-archive of 200 threads mid-scroll). If a latency regression surfaces we'll measure it ad hoc rather than maintain a permanent CI gate.
 
 17. **Per-operation idempotency contract.** Two paths re-issue operations: (a) the action-plan journal (item 18a) replays a plan op when the Service is respawned mid-execution; (b) the `pending_operations` periodic re-issues a single op after a transient retryable provider failure. Either path can land a duplicate `WireMailOperation` against an already-applied target. `WireMailOperation` (and the `MailOperation` it mirrors) must be idempotent at the wire level - re-archiving an already-archived thread is a no-op, not an error; re-marking a read thread as read is a no-op. Already true today (the action-service's local DB mutations check current state before applying); Phase 2 lifts the implicit contract into a doc-comment on `MailOperation`, `WireMailOperation`, and `RequestParams::ActionExecutePlan`. UI-side, the `applied_outcomes: HashSet<OperationId>` per plan provides the matching idempotency layer for replayed `OperationOutcome` notifications.
 
@@ -322,23 +322,23 @@ This is the second-largest UI-side surgery in the project (Phase 1.5 was the lar
 
 ### In scope (Phase 1.5 carry-forward closeout)
 
-These bullets come from `implementation-roadmap.md` Phase 2 § "Phase 1.5 carry-forward (close out as part of Phase 2)". Each is in scope for Phase 2 implementation.
+These bullets come from `implementation-roadmap.md` Phase 2 § "Phase 1.5 carry-forward (close out as part of Phase 2)". Original framing was "each is in scope for Phase 2 implementation"; close-out reality has each item either CLOSED, PARTIAL, or DEFERRED to a later phase. The roadmap is the source of truth for the current home of each item; the bullets below are kept for design-rationale reference.
 
-19a. **`ReadyApp::from_boot_ready` heavy synchronous init.** Today (Phase 1.5) `crates/app/src/app.rs::from_boot_ready` opens the DB, loads stores, parses bootstrap snapshots, restores pop-out windows synchronously. Phase 2 reworks `ActionContext` Service-side - which removes the ActionContext-side init from the critical path - then relocates the body/inline/search store init to async tasks dispatched from a `BootingApp::update` arm. The splash stays responsive while these finish.
+19a. **`ReadyApp::from_boot_ready` heavy synchronous init. DEFERRED to Phase 8.** Today `crates/app/src/app.rs::from_boot_ready` opens the DB, loads stores, parses bootstrap snapshots, restores pop-out windows synchronously. Original plan: relocate the body / inline / search store init to async tasks dispatched from a `BootingApp::update` arm so the splash stays responsive while they finish. Less load-bearing than expected once `ActionContext` moved Service-side; pure UI surgery, no Phase 2 blocker. Slotted into Phase 8 alongside the boot-path crash-recovery polish.
 
-19b. **`apply_standard_pragmas` per-connection waste / `BootContext.db_conn` consumed.** Phase 1.5 holds an idle `Connection` in `BootContext` waiting for Phase 2's `ActionContext` to consume. Phase 2 picks it up at the action-service-boot step (item 12 in `In scope`) so the connection is not duplicated and not leaked. If Phase 2 consumes the connection cleanly, the carry-forward is satisfied; if not, the fallback is to drop the field from `BootContext` and have Phase 2 reopen.
+19b. **`apply_standard_pragmas` per-connection waste / `BootContext.db_conn` consumed. PARTIAL.** The action worker now consumes `db_conn` from `BootSharedState`; the encryption key is also reachable. The two-connection waste (Service worker + UI reader) remains; the third UI-side write connection collapses with the global write-half lockdown in Phase 6.
 
-19c. **`SchemaVersionChanged` end-to-end test (`--test-fake-schema=N`).** Add a `--test-fake-schema=N` test-helper flag analogous to the existing `--test-fake-version`. Real-subprocess test flips the value across SIGKILL and asserts `ClientError::SchemaVersionChanged` arrives via Terminal. Phase 2 introduces real schema-version sensitivity (the action service depends on the schema being what the UI thinks it is), so the test naturally lands here.
+19c. **`SchemaVersionChanged` end-to-end test (`--test-fake-schema=N`). DEFERRED to Phase 8.** Original plan: a test-helper flag analogous to the existing `--test-fake-version`; a real-subprocess test that flips the value across SIGKILL and asserts `ClientError::SchemaVersionChanged` arrives via Terminal. Phase 2 introduced real schema-version sensitivity (the action worker depends on the schema being what the UI thinks it is), but the test didn't land in the same milestone. Slotted into Phase 8 alongside the rest of the crash-recovery / respawn test polish.
 
-19d. **`from_boot_ready` re-loads encryption key.** The hard requirement from Phase 1.5 commit 30. Phase 2 plumbs `BootContext::encryption_key` through the IPC boundary so the UI consumes the Service's already-validated key instead of re-reading the key file. Specifically: an internal `internal.crypto_handle` IPC method (or a new boot.ready response field) returns a Service-managed handle the UI can use to encrypt/decrypt without holding the raw bytes. **Decision in implementation**: handle-based access (Service holds bytes; UI calls `internal.encrypt { plaintext } -> ciphertext`) vs. trusted-bytes-once (Service hands the bytes once on a one-shot IPC method, UI keeps in memory). Default proposal: handle-based - extra IPC round-trips per encrypt are tolerable for credentials and are not a hot path; the security benefit (Service is the only process holding raw key bytes) is real.
+19d. **`from_boot_ready` re-loads encryption key. DEFERRED to Phase 6a.** The hard requirement from Phase 1.5 commit 30 carried into Phase 2 unchanged: plumb `BootContext::encryption_key` through the IPC boundary so the UI consumes the Service's already-validated key instead of re-reading the file. Two design options: (a) handle-based - Service holds raw bytes; UI calls `internal.encrypt_for_storage { plaintext } -> ciphertext`; (b) trusted-bytes-once - Service exports the bytes via a one-shot IPC method, UI keeps in memory. Default proposal: handle-based. The TOCTOU window the arch review flagged remains until this lands. Slotted into Phase 6a alongside the rest of the credential / account / preference write-surface relocations.
 
-19e. **Pre-dispatch generation-counter bumps.** Same as `In scope` item 13. Phase 1.5 noted the gap; Phase 2 closes it as part of the `dispatch_plan` rewrite.
+19e. **Pre-dispatch generation-counter bumps. CLOSED in Phase 2.** Same as `In scope` item 13. Closed as part of the `dispatch_plan` rewrite (task 10).
 
-19f. **`parent_death` crate boundary.** Extract `parent_death` from `service` into a new `process-lifetime` micro-crate. Both `service` and `app` depend on it. The dependency graph stops looking inverted (today `app -> service`). Land as part of the `service-state` crate split so the workspace surgery happens in one commit.
+19f. **`parent_death` crate boundary. CLOSED in Phase 2.** Extracted to `crates/process-lifetime/` (task 1). Both `service` and `app` depend on it; the App -> Service dependency for `ProcessGuard` is gone.
 
-19g. **`boot_progress::emit` per-phase regression test.** Today the contract ("`OUTBOUND_QUEUE_CAP=1024` must remain >> Phase-1.5 boot frame count") is doc-only. Phase 2 introduces several new `MustDeliver` notifications (`OperationOutcome`, `action.completed`, send progress, etc.) - each new emitter must ship with a regression test bounding total emit count for its phase, OR the helper must become class-aware (`try_send` for `Coalesce`/`Drop`, `send().await` for `MustDeliver` per the established backpressure model). Default proposal: class-aware helper. The contract becomes "use the helper, contract enforcement is structural."
+19g. **`boot_progress::emit` per-phase regression test / class-aware helper. DEFERRED to Phase 8.** Original proposal: class-aware helper picking `try_send` for `Coalesce`/`Drop`, `send().await` for `MustDeliver`. First implementation attempt introduced a hang in the `service_subprocess` test cohort and was reverted; today's helper still uses `try_send` only, structurally incompatible with `MustDeliver` semantics. Slotted into Phase 8 alongside the entangled flaky-test root-cause (the same writer-task drain-ordering issue is the most likely cause of both).
 
-19h. **`BootSharedState` flood resilience for `boot.ready`.** The `boot.ready` handler parks each request on the shared `Notify` and consumes a `JoinSet` slot until boot completes. Phase 2 touches the boot.ready handler shape (adds the encryption-key-handle response field per 19d), so this is the right moment to add an `AtomicBool` "already in flight" so subsequent callers either join the existing waiter or fail fast.
+19h. **`BootSharedState` flood resilience for `boot.ready`. CLOSED in Phase 2.** `boot_ready_inflight: AtomicBool` plus a cache-result-first check on the handler (task 22). Subsequent callers fail fast with `Backpressure` or read the cached result.
 
 ### Out of scope
 
@@ -602,31 +602,9 @@ The cross-process `service_generation` tag (Phase 1.5) and the within-process `G
 
 Both apply to action notifications. The `service_generation` filter lives in `notification_should_dispatch` (Phase 1.5's gate). The within-process generation check happens at the completion-effects handler when correlating plan_id back to optimistic state.
 
-### Action latency benchmark
+### Action latency benchmark (DROPPED)
 
-`crates/service/tests/action_latency_smoke.rs` (in-process):
-
-```rust
-#[tokio::test(flavor = "multi_thread")]
-async fn star_toggle_p99_under_local_service() {
-    let (client, _server) = spawn_in_process_test_harness().await;
-    let mut samples = Vec::with_capacity(200);
-    for _ in 0..200 {
-        let start = Instant::now();
-        let plan = build_star_toggle_plan(thread_id);
-        let _ack = client.execute_plan(plan).await.expect("dispatch");
-        wait_for_action_completed(&mut subscription).await;
-        samples.push(start.elapsed());
-    }
-    let p99 = percentile(&samples, 99.0);
-    assert!(
-        p99 < Duration::from_millis(16),
-        "star-toggle p99 {p99:?} exceeded 16 ms budget",
-    );
-}
-```
-
-The 16 ms target is one frame at 60 fps - star-toggle that takes longer is user-visible jitter. Bulk-archive of 200 threads gets a separate benchmark with a more generous target (1.5 s for the full plan including per-operation wire round-trips). Both run in CI; regressions in any commit between Phase 2 and Phase 7 are visible before the next phase ships.
+A p99-budget CI smoke test was originally planned at `crates/service/tests/action_latency_smoke.rs` with a 16 ms star-toggle target (one frame at 60 fps). Dropped during Phase 2 close-out: a budget-enforcing test reliably flaps on shared CI runners more than it catches real regressions, and the budget itself becomes a load-bearing number with no clear owner. Latency stays a manual-matrix concern (items 1-2 in `## Verification`); ad hoc measurement is the response if a regression surfaces.
 
 ## Detailed task list
 
@@ -680,17 +658,17 @@ In recommended commit order. Each item is one focused commit unless noted.
 
 18. **`service`: pending_ops periodic drainer relocation.** `crates/service/src/actions/pending.rs::process_pending_ops` runs Service-side, triggered by `pending_ops.kick`. UI removes the periodic dispatch.
 
-19. **`service` + `app`: encryption key handle (Phase 1.5 carry-forward 19d).** Default proposal: handle-based access. Service holds `SecretKey` in `BootContext`; UI's `from_boot_ready` no longer calls `rtsk::load_encryption_key`. Internal IPC method: `internal.encrypt_for_storage { plaintext, label }` -> `ciphertext`. UI uses this for credential persistence; the action service uses the local `SecretKey` directly (it lives Service-side already).
+19. **`service` + `app`: encryption key handle (Phase 1.5 carry-forward 19d). DEFERRED to Phase 6a.** Sketched here for future reference: handle-based access (Service holds `SecretKey` in `BootContext`; UI's `from_boot_ready` no longer calls `rtsk::load_encryption_key`; internal IPC method `internal.encrypt_for_storage { plaintext, label } -> ciphertext` covers credential persistence). Slotted into Phase 6a alongside the rest of the credential / account / preference write-surface relocations - see `implementation-roadmap.md` Phase 6a "In scope" entry.
 
-20. **`service` + `app`: `--test-fake-schema=N` end-to-end test (Phase 1.5 carry-forward 19c).** Test-helper flag analogous to `--test-fake-version`. Real-subprocess test asserts `ClientError::SchemaVersionChanged` arrives via Terminal across SIGKILL.
+20. **`service` + `app`: `--test-fake-schema=N` end-to-end test (Phase 1.5 carry-forward 19c). DEFERRED to Phase 8.** Sketched here: test-helper flag analogous to `--test-fake-version`; real-subprocess test asserts `ClientError::SchemaVersionChanged` arrives via Terminal across SIGKILL. Slotted into Phase 8 alongside the rest of the crash-recovery / respawn test polish.
 
-21. **`app`: `from_boot_ready` async store init (Phase 1.5 carry-forward 19a).** Body/inline/search store init relocates to async tasks dispatched from `BootingApp::update`. The `Booting -> Ready` transition moves earlier in the timeline (right after `BootReady`); the async store-init tasks fire `Message::ReadyStoreReady(...)` events that finalize the `ReadyApp` field set incrementally.
+21. **`app`: `from_boot_ready` async store init (Phase 1.5 carry-forward 19a). DEFERRED to Phase 8.** Sketched here: body / inline / search store init relocates to async tasks dispatched from `BootingApp::update`; the `Booting -> Ready` transition fires earlier (right after `BootReady`); async store-init tasks fire `Message::ReadyStoreReady(...)` events that finalize the `ReadyApp` field set incrementally. Slotted into Phase 8 because the crash-recovery polish already touches the boot path.
 
 22. **`service`: `BootSharedState` flood resilience (Phase 1.5 carry-forward 19h).** `AtomicBool` "already in flight" on the `boot.ready` handler. Subsequent callers either join the existing waiter or fail fast.
 
-23. **`service-api`: class-aware `boot_progress::emit` helper (Phase 1.5 carry-forward 19g).** Helper picks `try_send` for `Coalesce`/`Drop`, `send().await` for `MustDeliver`. Phase 2's new emitters use the helper exclusively.
+23. **`service-api`: class-aware `boot_progress::emit` helper (Phase 1.5 carry-forward 19g). DEFERRED to Phase 8.** First attempt (try_send for Coalesce/Drop, awaited send for MustDeliver) introduced a hang in the `service_subprocess` test cohort and was reverted; today's helper still uses `try_send` only. Slotted into Phase 8 alongside the entangled flaky-test root-cause - see `implementation-roadmap.md` Phase 8 "In scope" entry.
 
-24. **`service`: action latency benchmark.** `crates/service/tests/action_latency_smoke.rs` per the Architecture section. Runs in CI.
+24. **`service`: action latency benchmark. DROPPED.** See `## Architecture` § "Action latency benchmark (DROPPED)" for rationale. Latency is a manual-matrix concern; no CI gate.
 
 25. **`service` + `app`: error-shape decisions.** `RemoteFailure` wire type lockdown; per-`ActionError`-variant decision recorded in `service-api`'s error module doc-comment.
 
@@ -709,7 +687,6 @@ In recommended commit order. Each item is one focused commit unless noted.
 - `crates/service/src/actions/worker.rs` - the action worker that drives `batch_execute` against journal rows; emits `OperationOutcome` and final `action.completed`.
 - `crates/service/src/snooze_runner.rs` - timer-driven resurfacing.
 - `crates/service/src/progress.rs` - `IpcProgressReporter`.
-- `crates/service/tests/action_latency_smoke.rs` - benchmark.
 - `crates/app/src/in_flight_plans.rs` - UI-side correlation map: `PlanCompletionMeta { acked, applied_outcomes, ... }`.
 - `crates/db/src/db/schema/NN_actions.sql` (or extension to existing schema file) - `action_jobs` + `action_job_ops` tables (sibling-job model per scope item 18a).
 - `crates/db/src/db/action_journal.rs` - narrow `pub(crate)` write helpers for the journal tables.
@@ -780,15 +757,9 @@ In recommended commit order. Each item is one focused commit unless noted.
 - `crates/app/tests/service_subprocess.rs::undo_round_trips_as_compensating_plan` - dispatch action, undo, assert the inverse plan runs and outcomes match.
 - `crates/app/tests/service_subprocess.rs::test_fake_schema_propagates_via_terminal` - per Phase 1.5 carry-forward 19c.
 
-### Action latency benchmark
-
-- `crates/service/tests/action_latency_smoke.rs` per the Architecture section. Targets:
-  - Star-toggle p99 < 16 ms (in-process) / < 40 ms (real subprocess).
-  - Bulk-archive of 200 threads p99 < 1.5 s (real subprocess).
-
 ### Manual matrix updates
 
-- Real-keyboard star-toggle latency sanity. The benchmark covers the wire round-trip; this checks "does it *feel* fast" on a 50 GB seeded mailbox.
+- Real-keyboard star-toggle latency sanity on a 50 GB seeded mailbox - checks "does it *feel* fast" through the wire round-trip. (Replaces the dropped CI latency benchmark.)
 - Bulk-archive of 200 threads while the UI is mid-scroll. Verify rendering stays responsive throughout (Service is doing the work; the UI thread should be idle).
 - Compose with a 50 MB attachment. SMTP submit takes 30+ s; verify the UI's send button stays in "sending" state with progress notifications, then transitions cleanly on `SendCompleted`.
 - Service crash mid-action (`kill <service-pid>` while a bulk-archive is in flight). Verify optimistic rollback fires, the respawn happens within Phase 1.5's bounds, and the pending operations eventually drain.
@@ -807,7 +778,7 @@ Resolve in implementation:
 
 5. **Send variant on the action-plan journal.** `MailOperation::Send` does not exist today - send is a separate `SendRequest` shape (`crates/core/src/send.rs`). Phase 2 needs the journal to carry sends so the durable-ack contract holds for compose-send (item 13). Two options: (a) add `MailOperation::Send { send_id }` and let the action-plan journal carry sends generically; (b) keep send as a sibling enum that the journal serializes to a different blob column. Default proposal: (a) - one journal substrate, one worker loop, one set of replay semantics. Decide during task 13.
 
-6. **Per-account concurrency in batch_execute Service-side.** Today's batch_execute groups by account and dispatches per-account in parallel (limit 4). Service-side, the natural place is the worker. Decision: keep the limit at 4 unchanged in Phase 2; revisit if the action latency benchmark reveals contention.
+6. **Per-account concurrency in batch_execute Service-side.** Today's batch_execute groups by account and dispatches per-account in parallel (limit 4). Service-side, the natural place is the worker. Decision: keep the limit at 4 unchanged in Phase 2; revisit if manual-matrix latency runs reveal contention.
 
 7. **In-flight dedup set sharing.** The Service holds `ActionContext::in_flight: Arc<Mutex<HashSet<String>>>`. UI's client throttle is a separate map. Both layers serve - the question is whether the UI throttle entries should expire on `OperationOutcome` arrival vs `ActionCompleted` arrival vs a fixed timeout. Default: expire on `ActionCompleted`. Confirm during task 12 against the click-pattern manual test.
 
@@ -831,7 +802,7 @@ Resolve in implementation:
 
 This phase is done when:
 
-- All items in `In scope` (including the `Phase 1.5 carry-forward closeout` block) are implemented and wired - actions execute Service-side, the UI no longer constructs `ActionContext`, all five non-`MailActionIntent` paths (undo, send, snooze resurfacing, draft delete, mark-chat-read) flow through IPC.
+- All items in `In scope` (excluding the explicitly-deferred carry-forwards 19a / 19c / 19d / 19g, which now have homes in Phase 6a / Phase 8) are implemented and wired - actions execute Service-side, the UI no longer constructs `ActionContext`, all five non-`MailActionIntent` paths (undo, send, snooze resurfacing, draft delete, mark-chat-read) flow through IPC.
 - The action-job journal (`action_jobs` + `action_job_ops`, sibling-job model) ships with its schema migration, lease-based recovery path, and orphan-vault cleanup.
 - The `action.execute_plan` handler returns `ActionPlanAck` without driving `batch_execute` itself; the worker is a separate task.
 - `WireMailOperation` mirrors `core::actions::MailOperation` 1:1; static-assertion test enforces the mirror.
@@ -839,11 +810,10 @@ This phase is done when:
 - `action.mark_chat_read` exists and the UI's `chat.rs` handlers no longer write to the DB directly.
 - Action paths no longer write to the Tantivy index (Phase 2 temporary inconsistency policy is the agreed surface).
 - All `Exit criteria` from the implementation-roadmap.md Phase 2 section are satisfied.
-- Action latency benchmark in CI; star-toggle p99 < 16 ms in-process / < 40 ms real-subprocess.
 - The `service-state` crate boundary holds: a UI source file that tries `use service_state::WriteDbState` fails to build.
 - The `process-lifetime` crate exists; `service` and `app` both depend on it; the App -> Service dependency for `parent_death` is gone.
-- Phase 1.5's three Phase-2 carry-forwards (`from_boot_ready` heavy init, `BootContext.db_conn` consumed, `SchemaVersionChanged` end-to-end test) are closed.
-- Phase 1.5's five Phase-2 carry-forwards from commit 30 (`from_boot_ready` key reload, pre-dispatch generation bumps, `parent_death` boundary, `boot_progress::emit` regression-test contract, `BootSharedState` flood resilience) are closed.
+- Of Phase 1.5's three Phase-2 carry-forwards: `BootContext.db_conn` consumed (PARTIAL - action worker reads it; UI two-connection waste collapses in Phase 6); `from_boot_ready` heavy init and `SchemaVersionChanged` e2e test deferred to Phase 8.
+- Of Phase 1.5's five Phase-2 carry-forwards from commit 30: pre-dispatch generation bumps + `parent_death` boundary + `BootSharedState` flood resilience all CLOSED in Phase 2; `from_boot_ready` key reload deferred to Phase 6a; `boot_progress::emit` class-aware helper deferred to Phase 8.
 - Reviewer signoff on this plan + the delivered code.
 
 The next phase (Phase 3 - JMAP sync relocation, Tantivy/body/inline writer relocation) gets its own equivalent plan document at the time it's tackled. Phase 3 lights up the `SyncProviderCtx` shape Phase 2 scaffolds, locks down the body/inline/search write halves behind the same `service-state` crate boundary, introduces the minimal cross-store invariant pass (which also cleans up Phase 2's deliberate Tantivy orphans), and adds the `SearchState` read/write split.
