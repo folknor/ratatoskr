@@ -291,7 +291,7 @@ Every place the UI process writes to durable state today, mapped to the phase th
 | Pending-ops retry queue (`db_pending_ops_*`) | Background task in UI; drains queue, re-dispatches actions | Phase 2 (rides with the action service) |
 | Pending-ops boot recovery (`recover_on_boot` resets stranded executing rows) | Runs at app boot in UI process | Phase 1.5 (gates the boot handshake; the periodic drainer relocates separately in Phase 2 with the action service) |
 | Undo (compensating-action dispatch in `handlers/commands.rs`) | Builds a reverse plan, invokes core::actions directly | Phase 2 (undo follows the action pipeline) |
-| Compose send (uses `ActionContext` for SMTP submit + DB updates) | `handlers/pop_out/compose_send.rs` | Phase 2 (send is a Service-side action; large attachments mean its IPC timeout is generous - see timeout table) |
+| Compose send (uses `ActionContext` for SMTP submit + DB updates) | `handlers/pop_out/compose_send.rs` | Phase 2 - LANDED. UI stages attachments to `<app_data>/staging/<send_id>/`, dispatches `action.send` carrying `StagingFile` refs (no inline bytes on the wire). Service handler verifies SHA-256, atomically renames into `<app_data>/send_vault/`, journals as `kind = 'send'` quiet job. Worker submits SMTP and finalizes. Boot sweeps orphan vault dirs. |
 | Snooze resurfacing (timer-driven) | `handlers/commands.rs` SyncTick path | Phase 2 (becomes a Service-internal periodic task; UI receives `action.completed` notifications) |
 | Local-draft "queued failed" sweep (`db_mark_queued_drafts_failed_sync` at app boot) | Synchronous DB write in `App::boot` | Phase 1.5 (rides with schema-migration relocation; runs Service-side, gated on the boot handshake) |
 | Sync writes (DB metadata + body store + inline image store + Tantivy) | `core::sync_dispatch::sync_delta_for_account` per account | Phase 3 (JMAP), Phase 5 (other providers) |
@@ -324,7 +324,7 @@ Anything not in this table is either (a) read-only from the UI's perspective and
 - ✓ Action service mutations (archive / label / star / etc.) - relocated. UI calls `client.execute_plan(...)`.
 - ✓ Pending-ops retry queue - drains Service-side on each action-worker wakeup.
 - ✓ Undo - inverse plan dispatched via the standard `action.execute_plan` IPC.
-- ✗ Compose send - DEFERRED. The bytes-ownership transfer (staging→vault) plus journal `kind = 'send'` and SMTP-on-worker is non-trivial; not yet landed.
+- ✓ Compose send - `action.send` IPC. UI stages each attachment under `<app_data>/staging/<send_id>/`, sends a `SendWireRequest` carrying `StagingFile { relative_path, content_hash }` references; the Service handler verifies SHA-256, atomically renames each file into `<app_data>/send_vault/<send_id>/`, journals the send as a quiet `kind = 'send'` job, and returns `SendAck`. Worker reads vault bytes, builds MIME, submits via SMTP, finalizes the job, unlinks the vault directory. Boot recovery sweeps orphan vault dirs whose `job_id` is not in the journal or whose status is terminal.
 - ✓ Snooze resurfacing - Service-side runner triggered by `pending_ops.kick`; UI tick fires the kick and reloads nav after a 1.5 s grace window.
 - ✓ Chat read-on-view - `action.mark_chat_read` IPC; Service runs local DB write in the handler and provider mark-read on the worker.
 

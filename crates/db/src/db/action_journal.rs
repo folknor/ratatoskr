@@ -691,6 +691,54 @@ mod tests {
         assert!(result.is_err(), "kind CHECK constraint must reject unknowns");
     }
 
+    fn insert_send_job(conn: &Connection, job_id: &[u8; 16], status: &str) {
+        conn.execute(
+            "INSERT INTO action_jobs (\
+                 job_id, kind, account_id, status, quiet, payload, \
+                 created_at, updated_at\
+             ) VALUES (?1, 'send', 'acc-1', ?2, 1, X'', unixepoch(), unixepoch())",
+            params![job_id.as_slice(), status],
+        )
+        .expect("insert send job");
+    }
+
+    #[test]
+    fn live_send_job_ids_returns_only_non_terminal_send_jobs() {
+        let conn = fresh_db();
+        let queued = [1u8; 16];
+        let leased = [2u8; 16];
+        let executing = [3u8; 16];
+        let completed = [4u8; 16];
+        let failed = [5u8; 16];
+        insert_send_job(&conn, &queued, "queued");
+        insert_send_job(&conn, &leased, "leased");
+        insert_send_job(&conn, &executing, "executing");
+        insert_send_job(&conn, &completed, "completed");
+        insert_send_job(&conn, &failed, "failed");
+        // Mail-plan job with status='queued' must NOT appear (kind filter).
+        let mail_plan_id = [6u8; 16];
+        insert_test_job(&conn, &mail_plan_id, "queued");
+
+        let live: std::collections::HashSet<[u8; 16]> = live_send_job_ids(&conn)
+            .expect("query")
+            .into_iter()
+            .collect();
+        assert_eq!(live.len(), 3, "queued + leased + executing");
+        assert!(live.contains(&queued));
+        assert!(live.contains(&leased));
+        assert!(live.contains(&executing));
+        assert!(!live.contains(&completed));
+        assert!(!live.contains(&failed));
+        assert!(!live.contains(&mail_plan_id));
+    }
+
+    #[test]
+    fn live_send_job_ids_returns_empty_on_clean_journal() {
+        let conn = fresh_db();
+        let live = live_send_job_ids(&conn).expect("query");
+        assert!(live.is_empty());
+    }
+
     #[test]
     fn check_constraint_rejects_unknown_status() {
         let conn = fresh_db();
