@@ -168,6 +168,7 @@ pub(super) async fn sync_mailbox_changes(
     ctx: &SyncCtx<'_>,
     since_state: &str,
 ) -> Result<(), String> {
+    super::check_cancelled(ctx.cancellation_token)?;
     let inner = ctx.client.inner();
     let result = inner.mailbox_changes(since_state, 500).await;
 

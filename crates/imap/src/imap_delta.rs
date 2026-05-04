@@ -49,6 +49,9 @@ pub async fn imap_delta_sync(
     config: &ImapConfig,
     days_back: i64,
 ) -> Result<ImapSyncResult, String> {
+    if cancellation_token.is_cancelled() {
+        return Err("sync cancelled".to_string());
+    }
     let read_db = db.to_read_state();
     #[allow(unused_variables)]
     let _cancellation_token = cancellation_token;

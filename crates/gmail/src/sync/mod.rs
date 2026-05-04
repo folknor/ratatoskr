@@ -53,6 +53,9 @@ pub async fn gmail_initial_sync(
     progress: &dyn ProgressReporter,
     cancellation_token: &CancellationToken,
 ) -> Result<(), String> {
+    if cancellation_token.is_cancelled() {
+        return Err("sync cancelled".to_string());
+    }
     let read_db = db.to_read_state();
     let ctx = SyncCtx {
         client,
@@ -142,6 +145,9 @@ pub async fn gmail_delta_sync(
     progress: &dyn ProgressReporter,
     cancellation_token: &CancellationToken,
 ) -> Result<GmailSyncResult, String> {
+    if cancellation_token.is_cancelled() {
+        return Err("sync cancelled".to_string());
+    }
     let read_db = db.to_read_state();
     let ctx = SyncCtx {
         client,

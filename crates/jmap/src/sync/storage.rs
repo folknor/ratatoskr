@@ -27,6 +27,10 @@ pub(crate) async fn persist_messages(
         return Ok(());
     }
 
+    // Cancel-mid-persist: cancel observed before the DB transaction
+    // starts returns within at most one batch of network round-trip.
+    super::check_cancelled(ctx.cancellation_token)?;
+
     // Group messages by thread for thread-level aggregation
     let mut threads: HashMap<&str, Vec<&ParsedJmapMessage>> = HashMap::new();
     for msg in messages {
@@ -76,6 +80,7 @@ pub(crate) async fn persist_messages(
 /// Delete messages from DB, body store, and search index.
 /// Also updates or removes parent threads as needed.
 pub(crate) async fn delete_messages(ctx: &SyncCtx<'_>, message_ids: &[&str]) -> Result<(), String> {
+    super::check_cancelled(ctx.cancellation_token)?;
     let aid = ctx.account_id.to_string();
     let ids: Vec<String> = message_ids.iter().map(|s| (*s).to_string()).collect();
 

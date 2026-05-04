@@ -61,6 +61,9 @@ pub(crate) async fn graph_initial_sync(
     ctx: &SyncProviderCtx<'_>,
     days_back: i64,
 ) -> Result<(), String> {
+    if ctx.cancellation_token.is_cancelled() {
+        return Err("sync cancelled".to_string());
+    }
     let read_db = ctx.db.to_read_state();
     let sctx = SyncCtx {
         client,
@@ -192,6 +195,9 @@ pub(crate) async fn graph_delta_sync(
     client: &GraphClient,
     ctx: &SyncProviderCtx<'_>,
 ) -> Result<SyncResult, String> {
+    if ctx.cancellation_token.is_cancelled() {
+        return Err("sync cancelled".to_string());
+    }
     let read_db = ctx.db.to_read_state();
     let sctx = SyncCtx {
         client,

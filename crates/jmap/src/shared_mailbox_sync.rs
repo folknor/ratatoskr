@@ -47,6 +47,8 @@ pub async fn sync_shared_account(
     progress: &dyn ProgressReporter,
     cancellation_token: &CancellationToken,
 ) -> Result<SyncResult, String> {
+    super::sync::check_cancelled(cancellation_token)?;
+
     let read_db = db.to_read_state();
     let ctx = SyncCtx {
         client,

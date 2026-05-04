@@ -21,6 +21,24 @@ use sync::{pending as sync_pending, progress as sync_progress, state as sync_sta
 
 const BATCH_SIZE: usize = 50;
 
+/// Sentinel error returned by sync paths when cancellation is observed.
+/// The Service-side runner inspects the token state alongside the
+/// `Err` variant; if cancelled, the result is mapped to
+/// `SyncResult::Cancelled` rather than `SyncResult::Failed`.
+pub(crate) const CANCELLED_ERROR: &str = "sync cancelled";
+
+/// Poll the cancellation token. Cheap; intended for per-batch or
+/// per-mailbox boundaries where the next checkpoint is at most a
+/// batch round-trip away (under ~1 s).
+#[inline]
+pub(crate) fn check_cancelled(token: &CancellationToken) -> Result<(), String> {
+    if token.is_cancelled() {
+        Err(CANCELLED_ERROR.to_string())
+    } else {
+        Ok(())
+    }
+}
+
 // Re-export public items
 pub(crate) use mailbox::{fetch_all_mailboxes, role_to_str};
 
@@ -59,10 +77,6 @@ pub(crate) struct SyncCtx<'a> {
     /// per-mailbox / per-batch boundaries) or via `tokio::select!`
     /// against `cancellation_token.cancelled()` for long-running
     /// awaited calls.
-    ///
-    /// Field is deliberately allow(dead_code) until task 6 wires the
-    /// checkpoints.
-    #[allow(dead_code)]
     pub cancellation_token: &'a CancellationToken,
     /// Override the JMAP account ID for shared account sync.
     /// `None` = use `request.default_account_id()` (primary account).
@@ -119,6 +133,12 @@ pub async fn jmap_initial_sync(
         cancellation_token,
         jmap_account_id: None,
     };
+
+    // Cancellation gate: a cancel observed before any network round-
+    // trip returns immediately. Subsequent checkpoints fire at the
+    // per-batch boundaries inside `sync_emails_paginated` and at
+    // `sync_mailbox_changes`.
+    check_cancelled(ctx.cancellation_token)?;
 
     log::info!("[JMAP] Starting initial sync for account {account_id} (days_back={days_back})");
     emit_progress(&ctx, "mailboxes", 0, 1);
@@ -279,6 +299,11 @@ pub async fn jmap_delta_sync(
         jmap_account_id: None,
     };
 
+    // Cancellation gate: a cancel observed before the first network
+    // round-trip returns immediately. Subsequent checkpoints fire
+    // inside `sync_mailbox_changes` and the per-batch fetch loops.
+    check_cancelled(ctx.cancellation_token)?;
+
     // Load current sync states
     let email_state = load_sync_state(ctx.db, account_id, "Email").await?;
     let mailbox_state = load_sync_state(ctx.db, account_id, "Mailbox").await?;
@@ -329,6 +354,9 @@ pub async fn jmap_delta_sync(
 
         if !ids_to_fetch.is_empty() {
             for chunk in ids_to_fetch.chunks(BATCH_SIZE) {
+                // Per-batch cancellation checkpoint. Cancel mid-loop
+                // returns within at most one batch round-trip.
+                check_cancelled(ctx.cancellation_token)?;
                 let emails = fetch_email_batch(client, chunk).await?;
                 let parsed = parse_email_batch(&emails, &mailbox_map)?;
 
