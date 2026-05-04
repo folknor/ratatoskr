@@ -55,6 +55,13 @@ impl BodyStoreWriteState {
         Self { conn }
     }
 
+    /// Underlying `Arc<Mutex<Connection>>` accessor. Used by tests +
+    /// by service-side code that needs to bridge into a parallel
+    /// `BodyStoreReadState` view onto the same connection.
+    pub fn conn(&self) -> Arc<Mutex<Connection>> {
+        Arc::clone(&self.conn)
+    }
+
     /// Run a closure on the writer connection via `spawn_blocking`.
     /// Test helper / janitor escape hatch; production paths should
     /// prefer the typed methods below.

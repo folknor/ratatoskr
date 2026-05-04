@@ -1,36 +1,58 @@
 //! Sync dispatch - runs delta sync for a single account through the provider.
 //!
-//! This is the read path (server → local DB), moved to core so the app crate
-//! doesn't need direct provider dependencies.
+//! Phase 3 task 7 reshapes the entry point to take writer halves +
+//! a `CancellationToken` (`SyncProviderCtx`-shaped args) so the
+//! Service-side runner spawned by `crates/service/src/sync.rs`
+//! can drive sync against the dedicated `BodyStoreWriteState` /
+//! `InlineImageStoreWriteState` / `SearchWriteHandle` and observe
+//! cancellation requests through the per-account token map.
+//!
+//! Pre-Phase-3 this lived UI-side and consumed the unified store
+//! states + read-half DB. Phase 3 keeps the function in `core`
+//! (still provider-agnostic), but the dispatch site moves into the
+//! Service.
 
 use crate::actions::provider::create_provider;
-use crate::body_store::BodyStoreReadState;
 use crate::db::ReadDbState;
-use crate::search::SearchState;
-use common::types::ProviderCtx;
-use store::inline_image_store::InlineImageStoreReadState;
+use common::types::SyncProviderCtx;
+use service_state::{
+    BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
+};
+use tokio_util::sync::CancellationToken;
 
 /// Run a delta sync for a single account.
 ///
-/// Constructs the provider client internally. The caller provides
-/// pre-initialized stores and a progress reporter.
+/// `db` is the writer-half connection; the function passes it to the
+/// provider's `sync_delta` impl via `SyncProviderCtx`. The provider
+/// internally derives a read-state view onto the same connection for
+/// the helpers that have not yet been retyped onto the write half
+/// (transitional bridge from Phase 3 task 4).
+///
+/// `cancellation_token` is observed at JMAP sync's per-mailbox /
+/// per-batch / network-call checkpoints (Phase 3 task 6); the runner
+/// in `service::sync` flips the token when the UI dispatches
+/// `sync.cancel_account`.
+#[allow(clippy::too_many_arguments)]
 pub async fn sync_delta_for_account(
-    db: &ReadDbState,
+    write_db: &WriteDbState,
     account_id: &str,
     encryption_key: [u8; 32],
-    body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreReadState,
-    search: &SearchState,
+    body_store: &BodyStoreWriteState,
+    inline_images: &InlineImageStoreWriteState,
+    search: &SearchWriteHandle,
     progress: &dyn db::progress::ProgressReporter,
+    cancellation_token: &CancellationToken,
 ) -> Result<(), String> {
-    let provider = create_provider(db, account_id, encryption_key).await?;
-    let ctx = ProviderCtx {
+    let read_db: ReadDbState = write_db.to_read_state();
+    let provider = create_provider(&read_db, account_id, encryption_key).await?;
+    let ctx = SyncProviderCtx {
         account_id,
-        db,
+        db: write_db,
         body_store,
         inline_images,
         search,
         progress,
+        cancellation_token,
     };
     provider
         .sync_delta(&ctx, None)

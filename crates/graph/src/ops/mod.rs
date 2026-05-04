@@ -12,7 +12,7 @@ use common::ops::ProviderOps;
 use common::typed_ids::{FolderId, TagId};
 use common::types::{
     ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    ProviderProfile, ProviderTestResult, SyncResult,
+    ProviderProfile, ProviderTestResult, SyncProviderCtx, SyncResult,
 };
 use db::db::ReadDbState;
 
@@ -56,7 +56,7 @@ impl GraphOps {
 impl ProviderOps for GraphOps {
     async fn sync_initial(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &SyncProviderCtx<'_>,
         days_back: i64,
     ) -> Result<SyncResult, ProviderError> {
         super::sync::graph_initial_sync(&self.client, ctx, days_back).await?;
@@ -65,7 +65,7 @@ impl ProviderOps for GraphOps {
 
     async fn sync_delta(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &SyncProviderCtx<'_>,
         _days_back: Option<i64>,
     ) -> Result<SyncResult, ProviderError> {
         Ok(super::sync::graph_delta_sync(&self.client, ctx).await?)

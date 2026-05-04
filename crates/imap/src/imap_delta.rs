@@ -5,12 +5,13 @@ use std::collections::{HashMap, HashSet};
 use db::progress::ProgressReporter;
 
 use db::db::ReadDbState;
-use search::SearchState;
-use store::body_store::BodyStoreReadState;
-use store::inline_image_store::InlineImageStoreReadState;
+use service_state::{
+    BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
+};
 use sync::pipeline;
 use sync::threading;
 use sync::types::{ImapSyncResult, MessageMeta};
+use tokio_util::sync::CancellationToken;
 
 use super::client;
 use super::connection::connect;
@@ -39,14 +40,18 @@ fn compute_since_date(days_back: i64) -> String {
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 pub async fn imap_delta_sync(
     _progress: &dyn ProgressReporter,
-    db: &ReadDbState,
-    body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreReadState,
-    search: &SearchState,
+    db: &WriteDbState,
+    body_store: &BodyStoreWriteState,
+    inline_images: &InlineImageStoreWriteState,
+    search: &SearchWriteHandle,
+    cancellation_token: &CancellationToken,
     account_id: &str,
     config: &ImapConfig,
     days_back: i64,
 ) -> Result<ImapSyncResult, String> {
+    let read_db = db.to_read_state();
+    #[allow(unused_variables)]
+    let _cancellation_token = cancellation_token;
     log::info!("[IMAP] Starting delta sync for account {account_id} (days_back={days_back})");
     // List folders
     let all_folders = {
@@ -113,7 +118,7 @@ pub async fn imap_delta_sync(
             folder,
             &mapping.label_id,
             &since_date,
-            db,
+            &read_db,
             body_store,
             inline_images,
             search,
@@ -171,7 +176,7 @@ pub async fn imap_delta_sync(
                 saved,
                 delta,
                 days_back,
-                db,
+                &read_db,
                 body_store,
                 inline_images,
                 search,
@@ -208,7 +213,7 @@ pub async fn imap_delta_sync(
     let deletion_affected = run_deletion_detection(
         config,
         account_id,
-        db,
+        &read_db,
         body_store,
         search,
         &syncable_folders,
@@ -448,9 +453,9 @@ async fn fetch_folder_uids(
     folder_label_id: &str,
     since_date: &str,
     db: &ReadDbState,
-    body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreReadState,
-    search: &SearchState,
+    body_store: &BodyStoreWriteState,
+    inline_images: &InlineImageStoreWriteState,
+    search: &SearchWriteHandle,
     all_threadable: &mut Vec<threading::ThreadableMessage>,
     all_meta: &mut HashMap<String, MessageMeta>,
     labels_by_rfc_id: &mut HashMap<String, HashSet<String>>,
@@ -514,9 +519,9 @@ async fn fetch_uids_on_session(
     folder_label_id: &str,
     uids: &[u32],
     db: &ReadDbState,
-    body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreReadState,
-    search: &SearchState,
+    body_store: &BodyStoreWriteState,
+    inline_images: &InlineImageStoreWriteState,
+    search: &SearchWriteHandle,
     all_threadable: &mut Vec<threading::ThreadableMessage>,
     all_meta: &mut HashMap<String, MessageMeta>,
     labels_by_rfc_id: &mut HashMap<String, HashSet<String>>,
@@ -580,9 +585,9 @@ async fn process_folder_delta(
     delta: &DeltaCheckResult,
     days_back: i64,
     db: &ReadDbState,
-    body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreReadState,
-    search: &SearchState,
+    body_store: &BodyStoreWriteState,
+    inline_images: &InlineImageStoreWriteState,
+    search: &SearchWriteHandle,
     all_threadable: &mut Vec<threading::ThreadableMessage>,
     all_meta: &mut HashMap<String, MessageMeta>,
     labels_by_rfc_id: &mut HashMap<String, HashSet<String>>,

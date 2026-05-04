@@ -1,8 +1,8 @@
 use db::db::ReadDbState;
 use db::db::queries_extra::{AttachmentInsertRow, MessageInsertRow, insert_attachments, insert_messages};
-use search::{SearchDocument, SearchState};
-use store::body_store::BodyStoreReadState;
-use store::inline_image_store::{InlineImage, InlineImageStoreReadState};
+use search::SearchDocument;
+use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
+use store::inline_image_store::InlineImage;
 
 use super::super::client::GmailClient;
 use super::super::parse::{ParsedGmailMessage, parse_gmail_message};
@@ -18,9 +18,9 @@ pub(super) async fn process_single_thread(
     thread_id: &str,
     account_id: &str,
     db: &ReadDbState,
-    body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreReadState,
-    search: &SearchState,
+    body_store: &BodyStoreWriteState,
+    inline_images: &InlineImageStoreWriteState,
+    search: &SearchWriteHandle,
 ) -> Result<String, String> {
     let thread = client.get_thread(thread_id, "full", db).await?;
 
@@ -268,7 +268,7 @@ fn insert_reactions(
 // Body store helper
 // ---------------------------------------------------------------------------
 
-async fn store_bodies(body_store: &BodyStoreReadState, messages: &[ParsedGmailMessage]) {
+async fn store_bodies(body_store: &BodyStoreWriteState, messages: &[ParsedGmailMessage]) {
     sync_persistence::store_message_bodies(
         body_store,
         messages,
@@ -281,7 +281,7 @@ async fn store_bodies(body_store: &BodyStoreReadState, messages: &[ParsedGmailMe
 }
 
 async fn store_inline_images(
-    inline_images: &InlineImageStoreReadState,
+    inline_images: &InlineImageStoreWriteState,
     messages: &[ParsedGmailMessage],
 ) {
     let images: Vec<InlineImage> = messages
@@ -305,7 +305,7 @@ async fn store_inline_images(
 // Search index helper
 // ---------------------------------------------------------------------------
 
-async fn index_messages(search: &SearchState, account_id: &str, messages: &[ParsedGmailMessage]) {
+async fn index_messages(search: &SearchWriteHandle, account_id: &str, messages: &[ParsedGmailMessage]) {
     let docs: Vec<SearchDocument> = messages
         .iter()
         .map(|m| SearchDocument {

@@ -6,7 +6,7 @@
 //! described on `permanent_delete.rs` applies to the eventual
 //! permanent-delete that resolves a Trash. No action-time Tantivy
 //! writes happen here either; the type system enforces it via
-//! `ActionProviderCtx`'s lack of a `&SearchState` field.
+//! `ActionProviderCtx`'s lack of a `&SearchReadState` field.
 
 use common::ops::ProviderOps;
 use common::types::ActionProviderCtx;

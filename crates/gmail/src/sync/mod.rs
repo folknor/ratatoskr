@@ -7,9 +7,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use db::db::ReadDbState;
 use db::progress::ProgressReporter;
-use search::SearchState;
-use store::body_store::BodyStoreReadState;
-use store::inline_image_store::InlineImageStoreReadState;
+use service_state::{
+    BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
+};
+use tokio_util::sync::CancellationToken;
 
 use super::client::GmailClient;
 use sync::{progress as sync_progress, state as sync_state};
@@ -24,11 +25,15 @@ pub(crate) use delta::GmailSyncResult;
 pub(crate) struct SyncCtx<'a> {
     pub client: &'a GmailClient,
     pub account_id: &'a str,
+    /// Read view onto the writer connection (Phase 3 task 4 transitional
+    /// bridge).
     pub db: &'a ReadDbState,
-    pub body_store: &'a BodyStoreReadState,
-    pub inline_images: &'a InlineImageStoreReadState,
-    pub search: &'a SearchState,
+    pub body_store: &'a BodyStoreWriteState,
+    pub inline_images: &'a InlineImageStoreWriteState,
+    pub search: &'a SearchWriteHandle,
     pub progress: &'a dyn ProgressReporter,
+    #[allow(dead_code)]
+    pub cancellation_token: &'a CancellationToken,
 }
 
 // ---------------------------------------------------------------------------
@@ -41,20 +46,23 @@ pub async fn gmail_initial_sync(
     client: &GmailClient,
     account_id: &str,
     days_back: i64,
-    db: &ReadDbState,
-    body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreReadState,
-    search: &SearchState,
+    db: &WriteDbState,
+    body_store: &BodyStoreWriteState,
+    inline_images: &InlineImageStoreWriteState,
+    search: &SearchWriteHandle,
     progress: &dyn ProgressReporter,
+    cancellation_token: &CancellationToken,
 ) -> Result<(), String> {
+    let read_db = db.to_read_state();
     let ctx = SyncCtx {
         client,
         account_id,
-        db,
+        db: &read_db,
         body_store,
         inline_images,
         search,
         progress,
+        cancellation_token,
     };
     run_initial_sync(&ctx, days_back).await
 }
@@ -127,20 +135,23 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
 pub async fn gmail_delta_sync(
     client: &GmailClient,
     account_id: &str,
-    db: &ReadDbState,
-    body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreReadState,
-    search: &SearchState,
+    db: &WriteDbState,
+    body_store: &BodyStoreWriteState,
+    inline_images: &InlineImageStoreWriteState,
+    search: &SearchWriteHandle,
     progress: &dyn ProgressReporter,
+    cancellation_token: &CancellationToken,
 ) -> Result<GmailSyncResult, String> {
+    let read_db = db.to_read_state();
     let ctx = SyncCtx {
         client,
         account_id,
-        db,
+        db: &read_db,
         body_store,
         inline_images,
         search,
         progress,
+        cancellation_token,
     };
     delta::run_delta_sync(&ctx).await
 }

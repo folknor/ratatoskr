@@ -25,8 +25,10 @@ use rusqlite::Connection;
 
 pub mod body_store_write;
 pub mod inline_image_store_write;
+pub mod search_write;
 pub use body_store_write::BodyStoreWriteState;
 pub use inline_image_store_write::InlineImageStoreWriteState;
+pub use search_write::{SearchWriteHandle, WriterCommand};
 
 /// Service-only writer half of the shared database state.
 ///
@@ -53,6 +55,16 @@ impl WriteDbState {
     /// it directly.
     pub fn from_db_state(state: &db::db::ReadDbState) -> Self {
         Self::from_arc(state.conn())
+    }
+
+    /// Construct a `ReadDbState` view onto the same connection. Phase 3
+    /// task 4/7 transitional bridge: provider sync code paths still
+    /// consume `&ReadDbState` for queries that have not yet been
+    /// retyped onto the write half. The returned view shares the
+    /// underlying `Arc<Mutex<Connection>>` - a write through one is
+    /// observable through the other under SQLite's WAL.
+    pub fn to_read_state(&self) -> db::db::ReadDbState {
+        db::db::ReadDbState::from_arc(Arc::clone(&self.conn))
     }
 
     /// Run a closure with the database connection on the blocking

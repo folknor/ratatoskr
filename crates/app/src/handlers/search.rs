@@ -840,11 +840,11 @@ impl ReadyApp {
 
 /// Execute search off the main thread via spawn_blocking.
 ///
-/// Uses the provided SearchState (initialized once at boot) for Tantivy.
-/// Falls back to SQL-only if no SearchState is available.
+/// Uses the provided SearchReadState (initialized once at boot) for Tantivy.
+/// Falls back to SQL-only if no SearchReadState is available.
 pub(crate) async fn execute_search(
     db: Arc<db::Db>,
-    search_state: Option<Arc<rtsk::search::SearchState>>,
+    search_state: Option<Arc<rtsk::search::SearchReadState>>,
     query: String,
     scope: rtsk::db::types::AccountScope,
 ) -> Result<Vec<Thread>, String> {

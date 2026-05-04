@@ -23,7 +23,7 @@ fn make_test_ctx() -> (ActionContext, tempfile::TempDir) {
     let body_store = store::body_store::BodyStoreReadState::init(tmp.path()).expect("body store");
     let inline_images =
         store::inline_image_store::InlineImageStoreReadState::init(tmp.path()).expect("inline images");
-    let search = search::SearchState::init(tmp.path()).expect("search");
+    let search = search::SearchReadState::init(tmp.path()).expect("search");
 
     let ctx = ActionContext {
         db,

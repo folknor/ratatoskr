@@ -5,12 +5,13 @@ use std::collections::{HashMap, HashSet};
 use db::progress::{self, ProgressReporter};
 
 use db::db::ReadDbState;
-use search::SearchState;
-use store::body_store::BodyStoreReadState;
-use store::inline_image_store::InlineImageStoreReadState;
+use service_state::{
+    BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
+};
 use sync::pipeline;
 use sync::threading;
 use sync::types::{ImapSyncResult, MessageMeta, SyncProgressEvent};
+use tokio_util::sync::CancellationToken;
 
 use super::client;
 use super::connection::connect;
@@ -54,14 +55,18 @@ fn emit_progress(progress: &dyn ProgressReporter, event: &SyncProgressEvent) {
 #[allow(clippy::too_many_arguments)]
 pub async fn imap_initial_sync(
     progress: &dyn ProgressReporter,
-    db: &ReadDbState,
-    body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreReadState,
-    search: &SearchState,
+    db: &WriteDbState,
+    body_store: &BodyStoreWriteState,
+    inline_images: &InlineImageStoreWriteState,
+    search: &SearchWriteHandle,
+    cancellation_token: &CancellationToken,
     account_id: &str,
     config: &ImapConfig,
     days_back: i64,
 ) -> Result<ImapSyncResult, String> {
+    let read_db = db.to_read_state();
+    #[allow(unused_variables)]
+    let _cancellation_token = cancellation_token;
     log::info!("[IMAP] Starting initial sync for account {account_id} (days_back={days_back})");
     // Phase 1: List and sync folders
     emit_progress(
@@ -160,7 +165,7 @@ pub async fn imap_initial_sync(
 
         match sync_single_folder(
             progress,
-            db,
+            &read_db,
             body_store,
             inline_images,
             search,
@@ -340,9 +345,9 @@ pub async fn imap_initial_sync(
 async fn sync_single_folder(
     progress: &dyn ProgressReporter,
     db: &ReadDbState,
-    body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreReadState,
-    search: &SearchState,
+    body_store: &BodyStoreWriteState,
+    inline_images: &InlineImageStoreWriteState,
+    search: &SearchWriteHandle,
     config: &ImapConfig,
     account_id: &str,
     folder: &super::types::ImapFolder,

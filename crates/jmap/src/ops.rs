@@ -12,7 +12,7 @@ use common::ops::ProviderOps;
 use common::typed_ids::{FolderId, TagId};
 use common::types::{
     ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    ProviderProfile, ProviderTestResult, SyncResult,
+    ProviderProfile, ProviderTestResult, SyncProviderCtx, SyncResult,
 };
 
 use super::client::JmapClient;
@@ -36,7 +36,7 @@ impl JmapOps {
 impl ProviderOps for JmapOps {
     async fn sync_initial(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &SyncProviderCtx<'_>,
         days_back: i64,
     ) -> Result<SyncResult, ProviderError> {
         self.client.ensure_valid_token().await?;
@@ -49,6 +49,7 @@ impl ProviderOps for JmapOps {
             ctx.inline_images,
             ctx.search,
             ctx.progress,
+            ctx.cancellation_token,
         )
         .await?;
 
@@ -61,6 +62,7 @@ impl ProviderOps for JmapOps {
             ctx.inline_images,
             ctx.search,
             ctx.progress,
+            ctx.cancellation_token,
         )
         .await;
         for (id, result) in &shared_results {
@@ -74,7 +76,7 @@ impl ProviderOps for JmapOps {
 
     async fn sync_delta(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &SyncProviderCtx<'_>,
         _days_back: Option<i64>,
     ) -> Result<SyncResult, ProviderError> {
         self.client.ensure_valid_token().await?;
@@ -86,6 +88,7 @@ impl ProviderOps for JmapOps {
             ctx.inline_images,
             ctx.search,
             ctx.progress,
+            ctx.cancellation_token,
         )
         .await?;
 
@@ -98,6 +101,7 @@ impl ProviderOps for JmapOps {
             ctx.inline_images,
             ctx.search,
             ctx.progress,
+            ctx.cancellation_token,
         )
         .await;
         for (id, sr) in &shared_results {

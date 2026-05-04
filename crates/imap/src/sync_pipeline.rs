@@ -6,10 +6,10 @@ use db::db::queries_extra::{
     upsert_labels,
     get_thread_id_for_imap_uid, recompute_thread_read_starred, set_message_imap_flags,
 };
-use search::{SearchDocument, SearchState};
+use search::SearchDocument;
+use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
 use seen::MessageAddresses;
-use store::body_store::BodyStoreReadState;
-use store::inline_image_store::{InlineImage, InlineImageStoreReadState};
+use store::inline_image_store::InlineImage;
 use sync::persistence;
 
 use super::convert::ConvertedMessage;
@@ -211,9 +211,9 @@ impl DbInsertData {
 /// Store a chunk of converted messages to all four subsystems.
 pub(crate) async fn store_chunk(
     db: &ReadDbState,
-    body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreReadState,
-    search: &SearchState,
+    body_store: &BodyStoreWriteState,
+    inline_images: &InlineImageStoreWriteState,
+    search: &SearchWriteHandle,
     chunk: &[ConvertedMessage],
     account_id: &str,
 ) -> Result<(), String> {
@@ -297,7 +297,7 @@ impl MessageAddresses for ImapAddressData {
 
 /// Store bodies in the body store (compressed, separate DB).
 /// Fire-and-forget pattern - errors are logged but don't fail the sync.
-pub async fn store_bodies(body_store: &BodyStoreReadState, messages: &[ConvertedMessage]) {
+pub async fn store_bodies(body_store: &BodyStoreWriteState, messages: &[ConvertedMessage]) {
     let bodies: Vec<store::body_store::MessageBody> = messages
         .iter()
         .filter(|m| m.imap_msg.body_html.is_some() || m.imap_msg.body_text.is_some())
@@ -319,7 +319,7 @@ pub async fn store_bodies(body_store: &BodyStoreReadState, messages: &[Converted
 
 /// Store small inline images in the content-addressed blob store. Fire-and-forget.
 pub async fn store_inline_images(
-    inline_images: &InlineImageStoreReadState,
+    inline_images: &InlineImageStoreWriteState,
     messages: &[ConvertedMessage],
 ) {
     let images: Vec<InlineImage> = messages
@@ -347,7 +347,7 @@ pub async fn store_inline_images(
 }
 
 /// Index messages in tantivy search. Fire-and-forget.
-pub async fn index_messages(search: &SearchState, messages: &[ConvertedMessage], account_id: &str) {
+pub async fn index_messages(search: &SearchWriteHandle, messages: &[ConvertedMessage], account_id: &str) {
     let docs: Vec<SearchDocument> = messages
         .iter()
         .map(|m| SearchDocument {
@@ -367,7 +367,7 @@ pub async fn index_messages(search: &SearchState, messages: &[ConvertedMessage],
         })
         .collect();
 
-    if let Err(e) = search.index_messages_batch(&docs).await {
+    if let Err(e) = search.index_messages_batch(docs).await {
         log::warn!("Failed to index messages in tantivy: {e}");
     }
 }

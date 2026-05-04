@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tantivy::collector::TopDocs;
@@ -8,8 +7,7 @@ use tantivy::query::{BooleanQuery, Occur, Query, QueryParser, RangeQuery, TermQu
 use tantivy::schema::{
     DateOptions, Field, NumericOptions, STORED, STRING, Schema, TextFieldIndexing, TextOptions,
 };
-use tantivy::{DateTime as TantivyDateTime, Index, IndexReader, IndexWriter, ReloadPolicy, Term};
-use tokio::sync::Mutex;
+use tantivy::{DateTime as TantivyDateTime, Index, IndexReader, ReloadPolicy, Term};
 
 // ── Schema ──────────────────────────────────────────────────────────────
 
@@ -81,7 +79,7 @@ pub fn build_schema() -> Schema {
 
 // ── Types ───────────────────────────────────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchDocument {
     pub message_id: String,
@@ -135,25 +133,28 @@ pub struct SearchParams {
 
 // ── Field helpers ───────────────────────────────────────────────────────
 
-#[derive(Clone)]
-struct Fields {
-    subject: Field,
-    from_name: Field,
-    from_address: Field,
-    to_addresses: Field,
-    body_text: Field,
-    snippet: Field,
-    message_id: Field,
-    thread_id: Field,
-    account_id: Field,
-    date: Field,
-    is_read: Field,
-    is_starred: Field,
-    has_attachment: Field,
+/// Pre-resolved Tantivy field handles. Kept `pub` so the Service-side
+/// writer task (`crates/service/src/search_writer.rs`) can build
+/// `TantivyDocument`s using the same schema as the read path.
+#[derive(Clone, Debug)]
+pub struct Fields {
+    pub subject: Field,
+    pub from_name: Field,
+    pub from_address: Field,
+    pub to_addresses: Field,
+    pub body_text: Field,
+    pub snippet: Field,
+    pub message_id: Field,
+    pub thread_id: Field,
+    pub account_id: Field,
+    pub date: Field,
+    pub is_read: Field,
+    pub is_starred: Field,
+    pub has_attachment: Field,
 }
 
 impl Fields {
-    fn from_schema(schema: &Schema) -> Self {
+    pub fn from_schema(schema: &Schema) -> Self {
         Self {
             subject: schema.get_field("subject").expect("subject field"),
             from_name: schema.get_field("from_name").expect("from_name field"),
@@ -178,49 +179,117 @@ impl Fields {
     }
 }
 
-// ── SearchState ─────────────────────────────────────────────────────────
+// ── Index opener ────────────────────────────────────────────────────────
 
+/// Open or create the Tantivy index in `{app_data_dir}/search_index/`.
+///
+/// Phase 3 task 4 exposes this so the Service writer task and the UI's
+/// `SearchReadState` can both consume the same opener (the writer task
+/// runs in `BootPhase::OpeningSearchIndex` and creates the directory if
+/// it does not exist; the read state opens after the boot handshake
+/// completes).
+pub fn open_or_create_search_index(app_data_dir: &Path) -> Result<(Index, Schema), String> {
+    let index_dir = app_data_dir.join("search_index");
+    std::fs::create_dir_all(&index_dir).map_err(|e| format!("create search index dir: {e}"))?;
+
+    let schema = build_schema();
+
+    log::info!("Opening search index at {}", index_dir.display());
+
+    let index = if Index::exists(
+        &tantivy::directory::MmapDirectory::open(&index_dir)
+            .map_err(|e| format!("open mmap dir: {e}"))?,
+    )
+    .map_err(|e| format!("check index exists: {e}"))?
+    {
+        log::info!("Opening existing search index");
+        Index::open_in_dir(&index_dir).map_err(|e| {
+            log::error!("Failed to open search index: {e}");
+            format!("open index: {e}")
+        })?
+    } else {
+        log::info!("Creating new search index");
+        Index::create_in_dir(&index_dir, schema.clone()).map_err(|e| {
+            log::error!("Failed to create search index: {e}");
+            format!("create index: {e}")
+        })?
+    };
+
+    Ok((index, schema))
+}
+
+/// Build a Tantivy document from a `SearchDocument` against the
+/// pre-resolved field handles.
+///
+/// `pub` so the Service-side writer task (which owns the `IndexWriter`
+/// post-task-4) can drive document construction without a circular
+/// dependency on a `SearchReadState` reference.
+pub fn build_search_doc(fields: &Fields, msg: &SearchDocument) -> tantivy::TantivyDocument {
+    let mut doc = tantivy::TantivyDocument::default();
+
+    doc.add_text(fields.message_id, &msg.message_id);
+    doc.add_text(fields.account_id, &msg.account_id);
+    doc.add_text(fields.thread_id, &msg.thread_id);
+    doc.add_text(fields.subject, msg.subject.as_deref().unwrap_or_default());
+    doc.add_text(
+        fields.from_name,
+        msg.from_name.as_deref().unwrap_or_default(),
+    );
+    doc.add_text(
+        fields.from_address,
+        msg.from_address.as_deref().unwrap_or_default(),
+    );
+    doc.add_text(
+        fields.to_addresses,
+        msg.to_addresses.as_deref().unwrap_or_default(),
+    );
+    doc.add_text(
+        fields.body_text,
+        msg.body_text.as_deref().unwrap_or_default(),
+    );
+    doc.add_text(fields.snippet, msg.snippet.as_deref().unwrap_or_default());
+    doc.add_date(
+        fields.date,
+        TantivyDateTime::from_timestamp_secs(msg.date),
+    );
+    doc.add_u64(fields.is_read, u64::from(msg.is_read));
+    doc.add_u64(fields.is_starred, u64::from(msg.is_starred));
+    doc.add_u64(fields.has_attachment, u64::from(msg.has_attachment));
+
+    doc
+}
+
+// ── SearchReadState ─────────────────────────────────────────────────────────
+
+/// Read-only handle to the Tantivy search index.
+///
+/// Phase 3 task 4 strips writer ownership from this type. Writes flow
+/// through `service-state::SearchWriteHandle` (mpsc) to a Service-only
+/// writer task that owns the single `IndexWriter`. Tantivy's per-
+/// directory writer lock enforces the single-writer invariant; the
+/// `SearchReadState` only opens the reader.
 #[derive(Clone)]
-pub struct SearchState {
+pub struct SearchReadState {
     reader: IndexReader,
-    writer: Arc<Mutex<IndexWriter>>,
     fields: Fields,
 }
 
-// Safety: IndexReader is Send+Sync; writer is behind Arc<Mutex>
-unsafe impl Send for SearchState {}
-unsafe impl Sync for SearchState {}
+// IndexReader is Send + Sync; no interior mutability that would block auto-derives.
 
-const WRITER_HEAP_BYTES: usize = 50_000_000; // 50 MB
-
-impl SearchState {
-    /// Open or create the tantivy index in `{app_data_dir}/search_index/`.
+impl SearchReadState {
+    /// Open the search index reader for `{app_data_dir}/search_index/`.
+    ///
+    /// The boot ordering contract (Phase 3 task 12): the Service spawns
+    /// the writer task in `BootPhase::OpeningSearchIndex` *before* the
+    /// boot handshake completes; the UI constructs `SearchReadState` only
+    /// after `boot.ready`, so the directory is guaranteed to exist and
+    /// hold at least the initial empty segment.
+    ///
+    /// This entry point still calls `open_or_create_search_index` for the
+    /// Service-internal callers (action service constructs a read state
+    /// for its `ProviderCtx` builder) and for tests.
     pub fn init(app_data_dir: &Path) -> Result<Self, String> {
-        let index_dir = app_data_dir.join("search_index");
-        std::fs::create_dir_all(&index_dir).map_err(|e| format!("create search index dir: {e}"))?;
-
-        let schema = build_schema();
-
-        log::info!("Initializing search index at {}", index_dir.display());
-
-        let index = if Index::exists(
-            &tantivy::directory::MmapDirectory::open(&index_dir)
-                .map_err(|e| format!("open mmap dir: {e}"))?,
-        )
-        .map_err(|e| format!("check index exists: {e}"))?
-        {
-            log::info!("Opening existing search index");
-            Index::open_in_dir(&index_dir).map_err(|e| {
-                log::error!("Failed to open search index: {e}");
-                format!("open index: {e}")
-            })?
-        } else {
-            log::info!("Creating new search index");
-            Index::create_in_dir(&index_dir, schema.clone()).map_err(|e| {
-                log::error!("Failed to create search index: {e}");
-                format!("create index: {e}")
-            })?
-        };
+        let (index, schema) = open_or_create_search_index(app_data_dir)?;
 
         let reader = index
             .reader_builder()
@@ -228,121 +297,36 @@ impl SearchState {
             .try_into()
             .map_err(|e| format!("create reader: {e}"))?;
 
-        let writer = index
-            .writer(WRITER_HEAP_BYTES)
-            .map_err(|e| format!("create writer: {e}"))?;
-
         let fields = Fields::from_schema(&schema);
 
-        Ok(Self {
-            reader,
-            writer: Arc::new(Mutex::new(writer)),
-            fields,
-        })
+        Ok(Self { reader, fields })
     }
 
-    /// Convert a unix timestamp (seconds) to tantivy DateTime.
-    fn to_tantivy_date(ts: i64) -> TantivyDateTime {
-        TantivyDateTime::from_timestamp_secs(ts)
+    /// Drop the cached `Searcher` so subsequent searches see the
+    /// latest committed segments. Cheap; tantivy reloads cooperatively
+    /// on the next searcher acquire.
+    pub fn reload(&self) -> Result<(), String> {
+        self.reader
+            .reload()
+            .map_err(|e| format!("reader reload: {e}"))
     }
 
-    /// Build a tantivy document from a `SearchDocument`.
-    fn build_doc(&self, msg: &SearchDocument) -> tantivy::TantivyDocument {
-        let mut doc = tantivy::TantivyDocument::default();
-
-        doc.add_text(self.fields.message_id, &msg.message_id);
-        doc.add_text(self.fields.account_id, &msg.account_id);
-        doc.add_text(self.fields.thread_id, &msg.thread_id);
-        doc.add_text(
-            self.fields.subject,
-            msg.subject.as_deref().unwrap_or_default(),
-        );
-        doc.add_text(
-            self.fields.from_name,
-            msg.from_name.as_deref().unwrap_or_default(),
-        );
-        doc.add_text(
-            self.fields.from_address,
-            msg.from_address.as_deref().unwrap_or_default(),
-        );
-        doc.add_text(
-            self.fields.to_addresses,
-            msg.to_addresses.as_deref().unwrap_or_default(),
-        );
-        doc.add_text(
-            self.fields.body_text,
-            msg.body_text.as_deref().unwrap_or_default(),
-        );
-        doc.add_text(
-            self.fields.snippet,
-            msg.snippet.as_deref().unwrap_or_default(),
-        );
-        doc.add_date(self.fields.date, Self::to_tantivy_date(msg.date));
-        doc.add_u64(self.fields.is_read, u64::from(msg.is_read));
-        doc.add_u64(self.fields.is_starred, u64::from(msg.is_starred));
-        doc.add_u64(self.fields.has_attachment, u64::from(msg.has_attachment));
-
-        doc
+    /// Field handle accessor (used by tests + by future read paths
+    /// that need to inspect the schema).
+    pub fn fields(&self) -> &Fields {
+        &self.fields
     }
 
-    /// Index a single message. Commits immediately.
-    pub async fn index_message(&self, msg: &SearchDocument) -> Result<(), String> {
-        let doc = self.build_doc(msg);
-        let mut writer = self.writer.lock().await;
-
-        // Delete any existing doc with same message_id to avoid duplicates
-        writer.delete_term(Term::from_field_text(
-            self.fields.message_id,
-            &msg.message_id,
-        ));
-        writer
-            .add_document(doc)
-            .map_err(|e| format!("add document: {e}"))?;
-        writer.commit().map_err(|e| format!("commit: {e}"))?;
-        Ok(())
-    }
-
-    /// Batch-index multiple messages. Single commit at the end.
-    pub async fn index_messages_batch(&self, msgs: &[SearchDocument]) -> Result<(), String> {
-        log::debug!("Indexing batch of {} messages", msgs.len());
-        let mut writer = self.writer.lock().await;
-
-        for msg in msgs {
-            writer.delete_term(Term::from_field_text(
-                self.fields.message_id,
-                &msg.message_id,
-            ));
-            let doc = self.build_doc(msg);
-            writer
-                .add_document(doc)
-                .map_err(|e| format!("add document: {e}"))?;
-        }
-
-        writer.commit().map_err(|e| format!("commit batch: {e}"))?;
-        Ok(())
-    }
-
-    /// Delete a document by message_id.
-    pub async fn delete_message(&self, message_id: &str) -> Result<(), String> {
-        let mut writer = self.writer.lock().await;
-        writer.delete_term(Term::from_field_text(self.fields.message_id, message_id));
-        writer.commit().map_err(|e| format!("commit delete: {e}"))?;
-        Ok(())
-    }
-
-    /// Batch-delete multiple documents by message_id. Single commit at the end.
-    pub async fn delete_messages_batch(&self, message_ids: &[&str]) -> Result<(), String> {
-        if message_ids.is_empty() {
-            return Ok(());
-        }
-        let mut writer = self.writer.lock().await;
-        for id in message_ids {
-            writer.delete_term(Term::from_field_text(self.fields.message_id, id));
-        }
-        writer
-            .commit()
-            .map_err(|e| format!("commit batch delete: {e}"))?;
-        Ok(())
+    /// Exposed for the Phase 3 startup invariant pass: returns whether
+    /// a document with the given `message_id` exists in the index.
+    pub fn message_indexed(&self, message_id: &str) -> Result<bool, String> {
+        let searcher = self.reader.searcher();
+        let term = Term::from_field_text(self.fields.message_id, message_id);
+        let q = TermQuery::new(term, tantivy::schema::IndexRecordOption::Basic);
+        let count = searcher
+            .search(&q, &tantivy::collector::Count)
+            .map_err(|e| format!("search: {e}"))?;
+        Ok(count > 0)
     }
 
     /// Search with structured filters.
@@ -476,7 +460,7 @@ impl SearchState {
                 .map(|ts| {
                     std::ops::Bound::Included(Term::from_field_date(
                         self.fields.date,
-                        Self::to_tantivy_date(ts),
+                        TantivyDateTime::from_timestamp_secs(ts),
                     ))
                 })
                 .unwrap_or(std::ops::Bound::Unbounded);
@@ -485,7 +469,7 @@ impl SearchState {
                 .map(|ts| {
                     std::ops::Bound::Included(Term::from_field_date(
                         self.fields.date,
-                        Self::to_tantivy_date(ts),
+                        TantivyDateTime::from_timestamp_secs(ts),
                     ))
                 })
                 .unwrap_or(std::ops::Bound::Unbounded);
@@ -538,17 +522,6 @@ impl SearchState {
                 Some(Box::new(BooleanQuery::new(sub)))
             }
         }
-    }
-
-    /// Clear all documents from the index.
-    pub async fn clear_index(&self) -> Result<(), String> {
-        log::info!("Clearing entire search index");
-        let mut writer = self.writer.lock().await;
-        writer
-            .delete_all_documents()
-            .map_err(|e| format!("delete all: {e}"))?;
-        writer.commit().map_err(|e| format!("commit clear: {e}"))?;
-        Ok(())
     }
 
     /// Extract a text value from a tantivy document field.
@@ -629,32 +602,6 @@ pub fn group_by_thread(results: Vec<SearchResult>) -> Vec<SearchResult> {
 mod tests {
     use super::*;
 
-    // ── Helpers ──────────────────────────────────────────────────────
-
-    fn make_doc(msg_id: &str, acct: &str, thread: &str, subject: &str) -> SearchDocument {
-        SearchDocument {
-            message_id: msg_id.into(),
-            account_id: acct.into(),
-            thread_id: thread.into(),
-            subject: Some(subject.into()),
-            from_name: Some("Sender".into()),
-            from_address: Some("sender@test.com".into()),
-            to_addresses: Some("recv@test.com".into()),
-            body_text: Some(format!("Body of {subject}")),
-            snippet: Some(format!("Snippet of {subject}")),
-            date: 1_700_000_000,
-            is_read: false,
-            is_starred: false,
-            has_attachment: false,
-        }
-    }
-
-    fn init_temp_search() -> (SearchState, tempfile::TempDir) {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let state = SearchState::init(dir.path()).expect("init search");
-        (state, dir)
-    }
-
     fn make_result(thread_id: &str, rank: f32) -> SearchResult {
         SearchResult {
             message_id: format!("msg-{thread_id}-{rank}"),
@@ -689,7 +636,6 @@ mod tests {
 
         let grouped = group_by_thread(results);
         assert_eq!(grouped.len(), 2);
-        // Sorted by rank DESC: t1(5.0), t2(4.0)
         assert_eq!(grouped[0].thread_id, "t1");
         assert!((grouped[0].rank - 5.0).abs() < f32::EPSILON);
         assert_eq!(grouped[1].thread_id, "t2");
@@ -712,110 +658,9 @@ mod tests {
     }
 
     // ── Multi-account search tests ───────────────────────────────────
-
-    fn make_search_params(free_text: &str) -> SearchParams {
-        SearchParams {
-            account_ids: None,
-            free_text: Some(free_text.into()),
-            from: Vec::new(),
-            to: Vec::new(),
-            subject: None,
-            has_attachment: None,
-            is_unread: None,
-            is_starred: None,
-            before: None,
-            after: None,
-            limit: Some(10),
-        }
-    }
-
-    #[tokio::test]
-    async fn search_no_account_filter_returns_all() {
-        let (state, _dir) = init_temp_search();
-        let docs = vec![
-            make_doc("m1", "acct-a", "t1", "Quarterly report"),
-            make_doc("m2", "acct-b", "t2", "Quarterly summary"),
-        ];
-        state.index_messages_batch(&docs).await.expect("index");
-        state.reader.reload().expect("reload");
-
-        let params = make_search_params("quarterly");
-        let results = state.search_with_filters(&params).expect("search");
-        assert_eq!(results.len(), 2);
-    }
-
-    #[tokio::test]
-    async fn search_single_account_filter() {
-        let (state, _dir) = init_temp_search();
-        let docs = vec![
-            make_doc("m1", "acct-a", "t1", "Quarterly report"),
-            make_doc("m2", "acct-b", "t2", "Quarterly summary"),
-        ];
-        state.index_messages_batch(&docs).await.expect("index");
-        state.reader.reload().expect("reload");
-
-        let mut params = make_search_params("quarterly");
-        params.account_ids = Some(vec!["acct-a".to_string()]);
-        let results = state.search_with_filters(&params).expect("search");
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].account_id, "acct-a");
-    }
-
-    #[tokio::test]
-    async fn search_multi_account_filter() {
-        let (state, _dir) = init_temp_search();
-        let docs = vec![
-            make_doc("m1", "acct-a", "t1", "Quarterly report"),
-            make_doc("m2", "acct-b", "t2", "Quarterly summary"),
-            make_doc("m3", "acct-c", "t3", "Quarterly budget"),
-        ];
-        state.index_messages_batch(&docs).await.expect("index");
-        state.reader.reload().expect("reload");
-
-        let mut params = make_search_params("quarterly");
-        params.account_ids = Some(vec!["acct-a".to_string(), "acct-c".to_string()]);
-        let results = state.search_with_filters(&params).expect("search");
-        assert_eq!(results.len(), 2);
-        let accts: Vec<&str> = results.iter().map(|r| r.account_id.as_str()).collect();
-        assert!(accts.contains(&"acct-a"));
-        assert!(accts.contains(&"acct-c"));
-        assert!(!accts.contains(&"acct-b"));
-    }
-
-    #[tokio::test]
-    async fn search_empty_account_slice_returns_all() {
-        let (state, _dir) = init_temp_search();
-        let docs = vec![
-            make_doc("m1", "acct-a", "t1", "Quarterly report"),
-            make_doc("m2", "acct-b", "t2", "Quarterly summary"),
-        ];
-        state.index_messages_batch(&docs).await.expect("index");
-        state.reader.reload().expect("reload");
-
-        let mut params = make_search_params("quarterly");
-        params.account_ids = Some(Vec::new());
-        let results = state.search_with_filters(&params).expect("search");
-        assert_eq!(results.len(), 2);
-    }
-
-    #[tokio::test]
-    async fn search_with_filters_multi_account() {
-        let (state, _dir) = init_temp_search();
-        let docs = vec![
-            make_doc("m1", "acct-a", "t1", "Budget proposal"),
-            make_doc("m2", "acct-b", "t2", "Budget review"),
-            make_doc("m3", "acct-c", "t3", "Budget forecast"),
-        ];
-        state.index_messages_batch(&docs).await.expect("index");
-        state.reader.reload().expect("reload");
-
-        let mut params = make_search_params("budget");
-        params.account_ids = Some(vec!["acct-b".into(), "acct-c".into()]);
-        let results = state.search_with_filters(&params).expect("search");
-        assert_eq!(results.len(), 2);
-        let accts: Vec<&str> = results.iter().map(|r| r.account_id.as_str()).collect();
-        assert!(accts.contains(&"acct-b"));
-        assert!(accts.contains(&"acct-c"));
-        assert!(!accts.contains(&"acct-a"));
-    }
+    //
+    // The pre-Phase-3 read+write tests lived on `SearchState`; Phase 3
+    // task 4 strips writer ownership from `SearchReadState` so the
+    // search-with-data tests now live alongside the writer task in
+    // `crates/service/src/search_writer.rs`.
 }

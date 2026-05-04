@@ -24,11 +24,13 @@ db = { path = "../db" }
 store = { path = "../stores" }
 search = { path = "../search" }
 seen = { path = "../seen" }
+service-state = { path = "../service-state" }
 types = { path = "../types" }
 crypto-key = { path = "../crypto-key" }
 
 # Crate-specific deps
 tokio = { workspace = true, features = ["sync"] }
+tokio-util = "0.7"
 log = "0.4"
 async-trait = "0.1"
 unicode-segmentation = "1.12"

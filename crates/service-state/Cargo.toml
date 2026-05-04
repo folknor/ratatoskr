@@ -14,8 +14,9 @@ workspace = true
 db = { path = "../db" }
 log = "0.4"
 rusqlite.workspace = true
+search = { path = "../search" }
 store = { path = "../stores" }
-tokio = { workspace = true, features = ["rt"] }
+tokio = { workspace = true, features = ["rt", "sync"] }
 
 [dev-dependencies]
 tempfile = "3"

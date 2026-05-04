@@ -15,7 +15,7 @@
 //! `messages` and gets filtered out at result-render time).
 //!
 //! Type-level guarantee: this action takes `ActionProviderCtx` (no
-//! `&SearchState` field), so the compiler rejects any direct
+//! `&SearchReadState` field), so the compiler rejects any direct
 //! `ctx.search.*` write from inside the dispatch path. Future
 //! contributors who want action-time index writes would have to
 //! explicitly extend the type, which forces a design conversation.

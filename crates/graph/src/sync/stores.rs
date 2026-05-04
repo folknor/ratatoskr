@@ -1,6 +1,6 @@
-use search::{SearchDocument, SearchState};
-use store::body_store::BodyStoreReadState;
-use store::inline_image_store::{InlineImage, InlineImageStoreReadState};
+use search::SearchDocument;
+use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
+use store::inline_image_store::InlineImage;
 
 use super::super::parse::ParsedGraphMessage;
 use super::SyncCtx;
@@ -10,7 +10,7 @@ use sync::{persistence as sync_persistence, progress as sync_progress};
 // Body store helper
 // ---------------------------------------------------------------------------
 
-pub(super) async fn store_bodies(body_store: &BodyStoreReadState, messages: &[ParsedGraphMessage]) {
+pub(super) async fn store_bodies(body_store: &BodyStoreWriteState, messages: &[ParsedGraphMessage]) {
     sync_persistence::store_message_bodies(
         body_store,
         messages,
@@ -23,7 +23,7 @@ pub(super) async fn store_bodies(body_store: &BodyStoreReadState, messages: &[Pa
 }
 
 pub(super) async fn store_inline_images(
-    inline_images: &InlineImageStoreReadState,
+    inline_images: &InlineImageStoreWriteState,
     messages: &[ParsedGraphMessage],
 ) {
     let images: Vec<InlineImage> = messages
@@ -49,7 +49,7 @@ pub(super) async fn store_inline_images(
 // ---------------------------------------------------------------------------
 
 pub(super) async fn index_messages(
-    search: &SearchState,
+    search: &SearchWriteHandle,
     account_id: &str,
     messages: &[ParsedGraphMessage],
 ) {

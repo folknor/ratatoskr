@@ -5,7 +5,7 @@ use common::ops::ProviderOps;
 use common::typed_ids::{FolderId, TagId};
 use common::types::{
     ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    ProviderProfile, ProviderTestResult, SyncResult,
+    ProviderProfile, ProviderTestResult, SyncProviderCtx, SyncResult,
 };
 use db::db::ReadDbState;
 
@@ -26,7 +26,7 @@ impl GmailOps {
 impl ProviderOps for GmailOps {
     async fn sync_initial(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &SyncProviderCtx<'_>,
         days_back: i64,
     ) -> Result<SyncResult, ProviderError> {
         super::sync::gmail_initial_sync(
@@ -38,6 +38,7 @@ impl ProviderOps for GmailOps {
             ctx.inline_images,
             ctx.search,
             ctx.progress,
+            ctx.cancellation_token,
         )
         .await?;
         Ok(SyncResult::default())
@@ -45,7 +46,7 @@ impl ProviderOps for GmailOps {
 
     async fn sync_delta(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &SyncProviderCtx<'_>,
         _days_back: Option<i64>,
     ) -> Result<SyncResult, ProviderError> {
         let result = super::sync::gmail_delta_sync(
@@ -56,6 +57,7 @@ impl ProviderOps for GmailOps {
             ctx.inline_images,
             ctx.search,
             ctx.progress,
+            ctx.cancellation_token,
         )
         .await?;
         Ok(SyncResult {

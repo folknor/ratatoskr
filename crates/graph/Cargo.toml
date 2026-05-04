@@ -28,7 +28,9 @@ search = { path = "../search" }
 seen = { path = "../seen" }
 common = { path = "../common" }
 label-colors = { path = "../label-colors" }
+service-state = { path = "../service-state" }
 sync = { path = "../sync" }
+tokio-util = "0.7"
 
 # Crate-specific deps
 calcard = "0.3"
@@ -36,7 +38,7 @@ log = "0.4"
 async-trait = "0.1"
 uuid = { version = "1.23.1", features = ["v4"] }
 sha2 = "0.11"
-mail-parser = "0.11"
+mail-parser = "0.11.3"
 futures = "0.3"
 urlencoding = "2"
 getrandom = { version = "0.4.2", features = ["std"] }

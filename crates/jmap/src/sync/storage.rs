@@ -4,9 +4,9 @@ use db::db::queries_extra::{
     AttachmentInsertRow, LabelWriteRow, MessageInsertRow, insert_attachments, insert_messages,
     upsert_labels,
 };
-use search::{SearchDocument, SearchState};
+use search::SearchDocument;
+use service_state::{BodyStoreWriteState, SearchWriteHandle};
 use store::attachment_cache::hash_bytes;
-use store::body_store::BodyStoreReadState;
 use store::inline_image_store::{InlineImage, MAX_INLINE_SIZE};
 
 use super::super::parse::ParsedJmapMessage;
@@ -98,7 +98,8 @@ pub(crate) async fn delete_messages(ctx: &SyncCtx<'_>, message_ids: &[&str]) -> 
     }
 
     // Delete from search index (batch -- single commit)
-    if let Err(e) = ctx.search.delete_messages_batch(message_ids).await {
+    let owned_ids: Vec<String> = message_ids.iter().map(|s| (*s).to_string()).collect();
+    if let Err(e) = ctx.search.delete_messages_batch(owned_ids).await {
         log::warn!("Failed to batch-delete search documents: {e}");
     }
 
@@ -329,7 +330,7 @@ fn sync_keyword_labels(
 // Body store helper
 // ---------------------------------------------------------------------------
 
-async fn store_bodies(body_store: &BodyStoreReadState, messages: &[ParsedJmapMessage]) {
+async fn store_bodies(body_store: &BodyStoreWriteState, messages: &[ParsedJmapMessage]) {
     sync_persistence::store_message_bodies(
         body_store,
         messages,
@@ -458,7 +459,7 @@ async fn store_inline_images(ctx: &SyncCtx<'_>, messages: &[ParsedJmapMessage]) 
 // Search index helper
 // ---------------------------------------------------------------------------
 
-async fn index_messages(search: &SearchState, account_id: &str, messages: &[ParsedJmapMessage]) {
+async fn index_messages(search: &SearchWriteHandle, account_id: &str, messages: &[ParsedJmapMessage]) {
     let docs: Vec<SearchDocument> = messages
         .iter()
         .map(|m| SearchDocument {

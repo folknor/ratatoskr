@@ -52,6 +52,7 @@ Do not use your Memory functionality. Do not read, write, or update memories. Do
 - Never capture stdout into env vars (`UUID=$(...)`).
 - Never read or write from `/tmp`. All data lives in the project.
 - Never run raw `cargo`, `curl`, `pkill`. Use `brokkr`.
+- Never run `git` with `-C <path>`. Run `git` from the current working directory.
 
 ### git commit rules
 

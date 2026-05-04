@@ -20,6 +20,46 @@ use service_api::{BootPhase, BootProgress, MAX_FRAME_BYTES, Notification};
 use std::io;
 use tokio::sync::mpsc;
 
+/// Awaitable wrapper around the outbound writer mpsc that serializes
+/// + frames a `Notification` before sending.
+///
+/// Phase 3 task 4 introduces this so the search writer task can drive
+/// `MustDeliver` notifications with `tokio::time::timeout` against
+/// `NotificationSender::send` (the H5 30 s send-deadline) without
+/// re-implementing the serialize step.
+///
+/// Cheap `Clone` (the inner `mpsc::Sender` is `Arc`-backed). Mirrors
+/// the existing `try_send`-style helpers above for callers that need
+/// awaitable backpressure.
+#[derive(Clone)]
+pub struct NotificationSender {
+    out_tx: mpsc::Sender<Vec<u8>>,
+}
+
+impl NotificationSender {
+    pub fn new(out_tx: mpsc::Sender<Vec<u8>>) -> Self {
+        Self { out_tx }
+    }
+
+    /// Awaitable send. Backpressure-aware (`mpsc::Sender::send`).
+    pub async fn send(
+        &self,
+        notification: Notification,
+    ) -> Result<(), mpsc::error::SendError<Vec<u8>>> {
+        let bytes = match serialize_notification(&notification) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                log::warn!(
+                    "failed to serialize {}: {error}",
+                    notification.method_name()
+                );
+                return Ok(());
+            }
+        };
+        self.out_tx.send(bytes).await
+    }
+}
+
 /// Serialize and enqueue a `boot.progress` notification onto the outbound
 /// writer queue. Best-effort: a `try_send` failure is logged at warn and
 /// dropped.

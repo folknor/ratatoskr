@@ -5,16 +5,17 @@ mod stores;
 
 use std::collections::HashSet;
 
-use common::types::{ProviderCtx, SyncResult};
+use common::types::{ProviderCtx, SyncProviderCtx, SyncResult};
 use db::db::ReadDbState;
 use db::db::queries_extra::{
     UpsertCalendarEventParams, delete_event_by_remote_id_sync, save_calendar_sync_token_sync,
     upsert_calendar_event_sync, upsert_calendar_sync,
 };
 use db::progress::ProgressReporter;
-use search::SearchState;
-use store::body_store::BodyStoreReadState;
-use store::inline_image_store::InlineImageStoreReadState;
+use service_state::{
+    BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle,
+};
+use tokio_util::sync::CancellationToken;
 
 use super::client::GraphClient;
 use super::folder_mapper::FolderMap;
@@ -40,11 +41,14 @@ const BATCH_SIZE: usize = 50;
 struct SyncCtx<'a> {
     client: &'a GraphClient,
     account_id: &'a str,
+    /// Read view onto the writer connection (Phase 3 task 4 transitional bridge).
     db: &'a ReadDbState,
-    body_store: &'a BodyStoreReadState,
-    inline_images: &'a InlineImageStoreReadState,
-    search: &'a SearchState,
+    body_store: &'a BodyStoreWriteState,
+    inline_images: &'a InlineImageStoreWriteState,
+    search: &'a SearchWriteHandle,
     progress: &'a dyn ProgressReporter,
+    #[allow(dead_code)]
+    cancellation_token: &'a CancellationToken,
 }
 
 // ---------------------------------------------------------------------------
@@ -54,17 +58,19 @@ struct SyncCtx<'a> {
 /// Initial Graph sync: folders → per-folder message fetch → delta token bootstrap.
 pub(crate) async fn graph_initial_sync(
     client: &GraphClient,
-    ctx: &ProviderCtx<'_>,
+    ctx: &SyncProviderCtx<'_>,
     days_back: i64,
 ) -> Result<(), String> {
+    let read_db = ctx.db.to_read_state();
     let sctx = SyncCtx {
         client,
         account_id: ctx.account_id,
-        db: ctx.db,
+        db: &read_db,
         body_store: ctx.body_store,
         inline_images: ctx.inline_images,
         search: ctx.search,
         progress: ctx.progress,
+        cancellation_token: ctx.cancellation_token,
     };
 
     log::info!(
@@ -74,7 +80,12 @@ pub(crate) async fn graph_initial_sync(
     // Phase 1: Sync folders → labels → build folder map
     emit_progress(&sctx, "folders", "", 0, 1, 0);
 
-    let folder_map = sync_folders(client, ctx).await?;
+    let pctx = ProviderCtx {
+        account_id: ctx.account_id,
+        db: &read_db,
+        progress: ctx.progress,
+    };
+    let folder_map = sync_folders(client, &pctx).await?;
     client.set_folder_map(folder_map.clone()).await;
 
     emit_progress(&sctx, "folders", "", 1, 1, 0);
@@ -111,7 +122,7 @@ pub(crate) async fn graph_initial_sync(
         );
 
         let messages =
-            fetch_folder_messages(client, ctx.db, folder_id, &since_iso, &folder_map).await?;
+            fetch_folder_messages(client, &read_db, folder_id, &since_iso, &folder_map).await?;
 
         #[allow(clippy::cast_possible_truncation)]
         let count = messages.len() as u64;
@@ -126,9 +137,9 @@ pub(crate) async fn graph_initial_sync(
     emit_progress(&sctx, "delta", "", 0, total_folders, total_messages);
 
     for (i, &(folder_id, _)) in folder_list.iter().enumerate() {
-        match bootstrap_delta_token(client, ctx.db, folder_id).await {
+        match bootstrap_delta_token(client, &read_db, folder_id).await {
             Ok(delta_link) => {
-                save_delta_token(client, ctx.db, ctx.account_id, folder_id, &delta_link).await?;
+                save_delta_token(client, &read_db, ctx.account_id, folder_id, &delta_link).await?;
             }
             Err(e) => {
                 log::warn!("Failed to bootstrap delta token for folder {folder_id}: {e}");
@@ -141,7 +152,7 @@ pub(crate) async fn graph_initial_sync(
     }
 
     let aid = ctx.account_id.to_string();
-    ctx.db
+    read_db
         .with_conn(move |conn| sync::pipeline::mark_initial_sync_completed(conn, &aid))
         .await?;
 
@@ -179,16 +190,18 @@ pub(crate) async fn graph_initial_sync(
 /// Every 10th cycle, refreshes the folder tree and bootstraps new folders.
 pub(crate) async fn graph_delta_sync(
     client: &GraphClient,
-    ctx: &ProviderCtx<'_>,
+    ctx: &SyncProviderCtx<'_>,
 ) -> Result<SyncResult, String> {
+    let read_db = ctx.db.to_read_state();
     let sctx = SyncCtx {
         client,
         account_id: ctx.account_id,
-        db: ctx.db,
+        db: &read_db,
         body_store: ctx.body_store,
         inline_images: ctx.inline_images,
         search: ctx.search,
         progress: ctx.progress,
+        cancellation_token: ctx.cancellation_token,
     };
 
     let cycle = client.increment_sync_cycle();
@@ -198,7 +211,7 @@ pub(crate) async fn graph_delta_sync(
     );
 
     // Load stored delta tokens
-    let mut tokens = load_delta_tokens(client, ctx.db, ctx.account_id).await?;
+    let mut tokens = load_delta_tokens(client, &read_db, ctx.account_id).await?;
     if tokens.is_empty() {
         log::error!(
             "[Graph] No delta tokens for account {} - run initial sync first",
@@ -209,7 +222,12 @@ pub(crate) async fn graph_delta_sync(
 
     // Every 10th cycle, refresh the folder tree to discover new/removed folders
     let folder_map = if cycle.is_multiple_of(10) {
-        let map = sync_folders(client, ctx).await?;
+        let pctx = ProviderCtx {
+            account_id: ctx.account_id,
+            db: &read_db,
+            progress: ctx.progress,
+        };
+        let map = sync_folders(client, &pctx).await?;
         client.set_folder_map(map.clone()).await;
         client.set_folder_map_synced().await;
 
@@ -220,9 +238,9 @@ pub(crate) async fn graph_delta_sync(
         for folder_id in &known_folder_ids {
             if !token_folder_ids.contains(*folder_id) {
                 log::info!("Graph delta sync: bootstrapping new folder {folder_id}");
-                match bootstrap_delta_token_latest(client, ctx.db, folder_id).await {
+                match bootstrap_delta_token_latest(client, &read_db, folder_id).await {
                     Ok(delta_link) => {
-                        save_delta_token(client, ctx.db, ctx.account_id, folder_id, &delta_link)
+                        save_delta_token(client, &read_db, ctx.account_id, folder_id, &delta_link)
                             .await?;
                         tokens.insert(folder_id.to_string(), delta_link);
                     }
@@ -241,7 +259,7 @@ pub(crate) async fn graph_delta_sync(
             .collect();
         for stale_id in &stale_ids {
             log::info!("Graph delta sync: removing stale delta token for folder {stale_id}");
-            delete_delta_token(client, ctx.db, ctx.account_id, stale_id).await?;
+            delete_delta_token(client, &read_db, ctx.account_id, stale_id).await?;
             tokens.remove(stale_id);
         }
 
@@ -249,7 +267,12 @@ pub(crate) async fn graph_delta_sync(
     } else if let Some(map) = client.folder_map().await {
         map
     } else {
-        let map = sync_folders(client, ctx).await?;
+        let pctx = ProviderCtx {
+            account_id: ctx.account_id,
+            db: &read_db,
+            progress: ctx.progress,
+        };
+        let map = sync_folders(client, &pctx).await?;
         client.set_folder_map(map.clone()).await;
         client.set_folder_map_synced().await;
         map
@@ -280,7 +303,7 @@ pub(crate) async fn graph_delta_sync(
     // so delta queries miss reaction changes entirely. To compensate, we periodically
     // re-fetch reaction extended properties for messages that already have reactions.
     if cycle.is_multiple_of(5) {
-        match persistence::refresh_reactions_for_recent_messages(client, ctx.db, ctx.account_id)
+        match persistence::refresh_reactions_for_recent_messages(client, &read_db, ctx.account_id)
             .await
         {
             Ok(count) => {
@@ -295,15 +318,15 @@ pub(crate) async fn graph_delta_sync(
     // Contacts + categories + calendar delta sync: every 20th cycle (change rarely)
     if cycle.is_multiple_of(20) {
         if let Err(e) =
-            super::contact_sync::graph_contacts_delta_sync(client, ctx.account_id, ctx.db).await
+            super::contact_sync::graph_contacts_delta_sync(client, ctx.account_id, &read_db).await
         {
             log::warn!("Contact delta sync failed (non-fatal): {e}");
         }
-        if let Err(e) = super::label_sync::graph_label_sync(client, ctx.account_id, ctx.db).await
+        if let Err(e) = super::label_sync::graph_label_sync(client, ctx.account_id, &read_db).await
         {
             log::warn!("Label sync failed (non-fatal): {e}");
         }
-        match super::group_sync::sync_exchange_groups(client, ctx.db, ctx.account_id).await {
+        match super::group_sync::sync_exchange_groups(client, &read_db, ctx.account_id).await {
             Ok(count) => {
                 if count > 0 {
                     log::info!("Exchange group delta sync: {count} groups");
@@ -311,7 +334,7 @@ pub(crate) async fn graph_delta_sync(
             }
             Err(e) => log::warn!("Exchange group delta sync failed (non-fatal): {e}"),
         }
-        if let Err(e) = graph_calendar_delta_sync(client, ctx.account_id, ctx.db).await {
+        if let Err(e) = graph_calendar_delta_sync(client, ctx.account_id, &read_db).await {
             log::warn!("Graph calendar delta sync failed (non-fatal): {e}");
         }
     }

@@ -21,8 +21,10 @@ process-lifetime = { path = "../process-lifetime" }
 # and submits SMTP via `lettre`. `common` carries `ProviderCtx` and the
 # typed-id surface the action methods consume.
 common = { path = "../common" }
+service-state = { path = "../service-state" }
 store = { path = "../stores" }
 search = { path = "../search" }
+tantivy = { version = "0.26.1", default-features = false, features = ["mmap", "stemmer", "stopwords", "lz4-compression"] }
 gmail = { path = "../gmail" }
 jmap = { path = "../jmap" }
 graph = { path = "../graph" }
@@ -46,11 +48,17 @@ lettre = { version = "0.11.21", default-features = false, features = ["smtp-tran
 sha2 = "0.11"
 thiserror.workspace = true
 
+[target.'cfg(unix)']
+dev-dependencies = {}
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(windows)']
+dev-dependencies = {}
+
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = [
+windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
     "Win32_System_Console",

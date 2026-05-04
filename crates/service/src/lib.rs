@@ -2,6 +2,7 @@ pub mod actions;
 mod boot;
 mod boot_progress;
 pub mod progress;
+pub mod search_writer;
 pub mod send;
 mod send_vault;
 mod snooze_runner;

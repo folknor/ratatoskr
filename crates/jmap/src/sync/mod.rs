@@ -9,9 +9,10 @@ use serde::Serialize;
 
 use db::db::ReadDbState;
 use db::progress::ProgressReporter;
-use search::SearchState;
-use store::body_store::BodyStoreReadState;
-use store::inline_image_store::InlineImageStoreReadState;
+use service_state::{
+    BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
+};
+use tokio_util::sync::CancellationToken;
 
 use super::client::JmapClient;
 use super::mailbox_mapper::MailboxInfo;
@@ -39,11 +40,30 @@ pub struct JmapSyncResult {
 pub(crate) struct SyncCtx<'a> {
     pub client: &'a JmapClient,
     pub account_id: &'a str,
+    /// Read view onto the writer connection. Used by the existing
+    /// `sync::state::*` and `db::queries_extra::*` helpers that take
+    /// `&ReadDbState`. The Service constructs the underlying writer
+    /// half; `to_read_state()` shares the `Arc<Mutex<Connection>>`.
     pub db: &'a ReadDbState,
-    pub body_store: &'a BodyStoreReadState,
-    pub inline_images: &'a InlineImageStoreReadState,
-    pub search: &'a SearchState,
+    /// Write half: drives `put_batch` and `delete` for the body store.
+    pub body_store: &'a BodyStoreWriteState,
+    /// Write half: drives `put_batch` for the inline image store.
+    pub inline_images: &'a InlineImageStoreWriteState,
+    /// Service-side mpsc handle to the Tantivy writer task.
+    pub search: &'a SearchWriteHandle,
     pub progress: &'a dyn ProgressReporter,
+    /// Phase 3 task 6: cancellation observer. The runner cancels the
+    /// per-account `CancellationToken` when the UI dispatches
+    /// `sync.cancel_account`; insertion sites in this module observe
+    /// either via `is_cancelled()` poll points (cheap; useful at
+    /// per-mailbox / per-batch boundaries) or via `tokio::select!`
+    /// against `cancellation_token.cancelled()` for long-running
+    /// awaited calls.
+    ///
+    /// Field is deliberately allow(dead_code) until task 6 wires the
+    /// checkpoints.
+    #[allow(dead_code)]
+    pub cancellation_token: &'a CancellationToken,
     /// Override the JMAP account ID for shared account sync.
     /// `None` = use `request.default_account_id()` (primary account).
     /// `Some(id)` = target a shared account from the JMAP Session.
@@ -80,20 +100,23 @@ pub async fn jmap_initial_sync(
     client: &JmapClient,
     account_id: &str,
     days_back: i64,
-    db: &ReadDbState,
-    body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreReadState,
-    search: &SearchState,
+    db: &WriteDbState,
+    body_store: &BodyStoreWriteState,
+    inline_images: &InlineImageStoreWriteState,
+    search: &SearchWriteHandle,
     progress: &dyn ProgressReporter,
+    cancellation_token: &CancellationToken,
 ) -> Result<(), String> {
+    let read_db = db.to_read_state();
     let ctx = SyncCtx {
         client,
         account_id,
-        db,
+        db: &read_db,
         body_store,
         inline_images,
         search,
         progress,
+        cancellation_token,
         jmap_account_id: None,
     };
 
@@ -105,7 +128,7 @@ pub async fn jmap_initial_sync(
 
     // Save mailbox state
     let mailbox_state = mailbox::get_mailbox_state(client).await?;
-    save_sync_state(db, account_id, "Mailbox", &mailbox_state).await?;
+    save_sync_state(ctx.db, account_id, "Mailbox", &mailbox_state).await?;
 
     emit_progress(&ctx, "mailboxes", 1, 1);
 
@@ -153,21 +176,22 @@ pub async fn jmap_initial_sync(
 
     // Save email state
     let email_state = mailbox::get_email_state(client).await?;
-    save_sync_state(db, account_id, "Email", &email_state).await?;
+    save_sync_state(ctx.db, account_id, "Email", &email_state).await?;
     let aid = account_id.to_string();
-    db.with_conn(move |conn| sync::pipeline::mark_initial_sync_completed(conn, &aid))
+    ctx.db
+        .with_conn(move |conn| sync::pipeline::mark_initial_sync_completed(conn, &aid))
         .await?;
 
     log::info!("[JMAP] Initial sync complete for account {account_id}: {fetched} messages synced");
 
     // Phase 3: Shared account discovery from JMAP Session
-    discover_shared_accounts(client, account_id, db).await;
+    discover_shared_accounts(client, account_id, ctx.db).await;
 
     // Phase 3b: Resolve shared account identities via Principals
-    resolve_shared_account_identities(client, account_id, db).await;
+    resolve_shared_account_identities(client, account_id, ctx.db).await;
 
     // Phase 4: Contacts sync
-    match super::contacts_sync::jmap_contacts_initial_sync(client, account_id, db).await {
+    match super::contacts_sync::jmap_contacts_initial_sync(client, account_id, ctx.db).await {
         Ok(count) => {
             log::info!("[JMAP] Initial contacts sync: {count} contacts for account {account_id}");
         }
@@ -175,7 +199,7 @@ pub async fn jmap_initial_sync(
     }
 
     // Phase 5: Calendar sync
-    match super::calendar_sync::sync_calendars(client, account_id, db).await {
+    match super::calendar_sync::sync_calendars(client, account_id, ctx.db).await {
         Ok(()) => log::info!("[JMAP] Initial calendar sync complete for account {account_id}"),
         Err(e) => log::warn!("[JMAP] Calendar initial sync failed for account {account_id}: {e}"),
     }
@@ -235,26 +259,29 @@ pub(crate) async fn query_email_page_for(
 pub async fn jmap_delta_sync(
     client: &JmapClient,
     account_id: &str,
-    db: &ReadDbState,
-    body_store: &BodyStoreReadState,
-    inline_images: &InlineImageStoreReadState,
-    search: &SearchState,
+    db: &WriteDbState,
+    body_store: &BodyStoreWriteState,
+    inline_images: &InlineImageStoreWriteState,
+    search: &SearchWriteHandle,
     progress: &dyn ProgressReporter,
+    cancellation_token: &CancellationToken,
 ) -> Result<JmapSyncResult, String> {
+    let read_db = db.to_read_state();
     let ctx = SyncCtx {
         client,
         account_id,
-        db,
+        db: &read_db,
         body_store,
         inline_images,
         search,
         progress,
+        cancellation_token,
         jmap_account_id: None,
     };
 
     // Load current sync states
-    let email_state = load_sync_state(db, account_id, "Email").await?;
-    let mailbox_state = load_sync_state(db, account_id, "Mailbox").await?;
+    let email_state = load_sync_state(ctx.db, account_id, "Email").await?;
+    let mailbox_state = load_sync_state(ctx.db, account_id, "Mailbox").await?;
 
     log::info!("[JMAP] Starting delta sync for account {account_id}");
     let Some(email_state) = email_state else {
@@ -335,19 +362,19 @@ pub async fn jmap_delta_sync(
     }
 
     // Save updated states
-    save_sync_state(db, account_id, "Email", &since_state).await?;
+    save_sync_state(ctx.db, account_id, "Email", &since_state).await?;
 
     // 3. Shared account discovery (re-check Session on every delta sync)
-    discover_shared_accounts(client, account_id, db).await;
+    discover_shared_accounts(client, account_id, ctx.db).await;
 
     // 3b. Resolve shared account identities via Principals
-    resolve_shared_account_identities(client, account_id, db).await;
+    resolve_shared_account_identities(client, account_id, ctx.db).await;
 
     // 3c. ShareNotification polling (RFC 9670)
-    poll_share_notifications(client, account_id, db).await;
+    poll_share_notifications(client, account_id, ctx.db).await;
 
     // 4. Contacts delta sync
-    match super::contacts_sync::jmap_contacts_delta_sync(client, account_id, db).await {
+    match super::contacts_sync::jmap_contacts_delta_sync(client, account_id, ctx.db).await {
         Ok(count) => {
             if count > 0 {
                 log::info!("[JMAP] Contacts delta sync: {count} affected for account {account_id}");
@@ -357,7 +384,7 @@ pub async fn jmap_delta_sync(
     }
 
     // 5. Calendar delta sync
-    match super::calendar_sync::sync_calendars(client, account_id, db).await {
+    match super::calendar_sync::sync_calendars(client, account_id, ctx.db).await {
         Ok(()) => log::debug!("[JMAP] Calendar delta sync complete for account {account_id}"),
         Err(e) => log::warn!("[JMAP] Calendar delta sync failed for account {account_id}: {e}"),
     }

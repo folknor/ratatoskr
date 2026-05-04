@@ -4,7 +4,7 @@ use super::error::ProviderError;
 use super::typed_ids::{FolderId, TagId};
 use super::types::{
     ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    ProviderParsedMessage, ProviderProfile, ProviderTestResult, SyncResult,
+    ProviderParsedMessage, ProviderProfile, ProviderTestResult, SyncProviderCtx, SyncResult,
 };
 
 /// Common operations that every email provider must support.
@@ -18,12 +18,12 @@ pub trait ProviderOps: Send + Sync {
 
     async fn sync_initial(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &SyncProviderCtx<'_>,
         days_back: i64,
     ) -> Result<SyncResult, ProviderError>;
     async fn sync_delta(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &SyncProviderCtx<'_>,
         days_back: Option<i64>,
     ) -> Result<SyncResult, ProviderError>;
 

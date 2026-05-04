@@ -15,9 +15,6 @@ fn build_provider_ctx<'a>(ctx: &'a ActionContext, account_id: &'a str) -> Provid
     ProviderCtx {
         account_id,
         db: &ctx.db,
-        body_store: &ctx.body_store,
-        inline_images: &ctx.inline_images,
-        search: &ctx.search,
         progress: &NoopProgressReporter,
     }
 }

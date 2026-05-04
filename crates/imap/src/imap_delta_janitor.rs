@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use db::db::ReadDbState;
-use search::SearchState;
-use store::body_store::BodyStoreReadState;
+use service_state::{BodyStoreWriteState, SearchWriteHandle};
 
 use super::client;
 use super::connection::connect;
@@ -217,8 +216,8 @@ pub async fn run_deletion_detection(
     config: &ImapConfig,
     account_id: &str,
     db: &ReadDbState,
-    body_store: &BodyStoreReadState,
-    search: &SearchState,
+    body_store: &BodyStoreWriteState,
+    search: &SearchWriteHandle,
     syncable_folders: &[&super::types::ImapFolder],
     state_map: &HashMap<String, sync_pipeline::FolderSyncState>,
 ) -> Vec<String> {
@@ -252,8 +251,8 @@ pub async fn run_deletion_detection(
                 }
 
                 // Remove from search index
-                let id_refs: Vec<&str> = deleted_ids.iter().map(String::as_str).collect();
-                if let Err(e) = search.delete_messages_batch(&id_refs).await {
+                let owned_ids: Vec<String> = deleted_ids.clone();
+                if let Err(e) = search.delete_messages_batch(owned_ids).await {
                     log::warn!("[sync] Failed to remove deleted messages from search: {e}");
                 }
 
@@ -294,9 +293,8 @@ pub async fn run_deletion_detection(
                                             "[sync] Failed to delete bodies for removed messages: {e}"
                                         );
                                     }
-                                    let id_refs: Vec<&str> =
-                                        deleted_ids.iter().map(String::as_str).collect();
-                                    if let Err(e) = search.delete_messages_batch(&id_refs).await {
+                                    let owned_ids: Vec<String> = deleted_ids.clone();
+                                    if let Err(e) = search.delete_messages_batch(owned_ids).await {
                                         log::warn!(
                                             "[sync] Failed to remove deleted messages from search: {e}"
                                         );

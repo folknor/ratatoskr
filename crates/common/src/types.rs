@@ -2,9 +2,10 @@ use serde::Serialize;
 
 use db::db::ReadDbState;
 use db::progress::ProgressReporter;
-use search::SearchState;
-use store::body_store::BodyStoreReadState;
-use store::inline_image_store::InlineImageStoreReadState;
+use service_state::{
+    BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
+};
+use tokio_util::sync::CancellationToken;
 
 /// Standardized sync result across all providers.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -24,15 +25,43 @@ pub struct AutoSyncResult {
     pub fell_back_to_initial: bool,
 }
 
-/// Shared context for provider operations.
-/// Bundles state references to stay under clippy's 7-arg limit.
+/// Shared context for non-sync, non-action provider operations.
+///
+/// Phase 3 task 5 narrows this from the pre-Phase-3 wide shape (which
+/// also carried `&BodyStoreReadState`, `&InlineImageStoreReadState`,
+/// `&SearchReadState`). Those store handles only ever served sync
+/// methods; the non-sync methods (folder mutations, `fetch_*`,
+/// `get_profile`, `test_connection`, `list_folders`) never read or
+/// wrote them.
+///
+/// Sync methods take `SyncProviderCtx`. Action methods take
+/// `ActionProviderCtx`. This narrow `ProviderCtx` covers everything
+/// in between.
 pub struct ProviderCtx<'a> {
     pub account_id: &'a str,
     pub db: &'a ReadDbState,
-    pub body_store: &'a BodyStoreReadState,
-    pub inline_images: &'a InlineImageStoreReadState,
-    pub search: &'a SearchState,
     pub progress: &'a dyn ProgressReporter,
+}
+
+/// Sync-side context for provider sync methods (`sync_initial`,
+/// `sync_delta`).
+///
+/// Phase 3 task 5 introduces this distinct from `ProviderCtx`:
+/// - `db: &WriteDbState` because sync writes through the writer half
+///   (via `with_conn`).
+/// - `body_store`, `inline_images`, `search` are write halves
+///   (`BodyStoreWriteState`, `InlineImageStoreWriteState`,
+///   `SearchWriteHandle`).
+/// - `cancellation_token` rides on the ctx so every leaf call has
+///   access without threading an extra parameter (Phase 3 task 6).
+pub struct SyncProviderCtx<'a> {
+    pub account_id: &'a str,
+    pub db: &'a WriteDbState,
+    pub body_store: &'a BodyStoreWriteState,
+    pub inline_images: &'a InlineImageStoreWriteState,
+    pub search: &'a SearchWriteHandle,
+    pub progress: &'a dyn ProgressReporter,
+    pub cancellation_token: &'a CancellationToken,
 }
 
 /// Narrower context for `ProviderOps` action methods (Phase 2 task 7).
@@ -147,7 +176,7 @@ mod tests {
     use super::*;
 
     /// Phase 2 task 16 regression guard: action-side `ProviderCtx`
-    /// does not expose `&SearchState`. The action methods on
+    /// does not expose `&SearchReadState`. The action methods on
     /// `ProviderOps` take `ActionProviderCtx`, and Phase 2
     /// deliberately defers the Tantivy writer relocation to Phase 3 -
     /// so any action-time search write would be a type error. The

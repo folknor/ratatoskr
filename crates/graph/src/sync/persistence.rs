@@ -106,8 +106,8 @@ pub(super) async fn delete_messages(
     }
 
     // Delete from search index (batch - single commit)
-    let id_refs: Vec<&str> = message_ids.iter().map(String::as_str).collect();
-    if let Err(e) = sctx.search.delete_messages_batch(&id_refs).await {
+    let owned_ids: Vec<String> = message_ids.to_vec();
+    if let Err(e) = sctx.search.delete_messages_batch(owned_ids).await {
         log::warn!("Failed to batch-delete search documents: {e}");
     }
 

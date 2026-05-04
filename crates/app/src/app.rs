@@ -90,7 +90,7 @@ pub struct ReadyApp {
     pub(crate) chat_list_generation: GenerationCounter<rtsk::generation::ChatList>,
 
     // Search state
-    pub(crate) search_state: Option<Arc<rtsk::search::SearchState>>,
+    pub(crate) search_state: Option<Arc<rtsk::search::SearchReadState>>,
     pub(crate) search_generation: GenerationCounter<Search>,
     pub(crate) search_query: UndoableText,
     pub(crate) search_debounce_deadline: Option<iced::time::Instant>,
@@ -332,8 +332,8 @@ impl ReadyApp {
             .expect("encryption key must be loadable after Service validated it at boot");
 
         // Initialize search state once - shared between the app and action service.
-        let search_state: Option<Arc<rtsk::search::SearchState>> =
-            rtsk::search::SearchState::init(data_dir).map(Arc::new).ok();
+        let search_state: Option<Arc<rtsk::search::SearchReadState>> =
+            rtsk::search::SearchReadState::init(data_dir).map(Arc::new).ok();
 
         let action_ctx = match (&body_store, &inline_image_store, &search_state) {
             (Some(bs), Some(iis), Some(ss)) => Some(rtsk::actions::ActionContext {

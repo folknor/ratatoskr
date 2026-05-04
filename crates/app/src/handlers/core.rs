@@ -741,17 +741,17 @@ impl ReadyApp {
                     }
                 }
 
-                // Search index
-                if let Some(ref ss) = search {
-                    let refs: Vec<&str> =
-                        plan.data.message_ids.iter().map(String::as_str).collect();
-                    match ss.delete_messages_batch(&refs).await {
-                        Ok(()) => report.search_cleaned = true,
-                        Err(e) => {
-                            log::error!("Account deletion: search index cleanup failed: {e}");
-                        }
-                    }
-                }
+                // Search index cleanup deferred. Phase 3 task 4 strips
+                // writer ownership from `SearchReadState`; the UI no
+                // longer has a `SearchWriteHandle` here. Phase 3 task 16
+                // routes account-deletion through `cancel_and_await`,
+                // which lets the Service do this cleanup before the
+                // delete returns. Until then, the boot-time invariant
+                // pass (Phase 3 task 11) drops orphans by account on
+                // dirty boot, and the next sync's reindex makes the
+                // search results consistent again.
+                let _ = (&search, &plan.data.message_ids);
+                report.search_cleaned = false;
 
                 log::info!(
                     "Account deleted: {} bodies, {} inline images, {} cache files cleaned",

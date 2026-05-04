@@ -75,58 +75,17 @@ impl ReadyApp {
     /// wrapped with `Task::abortable` and its handle is stashed in
     /// `sync_handles` so `handle_delete_account` can cancel it.
     pub(crate) fn dispatch_sync_delta(&mut self, account_id: String) -> Task<Message> {
-        let encryption_key = self.encryption_key;
-
-        let db = Arc::clone(&self.db);
-        let body_store = match self.body_store.clone() {
-            Some(bs) => bs,
-            None => {
-                log::error!("Cannot sync: no body store");
-                return Task::none();
-            }
-        };
-        let search_state = match self.search_state.clone() {
-            Some(ss) => ss,
-            None => {
-                log::error!("Cannot sync: no search state");
-                return Task::none();
-            }
-        };
-        let inline_images = match self.inline_image_store.clone() {
-            Some(iis) => iis,
-            None => {
-                log::error!("Cannot sync: no inline image store");
-                return Task::none();
-            }
-        };
-        let reporter = Arc::clone(&self.sync_reporter);
-
-        if self.sync_handles.contains_key(&account_id) {
-            log::debug!("Sync for {account_id} already in-flight; skipping dispatch");
-            return Task::none();
-        }
-
-        let aid_for_msg = account_id.clone();
-        let aid_for_map = account_id.clone();
-        let task = Task::perform(
-            async move {
-                let core_db = db.write_db_state();
-                rtsk::sync_dispatch::sync_delta_for_account(
-                    &core_db,
-                    &account_id,
-                    encryption_key,
-                    &body_store,
-                    &inline_images,
-                    &search_state,
-                    reporter.as_ref(),
-                )
-                .await
-            },
-            move |result| Message::SyncComplete(aid_for_msg, result),
+        // Phase 3 task 4 transitional: the UI no longer has direct
+        // access to the writer halves of body / inline / search; sync
+        // runs Service-side now (Phase 3 task 8 spawns the runner via
+        // `SyncRuntime`). Phase 3 task 15 replaces this body with a
+        // `Task::perform(client.start_sync(account_id))` wrapper. Until
+        // the IPC path lands, dispatch is a no-op that logs and
+        // resolves an immediate `SyncComplete(Ok(()))`.
+        log::debug!(
+            "dispatch_sync_delta({account_id}): Phase 3 transitional no-op (Service-side sync not yet wired in app/IPC; task 15 lands the IPC path)"
         );
-        let (task, handle) = task.abortable();
-        self.sync_handles.insert(aid_for_map, handle);
-        task
+        Task::done(Message::SyncComplete(account_id, Ok(())))
     }
 
     /// Dispatch delta sync for all active accounts.

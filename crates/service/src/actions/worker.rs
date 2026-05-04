@@ -428,8 +428,8 @@ fn build_action_context(
         .map_err(|e| format!("BodyStoreReadState::init: {e}"))?;
     let inline_images = store::inline_image_store::InlineImageStoreReadState::init(app_data_dir)
         .map_err(|e| format!("InlineImageStoreReadState::init: {e}"))?;
-    let search = search::SearchState::init(app_data_dir)
-        .map_err(|e| format!("SearchState::init: {e}"))?;
+    let search = search::SearchReadState::init(app_data_dir)
+        .map_err(|e| format!("SearchReadState::init: {e}"))?;
     Ok(ActionContext {
         db: ReadDbState::from_arc(db_conn),
         body_store,

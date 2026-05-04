@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use db::db::types::{AccountScope, DbThread};
 use crate::db::Connection;
-use search::{SearchParams, SearchResult as TantivyResult, SearchState};
+use search::{SearchParams, SearchResult as TantivyResult, SearchReadState};
 use smart_folder::{ParsedQuery, parse_query, query_threads};
 
 // ── Result type ─────────────────────────────────────────────
@@ -40,7 +40,7 @@ pub struct UnifiedSearchResult {
 /// - Both operators and free text intersects SQL candidates with Tantivy scores.
 pub fn search(
     query: &str,
-    search_state: &SearchState,
+    search_state: &SearchReadState,
     conn: &Connection,
 ) -> Result<Vec<UnifiedSearchResult>, String> {
     let parsed = parse_query(query);
@@ -133,7 +133,7 @@ fn search_sql_only(
 /// Free text without operators: run Tantivy search, group by thread.
 fn search_tantivy_only(
     parsed: &ParsedQuery,
-    search_state: &SearchState,
+    search_state: &SearchReadState,
 ) -> Result<Vec<UnifiedSearchResult>, String> {
     let params = build_tantivy_params(parsed);
     let results = search_state.search_with_filters(&params)?;
@@ -151,7 +151,7 @@ fn search_tantivy_only(
 /// Both operators and free text: SQL narrows candidates, Tantivy scores them.
 fn search_combined(
     parsed: &ParsedQuery,
-    search_state: &SearchState,
+    search_state: &SearchReadState,
     conn: &Connection,
 ) -> Result<Vec<UnifiedSearchResult>, String> {
     // Step 1: SQL generates candidate thread IDs.

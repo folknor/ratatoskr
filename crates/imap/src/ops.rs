@@ -10,7 +10,7 @@ use common::typed_ids::{FolderId, TagId};
 use common::types::{
     ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderParsedAttachment, ProviderParsedMessage, ProviderProfile, ProviderTestResult,
-    SyncResult,
+    SyncProviderCtx, SyncResult,
 };
 use smtp;
 
@@ -360,14 +360,15 @@ impl ProviderOps for ImapOps {
 
     async fn sync_initial(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &SyncProviderCtx<'_>,
         days_back: i64,
     ) -> Result<SyncResult, ProviderError> {
         // IMAP sync is handled by the dedicated sync module (sync_imap_initial).
         // This trait method is not the primary entry point for IMAP sync, but we
         // wire it through for consistency with the provider abstraction.
         let account_id = ctx.account_id.to_string();
-        let imap_config = self.load_config(ctx.db, ctx.account_id).await?;
+        let read_db = ctx.db.to_read_state();
+        let imap_config = self.load_config(&read_db, ctx.account_id).await?;
 
         let result = super::imap_initial::imap_initial_sync(
             ctx.progress,
@@ -375,6 +376,7 @@ impl ProviderOps for ImapOps {
             ctx.body_store,
             ctx.inline_images,
             ctx.search,
+            ctx.cancellation_token,
             &account_id,
             &imap_config,
             days_back,
@@ -389,11 +391,12 @@ impl ProviderOps for ImapOps {
 
     async fn sync_delta(
         &self,
-        ctx: &ProviderCtx<'_>,
+        ctx: &SyncProviderCtx<'_>,
         days_back: Option<i64>,
     ) -> Result<SyncResult, ProviderError> {
         let account_id = ctx.account_id.to_string();
-        let imap_config = self.load_config(ctx.db, ctx.account_id).await?;
+        let read_db = ctx.db.to_read_state();
+        let imap_config = self.load_config(&read_db, ctx.account_id).await?;
         let days_back = days_back.unwrap_or(365);
 
         let result = super::imap_delta::imap_delta_sync(
@@ -402,6 +405,7 @@ impl ProviderOps for ImapOps {
             ctx.body_store,
             ctx.inline_images,
             ctx.search,
+            ctx.cancellation_token,
             &account_id,
             &imap_config,
             days_back,

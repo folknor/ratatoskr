@@ -1,11 +1,12 @@
 pub use db::db::queries_extra::thread_persistence::*;
 
-use search::{SearchDocument, SearchState};
-use store::body_store::{BodyStoreReadState, MessageBody};
-use store::inline_image_store::{InlineImage, InlineImageStoreReadState};
+use search::SearchDocument;
+use service_state::{BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle};
+use store::body_store::MessageBody;
+use store::inline_image_store::InlineImage;
 
 pub async fn store_message_bodies<T, FId, FHtml, FText>(
-    body_store: &BodyStoreReadState,
+    body_store: &BodyStoreWriteState,
     messages: &[T],
     provider_name: &str,
     id_of: FId,
@@ -41,7 +42,7 @@ pub async fn store_message_bodies<T, FId, FHtml, FText>(
 }
 
 pub async fn store_inline_images(
-    inline_images: &InlineImageStoreReadState,
+    inline_images: &InlineImageStoreWriteState,
     images: Vec<InlineImage>,
     provider_name: &str,
 ) {
@@ -56,7 +57,7 @@ pub async fn store_inline_images(
 }
 
 pub async fn index_search_documents(
-    search: &SearchState,
+    search: &SearchWriteHandle,
     documents: Vec<SearchDocument>,
     provider_name: &str,
 ) {
@@ -65,7 +66,7 @@ pub async fn index_search_documents(
         documents.len(),
         provider_name
     );
-    if let Err(error) = search.index_messages_batch(&documents).await {
+    if let Err(error) = search.index_messages_batch(documents).await {
         log::warn!("Failed to index {provider_name} messages: {error}");
     }
 }
