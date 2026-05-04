@@ -165,6 +165,15 @@ pub struct ReadyApp {
     pub(crate) pending_action_plans:
         std::collections::HashMap<service_api::PlanId, PendingActionPlan>,
 
+    /// In-flight compose-send dispatches keyed by `send_id` (the
+    /// UI-generated UUIDv7 the wire request carries; doubles as the
+    /// `plan_id` the eventual `ActionCompleted` notification echoes
+    /// back). Maps to the compose window so the completion handler
+    /// can fire `Message::SendCompleted` against the right window.
+    /// Entries are removed on completion arrival.
+    pub(crate) in_flight_sends:
+        std::collections::HashMap<service_api::PlanId, iced::window::Id>,
+
     /// Client-side action throttle keyed by `(account_id, thread_id)`.
     ///
     /// Phase 2 plan scope item 12 + open question 7. Absorbs fast
@@ -426,6 +435,7 @@ impl ReadyApp {
             service_client: Some(service_client),
             service_notifications,
             pending_action_plans: std::collections::HashMap::new(),
+            in_flight_sends: std::collections::HashMap::new(),
             action_throttle: std::collections::HashMap::new(),
         };
 

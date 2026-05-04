@@ -254,6 +254,7 @@ dependencies = [
  "serde_json",
  "service",
  "service-api",
+ "sha2 0.11.0",
  "smart-folder",
  "store",
  "system-fonts",

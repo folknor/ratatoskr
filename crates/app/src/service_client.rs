@@ -709,6 +709,32 @@ impl ServiceClient {
             .await
     }
 
+    /// Submit a compose-send for execution (Phase 2 task 13).
+    ///
+    /// Bytes-ownership transfer: the UI must have already written each
+    /// attachment into `<app_data>/staging/<send_id>/<index>.bin`
+    /// before calling this. The handler verifies SHA-256, atomically
+    /// renames each file into the Service-owned vault, journals the
+    /// send as a quiet `kind = 'send'` job, and returns `SendAck`. The
+    /// UI's staging directory is its own to clean up after a
+    /// successful ack; a Service crash before the ack returns an
+    /// error and the staging directory is still load-bearing on the
+    /// next attempt.
+    ///
+    /// 30 s timeout covers SHA-256 verify of typical attachment
+    /// payloads. SMTP submit happens on the worker; the eventual
+    /// `ActionCompleted` notification (matching `send_id` as
+    /// `plan_id`) is the success/failure signal.
+    pub async fn send_email(
+        &self,
+        request: service_api::SendWireRequest,
+    ) -> Result<service_api::SendAck, ClientError> {
+        self.request(RequestParams::ActionSend {
+            request: Box::new(request),
+        })
+        .await
+    }
+
     /// Send a fire-and-forget UI -> Service notification (Phase 2 plan
     /// scope item 11). No correlation map entry, no oneshot channel,
     /// no timeout. Returns `Ok(())` on successful enqueue into the

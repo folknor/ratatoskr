@@ -501,6 +501,23 @@ impl ReadyApp {
         &mut self,
         completion: &service_api::ActionCompleted,
     ) -> Task<Message> {
+        // Send jobs are quiet (no per-op OperationOutcome); the
+        // ActionCompleted's `plan_id` field carries the UI-generated
+        // `send_id`. Route to the compose window if we have one
+        // tracking this id; the worker's PlanSummary tells us
+        // success vs failure.
+        if let Some(window_id) = self.in_flight_sends.remove(&completion.plan_id) {
+            let outcome = if completion.summary.remote_succeeded > 0 {
+                rtsk::actions::ActionOutcome::Success
+            } else {
+                rtsk::actions::ActionOutcome::Failed {
+                    error: rtsk::actions::ActionError::remote(
+                        "Send failed - see Service log for detail",
+                    ),
+                }
+            };
+            return Task::done(Message::SendCompleted { window_id, outcome });
+        }
         let Some(state) = self.pending_action_plans.remove(&completion.plan_id) else {
             log::debug!(
                 "ActionCompleted for unknown plan {:?} - dropping",

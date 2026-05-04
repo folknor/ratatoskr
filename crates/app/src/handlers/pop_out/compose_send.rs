@@ -1,4 +1,8 @@
+use std::io::Write;
+use std::path::PathBuf;
+
 use iced::Task;
+use sha2::{Digest, Sha256};
 
 use crate::pop_out::PopOutWindow;
 use crate::{Message, ReadyApp};
@@ -99,26 +103,92 @@ impl ReadyApp {
         self.dispatch_send(window_id, send_req)
     }
 
-    /// Dispatch send_email through the action service.
+    /// Dispatch send through the Service via `action.send` IPC.
+    ///
+    /// Phase 2 task 13. UI writes attachment bytes to
+    /// `<app_data>/staging/<send_id>/<index>.bin` (UI-owned), then
+    /// issues the IPC. Service handler verifies SHA-256, atomically
+    /// renames into the Service-owned vault, journals the send, and
+    /// returns `SendAck`. The compose window stays in "sending"
+    /// until the eventual `ActionCompleted` notification (matching
+    /// `send_id`) fires `Message::SendCompleted`.
     fn dispatch_send(
         &mut self,
         window_id: iced::window::Id,
         request: rtsk::actions::SendRequest,
     ) -> Task<Message> {
-        let Some(ctx) = self.action_ctx() else {
+        let Some(client) = self.service_client.as_ref().cloned() else {
             if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id) {
                 state.sending = false;
                 state.status =
-                    Some("Send unavailable \u{2014} action service not initialized".to_string());
+                    Some("Send unavailable \u{2014} Service not connected".to_string());
             }
             return Task::none();
         };
+        let app_data_dir = crate::APP_DATA_DIR
+            .get()
+            .expect("APP_DATA_DIR set before send")
+            .clone();
+
+        let send_id = service_api::PlanId::new_v7();
+        // Stage every attachment to disk and build the wire request.
+        // Returns the wire request on success, an error string on
+        // first per-attachment failure (which restores the compose
+        // window state via the SendCompleted message).
+        let wire = match stage_and_build_wire(&app_data_dir, send_id, request) {
+            Ok(w) => w,
+            Err(error) => {
+                if let Some(PopOutWindow::Compose(state)) =
+                    self.pop_out_windows.get_mut(&window_id)
+                {
+                    state.sending = false;
+                    state.status = Some(format!("Send failed: {error}"));
+                }
+                return Task::none();
+            }
+        };
+
+        // Track the in-flight send so the ActionCompleted notification
+        // can fire SendCompleted against this window.
+        self.in_flight_sends.insert(send_id, window_id);
+
+        let staging_dir =
+            app_data_dir.join("staging").join(send_id.to_string());
         Task::perform(
             async move {
-                let outcome = rtsk::actions::send_email(&ctx, request).await;
-                (window_id, outcome)
+                let result = client.send_email(wire).await;
+                (window_id, send_id, staging_dir, result)
             },
-            move |(window_id, outcome)| Message::SendCompleted { window_id, outcome },
+            move |(window_id, send_id, staging_dir, result)| {
+                // Cleanup the staging directory regardless of ack
+                // outcome: on success the bytes are now in the
+                // Service vault, on failure they're not in the
+                // vault and the user will retry from compose state.
+                let _ = std::fs::remove_dir_all(&staging_dir);
+                let _ = send_id;
+                match result {
+                    // Ack received: the Service journaled the send. The
+                    // worker will dispatch SMTP and emit ActionCompleted;
+                    // the in_flight_sends entry routes that to the
+                    // compose window. Nothing to do at the UI layer
+                    // here.
+                    Ok(_ack) => Message::Noop,
+                    // IPC failure (ServiceCrashed / Timeout / handler
+                    // returned ServiceError). Surface as a send
+                    // failure on the compose window. The orphan
+                    // in_flight_sends entry stays - if a late
+                    // ActionCompleted ever arrives, the SendCompleted
+                    // handler will no-op against the closed window.
+                    Err(error) => Message::SendCompleted {
+                        window_id,
+                        outcome: rtsk::actions::ActionOutcome::Failed {
+                            error: rtsk::actions::ActionError::remote(format!(
+                                "{error}"
+                            )),
+                        },
+                    },
+                }
+            },
         )
     }
 
@@ -148,4 +218,86 @@ impl ReadyApp {
             }
         }
     }
+}
+
+/// Stage every attachment under `<app_data>/staging/<send_id>/`,
+/// SHA-256 the bytes, and assemble a `SendWireRequest` referencing
+/// the staged paths. Removes the staging directory and returns the
+/// first error if any per-attachment write fails - the caller
+/// surfaces the error in the compose status line.
+///
+/// Synchronous. Attachments are typically small (the dev fixtures
+/// cap at ~50 MB) and the staging write happens on the iced runtime
+/// only when the user clicks Send; the brief blocking is
+/// indistinguishable from the existing in-process MIME build.
+fn stage_and_build_wire(
+    app_data_dir: &std::path::Path,
+    send_id: service_api::PlanId,
+    request: rtsk::actions::SendRequest,
+) -> Result<service_api::SendWireRequest, String> {
+    let staging_dir: PathBuf = app_data_dir
+        .join("staging")
+        .join(send_id.to_string());
+    if let Err(error) = std::fs::create_dir_all(&staging_dir) {
+        return Err(format!(
+            "create staging dir {}: {error}",
+            staging_dir.display()
+        ));
+    }
+
+    let mut wire_attachments = Vec::with_capacity(request.attachments.len());
+    for (index, att) in request.attachments.into_iter().enumerate() {
+        let relative = format!("{index}.bin");
+        let staged_path = staging_dir.join(&relative);
+        if let Err(error) = write_atomic(&staged_path, &att.data) {
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            return Err(format!(
+                "write staging {}: {error}",
+                staged_path.display()
+            ));
+        }
+        let mut hasher = Sha256::new();
+        hasher.update(&att.data);
+        let mut content_hash = [0u8; 32];
+        content_hash.copy_from_slice(&hasher.finalize());
+        let size = att.data.len() as u64;
+        wire_attachments.push(service_api::SendWireAttachment {
+            source: service_api::SendAttachmentSource::StagingFile {
+                relative_path: relative,
+                content_hash,
+            },
+            size,
+            mime: att.mime_type,
+            filename: att.filename,
+            content_id: att.content_id,
+        });
+    }
+
+    Ok(service_api::SendWireRequest {
+        send_id,
+        from_account_id: request.account_id,
+        message: service_api::SendWireMessage {
+            draft_id: request.draft_id,
+            from: request.from,
+            to: request.to,
+            cc: request.cc,
+            bcc: request.bcc,
+            subject: request.subject,
+            body_html: request.body_html,
+            body_text: request.body_text,
+            in_reply_to: request.in_reply_to,
+            references: request.references,
+            thread_id: request.thread_id,
+        },
+        attachments: wire_attachments,
+    })
+}
+
+/// Write bytes to a file. Uses `File::create` + `write_all` rather
+/// than tempfile-rename: the staging directory is freshly created
+/// for each send_id, so there is no concurrent-writer concern.
+fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(bytes)?;
+    Ok(())
 }
