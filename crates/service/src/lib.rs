@@ -6,6 +6,8 @@ pub mod search_writer;
 pub mod send;
 mod send_vault;
 mod snooze_runner;
+pub mod sync;
+pub mod sync_dispatch;
 
 /// Re-export test-helpers knobs for the in-process integration tests so
 /// they can drive the artificial boot delay without `pub mod boot` leaking

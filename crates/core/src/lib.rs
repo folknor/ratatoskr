@@ -48,7 +48,12 @@ pub use smtp;
 pub use sync;
 pub use sync::smart_labels;
 pub use sync::threading;
-pub mod sync_dispatch;
+/// Phase 3 task 8: `sync_dispatch` moved to `crates/service/src/sync_dispatch.rs`
+/// alongside the `SyncRuntime` runner that drives it. Service-side
+/// callers reach it via `service::sync_dispatch::sync_delta_for_account`;
+/// no UI consumer remains (Phase 3 task 15 routes UI sync kicks
+/// through `client.start_sync(...)`).
+pub use service::sync_dispatch;
 pub mod url_cleaning;
 
 // Re-exports for app-layer convenience - avoids direct common dependency.

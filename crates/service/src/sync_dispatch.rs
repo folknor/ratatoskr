@@ -1,24 +1,24 @@
 //! Sync dispatch - runs delta sync for a single account through the provider.
 //!
-//! Phase 3 task 7 reshapes the entry point to take writer halves +
-//! a `CancellationToken` (`SyncProviderCtx`-shaped args) so the
-//! Service-side runner spawned by `crates/service/src/sync.rs`
-//! can drive sync against the dedicated `BodyStoreWriteState` /
-//! `InlineImageStoreWriteState` / `SearchWriteHandle` and observe
-//! cancellation requests through the per-account token map.
+//! Phase 3 task 7/8: lives in the `service` crate (alongside the
+//! `SyncRuntime` runner that spawns it) so the Service-side caller
+//! does not have to depend back into `core` and trip the
+//! `core -> service` re-export cycle. The function itself is
+//! provider-agnostic; the only `core` call is `create_provider`,
+//! which has a sibling implementation in `service::actions::provider`.
 //!
-//! Pre-Phase-3 this lived UI-side and consumed the unified store
-//! states + read-half DB. Phase 3 keeps the function in `core`
-//! (still provider-agnostic), but the dispatch site moves into the
-//! Service.
+//! Pre-Phase-3 this lived in `core::sync_dispatch` and consumed the
+//! unified store states + read-half DB; Phase 3 reshapes it for
+//! writer halves + cancellation token.
 
-use crate::actions::provider::create_provider;
-use crate::db::ReadDbState;
 use common::types::SyncProviderCtx;
+use db::db::ReadDbState;
 use service_state::{
     BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
 };
 use tokio_util::sync::CancellationToken;
+
+use crate::actions::provider::create_provider;
 
 /// Run a delta sync for a single account.
 ///
