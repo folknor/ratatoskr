@@ -113,6 +113,11 @@ async fn run(
         // are quiet (no per-op outcomes); the worker emits one final
         // `ActionCompleted` per finalized job.
         drain_mark_chat_read_jobs(&action_ctx, &out_tx, &owner_bytes).await;
+        // Phase 2 task 13: drain any queued send jobs. Quiet jobs that
+        // emit one `ActionCompleted` after SMTP submit (success or
+        // failure). The vault directory is unlinked on terminal
+        // status regardless of outcome.
+        drain_send_jobs(&action_ctx, &out_tx, &owner_bytes, &app_data_dir).await;
         // Phase 2 task 17: walk the snooze table for due threads and
         // unsnooze them via the standard `snooze::unsnooze` action.
         // Triggered by `pending_ops.kick`; same wakeup as the journal
@@ -227,6 +232,180 @@ async fn run_mark_chat_read(
     };
     enqueue_notification(out_tx, &Notification::ActionCompleted(completion));
     Ok(())
+}
+
+/// Drain queued `kind = 'send'` jobs. Each iteration leases one job,
+/// reconstructs a `SendRequest` from the journaled payload (reading
+/// attachment bytes from the Service-owned vault), calls
+/// `super::send::send_email`, and finalizes with summary
+/// `total = remote_succeeded = 1` on success or `remote_failed = 1`
+/// on failure. The vault directory is unlinked once the job reaches
+/// terminal status regardless of outcome - the journal carries the
+/// summary, the bytes are no longer needed.
+///
+/// Quiet job: no per-operation `OperationOutcome` notifications. The
+/// final `ActionCompleted` is the only wire signal the UI receives.
+async fn drain_send_jobs(
+    ctx: &ActionContext,
+    out_tx: &mpsc::Sender<Vec<u8>>,
+    owner: &[u8; 16],
+    app_data_dir: &std::path::Path,
+) {
+    loop {
+        let job = match lease_next_quiet_job_via_blocking(ctx, "send", owner).await {
+            Ok(Some(job)) => job,
+            Ok(None) => return,
+            Err(error) => {
+                log::warn!("action worker: send lease query failed: {error}");
+                return;
+            }
+        };
+        if let Err(error) = run_send(ctx, out_tx, &job, app_data_dir).await {
+            log::warn!(
+                "action worker: send job {:?} failed at worker layer: {error}",
+                job.job_id,
+            );
+            // Worker-layer failure (deserialize, unlinkable vault, etc.):
+            // finalize as failed so the lease clears. Recovery would
+            // otherwise reset and retry, which would deterministically
+            // re-fail in the same way.
+            let summary = PlanSummary {
+                total: 1,
+                local_only: 0,
+                remote_succeeded: 0,
+                remote_failed: 1,
+                conflicts: 0,
+            };
+            let summary_blob = serde_json::to_vec(&summary).unwrap_or_default();
+            let conn = ctx.db.conn();
+            let job_id_bytes = job.job_id;
+            let _ = tokio::task::spawn_blocking(move || {
+                let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
+                finalize_job(&conn, &job_id_bytes, JobTerminalStatus::Failed, &summary_blob)
+            })
+            .await;
+
+            // Best-effort vault cleanup. If the deserialize failed we
+            // never learned the send_id, but the job_id IS the
+            // send_id (UI-generated, journaled) so we can derive the
+            // vault path directly.
+            crate::send_vault::cleanup_vault_dir(
+                app_data_dir,
+                &PlanId(uuid::Uuid::from_bytes(job.job_id)),
+            );
+        }
+    }
+}
+
+async fn run_send(
+    ctx: &ActionContext,
+    out_tx: &mpsc::Sender<Vec<u8>>,
+    job: &LeasedQuietJob,
+    app_data_dir: &std::path::Path,
+) -> Result<(), String> {
+    use crate::handlers::JournaledSend;
+
+    let payload: JournaledSend = serde_json::from_slice(&job.payload)
+        .map_err(|e| format!("deserialize JournaledSend: {e}"))?;
+    let send_id = payload.send_id;
+
+    // Read each vault file's bytes synchronously inside spawn_blocking
+    // (the SendRequest carries inline Vec<u8>; the existing send_email
+    // path expects bytes already loaded). Vault unlink runs on the
+    // terminal path regardless of success/failure.
+    let request = match build_send_request(payload).await {
+        Ok(req) => req,
+        Err(error) => {
+            crate::send_vault::cleanup_vault_dir(app_data_dir, &send_id);
+            return Err(error);
+        }
+    };
+
+    let outcome = super::send::send_email(ctx, request).await;
+
+    let (status, summary) = match &outcome {
+        ActionOutcome::Success | ActionOutcome::NoOp => (
+            JobTerminalStatus::Completed,
+            PlanSummary {
+                total: 1,
+                local_only: 0,
+                remote_succeeded: 1,
+                remote_failed: 0,
+                conflicts: 0,
+            },
+        ),
+        ActionOutcome::Failed { .. } | ActionOutcome::LocalOnly { .. } => (
+            JobTerminalStatus::Failed,
+            PlanSummary {
+                total: 1,
+                local_only: 0,
+                remote_succeeded: 0,
+                remote_failed: 1,
+                conflicts: 0,
+            },
+        ),
+    };
+
+    let summary_blob =
+        serde_json::to_vec(&summary).map_err(|e| format!("serialize PlanSummary: {e}"))?;
+    let conn = ctx.db.conn();
+    let job_id_bytes = job.job_id;
+    tokio::task::spawn_blocking(move || {
+        let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
+        finalize_job(&conn, &job_id_bytes, status, &summary_blob)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking finalize_job: {e}"))??;
+
+    crate::send_vault::cleanup_vault_dir(app_data_dir, &send_id);
+
+    let completion = ActionCompleted {
+        plan_id: send_id,
+        summary,
+        service_generation: 0,
+    };
+    enqueue_notification(out_tx, &Notification::ActionCompleted(completion));
+    Ok(())
+}
+
+/// Read attachment bytes from the vault and assemble a `SendRequest`
+/// for `super::send::send_email`. Runs inside spawn_blocking - the
+/// vault files can be tens of megabytes apiece and we must not block
+/// the runtime.
+async fn build_send_request(
+    payload: crate::handlers::JournaledSend,
+) -> Result<crate::send::SendRequest, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut attachments = Vec::with_capacity(payload.attachments.len());
+        for att in payload.attachments {
+            let data = std::fs::read(&att.vault_path).map_err(|e| {
+                format!("read vault file {}: {e}", att.vault_path.display())
+            })?;
+            attachments.push(crate::send::SendAttachment {
+                filename: att.filename,
+                mime_type: att.mime,
+                data,
+                content_id: att.content_id,
+            });
+        }
+        Ok::<_, String>(crate::send::SendRequest {
+            draft_id: payload.message.draft_id,
+            account_id: payload.account_id,
+            from: payload.message.from,
+            to: payload.message.to,
+            cc: payload.message.cc,
+            bcc: payload.message.bcc,
+            subject: payload.message.subject,
+            body_html: payload.message.body_html,
+            body_text: payload.message.body_text,
+            attachments,
+            in_reply_to: payload.message.in_reply_to,
+            references: payload.message.references,
+            thread_id: payload.message.thread_id,
+        })
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking build_send_request: {e}"))?
 }
 
 fn build_action_context(

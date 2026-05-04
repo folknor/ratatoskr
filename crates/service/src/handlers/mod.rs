@@ -9,9 +9,6 @@ mod pending_ops_kick;
 mod test_helpers;
 
 pub(crate) use action_mark_chat_read::JournaledChatRead;
-// JournaledSend / JournaledMessage / JournaledAttachment are consumed
-// by the worker drain in the next commit; re-export when wired.
-#[allow(unused_imports, reason = "JournaledSend wires up in worker drain next commit")]
 pub(crate) use action_send::JournaledSend;
 
 use crate::boot::BootSharedState;
