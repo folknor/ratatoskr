@@ -109,7 +109,13 @@ fn validate_plan(plan: &ActionWirePlan) -> Result<(), ServiceError> {
 /// what the worker re-deserializes).
 fn serialize_ops(plan: ActionWirePlan) -> Result<Vec<PlanOpInsert>, ServiceError> {
     let mut out = Vec::with_capacity(plan.operations.len());
-    for op in plan.operations {
+    // `ordinal` is execution order; `operation_id` is the UI
+    // correlation key. They're distinct concepts: keep them decoupled
+    // even though `to_wire_plan` happens to assign dense `0..N`
+    // operation_ids today (a future caller using sparse op-ids would
+    // hit the `UNIQUE(job_id, ordinal)` constraint silently if we
+    // reused operation_id as ordinal).
+    for (ordinal, op) in plan.operations.into_iter().enumerate() {
         // Round-trip through wire_to_mail to enforce the mirror
         // contract; we drop the result (the journal stores the wire
         // form). This is cheap (each variant is a few bytes) and
@@ -123,9 +129,14 @@ fn serialize_ops(plan: ActionWirePlan) -> Result<Vec<PlanOpInsert>, ServiceError
                 op.operation_id
             ))
         })?;
+        let ordinal_u32 = u32::try_from(ordinal).map_err(|_| {
+            ServiceError::Internal(format!(
+                "plan has more than u32::MAX operations ({ordinal})",
+            ))
+        })?;
         out.push(PlanOpInsert {
             operation_id: op.operation_id.0,
-            ordinal: op.operation_id.0,
+            ordinal: ordinal_u32,
             thread_id: op.thread_id,
             operation_blob: blob,
         });

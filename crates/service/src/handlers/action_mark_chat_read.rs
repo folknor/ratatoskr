@@ -68,24 +68,44 @@ pub(super) async fn handle(
     // 2. Journal a quiet job. The payload carries the affected list so
     //    the worker can run remote dispatch deterministically across
     //    respawns. account_id is the journaled account scope; we use
-    //    the first affected thread's account if any (mark_chat_read
-    //    spans accounts naturally - the journal column accepts any
-    //    valid account id and the worker walks the payload's pairs
-    //    directly). For an empty affected list (chat had no unread
-    //    messages), we still journal so the UI's ack is meaningful;
-    //    the worker no-ops and emits ActionCompleted immediately.
+    //    the first affected thread's account (mark_chat_read spans
+    //    accounts naturally - the journal column accepts any valid
+    //    account id and the worker walks the payload's pairs directly).
+    //
+    //    When `affected` is empty (chat had no unread messages, or the
+    //    chat email matched no contacts) there's no remote work to
+    //    drive. Skip the journal insert: action_jobs.account_id is FK
+    //    to accounts(id) with foreign_keys=ON, so a placeholder like
+    //    "<chat>" raises a constraint violation. Return `journaled:
+    //    false` so the UI's fire-and-forget ack matches reality (no
+    //    durable work was scheduled because there was no work).
     let job_id = uuid::Uuid::now_v7();
+    if affected.is_empty() {
+        let ack = MarkChatReadAck {
+            job_id: PlanId(job_id),
+            journaled: false,
+        };
+        return serde_json::to_value(&ack)
+            .map_err(|error| ServiceError::Internal(error.to_string()));
+    }
+
     let job_id_bytes = *job_id.as_bytes();
+    let account_id_for_journal = match affected.first() {
+        Some((aid, _)) => aid.clone(),
+        None => {
+            // Unreachable: `affected.is_empty()` returned above. Guard
+            // anyway to keep the next line's borrow obvious.
+            return Err(ServiceError::Internal(
+                "mark_chat_read: affected became empty after non-empty check".into(),
+            ));
+        }
+    };
     let payload = JournaledChatRead {
         chat_email: chat_email.clone(),
         affected,
     };
     let payload_blob = serde_json::to_vec(&payload)
         .map_err(|error| ServiceError::Internal(format!("serialize JournaledChatRead: {error}")))?;
-    let account_id_for_journal = payload
-        .affected
-        .first()
-        .map_or_else(|| "<chat>".to_string(), |(aid, _)| aid.clone());
 
     let conn_for_journal = Arc::clone(&conn);
     tokio::task::spawn_blocking(move || {

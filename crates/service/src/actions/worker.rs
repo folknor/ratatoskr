@@ -9,9 +9,14 @@
 //! The worker runs as one tokio task spawned alongside the boot task
 //! in `dispatch::run_service_with_io_and_lifecycle`. It awaits
 //! `BootSharedState::wait_for_ready()` first so the journal helpers
-//! can run against a fully-migrated DB and `BootContext` is populated;
-//! after that it parks on `await_action_worker_wakeup()` until the
-//! `action.execute_plan` handler signals new work.
+//! can run against a fully-migrated DB and `BootContext` is populated.
+//! Each loop iteration drains all queues, then parks on
+//! `await_action_worker_wakeup()`. Drain-then-await (not await-then-drain)
+//! is load-bearing: a row left `queued` by a previous incarnation that
+//! crashed post-journal-commit pre-execution would be invisible to a
+//! worker that parked first. tokio::sync::Notify retains one permit, so
+//! handler-side notifies that fire while the worker is draining are
+//! observed by the next await with no race.
 //!
 //! Phase 2 simplifications (vs the plan's full design):
 //! - **No per-account semaphore.** The worker leases one op at a time
@@ -35,7 +40,7 @@ use db::db::ReadDbState;
 use db::db::action_journal::{
     JobTerminalStatus, LeasedOp, LeasedQuietJob, OpStatusCounts, OpTerminalStatus, ReplayableOp,
     count_ops_by_status, finalize_job, lease_next_ready_op, lease_next_ready_quiet_job,
-    mark_op_terminal, unemitted_terminal_ops,
+    mark_op_terminal, unemitted_terminal_ops, unfinalized_mail_plan_jobs,
 };
 use service_api::{
     ActionCompleted, Notification, OperationId, OperationOutcome, OperationResult, PlanId,
@@ -51,7 +56,7 @@ use super::wire_conversion::wire_to_mail;
 use common::types::ActionProviderCtx;
 use db::progress::NoopProgressReporter;
 use crate::boot::BootSharedState;
-use crate::boot_progress::enqueue_notification;
+use crate::boot_progress::send_must_deliver_notification;
 
 /// Lease duration for ops the worker is currently executing. The next
 /// boot's `recover_stale_leases` resets any lease whose
@@ -106,8 +111,13 @@ async fn run(
 
     log::info!("action worker started (uuid={worker_uuid})");
 
+    // Drain-then-await ordering: an op enqueued before the worker spawned
+    // (or a row left `queued` by a previous incarnation that crashed
+    // post-journal-commit pre-execution) would be missed if the worker
+    // parked first. tokio::sync::Notify retains one permit, so a
+    // notify_one that fires while we're draining is observed by the next
+    // await call - no race against handler-side notifies during drain.
     loop {
-        boot_state.await_action_worker_wakeup().await;
         drain_one_pass(&action_ctx, &out_tx, &owner_bytes).await;
         // Phase 2 task 15: drain any queued mark_chat_read jobs. These
         // are quiet (no per-op outcomes); the worker emits one final
@@ -131,6 +141,7 @@ async fn run(
         // both fire `boot_state.notify_action_worker()` so either
         // trigger does the same work.
         super::pending::process_pending_ops(&action_ctx).await;
+        boot_state.await_action_worker_wakeup().await;
     }
 }
 
@@ -230,7 +241,7 @@ async fn run_mark_chat_read(
         summary,
         service_generation: 0,
     };
-    enqueue_notification(out_tx, &Notification::ActionCompleted(completion));
+    send_must_deliver_notification(out_tx, &Notification::ActionCompleted(completion)).await;
     Ok(())
 }
 
@@ -364,7 +375,7 @@ async fn run_send(
         summary,
         service_generation: 0,
     };
-    enqueue_notification(out_tx, &Notification::ActionCompleted(completion));
+    send_must_deliver_notification(out_tx, &Notification::ActionCompleted(completion)).await;
     Ok(())
 }
 
@@ -439,6 +450,34 @@ async fn drain_one_pass(
     out_tx: &mpsc::Sender<Vec<u8>>,
     owner: &[u8; 16],
 ) {
+    // Sweep mail-plan jobs whose ops are all terminal but whose parent
+    // job_status is not. This is the recovery path for a crash between
+    // mark_op_terminal (clears the op lease) and finalize_job (writes
+    // the parent terminal status) - they're separate transactions, so
+    // a crash in between leaves the job stranded at queued/leased.
+    // lease_next_ready_op then returns None forever for that job, and
+    // without this sweep maybe_finalize is never called again.
+    let conn = ctx.db.conn();
+    let stranded = match tokio::task::spawn_blocking(move || {
+        let conn = conn.lock().unwrap_or_else(PoisonError::into_inner);
+        unfinalized_mail_plan_jobs(&conn)
+    })
+    .await
+    {
+        Ok(Ok(ids)) => ids,
+        Ok(Err(error)) => {
+            log::warn!("action worker: unfinalized_mail_plan_jobs failed: {error}");
+            Vec::new()
+        }
+        Err(error) => {
+            log::warn!("action worker: spawn_blocking unfinalized_mail_plan_jobs: {error}");
+            Vec::new()
+        }
+    };
+    for plan_id in stranded {
+        let _ = maybe_finalize(ctx, out_tx, &plan_id).await;
+    }
+
     loop {
         let leased = match lease_next_via_blocking(ctx, owner).await {
             Ok(Some(op)) => op,
@@ -543,7 +582,7 @@ async fn persist_and_emit(
             result,
             service_generation: 0,
         };
-        enqueue_notification(out_tx, &Notification::OperationOutcome(outcome));
+        send_must_deliver_notification(out_tx, &Notification::OperationOutcome(outcome)).await;
     }
     Ok(())
 }
@@ -594,7 +633,7 @@ async fn maybe_finalize(
         summary,
         service_generation: 0,
     };
-    enqueue_notification(out_tx, &Notification::ActionCompleted(completion));
+    send_must_deliver_notification(out_tx, &Notification::ActionCompleted(completion)).await;
     Ok(())
 }
 
@@ -638,7 +677,7 @@ async fn replay_unemitted(ctx: &ActionContext, out_tx: &mpsc::Sender<Vec<u8>>) {
             result,
             service_generation: 0,
         };
-        enqueue_notification(out_tx, &Notification::OperationOutcome(outcome));
+        send_must_deliver_notification(out_tx, &Notification::OperationOutcome(outcome)).await;
     }
 }
 

@@ -51,6 +51,16 @@ pub(crate) fn wire_to_mail(op: WireMailOperation) -> MailOperation {
 /// stores the wire form; if a path ever needs to insert a journal row
 /// from a `MailOperation` rather than from an `ActionWirePlan`, it
 /// goes through here).
+///
+/// **Do NOT delete even if it appears unused.** This function is
+/// the bidirectional regression guard for the `MailOperation` <->
+/// `WireMailOperation` mirror: its exhaustive match (no `_`
+/// wildcard) means that adding a `MailOperation` variant without
+/// adding the corresponding `WireMailOperation` variant fails to
+/// compile here. The companion guard for the wire->domain
+/// direction is `wire_to_mail`. The `mail_side_mirror_is_exhaustive`
+/// test below pins the bidirectional invariant by force-calling
+/// this function on every `MailOperation` variant.
 #[allow(dead_code)]
 pub(crate) fn mail_to_wire(op: MailOperation) -> WireMailOperation {
     match op {
@@ -135,6 +145,63 @@ mod tests {
             let m = wire_to_mail(w.clone());
             let back = mail_to_wire(m);
             assert_eq!(w, back, "wire -> mail -> wire must round-trip");
+        }
+    }
+
+    /// Mail-side mirror exhaustiveness pin. Force-constructs every
+    /// `MailOperation` variant and converts via `mail_to_wire`, then
+    /// round-trips back. The match below has no `_` wildcard, so a
+    /// new `MailOperation` variant added in core fails to compile
+    /// here - even if `mail_to_wire` itself stops being used in
+    /// production code. This is the explicit bidirectional regression
+    /// guard the Phase 2 plan called for; it complements the
+    /// wire-side enumeration in `round_trip_preserves_every_variant`.
+    #[test]
+    fn mail_side_mirror_is_exhaustive() {
+        let cases: Vec<MailOperation> = vec![
+            MailOperation::Archive,
+            MailOperation::Trash,
+            MailOperation::PermanentDelete,
+            MailOperation::SetSpam { to: true },
+            MailOperation::SetStarred { to: false },
+            MailOperation::SetRead { to: true },
+            MailOperation::SetPinned { to: false },
+            MailOperation::SetMuted { to: true },
+            MailOperation::MoveToFolder {
+                dest: FolderId("inbox".into()),
+                source: Some(FolderId("archive".into())),
+            },
+            MailOperation::AddLabel {
+                label_id: TagId("work".into()),
+            },
+            MailOperation::RemoveLabel {
+                label_id: TagId("work".into()),
+            },
+            MailOperation::Snooze { until: 1_700_000_000 },
+            MailOperation::Unsnooze,
+        ];
+        for m in cases {
+            // Exhaustive match on MailOperation, no wildcard. A new
+            // variant added in core without a wire mirror fails
+            // compilation here, before any assertion runs.
+            let tag: &str = match &m {
+                MailOperation::Archive => "Archive",
+                MailOperation::Trash => "Trash",
+                MailOperation::PermanentDelete => "PermanentDelete",
+                MailOperation::SetSpam { .. } => "SetSpam",
+                MailOperation::SetStarred { .. } => "SetStarred",
+                MailOperation::SetRead { .. } => "SetRead",
+                MailOperation::SetPinned { .. } => "SetPinned",
+                MailOperation::SetMuted { .. } => "SetMuted",
+                MailOperation::MoveToFolder { .. } => "MoveToFolder",
+                MailOperation::AddLabel { .. } => "AddLabel",
+                MailOperation::RemoveLabel { .. } => "RemoveLabel",
+                MailOperation::Snooze { .. } => "Snooze",
+                MailOperation::Unsnooze => "Unsnooze",
+            };
+            let w = mail_to_wire(m.clone());
+            let back = wire_to_mail(w);
+            assert_eq!(m, back, "mail -> wire -> mail must round-trip ({tag})");
         }
     }
 }

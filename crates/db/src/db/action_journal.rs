@@ -507,6 +507,53 @@ pub fn count_ops_by_status(
     Ok(counts)
 }
 
+/// Return the `job_id`s of `kind = 'mail_plan'` jobs that are
+/// non-terminal but whose ops are all in terminal status (done /
+/// failed / conflict). The worker calls this at the top of every
+/// drain pass so that a crash between `mark_op_terminal` and
+/// `finalize_job` (which clear the lease and write the parent status
+/// in separate transactions) does not strand a job at
+/// `status='queued'/'leased'/'executing'` forever.
+///
+/// Recovery order: the worker calls this AFTER startup-time
+/// `recover_stale_leases`, so any job whose ops were `leased` /
+/// `executing` will already have been reset to `pending`. That keeps
+/// the "all ops terminal" predicate honest - we only finalize jobs
+/// that have genuinely no remaining work, not ones whose work is
+/// queued for a fresh lease.
+pub fn unfinalized_mail_plan_jobs(conn: &Connection) -> Result<Vec<[u8; 16]>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT j.job_id FROM action_jobs j \
+             WHERE j.kind = 'mail_plan' \
+               AND j.status NOT IN ('completed', 'partial', 'failed') \
+               AND NOT EXISTS ( \
+                 SELECT 1 FROM action_job_ops o \
+                 WHERE o.job_id = j.job_id \
+                   AND o.status IN ('pending', 'leased', 'executing') \
+               )",
+        )
+        .map_err(|e| format!("unfinalized_mail_plan_jobs prepare: {e}"))?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, Vec<u8>>(0))
+        .map_err(|e| format!("unfinalized_mail_plan_jobs query: {e}"))?;
+    let mut out = Vec::new();
+    for row in rows {
+        let bytes = row.map_err(|e| format!("unfinalized_mail_plan_jobs row: {e}"))?;
+        let arr: [u8; 16] = bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| {
+                format!(
+                    "unfinalized_mail_plan_jobs: job_id len {} != 16",
+                    bytes.len()
+                )
+            })?;
+        out.push(arr);
+    }
+    Ok(out)
+}
+
 /// Set the terminal status + summary blob on an `action_jobs` row.
 /// The worker calls this once when the last op transitions out of
 /// non-terminal status, choosing the new status from the per-op
@@ -828,6 +875,102 @@ mod tests {
             )
             .expect("count pending");
         assert_eq!(pending_count, 3);
+    }
+
+    #[test]
+    fn unfinalized_mail_plan_jobs_finds_orphans_after_partial_finalize() {
+        let conn = fresh_db();
+        // Setup: one queued job whose ops are all terminal (the
+        // crash-between-mark_op_terminal-and-finalize_job state). Two
+        // jobs that should NOT be returned: a queued job with a still-
+        // pending op (worker has work to do); a completed job (already
+        // finalized).
+        let stranded = [0xA1; 16];
+        let in_flight = [0xA2; 16];
+        let already_done = [0xA3; 16];
+        insert_test_job(&conn, &stranded, "queued");
+        insert_test_job(&conn, &in_flight, "queued");
+        insert_test_job(&conn, &already_done, "completed");
+
+        // stranded: ops all terminal
+        insert_test_op(&conn, &stranded, 0, "done");
+        insert_test_op(&conn, &stranded, 1, "failed");
+        // in_flight: one terminal op + one still pending
+        insert_test_op(&conn, &in_flight, 0, "done");
+        insert_test_op(&conn, &in_flight, 1, "pending");
+        // already_done: ops all terminal (parent is already terminal too)
+        insert_test_op(&conn, &already_done, 0, "done");
+
+        let orphans: std::collections::HashSet<[u8; 16]> =
+            unfinalized_mail_plan_jobs(&conn)
+                .expect("query")
+                .into_iter()
+                .collect();
+
+        assert_eq!(orphans.len(), 1, "only stranded should be returned");
+        assert!(orphans.contains(&stranded));
+        assert!(!orphans.contains(&in_flight));
+        assert!(!orphans.contains(&already_done));
+    }
+
+    #[test]
+    fn unfinalized_mail_plan_jobs_skips_send_jobs() {
+        let conn = fresh_db();
+        // A `kind = 'send'` job in `queued` status with no child ops:
+        // would naively match the predicate (no pending/leased/
+        // executing ops) but must NOT be returned because the helper
+        // is mail-plan-specific (send jobs are quiet, finalized
+        // independently by the worker's send drain path).
+        let send_job = [0xB1; 16];
+        insert_send_job(&conn, &send_job, "queued");
+
+        let orphans = unfinalized_mail_plan_jobs(&conn).expect("query");
+        assert!(
+            orphans.is_empty(),
+            "send jobs must not appear in unfinalized_mail_plan_jobs"
+        );
+    }
+
+    #[test]
+    fn insert_quiet_job_rejects_unknown_account_id() {
+        // Regression guard for the `mark_chat_read` empty-affected FK
+        // violation. The handler used to fall back to `account_id =
+        // "<chat>"` when the affected list was empty (chat had no
+        // unread messages); foreign_keys=ON makes that a constraint
+        // violation. The fix is to early-return without journaling
+        // when there's no work; this test pins the underlying
+        // constraint that motivated the fix so a future regression
+        // (someone reverts the early-return) breaks loudly.
+        let conn = fresh_db();
+        let job_id = [0xD1; 16];
+        let result = insert_quiet_job(
+            &conn,
+            &job_id,
+            "mark_chat_read",
+            "<chat>",
+            b"{}",
+        );
+        assert!(
+            result.is_err(),
+            "FK to accounts(id) must reject unknown account_id"
+        );
+    }
+
+    #[test]
+    fn unfinalized_mail_plan_jobs_handles_leased_status() {
+        let conn = fresh_db();
+        // After recover_stale_leases, parent status would be 'queued'
+        // - but a job that crashed in 'leased' status with all-terminal
+        // ops (e.g. lease never expired before the worker died with
+        // its op already marked done) should still be picked up by
+        // this helper if recovery hasn't run yet.
+        let leased = [0xC1; 16];
+        insert_test_job(&conn, &leased, "leased");
+        insert_test_op(&conn, &leased, 0, "done");
+
+        let orphans = unfinalized_mail_plan_jobs(&conn).expect("query");
+        assert_eq!(orphans.len(), 1, "leased+all-done job is unfinalized");
+        assert!(orphans.contains(&leased));
     }
 
     #[test]

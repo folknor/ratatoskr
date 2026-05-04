@@ -193,6 +193,27 @@ impl ReadyApp {
             return Task::none();
         }
 
+        // Service rejects cross-account plans (one journal row =
+        // one parent account_id; ops inherit it). When the user
+        // selects threads from multiple accounts (typical from the
+        // all-accounts unified view), split into one plan per
+        // account before dispatch. Each split plan gets its own
+        // plan_id, its own subset of operations, and its own subset
+        // of optimistic mutations; behavior / compensation /
+        // undo_description are shared. Each split's ActionCompleted
+        // pushes its own undo-stack entry, so an N-account bulk
+        // undo takes N Ctrl+Z presses; that's a minor UX wart and
+        // beats the alternative (Service rejects, optimistic state
+        // already applied, user lands in a confusing partial state).
+        let mut accounts: std::collections::BTreeSet<&str> =
+            std::collections::BTreeSet::new();
+        for (account_id, _, _) in &plan.operations {
+            accounts.insert(account_id.as_str());
+        }
+        if accounts.len() > 1 {
+            return self.dispatch_plan_split_by_account(plan, undo_description.as_ref());
+        }
+
         let Some(client) = self.service_client.as_ref().cloned() else {
             // Pre-Ready (no client) or Service crashed without respawn:
             // roll back optimistic state and surface a toast.
@@ -298,6 +319,59 @@ impl ReadyApp {
         )
     }
 
+    /// Split a multi-account plan into per-account sub-plans and
+    /// dispatch each. Operations group by account_id; optimistic
+    /// mutations partition the same way (each `OptimisticMutation`
+    /// variant carries an `account_id`). `behavior`, `compensation`,
+    /// and `undo_description` clone for each split.
+    fn dispatch_plan_split_by_account(
+        &mut self,
+        plan: crate::action_resolve::ActionExecutionPlan,
+        undo_description: Option<&String>,
+    ) -> Task<Message> {
+        use std::collections::BTreeMap;
+
+        // Group operations by account, preserving original order
+        // within each group.
+        let mut ops_by_account: BTreeMap<String, Vec<(String, String, rtsk::actions::MailOperation)>> =
+            BTreeMap::new();
+        for op in plan.operations {
+            ops_by_account.entry(op.0.clone()).or_default().push(op);
+        }
+
+        // Partition optimistic mutations the same way.
+        let mut opt_by_account: BTreeMap<String, Vec<crate::action_resolve::OptimisticMutation>> =
+            BTreeMap::new();
+        for mutation in plan.optimistic {
+            let account_id = match &mutation {
+                crate::action_resolve::OptimisticMutation::SetStarred { account_id, .. }
+                | crate::action_resolve::OptimisticMutation::SetRead { account_id, .. }
+                | crate::action_resolve::OptimisticMutation::SetPinned { account_id, .. }
+                | crate::action_resolve::OptimisticMutation::SetMuted { account_id, .. } => {
+                    account_id.clone()
+                }
+            };
+            opt_by_account.entry(account_id).or_default().push(mutation);
+        }
+
+        log::info!(
+            "splitting cross-account plan into {} sub-plans by account",
+            ops_by_account.len(),
+        );
+
+        let mut tasks: Vec<Task<Message>> = Vec::new();
+        for (account_id, operations) in ops_by_account {
+            let sub_plan = crate::action_resolve::ActionExecutionPlan {
+                operations,
+                behavior: plan.behavior.clone(),
+                compensation: plan.compensation.clone(),
+                optimistic: opt_by_account.remove(&account_id).unwrap_or_default(),
+            };
+            tasks.push(self.dispatch_plan_with_undo(sub_plan, undo_description.cloned()));
+        }
+        Task::batch(tasks)
+    }
+
     /// Synchronous response to `dispatch_plan`'s IPC call.
     ///
     /// Drives the tri-state per Phase 2 plan scope item 14:
@@ -375,17 +449,36 @@ impl ReadyApp {
         let Some(client) = self.service_client.as_ref().cloned() else {
             return Task::none();
         };
-        let plan_ids: Vec<service_api::PlanId> = self
+        // Sweep both AckUnknown and Acked plans, plus every in-flight
+        // compose-send. AckUnknown is the documented case (pre-ack
+        // crash). Acked covers the post-ack-finalize-then-crash
+        // window: the journal row is terminal, but the Service died
+        // before delivering `ActionCompleted`. `replay_unemitted`
+        // filters out terminal jobs, so without this sweep the UI's
+        // `pending_action_plans` / `in_flight_sends` entry leaks
+        // forever. `handle_job_status_resolved` synthesizes an
+        // `ActionCompleted` from the terminal `Journaled` response,
+        // which routes to `Message::SendCompleted` for sends or
+        // through the standard completion pipeline for mail plans;
+        // a duplicate that arrives later is dropped at the unknown-
+        // plan-id check.
+        let mut plan_ids: Vec<service_api::PlanId> = self
             .pending_action_plans
             .iter()
-            .filter(|(_, p)| matches!(p.state, crate::app::PlanState::AckUnknown))
+            .filter(|(_, p)| {
+                matches!(
+                    p.state,
+                    crate::app::PlanState::AckUnknown | crate::app::PlanState::Acked
+                )
+            })
             .map(|(id, _)| *id)
             .collect();
+        plan_ids.extend(self.in_flight_sends.keys().copied());
         if plan_ids.is_empty() {
             return Task::none();
         }
         log::info!(
-            "post-respawn reconcile: querying action.job_status for {} AckUnknown plan(s)",
+            "post-respawn reconcile: querying action.job_status for {} plan(s) (AckUnknown + Acked + in-flight sends)",
             plan_ids.len(),
         );
         let tasks: Vec<Task<Message>> = plan_ids
@@ -422,9 +515,52 @@ impl ReadyApp {
         result: Result<service_api::JobStatusResponse, String>,
     ) -> Task<Message> {
         match result {
-            Ok(service_api::JobStatusResponse::Journaled { status, .. }) => {
+            Ok(service_api::JobStatusResponse::Journaled { status, summary }) => {
+                if matches!(
+                    status,
+                    service_api::WireJobStatus::Completed
+                        | service_api::WireJobStatus::Partial
+                        | service_api::WireJobStatus::Failed
+                ) {
+                    // Job is terminal but the UI never saw `ActionCompleted` -
+                    // either the Service crashed between finalize-commit and
+                    // notification-send, or the notification was lost on the
+                    // wire. Synthesize the completion so the existing
+                    // pipeline (toast, undo eligibility, optimistic rollback
+                    // on failure, auto-advance) runs against whatever
+                    // outcomes the UI accumulated. A duplicate that arrives
+                    // later is dropped at the unknown-plan-id check in
+                    // `handle_notification_action_completed`.
+                    let summary_struct = match summary
+                        .as_ref()
+                        .map(|blob| serde_json::from_slice::<service_api::PlanSummary>(blob))
+                    {
+                        Some(Ok(s)) => s,
+                        Some(Err(error)) => {
+                            log::warn!(
+                                "reconcile plan {plan_id}: PlanSummary deserialize failed ({error}); using empty summary",
+                            );
+                            service_api::PlanSummary::default()
+                        }
+                        None => {
+                            log::warn!(
+                                "reconcile plan {plan_id}: terminal status {status:?} with no summary; using empty",
+                            );
+                            service_api::PlanSummary::default()
+                        }
+                    };
+                    log::info!(
+                        "reconcile plan {plan_id}: Journaled (terminal status={status:?}); synthesizing ActionCompleted",
+                    );
+                    let synthetic = service_api::ActionCompleted {
+                        plan_id,
+                        summary: summary_struct,
+                        service_generation: 0,
+                    };
+                    return self.handle_notification_action_completed(&synthetic);
+                }
                 log::info!(
-                    "reconcile plan {plan_id}: Journaled (status={status:?}); promoting to Acked",
+                    "reconcile plan {plan_id}: Journaled (in-flight status={status:?}); promoting to Acked",
                 );
                 if let Some(state) = self.pending_action_plans.get_mut(&plan_id) {
                     state.state = crate::app::PlanState::Acked;
@@ -432,17 +568,33 @@ impl ReadyApp {
                 Task::none()
             }
             Ok(service_api::JobStatusResponse::NotFound) => {
-                log::info!("reconcile plan {plan_id}: NotFound; rolling back optimistic state");
                 if let Some(state) = self.pending_action_plans.remove(&plan_id) {
+                    log::info!(
+                        "reconcile plan {plan_id}: NotFound; rolling back optimistic state",
+                    );
                     for (account_id, thread_id, _) in &state.plan.operations {
                         self.action_throttle
                             .remove(&(account_id.clone(), thread_id.clone()));
                     }
                     self.rollback_optimistic(&state.plan.optimistic);
+                    self.status_bar.show_confirmation(
+                        "\u{26A0} Action lost during service restart \u{2014} reverted".to_string(),
+                    );
+                } else if self.in_flight_sends.remove(&plan_id).is_some() {
+                    // Compose-send whose ack never arrived. The local
+                    // Err path of the send_email future already fired
+                    // SendCompleted with a failure outcome and the
+                    // compose window is back in editable state; nothing
+                    // more to do here, just drop the orphan entry so
+                    // the in_flight_sends map stays bounded.
+                    log::info!(
+                        "reconcile plan {plan_id}: NotFound on in-flight send; dropping orphan entry",
+                    );
+                } else {
+                    log::debug!(
+                        "reconcile plan {plan_id}: NotFound but no pending entry to roll back",
+                    );
                 }
-                self.status_bar.show_confirmation(
-                    "\u{26A0} Action lost during service restart \u{2014} reverted".to_string(),
-                );
                 Task::none()
             }
             Err(error) => {

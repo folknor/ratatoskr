@@ -80,6 +80,41 @@ pub(crate) fn enqueue_notification(
     }
 }
 
+/// Enqueue a `MustDeliver`-class notification onto the outbound writer
+/// queue, blocking on full-queue backpressure until the receiver
+/// drains a slot.
+///
+/// `MustDeliver` semantics (per `Notification::class()` in service-api)
+/// are incompatible with `try_send`'s drop-on-full policy: dropping an
+/// `OperationOutcome` desyncs the UI's optimistic state from the
+/// journal (the outcome row has `outcome IS NOT NULL` so
+/// `replay_unemitted` skips it on respawn); dropping an
+/// `ActionCompleted` permanently leaks the UI's `pending_action_plans`
+/// entry (the post-respawn reconcile only sweeps `AckUnknown`). The
+/// caller MUST be on an async path; the awaited send is the contract.
+///
+/// A failure here means the receiver is gone, which only happens on
+/// Service teardown - log at warn and return; the dispatch loop is
+/// already on its way out.
+pub(crate) async fn send_must_deliver_notification(
+    out_tx: &mpsc::Sender<Vec<u8>>,
+    notification: &Notification,
+) {
+    let method_name = notification.method_name();
+    let bytes = match serialize_notification(notification) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            log::warn!("failed to serialize {method_name}: {error}");
+            return;
+        }
+    };
+    if let Err(error) = out_tx.send(bytes).await {
+        log::warn!(
+            "MustDeliver {method_name} dropped (receiver gone): {error}"
+        );
+    }
+}
+
 /// Build a single newline-terminated JSON-RPC frame for a `Notification`.
 /// `Notification` serializes as `{"method":..., "params":...}` via its
 /// `tag = "method", content = "params"` shape; we splice in the JSON-RPC

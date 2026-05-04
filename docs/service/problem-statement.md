@@ -328,7 +328,7 @@ Anything not in this table is either (a) read-only from the UI's perspective and
 - ✓ Snooze resurfacing - Service-side runner triggered by `pending_ops.kick`; UI tick fires the kick and reloads nav after a 1.5 s grace window.
 - ✓ Chat read-on-view - `action.mark_chat_read` IPC; Service runs local DB write in the handler and provider mark-read on the worker.
 
-The `service-state` crate boundary holds: a UI source file that tries `use service_state::WriteDbState` does not link. Body / inline / search write halves still construct UI-side until Phase 3 (sync) and Phase 6 (rest); the global lockdown is Phase 6.
+The `service-state` crate exists and a UI source file that tries `use service_state::WriteDbState` does not link - but the Phase 2 invariant is narrower than the original framing claimed. `WriteDbState` itself is scaffolded, not wired: the action worker writes through `ReadDbState::conn()`, same as Phase 1. What Phase 2 actually delivers is a narrowed `ActionProviderCtx` (excludes body / inline / search store handles, regression-tested by exhaustive destructure). Full lockdown - `WriteDbState` is the only path to writes, app crate can't reach it - lands in Phase 6 alongside the global write-surface relocation. Body / inline / search write halves still construct UI-side until Phase 3 (sync) and Phase 6 (rest).
 
 ## Cross-store crash consistency
 

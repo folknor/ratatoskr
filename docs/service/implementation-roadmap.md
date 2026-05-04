@@ -185,10 +185,12 @@ The phase lands as one milestone but with a clean commit-level split: respawn ma
 
 **Exit criteria.**
 - All user-triggered actions (archive, delete, label, snooze, send, undo, etc.) build the plan UI-side and execute Service-side.
-- UI compilation fails if anyone tries to construct a `WriteDbState` from the `app` crate. (Body/inline/search write-half lockdown follows in Phases 3 and 6.)
+- `service-state` crate is scaffolded so a UI source file that tries `use service_state::WriteDbState` fails to build at the dependency-graph level. (`WriteDbState` itself is not yet wired into Service-side write paths - the action worker still uses `ReadDbState::conn()`. The narrower invariant Phase 2 enforces is `ActionProviderCtx` excluding body / inline / search store handles, regression-tested via exhaustive destructure. Full lockdown lands in Phase 6 alongside the global write-surface relocation.)
 - `MutationLog` entries continue to land correctly (logged from the Service side).
 - Undo continues to work via the IPC path.
 - Pending-ops queue continues to drain (now Service-side).
+- Cross-account plans split UI-side at dispatch (one sub-plan per account; the Service handler rejects multi-account plans because `action_jobs.account_id` is single-valued).
+- Per-account leasing fairness (the plan's "cap 4 per account, separate semaphore") is **not** shipped: the worker leases one op at a time, sequentially. UI-side split keeps the practical penalty bounded; re-introducing parallelism is a follow-up if bulk-action latency becomes a hot path.
 
 **Risks / open questions.**
 - The interaction with the UI's `nav_generation` / `thread_generation` counters: bump pre-dispatch on plan submission, not post-completion (resolved above).

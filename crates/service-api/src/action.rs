@@ -240,8 +240,14 @@ pub struct OperationOutcome {
     pub plan_id: PlanId,
     pub operation_id: OperationId,
     pub result: OperationResult,
-    /// Set by the UI's reader task at enqueue time; the dispatch side
-    /// drops mismatches against the live incarnation.
+    /// Cross-respawn drop tag. The Service emits 0 at construction
+    /// (it has no view of the UI's generation counter); the UI's
+    /// reader task overwrites at enqueue with `current_generation()`
+    /// so the App's notification dispatcher can drop stale
+    /// notifications from a dying Service incarnation. In-process
+    /// tests that read this field pre-UI-overwrite see 0, not the
+    /// live generation - the overwrite path only runs in the
+    /// real-subprocess wire flow.
     pub service_generation: u32,
 }
 
@@ -273,6 +279,9 @@ pub struct PlanSummary {
 pub struct ActionCompleted {
     pub plan_id: PlanId,
     pub summary: PlanSummary,
+    /// Cross-respawn drop tag. See `OperationOutcome::service_generation`
+    /// for the placeholder rationale - Service emits 0; UI's reader
+    /// task overwrites at enqueue.
     pub service_generation: u32,
 }
 
@@ -449,6 +458,9 @@ pub struct SyncProgress {
     pub account_id: String,
     pub event_name: String,
     pub payload: serde_json::Value,
+    /// Cross-respawn drop tag. See `OperationOutcome::service_generation`
+    /// for the placeholder rationale - Service emits 0; UI's reader
+    /// task overwrites at enqueue.
     pub service_generation: u32,
 }
 

@@ -353,6 +353,26 @@ These bullets come from `implementation-roadmap.md` Phase 2 § "Phase 1.5 carry-
 - **Crashloop detection refinement, exponential backoff, status indicator.** Phase 8.
 - **Marker-file gating for cross-store invariant pass.** Phase 8.
 
+## Phase 2 architecture deltas (as shipped)
+
+Areas where the delivered code differs from this plan. The `discrepancies.md` companion tracks the open gaps; the deltas below are settled "this is what shipped" decisions. Read the rest of this plan with these annotations in mind.
+
+- **`service-state::WriteDbState` is scaffolded, not wired.** The crate exists and exports `WriteDbState`, but no production code constructs it - the action worker and every other Service-side write path go through `ReadDbState::from_arc(...)` and `ReadDbState::conn()`. The promotion criterion "a UI source file that tries `use service_state::WriteDbState` fails to build" passes trivially because nothing constructs the type. The actual Phase 2 invariant is narrower: `common::types::ActionProviderCtx` excludes body / inline / search store handles (regression-tested via exhaustive destructure at `crates/common/src/types.rs`), so action methods can't write to those stores. The full lockdown - `WriteDbState` is the only path to the underlying `Connection` for writes, app crate can't reach it - lands with the global write-surface lockdown in Phase 6. The `ActionDbWrite` / `ActionKeyAccess` traits in `common` mentioned below in scope item 9 also did not ship; the action context just carries `&ReadDbState` directly.
+
+- **No per-account leasing fairness.** Scope item 3 promised "per-account concurrency (4) and its own semaphore … Notify wakes ALL workers; each worker drains what it can." What shipped: one worker, one op at a time, sequential. The lease query orders by `(jobs.created_at, ops.ordinal)` globally. UI-side splitting (see next bullet) means a single dispatch always lands as a single-account plan, so the practical penalty is only when many plans queue across accounts and one account's provider is slow. Re-introducing parallelism is a follow-up if bulk-action latency becomes a hot path.
+
+- **Cross-account plans split UI-side.** The Service handler rejects multi-account plans (one journal row = one parent `account_id`; ops inherit it). The UI's `dispatch_plan_with_undo` detects multi-account operations and dispatches one sub-plan per account. Each sub-plan gets its own plan_id; an N-account bulk action leaves N undo-stack entries. Minor UX wart; better than the alternative (Service rejects, optimistic state already applied).
+
+- **`action_jobs.account_id` is `TEXT`, not `INTEGER`.** Scope item 18a's snippet had `account_id INTEGER NOT NULL`; the actual schema (`crates/db/src/db/schema/12_actions.sql`) uses `TEXT` to match `accounts.id TEXT PRIMARY KEY`. Shipped schema is correct; the plan snippet is the drift.
+
+- **`operation_id` doubles as `ordinal` at the wire layer.** `serialize_ops` writes `operation_id == ordinal` because the UI's `to_wire_plan` always assigns dense `0..N` `operation_id`s. The plan distinguished the two; conflation works for Phase 2 but the `UNIQUE(job_id, ordinal)` constraint will reject sparse op-id schemes a future caller might produce.
+
+- **`mark_chat_read` runs the local DB write in the handler, not the worker.** Plan scope item 18c said the worker does the local mutation. Actual: the handler runs `mark_chat_read_local_sync` first (instant read-state visibility for UX), then journals; the worker only handles the remote dispatch follow-up. Crash between local-commit and journal-commit leaves `is_read = 1` locally without remote dispatch; the next sync reconciles. Acceptable trade-off.
+
+- **Snooze resurfacing bypasses the journal.** Plan item 17 said resurface dispatches as a normal `action.execute_plan`. Actual: `snooze_runner::drain_due_snoozes` calls `unsnooze` directly on the worker - no `action_jobs` row, no UI notification, no replay machinery. The UI's `SnoozeTick` handler reloads nav after a 1.5 s grace window. Works in practice but breaks the "everything flows through one substrate" architectural promise.
+
+- **`action.send` `PackStore` source variant not implemented.** Scope item 5 sketched two `SendAttachmentSource` variants: `StagingFile` and `PackStore`. Only `StagingFile` shipped; `PackStore` is deferred to Phase 6 alongside pack-store eviction (no eviction = no need for refcount-bumping yet).
+
 ## Architecture
 
 ### `service-state` crate boundary

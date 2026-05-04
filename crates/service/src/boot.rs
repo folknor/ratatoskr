@@ -17,6 +17,7 @@
 
 use crate::boot_progress;
 use crypto_key::SecretKey;
+use db::db::action_journal::recover_stale_leases;
 use db::db::pending_ops::db_pending_ops_recover_on_boot_sync;
 use db::db::queries_extra::{
     backfill_thread_participants_for_account_sync, db_mark_queued_drafts_failed_sync,
@@ -442,6 +443,31 @@ async fn run_boot_sequence_inner(
     {
         log::warn!("pending-ops boot recovery failed: {error}");
         recovery_warnings.push("pending-ops recovery".to_string());
+    }
+
+    // Action-journal stale-lease reset. Any `action_jobs` row in `leased` /
+    // `executing` and any `action_job_ops` row in `leased` / `executing`
+    // belongs to a previous Service incarnation that's already gone; the
+    // worker UUID in lease_owner cannot be the current one. Reset to
+    // `queued` / `pending` so the worker re-leases on its first scheduling
+    // pass. Runs before the worker spawns; without this, a SIGKILL during
+    // batch_execute strands the in-flight op forever (lease_next_ready_op
+    // filters strictly on status='pending' and ignores lease_expires_at,
+    // and replay_unemitted requires outcome IS NOT NULL which the crashed
+    // op never wrote).
+    if let Err(error) = run_boot_recovery(&conn, "action-journal stale leases", |c| {
+        let (jobs_reset, ops_reset) = recover_stale_leases(c)?;
+        if jobs_reset > 0 || ops_reset > 0 {
+            log::info!(
+                "[action-journal] Reset {jobs_reset} stale jobs + {ops_reset} stale ops back to queued/pending"
+            );
+        }
+        Ok(())
+    })
+    .await
+    {
+        log::warn!("action-journal stale-lease recovery failed: {error}");
+        recovery_warnings.push("action-journal stale leases".to_string());
     }
 
     // Send-vault orphan cleanup (Phase 2 task 5 of compose-send
