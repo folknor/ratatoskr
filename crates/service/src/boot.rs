@@ -444,6 +444,30 @@ async fn run_boot_sequence_inner(
         recovery_warnings.push("pending-ops recovery".to_string());
     }
 
+    // Send-vault orphan cleanup (Phase 2 task 5 of compose-send
+    // relocation). Walks `<app_data>/send_vault/` and removes any
+    // subdirectory whose name does not parse as a UUIDv7 OR whose
+    // parsed PlanId is not in the set of "live" send jobs (kind =
+    // 'send' and status NOT IN ('completed', 'failed')). Three crash
+    // scenarios this catches:
+    //
+    // - Handler died mid-transfer: bytes in vault, no journal row -
+    //   orphan, removed.
+    // - Worker died after finalize but before cleanup_vault_dir:
+    //   journal terminal, vault still on disk - orphan, removed.
+    // - Worker died mid-execution: journal queued/leased/executing
+    //   (the `live` set); vault preserved - the next worker pass
+    //   replays the SMTP submit.
+    //
+    // Folded into the same recovery block as pending-ops because both
+    // are state-repair passes that run before the boot handshake
+    // signals readiness; no separate BootPhase notification (the
+    // pass is fast - filesystem walk, no user-visible progress).
+    if let Err(error) = reconcile_send_vault(&conn, &app_data_dir).await {
+        log::warn!("send-vault orphan cleanup failed: {error}");
+        recovery_warnings.push("send-vault cleanup".to_string());
+    }
+
     // SweepingQueuedDrafts: marks `local_drafts.sync_status='queued'` rows
     // as 'failed' so the user sees them surfaced in the drafts view rather
     // than stuck in a queue that the previous Service never drained. Phase
@@ -507,6 +531,47 @@ where
     })
     .await
     .map_err(|e| format!("{label} task panicked: {e}"))?
+}
+
+/// Boot-time send-vault orphan cleanup (Phase 2 task 5).
+///
+/// Reads the set of live send job IDs from the journal, then walks
+/// `<app_data>/send_vault/` and removes every subdirectory whose
+/// PlanId is not in that set. Each step lives behind its own
+/// spawn_blocking (the journal query holds the DB lock; the
+/// filesystem walk holds neither lock and can be relatively slow on
+/// a populated vault tree).
+async fn reconcile_send_vault(
+    conn: &Arc<Mutex<Connection>>,
+    app_data_dir: &std::path::Path,
+) -> Result<(), String> {
+    let conn = Arc::clone(conn);
+    let live_ids: std::collections::HashSet<service_api::PlanId> =
+        tokio::task::spawn_blocking(move || -> Result<_, String> {
+            let conn = conn
+                .lock()
+                .map_err(|e| format!("db lock poisoned: {e}"))?;
+            let ids = db::db::action_journal::live_send_job_ids(&conn)?;
+            Ok(ids
+                .into_iter()
+                .map(|bytes| service_api::PlanId(uuid::Uuid::from_bytes(bytes)))
+                .collect())
+        })
+        .await
+        .map_err(|e| format!("live_send_job_ids task: {e}"))??;
+
+    let app_data = app_data_dir.to_path_buf();
+    let removed = tokio::task::spawn_blocking(move || {
+        crate::send_vault::cleanup_orphan_vaults(&app_data, &live_ids)
+            .map_err(|e| format!("cleanup_orphan_vaults: {e}"))
+    })
+    .await
+    .map_err(|e| format!("cleanup_orphan_vaults task: {e}"))??;
+
+    if removed > 0 {
+        log::info!("[send-vault] removed {removed} orphan vault dir(s) at boot");
+    }
+    Ok(())
 }
 
 /// Per-account thread-participants backfill. Reads accounts + cross-account

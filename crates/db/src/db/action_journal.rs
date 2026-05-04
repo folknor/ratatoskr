@@ -75,6 +75,38 @@ pub fn recover_stale_leases(conn: &Connection) -> Result<(usize, usize), String>
     Ok((jobs_reset, ops_reset))
 }
 
+/// Return the `job_id`s of every `kind = 'send'` job whose status is
+/// not yet terminal (i.e. queued / leased / executing). Backs the
+/// boot-time send-vault orphan cleanup pass: the on-disk
+/// `<app_data>/send_vault/` is reconciled against this set so any
+/// vault directory whose parent job no longer exists (because the
+/// handler crashed mid-transfer, or the worker finalized + unlinked
+/// without a clean shutdown) is removed.
+///
+/// Phase 2 task 5. The query is a small SELECT; the boot recovery
+/// pass that calls it runs once per Service incarnation.
+pub fn live_send_job_ids(conn: &Connection) -> Result<Vec<[u8; 16]>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT job_id FROM action_jobs \
+             WHERE kind = 'send' AND status NOT IN ('completed', 'failed')",
+        )
+        .map_err(|e| format!("live_send_job_ids prepare: {e}"))?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, Vec<u8>>("job_id"))
+        .map_err(|e| format!("live_send_job_ids query: {e}"))?;
+    let mut out = Vec::new();
+    for row in rows {
+        let bytes = row.map_err(|e| format!("live_send_job_ids row: {e}"))?;
+        let arr: [u8; 16] = bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| format!("live_send_job_ids: job_id len {} != 16", bytes.len()))?;
+        out.push(arr);
+    }
+    Ok(out)
+}
+
 /// Snapshot of a journaled action job, returned by `query_job_status`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobStatusSnapshot {
