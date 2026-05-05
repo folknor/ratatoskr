@@ -270,6 +270,31 @@ where
         ShutdownCause::Unrequested
     };
 
+    // Phase 4 task 4: consolidated drain. Order is critical -
+    // push-before-sync prevents a `StateChange` mid-shutdown from
+    // calling `SyncRuntime::start_account` after sync has begun
+    // draining; sentinel-after-everything-else fixes a pre-existing
+    // Phase 3 bug where the sentinel could land before in-flight sync
+    // writes completed. See `service::lifecycle::ServiceLifecycle::drain`.
+    //
+    // 1. Cancel push bridges + await their supervisors (no-op if the
+    //    post-ready task hasn't installed a PushRuntime yet, e.g. fast
+    //    boot failure).
+    if let Some(push_runtime) = boot_state.take_push_runtime() {
+        push_runtime.shutdown().await;
+        drop(push_runtime);
+    }
+    // 2. Cancel sync runners + await their supervisors. Releasing this
+    //    Arc drops the inner `SearchWriteHandle` clone the runtime
+    //    owned, which lets the writer task observe EOF and exit (step
+    //    further down via `drop(out_tx)` + `writer_handle.await`).
+    if let Some(runtime) = boot_state.take_sync_runtime() {
+        runtime.shutdown().await;
+        drop(runtime);
+    }
+    // 3. Sentinel write happens inside `lifecycle::drain` below, after
+    //    all subsystem shutdowns. The OnceCell inside `drain` keeps the
+    //    write idempotent across any future caller.
     let flushed_ok = panic_safe_drain(&lifecycle, cause).await;
     if !flushed_ok {
         log::warn!("shutdown drain completed with errors");
@@ -305,25 +330,13 @@ where
     // this, `writer_handle.await` below blocks until every sender on
     // the outbound channel is dropped, which never happens for an
     // unbounded loop on a long-lived task.
+    //
+    // The PushRuntime + SyncRuntime shutdowns ran above as part of the
+    // consolidated drain (Phase 4 task 4). By this point, the search
+    // writer task is the last `out_tx` clone-holder; dropping `out_tx`
+    // here lets it observe EOF, commit any straggler docs, and exit.
     action_worker_handle.abort();
     let _ = action_worker_handle.await;
-
-    // Phase 3 task 13: shut down the SyncRuntime and release the
-    // search writer's mpsc + the runtime's `NotificationSender` clone.
-    // Order: cancel + await every runner's supervisor first; then drop
-    // the last `Arc<SyncRuntime>` so the inner `SearchWriteHandle`
-    // releases its sender; the writer task observes EOF, commits any
-    // straggler docs, and exits, releasing its `notification_tx`
-    // (the last `out_tx` clone the writer task held). Without this
-    // step `writer_handle.await` below would park forever - the
-    // dispatch writer task only completes when every `out_tx` clone
-    // is dropped.
-    if let Some(runtime) = boot_state.take_sync_runtime() {
-        runtime.shutdown().await;
-        // Last Arc holder; dropping it now releases the inner
-        // SearchWriteHandle clone the runtime owned.
-        drop(runtime);
-    }
 
     drop(out_tx);
     let _ = writer_handle.await;

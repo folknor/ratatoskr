@@ -342,6 +342,8 @@ The `service-state` crate exists and a UI source file that tries `use service_st
 
 The `is_deleting` schema column / SyncTick filter / Service-side defense-in-depth check from the plan are deferred; the load-bearing IPC cancel-then-await flow is the part the Phase 3 commits land. The Phase 3 invariant-pass orphan scans cover bodies + inline images; Tantivy orphan iteration ships in Phase 8 alongside the marker-file gating optimization.
 
+**Drain order consolidation (Phase 3 carry-forward fixed in Phase 4).** Phase 3 left a pre-existing race in the shutdown drain: `lifecycle::run_drain` wrote the `clean_shutdown` sentinel *before* `dispatch.rs:321-326` ran `SyncRuntime::shutdown()`, so a sync runner mid-write could land bytes after the sentinel claimed clean state. Phase 4 task 4 consolidated the drain: subsystem shutdowns (PushRuntime → SyncRuntime → search writer) all run *before* the sentinel write. The sentinel-only `lifecycle::drain` survives but is now invoked from the orchestrating block in `dispatch.rs::run_service_with_io_and_lifecycle` rather than as the entirety of the drain.
+
 ## Cross-store crash consistency
 
 The Service writes to four durable stores: SQLite (main + `bodies.db`), pack files, Tantivy, inline-image store. A crash mid-sequence can leave inter-store inconsistencies: `attachments` row written but pack append not fsync'd; Tantivy doc references a body the body store hasn't durably committed; etc. Each store has its own crash-safe recovery (SQLite WAL, append-only pack scan, Tantivy uncommitted-segment cleanup) but cross-store reconciliation is not free.

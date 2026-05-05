@@ -69,10 +69,30 @@ impl ServiceLifecycle {
         self.notify.notified().await;
     }
 
-    /// Run the shutdown drain exactly once. Phase 2+ per-store flushes
-    /// (Tantivy commit, pack-file fsync, etc.) will run regardless of
-    /// `cause`; today's drain is sentinel-only and therefore short-
-    /// circuits on non-graceful causes.
+    /// Write the `clean_shutdown` sentinel exactly once, gated on
+    /// `cause`.
+    ///
+    /// # Phase 4 drain ordering
+    ///
+    /// As of Phase 4 task 4, the sentinel write is no longer the
+    /// entirety of the drain. The orchestrating helper in
+    /// `dispatch::run_shutdown_drain` calls subsystem shutdowns
+    /// *before* this method:
+    ///
+    /// 1. `PushRuntime::shutdown()` (Phase 4) - cancel push bridges
+    ///    so a late `StateChange` can't call
+    ///    `SyncRuntime::start_account` after step 2.
+    /// 2. `SyncRuntime::shutdown()` (Phase 3) - cancel + await runners.
+    /// 3. Drop `Arc<SyncRuntime>` so `SearchWriteHandle` releases.
+    /// 4. Await search-writer `JoinHandle` (via `out_tx` drop +
+    ///    `writer_handle.await` in dispatch).
+    /// 5. **Then** this method: write the `clean_shutdown` sentinel.
+    ///
+    /// Calling this *before* steps 1-4 (the pre-Phase-4 layout) was
+    /// racy: a sync runner mid-write could land bytes after the
+    /// sentinel claimed clean state, leaving the next boot's invariant
+    /// pass unable to detect the gap. The drain consolidation in
+    /// `dispatch.rs` is what closes the race.
     pub(crate) async fn drain(&self, cause: ShutdownCause) -> bool {
         *self
             .drain_result
@@ -81,12 +101,6 @@ impl ServiceLifecycle {
     }
 
     async fn run_drain(&self, cause: ShutdownCause) -> bool {
-        // Phase 2+: per-store flushes (Tantivy commit, pack-file fsync,
-        // any other writer-owned drain step) go here. They run on every
-        // exit path because the writer state is unsafe to leave
-        // half-flushed regardless of WHY we're exiting. The sentinel
-        // write below is the only step that's gated on `cause`.
-
         if !matches!(cause, ShutdownCause::GracefulRequest) {
             // Non-graceful exit (boot failure, parent-death, SIGTERM,
             // stdin EOF). Leave the sentinel absent so the next boot's

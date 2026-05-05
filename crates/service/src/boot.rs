@@ -117,6 +117,13 @@ pub(crate) struct BootSharedState {
     /// rather than `OnceLock` so the type stays consistent with the
     /// other boot-installed state on this struct (`context`, `result`).
     sync_runtime: Mutex<Option<Arc<crate::sync::SyncRuntime>>>,
+    /// Per-account JMAP push coordinator. Installed by the post-ready
+    /// runtime task in `dispatch.rs` (Phase 4 task 5) - readiness must
+    /// not depend on push setup work (TLS+HTTPS+OAuth-refresh), so push
+    /// startup runs *after* `boot.ready` is signaled. The drain consults
+    /// this slot to shut down the push bridges *before* `SyncRuntime`
+    /// in the consolidated drain (Phase 4 task 4).
+    push_runtime: Mutex<Option<Arc<crate::push::PushRuntime>>>,
 }
 
 impl BootSharedState {
@@ -129,6 +136,7 @@ impl BootSharedState {
             boot_ready_inflight: std::sync::atomic::AtomicBool::new(false),
             app_data_dir,
             sync_runtime: Mutex::new(None),
+            push_runtime: Mutex::new(None),
         })
     }
 
@@ -174,6 +182,49 @@ impl BootSharedState {
         self.sync_runtime
             .lock()
             .expect("sync_runtime mutex poisoned")
+            .take()
+    }
+
+    /// Install the `PushRuntime` once the post-ready runtime task has
+    /// constructed it (Phase 4 task 5 wires this from `dispatch.rs`
+    /// after the `boot.ready` handshake completes). Must be called
+    /// exactly once; a second call is a programming error and is
+    /// logged at warn (the first install wins).
+    #[allow(dead_code)] // wired up in Phase 4 task 5
+    pub(crate) fn install_push_runtime(&self, runtime: Arc<crate::push::PushRuntime>) {
+        let mut guard = self
+            .push_runtime
+            .lock()
+            .expect("push_runtime mutex poisoned");
+        if guard.is_some() {
+            log::warn!(
+                "BootSharedState::install_push_runtime called twice; second install ignored",
+            );
+            return;
+        }
+        *guard = Some(runtime);
+    }
+
+    /// Snapshot the active `PushRuntime` if the post-ready task has
+    /// installed one. Returns `None` if the post-ready task has not yet
+    /// run, or if push startup failed for every account in the iteration.
+    #[allow(dead_code)] // consumed by sync.start_account piggyback in Phase 4 task 6
+    pub(crate) fn push_runtime(&self) -> Option<Arc<crate::push::PushRuntime>> {
+        self.push_runtime
+            .lock()
+            .expect("push_runtime mutex poisoned")
+            .as_ref()
+            .map(Arc::clone)
+    }
+
+    /// Move the `PushRuntime` Arc out of the slot. Used by the
+    /// consolidated drain helper (Phase 4 task 4): push drains *before*
+    /// sync so a `StateChange` arriving mid-shutdown cannot call
+    /// `SyncRuntime::start_account` after sync has begun draining.
+    pub(crate) fn take_push_runtime(&self) -> Option<Arc<crate::push::PushRuntime>> {
+        self.push_runtime
+            .lock()
+            .expect("push_runtime mutex poisoned")
             .take()
     }
 
