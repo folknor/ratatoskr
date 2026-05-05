@@ -1,7 +1,6 @@
 use crate::app::{CHORD_TIMEOUT, ReadyApp};
 use crate::command_dispatch::KeyEventMessage;
 use crate::handlers;
-use crate::handlers::provider::jmap_push_subscription;
 use crate::message::Message;
 use crate::service_subscription::service_notification_subscription;
 use crate::ui::settings::SettingsMessage;
@@ -47,14 +46,6 @@ impl ReadyApp {
             self.settings.subscription().map(Message::Settings),
             self.status_bar.subscription().map(Message::StatusBar),
             sync_progress_subscription(&self.sync_receiver).map(Message::SyncProgress),
-            // Phase 3 task 18: JMAP push events kick the Service-side
-            // sync via IPC instead of pretending the sync already
-            // completed. The Service runs the actual sync; the next
-            // SyncTick will also cover the same account, so dropping
-            // the kick under load is fine. Phase 4 collapses this
-            // round-trip by lifting the WebSocket subscriber into the
-            // Service (no UI hop).
-            jmap_push_subscription(&self.jmap_push_receiver).map(Message::JmapPushKick),
         ];
 
         if self.service_client.is_some() {

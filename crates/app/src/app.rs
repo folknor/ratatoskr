@@ -1,7 +1,6 @@
 use crate::appearance;
 use crate::command_resolver;
 use crate::db::{self, Db};
-use crate::handlers::provider::{JmapPushReceiver, create_jmap_push_channel};
 use crate::message::Message;
 use crate::pop_out::{self, PopOutWindow};
 use crate::service_client::{ServiceClient, ServiceNotificationReceiver};
@@ -130,15 +129,6 @@ pub struct ReadyApp {
     pub(crate) sync_receiver: SyncProgressReceiver,
     #[allow(dead_code)]
     pub(crate) sync_reporter: Arc<crate::ui::status_bar::IcedProgressReporter>,
-
-    /// In-flight delta-sync handles keyed by account id. Used to
-    /// (1) skip dispatch when a sync for the same account is already running
-    /// and (2) abort the task on account deletion so a stale sync can't keep
-    /// writing to the deleted account's stores.
-
-    // JMAP push notification pipeline
-    pub(crate) jmap_push_tx: tokio::sync::mpsc::UnboundedSender<String>,
-    pub(crate) jmap_push_receiver: JmapPushReceiver,
 
     /// Body store for loading decompressed message bodies via core.
     pub(crate) body_store: Option<rtsk::body_store::BodyStoreReadState>,
@@ -306,8 +296,6 @@ impl ReadyApp {
         let sync_receiver = shared_receiver(rx);
         let sync_reporter = Arc::new(reporter);
 
-        let (jmap_push_tx, jmap_push_receiver) = create_jmap_push_channel();
-
         let body_store = match db::threads::init_body_store() {
             Ok(bs) => Some(bs),
             Err(e) => {
@@ -435,8 +423,6 @@ impl ReadyApp {
             active_chat: None,
             sync_receiver,
             sync_reporter,
-            jmap_push_tx,
-            jmap_push_receiver,
             body_store,
             inline_image_store,
             encryption_key,

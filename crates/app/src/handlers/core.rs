@@ -1011,18 +1011,22 @@ impl ReadyApp {
         let sig_task =
             handlers::signatures::load_signatures_async(&self.db).map(Message::SignatureOp);
         let sync_task = self.sync_all_accounts();
-        let push_task = self.start_jmap_push();
         let auto_reply_task = self.check_auto_reply_status();
         // Per-account thread_participants backfill used to run from here.
         // As of Phase 1.5 it runs Service-side during the boot sequence
         // (BootPhase::BackfillingThreadParticipants); the helper is
         // idempotent so future-account-creation backfill becomes a Phase 2
         // action-pipeline concern.
+        //
+        // JMAP push setup also used to run here; as of Phase 4 it runs
+        // Service-side from a post-`boot.ready` runtime task in
+        // `dispatch.rs::spawn_post_ready_push_startup`. The
+        // `sync.start_account` IPC piggybacks push setup for newly
+        // added accounts (Phase 4 task 6).
         Task::batch([
             self.load_navigation_and_threads(),
             sig_task,
             sync_task,
-            push_task,
             auto_reply_task,
         ])
     }

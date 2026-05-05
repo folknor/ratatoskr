@@ -28,7 +28,6 @@ pub(crate) use imap;
 pub use label_colors;
 pub use store::inline_image_store;
 pub use sync::filters;
-pub mod jmap_push;
 pub mod mdn;
 pub mod oauth;
 pub use ::db::progress;

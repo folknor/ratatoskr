@@ -1,71 +1,16 @@
 //! Sync dispatch and provider-adjacent app helpers.
 //!
-//! All provider operations go through core. This module provides thin
-//! Task::perform wrappers for sync and JMAP push, plus an iced subscription
-//! recipe for receiving continuous push notifications.
+//! All provider operations go through core. Phase 4 removed the UI-side
+//! JMAP push subscription wiring; push events arrive as
+//! `Notification::PushEvent` from the Service-side `PushRuntime`.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use iced::advanced::graphics::futures::subscription;
-use iced::advanced::subscription::Hasher;
-use iced::futures::StreamExt;
-use iced::futures::stream::BoxStream;
-use iced::{Subscription, Task};
+use iced::Task;
 
 use crate::{Message, ReadyApp};
 
-// ── JMAP push subscription ─────────────────────────────────────────
-
-/// Shared handle for the JMAP push notification receiver.
-pub type JmapPushReceiver = Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<String>>>>;
-
-/// Create a JMAP push notification channel.
-///
-/// Returns `(sender, shared_receiver)`. Clone the sender for each
-/// account's push setup. Wrap the receiver in a subscription to
-/// receive account-ID notifications that trigger syncs.
-pub fn create_jmap_push_channel() -> (tokio::sync::mpsc::UnboundedSender<String>, JmapPushReceiver)
-{
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    (tx, Arc::new(Mutex::new(Some(rx))))
-}
-
-struct JmapPushRecipe {
-    receiver: JmapPushReceiver,
-}
-
-impl subscription::Recipe for JmapPushRecipe {
-    type Output = String;
-
-    fn hash(&self, state: &mut Hasher) {
-        use std::hash::Hash;
-        struct Marker;
-        std::any::TypeId::of::<Marker>().hash(state);
-    }
-
-    fn stream(self: Box<Self>, _input: subscription::EventStream) -> BoxStream<'static, String> {
-        let taken = self.receiver.lock().ok().and_then(|mut guard| guard.take());
-
-        match taken {
-            Some(rx) => iced::futures::stream::unfold(rx, |mut rx| async {
-                let account_id = rx.recv().await?;
-                Some((account_id, rx))
-            })
-            .boxed(),
-            None => iced::futures::stream::empty().boxed(),
-        }
-    }
-}
-
-/// Build an iced `Subscription` that yields account IDs from JMAP
-/// push state-change notifications.
-pub fn jmap_push_subscription(receiver: &JmapPushReceiver) -> Subscription<String> {
-    subscription::from_recipe(JmapPushRecipe {
-        receiver: Arc::clone(receiver),
-    })
-}
-
-// ── Sync dispatch & push setup ──────────────────────────────────────
+// ── Sync dispatch ───────────────────────────────────────────────────
 
 impl ReadyApp {
     /// Dispatch a delta sync for a specific account by issuing
@@ -241,56 +186,4 @@ impl ReadyApp {
         )
     }
 
-    /// Start JMAP push notification managers for all JMAP accounts.
-    /// Call after accounts are loaded and encryption key is available.
-    pub(crate) fn start_jmap_push(&self) -> Task<Message> {
-        let encryption_key = self.encryption_key;
-
-        let jmap_accounts: Vec<(String, String)> = self
-            .sidebar
-            .accounts
-            .iter()
-            .filter(|a| a.provider == "jmap")
-            .map(|a| (a.id.clone(), a.email.clone()))
-            .collect();
-
-        if jmap_accounts.is_empty() {
-            return Task::none();
-        }
-
-        let db = Arc::clone(&self.db);
-        let notify_tx = self.jmap_push_tx.clone();
-        let mut tasks = Vec::new();
-
-        for (account_id, email) in jmap_accounts {
-            let db = Arc::clone(&db);
-            let notify_tx = notify_tx.clone();
-            let email_log = email.clone();
-
-            tasks.push(Task::perform(
-                async move {
-                    let core_db = db.write_db_state();
-                    rtsk::jmap_push::start_jmap_push_for_account(
-                        &core_db,
-                        &account_id,
-                        &email,
-                        encryption_key,
-                        notify_tx,
-                    )
-                    .await
-                },
-                move |result| {
-                    match result {
-                        Ok(()) => log::info!("[JMAP Push] Started for {email_log}"),
-                        Err(ref e) => {
-                            log::warn!("[JMAP Push] Failed to start for {email_log}: {e}");
-                        }
-                    }
-                    Message::Noop
-                },
-            ));
-        }
-
-        Task::batch(tasks)
-    }
 }

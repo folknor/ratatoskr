@@ -705,21 +705,6 @@ impl ReadyApp {
                 }
                 Task::none()
             }
-            Message::JmapPushKick(account_id) => {
-                let Some(client) = self.service_client.as_ref().cloned() else {
-                    return Task::none();
-                };
-                Task::perform(
-                    async move {
-                        if let Err(error) = client.start_sync(account_id.clone()).await {
-                            log::debug!(
-                                "JmapPushKick start_sync({account_id}) failed: {error}",
-                            );
-                        }
-                    },
-                    |()| Message::Noop,
-                )
-            }
             Message::ReaderReloadTick => {
                 // Phase 3 task 17: debounced reader reload. Skip when
                 // there is no pending stamp (idle) or when the stamp
