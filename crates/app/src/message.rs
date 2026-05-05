@@ -365,6 +365,14 @@ pub enum Message {
     // when the stamp has aged past one tick.
     ReaderReloadTick,
 
+    /// Phase 5 task 11: debounced calendar reload after a
+    /// `Notification::CalendarChanged` arrival. The CalendarChanged
+    /// arm stamps `App.pending_calendar_reload`; a 250 ms tick
+    /// subscription emits this; the handler calls
+    /// `reload_calendar_events()` once the stamp has aged past one
+    /// tick. Collapses an N-account kick batch into a single reload.
+    CalendarReloadTick,
+
     // Keyboard modifier tracking (for Ctrl+click, Shift+click)
     ModifiersChanged(iced::keyboard::Modifiers),
 

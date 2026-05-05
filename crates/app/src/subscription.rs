@@ -127,6 +127,16 @@ impl ReadyApp {
             );
         }
 
+        // Phase 5 task 11: debounced calendar reload after CalendarChanged
+        // notifications. Polls every 250 ms; the handler reloads the
+        // calendar tab only when there is a pending stamp that has aged at
+        // least one tick. Collapses an N-account kick batch (one
+        // CalendarChanged per stale account) into a single reload.
+        subs.push(
+            iced::time::every(std::time::Duration::from_millis(250))
+                .map(|_| Message::CalendarReloadTick),
+        );
+
         if self
             .settings
             .sheet_anim

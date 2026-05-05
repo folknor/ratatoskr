@@ -100,6 +100,12 @@ pub struct ReadyApp {
     /// matters because pinning a `Searcher` across rapid reloads
     /// keeps stale segments mapped longer than necessary.
     pub(crate) pending_reader_reload: Option<std::time::Instant>,
+    /// Phase 5 task 11: stamped on `Notification::CalendarChanged` arrival;
+    /// cleared by the 250 ms `CalendarReloadTick` handler after calling
+    /// `reload_calendar_events()`. Debounces N near-simultaneous
+    /// `CalendarChanged` notifications (one per account in a kick batch)
+    /// into a single UI reload.
+    pub(crate) pending_calendar_reload: Option<std::time::Instant>,
     pub(crate) search_generation: GenerationCounter<Search>,
     pub(crate) search_query: UndoableText,
     pub(crate) search_debounce_deadline: Option<iced::time::Instant>,
@@ -399,6 +405,7 @@ impl ReadyApp {
             undo_stack: UndoStack::default(),
             search_state,
             pending_reader_reload: None,
+            pending_calendar_reload: None,
             chat_timeline: None,
             chat_generation: GenerationCounter::new(),
             chat_list_generation: GenerationCounter::new(),

@@ -276,14 +276,12 @@ impl ReadyApp {
                         Task::none()
                     }
                     service_api::Notification::CalendarChanged(_) => {
-                        // Phase 5 task 11 will wire a 250 ms trailing-edge
-                        // debouncer here that triggers reload_calendar_events().
-                        // Type-only commit: drop with a debug log so the
-                        // landing of task 11 is observable as a behavioural
-                        // change.
-                        log::debug!(
-                            "CalendarChanged received; debounce + reload not yet wired (Phase 5 task 11)",
-                        );
+                        // Phase 5 task 11: stamp the pending reload deadline.
+                        // The 250 ms `CalendarReloadTick` handler calls
+                        // `reload_calendar_events()` once the stamp has aged
+                        // past one tick. Debounces a kick batch's worth of
+                        // CalendarChanged notifications into a single reload.
+                        self.pending_calendar_reload = Some(std::time::Instant::now());
                         Task::none()
                     }
                 }
@@ -742,6 +740,20 @@ impl ReadyApp {
                 }
                 self.pending_reader_reload = None;
                 Task::none()
+            }
+            Message::CalendarReloadTick => {
+                // Phase 5 task 11: debounced calendar reload. Skip when
+                // there's no pending stamp (idle) or when the stamp was
+                // set within the last tick window (a fresh CalendarChanged
+                // just landed; the next tick will run the reload).
+                let Some(stamp) = self.pending_calendar_reload else {
+                    return Task::none();
+                };
+                if stamp.elapsed() < std::time::Duration::from_millis(250) {
+                    return Task::none();
+                }
+                self.pending_calendar_reload = None;
+                self.reload_calendar_events()
             }
             Message::ModifiersChanged(modifiers) => {
                 self.current_modifiers = modifiers;
