@@ -68,6 +68,17 @@ pub struct JmapPushManager {
     ws_url: String,
     state: Arc<RwLock<PushState>>,
     shutdown_tx: watch::Sender<bool>,
+    /// `JoinHandle` of the spawned `push_connection_loop` task, taken
+    /// out of `Some(_)` by `stop_push` and awaited so a caller can
+    /// guarantee the loop has terminated before returning. Pre-Phase-4
+    /// this handle was discarded at construction; `stop_push` only
+    /// flipped the watch and returned, so callers awaiting "stop_push"
+    /// could observe a clean return while the connection loop was
+    /// still mid-await on a TLS connect or DB write. The Phase 4
+    /// review pass identified the gap; this field is the fix.
+    /// `Mutex<Option<_>>` rather than `OnceLock` so `stop_push` can be
+    /// idempotent (second call observes `None` and returns immediately).
+    loop_handle: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -171,32 +182,37 @@ pub async fn start_push(
     let state = Arc::new(RwLock::new(PushState::Disconnected));
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-    let manager = JmapPushManager {
-        account_id: account_id.to_string(),
-        ws_url: ws_url.clone(),
-        state: Arc::clone(&state),
-        shutdown_tx,
-    };
-
     // Persist initial push state
     save_push_enabled(db, account_id, &ws_url).await;
 
-    // Spawn the background connection loop
+    // Spawn the background connection loop. Capture its JoinHandle on
+    // the manager so stop_push can await termination - dropping the
+    // handle here would leak the task past PushRuntime::shutdown.
     let aid = account_id.to_string();
     let db_clone = db.clone();
-    tokio::spawn(async move {
+    let ws_url_loop = ws_url.clone();
+    let state_loop = Arc::clone(&state);
+    let loop_handle = tokio::spawn(async move {
         push_connection_loop(
             &aid,
-            &ws_url,
+            &ws_url_loop,
             auth_resolver,
             last_push_state,
-            state,
+            state_loop,
             shutdown_rx,
             change_tx,
             &db_clone,
         )
         .await;
     });
+
+    let manager = JmapPushManager {
+        account_id: account_id.to_string(),
+        ws_url,
+        state,
+        shutdown_tx,
+        loop_handle: tokio::sync::Mutex::new(Some(loop_handle)),
+    };
 
     Ok(manager)
 }
@@ -218,8 +234,27 @@ impl JmapPushManager {
     }
 
     /// Stop the push connection and shut down the background task.
+    ///
+    /// Sets the watch-shutdown signal and then awaits the connection
+    /// loop's `JoinHandle` so the caller can assume the WebSocket has
+    /// closed (or aborted) by the time this returns. Idempotent: a
+    /// second call observes `None` for the handle and returns
+    /// immediately.
+    ///
+    /// Phase 4 review-pass fix: the prior implementation only sent on
+    /// the watch and returned; the `.await` was a no-op and the
+    /// connection-loop could survive past `PushRuntime::shutdown`.
     pub async fn stop_push(&self) {
         let _ = self.shutdown_tx.send(true);
+        let handle = self.loop_handle.lock().await.take();
+        if let Some(handle) = handle
+            && let Err(e) = handle.await
+        {
+            log::warn!(
+                "[JMAP push] {}: connection-loop join error during stop_push: {e}",
+                self.account_id,
+            );
+        }
     }
 }
 
