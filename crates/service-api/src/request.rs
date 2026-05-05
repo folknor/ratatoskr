@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::time::Duration;
 
 use crate::action::{ActionWirePlan, PlanId, SendWireRequest};
+use crate::calendar::{CalendarCancelAccountSyncParams, CalendarStartAccountSyncParams};
 use crate::sync::{SyncCancelAccountParams, SyncStartAccountParams};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,6 +84,27 @@ pub enum RequestParams {
     /// 5 s timeout: the handler returns immediately after flipping the
     /// token; cancellation propagation is asynchronous.
     SyncCancelAccount { params: SyncCancelAccountParams },
+    /// Phase 5: explicit-request calendar sync (manual "Sync now",
+    /// post-account-add, RSVP-then-resync). The handler returns within
+    /// microseconds: it acquires the per-account map, spawns or returns
+    /// an existing runner's id, and acks. The kick-driven path
+    /// (cadence + staleness gate) uses `ClientNotification::CalendarKick`
+    /// instead and does not surface this request type.
+    ///
+    /// 5 s timeout: bounded handler work, never blocking on the network.
+    CalendarStartAccountSync {
+        params: CalendarStartAccountSyncParams,
+    },
+    /// Phase 5: explicit-request calendar cancel. Account-deletion
+    /// cancel is piggybacked server-side inside `handle_cancel_account`
+    /// (mirroring push); this request type is reserved for the
+    /// explicit-request path.
+    ///
+    /// 5 s timeout: handler returns immediately after flipping the
+    /// runner's cancellation token; cancellation propagation is async.
+    CalendarCancelAccountSync {
+        params: CalendarCancelAccountSyncParams,
+    },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -112,6 +134,8 @@ impl RequestParams {
             Self::ActionSend { .. } => "action.send",
             Self::SyncStartAccount { .. } => "sync.start_account",
             Self::SyncCancelAccount { .. } => "sync.cancel_account",
+            Self::CalendarStartAccountSync { .. } => "calendar.start_account_sync",
+            Self::CalendarCancelAccountSync { .. } => "calendar.cancel_account_sync",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -158,6 +182,14 @@ impl RequestParams {
             // Handler-only budget: flip the token + return the active
             // `run_id`. Cancellation propagation is async.
             Self::SyncCancelAccount { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            // Handler-only budgets for the calendar request pair.
+            // Same shape as the sync pair above.
+            Self::CalendarStartAccountSync { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(5))
+            }
+            Self::CalendarCancelAccountSync { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(5))
+            }
             #[cfg(feature = "test-helpers")]
             Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
@@ -204,6 +236,10 @@ impl RequestParams {
             Self::ActionSend { request } => serde_json::json!({ "request": request }),
             Self::SyncStartAccount { params } => serde_json::json!({ "params": params }),
             Self::SyncCancelAccount { params } => serde_json::json!({ "params": params }),
+            Self::CalendarStartAccountSync { params } => serde_json::json!({ "params": params }),
+            Self::CalendarCancelAccountSync { params } => {
+                serde_json::json!({ "params": params })
+            }
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -286,6 +322,24 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("sync.cancel_account params: {e}"))?;
                 Ok(Self::SyncCancelAccount { params: p.params })
+            }
+            "calendar.start_account_sync" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: CalendarStartAccountSyncParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("calendar.start_account_sync params: {e}"))?;
+                Ok(Self::CalendarStartAccountSync { params: p.params })
+            }
+            "calendar.cancel_account_sync" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: CalendarCancelAccountSyncParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("calendar.cancel_account_sync params: {e}"))?;
+                Ok(Self::CalendarCancelAccountSync { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {

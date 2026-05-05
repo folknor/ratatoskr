@@ -263,6 +263,29 @@ impl ReadyApp {
                             .record_push_event(event.account_id, &label);
                         Task::none()
                     }
+                    service_api::Notification::CalendarRunCompleted(_) => {
+                        // Phase 5: CalendarRunCompleted is consumed inside
+                        // ServiceClient (per-run_id awaiters) before the
+                        // reader task enqueues - mirrors SyncCompleted's
+                        // routing. Reaching this arm means the routing was
+                        // bypassed (test path or a stale notification past
+                        // respawn); drop with a debug log.
+                        log::debug!(
+                            "CalendarRunCompleted reached update arm; routing already consumed it",
+                        );
+                        Task::none()
+                    }
+                    service_api::Notification::CalendarChanged(_) => {
+                        // Phase 5 task 11 will wire a 250 ms trailing-edge
+                        // debouncer here that triggers reload_calendar_events().
+                        // Type-only commit: drop with a debug log so the
+                        // landing of task 11 is observable as a behavioural
+                        // change.
+                        log::debug!(
+                            "CalendarChanged received; debounce + reload not yet wired (Phase 5 task 11)",
+                        );
+                        Task::none()
+                    }
                 }
             }
             Message::ActionDispatched { plan_id, outcome } => {

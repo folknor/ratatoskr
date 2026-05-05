@@ -1,5 +1,6 @@
 use crate::action::{ActionCompleted, OperationOutcome, SyncProgress};
 use crate::boot::{BootPhaseKind, BootProgress};
+use crate::calendar::{CalendarChanged, CalendarRunCompleted};
 use crate::push::PushEvent;
 use crate::sync::{IndexCommitted, SyncCompleted};
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,11 @@ pub enum CoalesceKey {
     /// account recently?" - dropping older events under overflow is
     /// benign (the latest one is what the UI renders).
     PushEvent(String),
+    /// Calendar view-reload signals keyed per-account. Two `CalendarChanged`
+    /// for the same account collapse (UI debounces 250 ms before reloading);
+    /// two for different accounts both pass through. The dispatch-layer
+    /// expression of "this account's calendar tables changed - reload."
+    CalendarChanged(String),
     /// Synthetic key used only by in-process queue tests in consumer crates.
     /// The queue's per-class enqueue logic is generic over `Classifiable`,
     /// and tests construct mock items with arbitrary string-keyed coalesce
@@ -132,6 +138,21 @@ pub enum Notification {
     /// kicks. See `docs/service/phase-4-plan.md` § "Notification class".
     #[serde(rename = "push.event")]
     PushEvent(PushEvent),
+    /// Per-run calendar completion. `MustDeliver`: a dropped completion
+    /// leaves the per-`run_id` awaiter (e.g. the deletion-piggyback
+    /// `cancel_and_await`) hanging forever. Routed by `run_id`, never
+    /// enqueued to the UI dispatcher - consumed inside `ServiceClient`'s
+    /// reader task. The corresponding UI view-reload signal is the
+    /// separate `CalendarChanged` notification below; both fire after a
+    /// run that mutated calendar tables, regardless of result.
+    #[serde(rename = "calendar.run_completed")]
+    CalendarRunCompleted(CalendarRunCompleted),
+    /// Per-account calendar view-reload signal. `Coalesce { key:
+    /// CalendarChanged(account_id) }`: N accounts completing a kick batch
+    /// produce one debounced UI reload, not N. The UI dispatcher applies
+    /// a 250 ms trailing-edge debounce before triggering the reload.
+    #[serde(rename = "calendar.changed")]
+    CalendarChanged(CalendarChanged),
     /// Test-only variant. Lets the wire round-trip be exercised when no
     /// production payload happens to match a test's needs. Compiled out of
     /// release builds via `#[cfg(test)]`.
@@ -162,6 +183,10 @@ impl Notification {
             Self::PushEvent(event) => NotificationClass::Coalesce {
                 key: CoalesceKey::PushEvent(event.account_id.clone()),
             },
+            Self::CalendarRunCompleted(_) => NotificationClass::MustDeliver,
+            Self::CalendarChanged(changed) => NotificationClass::Coalesce {
+                key: CoalesceKey::CalendarChanged(changed.account_id.clone()),
+            },
             #[cfg(test)]
             Self::TestEcho { .. } => NotificationClass::Coalesce {
                 key: CoalesceKey::test("test.echo"),
@@ -178,6 +203,8 @@ impl Notification {
             Self::SyncCompleted(_) => "sync.completed",
             Self::IndexCommitted(_) => "index.committed",
             Self::PushEvent(_) => "push.event",
+            Self::CalendarRunCompleted(_) => "calendar.run_completed",
+            Self::CalendarChanged(_) => "calendar.changed",
             #[cfg(test)]
             Self::TestEcho { .. } => "test.echo",
         }
@@ -219,6 +246,8 @@ impl Notification {
             Self::SyncCompleted(completed) => Some(completed.generation()),
             Self::IndexCommitted(committed) => Some(committed.generation()),
             Self::PushEvent(event) => Some(event.generation()),
+            Self::CalendarRunCompleted(completed) => Some(completed.generation()),
+            Self::CalendarChanged(changed) => Some(changed.generation()),
             #[cfg(test)]
             Self::TestEcho { .. } => None,
         }
@@ -242,6 +271,8 @@ impl Notification {
             Self::SyncCompleted(completed) => completed.set_generation(generation),
             Self::IndexCommitted(committed) => committed.set_generation(generation),
             Self::PushEvent(event) => event.set_generation(generation),
+            Self::CalendarRunCompleted(completed) => completed.set_generation(generation),
+            Self::CalendarChanged(changed) => changed.set_generation(generation),
             #[cfg(test)]
             Self::TestEcho { .. } => {}
         }
@@ -672,6 +703,151 @@ mod tests {
                 assert_eq!(e.service_generation, 7);
             }
             other => panic!("expected PushEvent notification, got {other:?}"),
+        }
+    }
+
+    // -- Phase 5 catalog cases --------------------------------------------
+    //
+    // CalendarRunCompleted (MustDeliver, ServiceClient-consumed) and
+    // CalendarChanged (Coalesce per-account, UI-dispatched) are the
+    // Phase 5 additions. The dual-routing decision is the heart of
+    // Phase 5's notification design - see calendar.rs and
+    // docs/service/phase-5-plan.md § "Calendar completion notification:
+    // dual routing".
+
+    #[test]
+    fn calendar_run_completed_classifies_as_must_deliver() {
+        use crate::calendar::{CalendarRunCompleted, CalendarRunId, CalendarSyncResult};
+        let n = Notification::CalendarRunCompleted(CalendarRunCompleted {
+            account_id: "a".into(),
+            run_id: CalendarRunId::new_v7(),
+            result: CalendarSyncResult::Completed,
+            mutated: true,
+            service_generation: 0,
+        });
+        assert!(matches!(n.class(), NotificationClass::MustDeliver));
+    }
+
+    #[test]
+    fn calendar_run_completed_method_name_is_dotted() {
+        use crate::calendar::{CalendarRunCompleted, CalendarRunId, CalendarSyncResult};
+        let n = Notification::CalendarRunCompleted(CalendarRunCompleted {
+            account_id: "a".into(),
+            run_id: CalendarRunId::new_v7(),
+            result: CalendarSyncResult::Cancelled,
+            mutated: false,
+            service_generation: 0,
+        });
+        assert_eq!(n.method_name(), "calendar.run_completed");
+    }
+
+    #[test]
+    fn calendar_run_completed_service_generation_round_trips() {
+        use crate::calendar::{CalendarRunCompleted, CalendarRunId, CalendarSyncResult};
+        let mut n = Notification::CalendarRunCompleted(CalendarRunCompleted {
+            account_id: "a".into(),
+            run_id: CalendarRunId::new_v7(),
+            result: CalendarSyncResult::Completed,
+            mutated: true,
+            service_generation: 1,
+        });
+        assert_eq!(n.service_generation(), Some(1));
+        n.set_service_generation(99);
+        assert_eq!(n.service_generation(), Some(99));
+    }
+
+    #[test]
+    fn calendar_run_completed_round_trips_through_parse_service_message() {
+        use crate::calendar::{CalendarRunCompleted, CalendarRunId, CalendarSyncResult};
+        let run_id = CalendarRunId::new_v7();
+        let original = Notification::CalendarRunCompleted(CalendarRunCompleted {
+            account_id: "acc-1".into(),
+            run_id,
+            result: CalendarSyncResult::Failed("oops".into()),
+            mutated: true,
+            service_generation: 5,
+        });
+        let json = serde_json::to_string(&original).expect("serialize");
+        let line = format!(r#"{{"jsonrpc":"2.0",{}}}"#, &json[1..json.len() - 1]);
+        let parsed = parse_service_message(&line).expect("parse");
+        match parsed {
+            ParsedServiceMessage::Notification(Notification::CalendarRunCompleted(c)) => {
+                assert_eq!(c.account_id, "acc-1");
+                assert_eq!(c.run_id, run_id);
+                assert_eq!(c.result, CalendarSyncResult::Failed("oops".into()));
+                assert!(c.mutated);
+                assert_eq!(c.service_generation, 5);
+            }
+            other => panic!("expected CalendarRunCompleted notification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn calendar_changed_classifies_as_coalesce_per_account() {
+        use crate::calendar::CalendarChanged;
+        let n_a = Notification::CalendarChanged(CalendarChanged {
+            account_id: "acc-a".into(),
+            service_generation: 0,
+        });
+        let n_b = Notification::CalendarChanged(CalendarChanged {
+            account_id: "acc-b".into(),
+            service_generation: 0,
+        });
+        let n_a_again = Notification::CalendarChanged(CalendarChanged {
+            account_id: "acc-a".into(),
+            service_generation: 9,
+        });
+
+        match n_a.class() {
+            NotificationClass::Coalesce { ref key } => {
+                assert_eq!(*key, CoalesceKey::CalendarChanged("acc-a".into()));
+            }
+            other => panic!("expected Coalesce, got {other:?}"),
+        }
+        // Different accounts must NOT collapse onto each other.
+        assert_ne!(n_a.class(), n_b.class());
+        // Same account collapses regardless of generation.
+        assert_eq!(n_a.class(), n_a_again.class());
+    }
+
+    #[test]
+    fn calendar_changed_method_name_is_dotted() {
+        use crate::calendar::CalendarChanged;
+        let n = Notification::CalendarChanged(CalendarChanged {
+            account_id: "acc-1".into(),
+            service_generation: 0,
+        });
+        assert_eq!(n.method_name(), "calendar.changed");
+    }
+
+    #[test]
+    fn calendar_changed_service_generation_round_trips() {
+        use crate::calendar::CalendarChanged;
+        let mut n = Notification::CalendarChanged(CalendarChanged {
+            account_id: "acc-1".into(),
+            service_generation: 1,
+        });
+        assert_eq!(n.service_generation(), Some(1));
+        n.set_service_generation(99);
+        assert_eq!(n.service_generation(), Some(99));
+    }
+
+    #[test]
+    fn calendar_changed_round_trips_through_parse_service_message() {
+        use crate::calendar::CalendarChanged;
+        let original = Notification::CalendarChanged(CalendarChanged {
+            account_id: "acc-42".into(),
+            service_generation: 7,
+        });
+        let json = serde_json::to_string(&original).expect("serialize");
+        let line = format!(r#"{{"jsonrpc":"2.0",{}}}"#, &json[1..json.len() - 1]);
+        let parsed = parse_service_message(&line).expect("parse");
+        match parsed {
+            ParsedServiceMessage::Notification(Notification::CalendarChanged(c)) => {
+                assert_eq!(c.account_id, "acc-42");
+                assert_eq!(c.service_generation, 7);
+            }
+            other => panic!("expected CalendarChanged notification, got {other:?}"),
         }
     }
 }

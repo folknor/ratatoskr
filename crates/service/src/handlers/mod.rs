@@ -48,6 +48,16 @@ pub(crate) async fn dispatch(
         RequestParams::SyncCancelAccount { params } => {
             sync::handle_cancel_account(&boot_state, params).await
         }
+        // Phase 5: stub arms. The wire types land in this commit so the
+        // service-api catalog is complete and downstream consumers can
+        // serialize/deserialize against them. Real handlers wire up in
+        // task 8 (`docs/service/phase-5-plan.md` § "Detailed task list").
+        RequestParams::CalendarStartAccountSync { params: _ } => Err(ServiceError::Internal(
+            "calendar.start_account_sync handler not yet wired (Phase 5 task 8)".into(),
+        )),
+        RequestParams::CalendarCancelAccountSync { params: _ } => Err(ServiceError::Internal(
+            "calendar.cancel_account_sync handler not yet wired (Phase 5 task 8)".into(),
+        )),
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPanic => test_helpers::panic_handle().await,
         #[cfg(feature = "test-helpers")]
@@ -71,5 +81,14 @@ pub(crate) async fn dispatch_notification(
 ) -> Result<(), String> {
     match notification {
         ClientNotification::PendingOpsKick => pending_ops_kick::handle(&boot_state).await,
+        // Phase 5: stub arms. Real handlers wire up in task 8.
+        ClientNotification::CalendarKick => {
+            log::debug!("[dispatch] calendar.kick received; handler not yet wired (Phase 5 task 8)");
+            Ok(())
+        }
+        ClientNotification::GalKick => {
+            log::debug!("[dispatch] gal.kick received; handler not yet wired (Phase 5 task 8)");
+            Ok(())
+        }
     }
 }

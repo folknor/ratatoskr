@@ -1,5 +1,6 @@
 mod action;
 mod boot;
+mod calendar;
 mod client_notification;
 mod error;
 mod framing;
@@ -20,6 +21,10 @@ pub use action::{
 pub use client_notification::{ClientNotification, JsonRpcClientNotification};
 pub use boot::{
     BootClassification, BootExitCode, BootPhase, BootPhaseKind, BootProgress, BootReadyResponse,
+};
+pub use calendar::{
+    CalendarCancelAccountSyncParams, CalendarCancelAck, CalendarChanged, CalendarRunCompleted,
+    CalendarRunId, CalendarStartAccountSyncParams, CalendarStartAck, CalendarSyncResult,
 };
 pub use error::{JsonRpcErrorObject, ServiceError};
 pub use framing::{

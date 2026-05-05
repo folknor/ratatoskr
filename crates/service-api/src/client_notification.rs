@@ -29,28 +29,46 @@ pub enum ClientNotification {
     /// UI-owned.
     #[serde(rename = "pending_ops.kick")]
     PendingOpsKick,
+    /// Phase 5: "The UI's tick fired; please consider running calendar
+    /// sync for any account whose `last_calendar_sync` is stale." The
+    /// Service handler enumerates accounts and gates each on a 1 h
+    /// staleness check before spawning a `CalendarRuntime` runner.
+    /// `Drop` class - a missed kick is harmless because the next tick
+    /// will re-cover.
+    #[serde(rename = "calendar.kick")]
+    CalendarKick,
+    /// Phase 5: "The UI's tick fired; please consider refreshing GAL
+    /// caches." The Service handler enumerates all accounts and calls
+    /// `refresh_gal_for_account`, which self-gates on the 24 h cache
+    /// age check. `Drop` class - same forgiveness as the other kicks.
+    #[serde(rename = "gal.kick")]
+    GalKick,
 }
 
 impl ClientNotification {
     pub fn method_name(&self) -> &'static str {
         match self {
             Self::PendingOpsKick => "pending_ops.kick",
+            Self::CalendarKick => "calendar.kick",
+            Self::GalKick => "gal.kick",
         }
     }
 
     pub fn params_value(&self) -> Value {
         match self {
-            Self::PendingOpsKick => Value::Null,
+            Self::PendingOpsKick | Self::CalendarKick | Self::GalKick => Value::Null,
         }
     }
 
     /// Class controls Service-side dispatch behavior. Phase 2 only
     /// uses `Drop` (best-effort fire-and-forget): if the notification
     /// task pool is at capacity, drop the inbound rather than block
-    /// the dispatch loop.
+    /// the dispatch loop. Phase 5's `calendar.kick` and `gal.kick`
+    /// follow the same shape - missed kicks self-heal on the next
+    /// `Message::SyncTick`.
     pub fn class(&self) -> NotificationClass {
         match self {
-            Self::PendingOpsKick => NotificationClass::Drop,
+            Self::PendingOpsKick | Self::CalendarKick | Self::GalKick => NotificationClass::Drop,
         }
     }
 
@@ -59,6 +77,14 @@ impl ClientNotification {
             "pending_ops.kick" => match params {
                 None | Some(Value::Null) => Ok(Self::PendingOpsKick),
                 Some(_) => Err("pending_ops.kick must have no params".to_string()),
+            },
+            "calendar.kick" => match params {
+                None | Some(Value::Null) => Ok(Self::CalendarKick),
+                Some(_) => Err("calendar.kick must have no params".to_string()),
+            },
+            "gal.kick" => match params {
+                None | Some(Value::Null) => Ok(Self::GalKick),
+                Some(_) => Err("gal.kick must have no params".to_string()),
             },
             _ => Err(format!("unknown client notification method: {method}")),
         }
@@ -143,5 +169,82 @@ mod tests {
             Err(message) => assert!(message.contains("unknown")),
             Ok(other) => panic!("expected Err, got Ok({other:?})"),
         }
+    }
+
+    // -- Phase 5 catalog cases --------------------------------------------
+
+    #[test]
+    fn calendar_kick_round_trips_through_serde() {
+        let original = ClientNotification::CalendarKick;
+        let json = serde_json::to_value(&original).expect("serialize");
+        let recovered: ClientNotification = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn calendar_kick_method_name_is_dotted() {
+        assert_eq!(
+            ClientNotification::CalendarKick.method_name(),
+            "calendar.kick",
+        );
+    }
+
+    #[test]
+    fn calendar_kick_classifies_as_drop() {
+        assert!(matches!(
+            ClientNotification::CalendarKick.class(),
+            NotificationClass::Drop,
+        ));
+    }
+
+    #[test]
+    fn calendar_kick_from_method_params_accepts_null_and_missing() {
+        let n = ClientNotification::from_method_params("calendar.kick", &None).expect("missing ok");
+        assert_eq!(n, ClientNotification::CalendarKick);
+        let n = ClientNotification::from_method_params("calendar.kick", &Some(Value::Null))
+            .expect("null ok");
+        assert_eq!(n, ClientNotification::CalendarKick);
+    }
+
+    #[test]
+    fn calendar_kick_from_method_params_rejects_non_null_params() {
+        let result = ClientNotification::from_method_params(
+            "calendar.kick",
+            &Some(serde_json::json!({"foo": "bar"})),
+        );
+        match result {
+            Err(message) => assert!(message.contains("no params")),
+            Ok(other) => panic!("expected Err, got Ok({other:?})"),
+        }
+    }
+
+    #[test]
+    fn gal_kick_round_trips_through_serde() {
+        let original = ClientNotification::GalKick;
+        let json = serde_json::to_value(&original).expect("serialize");
+        let recovered: ClientNotification = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn gal_kick_method_name_is_dotted() {
+        assert_eq!(ClientNotification::GalKick.method_name(), "gal.kick",);
+    }
+
+    #[test]
+    fn gal_kick_classifies_as_drop() {
+        assert!(matches!(
+            ClientNotification::GalKick.class(),
+            NotificationClass::Drop,
+        ));
+    }
+
+    #[test]
+    fn gal_kick_from_method_params_accepts_null_and_missing() {
+        let n = ClientNotification::from_method_params("gal.kick", &None).expect("missing ok");
+        assert_eq!(n, ClientNotification::GalKick);
+        let n = ClientNotification::from_method_params("gal.kick", &Some(Value::Null))
+            .expect("null ok");
+        assert_eq!(n, ClientNotification::GalKick);
     }
 }
