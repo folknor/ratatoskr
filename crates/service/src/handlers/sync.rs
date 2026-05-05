@@ -61,19 +61,21 @@ pub(crate) async fn handle_cancel_account(
                 .into(),
         )
     })?;
-    let account_id = params.account_id.clone();
     let ack = runtime.cancel_account(&params.account_id).await;
 
-    // Phase 4 task 6: symmetric push cancel piggyback. Detached for the
-    // same 5s-IPC-contract reason as the start side; the bridge runs
-    // manager.stop_push().await on its exit path which itself awaits a
-    // WebSocket close. cancel_account returns false if no bridge was
-    // registered (account is non-JMAP, never started, or already
-    // cancelled), which is a normal no-op.
+    // Phase 4 review-pass fix: push cancel is *awaited* on the cancel
+    // side (start side stays detached because TLS + OAuth-refresh
+    // would blow the 5s IPC budget; cancel does no network beyond the
+    // WebSocket close, and the connection-loop's TLS connect await is
+    // now in a select! against the shutdown watch so stop_push has
+    // bounded latency). The UI's `cancel_and_await` flow in the
+    // delete-account path then guarantees that by the time
+    // `client.cancel_and_await` returns, BOTH sync runners and push
+    // bridges for this account have been torn down - so the
+    // subsequent DB delete cannot race a late `start_sync` from a
+    // surviving push bridge.
     if let Some(push_runtime) = boot_state.push_runtime() {
-        tokio::spawn(async move {
-            push_runtime.cancel_account(&account_id).await;
-        });
+        push_runtime.cancel_account(&params.account_id).await;
     }
 
     serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))

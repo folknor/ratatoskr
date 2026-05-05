@@ -300,7 +300,23 @@ async fn push_connection_loop(
         // actual WebSocket connect failure would - the typical cause is
         // an OAuth refresh that itself failed (token revoked, network
         // partition during refresh).
-        let auth_header = match auth_resolver().await {
+        //
+        // Race against shutdown so a hanging refresh (network partition
+        // mid-`refresh_oauth_token`, DB lock contention) can't park the
+        // loop indefinitely; setting `shutdown_tx = true` from the
+        // bridge's exit path needs to wake this await for `stop_push`
+        // to be bounded-latency. Phase 4 review-pass fix.
+        let auth_resolve_fut = auth_resolver();
+        let resolve_result = tokio::select! {
+            biased;
+            _ = shutdown_rx.changed() => {
+                *state.write().await = PushState::Disconnected;
+                log::info!("[JMAP push] {account_id}: shutdown during auth resolve");
+                break;
+            }
+            r = auth_resolve_fut => r,
+        };
+        let auth_header = match resolve_result {
             Ok(h) => h,
             Err(e) => {
                 consecutive_failures += 1;
@@ -411,10 +427,22 @@ async fn connect_and_listen(
         .map_err(|e| format!("TLS connector creation failed: {e}"))?;
     let connector = tokio_tungstenite::Connector::NativeTls(tls_connector);
 
-    let (ws_stream, _response) =
-        tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector))
-            .await
-            .map_err(|e| format!("WebSocket connect failed: {e}"))?;
+    // Phase 4 review-pass fix: race the TLS+WebSocket connect against
+    // the shutdown watch so `stop_push().await` is bounded latency
+    // (the bridge's exit path runs `manager.stop_push().await` and the
+    // service-side `handle_cancel_account` awaits push tear-down
+    // before returning the ack; without this select! a mid-handshake
+    // connect could park the loop for the full TLS timeout, blowing
+    // the 5s IPC budget).
+    let connect_fut =
+        tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector));
+    let (ws_stream, _response) = tokio::select! {
+        biased;
+        _ = shutdown_rx.changed() => {
+            return Err("shutdown observed during WebSocket connect".to_string());
+        }
+        result = connect_fut => result.map_err(|e| format!("WebSocket connect failed: {e}"))?,
+    };
 
     let (mut ws_sink, mut ws_reader) = ws_stream.split();
 
