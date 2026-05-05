@@ -695,12 +695,12 @@ impl ReadyApp {
 ///
 /// LocalOnly maps to Ok(()) - the event is visible locally, the overlay closes.
 /// Phase 3 can add richer outcome reporting for the "saved locally, not synced" case.
-fn calendar_outcome_to_result(outcome: rtsk::actions::ActionOutcome) -> Result<(), String> {
+fn calendar_outcome_to_result(outcome: service::actions::ActionOutcome) -> Result<(), String> {
     match outcome {
-        rtsk::actions::ActionOutcome::Success
-        | rtsk::actions::ActionOutcome::NoOp
-        | rtsk::actions::ActionOutcome::LocalOnly { .. } => Ok(()),
-        rtsk::actions::ActionOutcome::Failed { error } => Err(error.user_message()),
+        service::actions::ActionOutcome::Success
+        | service::actions::ActionOutcome::NoOp
+        | service::actions::ActionOutcome::LocalOnly { .. } => Ok(()),
+        service::actions::ActionOutcome::Failed { error } => Err(error.user_message()),
     }
 }
 

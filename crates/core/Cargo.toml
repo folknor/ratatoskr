@@ -37,13 +37,6 @@ gmail = { path = "../gmail" }
 jmap = { path = "../jmap" }
 graph = { path = "../graph" }
 imap = { path = "../imap" }
-# Phase 2 task 6 transitional dep. `core` re-exports the relocated
-# action service through shim modules (`core::actions::*` ->
-# `service::actions::*`). Once tasks 9-10 land and the UI uses the
-# IPC `action.execute_plan` path instead of calling action functions
-# directly, the shims and this dep go away.
-service = { path = "../service" }
-
 # Crate-specific deps
 log = "0.4"
 futures = "0.3"

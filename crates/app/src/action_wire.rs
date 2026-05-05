@@ -16,7 +16,7 @@
 //! a `MailOperation` / `WireMailOperation` variant without updating
 //! both sides is a compile error.
 
-use rtsk::actions::{ActionError, ActionOutcome, MailOperation, RemoteFailureKind};
+use service::actions::{ActionError, ActionOutcome, MailOperation, RemoteFailureKind};
 use service_api::{
     ActionWireOperation, ActionWirePlan, OperationId, OperationResult, PlanId, RemoteFailure,
     WireFolderId, WireMailOperation, WireTagId,

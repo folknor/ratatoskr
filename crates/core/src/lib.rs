@@ -1,5 +1,4 @@
 pub mod account;
-pub mod actions;
 pub mod constants;
 pub use store::attachment_cache;
 pub mod auto_responses;
@@ -34,10 +33,11 @@ pub use ::db::progress;
 pub mod provider;
 pub mod scheduled_send;
 pub mod scope;
-// Phase 2 task 6: `core::send` moved to `service::send`. Re-export
-// the wire-shaped `SendAttachment` / `SendRequest` types via
-// `core::actions` (which now shims to `service::actions::*`); other
-// consumers go through `service::send` directly.
+// Phase 2 task 6: `core::send` moved to `service::send`; consumers
+// import from `service::send` directly. The Phase 5 prerequisite
+// retired the `core::actions` shim that briefly re-exported wire-shaped
+// `SendAttachment` / `SendRequest`; those types are now reached through
+// `service::actions::{SendAttachment, SendRequest}` (or `service::send`).
 pub use search;
 pub mod search_pipeline;
 pub use seen as seen_addresses;
@@ -47,12 +47,11 @@ pub use smtp;
 pub use sync;
 pub use sync::smart_labels;
 pub use sync::threading;
-/// Phase 3 task 8: `sync_dispatch` moved to `crates/service/src/sync_dispatch.rs`
-/// alongside the `SyncRuntime` runner that drives it. Service-side
-/// callers reach it via `service::sync_dispatch::sync_delta_for_account`;
-/// no UI consumer remains (Phase 3 task 15 routes UI sync kicks
-/// through `client.start_sync(...)`).
-pub use service::sync_dispatch;
+// Phase 3 task 8: `sync_dispatch` moved to `crates/service/src/sync_dispatch.rs`.
+// Service-side callers import directly from `service::sync_dispatch`. The
+// transitional `pub use service::sync_dispatch;` re-export was retired in
+// Phase 5's prerequisite (it was the second of two edges keeping the
+// `rtsk -> service` cycle alive).
 pub mod url_cleaning;
 
 // Re-exports for app-layer convenience - avoids direct common dependency.

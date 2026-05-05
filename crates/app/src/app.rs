@@ -143,7 +143,7 @@ pub struct ReadyApp {
     pub(crate) encryption_key: [u8; 32],
     /// Action service context - the authoritative write path for email mutations.
     /// `None` if stores failed to initialize at boot (degraded mode).
-    pub(crate) action_ctx: Option<rtsk::actions::ActionContext>,
+    pub(crate) action_ctx: Option<service::actions::ActionContext>,
 
     // Service process scaffold
     pub(crate) service_client: Option<Arc<ServiceClient>>,
@@ -222,7 +222,7 @@ pub(crate) struct PendingActionPlan {
     /// `(operation_id, ActionOutcome)` pairs in arrival order. Sorted
     /// by `operation_id` before firing `Message::ActionCompleted` so
     /// the per-target outcome ordering matches the dispatched plan.
-    pub(crate) outcomes: Vec<(u32, rtsk::actions::ActionOutcome)>,
+    pub(crate) outcomes: Vec<(u32, service::actions::ActionOutcome)>,
     pub(crate) state: PlanState,
     /// Idempotency guard for `OperationOutcome` notifications: replay
     /// from the journal can re-emit an outcome the UI already saw, and
@@ -333,7 +333,7 @@ impl ReadyApp {
             rtsk::search::SearchReadState::init(data_dir).map(Arc::new).ok();
 
         let action_ctx = match (&body_store, &inline_image_store, &search_state) {
-            (Some(bs), Some(iis), Some(ss)) => Some(rtsk::actions::ActionContext {
+            (Some(bs), Some(iis), Some(ss)) => Some(service::actions::ActionContext {
                 db: db.write_db_state(),
                 body_store: bs.clone(),
                 inline_images: iis.clone(),

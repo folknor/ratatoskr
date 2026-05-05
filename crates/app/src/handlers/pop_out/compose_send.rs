@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use crate::pop_out::PopOutWindow;
 use crate::{Message, ReadyApp};
 
-use rtsk::actions::SendAttachment;
+use service::actions::SendAttachment;
 
 impl ReadyApp {
     /// Build a MIME message from the compose state, save it to the draft row
@@ -80,7 +80,7 @@ impl ReadyApp {
             .get_or_insert_with(|| uuid::Uuid::new_v4().to_string())
             .clone();
 
-        let send_req = rtsk::actions::SendRequest {
+        let send_req = service::actions::SendRequest {
             draft_id,
             account_id: account_info.id.clone(),
             from,
@@ -115,7 +115,7 @@ impl ReadyApp {
     fn dispatch_send(
         &mut self,
         window_id: iced::window::Id,
-        request: rtsk::actions::SendRequest,
+        request: service::actions::SendRequest,
     ) -> Task<Message> {
         let Some(client) = self.service_client.as_ref().cloned() else {
             if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id) {
@@ -181,8 +181,8 @@ impl ReadyApp {
                     // handler will no-op against the closed window.
                     Err(error) => Message::SendCompleted {
                         window_id,
-                        outcome: rtsk::actions::ActionOutcome::Failed {
-                            error: rtsk::actions::ActionError::remote(format!(
+                        outcome: service::actions::ActionOutcome::Failed {
+                            error: service::actions::ActionError::remote(format!(
                                 "{error}"
                             )),
                         },
@@ -196,10 +196,10 @@ impl ReadyApp {
     pub(crate) fn handle_send_completed(
         &mut self,
         window_id: iced::window::Id,
-        outcome: &rtsk::actions::ActionOutcome,
+        outcome: &service::actions::ActionOutcome,
     ) -> Task<Message> {
         match outcome {
-            rtsk::actions::ActionOutcome::Success | rtsk::actions::ActionOutcome::NoOp => {
+            service::actions::ActionOutcome::Success | service::actions::ActionOutcome::NoOp => {
                 self.pop_out_windows.remove(&window_id);
                 self.status_bar
                     .show_confirmation("Message sent".to_string());
@@ -207,8 +207,8 @@ impl ReadyApp {
             }
             // LocalOnly should not occur for send (send uses Failed for all
             // failures), but handle it defensively as failure for safety.
-            rtsk::actions::ActionOutcome::Failed { error }
-            | rtsk::actions::ActionOutcome::LocalOnly { reason: error, .. } => {
+            service::actions::ActionOutcome::Failed { error }
+            | service::actions::ActionOutcome::LocalOnly { reason: error, .. } => {
                 if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id)
                 {
                     state.sending = false;
@@ -233,7 +233,7 @@ impl ReadyApp {
 fn stage_and_build_wire(
     app_data_dir: &std::path::Path,
     send_id: service_api::PlanId,
-    request: rtsk::actions::SendRequest,
+    request: service::actions::SendRequest,
 ) -> Result<service_api::SendWireRequest, String> {
     let staging_dir: PathBuf = app_data_dir
         .join("staging")

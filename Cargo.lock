@@ -5951,7 +5951,6 @@ dependencies = [
  "seen",
  "serde",
  "serde_json",
- "service",
  "service-state",
  "sha2 0.11.0",
  "smart-folder",

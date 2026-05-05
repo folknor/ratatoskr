@@ -8,7 +8,7 @@
 //! Toggle intents that require per-thread state are represented as
 //! `ResolveOutcome::PerThreadToggle`, NOT as fake resolved operations.
 
-use rtsk::actions::{ActionOutcome, FolderId, MailOperation, TagId};
+use service::actions::{ActionOutcome, FolderId, MailOperation, TagId};
 
 // ── Intent ──────────────────────────────────────────────
 

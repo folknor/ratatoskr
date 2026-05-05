@@ -366,7 +366,7 @@ pub async fn db_pending_ops_recover_executing(db: &ReadDbState) -> Result<i64, S
 /// Resets stranded `pending_operations.status = 'executing'` rows to
 /// 'pending' and resurfaces stale `local_drafts.sync_status = 'sending'`
 /// rows as 'failed'. This is the canonical home for the function;
-/// `rtsk::actions::pending::recover_on_boot` is the async sister that
+/// `service::actions::pending::recover_on_boot` is the async sister that
 /// Phase 2's relocated periodic drainer continues to call against the
 /// `ActionContext`-shaped API.
 pub fn db_pending_ops_recover_on_boot_sync(

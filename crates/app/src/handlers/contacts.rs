@@ -42,7 +42,7 @@ impl ReadyApp {
         let db = Arc::clone(&self.db);
         let filter = self.settings.contact_filter.clone();
 
-        let input = rtsk::actions::contacts::ContactSaveInput {
+        let input = service::actions::contacts::ContactSaveInput {
             id: entry.id,
             email: entry.email,
             display_name: entry.display_name,
@@ -57,14 +57,14 @@ impl ReadyApp {
 
         Task::perform(
             async move {
-                let outcome = rtsk::actions::contacts::save_contact(&ctx, input).await;
+                let outcome = service::actions::contacts::save_contact(&ctx, input).await;
                 // Reload contacts regardless of outcome (local save succeeded
                 // for Success and LocalOnly, failed for Failed)
                 let contacts = db.get_contacts_for_settings(filter).await;
                 (outcome, contacts)
             },
             |(outcome, contacts)| {
-                use rtsk::actions::ActionOutcome;
+                use service::actions::ActionOutcome;
                 match outcome {
                     ActionOutcome::Failed { error } => {
                         log::error!("Contact save failed: {error}");
@@ -94,9 +94,9 @@ impl ReadyApp {
 
         Task::perform(
             async move {
-                let outcome = rtsk::actions::contacts::delete_contact(&ctx, &id).await;
+                let outcome = service::actions::contacts::delete_contact(&ctx, &id).await;
                 match outcome {
-                    rtsk::actions::ActionOutcome::Failed { .. } => {
+                    service::actions::ActionOutcome::Failed { .. } => {
                         // Provider-first delete failed (e.g. JMAP) - contact not
                         // deleted locally. Don't reload (nothing changed).
                         (outcome, None)
@@ -109,7 +109,7 @@ impl ReadyApp {
                 }
             },
             |(outcome, contacts)| {
-                use rtsk::actions::ActionOutcome;
+                use service::actions::ActionOutcome;
                 match outcome {
                     ActionOutcome::Failed { error } => {
                         log::error!("Contact delete failed: {error}");

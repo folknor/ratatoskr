@@ -653,8 +653,8 @@ impl ReadyApp {
                 if outcomes.is_empty() {
                     return Task::none();
                 }
-                let all_failed = outcomes.iter().all(rtsk::actions::ActionOutcome::is_failed);
-                let any_failed = outcomes.iter().any(rtsk::actions::ActionOutcome::is_failed);
+                let all_failed = outcomes.iter().all(service::actions::ActionOutcome::is_failed);
+                let any_failed = outcomes.iter().any(service::actions::ActionOutcome::is_failed);
                 if all_failed {
                     self.status_bar
                         .show_confirmation(format!("\u{26A0} Undo failed: {desc}"));
