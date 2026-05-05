@@ -55,14 +55,22 @@ impl JmapClient {
 
     /// Ensure the access token is valid, refreshing if needed.
     ///
-    /// For Basic auth accounts this is a no-op. For OAuth accounts it
-    /// checks the token expiry in the DB and refreshes if <5 min remain,
-    /// following the same double-check-under-lock pattern as IMAP OAuth.
+    /// For Basic auth accounts this is a no-op. For OAuth-like accounts
+    /// (`auth_method` of `"oauth2"` or `"bearer"`) it checks the token
+    /// expiry in the DB and refreshes if <5 min remain, following the
+    /// same double-check-under-lock pattern as IMAP OAuth.
+    ///
+    /// The `"oauth2" | "bearer"` set must stay synchronized with the
+    /// branch in `from_account` that decides which `Credentials`
+    /// variant to construct - both lists describe "this account uses
+    /// a bearer token that may need refresh". Phase 4 review pass
+    /// found `from_account` accepted both but `ensure_valid_token`
+    /// only refreshed for `"oauth2"`, silently bypassing refresh for
+    /// `"bearer"` accounts.
     pub async fn ensure_valid_token(&self) -> Result<(), String> {
-        if self.auth_method != "oauth2" {
+        if !matches!(self.auth_method.as_str(), "oauth2" | "bearer") {
             return Ok(());
         }
-
         let db = self
             .db
             .as_ref()
@@ -70,119 +78,140 @@ impl JmapClient {
         let key = self
             .encryption_key
             .ok_or("JMAP OAuth client missing encryption key")?;
-
-        // Quick check: is the token still valid?
-        let aid = self.account_id.clone();
-        let (expires_at,) = db
-            .with_conn(move |conn| {
-                conn.query_row(
-                    "SELECT token_expires_at FROM accounts WHERE id = ?1",
-                    rusqlite::params![aid],
-                    |row| Ok((row.get::<_, Option<i64>>(0)?,)),
-                )
-                .map_err(|e| format!("JMAP token expiry check: {e}"))
-            })
-            .await?;
-
-        let expires_at = expires_at.unwrap_or_default();
-        if expires_at - chrono::Utc::now().timestamp() >= 300 {
-            return Ok(());
+        if let Some(refreshed_access) =
+            refresh_token_in_db_if_expired(db, &self.account_id, &key).await?
+        {
+            self.rebuild_client_with_token(&refreshed_access).await?;
         }
+        Ok(())
+    }
+}
 
-        // Token is expiring - acquire per-account lock
-        let lock = get_refresh_lock(&self.account_id);
-        let _guard = lock.lock().await;
-
-        // Double-check after acquiring lock - another task may have refreshed
-        let aid = self.account_id.clone();
-        let (
-            fresh_access,
-            fresh_expires,
-            fresh_refresh,
-            oauth_provider,
-            oauth_client_id,
-            oauth_client_secret,
-            oauth_token_url,
-        ) = db
-            .with_conn(move |conn| {
-                conn.query_row(
-                    "SELECT access_token, token_expires_at, refresh_token, \
-                     oauth_provider, oauth_client_id, oauth_client_secret, oauth_token_url \
-                     FROM accounts WHERE id = ?1",
-                    rusqlite::params![aid],
-                    |row| {
-                        Ok((
-                            row.get::<_, Option<String>>(0)?,
-                            row.get::<_, Option<i64>>(1)?,
-                            row.get::<_, Option<String>>(2)?,
-                            row.get::<_, Option<String>>(3)?,
-                            row.get::<_, Option<String>>(4)?,
-                            row.get::<_, Option<String>>(5)?,
-                            row.get::<_, Option<String>>(6)?,
-                        ))
-                    },
-                )
-                .map_err(|e| format!("JMAP token re-check: {e}"))
-            })
-            .await?;
-
-        if fresh_expires.unwrap_or_default() - chrono::Utc::now().timestamp() >= 300 {
-            // Another task refreshed - rebuild client with the fresh token
-            let access_token = decrypt_if_needed(&key, fresh_access)?
-                .filter(|v| !v.is_empty())
-                .ok_or_else(|| {
-                    format!(
-                        "JMAP token re-check: missing access token for {}",
-                        self.account_id
-                    )
-                })?;
-            self.rebuild_client_with_token(&access_token).await?;
-            return Ok(());
-        }
-
-        // Need to actually refresh
-        let refresh_token = decrypt_if_needed(&key, fresh_refresh)?
-            .filter(|v| !v.is_empty())
-            .ok_or_else(|| {
-                format!(
-                    "JMAP OAuth account {} has no refresh token",
-                    self.account_id
-                )
-            })?;
-        let client_id = oauth_client_id
-            .filter(|v| !v.is_empty())
-            .ok_or_else(|| format!("JMAP OAuth account {} has no client ID", self.account_id))?;
-        let client_secret = decrypt_if_needed(&key, oauth_client_secret)?;
-        let provider = oauth_provider.unwrap_or_default();
-        let token_url = oauth_token_endpoint(&provider, oauth_token_url.as_deref())?;
-
-        let refreshed = refresh_oauth_token(
-            shared_http_client(),
-            &token_url,
-            &refresh_token,
-            &client_id,
-            client_secret.as_deref(),
-        )
+/// DB-side OAuth refresh helper extracted in the Phase 4 review pass.
+///
+/// Checks `token_expires_at` for `account_id`; if <5 min remain (or
+/// already expired), takes the per-account refresh lock, hits the
+/// OAuth token endpoint, and persists the new access token via
+/// `db::queries::persist_refreshed_token`.
+///
+/// Returns `Some(new_access_token)` if a refresh happened, `None` if
+/// the token was still fresh. The caller decides whether to rebuild
+/// any in-flight `JmapClient` with the new token (via
+/// `rebuild_client_with_token`) or simply trust that the next
+/// `from_account` call will read the freshly persisted credentials.
+///
+/// This used to be the body of `JmapClient::ensure_valid_token`; the
+/// extraction lets `JmapClient::from_account` refresh the bearer
+/// BEFORE constructing the JMAP session. Pre-Phase-4 the order was
+/// inverted: `from_account` constructed the client (which immediately
+/// did a `connect()` with the stale token) and only then would a
+/// caller invoke `ensure_valid_token`. Cold startup with an expired
+/// token would fail the initial connect and the refresh path was
+/// never reached.
+async fn refresh_token_in_db_if_expired(
+    db: &ReadDbState,
+    account_id: &str,
+    key: &[u8; 32],
+) -> Result<Option<String>, String> {
+    // Quick check: is the token still valid?
+    let aid = account_id.to_string();
+    let (expires_at,) = db
+        .with_conn(move |conn| {
+            conn.query_row(
+                "SELECT token_expires_at FROM accounts WHERE id = ?1",
+                rusqlite::params![aid],
+                |row| Ok((row.get::<_, Option<i64>>(0)?,)),
+            )
+            .map_err(|e| format!("JMAP token expiry check: {e}"))
+        })
         .await?;
+    let expires_at = expires_at.unwrap_or_default();
+    if expires_at - chrono::Utc::now().timestamp() >= 300 {
+        return Ok(None);
+    }
 
-        // Persist new token
-        let encrypted_access = encrypt_value(&key, &refreshed.access_token)?;
-        let aid = self.account_id.clone();
-        let new_expires = refreshed.expires_at;
-        db.with_conn(move |conn| {
-            db::db::queries::persist_refreshed_token(conn, &aid, &encrypted_access, new_expires)
+    // Token is expiring - acquire per-account lock.
+    let lock = get_refresh_lock(account_id);
+    let _guard = lock.lock().await;
+
+    // Double-check after acquiring lock - another task may have refreshed.
+    let aid = account_id.to_string();
+    let (
+        fresh_access,
+        fresh_expires,
+        fresh_refresh,
+        oauth_provider,
+        oauth_client_id,
+        oauth_client_secret,
+        oauth_token_url,
+    ) = db
+        .with_conn(move |conn| {
+            conn.query_row(
+                "SELECT access_token, token_expires_at, refresh_token, \
+                 oauth_provider, oauth_client_id, oauth_client_secret, oauth_token_url \
+                 FROM accounts WHERE id = ?1",
+                rusqlite::params![aid],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<i64>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                    ))
+                },
+            )
+            .map_err(|e| format!("JMAP token re-check: {e}"))
         })
         .await?;
 
-        log::info!("JMAP OAuth token refreshed for account {}", self.account_id);
-
-        // Rebuild the inner client with the new token
-        self.rebuild_client_with_token(&refreshed.access_token)
-            .await?;
-
-        Ok(())
+    if fresh_expires.unwrap_or_default() - chrono::Utc::now().timestamp() >= 300 {
+        // Another task refreshed - return the fresh access token.
+        let access_token = decrypt_if_needed(key, fresh_access)?
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| {
+                format!("JMAP token re-check: missing access token for {account_id}")
+            })?;
+        return Ok(Some(access_token));
     }
 
+    // Need to actually refresh.
+    let refresh_token = decrypt_if_needed(key, fresh_refresh)?
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| format!("JMAP OAuth account {account_id} has no refresh token"))?;
+    let client_id = oauth_client_id
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| format!("JMAP OAuth account {account_id} has no client ID"))?;
+    let client_secret = decrypt_if_needed(key, oauth_client_secret)?;
+    let provider = oauth_provider.unwrap_or_default();
+    let token_url = oauth_token_endpoint(&provider, oauth_token_url.as_deref())?;
+
+    let refreshed = refresh_oauth_token(
+        shared_http_client(),
+        &token_url,
+        &refresh_token,
+        &client_id,
+        client_secret.as_deref(),
+    )
+    .await?;
+
+    // Persist new token.
+    let encrypted_access = encrypt_value(key, &refreshed.access_token)?;
+    let aid = account_id.to_string();
+    let new_expires = refreshed.expires_at;
+    db.with_conn(move |conn| {
+        db::db::queries::persist_refreshed_token(conn, &aid, &encrypted_access, new_expires)
+    })
+    .await?;
+
+    log::info!("JMAP OAuth token refreshed for account {account_id}");
+
+    Ok(Some(refreshed.access_token))
+}
+
+impl JmapClient {
     /// Rebuild the inner `jmap_client::Client` with a new Bearer token.
     async fn rebuild_client_with_token(&self, access_token: &str) -> Result<(), String> {
         let client = Client::new()
@@ -233,6 +262,36 @@ impl JmapClient {
     ) -> Result<Self, String> {
         let aid = account_id.to_string();
         let key = *encryption_key;
+
+        // Phase 4 review-pass fix: refresh the bearer token BEFORE
+        // reading credentials and connecting. Pre-Phase-4 this happened
+        // after `connect()`, so a Service that was down through token
+        // expiry would fail the initial JMAP session fetch with a 401
+        // and never reach the refresh path. The helper is a no-op for
+        // non-OAuth accounts (auth_method != "oauth2" | "bearer") and
+        // for tokens that still have >5 min of life left, so the cost
+        // on the hot path is one DB read.
+        //
+        // We don't know auth_method until we read credentials, but the
+        // helper guards on the DB query and short-circuits cheaply for
+        // non-OAuth accounts that don't have an `oauth_token_endpoint`.
+        // Reading the auth_method twice (once for the gate, once when
+        // building Credentials) is fine - both reads are sub-millisecond
+        // local SQLite.
+        let aid_for_method = account_id.to_string();
+        let auth_method: String = db
+            .with_conn(move |conn| {
+                conn.query_row(
+                    "SELECT auth_method FROM accounts WHERE id = ?1",
+                    rusqlite::params![aid_for_method],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(|e| format!("JMAP auth_method read: {e}"))
+            })
+            .await?;
+        if matches!(auth_method.as_str(), "oauth2" | "bearer") {
+            let _ = refresh_token_in_db_if_expired(db, account_id, &key).await?;
+        }
 
         let creds = db
             .with_conn(move |conn| read_jmap_credentials(conn, &aid, &key))
