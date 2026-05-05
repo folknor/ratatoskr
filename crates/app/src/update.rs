@@ -251,11 +251,13 @@ impl ReadyApp {
                         self.pending_reader_reload = Some(std::time::Instant::now());
                         Task::none()
                     }
-                    service_api::Notification::PushEvent(_) => {
-                        // Phase 4 task 1 placeholder: the wire variant
-                        // exists; status-bar wiring lands in task 8 once
-                        // the Service-side bridge actually emits these.
-                        log::debug!("PushEvent received (UI handler pending Phase 4 task 8)");
+                    service_api::Notification::PushEvent(event) => {
+                        // Phase 4 task 8: stamp the most-recent-push
+                        // timestamp on the StatusBar so the indicator
+                        // surfaces "new mail arrived" for this account.
+                        // The Service has already kicked sync by the
+                        // time we get here; this arm is purely UI.
+                        self.status_bar.record_push_event(event.account_id);
                         Task::none()
                     }
                 }

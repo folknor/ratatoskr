@@ -259,6 +259,11 @@ pub struct StatusBar {
     sync_generations: HashMap<String, u64>,
     /// True when any account has an active auto-reply / out-of-office.
     auto_reply_active: bool,
+    /// Per-account timestamp of the most recent JMAP push event. Set
+    /// from `Notification::PushEvent` arrivals; surfaced as a "new
+    /// mail arrived" indicator. Coalesce semantics on the wire mean
+    /// the entry always reflects the latest event for the account.
+    last_push_at: HashMap<String, std::time::Instant>,
 }
 
 impl StatusBar {
@@ -271,7 +276,24 @@ impl StatusBar {
             sync_cycle_index: 0,
             sync_generations: HashMap::new(),
             auto_reply_active: false,
+            last_push_at: HashMap::new(),
         }
+    }
+
+    /// Record a JMAP push event for `account_id`. Stamps the
+    /// most-recent-push timestamp; the indicator view reads this to
+    /// surface "new mail arrived". Phase 4 task 8.
+    pub fn record_push_event(&mut self, account_id: String) {
+        self.last_push_at
+            .insert(account_id, std::time::Instant::now());
+    }
+
+    /// Most recent JMAP push timestamp for `account_id`, if any.
+    /// Status-bar view consumers use this to render a transient
+    /// per-account indicator.
+    #[allow(dead_code)] // view wiring follows in a UI-polish pass
+    pub fn last_push_at(&self, account_id: &str) -> Option<std::time::Instant> {
+        self.last_push_at.get(account_id).copied()
     }
 
     // ── Inbound data methods (called by App) ────────────
