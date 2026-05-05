@@ -544,14 +544,15 @@ async fn boot_progress_notifications_emitted_in_order() -> TestResult {
                 | Notification::ActionCompleted(_)
                 | Notification::SyncProgress(_)
                 | Notification::SyncCompleted(_)
-                | Notification::IndexCommitted(_),
+                | Notification::IndexCommitted(_)
+                | Notification::PushEvent(_),
             )) => {
-                // Action / sync notifications cannot fire during the
-                // boot sequence (no action.execute_plan is in flight,
-                // no sync runs); if one ever does, that's a Phase 2+
-                // regression worth flagging loudly rather than silently
-                // ignoring.
-                panic!("unexpected action/sync notification during boot.ready: {line}");
+                // Action / sync / push notifications cannot fire during
+                // the boot sequence (no action.execute_plan is in flight,
+                // no sync runs, push starts post-ready per Phase 4); if
+                // one ever does, that's a Phase 2+ regression worth
+                // flagging loudly rather than silently ignoring.
+                panic!("unexpected action/sync/push notification during boot.ready: {line}");
             }
             Ok(ParsedServiceMessage::Response {
                 id: Some(1),

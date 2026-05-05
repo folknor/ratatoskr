@@ -251,6 +251,13 @@ impl ReadyApp {
                         self.pending_reader_reload = Some(std::time::Instant::now());
                         Task::none()
                     }
+                    service_api::Notification::PushEvent(_) => {
+                        // Phase 4 task 1 placeholder: the wire variant
+                        // exists; status-bar wiring lands in task 8 once
+                        // the Service-side bridge actually emits these.
+                        log::debug!("PushEvent received (UI handler pending Phase 4 task 8)");
+                        Task::none()
+                    }
                 }
             }
             Message::ActionDispatched { plan_id, outcome } => {

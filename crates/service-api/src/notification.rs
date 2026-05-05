@@ -1,5 +1,6 @@
 use crate::action::{ActionCompleted, OperationOutcome, SyncProgress};
 use crate::boot::{BootPhaseKind, BootProgress};
+use crate::push::PushEvent;
 use crate::sync::{IndexCommitted, SyncCompleted};
 use serde::{Deserialize, Serialize};
 
@@ -53,6 +54,11 @@ pub enum CoalesceKey {
     /// per-account; events from different accounts never collapse onto
     /// each other.
     SyncProgress(String),
+    /// JMAP push events keyed per-account so latest-wins per-account;
+    /// status-bar semantics are "did some push event arrive for this
+    /// account recently?" - dropping older events under overflow is
+    /// benign (the latest one is what the UI renders).
+    PushEvent(String),
     /// Synthetic key used only by in-process queue tests in consumer crates.
     /// The queue's per-class enqueue logic is generic over `Classifiable`,
     /// and tests construct mock items with arbitrary string-keyed coalesce
@@ -117,6 +123,15 @@ pub enum Notification {
     /// re-trigger the UI's reader reload).
     #[serde(rename = "index.committed")]
     IndexCommitted(IndexCommitted),
+    /// Per-account JMAP push event from the Service-side bridge task.
+    /// `Coalesce { key: PushEvent(account_id) }`: status-bar semantics
+    /// are latest-wins per account; nobody waits on a `PushEvent`
+    /// future, so drop-on-overflow is benign. The bridge calls
+    /// `SyncRuntime::start_account` *before* emitting this notification,
+    /// so any backpressure on the notification queue cannot delay sync
+    /// kicks. See `docs/service/phase-4-plan.md` § "Notification class".
+    #[serde(rename = "push.event")]
+    PushEvent(PushEvent),
     /// Test-only variant. Lets the wire round-trip be exercised when no
     /// production payload happens to match a test's needs. Compiled out of
     /// release builds via `#[cfg(test)]`.
@@ -144,6 +159,9 @@ impl Notification {
             },
             Self::SyncCompleted(_) => NotificationClass::MustDeliver,
             Self::IndexCommitted(_) => NotificationClass::MustDeliver,
+            Self::PushEvent(event) => NotificationClass::Coalesce {
+                key: CoalesceKey::PushEvent(event.account_id.clone()),
+            },
             #[cfg(test)]
             Self::TestEcho { .. } => NotificationClass::Coalesce {
                 key: CoalesceKey::test("test.echo"),
@@ -159,6 +177,7 @@ impl Notification {
             Self::SyncProgress(_) => "sync.progress",
             Self::SyncCompleted(_) => "sync.completed",
             Self::IndexCommitted(_) => "index.committed",
+            Self::PushEvent(_) => "push.event",
             #[cfg(test)]
             Self::TestEcho { .. } => "test.echo",
         }
@@ -199,6 +218,7 @@ impl Notification {
             Self::SyncProgress(progress) => Some(progress.generation()),
             Self::SyncCompleted(completed) => Some(completed.generation()),
             Self::IndexCommitted(committed) => Some(committed.generation()),
+            Self::PushEvent(event) => Some(event.generation()),
             #[cfg(test)]
             Self::TestEcho { .. } => None,
         }
@@ -221,6 +241,7 @@ impl Notification {
             Self::SyncProgress(progress) => progress.set_generation(generation),
             Self::SyncCompleted(completed) => completed.set_generation(generation),
             Self::IndexCommitted(committed) => committed.set_generation(generation),
+            Self::PushEvent(event) => event.set_generation(generation),
             #[cfg(test)]
             Self::TestEcho { .. } => {}
         }
@@ -580,6 +601,77 @@ mod tests {
                 assert_eq!(c.service_generation, 13);
             }
             other => panic!("expected IndexCommitted notification, got {other:?}"),
+        }
+    }
+
+    // -- Phase 4 catalog cases --------------------------------------------
+    //
+    // PushEvent is the Phase 4 addition. Class is `Coalesce`, not
+    // `MustDeliver` - status-bar semantics are latest-wins per account.
+
+    #[test]
+    fn push_event_classifies_as_coalesce_per_account() {
+        let n_a = Notification::PushEvent(PushEvent {
+            account_id: "acc-a".into(),
+            service_generation: 0,
+        });
+        let n_b = Notification::PushEvent(PushEvent {
+            account_id: "acc-b".into(),
+            service_generation: 0,
+        });
+        let n_a_again = Notification::PushEvent(PushEvent {
+            account_id: "acc-a".into(),
+            service_generation: 9,
+        });
+
+        match n_a.class() {
+            NotificationClass::Coalesce { ref key } => {
+                assert_eq!(*key, CoalesceKey::PushEvent("acc-a".into()));
+            }
+            other => panic!("expected Coalesce, got {other:?}"),
+        }
+
+        // Different accounts must NOT collapse onto each other.
+        assert_ne!(n_a.class(), n_b.class());
+        // Same account collapses regardless of generation.
+        assert_eq!(n_a.class(), n_a_again.class());
+    }
+
+    #[test]
+    fn push_event_method_name_is_dotted() {
+        let n = Notification::PushEvent(PushEvent {
+            account_id: "acc-1".into(),
+            service_generation: 0,
+        });
+        assert_eq!(n.method_name(), "push.event");
+    }
+
+    #[test]
+    fn push_event_service_generation_round_trips() {
+        let mut n = Notification::PushEvent(PushEvent {
+            account_id: "acc-1".into(),
+            service_generation: 1,
+        });
+        assert_eq!(n.service_generation(), Some(1));
+        n.set_service_generation(99);
+        assert_eq!(n.service_generation(), Some(99));
+    }
+
+    #[test]
+    fn push_event_round_trips_through_parse_service_message() {
+        let original = Notification::PushEvent(PushEvent {
+            account_id: "acc-42".into(),
+            service_generation: 7,
+        });
+        let json = serde_json::to_string(&original).expect("serialize");
+        let line = format!(r#"{{"jsonrpc":"2.0",{}}}"#, &json[1..json.len() - 1]);
+        let parsed = parse_service_message(&line).expect("parse");
+        match parsed {
+            ParsedServiceMessage::Notification(Notification::PushEvent(e)) => {
+                assert_eq!(e.account_id, "acc-42");
+                assert_eq!(e.service_generation, 7);
+            }
+            other => panic!("expected PushEvent notification, got {other:?}"),
         }
     }
 }

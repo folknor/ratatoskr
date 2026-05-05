@@ -4,6 +4,7 @@ mod client_notification;
 mod error;
 mod framing;
 mod notification;
+mod push;
 mod redacted;
 mod request;
 mod response;
@@ -27,6 +28,7 @@ pub use framing::{
     encode_message, parse_client_message, parse_service_message, write_message,
 };
 pub use notification::{CoalesceKey, Notification, NotificationClass, WithGeneration};
+pub use push::PushEvent;
 pub use redacted::{RedactedBytes, RedactedString};
 pub use request::{RequestParams, RequestTimeoutKind};
 pub use response::{HealthPingResponse, ShutdownResponse};
