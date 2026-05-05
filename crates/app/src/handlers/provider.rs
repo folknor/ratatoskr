@@ -4,8 +4,6 @@
 //! JMAP push subscription wiring; push events arrive as
 //! `Notification::PushEvent` from the Service-side `PushRuntime`.
 
-use std::sync::Arc;
-
 use iced::Task;
 
 use crate::{Message, ReadyApp};
@@ -87,49 +85,49 @@ impl ReadyApp {
         )
     }
 
-    /// Refresh GAL (Global Address List) caches for accounts that support it.
-    /// Only fetches if the cache is stale (>24h). Runs silently in the background.
-    pub(crate) fn refresh_gal_caches(&self) -> Task<Message> {
-        let encryption_key = self.encryption_key;
-
-        let account_ids: Vec<String> = self
-            .sidebar
-            .accounts
-            .iter()
-            .filter(|a| matches!(a.provider.as_str(), "graph" | "gmail_api"))
-            .map(|a| a.id.clone())
-            .collect();
-
-        if account_ids.is_empty() {
+    /// Phase 5 task 10: kick the Service-side GAL refresh.
+    ///
+    /// Replaces the deleted UI-side `refresh_gal_caches`. The Service
+    /// handler iterates all accounts and calls `refresh_gal_for_account`
+    /// (which self-gates via the 24 h cache check), under a global
+    /// Tokio Mutex so the `NOTIFY_CAP=4` concurrent dispatcher can't
+    /// double-fire stale-account fetches. Notification class is `Drop`
+    /// - missed kicks self-heal on the next `SyncTick`.
+    pub(crate) fn kick_gal_refresh(&self) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
             return Task::none();
-        }
-
-        let db = Arc::clone(&self.db);
+        };
         Task::perform(
             async move {
-                let core_db = db.write_db_state();
-                for account_id in &account_ids {
-                    match tokio::time::timeout(
-                        std::time::Duration::from_secs(60),
-                        rtsk::contacts::gal::refresh_gal_for_account(
-                            &core_db,
-                            account_id,
-                            encryption_key,
-                        ),
-                    )
+                if let Err(error) = client
+                    .send_notification(service_api::ClientNotification::GalKick)
                     .await
-                    {
-                        Ok(Ok(n)) if n > 0 => {
-                            log::info!("[GAL] Cached {n} entries for {account_id}");
-                        }
-                        Ok(Ok(_)) => {}
-                        Ok(Err(e)) => {
-                            log::warn!("[GAL] Refresh failed for {account_id}: {e}");
-                        }
-                        Err(_) => {
-                            log::warn!("[GAL] Refresh timed out for {account_id}");
-                        }
-                    }
+                {
+                    log::debug!("gal.kick send failed: {error}");
+                }
+            },
+            |()| Message::Noop,
+        )
+    }
+
+    /// Phase 5 task 10: kick the Service-side calendar sync.
+    ///
+    /// Replaces the deleted UI-side `sync_calendars`. The Service
+    /// handler enumerates accounts whose `last_calendar_sync` is more
+    /// than 1 h stale and starts a `CalendarRuntime` runner for each.
+    /// Notification class is `Drop` - missed kicks self-heal on the
+    /// next `SyncTick`.
+    pub(crate) fn kick_calendar_sync(&self) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                if let Err(error) = client
+                    .send_notification(service_api::ClientNotification::CalendarKick)
+                    .await
+                {
+                    log::debug!("calendar.kick send failed: {error}");
                 }
             },
             |()| Message::Noop,

@@ -367,16 +367,17 @@ impl ReadyApp {
             Message::ShowHelp => Task::none(),
             Message::SyncCurrentFolder => self.sync_all_accounts(),
             Message::SyncTick => {
-                // Phase 5 task 3b: UI-side `sync_calendars` is gone; calendar
-                // sync is owned by the Service's `CalendarRuntime` and will be
-                // kicked over IPC in task 10. For now, the SyncTick fires its
-                // remaining UI work without a calendar arm; calendar sync stays
-                // dark across the next few commits until the Service wiring
-                // lands. GAL relocates the same way later in Phase 5.
+                // Phase 5 task 10: SyncTick collapses to three notifications +
+                // one request fan-out. Calendar and GAL both relocated
+                // Service-side; the UI's only role is to fire the cadence,
+                // and Service-side staleness gates (calendar: 1h per-account
+                // last_completed; GAL: 24h cache check) keep the actual
+                // provider load bounded.
                 let sync_task = self.sync_all_accounts();
                 let pending_task = self.process_pending_ops();
-                let gal_task = self.refresh_gal_caches();
-                Task::batch([sync_task, pending_task, gal_task])
+                let gal_task = self.kick_gal_refresh();
+                let cal_task = self.kick_calendar_sync();
+                Task::batch([sync_task, pending_task, gal_task, cal_task])
             }
             Message::SyncComplete(account_id, result) => {
                 // Phase 3 task 15: per-account "already-in-flight" gating
@@ -721,22 +722,6 @@ impl ReadyApp {
             Message::SnoozeTick => self.handle_snooze_tick(),
             Message::SnoozeResurfaceComplete(result) => {
                 self.handle_snooze_resurface_complete(result)
-            }
-            Message::GalRefreshTick => {
-                // Refresh GAL cache for all connected accounts.
-                // Currently a placeholder - the actual directory API calls
-                // (Graph /users, Google Directory API) require provider
-                // clients. When the sync orchestrator provides account-level
-                // clients, this dispatches cache_gal_entries() per account.
-                log::debug!("GAL refresh tick (directory fetch not yet wired to provider clients)");
-                Task::none()
-            }
-            Message::GalCacheRefreshed(result) => {
-                match result {
-                    Ok(count) => log::info!("GAL cache refreshed: {count} entries"),
-                    Err(e) => log::warn!("GAL cache refresh failed: {e}"),
-                }
-                Task::none()
             }
             Message::ReaderReloadTick => {
                 // Phase 3 task 17: debounced reader reload. Skip when

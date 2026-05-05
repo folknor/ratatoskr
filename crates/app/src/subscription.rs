@@ -105,11 +105,14 @@ impl ReadyApp {
             );
         }
 
-        // GAL (organization directory) cache refresh - every hour
-        subs.push(
-            iced::time::every(std::time::Duration::from_secs(3600))
-                .map(|_| Message::GalRefreshTick),
-        );
+        // Phase 5 task 10: the dedicated 1-hour `Message::GalRefreshTick`
+        // subscription is gone. GAL refresh now rides on the 5-min
+        // `SyncTick` via `Message::SyncTick -> kick_gal_refresh`, gated
+        // Service-side by the existing 24 h cache check inside
+        // `refresh_gal_for_account`. Two cadences would mean two failure
+        // modes (one timer stops working but the other doesn't); one
+        // cadence + Service-side gating is the simpler shape and
+        // survives the Phase 9 tray-resident move unchanged.
 
         // Phase 3 task 17: debounced reader reload after
         // `index.committed` notifications. Polls every 200 ms; the

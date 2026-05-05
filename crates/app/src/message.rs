@@ -84,8 +84,7 @@
 //   SyncTick | SyncCurrentFolder | SyncComplete | SyncProgress
 //   AddAccount | OpenAddAccount | AccountDeleted | AccountUpdated
 //   ReloadSignatures | SignatureOp | SharedMailboxesLoaded
-//   PinnedPublicFoldersLoaded | GalRefreshTick | GalCacheRefreshed
-//   AutoReplyChecked
+//   PinnedPublicFoldersLoaded | AutoReplyChecked
 //
 // Pop-out windows: dropped (the pop-out dispatch path needs ReadyApp
 // state). The session restorer fires its own pop-out tasks after Ready.
@@ -353,9 +352,11 @@ pub enum Message {
     SnoozeTick,
     SnoozeResurfaceComplete(Result<usize, String>),
 
-    // GAL (organization directory) cache
-    GalRefreshTick,
-    GalCacheRefreshed(Result<usize, String>),
+    // Phase 5 task 10: GalRefreshTick / GalCacheRefreshed deleted. GAL
+    // refresh now rides on `Message::SyncTick -> kick_gal_refresh`
+    // (fire-and-forget IPC notification); the Service handler iterates
+    // accounts and the 24 h cache gate inside refresh_gal_for_account
+    // self-throttles.
 
     // Phase 3 task 17: debounced reader reload after `index.committed`
     // notifications. The notification handler stamps

@@ -134,13 +134,6 @@ pub struct ReadyApp {
     pub(crate) body_store: Option<rtsk::body_store::BodyStoreReadState>,
     /// Inline image store for CID image resolution.
     pub(crate) inline_image_store: Option<store::inline_image_store::InlineImageStoreReadState>,
-    /// Encryption key for decrypting provider credentials (OAuth tokens,
-    /// passwords). Loaded by the Service at boot (BootPhase::LoadingKey)
-    /// and again by the UI here as a thin redundancy. Phase 2 plumbs the
-    /// already-validated key through IPC and removes the UI-side load;
-    /// until then, a UI-only load failure here is treated as fatal in
-    /// from_boot_ready() rather than silently degrading to a zero key.
-    pub(crate) encryption_key: [u8; 32],
     /// Action service context - the authoritative write path for email mutations.
     /// `None` if stores failed to initialize at boot (degraded mode).
     pub(crate) action_ctx: Option<service::actions::ActionContext>,
@@ -425,7 +418,6 @@ impl ReadyApp {
             sync_reporter,
             body_store,
             inline_image_store,
-            encryption_key,
             action_ctx,
             service_client: Some(service_client),
             service_notifications,
@@ -467,10 +459,11 @@ impl ReadyApp {
                 async move { db_ref4.get_pinned_public_folders().await },
                 Message::PinnedPublicFoldersLoaded,
             ),
-            // Initial GAL cache population (deferred - provider clients
-            // aren't available at boot; the first GalRefreshTick will
-            // attempt the actual fetch once accounts are loaded)
-            Task::done(Message::GalRefreshTick),
+            // Phase 5 task 10: initial GAL cache population is no longer
+            // a UI-side concern. The Service's gal.kick handler runs on
+            // the first `Message::SyncTick` and gates per-account on the
+            // 24 h cache check. No bootstrap kick needed: the SyncTick
+            // subscription fires within 5 min of post-ready.
         ];
 
         // Pending-ops crash recovery, queued-drafts sweep, and thread-
