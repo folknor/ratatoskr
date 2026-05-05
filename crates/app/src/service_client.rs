@@ -5,7 +5,9 @@ use service_api::{
     BootClassification, BootExitCode, BootReadyResponse, BoundedLineReader, HealthPingResponse,
     JsonRpcErrorObject, JsonRpcRequest, Notification, ParsedServiceMessage, PROTOCOL_VERSION,
     RequestParams, RequestTimeoutKind, ServiceError, ServiceResponse, ShutdownResponse,
-    SyncCancelAccountParams, SyncCancelAck, SyncCompleted, SyncResult, SyncRunId,
+    CalendarRunCompleted, CalendarRunId, CalendarStartAccountSyncParams, CalendarStartAck,
+    CalendarSyncResult, SyncCancelAccountParams, SyncCancelAck, SyncCompleted, SyncResult,
+    SyncRunId,
     SyncStartAccountParams, SyncStartAck, encode_message, parse_service_message,
 };
 use std::collections::{HashMap, VecDeque, hash_map::Entry};
@@ -58,6 +60,19 @@ const LATCHED_COMPLETED_TTL: Duration = Duration::from_secs(30);
 
 type PendingSyncs = Arc<Mutex<HashMap<SyncRunId, PendingSync>>>;
 
+/// Phase 5 task 9b: per-`CalendarRunId` waiter slot. Mirrors
+/// `PendingSync` exactly. Routes `Notification::CalendarRunCompleted`
+/// to `start_calendar_sync` / `cancel_and_await` callers.
+enum PendingCalendar {
+    Pending(broadcast::Sender<CalendarSyncResult>),
+    Completed {
+        result: CalendarSyncResult,
+        latched_at: Instant,
+    },
+}
+
+type PendingCalendars = Arc<Mutex<HashMap<CalendarRunId, PendingCalendar>>>;
+
 /// Drain every entry: `Pending` senders are dropped (subscribers
 /// receive `RecvError::Closed` and surface as
 /// `Err(ClientError::ServiceCrashed)`); `Completed` entries are
@@ -65,6 +80,12 @@ type PendingSyncs = Arc<Mutex<HashMap<SyncRunId, PendingSync>>>;
 /// `start_sync` caller does not park forever across a Service
 /// crash / respawn.
 fn fail_pending_syncs(map: &PendingSyncs) {
+    let mut guard = map.lock().unwrap_or_else(PoisonError::into_inner);
+    guard.clear();
+}
+
+/// Mirror of `fail_pending_syncs` for the calendar map.
+fn fail_pending_calendars(map: &PendingCalendars) {
     let mut guard = map.lock().unwrap_or_else(PoisonError::into_inner);
     guard.clear();
 }
@@ -83,6 +104,18 @@ fn sweep_latched_completed(map: &PendingSyncs) {
             cutoff.duration_since(*latched_at) < LATCHED_COMPLETED_TTL
         }
         PendingSync::Pending(_) => true,
+    });
+}
+
+/// Mirror of `sweep_latched_completed` for the calendar map.
+fn sweep_latched_calendar_completed(map: &PendingCalendars) {
+    let mut guard = map.lock().unwrap_or_else(PoisonError::into_inner);
+    let cutoff = Instant::now();
+    guard.retain(|_, entry| match entry {
+        PendingCalendar::Completed { latched_at, .. } => {
+            cutoff.duration_since(*latched_at) < LATCHED_COMPLETED_TTL
+        }
+        PendingCalendar::Pending(_) => true,
     });
 }
 
@@ -130,6 +163,10 @@ pub struct ServiceClient {
     /// state, drained on respawn / Drop. See `PendingSync` for the
     /// `Pending` / `Completed` discipline.
     pending_syncs: PendingSyncs,
+    /// Phase 5 task 9b: per-`CalendarRunId` waiter slots. Mirrors
+    /// `pending_syncs` exactly; routes `Notification::CalendarRunCompleted`
+    /// to `start_calendar_sync` / `cancel_and_await` callers.
+    pending_calendars: PendingCalendars,
     next_id: Arc<AtomicU64>,
     notifications: ServiceNotificationReceiver,
     /// Latest generation; bumped before respawn. The dispatch-side drop
@@ -496,10 +533,12 @@ impl ServiceClient {
         // `boot.progress` notifications as stale. install_running_state's
         // store(1) below is now idempotent rather than load-bearing.
         let pending_syncs: PendingSyncs = Arc::new(Mutex::new(HashMap::new()));
+        let pending_calendars: PendingCalendars = Arc::new(Mutex::new(HashMap::new()));
         let client = Arc::new(Self {
             state: Mutex::new(None),
             pending: Arc::clone(&pending),
             pending_syncs: Arc::clone(&pending_syncs),
+            pending_calendars: Arc::clone(&pending_calendars),
             next_id: Arc::clone(&next_id),
             notifications: Arc::clone(&notifications),
             current_generation: AtomicU32::new(1),
@@ -876,11 +915,36 @@ impl ServiceClient {
         self.subscribe_or_consume(ack.run_id).await
     }
 
+    /// Phase 5 task 9b: kick a calendar sync run for `account_id` and
+    /// await its terminal `CalendarSyncResult`. Mirrors `start_sync`
+    /// exactly - the IPC ack carries a `run_id`; the caller subscribes
+    /// to the `pending_calendars` slot keyed on it; a fast
+    /// `CalendarRunCompleted` that races the post-ack subscriber is
+    /// latched and consumed by the late subscriber.
+    pub async fn start_calendar_sync(
+        &self,
+        account_id: String,
+    ) -> Result<CalendarSyncResult, ClientError> {
+        let ack: CalendarStartAck = self
+            .request(RequestParams::CalendarStartAccountSync {
+                params: CalendarStartAccountSyncParams { account_id },
+            })
+            .await?;
+        self.subscribe_or_consume_calendar(ack.run_id).await
+    }
+
     /// Phase 3 task 14: cancel any in-flight sync for `account_id` and
     /// await the terminal `SyncResult` (typically `Cancelled`). If the
     /// Service ack reports `was_in_flight: false` (no run was active),
     /// returns `SyncResult::Completed` immediately - there's nothing
     /// to await.
+    ///
+    /// Phase 5 task 9b: when the Service piggybacks calendar cancel
+    /// (ack carries `calendar_run_id`), this also awaits the
+    /// CalendarRunCompleted notification before returning so the
+    /// account-deletion path's DB DELETE cannot race a calendar runner
+    /// mid-write. The sync result is what's returned (the calendar
+    /// outcome is best-effort - logged on failure but not surfaced).
     pub async fn cancel_and_await(
         &self,
         account_id: &str,
@@ -892,10 +956,32 @@ impl ServiceClient {
                 },
             })
             .await?;
-        let Some(run_id) = ack.run_id else {
-            return Ok(SyncResult::Completed);
+        let calendar_run_id = ack.calendar_run_id;
+
+        // Await the calendar run terminal completion in parallel with
+        // sync's. tokio::join! lets a slow sync cancel and a slow
+        // calendar cancel overlap; the deletion path doesn't need to
+        // distinguish them.
+        let sync_future = async {
+            match ack.run_id {
+                Some(run_id) => self.subscribe_or_consume(run_id).await,
+                None => Ok(SyncResult::Completed),
+            }
         };
-        self.subscribe_or_consume(run_id).await
+        let calendar_future = async {
+            if let Some(run_id) = calendar_run_id {
+                match self.subscribe_or_consume_calendar(run_id).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        log::warn!(
+                            "[calendar] cancel_and_await: failed to await CalendarRunCompleted: {e:?}",
+                        );
+                    }
+                }
+            }
+        };
+        let (sync_result, ()) = tokio::join!(sync_future, calendar_future);
+        sync_result
     }
 
     async fn subscribe_or_consume(
@@ -920,6 +1006,39 @@ impl ServiceClient {
                 Entry::Vacant(v) => {
                     let (tx, rx) = broadcast::channel(SYNC_BROADCAST_CAPACITY);
                     v.insert(PendingSync::Pending(tx));
+                    rx
+                }
+            }
+        };
+        let mut rx = rx_to_await;
+        rx.recv().await.map_err(|_| ClientError::ServiceCrashed)
+    }
+
+    /// Phase 5 task 9b: mirror of `subscribe_or_consume` for calendar
+    /// runs. Pendings keyed by `CalendarRunId`; notifications routed by
+    /// `route_calendar_run_completed`.
+    async fn subscribe_or_consume_calendar(
+        &self,
+        run_id: CalendarRunId,
+    ) -> Result<CalendarSyncResult, ClientError> {
+        sweep_latched_calendar_completed(&self.pending_calendars);
+        let rx_to_await = {
+            let mut guard = self
+                .pending_calendars
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            match guard.entry(run_id) {
+                Entry::Occupied(e) => match e.get() {
+                    PendingCalendar::Completed { result, .. } => {
+                        let result = result.clone();
+                        e.remove();
+                        return Ok(result);
+                    }
+                    PendingCalendar::Pending(tx) => tx.subscribe(),
+                },
+                Entry::Vacant(v) => {
+                    let (tx, rx) = broadcast::channel(SYNC_BROADCAST_CAPACITY);
+                    v.insert(PendingCalendar::Pending(tx));
                     rx
                 }
             }
@@ -953,6 +1072,36 @@ impl ServiceClient {
             },
             Entry::Vacant(v) => {
                 v.insert(PendingSync::Completed {
+                    result: completed.result,
+                    latched_at: Instant::now(),
+                });
+            }
+        }
+    }
+
+    /// Reader-task helper: route an incoming `CalendarRunCompleted`
+    /// notification to its waiter set. Mirror of `route_sync_completed`
+    /// for calendar runs.
+    pub(crate) fn route_calendar_run_completed(&self, completed: CalendarRunCompleted) {
+        let mut guard = self
+            .pending_calendars
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        match guard.entry(completed.run_id) {
+            Entry::Occupied(mut e) => match e.get_mut() {
+                PendingCalendar::Pending(tx) => {
+                    let _ = tx.send(completed.result);
+                    e.remove();
+                }
+                PendingCalendar::Completed { .. } => {
+                    log::warn!(
+                        "duplicate CalendarRunCompleted for run_id {}; dropping",
+                        completed.run_id
+                    );
+                }
+            },
+            Entry::Vacant(v) => {
+                v.insert(PendingCalendar::Completed {
                     result: completed.result,
                     latched_at: Instant::now(),
                 });
@@ -1195,6 +1344,8 @@ impl ServiceClient {
         // start_sync against the new incarnation, generating a fresh
         // run_id.
         fail_pending_syncs(&self.pending_syncs);
+        // Phase 5 task 9b: same shape for calendar awaiters.
+        fail_pending_calendars(&self.pending_calendars);
 
         let RunningState {
             mut child,
@@ -1848,6 +1999,7 @@ async fn reader_task<R>(
     let fail_syncs_via_client = |w: &Weak<ServiceClient>| {
         if let Some(c) = w.upgrade() {
             fail_pending_syncs(&c.pending_syncs);
+            fail_pending_calendars(&c.pending_calendars);
         }
     };
     let mut lines = BoundedLineReader::new(stdout, service_api::MAX_FRAME_BYTES);
@@ -1907,6 +2059,19 @@ async fn reader_task<R>(
                             if let Notification::SyncCompleted(c) = notification {
                                 if let Some(client) = upgraded {
                                     client.route_sync_completed(c);
+                                }
+                                continue;
+                            }
+                            // Phase 5 task 9b: same routing for calendar
+                            // run completions. Per-run_id awaiters
+                            // (`start_calendar_sync`, `cancel_and_await`)
+                            // resolve via `pending_calendars`. The UI
+                            // never sees the raw frame; CalendarChanged
+                            // is the dispatched-to-UI signal for view
+                            // reload.
+                            if let Notification::CalendarRunCompleted(c) = notification {
+                                if let Some(client) = upgraded {
+                                    client.route_calendar_run_completed(c);
                                 }
                                 continue;
                             }
