@@ -117,6 +117,9 @@ pub enum BootPhaseKind {
     RecoveringPendingOps,
     SweepingQueuedDrafts,
     BackfillingThreadParticipants,
+    OpeningBodyAndInlineStores,
+    OpeningSearchIndex,
+    RunningInvariantPass,
 }
 
 /// Phase markers emitted by the Service during the boot sequence so the UI
@@ -134,6 +137,9 @@ pub enum BootPhase {
     RecoveringPendingOps,
     SweepingQueuedDrafts,
     BackfillingThreadParticipants,
+    OpeningBodyAndInlineStores,
+    OpeningSearchIndex,
+    RunningInvariantPass,
 }
 
 impl BootPhase {
@@ -148,6 +154,9 @@ impl BootPhase {
             Self::RecoveringPendingOps => BootPhaseKind::RecoveringPendingOps,
             Self::SweepingQueuedDrafts => BootPhaseKind::SweepingQueuedDrafts,
             Self::BackfillingThreadParticipants => BootPhaseKind::BackfillingThreadParticipants,
+            Self::OpeningBodyAndInlineStores => BootPhaseKind::OpeningBodyAndInlineStores,
+            Self::OpeningSearchIndex => BootPhaseKind::OpeningSearchIndex,
+            Self::RunningInvariantPass => BootPhaseKind::RunningInvariantPass,
         }
     }
 }

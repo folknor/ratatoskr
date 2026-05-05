@@ -598,6 +598,13 @@ impl SplashState {
             Some(service_api::BootPhase::BackfillingThreadParticipants) => {
                 "Backfilling thread participants..."
             }
+            Some(service_api::BootPhase::OpeningBodyAndInlineStores) => {
+                "Opening body and inline stores..."
+            }
+            Some(service_api::BootPhase::OpeningSearchIndex) => "Opening search index...",
+            Some(service_api::BootPhase::RunningInvariantPass) => {
+                "Running cross-store invariant pass..."
+            }
         }
     }
 }

@@ -45,8 +45,21 @@ impl IpcProgressReporter {
 
 impl ProgressReporter for IpcProgressReporter {
     fn emit_json(&self, event_name: &str, json: serde_json::Value) {
+        // Phase 3: when this reporter is shared across sync runs (one
+        // SyncRuntime, many account_ids), the bound `self.account_id`
+        // is an empty string and the per-event `account_id` rides in
+        // the JSON payload's `accountId` field (set by
+        // `sync::progress::emit_sync_progress`). Prefer that over the
+        // bound id so the wire `Notification::SyncProgress` carries
+        // the correct coalesce key.
+        let account_id = json
+            .get("accountId")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| self.account_id.clone());
         let notification = Notification::SyncProgress(SyncProgress {
-            account_id: self.account_id.clone(),
+            account_id,
             event_name: event_name.to_string(),
             payload: json,
             service_generation: 0,

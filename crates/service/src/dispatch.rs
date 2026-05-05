@@ -62,11 +62,13 @@ where
     let started_at = Instant::now();
 
     // Clear the clean_shutdown sentinel before the boot sequence runs. Phase
-    // 3+ cross-store recovery uses sentinel-absent-at-boot as its trigger;
+    // 3 cross-store recovery uses sentinel-absent-at-boot as its trigger;
     // without this, the marker would persist across reboots and recovery
     // would never fire. Lock acquisition has already gated this call site, so
-    // a contending second instance cannot race us.
-    lifecycle.clear_sentinel().await;
+    // a contending second instance cannot race us. The return value (`true`
+    // if the sentinel was present, i.e., the prior shutdown was graceful)
+    // gates the Phase 3 invariant pass below.
+    let had_clean_shutdown = lifecycle.clear_sentinel().await;
 
     let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_QUEUE_CAP);
     let writer_handle = tokio::spawn(writer_task(writer, out_rx));
@@ -108,8 +110,13 @@ where
         let app_data_dir = app_data_dir.clone();
         let boot_state = Arc::clone(&boot_state);
         async move {
-            if let Err(failure) =
-                boot::run_boot_sequence(out_tx, app_data_dir, boot_state).await
+            if let Err(failure) = boot::run_boot_sequence(
+                out_tx,
+                app_data_dir,
+                boot_state,
+                had_clean_shutdown,
+            )
+            .await
             {
                 let _ = boot_failure_tx.send(failure.as_exit_code()).await;
             }
@@ -300,6 +307,23 @@ where
     // unbounded loop on a long-lived task.
     action_worker_handle.abort();
     let _ = action_worker_handle.await;
+
+    // Phase 3 task 13: shut down the SyncRuntime and release the
+    // search writer's mpsc + the runtime's `NotificationSender` clone.
+    // Order: cancel + await every runner's supervisor first; then drop
+    // the last `Arc<SyncRuntime>` so the inner `SearchWriteHandle`
+    // releases its sender; the writer task observes EOF, commits any
+    // straggler docs, and exits, releasing its `notification_tx`
+    // (the last `out_tx` clone the writer task held). Without this
+    // step `writer_handle.await` below would park forever - the
+    // dispatch writer task only completes when every `out_tx` clone
+    // is dropped.
+    if let Some(runtime) = boot_state.take_sync_runtime() {
+        runtime.shutdown().await;
+        // Last Arc holder; dropping it now releases the inner
+        // SearchWriteHandle clone the runtime owned.
+        drop(runtime);
+    }
 
     drop(out_tx);
     let _ = writer_handle.await;

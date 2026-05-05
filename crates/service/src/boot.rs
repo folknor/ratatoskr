@@ -24,6 +24,7 @@ use db::db::queries_extra::{
     get_all_accounts_sync, get_all_send_identity_emails,
 };
 use db::db::{Connection, apply_standard_pragmas, migrations, reconcile_velo_rename};
+use db::progress::ProgressReporter;
 use service_api::{BootExitCode, BootPhase, BootReadyResponse};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -160,6 +161,20 @@ impl BootSharedState {
             .expect("sync_runtime mutex poisoned")
             .as_ref()
             .map(Arc::clone)
+    }
+
+    /// Move the `SyncRuntime` Arc out of the slot. Used by the
+    /// dispatch loop's drain step (Phase 3 task 13): once the
+    /// supervisors are awaited and this last Arc is dropped, the
+    /// inner `SearchWriteHandle` releases its mpsc sender, the search
+    /// writer task observes EOF, commits any straggler docs, exits,
+    /// and drops its `notification_tx` (the last out_tx clone). At
+    /// that point the dispatch loop's writer task can finish.
+    pub(crate) fn take_sync_runtime(&self) -> Option<Arc<crate::sync::SyncRuntime>> {
+        self.sync_runtime
+            .lock()
+            .expect("sync_runtime mutex poisoned")
+            .take()
     }
 
     /// Path to `<app_data>/` for this Service incarnation. Used by
@@ -345,8 +360,15 @@ pub(crate) async fn run_boot_sequence(
     out_tx: mpsc::Sender<Vec<u8>>,
     app_data_dir: PathBuf,
     state: Arc<BootSharedState>,
+    had_clean_shutdown: bool,
 ) -> Result<(), BootFailure> {
-    let inner = run_boot_sequence_inner(out_tx, app_data_dir).await;
+    let inner = run_boot_sequence_inner(
+        out_tx,
+        app_data_dir,
+        Arc::clone(&state),
+        had_clean_shutdown,
+    )
+    .await;
     let (result, context) = match inner {
         Ok(ctx) => (
             Ok(BootReadyResponse {
@@ -401,6 +423,8 @@ pub static TEST_BOOT_DELAY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(()
 async fn run_boot_sequence_inner(
     out_tx: mpsc::Sender<Vec<u8>>,
     app_data_dir: PathBuf,
+    state: Arc<BootSharedState>,
+    had_clean_shutdown: bool,
 ) -> Result<BootContext, BootFailure> {
     let delay = test_boot_delay_ms();
     if delay > 0 {
@@ -563,6 +587,76 @@ async fn run_boot_sequence_inner(
         log::warn!("thread-participants backfill failed: {error}");
         recovery_warnings.push("thread-participants backfill".to_string());
     }
+
+    // Phase 3 task 12: writer halves + search writer task + sync runtime.
+    // These phases land Service-side state that the relocated sync paths
+    // depend on, and they run before `signal_ready` so any sync handler
+    // that arrives after `boot.ready` finds a fully-installed runtime.
+    boot_progress::emit(&out_tx, BootPhase::OpeningBodyAndInlineStores, None);
+    let body_write = service_state::BodyStoreWriteState::init(&app_data_dir).map_err(|e| {
+        log::error!("body store write init failed: {e}");
+        BootFailure::MigrationFailure
+    })?;
+    let inline_write =
+        service_state::InlineImageStoreWriteState::init(&app_data_dir).map_err(|e| {
+            log::error!("inline image store write init failed: {e}");
+            BootFailure::MigrationFailure
+        })?;
+
+    boot_progress::emit(&out_tx, BootPhase::OpeningSearchIndex, None);
+    let notification_tx = boot_progress::NotificationSender::new(out_tx.clone());
+    let search_write = match crate::search_writer::spawn(&app_data_dir, notification_tx.clone(), 0)
+    {
+        Ok(handle) => handle,
+        Err(e) => {
+            log::error!("search writer spawn failed: {e}");
+            return Err(BootFailure::MigrationFailure);
+        }
+    };
+
+    let db_write = service_state::WriteDbState::from_arc(Arc::clone(&conn));
+
+    // Phase 3 task 11: invariant pass. Skipped on clean shutdown.
+    if !had_clean_shutdown {
+        boot_progress::emit(&out_tx, BootPhase::RunningInvariantPass, None);
+        let dirty =
+            crate::startup_invariants::discover_dirty_accounts(&app_data_dir).await;
+        if dirty.is_empty() {
+            log::info!(
+                "invariant pass: no dirty markers under {}/sync_markers, skipping",
+                app_data_dir.display()
+            );
+        } else {
+            let _stats = crate::startup_invariants::run_invariant_pass(
+                &db_write,
+                &body_write,
+                &inline_write,
+                &search_write,
+                &app_data_dir,
+                &dirty,
+            )
+            .await;
+        }
+    }
+
+    // Construct + install the SyncRuntime so the sync handlers
+    // (`crates/service/src/handlers/sync.rs`) can reach it via
+    // `BootSharedState::sync_runtime()` once boot.ready returns.
+    let progress_reporter: Arc<dyn ProgressReporter> = Arc::new(
+        crate::progress::IpcProgressReporter::new(out_tx.clone(), String::new()),
+    );
+    let runtime = Arc::new(crate::sync::SyncRuntime::new(
+        db_write,
+        body_write,
+        inline_write,
+        search_write,
+        SecretKey::from_bytes(*key.expose()),
+        progress_reporter,
+        notification_tx,
+        app_data_dir.clone(),
+        0,
+    ));
+    state.install_sync_runtime(runtime);
 
     Ok(BootContext {
         encryption_key: key,

@@ -116,17 +116,28 @@ impl ServiceLifecycle {
     /// sentinel would persist across reboots and recovery would never fire.
     ///
     /// Errors are logged at warn and ignored - the worst case is that recovery
-    /// runs (or doesn't) when the opposite was expected, which is benign in
-    /// Phase 1.5 because no recovery passes consume the sentinel yet.
-    pub(crate) async fn clear_sentinel(&self) {
+    /// runs (or doesn't) when the opposite was expected.
+    ///
+    /// Returns `true` if the sentinel was present and successfully removed
+    /// (i.e., the previous shutdown was graceful), `false` otherwise. Phase 3
+    /// uses the return value to gate the cross-store invariant pass: a `true`
+    /// return means the previous Service drained cleanly and skipped the
+    /// pass; a `false` return triggers it.
+    pub(crate) async fn clear_sentinel(&self) -> bool {
         let Some(app_data_dir) = self.app_data_dir.as_ref() else {
-            return;
+            return false;
         };
         let sentinel = app_data_dir.join("clean_shutdown");
         match tokio::fs::remove_file(&sentinel).await {
-            Ok(()) => log::debug!("removed clean_shutdown sentinel at boot"),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => log::warn!("failed to remove clean_shutdown sentinel at boot: {error}"),
+            Ok(()) => {
+                log::debug!("removed clean_shutdown sentinel at boot");
+                true
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => {
+                log::warn!("failed to remove clean_shutdown sentinel at boot: {error}");
+                false
+            }
         }
     }
 }
