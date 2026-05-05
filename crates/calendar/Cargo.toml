@@ -24,6 +24,7 @@ reqwest.workspace = true
 quick-xml.workspace = true
 rusqlite.workspace = true
 tokio = { workspace = true, features = ["time"] }
+tokio-util = "0.7"
 log = "0.4"
 urlencoding = "2"
 uuid = { version = "1.23.1", features = ["v4"] }

@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use tokio_util::sync::CancellationToken;
+
 use crate::db::ReadDbState;
 use crate::db::queries_extra::calendars::{
     UpsertCalendarEventParams, db_delete_events_for_calendar, db_update_calendar_sync_token,
@@ -36,7 +38,11 @@ pub async fn sync_caldav_calendars(
     client: &CalDavClient,
     db: &ReadDbState,
     account_id: &str,
+    cancellation_token: &CancellationToken,
 ) -> Result<CalDavSyncResult, String> {
+    if cancellation_token.is_cancelled() {
+        return Err("calendar sync cancelled".to_string());
+    }
     // Step 1: Discover calendars
     let discovered = client.list_calendars().await?;
 
@@ -50,6 +56,12 @@ pub async fn sync_caldav_calendars(
     let mut skipped_unchanged = 0;
 
     for cal in &discovered {
+        // Per-calendar cancellation checkpoint - between PROPFIND/REPORT
+        // RPCs. CalDAV sync is idempotent (CTags), so a cancelled run
+        // resumes naturally on the next attempt.
+        if cancellation_token.is_cancelled() {
+            return Err("calendar sync cancelled".to_string());
+        }
         // Honor the server's current-user-privilege-set when present: any
         // of `<write/>`, `<write-content/>`, or `<all/>` inside a granted
         // privilege flips us to editable. When the block is absent (older

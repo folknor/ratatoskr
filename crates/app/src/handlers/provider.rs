@@ -156,9 +156,20 @@ impl ReadyApp {
                 let core_db = db.write_db_state();
                 let mut any_synced = false;
                 for account_id in &account_ids {
+                    // Phase 5 task 3a: cal::sync now takes a CancellationToken
+                    // for per-calendar checkpoints. The UI-side caller doesn't
+                    // own a runtime-level token, so a fresh never-cancelled
+                    // token suffices until task 3b deletes this UI caller and
+                    // the Service-side CalendarRuntime owns the real token.
+                    let token = tokio_util::sync::CancellationToken::new();
                     match tokio::time::timeout(
                         std::time::Duration::from_secs(60),
-                        cal::sync::calendar_sync_account(account_id, &core_db, encryption_key),
+                        cal::sync::calendar_sync_account(
+                            account_id,
+                            &core_db,
+                            encryption_key,
+                            &token,
+                        ),
                     )
                     .await
                     {

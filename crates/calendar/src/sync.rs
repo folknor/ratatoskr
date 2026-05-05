@@ -1,4 +1,5 @@
 use rusqlite::{OptionalExtension, Row, params};
+use tokio_util::sync::CancellationToken;
 
 use gmail::client::GmailState;
 use graph::client::GraphState;
@@ -19,7 +20,11 @@ pub async fn calendar_sync_account_impl(
     db: &ReadDbState,
     gmail: &GmailState,
     graph: &GraphState,
+    cancellation_token: &CancellationToken,
 ) -> Result<(), String> {
+    if cancellation_token.is_cancelled() {
+        return Err("calendar sync cancelled".to_string());
+    }
     let provider = db
         .with_conn({
             let account_id = account_id.to_string();
@@ -61,10 +66,20 @@ pub async fn calendar_sync_account_impl(
         .await?;
 
     match provider {
-        Some("google_api") => sync_google_calendar_account(account_id, db, gmail).await,
-        Some("graph") => sync_graph_calendar_account(account_id, db, graph).await,
+        Some("google_api") => {
+            sync_google_calendar_account(account_id, db, gmail, cancellation_token).await
+        }
+        Some("graph") => {
+            sync_graph_calendar_account(account_id, db, graph, cancellation_token).await
+        }
         Some("caldav") => {
-            sync_caldav_calendar_account(account_id, db, gmail.encryption_key()).await
+            sync_caldav_calendar_account(
+                account_id,
+                db,
+                gmail.encryption_key(),
+                cancellation_token,
+            )
+            .await
         }
         _ => Err(format!(
             "No calendar provider configured for account {account_id}"
@@ -80,10 +95,11 @@ pub async fn calendar_sync_account(
     account_id: &str,
     db: &ReadDbState,
     encryption_key: [u8; 32],
+    cancellation_token: &CancellationToken,
 ) -> Result<(), String> {
     let gmail = gmail::client::new_gmail_state(encryption_key);
     let graph = graph::client::new_graph_state(encryption_key);
-    calendar_sync_account_impl(account_id, db, &gmail, &graph).await
+    calendar_sync_account_impl(account_id, db, &gmail, &graph, cancellation_token).await
 }
 
 pub async fn upsert_discovered_calendars_impl(
@@ -245,6 +261,7 @@ async fn sync_google_calendar_account(
     account_id: &str,
     db: &ReadDbState,
     gmail: &GmailState,
+    cancellation_token: &CancellationToken,
 ) -> Result<(), String> {
     let client = gmail.get(account_id).await?;
     let calendars = google_calendar_list_calendars_impl(account_id, db, &client).await?;
@@ -252,6 +269,16 @@ async fn sync_google_calendar_account(
     let visible_calendars = load_visible_calendars(db, account_id).await?;
 
     for calendar in visible_calendars {
+        // Cancellation checkpoint - mirrors the IMAP and JMAP per-mailbox
+        // patterns. Calendar sync is idempotent against CalDAV CTags /
+        // Exchange ETags, so a cancelled run resumes from wherever the next
+        // run finds the provider state - no marker-file repair needed.
+        // Point-checks between RPC boundaries, not mid-RPC. See
+        // `docs/service/phase-5-plan.md` § "Cancellation: runtime ->
+        // handler -> provider chain".
+        if cancellation_token.is_cancelled() {
+            return Err("calendar sync cancelled".to_string());
+        }
         let sync_result = google_calendar_sync_events_impl(
             account_id,
             &calendar.remote_id,
@@ -270,6 +297,7 @@ async fn sync_graph_calendar_account(
     account_id: &str,
     db: &ReadDbState,
     graph: &GraphState,
+    cancellation_token: &CancellationToken,
 ) -> Result<(), String> {
     let client = graph.get(account_id).await?;
     let calendars = graph_calendar_list_calendars_impl(account_id, db, &client).await?;
@@ -277,6 +305,9 @@ async fn sync_graph_calendar_account(
     let visible_calendars = load_visible_calendars(db, account_id).await?;
 
     for calendar in visible_calendars {
+        if cancellation_token.is_cancelled() {
+            return Err("calendar sync cancelled".to_string());
+        }
         let sync_result = graph_calendar_sync_events_impl(
             account_id,
             &calendar.remote_id,
@@ -295,6 +326,7 @@ async fn sync_caldav_calendar_account(
     account_id: &str,
     db: &ReadDbState,
     encryption_key: &[u8; 32],
+    cancellation_token: &CancellationToken,
 ) -> Result<(), String> {
     let config =
         super::caldav::load_caldav_account_config(db, encryption_key, account_id).await?;
@@ -310,7 +342,14 @@ async fn sync_caldav_calendar_account(
     // sites - construction *and* sync - so a stale principal doesn't
     // wedge the account permanently. (Round 3 #32.)
     let needs_discovery_now = config.home_url().is_none();
-    let attempt = run_caldav_sync_attempt(account_id, db, &config, needs_discovery_now).await;
+    let attempt = run_caldav_sync_attempt(
+        account_id,
+        db,
+        &config,
+        needs_discovery_now,
+        cancellation_token,
+    )
+    .await;
     match attempt {
         Ok(()) => Ok(()),
         Err(err) if used_persisted => {
@@ -323,7 +362,7 @@ async fn sync_caldav_calendar_account(
                 .await?;
             // After clearing, both URLs are None so this branch always runs
             // discovery; pass `true` to persist the freshly discovered values.
-            run_caldav_sync_attempt(account_id, db, &refreshed, true).await
+            run_caldav_sync_attempt(account_id, db, &refreshed, true, cancellation_token).await
         }
         Err(err) => Err(err),
     }
@@ -334,6 +373,7 @@ async fn run_caldav_sync_attempt(
     db: &ReadDbState,
     config: &super::caldav::CaldavAccountConfig,
     persist_after_build: bool,
+    cancellation_token: &CancellationToken,
 ) -> Result<(), String> {
     let client = super::caldav::build_client_from_config(config).await?;
     if persist_after_build {
@@ -345,7 +385,7 @@ async fn run_caldav_sync_attempt(
         )
         .await;
     }
-    rtsk::caldav::sync::sync_caldav_calendars(&client, db, account_id)
+    rtsk::caldav::sync::sync_caldav_calendars(&client, db, account_id, cancellation_token)
         .await
         .map(|_| ())
 }
