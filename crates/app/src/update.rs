@@ -367,11 +367,16 @@ impl ReadyApp {
             Message::ShowHelp => Task::none(),
             Message::SyncCurrentFolder => self.sync_all_accounts(),
             Message::SyncTick => {
+                // Phase 5 task 3b: UI-side `sync_calendars` is gone; calendar
+                // sync is owned by the Service's `CalendarRuntime` and will be
+                // kicked over IPC in task 10. For now, the SyncTick fires its
+                // remaining UI work without a calendar arm; calendar sync stays
+                // dark across the next few commits until the Service wiring
+                // lands. GAL relocates the same way later in Phase 5.
                 let sync_task = self.sync_all_accounts();
                 let pending_task = self.process_pending_ops();
                 let gal_task = self.refresh_gal_caches();
-                let cal_task = self.sync_calendars();
-                Task::batch([sync_task, pending_task, gal_task, cal_task])
+                Task::batch([sync_task, pending_task, gal_task])
             }
             Message::SyncComplete(account_id, result) => {
                 // Phase 3 task 15: per-account "already-in-flight" gating
