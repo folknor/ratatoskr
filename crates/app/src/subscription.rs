@@ -113,6 +113,14 @@ impl ReadyApp {
         // modes (one timer stops working but the other doesn't); one
         // cadence + Service-side gating is the simpler shape and
         // survives the Phase 9 tray-resident move unchanged.
+        //
+        // TODO(phase-9): when tray-resident mode lands, the SyncTick
+        // cadence stops working when the UI window is closed. Move the
+        // cadence Service-side (a tokio::time::interval in the dispatch
+        // loop, gated by per-account staleness). The Service-side
+        // staleness logic (CalendarRuntime::accounts_due_for_sync at 1h,
+        // refresh_gal_for_account's 24h cache check) transplants
+        // unchanged.
 
         // Phase 3 task 17: debounced reader reload after
         // `index.committed` notifications. Polls every 200 ms; the
