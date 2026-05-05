@@ -5,9 +5,10 @@ use service_api::{
     BootClassification, BootExitCode, BootReadyResponse, BoundedLineReader, HealthPingResponse,
     JsonRpcErrorObject, JsonRpcRequest, Notification, ParsedServiceMessage, PROTOCOL_VERSION,
     RequestParams, RequestTimeoutKind, ServiceError, ServiceResponse, ShutdownResponse,
-    encode_message, parse_service_message,
+    SyncCancelAccountParams, SyncCancelAck, SyncCompleted, SyncResult, SyncRunId,
+    SyncStartAccountParams, SyncStartAck, encode_message, parse_service_message,
 };
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque, hash_map::Entry};
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex, PoisonError, Weak,
@@ -16,7 +17,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::process::{Child, Command};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 const STDIN_QUEUE_CAP: usize = 1024;
 const NOTIFICATION_QUEUE_CAP: usize = 1024;
@@ -35,6 +36,55 @@ const CRASHLOOP_WINDOW: Duration = Duration::from_secs(30);
 const CRASHLOOP_THRESHOLD: usize = 3;
 
 pub type ServiceNotificationReceiver = Arc<NotificationQueue>;
+
+/// Per-`SyncRunId` waiter slot. Phase 3 task 14: a `start_sync` /
+/// `cancel_and_await` caller subscribes to a broadcast channel for the
+/// active run; on `Notification::SyncCompleted` arrival, the reader
+/// task fans the result out across every subscriber. The
+/// `Completed` variant latches a result that arrives *before* any
+/// caller subscribes (the subscribe-after-completion race) so a fast
+/// `SyncCompleted` is not dropped on the floor. Latched entries are
+/// GC'd after `LATCHED_COMPLETED_TTL` if no consumer ever shows up.
+enum PendingSync {
+    Pending(broadcast::Sender<SyncResult>),
+    Completed {
+        result: SyncResult,
+        latched_at: Instant,
+    },
+}
+
+const SYNC_BROADCAST_CAPACITY: usize = 8;
+const LATCHED_COMPLETED_TTL: Duration = Duration::from_secs(30);
+
+type PendingSyncs = Arc<Mutex<HashMap<SyncRunId, PendingSync>>>;
+
+/// Drain every entry: `Pending` senders are dropped (subscribers
+/// receive `RecvError::Closed` and surface as
+/// `Err(ClientError::ServiceCrashed)`); `Completed` entries are
+/// discarded. Used by `handle_crash` and `Drop` so an in-flight
+/// `start_sync` caller does not park forever across a Service
+/// crash / respawn.
+fn fail_pending_syncs(map: &PendingSyncs) {
+    let mut guard = map.lock().unwrap_or_else(PoisonError::into_inner);
+    guard.clear();
+}
+
+/// Drop `Completed` entries that have aged past `LATCHED_COMPLETED_TTL`.
+/// Cheap; called opportunistically (no separate timer task is needed -
+/// the next `start_sync` / `cancel_and_await` runs the sweep before
+/// inserting). 30 s is a wide safety margin against the sub-second
+/// subscribe-after-completion race; revisit if a longer race window
+/// surfaces.
+fn sweep_latched_completed(map: &PendingSyncs) {
+    let mut guard = map.lock().unwrap_or_else(PoisonError::into_inner);
+    let cutoff = Instant::now();
+    guard.retain(|_, entry| match entry {
+        PendingSync::Completed { latched_at, .. } => {
+            cutoff.duration_since(*latched_at) < LATCHED_COMPLETED_TTL
+        }
+        PendingSync::Pending(_) => true,
+    });
+}
 
 /// Mutable per-incarnation state. Replaced atomically on every respawn.
 ///
@@ -76,6 +126,10 @@ struct RespawnConfig {
 pub struct ServiceClient {
     state: Mutex<Option<RunningState>>,
     pending: Arc<DashMap<u64, oneshot::Sender<Result<serde_json::Value, ClientError>>>>,
+    /// Phase 3 task 14: per-`SyncRunId` waiter slots. Cross-incarnation
+    /// state, drained on respawn / Drop. See `PendingSync` for the
+    /// `Pending` / `Completed` discipline.
+    pending_syncs: PendingSyncs,
     next_id: Arc<AtomicU64>,
     notifications: ServiceNotificationReceiver,
     /// Latest generation; bumped before respawn. The dispatch-side drop
@@ -441,9 +495,11 @@ impl ServiceClient {
         // `reader_should_enqueue` would drop legitimate first-boot
         // `boot.progress` notifications as stale. install_running_state's
         // store(1) below is now idempotent rather than load-bearing.
+        let pending_syncs: PendingSyncs = Arc::new(Mutex::new(HashMap::new()));
         let client = Arc::new(Self {
             state: Mutex::new(None),
             pending: Arc::clone(&pending),
+            pending_syncs: Arc::clone(&pending_syncs),
             next_id: Arc::clone(&next_id),
             notifications: Arc::clone(&notifications),
             current_generation: AtomicU32::new(1),
@@ -801,6 +857,109 @@ impl ServiceClient {
         Arc::clone(&self.notifications)
     }
 
+    /// Phase 3 task 14: kick a sync run for `account_id` and await its
+    /// terminal `SyncResult`. The IPC ack carries a `run_id`; the
+    /// caller subscribes to the `pending_syncs` slot keyed on it. Two
+    /// callers issuing concurrent `start_sync` for the same account
+    /// receive the same `run_id` from the Service (the second call's
+    /// ack carries `already_in_flight: true`) and both subscribers
+    /// resolve via the broadcast channel when `Notification::SyncCompleted`
+    /// arrives. A fast `SyncCompleted` that races the post-ack
+    /// subscriber is latched as `PendingSync::Completed` and consumed
+    /// by the late subscriber instead of being dropped.
+    pub async fn start_sync(&self, account_id: String) -> Result<SyncResult, ClientError> {
+        let ack: SyncStartAck = self
+            .request(RequestParams::SyncStartAccount {
+                params: SyncStartAccountParams { account_id },
+            })
+            .await?;
+        self.subscribe_or_consume(ack.run_id).await
+    }
+
+    /// Phase 3 task 14: cancel any in-flight sync for `account_id` and
+    /// await the terminal `SyncResult` (typically `Cancelled`). If the
+    /// Service ack reports `was_in_flight: false` (no run was active),
+    /// returns `SyncResult::Completed` immediately - there's nothing
+    /// to await.
+    pub async fn cancel_and_await(
+        &self,
+        account_id: &str,
+    ) -> Result<SyncResult, ClientError> {
+        let ack: SyncCancelAck = self
+            .request(RequestParams::SyncCancelAccount {
+                params: SyncCancelAccountParams {
+                    account_id: account_id.to_string(),
+                },
+            })
+            .await?;
+        let Some(run_id) = ack.run_id else {
+            return Ok(SyncResult::Completed);
+        };
+        self.subscribe_or_consume(run_id).await
+    }
+
+    async fn subscribe_or_consume(
+        &self,
+        run_id: SyncRunId,
+    ) -> Result<SyncResult, ClientError> {
+        sweep_latched_completed(&self.pending_syncs);
+        let rx_to_await = {
+            let mut guard = self
+                .pending_syncs
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            match guard.entry(run_id) {
+                Entry::Occupied(e) => match e.get() {
+                    PendingSync::Completed { result, .. } => {
+                        let result = result.clone();
+                        e.remove();
+                        return Ok(result);
+                    }
+                    PendingSync::Pending(tx) => tx.subscribe(),
+                },
+                Entry::Vacant(v) => {
+                    let (tx, rx) = broadcast::channel(SYNC_BROADCAST_CAPACITY);
+                    v.insert(PendingSync::Pending(tx));
+                    rx
+                }
+            }
+        };
+        let mut rx = rx_to_await;
+        rx.recv().await.map_err(|_| ClientError::ServiceCrashed)
+    }
+
+    /// Reader-task helper: route an incoming `SyncCompleted`
+    /// notification to its waiter set. If no waiters have subscribed
+    /// yet, latch the result as `PendingSync::Completed` so a
+    /// late subscriber can consume it; otherwise broadcast to every
+    /// active subscriber and remove the entry.
+    pub(crate) fn route_sync_completed(&self, completed: SyncCompleted) {
+        let mut guard = self
+            .pending_syncs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        match guard.entry(completed.run_id) {
+            Entry::Occupied(mut e) => match e.get_mut() {
+                PendingSync::Pending(tx) => {
+                    let _ = tx.send(completed.result);
+                    e.remove();
+                }
+                PendingSync::Completed { .. } => {
+                    log::warn!(
+                        "duplicate SyncCompleted for run_id {}; dropping",
+                        completed.run_id
+                    );
+                }
+            },
+            Entry::Vacant(v) => {
+                v.insert(PendingSync::Completed {
+                    result: completed.result,
+                    latched_at: Instant::now(),
+                });
+            }
+        }
+    }
+
     /// Live Service-incarnation counter. The reader task tags every
     /// notification with the generation it captured at spawn time;
     /// `notification_should_dispatch` compares the tag against this value
@@ -1029,6 +1188,13 @@ impl ServiceClient {
         // dispatch-side generation check (item 15) and be dropped.
         self.current_generation.fetch_add(1, Ordering::SeqCst);
         fail_pending(&self.pending);
+        // Phase 3 task 14: drop every Pending broadcast::Sender so
+        // any in-flight start_sync / cancel_and_await future surfaces
+        // `Err(ClientError::ServiceCrashed)` rather than parking
+        // forever across the respawn. The next SyncTick re-issues
+        // start_sync against the new incarnation, generating a fresh
+        // run_id.
+        fail_pending_syncs(&self.pending_syncs);
 
         let RunningState {
             mut child,
@@ -1679,6 +1845,11 @@ async fn reader_task<R>(
 ) where
     R: tokio::io::AsyncRead + Unpin,
 {
+    let fail_syncs_via_client = |w: &Weak<ServiceClient>| {
+        if let Some(c) = w.upgrade() {
+            fail_pending_syncs(&c.pending_syncs);
+        }
+    };
     let mut lines = BoundedLineReader::new(stdout, service_api::MAX_FRAME_BYTES);
     let mut consecutive_parse_errors: u32 = 0;
     loop {
@@ -1718,12 +1889,25 @@ async fn reader_task<R>(
                             }
                         }
                         ParsedServiceMessage::Notification(notification) => {
-                            let live = weak_client.upgrade().map(|c| c.current_generation());
+                            let upgraded = weak_client.upgrade();
+                            let live = upgraded.as_ref().map(|c| c.current_generation());
                             if !reader_should_enqueue(generation, live) {
                                 log::debug!(
                                     "reader_task(gen={generation}): dropping stale notification \
                                      (current_generation now {live:?})",
                                 );
+                                continue;
+                            }
+                            // Phase 3 task 14: SyncCompleted is consumed
+                            // by `start_sync` / `cancel_and_await`
+                            // futures via `pending_syncs`, not by the
+                            // notification queue. Route + skip enqueue
+                            // so a stray UI consumer does not see the
+                            // raw frame.
+                            if let Notification::SyncCompleted(c) = notification {
+                                if let Some(client) = upgraded {
+                                    client.route_sync_completed(c);
+                                }
                                 continue;
                             }
                             let tagged = tag_notification_with_generation(notification, generation);
@@ -1742,6 +1926,7 @@ async fn reader_task<R>(
                              consecutive parse errors; treating as Service crash",
                         );
                         fail_pending(&pending);
+                        fail_syncs_via_client(&weak_client);
                         trigger_crash_handler(&weak_client, generation);
                         return;
                     }
@@ -1749,12 +1934,14 @@ async fn reader_task<R>(
             },
             Ok(None) => {
                 fail_pending(&pending);
+                fail_syncs_via_client(&weak_client);
                 trigger_crash_handler(&weak_client, generation);
                 return;
             }
             Err(error) => {
                 log::warn!("service stdout frame error: {error}");
                 fail_pending(&pending);
+                fail_syncs_via_client(&weak_client);
                 trigger_crash_handler(&weak_client, generation);
                 return;
             }

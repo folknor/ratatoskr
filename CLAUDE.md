@@ -82,6 +82,8 @@ Use `brokkr` (not `cargo`) for check/test. It runs a gremlins scan (banned Unico
 
 Fall back to raw `cargo check`/`cargo test` only when you need to bypass clippy gating for a targeted run.
 
+**Always run `brokkr check` in the foreground with a 4-minute (240000ms) timeout.** A healthy `brokkr check` finishes well under that. If it does not, something is wrong - kill it and investigate (most often: a test hangs because a background task wasn't drained on shutdown). Do not raise the timeout to "wait it out", and do not run `brokkr check` in the background.
+
 **Never run `cargo fmt`.** Formatting is the user's call - leave whitespace, line breaks, and import ordering as written.
 
 ## Dev-Seed
