@@ -24,6 +24,8 @@ common = { path = "../common" }
 service-state = { path = "../service-state" }
 store = { path = "../stores" }
 search = { path = "../search" }
+sync = { path = "../sync" }
+rusqlite.workspace = true
 tantivy = { version = "0.26.1", default-features = false, features = ["mmap", "stemmer", "stopwords", "lz4-compression"] }
 gmail = { path = "../gmail" }
 jmap = { path = "../jmap" }

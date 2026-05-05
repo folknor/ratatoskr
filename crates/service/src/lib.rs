@@ -6,6 +6,7 @@ pub mod search_writer;
 pub mod send;
 mod send_vault;
 mod snooze_runner;
+pub mod startup_invariants;
 pub mod sync;
 pub mod sync_dispatch;
 
