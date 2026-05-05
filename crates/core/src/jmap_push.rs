@@ -23,6 +23,8 @@
 //! The bridge task coalesces notifications within a 500ms window to avoid
 //! spawning concurrent syncs for the same account.
 
+use std::sync::Arc;
+
 use crate::db::ReadDbState;
 
 /// How long to wait after a state change before forwarding the notification,
@@ -45,7 +47,20 @@ pub async fn start_jmap_push_for_account(
     let client = jmap::client::JmapClient::from_account(db, account_id, &encryption_key).await?;
 
     let (tx, mut rx) = jmap::push::create_push_channel();
-    let manager = jmap::push::start_push(&client, account_id, db, tx).await?;
+
+    // Phase 4 task 2: wire `start_push`'s new `auth_resolver` parameter.
+    // The legacy in-app code path captures the static auth header at
+    // construction (today's behaviour); Phase 4 task 3 replaces this with
+    // a Service-side resolver that calls `JmapClient::ensure_valid_token`
+    // before each connect, so refreshed bearer tokens propagate into
+    // reconnects. Behaviour-preserving shim until then.
+    let captured_header = client.inner().authorization().to_string();
+    let auth_resolver: jmap::push::AuthResolver = Arc::new(move || {
+        let header = captured_header.clone();
+        Box::pin(async move { Ok(header) })
+    });
+
+    let manager = jmap::push::start_push(&client, account_id, db, tx, auth_resolver).await?;
 
     let aid = account_id.to_string();
     let email = email.to_string();

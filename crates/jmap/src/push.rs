@@ -12,12 +12,31 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::StreamExt;
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, mpsc, watch};
 
 use db::db::ReadDbState;
 
 use super::client::JmapClient;
+
+/// Async closure that resolves the current `Authorization` header for the
+/// push WebSocket. Called by `push_connection_loop` before *each* connect
+/// attempt (initial + every reconnect) so a refreshed bearer token reaches
+/// the WebSocket on the next connection. Returning an error fails the
+/// connect attempt and counts toward `MAX_CONSECUTIVE_FAILURES`.
+///
+/// Phase 4 of `docs/service/phase-4-plan.md` introduced this parameter to
+/// fix mid-subscription token-expiry: the previous design captured the
+/// auth header at construction and never re-read it, so a refreshed token
+/// never propagated into the WebSocket and the connection died after
+/// `MAX_CONSECUTIVE_FAILURES` 401s. The Service-side resolver in
+/// `crates/service/src/push.rs` calls `JmapClient::ensure_valid_token`
+/// inside the closure; the legacy in-app resolver in
+/// `crates/core/src/jmap_push.rs` returns the captured header until Phase
+/// 4 task 3 replaces the call site.
+pub type AuthResolver =
+    Arc<dyn Fn() -> BoxFuture<'static, Result<String, String>> + Send + Sync>;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -118,12 +137,17 @@ pub fn create_push_channel() -> (mpsc::Sender<StateChange>, mpsc::Receiver<State
 /// are forwarded to `change_tx`. The connection auto-reconnects with
 /// exponential backoff on failure.
 ///
+/// `auth_resolver` is called before each connect attempt to obtain the
+/// current `Authorization` header. This lets refreshed bearer tokens
+/// propagate into reconnects without a full restart - see `AuthResolver`.
+///
 /// Returns an error if the server does not advertise WebSocket capability.
 pub async fn start_push(
     client: &JmapClient,
     account_id: &str,
     db: &ReadDbState,
     change_tx: mpsc::Sender<StateChange>,
+    auth_resolver: AuthResolver,
 ) -> Result<JmapPushManager, String> {
     let inner = client.inner();
     let session = inner.session();
@@ -140,9 +164,6 @@ pub async fn start_push(
     }
 
     let ws_url = ws_caps.url().to_string();
-
-    // Extract auth header from the client
-    let auth_header = inner.authorization().to_string();
 
     // Load last known push state from DB
     let last_push_state = load_push_state(db, account_id).await?;
@@ -167,7 +188,7 @@ pub async fn start_push(
         push_connection_loop(
             &aid,
             &ws_url,
-            &auth_header,
+            auth_resolver,
             last_push_state,
             state,
             shutdown_rx,
@@ -210,7 +231,7 @@ impl JmapPushManager {
 async fn push_connection_loop(
     account_id: &str,
     ws_url: &str,
-    auth_header: &str,
+    auth_resolver: AuthResolver,
     initial_push_state: Option<String>,
     state: Arc<RwLock<PushState>>,
     mut shutdown_rx: watch::Receiver<bool>,
@@ -239,13 +260,42 @@ async fn push_connection_loop(
             break;
         }
 
+        // Resolve the auth header before each connect attempt. Failures
+        // here count toward MAX_CONSECUTIVE_FAILURES the same way an
+        // actual WebSocket connect failure would - the typical cause is
+        // an OAuth refresh that itself failed (token revoked, network
+        // partition during refresh).
+        let auth_header = match auth_resolver().await {
+            Ok(h) => h,
+            Err(e) => {
+                consecutive_failures += 1;
+                log::warn!(
+                    "[JMAP push] {account_id}: auth resolver failed \
+                     (attempt {consecutive_failures}/{MAX_CONSECUTIVE_FAILURES}): {e}"
+                );
+                *state.write().await = PushState::Error(e);
+                save_consecutive_failures(db, account_id, consecutive_failures).await;
+                let backoff = backoff_duration(consecutive_failures);
+                tokio::select! {
+                    _ = tokio::time::sleep(backoff) => {}
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() {
+                            *state.write().await = PushState::Disconnected;
+                            break;
+                        }
+                    }
+                }
+                continue;
+            }
+        };
+
         *state.write().await = PushState::Connecting;
         log::info!("[JMAP push] {account_id}: connecting to {ws_url}");
 
         match connect_and_listen(
             account_id,
             ws_url,
-            auth_header,
+            &auth_header,
             &last_push_state,
             &state,
             &mut shutdown_rx,
