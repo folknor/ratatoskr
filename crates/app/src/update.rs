@@ -229,16 +229,26 @@ impl ReadyApp {
                         log::debug!("Service notification: {}", notification.method_name());
                         Task::none()
                     }
-                    service_api::Notification::SyncCompleted(_)
-                    | service_api::Notification::IndexCommitted(_) => {
-                        // Phase 3 task 14 (sync.completed) and task 17
-                        // (index.committed) wire the consumers. Until
-                        // then the variants exist on the wire but no
-                        // app-side handler runs.
+                    service_api::Notification::SyncCompleted(_) => {
+                        // Phase 3 task 14: SyncCompleted is consumed
+                        // inside `ServiceClient::route_sync_completed`
+                        // before the reader task enqueues. Reaching
+                        // this arm means the routing was bypassed
+                        // (test path that bumps the queue directly,
+                        // or a stale notification past respawn) - drop
+                        // with a debug log.
                         log::debug!(
-                            "Service notification (Phase 3 unwired): {}",
-                            notification.method_name()
+                            "SyncCompleted reached update arm; routing already consumed it",
                         );
+                        Task::none()
+                    }
+                    service_api::Notification::IndexCommitted(_) => {
+                        // Phase 3 task 17: stamp the pending reload
+                        // deadline; the 200 ms `ReaderReloadTick`
+                        // handler calls `reader.reload()` once the
+                        // stamp has aged past one tick. Debounces a
+                        // commit storm under heavy initial sync.
+                        self.pending_reader_reload = Some(std::time::Instant::now());
                         Task::none()
                     }
                 }
@@ -686,6 +696,41 @@ impl ReadyApp {
                     Ok(count) => log::info!("GAL cache refreshed: {count} entries"),
                     Err(e) => log::warn!("GAL cache refresh failed: {e}"),
                 }
+                Task::none()
+            }
+            Message::JmapPushKick(account_id) => {
+                let Some(client) = self.service_client.as_ref().cloned() else {
+                    return Task::none();
+                };
+                Task::perform(
+                    async move {
+                        if let Err(error) = client.start_sync(account_id.clone()).await {
+                            log::debug!(
+                                "JmapPushKick start_sync({account_id}) failed: {error}",
+                            );
+                        }
+                    },
+                    |()| Message::Noop,
+                )
+            }
+            Message::ReaderReloadTick => {
+                // Phase 3 task 17: debounced reader reload. Skip when
+                // there is no pending stamp (idle) or when the stamp
+                // was set within the last tick window (a fresh
+                // IndexCommitted just landed; the next tick will run
+                // the reload).
+                let Some(stamp) = self.pending_reader_reload else {
+                    return Task::none();
+                };
+                if stamp.elapsed() < std::time::Duration::from_millis(200) {
+                    return Task::none();
+                }
+                if let Some(reader) = self.search_state.as_ref()
+                    && let Err(e) = reader.reload()
+                {
+                    log::warn!("SearchReadState::reload failed: {e}");
+                }
+                self.pending_reader_reload = None;
                 Task::none()
             }
             Message::ModifiersChanged(modifiers) => {

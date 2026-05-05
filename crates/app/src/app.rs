@@ -91,6 +91,16 @@ pub struct ReadyApp {
 
     // Search state
     pub(crate) search_state: Option<Arc<rtsk::search::SearchReadState>>,
+    /// Phase 3 task 17: stamped on `Notification::IndexCommitted`
+    /// arrival; cleared by the 200 ms `ReaderReloadTick` handler
+    /// after calling `reader.reload()`. The debounce collapses a
+    /// commit storm under heavy initial sync (writer task can fire
+    /// up to one commit per
+    /// `crates/service/src/search_writer.rs::COMMIT_TIME_THRESHOLD`)
+    /// into ~5 reloads/sec. Reload itself is cheap; the debounce
+    /// matters because pinning a `Searcher` across rapid reloads
+    /// keeps stale segments mapped longer than necessary.
+    pub(crate) pending_reader_reload: Option<std::time::Instant>,
     pub(crate) search_generation: GenerationCounter<Search>,
     pub(crate) search_query: UndoableText,
     pub(crate) search_debounce_deadline: Option<iced::time::Instant>,
@@ -407,6 +417,7 @@ impl ReadyApp {
             palette: Palette::new(CommandRegistry::new(), resolver),
             undo_stack: UndoStack::default(),
             search_state,
+            pending_reader_reload: None,
             chat_timeline: None,
             chat_generation: GenerationCounter::new(),
             chat_list_generation: GenerationCounter::new(),

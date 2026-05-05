@@ -47,8 +47,14 @@ impl ReadyApp {
             self.settings.subscription().map(Message::Settings),
             self.status_bar.subscription().map(Message::StatusBar),
             sync_progress_subscription(&self.sync_receiver).map(Message::SyncProgress),
-            jmap_push_subscription(&self.jmap_push_receiver)
-                .map(|account_id| Message::SyncComplete(account_id, Ok(()))),
+            // Phase 3 task 18: JMAP push events kick the Service-side
+            // sync via IPC instead of pretending the sync already
+            // completed. The Service runs the actual sync; the next
+            // SyncTick will also cover the same account, so dropping
+            // the kick under load is fine. Phase 4 collapses this
+            // round-trip by lifting the WebSocket subscriber into the
+            // Service (no UI hop).
+            jmap_push_subscription(&self.jmap_push_receiver).map(Message::JmapPushKick),
         ];
 
         if self.service_client.is_some() {
@@ -113,6 +119,19 @@ impl ReadyApp {
             iced::time::every(std::time::Duration::from_secs(3600))
                 .map(|_| Message::GalRefreshTick),
         );
+
+        // Phase 3 task 17: debounced reader reload after
+        // `index.committed` notifications. Polls every 200 ms; the
+        // handler reloads the searcher only when there is a pending
+        // reload that has aged at least one tick. Cheap when idle (no
+        // pending) and bounded under heavy initial-sync pressure
+        // (~5 reloads/sec at most).
+        if self.search_state.is_some() {
+            subs.push(
+                iced::time::every(std::time::Duration::from_millis(200))
+                    .map(|_| Message::ReaderReloadTick),
+            );
+        }
 
         if self
             .settings

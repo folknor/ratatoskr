@@ -357,6 +357,21 @@ pub enum Message {
     GalRefreshTick,
     GalCacheRefreshed(Result<usize, String>),
 
+    // Phase 3 task 17: debounced reader reload after `index.committed`
+    // notifications. The notification handler stamps
+    // `App.pending_reader_reload`; a 200 ms tick subscription emits
+    // `ReaderReloadTick`; the handler calls `SearchReadState::reload()`
+    // when the stamp has aged past one tick.
+    ReaderReloadTick,
+
+    /// Phase 3 task 18: JMAP push event arrived for an account.
+    /// Handler issues `client.start_sync(account_id)` and discards
+    /// the future (the next SyncTick re-covers; missing one push
+    /// kick under load is the documented best-effort guarantee).
+    /// Phase 4 lifts the WebSocket subscriber into the Service and
+    /// removes this UI-side round-trip.
+    JmapPushKick(String),
+
     // Keyboard modifier tracking (for Ctrl+click, Shift+click)
     ModifiersChanged(iced::keyboard::Modifiers),
 
