@@ -319,34 +319,48 @@ The phase lands as one milestone but with a clean commit-level split: respawn ma
 
 ---
 
-## Phase 5 - Port sync to other providers
+## Phase 5 - IMAP cancellation depth + calendar / GAL relocation
 
-**Goal.** Gmail, Graph, IMAP sync paths run inside the Service. Calendar provider sync rides along.
+**Goal.** Close the residual UI-side sync work after Phase 3 cascaded the email-sync-relocation pattern to all four providers via `ProviderOps::sync_delta`. Specifically: finish IMAP cancellation depth (the `let _cancellation_token = cancellation_token;` incomplete-port markers), relocate calendar sync and GAL refresh into the Service, and collapse `Message::SyncTick` to be entirely IPC kicks with no UI-side provider work.
 
 **Entry criteria.**
-- Phase 3 landed for JMAP. The pattern is proven.
+- Phase 3 landed for JMAP. The dispatch pattern via `ProviderOps::sync_delta` already drives all four providers.
+- Phase 4 landed; consolidated drain shape is established.
 
 **In scope.**
-- Same Service-side hosting pattern applied to `gmail`, `graph`, `imap` provider sync entry points.
-- Calendar provider sync (today triggered from `handlers/provider.rs`) follows the same pattern.
-- Per-provider concurrency policies preserved (Gmail/Graph: 4 per account; IMAP: 1 per folder via session reuse).
-- Cancellation checkpoints applied to each provider's per-folder/per-batch loops (mirroring Phase 3's JMAP work).
+- IMAP per-folder cancellation checkpoints (close the Phase 3 incomplete port).
+- New `CalendarRuntime` mirroring `SyncRuntime`'s lifecycle surface but with simpler invariants (no marker-file lifecycle, no four-store writer halves, no invariant-pass entry).
+- `calendar.start_account_sync` request + `calendar.completed` notification + `calendar.kick` client notification.
+- `gal.kick` client notification with a Service-side handler that iterates supported accounts.
+- Drain consolidation extension: `PushRuntime → CalendarRuntime → SyncRuntime → search-writer → sentinel`.
+- UI-side teardown of `sync_calendars` and `refresh_gal_caches`; `Message::SyncTick` collapses to four IPC kicks.
 
 **Out of scope.**
 - Provider-specific protocol improvements (CONDSTORE/QRESYNC, batch APIs, etc.) - those are tracked in their own roadmap docs.
 - IMAP IDLE (rides into Phase 4's pattern when IDLE lands).
 
 **Touchpoints.**
-- `crates/service/src/handlers/sync.rs` - dispatch by provider type.
-- The four `crates/{gmail,graph,imap,jmap}/src/sync/...` paths - no functional change, just where they're called from.
-- `crates/calendar/src/sync/...` - same.
+- `crates/imap/src/imap_initial.rs` + `imap_delta.rs` - thread `cancellation_token` into the per-folder loop and per-batch persist points; remove the `let _cancellation_token = cancellation_token;` incomplete-port markers.
+- `crates/service/src/calendar.rs` - new `CalendarRuntime`.
+- `crates/service/src/handlers/calendar.rs` - new request + kick handlers.
+- `crates/service/src/handlers/gal.rs` - new kick handler.
+- `crates/service-api/src/calendar.rs` - new wire types.
+- `crates/service-api/src/{notification.rs,client_notification.rs,request.rs}` - new variants.
+- `crates/service/src/dispatch.rs` - drain step insertion + handler dispatch arms.
+- `crates/service/src/boot.rs` - `CalendarRuntime` slot install.
+- `crates/app/src/handlers/provider.rs` - **delete** `sync_calendars` and `refresh_gal_caches`; **add** thin `kick_calendar_sync` / `kick_gal_refresh` IPC wrappers.
+- `crates/app/src/update.rs` - `Message::SyncTick` collapse + new `Notification::CalendarCompleted` arm.
 
 **Exit criteria.**
-- All four provider sync paths run Service-side.
-- UI lifecycle has no remaining sync code on the hot path.
+- IMAP `let _cancellation_token = cancellation_token;` markers gone; cancellation interrupts mid-fetch.
+- Calendar sync runs Service-side via `CalendarRuntime`; UI fires `calendar.kick` on the hourly tick.
+- GAL refresh runs Service-side via `gal.kick`; no per-account runtime needed.
+- `Message::SyncTick` does no UI-side provider work.
+- Drain order: PushRuntime → CalendarRuntime → SyncRuntime → search-writer → sentinel.
 
 **Risks / open questions.**
-- IMAP session pooling needs to live Service-side; the existing per-folder-session state moves with sync.
+- IMAP session pooling: per-folder session reuse stays inside the IMAP provider; doesn't change with the cancellation depth fix.
+- See `docs/service/phase-5-plan.md` open questions for cadence-ownership (UI vs Service hourly timer), per-account vs per-calendar concurrency, GAL handler concurrency tradeoffs.
 
 ---
 
