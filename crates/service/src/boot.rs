@@ -124,6 +124,12 @@ pub(crate) struct BootSharedState {
     /// this slot to shut down the push bridges *before* `SyncRuntime`
     /// in the consolidated drain (Phase 4 task 4).
     push_runtime: Mutex<Option<Arc<crate::push::PushRuntime>>>,
+    /// Per-account calendar sync coordinator. Phase 5: installed by the
+    /// post-ready runtime task in `dispatch.rs` so calendar handlers
+    /// (start/cancel/kick) and the consolidated drain (Phase 5 task 7)
+    /// can both reach a shared `Arc<CalendarRuntime>`. Same install-once
+    /// pattern as `push_runtime` and `sync_runtime`.
+    calendar_runtime: Mutex<Option<Arc<crate::calendar::CalendarRuntime>>>,
     /// `JoinHandle` of the search-writer task. Phase 3 spawned it and
     /// discarded the handle; Phase 4 review-pass fix captures it so the
     /// consolidated drain can await termination after every
@@ -146,6 +152,7 @@ impl BootSharedState {
             app_data_dir,
             sync_runtime: Mutex::new(None),
             push_runtime: Mutex::new(None),
+            calendar_runtime: Mutex::new(None),
             search_writer_handle: Mutex::new(None),
         })
     }
@@ -235,6 +242,53 @@ impl BootSharedState {
         self.push_runtime
             .lock()
             .expect("push_runtime mutex poisoned")
+            .take()
+    }
+
+    /// Install the `CalendarRuntime` once the post-ready runtime task has
+    /// constructed it (Phase 5 task 8). Same install-once / first-wins
+    /// pattern as `install_push_runtime`.
+    #[allow(dead_code)] // wired up in Phase 5 task 8
+    pub(crate) fn install_calendar_runtime(
+        &self,
+        runtime: Arc<crate::calendar::CalendarRuntime>,
+    ) {
+        let mut guard = self
+            .calendar_runtime
+            .lock()
+            .expect("calendar_runtime mutex poisoned");
+        if guard.is_some() {
+            log::warn!(
+                "BootSharedState::install_calendar_runtime called twice; second install ignored",
+            );
+            return;
+        }
+        *guard = Some(runtime);
+    }
+
+    /// Snapshot the active `CalendarRuntime` if the post-ready task has
+    /// installed one. Returns `None` if calendar startup hasn't run yet
+    /// (or if a non-calendar code path reaches here pre-install).
+    #[allow(dead_code)] // consumed by calendar handlers in Phase 5 task 4
+    pub(crate) fn calendar_runtime(&self) -> Option<Arc<crate::calendar::CalendarRuntime>> {
+        self.calendar_runtime
+            .lock()
+            .expect("calendar_runtime mutex poisoned")
+            .as_ref()
+            .map(Arc::clone)
+    }
+
+    /// Move the `CalendarRuntime` Arc out of the slot. Used by the
+    /// consolidated drain helper (Phase 5 task 7): calendar drains
+    /// *before* sync so a calendar runner's writes complete (or cancel
+    /// cleanly) before sync teardown begins.
+    #[allow(dead_code)] // consumed by drain wire-up in Phase 5 task 7
+    pub(crate) fn take_calendar_runtime(
+        &self,
+    ) -> Option<Arc<crate::calendar::CalendarRuntime>> {
+        self.calendar_runtime
+            .lock()
+            .expect("calendar_runtime mutex poisoned")
             .take()
     }
 
