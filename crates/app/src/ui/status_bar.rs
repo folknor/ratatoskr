@@ -16,6 +16,15 @@ use crate::ui::theme::{ContainerClass, TextClass};
 /// How long transient confirmations are visible.
 const CONFIRMATION_DURATION: std::time::Duration = std::time::Duration::from_secs(3);
 
+/// Minimum interval between back-to-back "New mail in <account>"
+/// confirmations for the same account. Without this rate limit, a
+/// heavy import bursting StateChanges every debounce window would
+/// surface a fresh confirmation every ~500 ms, replacing the prior
+/// one and producing flicker. 60 s strikes a balance: the user gets
+/// notified per fresh push burst, but a sustained import shows one
+/// confirmation per minute rather than per second.
+const PUSH_CONFIRMATION_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// Cycle interval for rotating through multiple warnings or syncing accounts.
 const CYCLE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3);
 
@@ -280,21 +289,32 @@ impl StatusBar {
         }
     }
 
-    /// Record a JMAP push event for `account_id`. Stamps the
-    /// most-recent-push timestamp; the indicator view reads this to
-    /// surface "new mail arrived". Phase 4 task 8.
-    pub fn record_push_event(&mut self, account_id: String) {
-        self.last_push_at
-            .insert(account_id, std::time::Instant::now());
+    /// Record a JMAP push event for `account_id`.
+    ///
+    /// Stamps the most-recent-push timestamp on the
+    /// `last_push_at[account_id]` entry (reserved for a future
+    /// per-account icon indicator) and, if the previous push for
+    /// the same account was more than `PUSH_CONFIRMATION_INTERVAL`
+    /// ago, fires a brief "New mail in <label>" confirmation. The
+    /// rate-limit prevents a heavy import (StateChanges arriving
+    /// every debounce window) from spamming the status bar with
+    /// identical confirmations.
+    ///
+    /// `account_label` is the display string surfaced to the user
+    /// (typically the account email); the caller resolves it from
+    /// the sidebar account list.
+    pub fn record_push_event(&mut self, account_id: String, account_label: &str) {
+        let now = std::time::Instant::now();
+        let should_confirm = self
+            .last_push_at
+            .get(&account_id)
+            .is_none_or(|prev| now.duration_since(*prev) >= PUSH_CONFIRMATION_INTERVAL);
+        self.last_push_at.insert(account_id, now);
+        if should_confirm {
+            self.show_confirmation(format!("New mail in {account_label}"));
+        }
     }
 
-    /// Most recent JMAP push timestamp for `account_id`, if any.
-    /// Status-bar view consumers use this to render a transient
-    /// per-account indicator.
-    #[allow(dead_code)] // view wiring follows in a UI-polish pass
-    pub fn last_push_at(&self, account_id: &str) -> Option<std::time::Instant> {
-        self.last_push_at.get(account_id).copied()
-    }
 
     // ── Inbound data methods (called by App) ────────────
 

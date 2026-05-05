@@ -252,12 +252,15 @@ impl ReadyApp {
                         Task::none()
                     }
                     service_api::Notification::PushEvent(event) => {
-                        // Phase 4 task 8: stamp the most-recent-push
-                        // timestamp on the StatusBar so the indicator
-                        // surfaces "new mail arrived" for this account.
-                        // The Service has already kicked sync by the
-                        // time we get here; this arm is purely UI.
-                        self.status_bar.record_push_event(event.account_id);
+                        // Phase 4 task 8 + review-pass: stamp the
+                        // most-recent-push timestamp and fire a
+                        // rate-limited "New mail in <email>"
+                        // confirmation. The Service has already kicked
+                        // sync by the time we get here; this arm is
+                        // purely UI.
+                        let label = self.email_for_account(&event.account_id);
+                        self.status_bar
+                            .record_push_event(event.account_id, &label);
                         Task::none()
                     }
                 }

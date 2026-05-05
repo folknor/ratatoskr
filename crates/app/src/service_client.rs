@@ -2411,7 +2411,7 @@ mod tests {
     /// testable counterpart to the `WithGeneration` trait + the
     /// adjacent get/set methods on `Notification`.
     fn production_notification_catalog() -> Vec<Notification> {
-        use service_api::{BootPhase, BootProgress};
+        use service_api::{BootPhase, BootProgress, PushEvent};
         let phases = [
             BootPhase::LoadingKey,
             BootPhase::OpeningDatabase,
@@ -2423,7 +2423,7 @@ mod tests {
             BootPhase::SweepingQueuedDrafts,
             BootPhase::BackfillingThreadParticipants,
         ];
-        phases
+        let mut catalog: Vec<Notification> = phases
             .into_iter()
             .map(|phase| {
                 Notification::BootProgress(BootProgress {
@@ -2433,7 +2433,16 @@ mod tests {
                     service_generation: 0,
                 })
             })
-            .collect()
+            .collect();
+        // Phase 4 review-pass: PushEvent was added in task 1 but
+        // omitted from this catalog. Without an entry the cross-
+        // respawn round-trip test below silently skips the new
+        // variant.
+        catalog.push(Notification::PushEvent(PushEvent {
+            account_id: "acc-1".into(),
+            service_generation: 0,
+        }));
+        catalog
     }
 
     /// Catalog-driven regression test: every production notification
