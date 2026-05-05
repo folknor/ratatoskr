@@ -7,10 +7,6 @@ use std::collections::HashSet;
 
 use common::types::{ProviderCtx, SyncProviderCtx, SyncResult};
 use db::db::ReadDbState;
-use db::db::queries_extra::{
-    UpsertCalendarEventParams, delete_event_by_remote_id_sync, save_calendar_sync_token_sync,
-    upsert_calendar_event_sync, upsert_calendar_sync,
-};
 use db::progress::ProgressReporter;
 use service_state::{
     BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle,
@@ -321,7 +317,8 @@ pub(crate) async fn graph_delta_sync(
         }
     }
 
-    // Contacts + categories + calendar delta sync: every 20th cycle (change rarely)
+    // Contacts + categories: every 20th cycle (change rarely). Calendar
+    // delta runs through `CalendarRuntime` (Phase 5), not from this path.
     if cycle.is_multiple_of(20) {
         if let Err(e) =
             super::contact_sync::graph_contacts_delta_sync(client, ctx.account_id, &read_db).await
@@ -339,9 +336,6 @@ pub(crate) async fn graph_delta_sync(
                 }
             }
             Err(e) => log::warn!("Exchange group delta sync failed (non-fatal): {e}"),
-        }
-        if let Err(e) = graph_calendar_delta_sync(client, ctx.account_id, &read_db).await {
-            log::warn!("Graph calendar delta sync failed (non-fatal): {e}");
         }
     }
 
@@ -482,179 +476,6 @@ async fn filter_pending_ops(
         &blocked_threads,
         |message| &message.base.thread_id,
     ))
-}
-
-// ---------------------------------------------------------------------------
-// Calendar delta sync
-// ---------------------------------------------------------------------------
-
-/// Run a calendar delta sync for a Graph account.
-///
-/// Lists calendars, upserts them into the DB, then syncs events for each
-/// visible calendar using delta queries. Delta links are stored in the
-/// calendar's `sync_token` column.
-async fn graph_calendar_delta_sync(
-    client: &GraphClient,
-    account_id: &str,
-    db: &ReadDbState,
-) -> Result<(), String> {
-    use super::calendar_sync::{graph_list_calendars, graph_sync_calendar_events};
-
-    let calendars = graph_list_calendars(client, db).await?;
-    let aid = account_id.to_string();
-
-    upsert_graph_calendars(db, &aid, &calendars).await?;
-    let visible = load_visible_graph_calendars(db, &aid).await?;
-
-    for (calendar_id, remote_id, sync_token) in &visible {
-        let result =
-            graph_sync_calendar_events(client, db, remote_id, sync_token.as_deref()).await?;
-        persist_graph_calendar_events(db, &aid, calendar_id, result).await?;
-        log::info!("Graph calendar sync: synced calendar '{remote_id}' (cal_id={calendar_id})");
-    }
-
-    Ok(())
-}
-
-/// Upsert discovered Graph calendars into the database.
-async fn upsert_graph_calendars(
-    db: &ReadDbState,
-    account_id: &str,
-    calendars: &[super::calendar_sync::GraphCalendarInfo],
-) -> Result<(), String> {
-    let aid = account_id.to_string();
-    let data: Vec<(String, Option<String>, bool, bool)> = calendars
-        .iter()
-        .map(|c| {
-            (
-                c.remote_id.clone(),
-                c.color.clone(),
-                c.is_primary,
-                c.can_edit,
-            )
-        })
-        .collect();
-    let names: Vec<String> = calendars.iter().map(|c| c.display_name.clone()).collect();
-
-    db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-        for (i, (remote_id, color, is_primary, can_edit)) in data.iter().enumerate() {
-            upsert_calendar_sync(
-                &tx,
-                &aid,
-                "graph",
-                remote_id,
-                Some(names[i].as_str()),
-                color.as_deref(),
-                *is_primary,
-                *can_edit,
-            )?;
-        }
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
-}
-
-/// Load visible calendars (id, remote_id, sync_token) for an account.
-async fn load_visible_graph_calendars(
-    db: &ReadDbState,
-    account_id: &str,
-) -> Result<Vec<(String, String, Option<String>)>, String> {
-    let aid = account_id.to_string();
-    db.with_conn(move |conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, remote_id, sync_token FROM calendars \
-                 WHERE account_id = ?1 AND is_visible = 1 \
-                 ORDER BY is_primary DESC, display_name ASC",
-            )
-            .map_err(|e| e.to_string())?;
-        stmt.query_map(rusqlite::params![aid], |row| {
-            Ok((
-                row.get::<_, String>("id")?,
-                row.get::<_, String>("remote_id")?,
-                row.get::<_, Option<String>>("sync_token")?,
-            ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
-    })
-    .await
-}
-
-/// Persist synced calendar events and update the delta link.
-#[allow(clippy::too_many_lines)]
-async fn persist_graph_calendar_events(
-    db: &ReadDbState,
-    account_id: &str,
-    calendar_id: &str,
-    result: super::calendar_sync::GraphCalendarSyncResult,
-) -> Result<(), String> {
-    let aid = account_id.to_string();
-    let cal_id = calendar_id.to_string();
-    let new_delta_link = result.new_delta_link;
-    let created = result.created;
-    let updated = result.updated;
-    let deleted_ids = result.deleted_remote_ids;
-
-    db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-
-        for event in created.into_iter().chain(updated) {
-            upsert_calendar_event_sync(
-                &tx,
-                &UpsertCalendarEventParams {
-                    account_id: aid.clone(),
-                    google_event_id: event.remote_event_id.clone(),
-                    summary: event.summary.clone(),
-                    description: event.description.clone(),
-                    location: event.location.clone(),
-                    start_time: event.start_time,
-                    end_time: event.end_time,
-                    is_all_day: event.is_all_day,
-                    status: event.status.clone(),
-                    organizer_email: event.organizer_email.clone(),
-                    attendees_json: event.attendees_json.clone(),
-                    html_link: event.html_link.clone(),
-                    calendar_id: Some(cal_id.clone()),
-                    remote_event_id: Some(event.remote_event_id.clone()),
-                    etag: event.etag.clone(),
-                    ical_data: event.ical_data.clone(),
-                    uid: event.uid.clone(),
-                    title: None,
-                    // Resolved IANA name from `parse_graph_datetime`, so
-                    // the RRULE expander walks recurrences in the source
-                    // zone instead of the user's host zone. (Round 3 #6.)
-                    timezone: event.timezone.clone(),
-                    recurrence_rule: None,
-                    organizer_name: None,
-                    rsvp_status: None,
-                    availability: None,
-                    visibility: None,
-                    // Graph's calendarView returns master + exception events
-                    // as separate `singleInstance`/`exception` types; this
-                    // sync path doesn't yet plumb the override discriminator
-                    // through. Leave None - the master row stands alone
-                    // until that work lands.
-                    recurrence_id: None,
-                },
-            )?;
-        }
-
-        for remote_event_id in &deleted_ids {
-            delete_event_by_remote_id_sync(&tx, &cal_id, remote_event_id)?;
-        }
-
-        if let Some(ref delta_link) = new_delta_link {
-            save_calendar_sync_token_sync(&tx, &cal_id, Some(delta_link.as_str()))?;
-        }
-
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
 }
 
 /// Public entry point for folder sync (used by ops.rs list_folders).

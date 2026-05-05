@@ -227,22 +227,50 @@ impl CalendarRuntime {
     /// Cancel an in-flight runner for `account_id`. Returns the active
     /// `run_id` so the caller can subscribe to `CalendarRunCompleted` and
     /// await the cancellation outcome (mirrors `SyncCancelAck`).
+    ///
+    /// If the entry exists but the supervisor has already finished, the
+    /// run already emitted its terminal notification and there is nothing
+    /// to await. Prune and return `None` so `cancel_and_await` does not
+    /// subscribe to a `run_id` that will never emit again. Drops the
+    /// in-memory `last_completed` entry too so a future re-create with the
+    /// same account id starts with a clean slate.
     pub async fn cancel_account(&self, account_id: &str) -> CalendarCancelAck {
-        let map = self.inner.accounts.lock().await;
-        match map.get(account_id) {
-            Some(entry) => {
+        let mut map = self.inner.accounts.lock().await;
+        let outcome = map.get(account_id).map(|entry| {
+            let finished = entry
+                .supervisor
+                .as_ref()
+                .is_none_or(JoinHandle::is_finished);
+            if !finished {
                 entry.cancel.cancel();
+            }
+            (entry.run_id, finished)
+        });
+        match outcome {
+            Some((_, true)) => {
+                map.remove(account_id);
+                drop(map);
+                self.inner.last_completed.lock().await.remove(account_id);
                 CalendarCancelAck {
                     account_id: account_id.into(),
-                    run_id: Some(entry.run_id),
-                    was_in_flight: true,
+                    run_id: None,
+                    was_in_flight: false,
                 }
             }
-            None => CalendarCancelAck {
+            Some((run_id, false)) => CalendarCancelAck {
                 account_id: account_id.into(),
-                run_id: None,
-                was_in_flight: false,
+                run_id: Some(run_id),
+                was_in_flight: true,
             },
+            None => {
+                drop(map);
+                self.inner.last_completed.lock().await.remove(account_id);
+                CalendarCancelAck {
+                    account_id: account_id.into(),
+                    run_id: None,
+                    was_in_flight: false,
+                }
+            }
         }
     }
 

@@ -41,13 +41,8 @@ pub(super) async fn run_delta_sync(ctx: &SyncCtx<'_>) -> Result<GmailSyncResult,
     // Sync signatures on each delta (lightweight - single API call)
     labels::sync_signatures(ctx).await?;
 
-    // Calendar delta sync: every 5th cycle (calendar events change moderately)
-    if cycle.is_multiple_of(5)
-        && let Err(e) =
-            super::super::calendar::sync_calendars(ctx.client, ctx.account_id, ctx.db).await
-    {
-        log::warn!("Google Calendar delta sync failed (non-fatal): {e}");
-    }
+    // Calendar sync runs through `CalendarRuntime` (Phase 5); not invoked
+    // from the email-delta path.
 
     // Contacts delta sync: every 20th cycle (contacts change rarely)
     if cycle.is_multiple_of(20) {

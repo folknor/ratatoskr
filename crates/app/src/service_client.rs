@@ -1057,6 +1057,17 @@ impl ServiceClient {
             .pending_syncs
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        let now = Instant::now();
+        // Sweep aged latched entries on every route. The cancel-on-delete
+        // and `cancel_account` prune-on-finished paths can produce a
+        // route with no awaiter; bounding map size to TTL keeps the
+        // latch protection without unbounded growth across long sessions.
+        guard.retain(|_, entry| match entry {
+            PendingSync::Completed { latched_at, .. } => {
+                now.duration_since(*latched_at) < LATCHED_COMPLETED_TTL
+            }
+            PendingSync::Pending(_) => true,
+        });
         match guard.entry(completed.run_id) {
             Entry::Occupied(mut e) => match e.get_mut() {
                 PendingSync::Pending(tx) => {
@@ -1073,7 +1084,7 @@ impl ServiceClient {
             Entry::Vacant(v) => {
                 v.insert(PendingSync::Completed {
                     result: completed.result,
-                    latched_at: Instant::now(),
+                    latched_at: now,
                 });
             }
         }
@@ -1082,11 +1093,28 @@ impl ServiceClient {
     /// Reader-task helper: route an incoming `CalendarRunCompleted`
     /// notification to its waiter set. Mirror of `route_sync_completed`
     /// for calendar runs.
+    ///
+    /// Sweeps aged latched entries before inserting. Kick-driven calendar
+    /// runs always complete with no awaiter (the kick path on `SyncTick`
+    /// never subscribes), so without an in-route sweep every kick that
+    /// completes adds a latched entry that only ages out when an
+    /// explicit-request awaiter calls `subscribe_or_consume_calendar`.
+    /// Explicit-request paths are uncommon, so the map would otherwise
+    /// grow with every kick until the next respawn. Sweeping on each
+    /// route keeps the latch protecting genuine awaiter-after-completion
+    /// races (cancel-on-delete, post-account-add) without unbounded growth.
     pub(crate) fn route_calendar_run_completed(&self, completed: CalendarRunCompleted) {
         let mut guard = self
             .pending_calendars
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        let now = Instant::now();
+        guard.retain(|_, entry| match entry {
+            PendingCalendar::Completed { latched_at, .. } => {
+                now.duration_since(*latched_at) < LATCHED_COMPLETED_TTL
+            }
+            PendingCalendar::Pending(_) => true,
+        });
         match guard.entry(completed.run_id) {
             Entry::Occupied(mut e) => match e.get_mut() {
                 PendingCalendar::Pending(tx) => {
@@ -1103,7 +1131,7 @@ impl ServiceClient {
             Entry::Vacant(v) => {
                 v.insert(PendingCalendar::Completed {
                     result: completed.result,
-                    latched_at: Instant::now(),
+                    latched_at: now,
                 });
             }
         }

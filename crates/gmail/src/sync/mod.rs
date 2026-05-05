@@ -107,10 +107,9 @@ async fn run_initial_sync(ctx: &SyncCtx<'_>, days_back: i64) -> Result<(), Strin
         log::warn!("Google otherContacts initial sync failed (non-fatal): {e}");
     }
 
-    // Phase 5: Sync Google Calendar (non-fatal)
-    if let Err(e) = super::calendar::sync_calendars(ctx.client, ctx.account_id, ctx.db).await {
-        log::warn!("Google Calendar initial sync failed (non-fatal): {e}");
-    }
+    // Calendar sync runs through `CalendarRuntime` (Phase 5), not from the
+    // email sync path - the kick handler in `service::handlers::calendar`
+    // owns the cadence and the `WriteDbState` write surface.
 
     let total = thread_ids.len() as u64;
     log::info!(

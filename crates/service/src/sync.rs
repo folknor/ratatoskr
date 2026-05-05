@@ -273,20 +273,41 @@ impl SyncRuntime {
     /// Cancel an in-flight runner for `account_id`. Returns the active
     /// `run_id` so the caller can subscribe to `SyncCompleted` and
     /// await the cancellation outcome.
+    ///
+    /// If the entry exists but the supervisor has already finished, the
+    /// run emitted its terminal `SyncCompleted` already. Prune and
+    /// return `None` so `cancel_and_await` does not park on a `run_id`
+    /// that will never emit again.
     pub async fn cancel_account(&self, account_id: &str) -> SyncCancelAck {
-        let map = self.inner.accounts.lock().await;
-        match map.get(account_id) {
-            Some(entry) => {
+        let mut map = self.inner.accounts.lock().await;
+        let outcome = map.get(account_id).map(|entry| {
+            let finished = entry
+                .supervisor
+                .as_ref()
+                .is_none_or(JoinHandle::is_finished);
+            if !finished {
                 entry.cancellation_token.cancel();
+            }
+            (entry.run_id, finished)
+        });
+        match outcome {
+            Some((_, true)) => {
+                map.remove(account_id);
                 SyncCancelAck {
                     account_id: account_id.into(),
-                    run_id: Some(entry.run_id),
-                    was_in_flight: true,
-                    // SyncRuntime knows nothing about calendar; the
-                    // handler stamps this field after piggyback.
+                    run_id: None,
+                    was_in_flight: false,
                     calendar_run_id: None,
                 }
             }
+            Some((run_id, false)) => SyncCancelAck {
+                account_id: account_id.into(),
+                run_id: Some(run_id),
+                was_in_flight: true,
+                // SyncRuntime knows nothing about calendar; the
+                // handler stamps this field after piggyback.
+                calendar_run_id: None,
+            },
             None => SyncCancelAck {
                 account_id: account_id.into(),
                 run_id: None,
