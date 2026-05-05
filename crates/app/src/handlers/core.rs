@@ -629,19 +629,15 @@ impl ReadyApp {
     }
 
     pub(crate) fn handle_delete_account(&mut self, account_id: String) -> Task<Message> {
-        // Cancel any in-flight delta sync for this account so it can't keep
-        // writing to the deleted account's stores after CASCADE has fired.
-        // Caveat: `Handle::abort` drops the wrapped future at its next yield
-        // point - writes that already landed before that yield are not undone.
-        // The body-store / inline-image / search-index cleanup below re-deletes
-        // anything the sync wrote up to the abort, so orphans get reaped by
-        // the same CASCADE pass. A write that races *between* cleanup batches
-        // and abort can still orphan; closing that hole would need per-account
-        // generation checks at every store-write site.
-        if let Some(handle) = self.sync_handles.remove(&account_id) {
-            handle.abort();
-            log::info!("Aborted in-flight sync for deleted account {account_id}");
-        }
+        // Phase 3 task 16: cancel any in-flight Service-side sync via
+        // `cancel_and_await` *inside* the deletion task below (it must
+        // happen before the DB delete fires so a sync mid-persist
+        // cannot write into the about-to-be-deleted account). The old
+        // `sync_handles.abort()` codepath is gone with the
+        // `sync_handles` field; the Service owns the cancellation
+        // token now and `cancel_and_await` blocks until the runner
+        // observes the token at its next checkpoint and emits
+        // `SyncCompleted { Cancelled }`.
 
         // Close compose and message-view pop-outs belonging to the deleted account.
         let windows_to_close: Vec<iced::window::Id> = self
@@ -683,9 +679,28 @@ impl ReadyApp {
         let inline_image_store = self.inline_image_store.clone();
         let search = self.search_state.clone();
         let app_data_dir = crate::APP_DATA_DIR.get().expect("APP_DATA_DIR not set").clone();
+        let service_client = self.service_client.clone();
 
         let delete_task = Task::perform(
             async move {
+                // Phase 3 task 16: cancel any in-flight Service-side
+                // sync first. Tolerates ServiceCrashed - a dead Service
+                // provably has no in-flight writers, so the delete
+                // proceeds. Other IPC errors are logged and the delete
+                // proceeds anyway (best-effort; the Service-side
+                // invariant pass on next boot reconciles).
+                if let Some(client) = service_client.as_ref() {
+                    match client.cancel_and_await(&account_id).await {
+                        Ok(_) => {}
+                        Err(crate::service_client::ClientError::ServiceCrashed) => {}
+                        Err(error) => {
+                            log::warn!(
+                                "cancel_and_await({account_id}) before delete: {error}; proceeding",
+                            );
+                        }
+                    }
+                }
+
                 // Phase 1: gather cleanup data + ref-checks + delete account row
                 // (synchronous, inside one write-connection call so CASCADE hasn't
                 // fired yet when we query attachment rows)

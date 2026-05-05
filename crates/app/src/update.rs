@@ -329,8 +329,9 @@ impl ReadyApp {
                 Task::batch([sync_task, pending_task, gal_task, cal_task])
             }
             Message::SyncComplete(account_id, result) => {
-                // Free the handle so the next tick can re-dispatch.
-                self.sync_handles.remove(&account_id);
+                // Phase 3 task 15: per-account "already-in-flight" gating
+                // moved Service-side (`SyncRuntime` keys runs by
+                // `SyncRunId`); no UI-side handle to free here.
                 // If the account was deleted while sync was in-flight, drop
                 // the result silently. The status-bar warning, navigation
                 // reload, and chat-view refresh below all assume the account

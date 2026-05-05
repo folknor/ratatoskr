@@ -68,24 +68,37 @@ pub fn jmap_push_subscription(receiver: &JmapPushReceiver) -> Subscription<Strin
 // ── Sync dispatch & push setup ──────────────────────────────────────
 
 impl ReadyApp {
-    /// Dispatch a delta sync for a specific account as a background task.
+    /// Dispatch a delta sync for a specific account by issuing
+    /// `sync.start_account` over IPC. The Service spawns the runner;
+    /// the returned task awaits the matching `sync.completed`
+    /// notification (correlated by `SyncRunId` inside
+    /// `ServiceClient::start_sync`) and resolves to a
+    /// `Message::SyncComplete`.
     ///
-    /// Skips dispatch if a sync for the same account is already in-flight -
-    /// the periodic tick will pick it up next round. The returned task is
-    /// wrapped with `Task::abortable` and its handle is stashed in
-    /// `sync_handles` so `handle_delete_account` can cancel it.
+    /// The "already in flight" guard now lives Service-side: a
+    /// duplicate `sync.start_account` for the same account returns
+    /// `already_in_flight: true` with the live `run_id`, and both
+    /// callers' broadcast subscribers resolve from the same
+    /// `SyncCompleted` notification.
     pub(crate) fn dispatch_sync_delta(&mut self, account_id: String) -> Task<Message> {
-        // Phase 3 task 4 transitional: the UI no longer has direct
-        // access to the writer halves of body / inline / search; sync
-        // runs Service-side now (Phase 3 task 8 spawns the runner via
-        // `SyncRuntime`). Phase 3 task 15 replaces this body with a
-        // `Task::perform(client.start_sync(account_id))` wrapper. Until
-        // the IPC path lands, dispatch is a no-op that logs and
-        // resolves an immediate `SyncComplete(Ok(()))`.
-        log::debug!(
-            "dispatch_sync_delta({account_id}): Phase 3 transitional no-op (Service-side sync not yet wired in app/IPC; task 15 lands the IPC path)"
-        );
-        Task::done(Message::SyncComplete(account_id, Ok(())))
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::debug!(
+                "dispatch_sync_delta({account_id}): no ServiceClient yet; skipping",
+            );
+            return Task::none();
+        };
+        let aid_for_msg = account_id.clone();
+        Task::perform(
+            async move {
+                match client.start_sync(account_id).await {
+                    Ok(service_api::SyncResult::Completed)
+                    | Ok(service_api::SyncResult::Cancelled) => Ok(()),
+                    Ok(service_api::SyncResult::Failed(e)) => Err(e),
+                    Err(e) => Err(e.to_string()),
+                }
+            },
+            move |result| Message::SyncComplete(aid_for_msg.clone(), result),
+        )
     }
 
     /// Dispatch delta sync for all active accounts.
