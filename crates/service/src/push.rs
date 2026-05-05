@@ -49,6 +49,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crypto_key::SecretKey;
@@ -95,6 +96,17 @@ struct PushRuntimeInner {
     sync_runtime: Arc<SyncRuntime>,
     notification_tx: NotificationSender,
     service_generation: u32,
+    /// Hard barrier against `start_account` accepting new entries after
+    /// `shutdown()` has begun. Without this gate three back doors can
+    /// race past the consolidated drain (Phase 4 review pass found
+    /// them all): post-ready iteration's untracked per-account
+    /// `tokio::spawn`s, `handle_start_account`'s detached piggyback,
+    /// and `handle_cancel_account`'s detached piggyback. A bridge
+    /// spawned after shutdown holds an `Arc<NotificationSender>` clone
+    /// of `out_tx` and would hang `writer_handle.await` forever - and
+    /// could call `SyncRuntime::start_account` after sync drained,
+    /// re-opening the Phase 3 sentinel race the consolidation closed.
+    closed: AtomicBool,
 }
 
 pub struct PushRuntime {
@@ -117,6 +129,7 @@ impl PushRuntime {
                 sync_runtime,
                 notification_tx,
                 service_generation,
+                closed: AtomicBool::new(false),
             }),
         }
     }
@@ -128,7 +141,18 @@ impl PushRuntime {
     /// The provider check happens inside this method (rather than in
     /// the calling handler) so the runtime is self-policing - the
     /// caller doesn't need to know which provider an account uses.
+    ///
+    /// Returns `Err("PushRuntime is shutting down")` if `shutdown()`
+    /// has been observed. This gate exists because `start_account` is
+    /// called from three detached contexts (post-ready iteration,
+    /// `handle_start_account` piggyback, `handle_cancel_account`
+    /// piggyback) and a late call would otherwise re-open the Phase 3
+    /// sentinel-before-sync race.
     pub async fn start_account(&self, account_id: String) -> Result<(), String> {
+        if self.inner.closed.load(Ordering::Acquire) {
+            return Err("PushRuntime is shutting down".into());
+        }
+
         // Provider gate: no-op for non-JMAP accounts.
         let read_db = self.inner.db.to_read_state();
         let provider = db::db::queries::get_provider_type(&read_db, &account_id).await?;
@@ -139,43 +163,48 @@ impl PushRuntime {
             return Ok(());
         }
 
-        // Reap finished entries so a previously-died bridge doesn't
-        // block a fresh start. Mirrors `SyncRuntime`'s opportunistic
-        // cleanup pattern.
-        let mut map = self.inner.accounts.lock().await;
-        let stale_keys: Vec<String> = map
-            .iter()
-            .filter_map(|(k, entry)| {
-                let finished = entry
-                    .handle
-                    .as_ref()
-                    .map(JoinHandle::is_finished)
-                    .unwrap_or(true);
-                if finished { Some(k.clone()) } else { None }
-            })
-            .collect();
-        for k in stale_keys {
-            map.remove(&k);
+        // Pre-check under the lock. Reap finished entries so a
+        // previously-died bridge doesn't block a fresh start.
+        {
+            let mut map = self.inner.accounts.lock().await;
+            let stale_keys: Vec<String> = map
+                .iter()
+                .filter_map(|(k, entry)| {
+                    let finished = entry
+                        .handle
+                        .as_ref()
+                        .map(JoinHandle::is_finished)
+                        .unwrap_or(true);
+                    if finished { Some(k.clone()) } else { None }
+                })
+                .collect();
+            for k in stale_keys {
+                map.remove(&k);
+            }
+            if map.contains_key(&account_id) {
+                log::debug!("PushRuntime::start_account: bridge already live for {account_id}");
+                return Ok(());
+            }
         }
 
-        if map.contains_key(&account_id) {
-            log::debug!("PushRuntime::start_account: bridge already live for {account_id}");
-            return Ok(());
-        }
-
-        // Construct the JMAP client and refresh the access token before
-        // start_push so the WebSocket's first connect carries a fresh
-        // bearer. The auth_resolver re-runs ensure_valid_token on every
-        // reconnect.
+        // Slow path runs OUTSIDE the lock - JMAP client construction
+        // does TLS + HTTPS and ensure_valid_token may do an OAuth
+        // refresh round-trip. Holding the accounts mutex across that
+        // would serialize concurrent starts for different accounts
+        // (post-ready iteration kicks N starts in parallel for N JMAP
+        // accounts; one slow provider would block all the others).
         let mut key_bytes = [0u8; 32];
         key_bytes.copy_from_slice(self.inner.encryption_key.expose().as_slice());
         let client =
             jmap::client::JmapClient::from_account(&read_db, &account_id, &key_bytes).await?;
-        client.ensure_valid_token().await?;
 
         // Auth resolver: every reconnect re-resolves the bearer via
         // ensure_valid_token. Returning an error counts toward
         // MAX_CONSECUTIVE_FAILURES (see jmap::push::AuthResolver doc).
+        // ensure_valid_token is also called inside JmapClient::from_account
+        // before the JMAP session connect, so the initial connection
+        // carries a fresh bearer (closes the cold-startup-with-expired-
+        // token hole found in the Phase 4 review pass).
         let resolver_client = client.clone();
         let auth_resolver: jmap::push::AuthResolver = Arc::new(move || {
             let client = resolver_client.clone();
@@ -210,6 +239,29 @@ impl PushRuntime {
             }
         });
 
+        // Re-acquire the lock for the insert. Re-check the shutdown
+        // guard *and* the duplicate-entry guard - between the pre-check
+        // and now, shutdown() may have started, or another caller may
+        // have raced us to a fresh insert. On either, cancel + drop
+        // our supervisor cleanly (the bridge's exit path runs
+        // manager.stop_push().await, so the WebSocket closes).
+        let mut map = self.inner.accounts.lock().await;
+        if self.inner.closed.load(Ordering::Acquire) || map.contains_key(&account_id) {
+            cancel.cancel();
+            // Detach the supervisor; its bridge will observe cancel,
+            // call stop_push, and exit. We do not hold the lock while
+            // awaiting (that would re-introduce the lock-hold-across-
+            // network problem).
+            drop(map);
+            if let Err(e) = supervisor.await {
+                log::warn!("post-cancel supervisor join error: {e}");
+            }
+            return if self.inner.closed.load(Ordering::Acquire) {
+                Err("PushRuntime is shutting down".into())
+            } else {
+                Ok(())
+            };
+        }
         map.insert(
             account_id,
             AccountEntry {
@@ -251,7 +303,15 @@ impl PushRuntime {
     /// *before* `SyncRuntime::shutdown()` so a `StateChange` arriving
     /// mid-shutdown cannot call `SyncRuntime::start_account` after
     /// SyncRuntime has begun draining.
+    ///
+    /// Order: flip the `closed` flag BEFORE snapshotting the map.
+    /// Any `start_account` call that lands after this point sees the
+    /// flag set and returns an error. Without this ordering, a late
+    /// `start_account` could insert a fresh entry between the
+    /// snapshot and the supervisor await, leaking a bridge that
+    /// outlives the drain.
     pub async fn shutdown(&self) {
+        self.inner.closed.store(true, Ordering::Release);
         let supervisors: Vec<JoinHandle<()>> = {
             let mut map = self.inner.accounts.lock().await;
             map.values_mut()
