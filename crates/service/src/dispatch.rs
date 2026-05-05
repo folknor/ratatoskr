@@ -138,6 +138,17 @@ where
         app_data_dir.clone(),
     );
 
+    // Phase 4 task 5: post-ready push startup. Waits for boot.ready,
+    // constructs the PushRuntime, iterates JMAP accounts, and
+    // tokio::spawns a per-account start. Per-account failure is
+    // log-and-continue. Push startup runs *after* readiness because
+    // TLS+HTTPS+OAuth-refresh latency must not block the splash
+    // transition.
+    let push_startup_handle = spawn_post_ready_push_startup(
+        Arc::clone(&boot_state),
+        out_tx.clone(),
+    );
+
     let mut boot_exit_code: Option<BootExitCode> = None;
 
     loop {
@@ -337,6 +348,13 @@ where
     // here lets it observe EOF, commit any straggler docs, and exit.
     action_worker_handle.abort();
     let _ = action_worker_handle.await;
+
+    // Phase 4 task 5: abort the post-ready push startup task in case
+    // it was still iterating accounts when shutdown arrived. Started
+    // bridges are already registered in the PushRuntime and were
+    // drained by the consolidated drain above.
+    push_startup_handle.abort();
+    let _ = push_startup_handle.await;
 
     drop(out_tx);
     let _ = writer_handle.await;
@@ -669,4 +687,110 @@ where
             break;
         }
     }
+}
+
+/// Phase 4 task 5: post-ready push startup task.
+///
+/// Spawn a task that waits for `boot.ready`, then constructs a
+/// `PushRuntime` and starts a bridge per JMAP account. Per-account
+/// starts are themselves `tokio::spawn`'d inside `PushRuntime::start_account`,
+/// so a slow initial connect (TLS+HTTPS+OAuth refresh) for one account
+/// does not delay the others.
+///
+/// Push startup explicitly runs *after* `boot.ready` rather than as a
+/// boot phase: readiness must not depend on push setup work, and a
+/// missing JMAP server (network down at boot) must not block the
+/// splash transition. Per-account failure is log-and-continue.
+fn spawn_post_ready_push_startup(
+    boot_state: Arc<boot::BootSharedState>,
+    out_tx: mpsc::Sender<Vec<u8>>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        // Park until boot.ready resolves (or the boot task is aborted).
+        if boot_state.wait_for_ready().await.is_err() {
+            log::debug!("post-ready push startup: boot failed, skipping push setup");
+            return;
+        }
+
+        // SyncRuntime is installed by run_boot_sequence_inner before
+        // signal_ready fires, so by this point it MUST be present. A
+        // missing SyncRuntime here is a programming error.
+        let Some(sync_runtime) = boot_state.sync_runtime() else {
+            log::error!(
+                "post-ready push startup: SyncRuntime missing after boot.ready - programming error",
+            );
+            return;
+        };
+
+        let Some(db_conn) = boot_state.db_conn() else {
+            log::error!(
+                "post-ready push startup: db_conn missing after boot.ready - programming error",
+            );
+            return;
+        };
+        let Some(key_bytes) = boot_state.encryption_key() else {
+            log::error!(
+                "post-ready push startup: encryption key missing after boot.ready - programming error",
+            );
+            return;
+        };
+
+        let db_state = service_state::WriteDbState::from_arc(db_conn);
+        let encryption_key = crypto_key::SecretKey::from_bytes(key_bytes);
+        let notification_tx = crate::boot_progress::NotificationSender::new(out_tx);
+
+        // service_generation is overwritten by the UI's reader task at
+        // enqueue time; emit 0 here per the WithGeneration trait
+        // contract documented on `Notification::service_generation()`.
+        let push_runtime = Arc::new(crate::push::PushRuntime::new(
+            db_state.clone(),
+            encryption_key,
+            sync_runtime,
+            notification_tx,
+            0,
+        ));
+        boot_state.install_push_runtime(Arc::clone(&push_runtime));
+
+        // Iterate JMAP accounts. Per-account failure is logged and the
+        // iteration continues - a misconfigured / network-unreachable
+        // account must not block push setup for healthy ones.
+        let jmap_account_ids: Result<Vec<String>, String> = db_state
+            .with_conn(|conn| {
+                let mut stmt = conn
+                    .prepare("SELECT id FROM accounts WHERE provider = 'jmap'")
+                    .map_err(|e| format!("prepare jmap accounts query: {e}"))?;
+                let ids = stmt
+                    .query_map([], |row| row.get::<_, String>(0))
+                    .map_err(|e| format!("query jmap accounts: {e}"))?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| format!("collect jmap account ids: {e}"))?;
+                Ok(ids)
+            })
+            .await;
+
+        let account_ids = match jmap_account_ids {
+            Ok(ids) => ids,
+            Err(e) => {
+                log::warn!(
+                    "post-ready push startup: failed to enumerate JMAP accounts: {e}",
+                );
+                return;
+            }
+        };
+
+        log::info!(
+            "post-ready push startup: starting bridges for {} JMAP account(s)",
+            account_ids.len()
+        );
+        for account_id in account_ids {
+            let push_runtime = Arc::clone(&push_runtime);
+            // Spawn per-account so a slow TLS handshake for one account
+            // doesn't sequence the others.
+            tokio::spawn(async move {
+                if let Err(e) = push_runtime.start_account(account_id.clone()).await {
+                    log::warn!("[push] start_account({account_id}) failed: {e}");
+                }
+            });
+        }
+    })
 }
