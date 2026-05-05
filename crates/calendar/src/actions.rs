@@ -10,7 +10,7 @@
 use gmail::client::GmailClient;
 use graph::client::GraphClient;
 use jmap::client::JmapClient;
-use rtsk::actions::{ActionContext, ActionError, ActionOutcome, MutationLog};
+use action_types::{ActionContext, ActionError, ActionOutcome, MutationLog};
 use rtsk::db::ReadDbState;
 use rtsk::db::queries_extra::{set_calendar_event_etag, set_calendar_event_remote_id_and_etag};
 

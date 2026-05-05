@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 rtsk = { path = "../core" }
+action-types = { path = "../action-types" }
 gmail = { path = "../gmail" }
 graph = { path = "../graph" }
 jmap = { path = "../jmap" }

@@ -1,0 +1,17 @@
+[package]
+name = "action-types"
+description = "Shared type contract for the email/calendar action service. Lives below the service/cal crate split so both can depend on the same ActionContext / ActionError / ActionOutcome / MutationLog types without forming a dependency cycle. Phase 5 prerequisite (see docs/service/phase-5-plan.md)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+db = { path = "../db" }
+store = { path = "../stores" }
+search = { path = "../search" }
+log = "0.4"
