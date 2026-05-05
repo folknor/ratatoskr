@@ -253,10 +253,17 @@ where
     // sentinel and ack the Shutdown request. The dispatch loop has already
     // stopped reading new requests by the time we reach this point.
     drain_in_flight(&mut handlers_in_flight).await;
-    // Notification handlers are best-effort - we wait briefly for them to
-    // finish (so an in-flight `pending_ops.kick`-driven drain can flush its
-    // current batch) but don't let a wedged notification block shutdown.
-    drain_in_flight(&mut notifications_in_flight).await;
+    // Notification handlers are best-effort. Phase 5 task 7: cap the
+    // notification drain at 5 s aggregate so a wedged handler (the GAL
+    // handler can take up to 60 s per account x N accounts in the worst
+    // case, and refresh_gal_for_account performs DB writes via
+    // tokio::task::spawn_blocking which itself isn't cancellable) cannot
+    // stall shutdown for minutes. Past the cap we abort the remaining
+    // notification tasks and log the count. The blocking work spawned
+    // by an aborted GAL handler runs to completion regardless - the
+    // abort releases only the outer async future. Acceptable because
+    // GAL writes are bounded and idempotent.
+    drain_notifications_bounded(&mut notifications_in_flight, NOTIFICATION_DRAIN_BOUND).await;
 
     // Reap the boot task so any boot-sequence panic surfaces in the log
     // rather than vanishing at process exit. We don't need the result -
@@ -556,6 +563,59 @@ async fn drain_in_flight(handlers: &mut JoinSet<()>) {
             // itself panicked or the task was cancelled. Log and continue
             // so a single bad handler can't hold up shutdown.
             log::warn!("in-flight handler join failed during drain: {error}");
+        }
+    }
+}
+
+/// Phase 5 task 7: aggregate cap on the notification drain. A wedged
+/// notification handler must not stall shutdown indefinitely.
+///
+/// **Caveat for handlers that wrap blocking work in `spawn_blocking`:**
+/// aborting the outer async task does NOT stop a running blocking
+/// closure. The GAL handler is the live example -
+/// `crates/core/src/contacts/gal.rs:212` writes via `spawn_blocking`,
+/// so a drain-timeout abort releases the async wrapper but the
+/// blocking write runs to completion. Acceptable because GAL writes
+/// are bounded and idempotent. Any handler added later that doesn't
+/// satisfy that contract must either keep its blocking work
+/// cancellation-aware or accept the same drain-timeout semantics.
+const NOTIFICATION_DRAIN_BOUND: std::time::Duration = std::time::Duration::from_secs(5);
+
+async fn drain_notifications_bounded(
+    handlers: &mut JoinSet<()>,
+    bound: std::time::Duration,
+) {
+    let deadline = tokio::time::Instant::now() + bound;
+    loop {
+        if handlers.is_empty() {
+            return;
+        }
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            let remaining = handlers.len();
+            log::warn!(
+                "notification drain timed out after {} s, aborting {} task(s)",
+                bound.as_secs(),
+                remaining,
+            );
+            handlers.abort_all();
+            // Drain JoinErrors so the JoinSet is empty before we return.
+            while handlers.join_next().await.is_some() {}
+            return;
+        }
+        match tokio::time::timeout_at(deadline, handlers.join_next()).await {
+            Ok(Some(result)) => {
+                if let Err(error) = result {
+                    log::warn!("notification join failed during drain: {error}");
+                }
+            }
+            Ok(None) => return,
+            Err(_) => {
+                // Loop iteration to fall into the deadline-passed branch
+                // above (which logs + aborts). Don't open-code the abort
+                // here so the log line is one place.
+                continue;
+            }
         }
     }
 }
