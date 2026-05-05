@@ -140,10 +140,18 @@ impl ReadyApp {
         // calendar tab only when there is a pending stamp that has aged at
         // least one tick. Collapses an N-account kick batch (one
         // CalendarChanged per stale account) into a single reload.
-        subs.push(
-            iced::time::every(std::time::Duration::from_millis(250))
-                .map(|_| Message::CalendarReloadTick),
-        );
+        //
+        // Gated on `pending_calendar_reload.is_some()` so the timer doesn't
+        // wake the runtime four times per second indefinitely on a system
+        // with no calendar activity. The pending stamp is set by the
+        // `Notification::CalendarChanged` arm in `update.rs`, so the next
+        // view cycle re-evaluates this subscription and arms the tick.
+        if self.pending_calendar_reload.is_some() {
+            subs.push(
+                iced::time::every(std::time::Duration::from_millis(250))
+                    .map(|_| Message::CalendarReloadTick),
+            );
+        }
 
         if self
             .settings

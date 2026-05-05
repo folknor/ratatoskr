@@ -16,15 +16,31 @@ use super::google::{google_calendar_list_calendars_impl, google_calendar_sync_ev
 use super::graph::{graph_calendar_list_calendars_impl, graph_calendar_sync_events_impl};
 use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
 
+/// Outcome of a calendar sync run.
+///
+/// `mutated` tracks whether the run wrote anything to the calendar tables
+/// before terminating. `CalendarRuntime` reads this independently of
+/// `result`: a partial-commit failure (provider error mid-loop after the
+/// discovered-calendars upsert succeeded) must still drive a UI reload.
+/// Conditioning emission on `result.is_ok()` would leave the UI stale
+/// after exactly that case.
+pub struct CalendarSyncOutcome {
+    pub mutated: bool,
+    pub result: Result<(), String>,
+}
+
 pub async fn calendar_sync_account_impl(
     account_id: &str,
     db: &WriteDbState,
     gmail: &GmailState,
     graph: &GraphState,
     cancellation_token: &CancellationToken,
-) -> Result<(), String> {
+) -> CalendarSyncOutcome {
     if cancellation_token.is_cancelled() {
-        return Err("calendar sync cancelled".to_string());
+        return CalendarSyncOutcome {
+            mutated: false,
+            result: Err("calendar sync cancelled".to_string()),
+        };
     }
     // Phase 5 task 3b: Service-facing surface takes `&WriteDbState`. The
     // existing per-helper queries below are still on `&ReadDbState` (they
@@ -35,7 +51,7 @@ pub async fn calendar_sync_account_impl(
     // boundary even though deeper helpers still use the escape.
     let read_view = db.to_read_state();
     let db = &read_view;
-    let provider = db
+    let provider_result = db
         .with_conn({
             let account_id = account_id.to_string();
             move |conn| {
@@ -73,14 +89,27 @@ pub async fn calendar_sync_account_impl(
                 })
             }
         })
-        .await?;
+        .await;
 
-    match provider {
+    let provider = match provider_result {
+        Ok(p) => p,
+        Err(e) => {
+            return CalendarSyncOutcome {
+                mutated: false,
+                result: Err(e),
+            };
+        }
+    };
+
+    let mut mutated = false;
+    let result = match provider {
         Some("google_api") => {
-            sync_google_calendar_account(account_id, db, gmail, cancellation_token).await
+            sync_google_calendar_account(account_id, db, gmail, cancellation_token, &mut mutated)
+                .await
         }
         Some("graph") => {
-            sync_graph_calendar_account(account_id, db, graph, cancellation_token).await
+            sync_graph_calendar_account(account_id, db, graph, cancellation_token, &mut mutated)
+                .await
         }
         Some("caldav") => {
             sync_caldav_calendar_account(
@@ -88,28 +117,16 @@ pub async fn calendar_sync_account_impl(
                 db,
                 gmail.encryption_key(),
                 cancellation_token,
+                &mut mutated,
             )
             .await
         }
         _ => Err(format!(
             "No calendar provider configured for account {account_id}"
         )),
-    }
-}
+    };
 
-/// Convenience entry point for syncing a single account's calendars.
-///
-/// Constructs ephemeral `GmailState` / `GraphState` internally so callers
-/// only need `ReadDbState` + encryption key (same pattern as `sync_delta_for_account`).
-pub async fn calendar_sync_account(
-    account_id: &str,
-    db: &WriteDbState,
-    encryption_key: [u8; 32],
-    cancellation_token: &CancellationToken,
-) -> Result<(), String> {
-    let gmail = gmail::client::new_gmail_state(encryption_key);
-    let graph = graph::client::new_graph_state(encryption_key);
-    calendar_sync_account_impl(account_id, db, &gmail, &graph, cancellation_token).await
+    CalendarSyncOutcome { mutated, result }
 }
 
 pub async fn upsert_discovered_calendars_impl(
@@ -272,10 +289,12 @@ async fn sync_google_calendar_account(
     db: &ReadDbState,
     gmail: &GmailState,
     cancellation_token: &CancellationToken,
+    mutated: &mut bool,
 ) -> Result<(), String> {
     let client = gmail.get(account_id).await?;
     let calendars = google_calendar_list_calendars_impl(account_id, db, &client).await?;
     upsert_discovered_calendars_impl(db, account_id, "google", calendars).await?;
+    *mutated = true;
     let visible_calendars = load_visible_calendars(db, account_id).await?;
 
     for calendar in visible_calendars {
@@ -308,10 +327,12 @@ async fn sync_graph_calendar_account(
     db: &ReadDbState,
     graph: &GraphState,
     cancellation_token: &CancellationToken,
+    mutated: &mut bool,
 ) -> Result<(), String> {
     let client = graph.get(account_id).await?;
     let calendars = graph_calendar_list_calendars_impl(account_id, db, &client).await?;
     upsert_discovered_calendars_impl(db, account_id, "graph", calendars).await?;
+    *mutated = true;
     let visible_calendars = load_visible_calendars(db, account_id).await?;
 
     for calendar in visible_calendars {
@@ -337,6 +358,7 @@ async fn sync_caldav_calendar_account(
     db: &ReadDbState,
     encryption_key: &[u8; 32],
     cancellation_token: &CancellationToken,
+    mutated: &mut bool,
 ) -> Result<(), String> {
     let config =
         super::caldav::load_caldav_account_config(db, encryption_key, account_id).await?;
@@ -358,6 +380,7 @@ async fn sync_caldav_calendar_account(
         &config,
         needs_discovery_now,
         cancellation_token,
+        mutated,
     )
     .await;
     match attempt {
@@ -372,7 +395,15 @@ async fn sync_caldav_calendar_account(
                 .await?;
             // After clearing, both URLs are None so this branch always runs
             // discovery; pass `true` to persist the freshly discovered values.
-            run_caldav_sync_attempt(account_id, db, &refreshed, true, cancellation_token).await
+            run_caldav_sync_attempt(
+                account_id,
+                db,
+                &refreshed,
+                true,
+                cancellation_token,
+                mutated,
+            )
+            .await
         }
         Err(err) => Err(err),
     }
@@ -384,6 +415,7 @@ async fn run_caldav_sync_attempt(
     config: &super::caldav::CaldavAccountConfig,
     persist_after_build: bool,
     cancellation_token: &CancellationToken,
+    mutated: &mut bool,
 ) -> Result<(), String> {
     let client = super::caldav::build_client_from_config(config).await?;
     if persist_after_build {
@@ -395,9 +427,19 @@ async fn run_caldav_sync_attempt(
         )
         .await;
     }
-    rtsk::caldav::sync::sync_caldav_calendars(&client, db, account_id, cancellation_token)
-        .await
-        .map(|_| ())
+    let outcome =
+        rtsk::caldav::sync::sync_caldav_calendars(&client, db, account_id, cancellation_token)
+            .await?;
+    // Any non-zero CalDAV write counts means we touched the calendar tables.
+    // `calendars_discovered` triggers `db_upsert_calendar` per row even when
+    // the ctag turns out unchanged afterwards, so we conservatively flag it.
+    if outcome.calendars_discovered > 0
+        || outcome.events_upserted > 0
+        || outcome.events_deleted > 0
+    {
+        *mutated = true;
+    }
+    Ok(())
 }
 
 /// Convert a `CalendarEventDto` from the provider layer into the DB-crate row

@@ -48,22 +48,18 @@
 //! ## CalendarChanged emission
 //!
 //! `CalendarChanged` cannot be conditioned on `result == Completed`.
-//! `crates/calendar/src/sync.rs:249` upserts discovered calendars before
+//! `calendar_sync_account_impl` upserts discovered calendars before
 //! per-calendar event loops execute, and per-calendar results are applied
-//! independently (line 263). A run cancelled or failed *after* a committed
-//! batch has already mutated calendar rows; the UI must reload to surface
-//! them.
+//! independently. A run cancelled or failed *after* a committed batch has
+//! already mutated calendar rows; the UI must reload to surface them.
 //!
-//! Phase 5 implementation: the runner emits `CalendarChanged` whenever the
-//! call to `calendar_sync_account_impl` returned `Ok(())` *or* the
-//! cancellation token was observed (we may have committed a batch before the
-//! checkpoint fired). On non-cancelled failure the runner does NOT emit
-//! `CalendarChanged` - this is a known coarsening: a partial-batch commit
-//! followed by a failure observed *outside* the cancellation path leaves UI
-//! state stale until the next run. Tightening this requires threading a
-//! mutated flag through `cal::sync` end-to-end; that's deferred to the
-//! Phase 6 calendar event-mutation relocation pass which already needs to
-//! refactor those helpers.
+//! `cal::sync::calendar_sync_account_impl` returns a
+//! `CalendarSyncOutcome { mutated, result }`. The runner emits
+//! `CalendarChanged` whenever `mutated == true`, independently of `result`'s
+//! variant - so a partial-commit failure mid-loop still drives the UI
+//! reload. `mutated` is set true after each successful per-helper write
+//! completes (the discovered-calendars upsert, per-calendar event applies,
+//! CalDAV non-zero write counts).
 //!
 //! `CalendarRunCompleted` always fires regardless of result (the per-run_id
 //! awaiter on the client side requires it for terminal correlation).
@@ -404,7 +400,7 @@ async fn run_calendar(
     let gmail = gmail::client::new_gmail_state(encryption_key_bytes);
     let graph = graph::client::new_graph_state(encryption_key_bytes);
 
-    let result = cal::sync::calendar_sync_account_impl(
+    let outcome = cal::sync::calendar_sync_account_impl(
         &account_id,
         &inner.db,
         &gmail,
@@ -415,19 +411,20 @@ async fn run_calendar(
 
     // Phase 5 emission rule:
     //   - CalendarRunCompleted always fires (per-run_id awaiter contract).
-    //   - CalendarChanged fires whenever `mutated == true`. Without
-    //     end-to-end mutated tracking through cal::sync (deferred to the
-    //     Phase 6 cleanup pass alongside calendar event-mutation
-    //     relocation), we conservatively treat any non-failure run as
-    //     mutated: `Completed` always changed something (the discover
-    //     upsert at minimum), and `Cancelled` may have committed a batch
-    //     before the checkpoint observed the token. Pure failures
-    //     (provider config error, "no calendar provider") do NOT emit
-    //     CalendarChanged.
-    let (sync_result, mutated) = match result {
-        Ok(()) => (CalendarSyncResult::Completed, true),
-        Err(_) if cancellation_token.is_cancelled() => (CalendarSyncResult::Cancelled, true),
-        Err(e) => (CalendarSyncResult::Failed(e), false),
+    //   - CalendarChanged fires whenever `outcome.mutated == true`.
+    //
+    // The `mutated` flag is set inside `calendar_sync_account_impl` after
+    // each successful helper write completes - so a partial-commit failure
+    // (e.g., upsert_discovered_calendars succeeded, then a per-calendar
+    // event apply errored midway) still emits `CalendarChanged` and the UI
+    // reloads. Conditioning emission on `result.is_ok()` would have left
+    // the UI stale after exactly that case.
+    let (sync_result, mutated) = match outcome.result {
+        Ok(()) => (CalendarSyncResult::Completed, outcome.mutated),
+        Err(_) if cancellation_token.is_cancelled() => {
+            (CalendarSyncResult::Cancelled, outcome.mutated)
+        }
+        Err(e) => (CalendarSyncResult::Failed(e), outcome.mutated),
     };
 
     if mutated {

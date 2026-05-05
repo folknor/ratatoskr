@@ -21,13 +21,6 @@ These are correctness or architectural violations that breach Phase 5's premise.
 
 Real gaps with measurable impact, ordered roughly by how often the user-facing behavior shows up.
 
-**`mutated` flag is coarser than the plan stipulates - partial-failure runs don't notify the UI.** [claude arch, claude bugs, codex bugs]
-- `crates/service/src/calendar.rs:399-403` sets `mutated = false` for any non-cancelled `Failed` outcome.
-- But the discovered-calendars upsert at `crates/calendar/src/sync.rs:124-141` (and the analogous upserts for Google/Graph/CalDAV per the codex pointers) commits *before* per-calendar event loops run. A failure mid-loop after that upsert leaves the UI stale until the next successful run.
-- The plan's § "CalendarChanged: partial-mutation emission" explicitly forbids this exact behavior: "A run cancelled or failed *after* a committed batch has already mutated calendar rows; the UI must reload to surface them."
-- Module doc-comment at `service/src/calendar.rs:48-66` and `problem-statement.md` § "Phase 5 known gaps" both acknowledge this as deferred to Phase 6 alongside the `cal::sync` helper refactor that exposes per-batch mutation tracking. So this is a known deviation, not an undiscovered defect - but three reviewers caught it independently, and the deviation is not load-bearing in the plan: it's a "we ran out of refactor budget" deferral, not a "we changed our mind" decision.
-- Either close the gap in Phase 5 (helper refactor) or move the deferral note to a more prominent location so the next reviewer doesn't keep re-flagging it.
-
 **Plan's Phase-5-scoped unit test cohort largely did not land.** [claude arch, claude bugs]
 - Plan task 13 listed eight in-scope tests; three landed (wire-type round-trips, `CalendarRuntime` shutdown-guard, catalog cross-respawn). Five did not:
   - GAL handler mutex test (the plan calls this out as **required** in `service/src/handlers/gal.rs:10-30` for correctness verification of the `NOTIFY_CAP=4` duplicate-call hazard).
@@ -45,11 +38,6 @@ Real gaps with measurable impact, ordered roughly by how often the user-facing b
 - Account-added path (`crates/app/src/handlers/accounts.rs:11`) ignores the new account ID and only reloads accounts.
 - Manual sync (`crates/app/src/update.rs:366`) still calls email sync only.
 - This also explains why the `pending_calendars` leak above never gets swept in practice.
-
-**`CalendarReloadTick` subscription wakes every 250 ms unconditionally.** [claude bugs]
-- `crates/app/src/subscription.rs:143-146` is not gated on calendar visibility or even on having any calendar-capable accounts. Sibling `ReaderReloadTick` (`:131`) is gated on `self.search_state.is_some()`.
-- Handler returns immediately when `pending_calendar_reload` is `None`, so cost is small per tick - but ~4 wakeups/sec, 24/7, for a feature most users don't have open.
-- Match the gating pattern: `self.calendar.is_active()` or `self.sidebar.accounts.iter().any(|a| has_calendar_provider(a))`.
 
 **Calendar cancellation depth doesn't reach the per-event-batch boundary the plan promised.** [claude bugs]
 - Plan task 3a called for point-checks at "calendar-list-entry, per-calendar-entry, per-event-batch boundaries."
