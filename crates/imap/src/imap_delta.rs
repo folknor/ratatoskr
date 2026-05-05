@@ -53,8 +53,6 @@ pub async fn imap_delta_sync(
         return Err("sync cancelled".to_string());
     }
     let read_db = db.to_read_state();
-    #[allow(unused_variables)]
-    let _cancellation_token = cancellation_token;
     log::info!("[IMAP] Starting delta sync for account {account_id} (days_back={days_back})");
     // List folders
     let all_folders = {
@@ -107,6 +105,11 @@ pub async fn imap_delta_sync(
     let since_date = compute_since_date(days_back);
 
     for folder in &new_folders {
+        // Per-folder cancellation checkpoint. See `imap_initial.rs` for the
+        // full rationale (point-checks between RPCs, not `tokio::select!`).
+        if cancellation_token.is_cancelled() {
+            return Err("sync cancelled".to_string());
+        }
         if consecutive_failures >= CIRCUIT_BREAKER_MAX_FAILURES {
             break;
         }
@@ -117,6 +120,7 @@ pub async fn imap_delta_sync(
         let mapping = map_folder_to_label(folder);
         match fetch_folder_uids(
             config,
+            cancellation_token,
             account_id,
             folder,
             &mapping.label_id,
@@ -158,9 +162,22 @@ pub async fn imap_delta_sync(
             })
             .collect();
 
-        let result_map = batch_delta_check(config, &requests, &existing_folders, &state_map).await;
+        let result_map = batch_delta_check(
+            config,
+            cancellation_token,
+            &requests,
+            &existing_folders,
+            &state_map,
+        )
+        .await;
 
         for folder in &existing_folders {
+            // Per-folder cancellation checkpoint between delta-applies. The
+            // batch_delta_check above is a single RPC; cancelling between
+            // folders here breaks the apply loop at an RPC boundary.
+            if cancellation_token.is_cancelled() {
+                return Err("sync cancelled".to_string());
+            }
             let mapping = map_folder_to_label(folder);
             let saved = match state_map.get(&folder.raw_path) {
                 Some(s) => s,
@@ -173,6 +190,7 @@ pub async fn imap_delta_sync(
 
             if let Err(e) = process_folder_delta(
                 config,
+                cancellation_token,
                 account_id,
                 folder,
                 &mapping.label_id,
@@ -215,6 +233,7 @@ pub async fn imap_delta_sync(
     // Run deletion detection (throttled per-folder, only checks every 10 min)
     let deletion_affected = run_deletion_detection(
         config,
+        cancellation_token,
         account_id,
         &read_db,
         body_store,
@@ -300,13 +319,17 @@ pub async fn imap_delta_sync(
 /// call fails entirely.
 async fn batch_delta_check(
     config: &ImapConfig,
+    cancellation_token: &CancellationToken,
     requests: &[DeltaCheckRequest],
     existing_folders: &[&&super::types::ImapFolder],
     state_map: &HashMap<String, sync_pipeline::FolderSyncState>,
 ) -> HashMap<String, DeltaCheckResult> {
+    if cancellation_token.is_cancelled() {
+        return HashMap::new();
+    }
     let result = async {
         let mut session = connect(config).await?;
-        let results = client::delta_check_folders(&mut session, requests).await;
+        let results = client::delta_check_folders(&mut session, cancellation_token, requests).await;
         let _ =
             tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
         results
@@ -335,6 +358,7 @@ async fn batch_delta_check(
                     Ok(mut session) => {
                         match client::delta_check_folders(
                             &mut session,
+                            cancellation_token,
                             &missing.iter().copied().cloned().collect::<Vec<_>>(),
                         )
                         .await
@@ -451,6 +475,7 @@ async fn per_folder_check(
 #[allow(clippy::too_many_arguments)]
 async fn fetch_folder_uids(
     config: &ImapConfig,
+    cancellation_token: &CancellationToken,
     account_id: &str,
     folder: &super::types::ImapFolder,
     folder_label_id: &str,
@@ -463,6 +488,9 @@ async fn fetch_folder_uids(
     all_meta: &mut HashMap<String, MessageMeta>,
     labels_by_rfc_id: &mut HashMap<String, HashSet<String>>,
 ) -> Result<(), String> {
+    if cancellation_token.is_cancelled() {
+        return Err("sync cancelled".to_string());
+    }
     let mut session = connect(config).await?;
     let sr =
         client::search_folder(&mut session, &folder.raw_path, Some(since_date.to_string())).await?;
@@ -485,6 +513,7 @@ async fn fetch_folder_uids(
 
     let (last_uid, _) = fetch_uids_on_session(
         &mut session,
+        cancellation_token,
         account_id,
         folder,
         folder_label_id,
@@ -517,6 +546,7 @@ async fn fetch_folder_uids(
 #[allow(clippy::too_many_arguments)]
 async fn fetch_uids_on_session(
     session: &mut super::connection::ImapSession,
+    cancellation_token: &CancellationToken,
     account_id: &str,
     folder: &super::types::ImapFolder,
     folder_label_id: &str,
@@ -533,6 +563,11 @@ async fn fetch_uids_on_session(
     let mut uidvalidity: u32 = 0;
 
     for chunk in uids.chunks(CHUNK_SIZE) {
+        // Per-chunk cancellation checkpoint - each chunk is its own UID
+        // FETCH round-trip.
+        if cancellation_token.is_cancelled() {
+            return Err("sync cancelled".to_string());
+        }
         let uid_set: String = chunk
             .iter()
             .map(ToString::to_string)
@@ -581,6 +616,7 @@ async fn fetch_uids_on_session(
 #[allow(clippy::too_many_arguments)]
 async fn process_folder_delta(
     config: &ImapConfig,
+    cancellation_token: &CancellationToken,
     account_id: &str,
     folder: &super::types::ImapFolder,
     folder_label_id: &str,
@@ -595,6 +631,9 @@ async fn process_folder_delta(
     all_meta: &mut HashMap<String, MessageMeta>,
     labels_by_rfc_id: &mut HashMap<String, HashSet<String>>,
 ) -> Result<(), String> {
+    if cancellation_token.is_cancelled() {
+        return Err("sync cancelled".to_string());
+    }
     // CONDSTORE fast path: modseq unchanged means no flags, no new messages,
     // no deletions. Update the modseq in sync state (in case it was None before)
     // and skip all further processing.
@@ -708,6 +747,7 @@ async fn process_folder_delta(
 
         let (lu, _) = fetch_uids_on_session(
             &mut session,
+            cancellation_token,
             account_id,
             folder,
             folder_label_id,
@@ -813,6 +853,7 @@ async fn process_folder_delta(
     let mut session = connect(config).await?;
     let (dlu, uv) = fetch_uids_on_session(
         &mut session,
+        cancellation_token,
         account_id,
         folder,
         folder_label_id,

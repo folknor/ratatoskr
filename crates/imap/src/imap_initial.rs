@@ -68,8 +68,6 @@ pub async fn imap_initial_sync(
         return Err("sync cancelled".to_string());
     }
     let read_db = db.to_read_state();
-    #[allow(unused_variables)]
-    let _cancellation_token = cancellation_token;
     log::info!("[IMAP] Starting initial sync for account {account_id} (days_back={days_back})");
     // Phase 1: List and sync folders
     emit_progress(
@@ -139,6 +137,21 @@ pub async fn imap_initial_sync(
     let since_date = compute_since_date(days_back);
 
     for (folder_idx, folder) in syncable_folders.iter().enumerate() {
+        // Cancellation checkpoint - mirrors JMAP's per-mailbox checkpoint
+        // (Phase 3 task 6). The previous incomplete-port pattern was
+        // `let _cancellation_token = cancellation_token;` immediately after
+        // the entry-point check, dropping the token without threading it
+        // into the loop. A user pressing "cancel sync" mid-IMAP-sync should
+        // not have to wait out the entire sync. Point-checks between RPCs -
+        // NOT `tokio::select!` - because IMAP is a stateful session:
+        // dropping a future mid-FETCH leaves unread response data on the
+        // wire and breaks the next command. If true mid-RPC interruption is
+        // ever needed, pair `select!` with explicit session teardown on the
+        // cancel arm. See `docs/service/phase-5-plan.md` § "Cancellation:
+        // runtime -> handler -> provider chain".
+        if cancellation_token.is_cancelled() {
+            return Err("sync cancelled".to_string());
+        }
         if folder.exists == 0 {
             continue;
         }
@@ -172,6 +185,7 @@ pub async fn imap_initial_sync(
             body_store,
             inline_images,
             search,
+            cancellation_token,
             config,
             account_id,
             folder,
@@ -351,6 +365,7 @@ async fn sync_single_folder(
     body_store: &BodyStoreWriteState,
     inline_images: &InlineImageStoreWriteState,
     search: &SearchWriteHandle,
+    cancellation_token: &CancellationToken,
     config: &ImapConfig,
     account_id: &str,
     folder: &super::types::ImapFolder,
@@ -385,6 +400,14 @@ async fn sync_single_folder(
     let mut date_fallback_count: u64 = 0;
 
     for chunk_start in (0..uids.len()).step_by(CHUNK_SIZE) {
+        // Per-chunk cancellation checkpoint: each chunk is its own UID FETCH
+        // round-trip, the natural break for an IMAP point-check.
+        if cancellation_token.is_cancelled() {
+            let _ =
+                tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout())
+                    .await;
+            return Err("sync cancelled".to_string());
+        }
         let chunk_end = (chunk_start + CHUNK_SIZE).min(uids.len());
         let chunk_uids = &uids[chunk_start..chunk_end];
 

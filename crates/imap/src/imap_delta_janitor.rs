@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use db::db::ReadDbState;
 use service_state::{BodyStoreWriteState, SearchWriteHandle};
+use tokio_util::sync::CancellationToken;
 
 use super::client;
 use super::connection::connect;
@@ -212,8 +213,10 @@ pub async fn detect_deleted_messages(
 /// TLS handshake per folder.
 ///
 /// Returns the list of affected thread IDs (for UI refresh).
+#[allow(clippy::too_many_arguments)]
 pub async fn run_deletion_detection(
     config: &ImapConfig,
+    cancellation_token: &CancellationToken,
     account_id: &str,
     db: &ReadDbState,
     body_store: &BodyStoreWriteState,
@@ -222,6 +225,9 @@ pub async fn run_deletion_detection(
     state_map: &HashMap<String, sync_pipeline::FolderSyncState>,
 ) -> Vec<String> {
     let mut all_affected = Vec::new();
+    if cancellation_token.is_cancelled() {
+        return all_affected;
+    }
 
     // Filter to folders that need checking (already synced)
     let folders_to_check: Vec<_> = syncable_folders
@@ -243,6 +249,12 @@ pub async fn run_deletion_detection(
     };
 
     for folder in &folders_to_check {
+        // Per-folder cancellation checkpoint - between SELECT/SEARCH RPCs
+        // for distinct folders. Same shape as the per-folder loops in
+        // imap_initial / imap_delta.
+        if cancellation_token.is_cancelled() {
+            break;
+        }
         match detect_deleted_on_session(&mut session, &folder.raw_path, account_id, db).await {
             Ok(deleted_ids) if !deleted_ids.is_empty() => {
                 // Remove from body store

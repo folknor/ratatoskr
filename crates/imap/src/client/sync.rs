@@ -1,6 +1,7 @@
 use async_imap::types::Flag;
 use futures::StreamExt;
 use mail_parser::MessageParser;
+use tokio_util::sync::CancellationToken;
 
 use super::super::connection::{
     IMAP_CMD_TIMEOUT, IMAP_FETCH_TIMEOUT, IMAP_SEARCH_TIMEOUT, ImapSession,
@@ -17,11 +18,18 @@ use super::{mailbox_supports_custom_keywords, timeout_err};
 #[allow(clippy::too_many_lines)]
 pub async fn delta_check_folders(
     session: &mut ImapSession,
+    cancellation_token: &CancellationToken,
     folders: &[DeltaCheckRequest],
 ) -> Result<Vec<DeltaCheckResult>, String> {
     let mut results = Vec::with_capacity(folders.len());
 
     for req in folders {
+        // Per-folder cancellation checkpoint between SELECT/SEARCH RPCs.
+        // Returning the partial result so the caller's existing
+        // "missed-folder" reconnect path doesn't kick in.
+        if cancellation_token.is_cancelled() {
+            break;
+        }
         let mailbox =
             match tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(&req.folder)).await {
                 Ok(Ok(m)) => m,
