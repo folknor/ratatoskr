@@ -282,12 +282,16 @@ impl SyncRuntime {
                     account_id: account_id.into(),
                     run_id: Some(entry.run_id),
                     was_in_flight: true,
+                    // SyncRuntime knows nothing about calendar; the
+                    // handler stamps this field after piggyback.
+                    calendar_run_id: None,
                 }
             }
             None => SyncCancelAck {
                 account_id: account_id.into(),
                 run_id: None,
                 was_in_flight: false,
+                calendar_run_id: None,
             },
         }
     }

@@ -61,7 +61,7 @@ pub(crate) async fn handle_cancel_account(
                 .into(),
         )
     })?;
-    let ack = runtime.cancel_account(&params.account_id).await;
+    let mut ack = runtime.cancel_account(&params.account_id).await;
 
     // Phase 4 review-pass fix: push cancel is *awaited* on the cancel
     // side (start side stays detached because TLS + OAuth-refresh
@@ -76,6 +76,18 @@ pub(crate) async fn handle_cancel_account(
     // surviving push bridge.
     if let Some(push_runtime) = boot_state.push_runtime() {
         push_runtime.cancel_account(&params.account_id).await;
+    }
+
+    // Phase 5 task 9: piggyback calendar cancel server-side, mirroring
+    // the push pattern. Stamps `calendar_run_id` on the ack so the UI's
+    // cancel_and_await path can subscribe to CalendarRunCompleted for
+    // the cancelled run before issuing the DB DELETE. Calendar tables
+    // CASCADE from `accounts` (db/src/db/schema/05_calendar.sql:5);
+    // without this piggyback a calendar runner with an open
+    // WriteDbState write borrow could race the DELETE FROM accounts.
+    if let Some(calendar_runtime) = boot_state.calendar_runtime() {
+        let cal_ack = calendar_runtime.cancel_account(&params.account_id).await;
+        ack.calendar_run_id = cal_ack.run_id;
     }
 
     serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))

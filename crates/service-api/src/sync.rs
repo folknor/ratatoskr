@@ -99,14 +99,28 @@ pub struct SyncCancelAccountParams {
 /// `CancellationToken` and may take up to 5 seconds on a healthy
 /// connection (longer if a single in-flight network call is stuck).
 ///
-/// `run_id` is `Some` if a run was in flight (the caller can then
+/// `run_id` is `Some` if a sync run was in flight (the caller can then
 /// subscribe to that run's `sync.completed` to know when cancellation
-/// completed); `None` if no runner was active.
+/// completed); `None` if no sync runner was active.
+///
+/// Phase 5 task 9: `calendar_run_id` is the calendar runner's run id
+/// when `handle_cancel_account` piggybacks calendar cancel alongside
+/// sync cancel (account-deletion path). `None` when no calendar runner
+/// was active OR when the request didn't piggyback calendar cancel
+/// (e.g., the explicit-request path uses `calendar.cancel_account_sync`
+/// directly and ignores this field's content). The
+/// `cancel_and_await` UI path uses both `run_id` and `calendar_run_id`
+/// to await both terminal completions before issuing the DB DELETE.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncCancelAck {
     pub account_id: String,
     pub run_id: Option<SyncRunId>,
     pub was_in_flight: bool,
+    /// Phase 5 task 9: piggyback calendar cancel run id. Defaults to
+    /// `None` if the field is missing on the wire (older Service or
+    /// the call didn't piggyback).
+    #[serde(default)]
+    pub calendar_run_id: Option<crate::calendar::CalendarRunId>,
 }
 
 // ---------------------------------------------------------------------------
@@ -222,11 +236,13 @@ mod tests {
                 account_id: "acc-1".into(),
                 run_id: Some(SyncRunId::new_v7()),
                 was_in_flight: true,
+                calendar_run_id: Some(crate::calendar::CalendarRunId::new_v7()),
             },
             SyncCancelAck {
                 account_id: "acc-2".into(),
                 run_id: None,
                 was_in_flight: false,
+                calendar_run_id: None,
             },
         ];
         for ack in cases {
