@@ -1,4 +1,5 @@
 use rusqlite::{OptionalExtension, Row, params};
+use service_state::WriteDbState;
 use tokio_util::sync::CancellationToken;
 
 use gmail::client::GmailState;
@@ -17,7 +18,7 @@ use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
 
 pub async fn calendar_sync_account_impl(
     account_id: &str,
-    db: &ReadDbState,
+    db: &WriteDbState,
     gmail: &GmailState,
     graph: &GraphState,
     cancellation_token: &CancellationToken,
@@ -25,6 +26,15 @@ pub async fn calendar_sync_account_impl(
     if cancellation_token.is_cancelled() {
         return Err("calendar sync cancelled".to_string());
     }
+    // Phase 5 task 3b: Service-facing surface takes `&WriteDbState`. The
+    // existing per-helper queries below are still on `&ReadDbState` (they
+    // write through `ReadDbState::with_conn`, the same write-surface escape
+    // Phase 4 cleaned up for sync). Phase 6's calendar event-mutation
+    // relocation will flip those helpers too. For now we derive a read
+    // view from the WriteDbState so the surface is honest at the Service
+    // boundary even though deeper helpers still use the escape.
+    let read_view = db.to_read_state();
+    let db = &read_view;
     let provider = db
         .with_conn({
             let account_id = account_id.to_string();
@@ -93,7 +103,7 @@ pub async fn calendar_sync_account_impl(
 /// only need `ReadDbState` + encryption key (same pattern as `sync_delta_for_account`).
 pub async fn calendar_sync_account(
     account_id: &str,
-    db: &ReadDbState,
+    db: &WriteDbState,
     encryption_key: [u8; 32],
     cancellation_token: &CancellationToken,
 ) -> Result<(), String> {
