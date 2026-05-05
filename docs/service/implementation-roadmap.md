@@ -286,28 +286,36 @@ The phase lands as one milestone but with a clean commit-level split: respawn ma
 **In scope.**
 - JMAP push WebSocket receiver moves into the Service.
 - The existing `JmapPushReceiver` channel collapses - the UI no longer subscribes to push directly. Push events arriving at the Service trigger the Service-internal sync path.
-- UI gets a `push.event { account_id }` notification (`MustDeliver`) for visibility (status bar updates) but the actual response (sync) happens entirely in the Service.
-- **OAuth token-refresh handshake.** Service-side push subscriptions need to handle JMAP token expiry, but OAuth flow doesn't move until Phase 6. Until then, the Service requests a refresh via IPC: `oauth.refresh_request { account_id }` -> UI runs the refresh + persist (existing UI-side OAuth logic) -> UI replies. This is a temporary IPC method that goes away in Phase 6 when OAuth fully relocates.
+- UI gets a `push.event { account_id, service_generation }` notification (`Coalesce { key: account_id }`) for visibility (status bar updates); the actual response (sync) happens entirely in the Service.
+- **OAuth refresh runs in-Service.** No IPC handshake. `JmapClient::ensure_valid_token` is called before `start_push`, and an auth resolver is threaded into `push_connection_loop` so reconnects re-resolve the bearer. Refresh is purely DB+HTTPS, both Service-internal; the original "temporary `oauth.refresh_request` IPC" plan was a planning-doc error corrected during Phase 4 plan review.
+- **Drain consolidation.** Phase 4 ships an explicit drain consolidation that fixes a pre-existing Phase 3 bug (`lifecycle::run_drain` writes the sentinel before `dispatch.rs` shuts down `SyncRuntime`). The consolidated helper orders: PushRuntime → SyncRuntime → search-writer flush → marker unlink → sentinel write.
 - IMAP IDLE follows the same pattern when it lands. Out-of-scope until then.
 
 **Out of scope.**
 - IMAP IDLE (still pending; comes when IMAP IDLE itself lands in the codebase).
 - Cross-platform OS-level notification surfacing (toast on new mail). Separate work.
+- Push state hardening (crash-aware fresh-start). Phase 4 inherits today's resume-from-saved-state behavior; Phase 8 hardens.
+- Re-auth re-arm of dead push entries. Phase 8.
 
 **Touchpoints.**
-- `crates/service/src/push.rs` - new.
-- `crates/service-api/` - `push.event` notification + temporary `oauth.refresh_request` IPC method.
-- `crates/app/src/handlers/provider.rs` - delete the JMAP push subscription wiring; add the `oauth.refresh_request` handler (deletes itself in Phase 6).
+- `crates/service/src/push.rs` - new. PushRuntime, bridge tasks, panic supervisor, auth resolver closure.
+- `crates/jmap/src/push.rs` - replace captured `auth_header` with `auth_resolver` parameter.
+- `crates/service-api/src/notification.rs` - `push.event` notification variant + catalog test cases (inline at lines 469-585).
+- `crates/service/src/lifecycle.rs` + `crates/service/src/dispatch.rs` - drain consolidation.
+- `crates/service/src/handlers/sync.rs` - detached push start/cancel piggyback.
+- `crates/app/src/handlers/provider.rs` - delete JMAP push subscription wiring entirely.
 - `crates/app/src/subscription.rs` - drop the `jmap_push_subscription` recipe.
+- `crates/app/src/service_client.rs` - add `Notification::PushEvent` arm.
+- `crates/core/src/jmap_push.rs` - deleted.
 
 **Exit criteria.**
 - A change pushed to a JMAP mailbox triggers a sync in the Service without the UI being on the call path.
 - Status bar still surfaces "new mail arrived" indicators.
-- Token expiry during a Service-side push subscription survives via the `oauth.refresh_request` round-trip.
+- Token expiry mid-subscription survives via the in-Service auth resolver; reconnect uses the refreshed bearer.
+- Drain consolidation lands; sentinel writes only after `SyncRuntime::shutdown` completes.
 
 **Risks / open questions.**
 - WebSocket lifetime: today the receiver lives as long as the iced subscription. Service-side, it lives as long as the Service. This is strictly more durable - good.
-- Bundling Phase 4 + Phase 6 was considered (so OAuth doesn't need a temporary refresh handshake). Rejected because Phase 6 is large and Phase 4 is mostly mechanical; the temporary handshake is small and goes away cleanly.
 
 ---
 
@@ -470,7 +478,8 @@ The phase splits into 6a + 6b at commit level. 6a is the long tail of small, mec
 - **Phase 2 plan-specified integration tests (T1).** Phase 2 carry-forward (originally tracked in a `discrepancies.md` companion that has been retired into this entry). The plan's `phase-2-plan.md` § "Integration tests (in-process)" + "Real-subprocess smoke tests" names a cohort - `journal_replays_after_respawn`, `post_ack_crash_does_not_roll_back` / `post_ack_crash_replays_subprocess`, `pre_ack_crash_rolls_back_subprocess`, `mark_chat_read_emits_only_action_completed`, `action_skips_search_index_write`, `compose_send_50mb_attachment` / `send_wire_attachment_validation` / `send_wire_oversize_payload_handler_path`, `handler_does_not_drive_batch_execute`, `stale_outcomes_dropped_after_respawn` - that did not land alongside Phase 2. Foundational unit tests did (`recover_stale_leases_resets_active_jobs_and_ops` + idempotent variant for B1's SQL; `unfinalized_mail_plan_jobs_finds_orphans_after_partial_finalize` + `_skips_send_jobs` + `_handles_leased_status` for B4's finalize-on-drain helper; `insert_quiet_job_rejects_unknown_account_id` for B5's FK constraint; `mail_side_mirror_is_exhaustive` for the bidirectional `MailOperation` ↔ `WireMailOperation` mirror), but the end-to-end behavioral path (kill Service mid-execute, respawn, observe journal replay; submit a plan, observe per-op outcomes streaming, observe final `ActionCompleted`) was not exercised - blockers fixed during close-out were validated by reading code paths, not by running them. Today's in-process harness lacks account seeding (the FK constraint requires real `accounts(id)` rows), a "shut down then respawn against the same data dir" pattern, and action-notification reading. Lands here because Phase 8's flaky-test root-cause and class-aware-emit re-attempt are already going to reshape the harness; building T1 against today's framework would mean rebuilding it once that work lands.
 - **Cross-store invariant pass optimization.** Replace the Phase 3 / Phase 6 full-table scans with marker-file gating: track a "last clean shutdown" marker per store; scan only what's been written since. Bounded to N seconds on a 200 GB mailbox via per-store cursors.
 - **Tantivy orphan iteration in the invariant pass.** Phase 3 carry-forward. The Phase 3 invariant pass clears `history_id` per dirty account and drops body / inline orphans, but Tantivy orphan iteration was deferred - the cursor-clear + next-sync re-index repopulates correctness without it, but unreferenced docs accumulate until then. Add the Tantivy scan (per dirty account: iterate index, drop docs whose `message_id` is no longer in `messages`) alongside the marker-file gating work above so they share the same per-account scan loop. Lands in `crates/service/src/startup_invariants.rs`.
-- **JMAP push state resume.** Phase 4 carry-forward. Phase 4 ships cold-restart-and-resync: every Service boot opens fresh JMAP push WebSocket subscriptions, ignoring `jmap_push_state.push_state` (the column is still written by the existing `save_*` helpers in `crates/jmap/src/push.rs`, just not read for resume). On boot after a clean shutdown, this wastes one sync kick per account if anything changed during downtime; on boot after a crash, the Phase 3 invariant pass already handles correctness via `clear_account_history_id`. Phase 8 reads `last_push_state` per account at boot and threads it through `start_push` so the WebSocket resumes server-side change tracking from the previous incarnation. Strict optimization; correctness preserved without it. Lands in `crates/service/src/push.rs::PushRuntime::start_account` plus a new `load_push_state` query.
+- **JMAP push re-auth re-arm.** Phase 4 carry-forward. UI-side re-auth (`AddAccountWizard::new_reauth` at `crates/app/src/handlers/accounts.rs:53`) updates the existing account row in place and does NOT trigger `PushRuntime::start_account`. So a JMAP token-revocation kills push for that account until Service restart, even after the user re-authorizes - the dead `PushRuntime` entry has no path to re-arm. Phase 8 wires push re-arm to a token-refresh-success event (or to a UI-side `account.reauthorized { account_id }` IPC, depending on whether re-auth itself relocates Service-side in Phase 6). Manual workaround in Phase 4: restart the Service. Lands in `crates/service/src/push.rs::PushRuntime` plus an event emission point in the OAuth refresh path.
+- **JMAP push state hardening.** Phase 4 carry-forward (subsumes / supersedes the prior "JMAP push state resume" bullet from the original Phase 3 deferral pass). Phase 4 inherits today's behavior: `jmap::push::start_push` unconditionally loads `jmap_push_state.push_state` and sends it in `WebSocketPushEnable`. On crash, Phase 3's invariant pass clears `history_id` so a stale `StateChange` resolves correctly via re-fetch; the resume path is therefore correctness-preserving. Phase 8 hardens it: detect crashed accounts (via the same Phase 3 sync-marker signal) and force a fresh-start by clearing `push_state` before calling `start_push`. Adds an explicit fresh-start knob on `start_push` rather than a pre-call `save_push_disabled` workaround. Strict optimization; correctness preserved without it. Lands in `crates/service/src/push.rs::PushRuntime::start_account`.
 - **Account-deletion `is_deleting` gate.** Phase 3 carry-forward. The plan called for an `accounts.is_deleting` schema column + UI-side `SyncTick` filter (skip deleting accounts) + Service-side defense-in-depth check in `SyncRuntime::start_account`. The load-bearing `cancel_and_await` flow shipped without it, so a `SyncTick` firing between the cancel-ack and the row-delete can re-kick a sync against the disappearing account; the cancel races the start, and either the new run gets the cancel (correct outcome) or runs to completion against a half-deleted account (briefly inconsistent until the row delete finalizes). Add the column + both gates so the deletion flow is monotonic. Schema change goes in `crates/db/src/db/schema/01_core.sql`; UI gate in the `SyncTick` account-list filter; Service gate in `SyncRuntime::start_account`.
 - Heartbeat policy refinement: distinguish "dispatch loop alive" from "no progress on a long-running task." Generous timeouts on first heartbeat after a sync starts; require N consecutive misses before respawning rather than 1.
 
