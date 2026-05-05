@@ -149,6 +149,16 @@ where
         out_tx.clone(),
     );
 
+    // Phase 5 task 8: post-ready calendar startup. Constructs the
+    // CalendarRuntime and installs it on BootSharedState so calendar
+    // handlers (start/cancel/kick) can reach it. Calendar is kick-
+    // driven, so the post-ready task does not iterate accounts -
+    // calendar.kick from the UI's SyncTick triggers the actual sync.
+    let calendar_startup_handle = spawn_post_ready_calendar_startup(
+        Arc::clone(&boot_state),
+        out_tx.clone(),
+    );
+
     let mut boot_exit_code: Option<BootExitCode> = None;
 
     loop {
@@ -281,21 +291,47 @@ where
         ShutdownCause::Unrequested
     };
 
-    // Phase 4 task 4: consolidated drain. Order is critical -
-    // push-before-sync prevents a `StateChange` mid-shutdown from
-    // calling `SyncRuntime::start_account` after sync has begun
-    // draining; sentinel-after-everything-else fixes a pre-existing
-    // Phase 3 bug where the sentinel could land before in-flight sync
-    // writes completed. See `service::lifecycle::ServiceLifecycle::drain`.
+    // Phase 4 task 4 + Phase 5 task 7: consolidated drain. Order is
+    // critical -
+    //
+    // - **Push -> Sync** is load-bearing: a `StateChange` mid-shutdown
+    //   would otherwise call `SyncRuntime::start_account` after sync
+    //   has begun draining, leaking a runner past the drain.
+    // - **Calendar -> Sync** is reserved, NOT load-bearing today: the
+    //   action worker is alive throughout the entire consolidated drain,
+    //   so calendar can drain before or after sync without affecting
+    //   action-worker availability today. The order is fixed so a
+    //   future change wiring calendar-cancel cleanup to dispatch action
+    //   plans (RSVP send is the candidate) is a one-liner instead of a
+    //   drain reshuffle. Don't promote this to "load-bearing today"
+    //   rationale unless that wiring lands.
+    // - Sentinel-after-everything-else fixes a pre-existing Phase 3 bug
+    //   where the sentinel could land before in-flight sync writes
+    //   completed.
+    //
+    // See `service::lifecycle::ServiceLifecycle::drain` and
+    // `crates/service/src/calendar.rs` for the rationale matrix.
+    //
+    // Each runtime holds a NotificationSender clone of `out_tx`;
+    // dropping the runtime Arc here is what eventually lets
+    // `drop(out_tx)` below close the writer's input channel and the
+    // writer task exit. Skipping any of these (e.g. forgetting to
+    // shutdown CalendarRuntime when it's installed) hangs
+    // `writer_handle.await` indefinitely.
     //
     // 1. Cancel push bridges + await their supervisors (no-op if the
-    //    post-ready task hasn't installed a PushRuntime yet, e.g. fast
-    //    boot failure).
+    //    post-ready task hasn't installed a PushRuntime yet).
     if let Some(push_runtime) = boot_state.take_push_runtime() {
         push_runtime.shutdown().await;
         drop(push_runtime);
     }
-    // 2. Cancel sync runners + await their supervisors. Releasing this
+    // 2. Cancel calendar runners + await their supervisors (no-op if
+    //    post-ready calendar startup hasn't installed yet).
+    if let Some(calendar_runtime) = boot_state.take_calendar_runtime() {
+        calendar_runtime.shutdown().await;
+        drop(calendar_runtime);
+    }
+    // 3. Cancel sync runners + await their supervisors. Releasing this
     //    Arc drops the inner `SearchWriteHandle` clone the runtime
     //    owned, which lets the writer task observe EOF and exit.
     if let Some(runtime) = boot_state.take_sync_runtime() {
@@ -368,6 +404,14 @@ where
     // drained by the consolidated drain above.
     push_startup_handle.abort();
     let _ = push_startup_handle.await;
+
+    // Phase 5 task 8: same shape as push - the post-ready calendar
+    // startup is bounded work (construct + install), but abort it
+    // explicitly in case it was still mid-construction when shutdown
+    // arrived. The runtime itself, if installed, was drained by the
+    // consolidated drain above.
+    calendar_startup_handle.abort();
+    let _ = calendar_startup_handle.await;
 
     drop(out_tx);
     let _ = writer_handle.await;
@@ -805,5 +849,54 @@ fn spawn_post_ready_push_startup(
                 }
             });
         }
+    })
+}
+
+/// Phase 5 task 8: post-ready calendar startup.
+///
+/// Parks until `boot.ready`, constructs the `CalendarRuntime`, and
+/// installs it on `BootSharedState` so calendar handlers can reach it.
+/// Unlike push startup, this does NOT iterate accounts - calendar is
+/// kick-driven (`calendar.kick` notification from the UI's `SyncTick`),
+/// and the kick handler enumerates accounts itself.
+fn spawn_post_ready_calendar_startup(
+    boot_state: Arc<boot::BootSharedState>,
+    out_tx: mpsc::Sender<Vec<u8>>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        if boot_state.wait_for_ready().await.is_err() {
+            log::debug!("post-ready calendar startup: boot failed, skipping");
+            return;
+        }
+
+        let Some(db_conn) = boot_state.db_conn() else {
+            log::error!(
+                "post-ready calendar startup: db_conn missing after boot.ready - programming error",
+            );
+            return;
+        };
+        let Some(key_bytes) = boot_state.encryption_key() else {
+            log::error!(
+                "post-ready calendar startup: encryption key missing after boot.ready - programming error",
+            );
+            return;
+        };
+
+        let db_state = service_state::WriteDbState::from_arc(db_conn);
+        let encryption_key = crypto_key::SecretKey::from_bytes(key_bytes);
+        let notification_tx = crate::boot_progress::NotificationSender::new(out_tx);
+
+        // service_generation is overwritten by the UI's reader task at
+        // enqueue time; emit 0 here per the WithGeneration trait
+        // contract documented on `Notification::service_generation()`.
+        let calendar_runtime = Arc::new(crate::calendar::CalendarRuntime::new(
+            db_state,
+            encryption_key,
+            notification_tx,
+            0,
+        ));
+        boot_state.install_calendar_runtime(Arc::clone(&calendar_runtime));
+
+        log::info!("post-ready calendar startup: CalendarRuntime installed");
     })
 }
