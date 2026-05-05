@@ -11,11 +11,17 @@ workspace = true
 log = "0.4"
 tokio = { workspace = true, features = ["process"] }
 
+[target.'cfg(unix)']
+dev-dependencies = {}
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(windows)']
+dev-dependencies = {}
+
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = [
+windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_System_JobObjects",
     "Win32_System_Threading",

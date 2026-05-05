@@ -38,7 +38,7 @@ env_logger = "0.11"
 log = "0.4"
 uuid = { version = "1.23.1", features = ["v4"] }
 toml = "1.0"
-mundy = { version = "0.2", default-features = false, features = ["color-scheme", "tokio", "log"] }
+mundy = { version = "0.2.3", default-features = false, features = ["color-scheme", "tokio", "log"] }
 display-info = "0.5"
 rfd = "0.17"
 store = { path = "../stores" }
@@ -50,6 +50,9 @@ mime_guess = "2"
 sha2 = "0.11"
 dev-seed = { path = "../dev-seed", optional = true }
 hotpath = { workspace = true, optional = true }
+
+[target.'cfg(unix)']
+dev-dependencies = {}
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
