@@ -13,6 +13,8 @@ test-helpers = ["service-api/test-helpers"]
 [dependencies]
 service-api = { path = "../service-api" }
 action-types = { path = "../action-types" }
+cal = { path = "../calendar" }
+rtsk = { path = "../core" }
 db = { path = "../db" }
 crypto-key = { path = "../crypto-key" }
 process-lifetime = { path = "../process-lifetime" }

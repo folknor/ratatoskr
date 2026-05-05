@@ -6319,6 +6319,7 @@ version = "0.1.0"
 dependencies = [
  "action-types",
  "base64",
+ "cal",
  "chrono",
  "common",
  "crypto-key",
@@ -6336,6 +6337,7 @@ dependencies = [
  "libc",
  "log",
  "process-lifetime",
+ "rtsk",
  "rusqlite",
  "search",
  "serde",
