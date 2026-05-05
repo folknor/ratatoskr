@@ -330,6 +330,18 @@ Anything not in this table is either (a) read-only from the UI's perspective and
 
 The `service-state` crate exists and a UI source file that tries `use service_state::WriteDbState` does not link - but the Phase 2 invariant is narrower than the original framing claimed. `WriteDbState` itself is scaffolded, not wired: the action worker writes through `ReadDbState::conn()`, same as Phase 1. What Phase 2 actually delivers is a narrowed `ActionProviderCtx` (excludes body / inline / search store handles, regression-tested by exhaustive destructure). Full lockdown - `WriteDbState` is the only path to writes, app crate can't reach it - lands in Phase 6 alongside the global write-surface relocation. Body / inline / search write halves still construct UI-side until Phase 3 (sync) and Phase 6 (rest).
 
+**Phase 3 status (as landed).** Of the Phase 3 entries above:
+- ✓ Tantivy / body / inline store writer halves relocated to `service-state`; the writer task that owns the `IndexWriter` lives in `crates/service/src/search_writer.rs` and emits `index.committed` from its async context (no `block_on`).
+- ✓ `service-api` sync surface: `sync.start_account` / `sync.cancel_account` request methods + `sync.completed` / `index.committed` / `sync.progress` notifications. `SyncRunId` correlates ack-to-completed.
+- ✓ `SyncRuntime` per-account map (cancellation tokens, panic supervisor, on-disk `sync_markers/<id>.json` lifecycle) lands in `crates/service/src/sync.rs`. Drain order in dispatch: cancel + await runners, drop the runtime Arc (releases the inner `SearchWriteHandle`), let the writer task drain, then write the sentinel.
+- ✓ Boot phases extended: `OpeningBodyAndInlineStores`, `OpeningSearchIndex`, `RunningInvariantPass`. The invariant pass triggers when the clean-shutdown sentinel was absent at boot; per dirty account, it clears `history_id` (forcing the next sync to re-fetch the cached window) and drops body / inline orphans whose `message_id` / `content_hash` are no longer referenced. Tantivy orphan iteration is deferred to Phase 8 - the cursor-clear + next-sync re-index repopulates correctness without it.
+- ✓ Cancellation checkpoints in JMAP sync (`crates/jmap/src/sync/...`) at sync-entry, network-call, and persist-batch sites.
+- ✓ UI's `dispatch_sync_delta` rewired to `client.start_sync(account_id)`; the `App.sync_handles` map is gone. Account deletion calls `client.cancel_and_await(&account_id)` before the orchestrate.
+- ✓ JMAP push events route through `Message::JmapPushKick(account_id)` -> `client.start_sync(...)` (transitional - Phase 4 collapses).
+- ✓ UI search reader debounces 200 ms on `index.committed` via `pending_reader_reload` + `ReaderReloadTick`.
+
+The `is_deleting` schema column / SyncTick filter / Service-side defense-in-depth check from the plan are deferred; the load-bearing IPC cancel-then-await flow is the part the Phase 3 commits land. The Phase 3 invariant-pass orphan scans cover bodies + inline images; Tantivy orphan iteration ships in Phase 8 alongside the marker-file gating optimization.
+
 ## Cross-store crash consistency
 
 The Service writes to four durable stores: SQLite (main + `bodies.db`), pack files, Tantivy, inline-image store. A crash mid-sequence can leave inter-store inconsistencies: `attachments` row written but pack append not fsync'd; Tantivy doc references a body the body store hasn't durably committed; etc. Each store has its own crash-safe recovery (SQLite WAL, append-only pack scan, Tantivy uncommitted-segment cleanup) but cross-store reconciliation is not free.

@@ -2756,4 +2756,126 @@ mod tests {
         );
         assert!(notification_should_dispatch(&fresh, 2));
     }
+
+    // Phase 3 task 14: pending_syncs latching + GC + drain.
+
+    fn empty_pending_syncs() -> PendingSyncs {
+        Arc::new(Mutex::new(HashMap::new()))
+    }
+
+    /// `route_sync_completed` arriving before any subscriber latches
+    /// the result; the late subscriber consumes it without parking.
+    #[tokio::test]
+    async fn pending_syncs_latches_completed_when_no_subscriber() {
+        let map = empty_pending_syncs();
+        let run_id = SyncRunId::new_v7();
+
+        // Simulate the reader-task arrival path inline.
+        {
+            let mut g = map.lock().expect("test mutex");
+            g.insert(
+                run_id,
+                PendingSync::Completed {
+                    result: SyncResult::Completed,
+                    latched_at: Instant::now(),
+                },
+            );
+        }
+        // A late "subscribe" finds the latched entry and consumes.
+        let mut g = map.lock().expect("test mutex");
+        match g.entry(run_id) {
+            Entry::Occupied(e) => match e.get() {
+                PendingSync::Completed { result, .. } => {
+                    let r = result.clone();
+                    e.remove();
+                    assert!(matches!(r, SyncResult::Completed));
+                }
+                PendingSync::Pending(_) => panic!("expected latched Completed"),
+            },
+            Entry::Vacant(_) => panic!("expected latched entry"),
+        }
+        assert!(g.is_empty(), "consumed entry must be removed");
+    }
+
+    /// Subscriber inserts `Pending`; routing arrival broadcasts the
+    /// result and removes the entry.
+    #[tokio::test]
+    async fn pending_syncs_pending_then_route_resolves_subscriber() {
+        let map = empty_pending_syncs();
+        let run_id = SyncRunId::new_v7();
+        let mut rx = {
+            let mut g = map.lock().expect("test mutex");
+            let (tx, rx) = broadcast::channel(SYNC_BROADCAST_CAPACITY);
+            g.insert(run_id, PendingSync::Pending(tx));
+            rx
+        };
+        // Routing path:
+        {
+            let mut g = map.lock().expect("test mutex");
+            if let Entry::Occupied(mut e) = g.entry(run_id) {
+                if let PendingSync::Pending(tx) = e.get_mut() {
+                    let _ = tx.send(SyncResult::Cancelled);
+                }
+                e.remove();
+            }
+        }
+        let received = rx.recv().await.expect("subscriber receives");
+        assert!(matches!(received, SyncResult::Cancelled));
+        assert!(map.lock().expect("test mutex").is_empty());
+    }
+
+    /// `fail_pending_syncs` drops every Pending sender so awaiting
+    /// subscribers see `RecvError::Closed`. Mirrors the cross-respawn
+    /// drain.
+    #[tokio::test]
+    async fn fail_pending_syncs_closes_pending_subscribers() {
+        let map = empty_pending_syncs();
+        let run_id = SyncRunId::new_v7();
+        let mut rx = {
+            let mut g = map.lock().expect("test mutex");
+            let (tx, rx) = broadcast::channel(SYNC_BROADCAST_CAPACITY);
+            g.insert(run_id, PendingSync::Pending(tx));
+            rx
+        };
+        fail_pending_syncs(&map);
+        let recv = rx.recv().await;
+        assert!(recv.is_err(), "subscriber should see Closed after drain");
+        assert!(map.lock().expect("test mutex").is_empty());
+    }
+
+    /// `sweep_latched_completed` drops Completed entries past the TTL
+    /// but leaves Pending entries alone.
+    #[test]
+    fn sweep_latched_drops_aged_completed_keeps_pending() {
+        let map = empty_pending_syncs();
+        let stale_id = SyncRunId::new_v7();
+        let fresh_id = SyncRunId::new_v7();
+        let pending_id = SyncRunId::new_v7();
+        {
+            let mut g = map.lock().expect("test mutex");
+            g.insert(
+                stale_id,
+                PendingSync::Completed {
+                    result: SyncResult::Completed,
+                    latched_at: Instant::now()
+                        .checked_sub(LATCHED_COMPLETED_TTL + Duration::from_secs(1))
+                        .expect("monotonic"),
+                },
+            );
+            g.insert(
+                fresh_id,
+                PendingSync::Completed {
+                    result: SyncResult::Completed,
+                    latched_at: Instant::now(),
+                },
+            );
+            let (tx, _rx) = broadcast::channel(SYNC_BROADCAST_CAPACITY);
+            g.insert(pending_id, PendingSync::Pending(tx));
+        }
+        sweep_latched_completed(&map);
+        let g = map.lock().expect("test mutex");
+        assert!(!g.contains_key(&stale_id), "stale Completed must be dropped");
+        assert!(g.contains_key(&fresh_id), "fresh Completed must survive");
+        assert!(g.contains_key(&pending_id), "Pending must survive");
+    }
 }

@@ -375,3 +375,88 @@ async fn unlink_marker_file(app_data_dir: &Path, account_id: &str) -> Result<(),
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use service_api::SyncRunId;
+    use tempfile::tempdir;
+
+    async fn write_marker(dir: &Path, account_id: &str, status: MarkerStatus) {
+        let marker = SyncMarker {
+            run_id: SyncRunId::new_v7(),
+            started_at: 1234,
+            kind: "delta".into(),
+            status,
+        };
+        let markers = dir.join("sync_markers");
+        tokio::fs::create_dir_all(&markers).await.expect("create");
+        let bytes = serde_json::to_vec_pretty(&marker).expect("serialize");
+        tokio::fs::write(markers.join(format!("{account_id}.json")), bytes)
+            .await
+            .expect("write");
+    }
+
+    #[tokio::test]
+    async fn discover_returns_empty_when_dir_missing() {
+        let dir = tempdir().expect("tempdir");
+        let dirty = discover_dirty_accounts(dir.path()).await;
+        assert!(dirty.is_empty());
+    }
+
+    #[tokio::test]
+    async fn discover_skips_completed_markers() {
+        let dir = tempdir().expect("tempdir");
+        write_marker(dir.path(), "acc-clean", MarkerStatus::Completed).await;
+        let dirty = discover_dirty_accounts(dir.path()).await;
+        assert!(
+            dirty.is_empty(),
+            "completed markers must not surface as dirty"
+        );
+    }
+
+    #[tokio::test]
+    async fn discover_surfaces_in_progress_failed_cancelled_markers() {
+        let dir = tempdir().expect("tempdir");
+        write_marker(dir.path(), "acc-a", MarkerStatus::InProgress).await;
+        write_marker(dir.path(), "acc-b", MarkerStatus::Failed).await;
+        write_marker(dir.path(), "acc-c", MarkerStatus::Cancelled).await;
+        write_marker(dir.path(), "acc-clean", MarkerStatus::Completed).await;
+        let mut dirty: Vec<_> = discover_dirty_accounts(dir.path())
+            .await
+            .into_iter()
+            .map(|d| d.account_id)
+            .collect();
+        dirty.sort();
+        assert_eq!(
+            dirty,
+            vec!["acc-a".to_string(), "acc-b".to_string(), "acc-c".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn discover_surfaces_unparseable_marker_as_fully_dirty() {
+        let dir = tempdir().expect("tempdir");
+        let markers = dir.path().join("sync_markers");
+        tokio::fs::create_dir_all(&markers).await.expect("create");
+        tokio::fs::write(markers.join("garbage.json"), b"not json")
+            .await
+            .expect("write");
+        let dirty = discover_dirty_accounts(dir.path()).await;
+        assert_eq!(dirty.len(), 1);
+        assert_eq!(dirty[0].account_id, "garbage");
+        assert!(matches!(dirty[0].status, DirtyStatus::Unparseable));
+    }
+
+    #[tokio::test]
+    async fn discover_skips_tmp_files() {
+        let dir = tempdir().expect("tempdir");
+        let markers = dir.path().join("sync_markers");
+        tokio::fs::create_dir_all(&markers).await.expect("create");
+        tokio::fs::write(markers.join("foo.json.tmp"), b"")
+            .await
+            .expect("write");
+        let dirty = discover_dirty_accounts(dir.path()).await;
+        assert!(dirty.is_empty(), "in-progress temp files must be ignored");
+    }
+}
+
