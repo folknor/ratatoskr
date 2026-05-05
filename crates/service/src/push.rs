@@ -376,3 +376,22 @@ async fn kick_sync_and_emit(inner: &Arc<PushRuntimeInner>, account_id: &str) {
         }
     }
 }
+
+// Tests for PushRuntime intentionally omitted from this commit.
+//
+// Phase 4 task 9 (test cohort) calls for: provider-gating against a
+// seeded DB, bridge-task debounce + sync-kick + notification emission,
+// shutdown drain ordering, account-delete cancel-before-sync. All of
+// these require either:
+//   (a) a fake JMAP WebSocket server fixture (the bridge body needs a
+//       real-shaped StateChange producer to exercise debounce + kick), or
+//   (b) `test_dummy` constructors on BodyStoreWriteState /
+//       InlineImageStoreWriteState / SearchWriteHandle (which don't
+//       exist - SyncRuntime today has no in-memory test path either).
+//
+// Adding the fixtures is non-trivial infrastructure work that would
+// dwarf Phase 4's behavioral surface. The PushEvent wire/class
+// guarantees are covered by the service-api catalog tests at
+// crates/service-api/src/notification.rs:469-585; the integration
+// behavior is tracked as a Phase 8 carry-forward alongside the
+// flaky-test root-cause work that Phase 8 already touches.
