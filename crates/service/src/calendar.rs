@@ -71,6 +71,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use crypto_key::SecretKey;
 use service_api::{
@@ -101,6 +102,13 @@ struct AccountEntry {
 
 pub(crate) struct CalendarRuntimeInner {
     accounts: Mutex<HashMap<String, AccountEntry>>,
+    /// Wall-clock-ish timestamps of the most recent run completion per
+    /// account (Ok or Err). In-memory only; lost on Service respawn.
+    /// Open question 3 of `phase-5-plan.md`: a Service restart re-syncs
+    /// every account on the next kick (idempotent by CTags/ETags), and
+    /// the per-runtime semaphore bounds the parallel cost. Persisting
+    /// would buy little; revisit if benchmarks surface a need.
+    last_completed: Mutex<HashMap<String, Instant>>,
     pub(crate) db: WriteDbState,
     pub(crate) encryption_key: SecretKey,
     pub(crate) notification_tx: NotificationSender,
@@ -129,6 +137,7 @@ impl CalendarRuntime {
         Self {
             inner: Arc::new(CalendarRuntimeInner {
                 accounts: Mutex::new(HashMap::new()),
+                last_completed: Mutex::new(HashMap::new()),
                 db,
                 encryption_key,
                 notification_tx,
@@ -235,6 +244,32 @@ impl CalendarRuntime {
                 was_in_flight: false,
             },
         }
+    }
+
+    /// Filter `account_ids` to those whose last completion was more
+    /// than `staleness` ago (or that have no recorded completion).
+    /// Used by `handle_calendar_kick` to gate the kick-driven path
+    /// without re-syncing accounts that just finished.
+    ///
+    /// Open question 3 in `phase-5-plan.md` is closed in favour of
+    /// in-memory tracking + the per-runtime semaphore: a Service
+    /// respawn re-syncs every account on the next kick, but the
+    /// concurrency cap bounds the cost and CTags/ETags make the work
+    /// idempotent on the wire.
+    pub async fn accounts_due_for_sync(
+        &self,
+        account_ids: Vec<String>,
+        staleness: Duration,
+    ) -> Vec<String> {
+        let now = Instant::now();
+        let map = self.inner.last_completed.lock().await;
+        account_ids
+            .into_iter()
+            .filter(|aid| {
+                map.get(aid)
+                    .is_none_or(|last| now.duration_since(*last) >= staleness)
+            })
+            .collect()
     }
 
     /// Drain step. Cancel every runner, await every supervisor.
@@ -369,6 +404,14 @@ async fn run_calendar(
 
     if mutated {
         emit_calendar_changed(&inner, &account_id).await;
+    }
+    // Stamp last_completed regardless of result. The kick handler reads
+    // this map to gate the staleness check (1h default) and a failed
+    // attempt still counts as "we just tried" - hammering a flaky
+    // provider every 5 minutes wouldn't help.
+    {
+        let mut map = inner.last_completed.lock().await;
+        map.insert(account_id.clone(), Instant::now());
     }
     emit_run_completed(&inner, &account_id, run_id, sync_result, mutated).await;
 }
