@@ -297,13 +297,26 @@ where
     }
     // 2. Cancel sync runners + await their supervisors. Releasing this
     //    Arc drops the inner `SearchWriteHandle` clone the runtime
-    //    owned, which lets the writer task observe EOF and exit (step
-    //    further down via `drop(out_tx)` + `writer_handle.await`).
+    //    owned, which lets the writer task observe EOF and exit.
     if let Some(runtime) = boot_state.take_sync_runtime() {
         runtime.shutdown().await;
         drop(runtime);
     }
-    // 3. Sentinel write happens inside `lifecycle::drain` below, after
+    // 3. Await the search-writer task's JoinHandle so the consolidated
+    //    drain genuinely observes termination. The task exits when its
+    //    mpsc rx returns None (every SearchWriteHandle clone has been
+    //    dropped); SyncRuntime::shutdown above released the last
+    //    clone. Phase 4 review-pass fix - pre-fix the handle was
+    //    discarded at construction and the "the writer task observes
+    //    EOF and exits" claim relied on the run_sync flush_now()
+    //    invariant being maintained, with no test that would catch a
+    //    future regression of that invariant.
+    if let Some(handle) = boot_state.take_search_writer_handle()
+        && let Err(e) = handle.await
+    {
+        log::warn!("search-writer task join error during shutdown: {e}");
+    }
+    // 4. Sentinel write happens inside `lifecycle::drain` below, after
     //    all subsystem shutdowns. The OnceCell inside `drain` keeps the
     //    write idempotent across any future caller.
     let flushed_ok = panic_safe_drain(&lifecycle, cause).await;

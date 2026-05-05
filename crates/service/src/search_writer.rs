@@ -88,7 +88,7 @@ pub fn spawn(
     app_data_dir: &Path,
     notification_tx: NotificationSender,
     service_generation: u32,
-) -> Result<SearchWriteHandle, String> {
+) -> Result<(SearchWriteHandle, tokio::task::JoinHandle<()>), String> {
     let handle = tokio::runtime::Handle::try_current()
         .map_err(|_| "search writer requires a tokio runtime".to_string())?;
     if !matches!(
@@ -106,14 +106,24 @@ pub fn spawn(
     drop(index);
 
     let (tx, rx) = mpsc::channel::<WriterCommand>(COMMAND_QUEUE_CAPACITY);
-    tokio::spawn(run_writer_task(
+    // Phase 4 review-pass fix: capture and return the writer task's
+    // JoinHandle so the consolidated drain can await it after every
+    // SearchWriteHandle clone has been dropped. Pre-Phase-4 the handle
+    // was discarded; the task exited "by accident" because every
+    // run_sync exit path called flush_now() (which round-trips through
+    // an oneshot ack), so by SyncRuntime::shutdown return the writer
+    // was queued-empty. Undocumented invariant; one stray future
+    // change to a sync exit path that skips flush_now would re-open a
+    // sentinel-before-flush race with no test catching it. Now the
+    // drain explicitly observes the writer's exit.
+    let task_handle = tokio::spawn(run_writer_task(
         writer,
         fields,
         rx,
         notification_tx,
         service_generation,
     ));
-    Ok(SearchWriteHandle::from_sender(tx))
+    Ok((SearchWriteHandle::from_sender(tx), task_handle))
 }
 
 /// Runner body. Owns the `IndexWriter` and `Fields`; processes

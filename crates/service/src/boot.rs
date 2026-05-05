@@ -124,6 +124,15 @@ pub(crate) struct BootSharedState {
     /// this slot to shut down the push bridges *before* `SyncRuntime`
     /// in the consolidated drain (Phase 4 task 4).
     push_runtime: Mutex<Option<Arc<crate::push::PushRuntime>>>,
+    /// `JoinHandle` of the search-writer task. Phase 3 spawned it and
+    /// discarded the handle; Phase 4 review-pass fix captures it so the
+    /// consolidated drain can await termination after every
+    /// `SearchWriteHandle` clone has been dropped (the task exits when
+    /// its mpsc rx returns None). Without this, the consolidated drain
+    /// has no signal that the writer has actually flushed; the prior
+    /// "step 5: await search-writer JoinHandle" doc-comment was
+    /// aspirational.
+    search_writer_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl BootSharedState {
@@ -137,6 +146,7 @@ impl BootSharedState {
             app_data_dir,
             sync_runtime: Mutex::new(None),
             push_runtime: Mutex::new(None),
+            search_writer_handle: Mutex::new(None),
         })
     }
 
@@ -225,6 +235,36 @@ impl BootSharedState {
         self.push_runtime
             .lock()
             .expect("push_runtime mutex poisoned")
+            .take()
+    }
+
+    /// Install the search-writer task's `JoinHandle` once the boot
+    /// task has spawned the writer (Phase 4 review-pass fix). The
+    /// consolidated drain awaits this handle after dropping the last
+    /// `SearchWriteHandle` clone so termination of the writer is
+    /// observed rather than relied-on as an undocumented invariant.
+    pub(crate) fn install_search_writer_handle(&self, handle: tokio::task::JoinHandle<()>) {
+        let mut guard = self
+            .search_writer_handle
+            .lock()
+            .expect("search_writer_handle mutex poisoned");
+        if guard.is_some() {
+            log::warn!(
+                "BootSharedState::install_search_writer_handle called twice; second install ignored",
+            );
+            return;
+        }
+        *guard = Some(handle);
+    }
+
+    /// Move the search-writer `JoinHandle` out of the slot. Called from
+    /// the consolidated drain after `SyncRuntime::shutdown` has dropped
+    /// the last `SearchWriteHandle` clone (the writer task exits when
+    /// its mpsc rx returns None).
+    pub(crate) fn take_search_writer_handle(&self) -> Option<tokio::task::JoinHandle<()>> {
+        self.search_writer_handle
+            .lock()
+            .expect("search_writer_handle mutex poisoned")
             .take()
     }
 
@@ -656,14 +696,15 @@ async fn run_boot_sequence_inner(
 
     boot_progress::emit(&out_tx, BootPhase::OpeningSearchIndex, None);
     let notification_tx = boot_progress::NotificationSender::new(out_tx.clone());
-    let search_write = match crate::search_writer::spawn(&app_data_dir, notification_tx.clone(), 0)
-    {
-        Ok(handle) => handle,
-        Err(e) => {
-            log::error!("search writer spawn failed: {e}");
-            return Err(BootFailure::MigrationFailure);
-        }
-    };
+    let (search_write, search_writer_handle) =
+        match crate::search_writer::spawn(&app_data_dir, notification_tx.clone(), 0) {
+            Ok(pair) => pair,
+            Err(e) => {
+                log::error!("search writer spawn failed: {e}");
+                return Err(BootFailure::MigrationFailure);
+            }
+        };
+    state.install_search_writer_handle(search_writer_handle);
 
     let db_write = service_state::WriteDbState::from_arc(Arc::clone(&conn));
 
