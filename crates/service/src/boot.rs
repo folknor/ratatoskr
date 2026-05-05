@@ -108,6 +108,14 @@ pub(crate) struct BootSharedState {
     /// dispatch signature. Immutable for the lifetime of the
     /// `BootSharedState`.
     app_data_dir: PathBuf,
+    /// Per-account sync coordinator. Installed by the boot task once
+    /// the writer halves (DB, body store, inline image store, search
+    /// writer task) are ready, before `signal_ready` fires; from that
+    /// point on every `sync.start_account` / `sync.cancel_account`
+    /// handler reads it via `sync_runtime()`. Held in a `Mutex<Option<_>>`
+    /// rather than `OnceLock` so the type stays consistent with the
+    /// other boot-installed state on this struct (`context`, `result`).
+    sync_runtime: Mutex<Option<Arc<crate::sync::SyncRuntime>>>,
 }
 
 impl BootSharedState {
@@ -119,7 +127,39 @@ impl BootSharedState {
             action_worker_wakeup: Notify::new(),
             boot_ready_inflight: std::sync::atomic::AtomicBool::new(false),
             app_data_dir,
+            sync_runtime: Mutex::new(None),
         })
+    }
+
+    /// Install the `SyncRuntime` once the boot task has constructed it
+    /// (Phase 3 task 12 wires this from `run_boot_sequence_inner`).
+    /// Must be called exactly once; a second call is a programming
+    /// error and is logged at warn (the first install wins).
+    #[allow(dead_code)] // wired up in Phase 3 task 12
+    pub(crate) fn install_sync_runtime(&self, runtime: Arc<crate::sync::SyncRuntime>) {
+        let mut guard = self
+            .sync_runtime
+            .lock()
+            .expect("sync_runtime mutex poisoned");
+        if guard.is_some() {
+            log::warn!(
+                "BootSharedState::install_sync_runtime called twice; second install ignored",
+            );
+            return;
+        }
+        *guard = Some(runtime);
+    }
+
+    /// Snapshot the active `SyncRuntime` if boot has installed one.
+    /// Returns `None` if boot has not reached the sync-runtime
+    /// construction step yet (or if a non-sync code path reaches here
+    /// before boot completes).
+    pub(crate) fn sync_runtime(&self) -> Option<Arc<crate::sync::SyncRuntime>> {
+        self.sync_runtime
+            .lock()
+            .expect("sync_runtime mutex poisoned")
+            .as_ref()
+            .map(Arc::clone)
     }
 
     /// Path to `<app_data>/` for this Service incarnation. Used by
