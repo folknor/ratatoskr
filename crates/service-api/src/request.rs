@@ -8,6 +8,9 @@ use crate::calendar::{
 };
 use crate::account::{AccountCreateParams, AccountReorderParams, AccountUpdateParams};
 use crate::contacts::{ContactGroupDeleteParams, ContactGroupSaveParams};
+use crate::internal::{
+    DecryptForStorageParams, EncryptForStorageParams, ReadBootstrapSnapshotsParams,
+};
 use crate::pinned_search::{
     PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,
     PinnedSearchUpdateParams,
@@ -242,6 +245,31 @@ pub enum RequestParams {
     ///
     /// 5 s timeout: handler is one bounded statement.
     SmartFolderCreate { params: SmartFolderCreateParams },
+    /// Phase 6a-part-2 (encryption-key handle): cold-boot read of the
+    /// UI + settings bootstrap snapshots, decrypted Service-side. The
+    /// handler runs `get_ui_bootstrap_snapshot` and
+    /// `get_settings_bootstrap_snapshot` with the in-memory key and
+    /// returns the already-decrypted structs as JSON. One round-trip
+    /// per cold boot replaces the prior 22+44 per-decrypt local reads.
+    ///
+    /// 10 s timeout: cold-disk read + AES key-stretch under
+    /// contention. Generous because this IPC sits on the cold-boot
+    /// critical path and we cannot retry behind the user.
+    ReadBootstrapSnapshots { params: ReadBootstrapSnapshotsParams },
+    /// Phase 6a-part-2 (encryption-key handle): one-shot encrypt for
+    /// credential persistence. Returns the existing
+    /// `iv:ciphertext_with_tag` string format that `encrypt_value`
+    /// produces. Used by the account-add password persist site and
+    /// the rare hand-built persistence in tests.
+    ///
+    /// 5 s timeout: handler is one in-memory AES encrypt.
+    EncryptForStorage { params: EncryptForStorageParams },
+    /// Phase 6a-part-2 (encryption-key handle): one-shot decrypt for
+    /// the re-auth wizard pre-fill. Returns the plaintext as
+    /// `RedactedString` so wire-debug logs cannot leak it.
+    ///
+    /// 5 s timeout: handler is one in-memory AES decrypt.
+    DecryptForStorage { params: DecryptForStorageParams },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -290,6 +318,9 @@ impl RequestParams {
             Self::AccountUpdate { .. } => "account.update",
             Self::AccountReorder { .. } => "account.reorder",
             Self::AccountCreate { .. } => "account.create",
+            Self::ReadBootstrapSnapshots { .. } => "internal.read_bootstrap_snapshots",
+            Self::EncryptForStorage { .. } => "internal.encrypt_for_storage",
+            Self::DecryptForStorage { .. } => "internal.decrypt_for_storage",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -363,6 +394,13 @@ impl RequestParams {
             | Self::SmartFolderCreate { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
+            // Cold-boot critical path; absorb cold-disk + key-stretch.
+            Self::ReadBootstrapSnapshots { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(10))
+            }
+            Self::EncryptForStorage { .. } | Self::DecryptForStorage { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(5))
+            }
             #[cfg(feature = "test-helpers")]
             Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
@@ -430,6 +468,9 @@ impl RequestParams {
             Self::AccountUpdate { params } => serde_json::json!({ "params": params }),
             Self::AccountReorder { params } => serde_json::json!({ "params": params }),
             Self::AccountCreate { params } => serde_json::json!({ "params": params }),
+            Self::ReadBootstrapSnapshots { params } => serde_json::json!({ "params": params }),
+            Self::EncryptForStorage { params } => serde_json::json!({ "params": params }),
+            Self::DecryptForStorage { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -685,6 +726,33 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("smart_folder.create params: {e}"))?;
                 Ok(Self::SmartFolderCreate { params: p.params })
+            }
+            "internal.read_bootstrap_snapshots" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: ReadBootstrapSnapshotsParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("internal.read_bootstrap_snapshots params: {e}"))?;
+                Ok(Self::ReadBootstrapSnapshots { params: p.params })
+            }
+            "internal.encrypt_for_storage" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: EncryptForStorageParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("internal.encrypt_for_storage params: {e}"))?;
+                Ok(Self::EncryptForStorage { params: p.params })
+            }
+            "internal.decrypt_for_storage" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: DecryptForStorageParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("internal.decrypt_for_storage params: {e}"))?;
+                Ok(Self::DecryptForStorage { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {
@@ -1745,6 +1813,116 @@ mod tests {
     fn smart_folder_create_round_trips_from_method_params() {
         let original = RequestParams::SmartFolderCreate {
             params: sample_smart_folder_create(),
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    // -- Phase 6a-part-2: encryption-key handle wire envelopes -------------
+
+    #[test]
+    fn read_bootstrap_snapshots_method_name_is_dotted() {
+        let p = RequestParams::ReadBootstrapSnapshots {
+            params: ReadBootstrapSnapshotsParams::default(),
+        };
+        assert_eq!(p.method_name(), "internal.read_bootstrap_snapshots");
+    }
+
+    #[test]
+    fn read_bootstrap_snapshots_timeout_is_ten_seconds() {
+        let p = RequestParams::ReadBootstrapSnapshots {
+            params: ReadBootstrapSnapshotsParams::default(),
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(10)),
+        );
+    }
+
+    #[test]
+    fn read_bootstrap_snapshots_round_trips_from_method_params() {
+        let original = RequestParams::ReadBootstrapSnapshots {
+            params: ReadBootstrapSnapshotsParams::default(),
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn encrypt_for_storage_method_name_is_dotted() {
+        let p = RequestParams::EncryptForStorage {
+            params: EncryptForStorageParams {
+                plaintext: crate::redacted::RedactedString::new("x"),
+            },
+        };
+        assert_eq!(p.method_name(), "internal.encrypt_for_storage");
+    }
+
+    #[test]
+    fn encrypt_for_storage_timeout_is_five_seconds() {
+        let p = RequestParams::EncryptForStorage {
+            params: EncryptForStorageParams {
+                plaintext: crate::redacted::RedactedString::new("x"),
+            },
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn encrypt_for_storage_round_trips_from_method_params() {
+        let original = RequestParams::EncryptForStorage {
+            params: EncryptForStorageParams {
+                plaintext: crate::redacted::RedactedString::new("hunter2"),
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn decrypt_for_storage_method_name_is_dotted() {
+        let p = RequestParams::DecryptForStorage {
+            params: DecryptForStorageParams {
+                ciphertext: "AAAA:BBBB".into(),
+            },
+        };
+        assert_eq!(p.method_name(), "internal.decrypt_for_storage");
+    }
+
+    #[test]
+    fn decrypt_for_storage_timeout_is_five_seconds() {
+        let p = RequestParams::DecryptForStorage {
+            params: DecryptForStorageParams {
+                ciphertext: "AAAA:BBBB".into(),
+            },
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn decrypt_for_storage_round_trips_from_method_params() {
+        let original = RequestParams::DecryptForStorage {
+            params: DecryptForStorageParams {
+                ciphertext: "AAAA:BBBB".into(),
+            },
         };
         let parsed = RequestParams::from_method_params(
             original.method_name(),

@@ -18,7 +18,6 @@ use crate::ui::undoable::UndoableText;
 use crate::window_state;
 use cmdk::{BindingTable, Chord, CommandRegistry, FocusedRegion, UndoStack, current_platform};
 use iced::{Task, Theme};
-use rtsk::db::queries::{get_settings_bootstrap_snapshot, get_ui_bootstrap_snapshot};
 use rtsk::db::queries_extra::get_calendar_default_view_sync;
 use rtsk::generation::{GenerationCounter, Nav, PopOut, Search, ThreadDetail};
 use std::collections::HashMap;
@@ -311,18 +310,24 @@ impl ReadyApp {
                 }
             };
 
-        // The Service has already loaded and validated the key in its boot
-        // sequence (BootPhase::LoadingKey - a missing or unreadable key is a
-        // fatal Service exit with BootExitCode::KeyLoadFailure, surfaced to
-        // the user before this code runs). Reaching this point with a load
-        // failure means the key file changed between the Service's read and
-        // ours - permissions race, transient FS glitch, etc. Surfacing as
-        // expect() rather than silently degrading to a zero key (the Phase 1
-        // behaviour the plan called out as a real risk) is the correct
-        // response: a fatal error here gives the user a chance to fix the
-        // underlying problem instead of writing data under a zero key.
-        // Phase 2 will plumb the Service's already-validated key through IPC
-        // and remove this UI-side load entirely.
+        // Phase 6a-part-2: the bootstrap-snapshot decrypt path now flows
+        // through `internal.read_bootstrap_snapshots` (one IPC, both
+        // snapshots returned already-decrypted). The N-decrypt-per-boot
+        // anti-pattern (one IPC per secure setting under a generic
+        // `decrypt_for_storage`) was rejected in plan revision; see
+        // `docs/service/phase-6a-plan.md` § "Encryption-key handle".
+        //
+        // The single remaining UI-side load is the `ActionContext` below:
+        // it carries `encryption_key` for SMTP credential decrypt during
+        // email/contact actions. Phase 6c removes the action_ctx (the
+        // `cal::actions` ActionContext is its only outstanding caller),
+        // and with it this last UI-side load. Until 6c, the load is
+        // scoped to action_ctx construction; the Service's already-
+        // validated key bytes flow through that single field. A load
+        // failure here means the key file changed between the Service's
+        // read and ours (permissions race, FS glitch); `expect()` is the
+        // correct response so the user can fix the underlying problem
+        // instead of writing data under a zero key.
         let encryption_key = rtsk::load_encryption_key(data_dir)
             .expect("encryption key must be loadable after Service validated it at boot");
 
@@ -358,17 +363,15 @@ impl ReadyApp {
             .map(|view_name| CalendarState::parse_view_name(&view_name))
             .unwrap_or(CalendarView::Month);
 
-        // Load persisted preferences. The bootstrap snapshots don't decrypt
-        // anything (they only cover non-secure keys), so the encryption key
-        // is fed through unchanged.
-        let bootstrap = db
-            .read_db_state()
-            .with_conn_sync(|conn| {
-                let ui = get_ui_bootstrap_snapshot(conn, &encryption_key)?;
-                let settings = get_settings_bootstrap_snapshot(conn, &encryption_key)?;
-                Ok((ui, settings))
-            })
-            .ok();
+        // Phase 6a-part-2 (encryption-key handle): persisted preferences
+        // arrive via `internal.read_bootstrap_snapshots` and are applied
+        // when `Message::BootstrapSnapshotsLoaded` lands - see the
+        // boot-task assembly below. The Service decrypts secure settings
+        // with its already-loaded key; the UI never holds an encrypted
+        // byte for the bootstrap path. Until the IPC settles the UI
+        // shows defaults; the round-trip is sub-100 ms in steady-state
+        // and the 10 s wire timeout absorbs cold-disk + key-stretch
+        // contention.
 
         let bimi_cache = Arc::new(rtsk::bimi::BimiLruCache::new());
 
@@ -431,20 +434,20 @@ impl ReadyApp {
             action_throttle: std::collections::HashMap::new(),
         };
 
-        if let Some((ui_snap, settings_snap)) = bootstrap {
-            app.settings.apply_bootstrap(&ui_snap, &settings_snap);
-        }
-
         // Note: the queued-drafts sweep, pending-ops boot recovery, and
         // per-account thread_participants backfill that used to run from
         // here all relocated to the Service's boot sequence in Phase 1.5.
-        // The UI ActionContext below stays UI-side until Phase 2 moves the
-        // action service across the boundary.
+        // The UI ActionContext below stays UI-side until Phase 6c moves
+        // the calendar action context across the boundary.
 
         // Restore pop-out windows from previous session
         let mut session_tasks = app.restore_pop_out_windows(&session);
 
         let load_gen = app.nav_generation.next();
+        let bootstrap_client = app
+            .service_client
+            .as_ref()
+            .map(Arc::clone);
         let mut boot_tasks = vec![
             Task::perform(
                 async move { (load_gen, crate::helpers::load_accounts(db_ref).await) },
@@ -470,6 +473,26 @@ impl ReadyApp {
             // 24 h cache check. No bootstrap kick needed: the SyncTick
             // subscription fires within 5 min of post-ready.
         ];
+
+        // Phase 6a-part-2 (encryption-key handle): fetch the cold-boot
+        // bootstrap snapshots. The IPC arrives as
+        // `Message::BootstrapSnapshotsLoaded` and the handler applies
+        // it via `Settings::apply_bootstrap`. If `service_client` is
+        // None (e.g. the Service connection was unavailable at
+        // construction - a degraded-mode boot), the UI falls through
+        // to default preferences; the next launch picks up the
+        // persisted values.
+        if let Some(client) = bootstrap_client {
+            boot_tasks.push(Task::perform(
+                async move {
+                    client
+                        .read_bootstrap_snapshots()
+                        .await
+                        .map_err(|e| format!("read_bootstrap_snapshots: {e}"))
+                },
+                Message::BootstrapSnapshotsLoaded,
+            ));
+        }
 
         // Pending-ops crash recovery, queued-drafts sweep, and thread-
         // participants backfill all run Service-side now (Phase 1.5

@@ -53,7 +53,7 @@ pub(crate) fn row_to_message(row: &Row<'_>) -> std::result::Result<DbMessage, su
     })
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsBootstrapSnapshot {
     pub notifications_enabled: bool,
@@ -80,7 +80,7 @@ pub struct SettingsBootstrapSnapshot {
     pub attachment_cache_max_mb: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsSecretsSnapshot {
     pub claude_api_key: Option<String>,
@@ -89,7 +89,7 @@ pub struct SettingsSecretsSnapshot {
     pub copilot_api_key: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UiBootstrapSnapshot {
     pub active_account_id: Option<String>,

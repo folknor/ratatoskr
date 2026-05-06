@@ -779,6 +779,10 @@ impl ReadyApp {
                 self.status_bar.set_auto_reply_active(active);
                 Task::none()
             }
+            Message::BootstrapSnapshotsLoaded(result) => {
+                self.handle_bootstrap_snapshots_loaded(result);
+                Task::none()
+            }
         }
     }
 }

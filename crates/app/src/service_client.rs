@@ -9,9 +9,11 @@ use service_api::{
     AccountCreateAck, AccountCreateParams, AccountReorderAck, AccountReorderEntry,
     AccountReorderParams, AccountUpdateAck, AccountUpdateParams, ContactGroupDeleteAck,
     ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
+    DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,
     PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAck,
     PinnedSearchDeleteAllAck, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,
     PinnedSearchUpdateAck, PinnedSearchUpdateParams,
+    ReadBootstrapSnapshotsAck, ReadBootstrapSnapshotsParams, RedactedString,
     RequestParams, RequestTimeoutKind, ServiceError, ServiceResponse, SettingValue, SettingsSetAck,
     SettingsSetParams, ShutdownResponse, SignatureCreateAck, SignatureCreateParams,
     SignatureDeleteAck, SignatureDeleteParams, SignatureReorderAck, SignatureReorderParams,
@@ -1193,6 +1195,55 @@ impl ServiceClient {
             })
             .await?;
         Ok(ack.id)
+    }
+
+    /// Phase 6a-part-2 (encryption-key handle): cold-boot read of the
+    /// decrypted UI + settings bootstrap snapshots. Returns the JSON
+    /// values verbatim - UI deserializes into the typed
+    /// `rtsk::db::queries::UiBootstrapSnapshot` /
+    /// `SettingsBootstrapSnapshot` shapes. `warnings` is reserved for
+    /// per-field decrypt failures that the helpers may surface in a
+    /// future change; today it is always empty.
+    pub async fn read_bootstrap_snapshots(
+        &self,
+    ) -> Result<ReadBootstrapSnapshotsAck, ClientError> {
+        let ack: ReadBootstrapSnapshotsAck = self
+            .request(RequestParams::ReadBootstrapSnapshots {
+                params: ReadBootstrapSnapshotsParams::default(),
+            })
+            .await?;
+        Ok(ack)
+    }
+
+    /// Phase 6a-part-2 (encryption-key handle): one-shot encrypt for
+    /// credential persistence. Returns the
+    /// `iv:ciphertext_with_tag` string format Service-side
+    /// `crypto::encrypt_value` produces.
+    pub async fn encrypt_for_storage(
+        &self,
+        plaintext: RedactedString,
+    ) -> Result<String, ClientError> {
+        let ack: EncryptForStorageAck = self
+            .request(RequestParams::EncryptForStorage {
+                params: EncryptForStorageParams { plaintext },
+            })
+            .await?;
+        Ok(ack.ciphertext)
+    }
+
+    /// Phase 6a-part-2 (encryption-key handle): one-shot decrypt for
+    /// the re-auth wizard pre-fill. Plaintext returns wrapped in
+    /// `RedactedString` so a stray `Debug` print cannot leak it.
+    pub async fn decrypt_for_storage(
+        &self,
+        ciphertext: String,
+    ) -> Result<RedactedString, ClientError> {
+        let ack: DecryptForStorageAck = self
+            .request(RequestParams::DecryptForStorage {
+                params: DecryptForStorageParams { ciphertext },
+            })
+            .await?;
+        Ok(ack.plaintext)
     }
 
     /// Phase 3 task 14: cancel any in-flight sync for `account_id` and

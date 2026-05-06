@@ -11,6 +11,7 @@ mod request;
 mod response;
 mod account;
 mod contacts;
+mod internal;
 mod pinned_search;
 mod settings;
 mod signature;
@@ -40,6 +41,10 @@ pub use account::{
 };
 pub use contacts::{
     ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
+};
+pub use internal::{
+    DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,
+    ReadBootstrapSnapshotsAck, ReadBootstrapSnapshotsParams,
 };
 pub use pinned_search::{
     PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAck,

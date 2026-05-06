@@ -9,6 +9,7 @@ mod health;
 mod pending_ops_kick;
 mod account;
 mod contacts;
+mod internal;
 mod pinned_search;
 mod settings;
 mod signature;
@@ -113,6 +114,15 @@ pub(crate) async fn dispatch(
         }
         RequestParams::SmartFolderCreate { params } => {
             smart_folder::handle_create(&boot_state, params).await
+        }
+        RequestParams::ReadBootstrapSnapshots { params } => {
+            internal::handle_read_bootstrap_snapshots(&boot_state, params).await
+        }
+        RequestParams::EncryptForStorage { params } => {
+            internal::handle_encrypt_for_storage(&boot_state, params).await
+        }
+        RequestParams::DecryptForStorage { params } => {
+            internal::handle_decrypt_for_storage(&boot_state, params).await
         }
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPanic => test_helpers::panic_handle().await,

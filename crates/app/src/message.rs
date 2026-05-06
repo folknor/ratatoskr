@@ -403,4 +403,14 @@ pub enum Message {
 
     // Auto-reply status check result
     AutoReplyChecked(bool),
+
+    /// Phase 6a-part-2 (encryption-key handle): cold-boot bootstrap
+    /// snapshots arrived from `internal.read_bootstrap_snapshots`.
+    /// Handler applies them via `Settings::apply_bootstrap`. The IPC
+    /// fires once during `from_boot_ready`; failure logs and the UI
+    /// continues with default preferences (today's silent-fallback
+    /// behaviour).
+    BootstrapSnapshotsLoaded(
+        Result<service_api::ReadBootstrapSnapshotsAck, String>,
+    ),
 }

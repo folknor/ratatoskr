@@ -1026,6 +1026,46 @@ impl ReadyApp {
         Task::none()
     }
 
+    /// Phase 6a-part-2 (encryption-key handle): apply the cold-boot
+    /// bootstrap snapshots returned by `internal.read_bootstrap_snapshots`.
+    /// On Err the UI keeps the default preferences and logs the failure;
+    /// the next boot retries. Per-field decrypt warnings are surfaced
+    /// from the IPC's `warnings` slot today only as log lines.
+    pub(crate) fn handle_bootstrap_snapshots_loaded(
+        &mut self,
+        result: Result<service_api::ReadBootstrapSnapshotsAck, String>,
+    ) {
+        let ack = match result {
+            Ok(ack) => ack,
+            Err(e) => {
+                log::warn!(
+                    "bootstrap snapshots IPC failed; using default preferences this boot: {e}",
+                );
+                return;
+            }
+        };
+        for warning in &ack.warnings {
+            log::warn!("bootstrap snapshot decrypt warning: {warning}");
+        }
+        let ui_snap: rtsk::db::queries::UiBootstrapSnapshot =
+            match serde_json::from_value(ack.ui) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::warn!("could not parse ui bootstrap snapshot: {e}");
+                    return;
+                }
+            };
+        let settings_snap: rtsk::db::queries::SettingsBootstrapSnapshot =
+            match serde_json::from_value(ack.settings) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::warn!("could not parse settings bootstrap snapshot: {e}");
+                    return;
+                }
+            };
+        self.settings.apply_bootstrap(&ui_snap, &settings_snap);
+    }
+
     pub(crate) fn handle_accounts_loaded(
         &mut self,
         accounts: Vec<db::Account>,
