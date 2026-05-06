@@ -397,7 +397,23 @@ impl ReadyApp {
                 Task::none()
             }
             CalendarMessage::ToggleCalendarVisibility(calendar_id, visible) => {
-                // Update local state immediately for responsiveness.
+                // If the Service is not yet attached, do not apply the eager
+                // flip - the write would be lost on next reload. Phase 6a
+                // sized this window narrowly (post-`boot.ready` only); if it
+                // shows up in practice we surface a status-bar message
+                // instead of silently swallowing the click.
+                let Some(client) = self.service_client.as_ref().cloned() else {
+                    log::warn!(
+                        "calendar.set_visibility: no ServiceClient yet; ignoring toggle"
+                    );
+                    self.status_bar.show_confirmation(
+                        "Service not ready - try again in a moment".to_string(),
+                    );
+                    return Task::none();
+                };
+                // Eager UI flip for responsiveness, with the prior value
+                // captured so the Err arm can snap back without overwriting
+                // a newer click.
                 if let Some(cal) = self
                     .calendar
                     .calendars
@@ -406,21 +422,49 @@ impl ReadyApp {
                 {
                     cal.is_visible = visible;
                 }
-                // Phase 6a: persist via Service IPC instead of UI-side write.
-                let Some(client) = self.service_client.as_ref().cloned() else {
-                    log::debug!(
-                        "calendar.set_visibility: no ServiceClient yet; UI state updated locally"
-                    );
-                    return Task::none();
-                };
+                let cid = calendar_id.clone();
                 Task::perform(
-                    async move { client.set_calendar_visibility(calendar_id, visible).await },
-                    |result| {
-                        let mapped = result.map_err(|e| e.to_string());
-                        Message::Calendar(Box::new(CalendarMessage::EventSaved(mapped)))
+                    async move { client.set_calendar_visibility(cid, visible).await },
+                    move |result| {
+                        Message::Calendar(Box::new(CalendarMessage::VisibilityToggled {
+                            calendar_id: calendar_id.clone(),
+                            requested_value: visible,
+                            result: result.map_err(|e| e.to_string()),
+                        }))
                     },
                 )
             }
+            CalendarMessage::VisibilityToggled {
+                calendar_id,
+                requested_value,
+                result,
+            } => match result {
+                Ok(()) => {
+                    // Persistence confirmed; reload events so the SQL view
+                    // filter (`is_visible = 1`) reflects the new state.
+                    self.reload_calendar_events()
+                }
+                Err(e) => {
+                    // Roll back the eager flip iff the local value still
+                    // matches the failed request - if the user clicked again
+                    // mid-flight, leave their newer intent alone.
+                    if let Some(cal) = self
+                        .calendar
+                        .calendars
+                        .iter_mut()
+                        .find(|c| c.id == calendar_id)
+                        && cal.is_visible == requested_value
+                    {
+                        cal.is_visible = !requested_value;
+                    }
+                    log::warn!(
+                        "calendar.set_visibility failed for {calendar_id}: {e}"
+                    );
+                    self.status_bar
+                        .show_confirmation(format!("Could not update calendar: {e}"));
+                    Task::none()
+                }
+            },
             CalendarMessage::CalendarsLoaded(load_generation, result) => {
                 if !self.calendar.load_generation.is_current(load_generation) {
                     // Stale result from a previous load - discard.

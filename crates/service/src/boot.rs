@@ -398,6 +398,27 @@ impl BootSharedState {
         guard.as_ref().map(|ctx| Arc::clone(&ctx.db_conn))
     }
 
+    /// Build a fresh `WriteDbState` wrapper for a Phase 6a IPC handler.
+    /// Returns `Err(ServiceError::Internal)` with a uniform message if
+    /// `db_conn` is not yet populated (boot still in flight, or
+    /// post-respawn pre-`boot.ready`).
+    ///
+    /// Phase 6a centralises the boilerplate every write-surface handler
+    /// would otherwise repeat (`db_conn()? -> WriteDbState::from_arc`).
+    /// Each `WriteDbState` is a cheap `Arc::clone` wrapper, so handlers
+    /// constructing one per request stay fine even though boot already
+    /// holds a canonical instance for `SyncRuntime`.
+    pub(crate) fn write_db_state(
+        &self,
+    ) -> Result<service_state::WriteDbState, service_api::ServiceError> {
+        let conn = self.db_conn().ok_or_else(|| {
+            service_api::ServiceError::Internal(
+                "request received before db_conn available; UI must wait for boot.ready".into(),
+            )
+        })?;
+        Ok(service_state::WriteDbState::from_arc(conn))
+    }
+
     /// Snapshot the encryption key out of `BootContext` once boot has
     /// populated it. Returns the raw 32 bytes by copy because the
     /// action service consumers (`ActionContext::encryption_key`,

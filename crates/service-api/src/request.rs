@@ -700,6 +700,47 @@ mod tests {
     }
 
     #[test]
+    fn calendar_set_visibility_method_name_is_dotted() {
+        let p = RequestParams::CalendarSetVisibility {
+            params: CalendarSetVisibilityParams {
+                calendar_id: "cal-1".into(),
+                visible: true,
+            },
+        };
+        assert_eq!(p.method_name(), "calendar.set_visibility");
+    }
+
+    #[test]
+    fn calendar_set_visibility_timeout_is_five_seconds() {
+        let p = RequestParams::CalendarSetVisibility {
+            params: CalendarSetVisibilityParams {
+                calendar_id: "cal-1".into(),
+                visible: true,
+            },
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn calendar_set_visibility_round_trips_from_method_params() {
+        let original = RequestParams::CalendarSetVisibility {
+            params: CalendarSetVisibilityParams {
+                calendar_id: "cal-1".into(),
+                visible: false,
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
     fn boot_ready_round_trips_from_method_params() {
         let parsed = RequestParams::from_method_params("boot.ready", None).expect("parse");
         assert_eq!(parsed, RequestParams::BootReady);

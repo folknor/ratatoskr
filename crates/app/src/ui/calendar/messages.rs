@@ -103,6 +103,15 @@ pub enum CalendarMessage {
     PopOutCalendar,
     /// Toggle visibility of a calendar (checkbox in sidebar).
     ToggleCalendarVisibility(String, bool),
+    /// Async ack from `calendar.set_visibility`. Carries the calendar id +
+    /// the value the IPC was asked to write so the Err arm can roll back
+    /// the eager UI flip without snapping back over a newer click.
+    /// Phase 6a (`docs/service/phase-6a-plan.md`).
+    VisibilityToggled {
+        calendar_id: String,
+        requested_value: bool,
+        result: Result<(), String>,
+    },
     /// Calendars loaded from DB for sidebar list.
     /// The token is a generation guard - stale results are discarded.
     CalendarsLoaded(

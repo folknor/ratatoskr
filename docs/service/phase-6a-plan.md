@@ -6,6 +6,8 @@ Companion to `phase-1-plan.md`, `phase-1.5-plan.md`, `phase-2-plan.md`, `phase-3
 
 **2026-05-06 - initial draft.** Phase 5 closed the calendar/GAL relocation and IMAP cancellation depth. Phase 6 was originally scoped as a single milestone covering every remaining UI write surface plus the global lockdown. Splitting into 6a/6b/6c (calendar event mutations) keeps each plan small enough to review against the actual scope.
 
+**2026-05-06 - post-Task-6-review revision (small).** Task 6 (`calendar.set_visibility`) shipped as the first end-to-end surface, then went through `review arch,bugs --oneshot` to validate the pattern before the remaining 11 surfaces inherited it. Reviewers caught four P1 issues that would compound across replication: (1) the ack was funnelled through an existing `CalendarMessage::EventSaved` variant whose handler had unrelated workflow side effects (closing the event editor mid-flight); (2) the eager UI flip had no rollback path on IPC failure or on `service_client = None`; (3) no wire-envelope round-trip test (`*_round_trips_from_method_params`) covering the dispatch-table; (4) per-handler `WriteDbState::from_arc(conn)` boilerplate would copy 12 times. Plan now codifies a "Per-surface checklist" + "UI-side ack message and rollback policy" section so the remaining 10 surfaces inherit the corrected shape rather than the original Task 6 anti-pattern. Three deferred items (per-entity ordering, AckUnknown reconciliation, typed `NotReady` error variant) are explicitly tracked rather than left as silent gaps. The Task 6 fixup commit lands these patterns directly.
+
 **2026-05-06 - post-arch-review revision.** Two reviewers (claude + codex) independently flagged that the original inventory was too narrow: `Db::write_db_state()` (`crates/app/src/db/connection.rs:32`) returns the writable connection wrapped as `ReadDbState`, and 14 UI call sites use this method directly without going through `Db::with_write_conn`. The original `with_write_conn` grep missed all of them. The 6b lockdown's planned "app drops `service-state`" check is also already true today and would not prove the mutation gate. Plan revised: inventory enumerates *both* `Db::with_write_conn*` and `Db::write_db_state()` callers; verification flips from a negative grep to a positive allow-list (the two methods are deleted from `Db` once their callers go away in 6a, except for the cal::actions construction at `app.rs:336` which 6c removes). Other revisions: `prefs.set` recast around the actual `settings` (global key/value) and `thread_ui_state` (per-thread) tables - the original draft cited tables that do not exist; prefs switches to a typed enum matching the project's `MailOperation` exhaustive-match house style; the encryption-key handle survey now includes the bootstrap-snapshot decrypts at `app.rs:368-369`, which would otherwise become N IPC round-trips on every cold boot - the design moves the snapshot reads Service-side via a dedicated `internal.read_bootstrap_snapshots` IPC, scoping the residual encrypt/decrypt surface to genuinely one-shot uses; draft auto-save pivots from "synchronous IPC during shutdown" to a UI-side WAL drained by the Service on next boot, preserving the "guaranteed" semantics today's local SQLite write provides; `account.create` lands with a `Plaintext | Encrypted` credentials envelope from day one so the 6b OAuth two-step adds a variant rather than redefining the wire contract; `account.delete` moves the `cancel_and_await` step Service-side so a future caller cannot delete while runners hold references; save-as-smart-folder added to the pinned-search relocation.
 
 ## Context
@@ -70,41 +72,70 @@ The phase ships as one milestone with a clean commit-level split. A regression s
 
 ## Architecture
 
-### Wire-type pattern
+### Per-surface checklist (codified after Task 6 review)
 
-Each new IPC method gets:
+Each new IPC surface follows the same six-step shape, validated against the post-Task-6 arch+bugs review:
 
-1. A typed `Params` struct in `crates/service-api/src/{prefs,account,signature,draft,pinned_search,contacts,calendar,internal}.rs`.
-2. An `Ack` (or named result) struct mirroring the existing local return type.
-3. A variant in `RequestParams` with a 5 s timeout (consistent with Phase 5's calendar-request budget).
-4. A serde round-trip test colocated with the type (matching the Phase 5 review-pass discipline).
+1. **Wire types** in `crates/service-api/src/<surface>.rs`: a typed `Params` struct + `Ack` (or named result) struct. Both serde-derived. Even unit-struct acks use a named type (not `()`) so adding a field later is a single-site edit, and the handler always routes through `serde_json::to_value(ack)` so the construction path is identical.
+2. **`RequestParams` variant** with appropriate timeout (most 5 s; `account.delete` 60 s; `internal.read_bootstrap_snapshots` 10 s). Plus the `method_name`, `timeout`, `params_value`, `from_method_params` arms.
+3. **Service-side handler** in `service/src/handlers/<surface>.rs`. **Uses `BootSharedState::write_db_state()`** (added in Task 6 fixup) rather than re-implementing the `db_conn()? -> WriteDbState::from_arc` boilerplate per handler. Pure write-through; no runtime; six to twelve lines.
+4. **Dispatch arm** in `service/src/handlers/mod.rs`.
+5. **Service-client async helper** in `crates/app/src/service_client.rs`.
+6. **UI-side IPC swap + dedicated ack message variant** (see § "UI-side ack message and rollback policy" below). Old `Db::*` helpers are deleted in the same commit.
 
-The IPC side does not need to mirror every internal helper. Where today's UI calls a single `db::queries_extra::*_sync` function, the IPC method wraps that single function. Where today's UI orchestrates two writes in sequence (e.g., the account-creation path that writes `accounts` and then `account_provider_credentials`), the IPC method wraps both - the orchestration moves with the writes.
+**Required tests per surface**:
 
-### Service-side handler shape
+- Inner-struct serde round-trip in the wire-types module.
+- `*_method_name_is_dotted`, `*_timeout_is_<n>_seconds`, and **`*_round_trips_from_method_params`** in `service-api/src/request.rs`. The wire-envelope round-trip catches dispatch-table typos that the inner-struct test cannot. The post-Task-6 review pointed out this gap; closing it on every surface makes future copy-paste typos a compile/test failure.
 
-Handlers follow the `service::handlers::*` pattern Phase 5 established:
+### Service-side handler template
+
+Handlers follow this template after the Task 6 fixup:
 
 ```rust
 pub(crate) async fn handle_signature_create(
     boot_state: &Arc<BootSharedState>,
     params: SignatureCreateParams,
 ) -> Result<Value, ServiceError> {
-    let Some(conn) = boot_state.db_conn() else {
-        return Err(ServiceError::Internal(
-            "signature.create received before db_conn available; UI must wait for boot.ready".into()
-        ));
-    };
-    let write_db = WriteDbState::from_arc(conn);
+    let write_db = boot_state.write_db_state()?;
     let signature = write_db
         .with_conn(move |conn| db::queries_extra::signatures::create_signature_sync(conn, &params))
         .await
         .map_err(ServiceError::Internal)?;
+    // Always go through `to_value` (even for unit-struct acks).
     serde_json::to_value(signature).map_err(|e| ServiceError::Internal(e.to_string()))
 }
 ```
 
 Pure write-through. No runtime, no kick handler, no notification dispatch beyond the request-response cycle. The handler exists to (a) cross the boundary, (b) hold the `WriteDbState` borrow on the Service side. The body of each handler is six to twelve lines.
+
+### UI-side ack message and rollback policy
+
+The Task 6 review caught two bugs that compound across replicated surfaces:
+
+1. **Reusing existing message variants for IPC acks is forbidden.** The original Task 6 implementation funnelled `calendar.set_visibility`'s ack through `CalendarMessage::EventSaved`, whose handler arm clobbered `workflow = Idle`, dismissed the active modal, and set a "Save failed:" status string. Pre-IPC the local DB write closed in <1 ms so the race was unreachable; post-IPC a user can toggle a checkbox, open an event editor while the IPC is in flight, and have the late ack close the editor. **Every IPC gets its own ack `Message` variant**, with a handler arm that touches only state relevant to the surface.
+
+2. **Eager-update surfaces need an explicit failure policy.** When the UI flips local state before the IPC settles (the common case for fast-feeling toggles, list reorders, etc.), the ack handler captures the requested value and on `Err` rolls back **only if the local state still matches the failed request** - if the user clicked again mid-flight, the newer intent is preserved. The corresponding ack message variant carries the requested value:
+
+   ```rust
+   VisibilityToggled {
+       calendar_id: String,
+       requested_value: bool,
+       result: Result<(), String>,
+   }
+   ```
+
+   The Err arm rolls back conditionally; the Ok arm reloads canonical state.
+
+**`service_client = None` policy**: surfaces that cannot tolerate a silent drop (the toggle would persist only in memory) must surface a status-bar message and skip the eager flip. Visibility-style "if the toggle is lost, next reload catches up" surfaces can `log::warn` and proceed. Each surface's policy is decided at implementation time and documented in the dispatch arm's comment.
+
+### Deferred for later sub-phase
+
+The Task 6 review surfaced three architectural questions that do not block the Phase 6a per-surface work but need explicit follow-up:
+
+- **Per-entity ordering / generation tokens.** Rapid-click sequences on a "set" surface can land out of order if the Service dispatches handlers concurrently and the blocking pool is not order-preserving. Visibility tolerates the staleness (idempotent, recovery on next reload); signatures-reorder, account-update, and other surfaces with stronger ordering needs may want a per-entity coalescing or a UI-side generation token that the Service rejects on stale. **Plan**: monitor as surfaces land; add a generation-token wrapper if a real ordering bug appears. Document the per-surface tolerance in each dispatch arm's comment.
+- **AckUnknown reconciliation on timeout.** A 5 s timeout on the UI side does not stop the Service handler - the write may still commit while the UI surfaces failure. For idempotent surfaces (visibility, settings, attachment-collapse) re-trying is safe. For surfaces with side effects (account create, draft save), an idempotency key in the wire shape lets retries dedupe Service-side. **Plan**: account create + draft save handle this explicitly (Task 11 + Task 10b); the small surfaces tolerate the gap.
+- **Typed `ServiceError::NotReady` variant.** Today's "boot not ready" branch returns `ServiceError::Internal("...")`. Across Service respawn the branch becomes reachable (post-respawn pre-`boot.ready` window) and the UI cannot differentiate it from genuine internal errors. **Plan**: add `ServiceError::NotReady` in a follow-up commit (separate from per-surface work) and have UI surface a "service starting..." retry. Not blocking Phase 6a.
 
 ### `settings.set` shape (typed enum, not handler-side validation)
 
