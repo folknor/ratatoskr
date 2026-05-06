@@ -1084,10 +1084,8 @@ dependencies = [
  "seen",
  "serde",
  "serde_json",
- "service-state",
  "store",
  "tokio",
- "tokio-util",
  "types",
  "unicode-segmentation",
  "xxhash-rust",
@@ -5412,6 +5410,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "provider-sync"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "common",
+ "db",
+ "gmail",
+ "graph",
+ "imap",
+ "jmap",
+ "log",
+ "service-state",
+ "tokio-util",
+]
+
+[[package]]
 name = "pxfm"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6337,6 +6351,7 @@ dependencies = [
  "libc",
  "log",
  "process-lifetime",
+ "provider-sync",
  "rtsk",
  "rusqlite",
  "search",

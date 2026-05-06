@@ -2,10 +2,6 @@ use serde::Serialize;
 
 use db::db::ReadDbState;
 use db::progress::ProgressReporter;
-use service_state::{
-    BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
-};
-use tokio_util::sync::CancellationToken;
 
 /// Standardized sync result across all providers.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -41,27 +37,6 @@ pub struct ProviderCtx<'a> {
     pub account_id: &'a str,
     pub db: &'a ReadDbState,
     pub progress: &'a dyn ProgressReporter,
-}
-
-/// Sync-side context for provider sync methods (`sync_initial`,
-/// `sync_delta`).
-///
-/// Phase 3 task 5 introduces this distinct from `ProviderCtx`:
-/// - `db: &WriteDbState` because sync writes through the writer half
-///   (via `with_conn`).
-/// - `body_store`, `inline_images`, `search` are write halves
-///   (`BodyStoreWriteState`, `InlineImageStoreWriteState`,
-///   `SearchWriteHandle`).
-/// - `cancellation_token` rides on the ctx so every leaf call has
-///   access without threading an extra parameter (Phase 3 task 6).
-pub struct SyncProviderCtx<'a> {
-    pub account_id: &'a str,
-    pub db: &'a WriteDbState,
-    pub body_store: &'a BodyStoreWriteState,
-    pub inline_images: &'a InlineImageStoreWriteState,
-    pub search: &'a SearchWriteHandle,
-    pub progress: &'a dyn ProgressReporter,
-    pub cancellation_token: &'a CancellationToken,
 }
 
 /// Narrower context for `ProviderOps` action methods (Phase 2 task 7).

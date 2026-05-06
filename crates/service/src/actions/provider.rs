@@ -1,18 +1,23 @@
 use db::db::ReadDbState;
-use common::ops::ProviderOps;
+use provider_sync::ProviderSyncOps;
 
 /// Create a provider ops instance for the given account.
 ///
 /// Reads the provider type from the database, decrypts credentials with
 /// the encryption key, and constructs the appropriate provider client.
 ///
-/// This is the single point of provider resolution. The app crate should
-/// not construct providers directly.
+/// Returns `Box<dyn ProviderSyncOps>` (Phase 6d-B). The trait inherits
+/// `ProviderOps` so a single trait object covers both the action and
+/// sync surfaces - action callers continue to call `provider.archive(...)`
+/// etc. directly via supertrait method resolution; the sync dispatcher
+/// calls `provider.sync_initial(...)` / `sync_delta(...)`. The action
+/// service is the single point of provider resolution; the app crate
+/// must not construct providers directly.
 pub async fn create_provider(
     db: &ReadDbState,
     account_id: &str,
     encryption_key: [u8; 32],
-) -> Result<Box<dyn ProviderOps>, String> {
+) -> Result<Box<dyn ProviderSyncOps>, String> {
     let aid = account_id.to_string();
     let provider = db
         .with_conn(move |conn| {

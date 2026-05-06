@@ -5,7 +5,7 @@ mod stores;
 
 use std::collections::HashSet;
 
-use common::types::{ProviderCtx, SyncProviderCtx, SyncResult};
+use common::types::{ProviderCtx, SyncResult};
 use db::db::ReadDbState;
 use db::progress::ProgressReporter;
 use service_state::{
@@ -52,37 +52,50 @@ struct SyncCtx<'a> {
 // ---------------------------------------------------------------------------
 
 /// Initial Graph sync: folders → per-folder message fetch → delta token bootstrap.
-pub(crate) async fn graph_initial_sync(
+///
+/// Phase 6d-B flattened the parameter list: callers pass the writer-half
+/// handles individually instead of a `SyncProviderCtx`. The `provider-sync`
+/// crate (which carries the `service-state` dep) destructures its
+/// `SyncProviderCtx` at the IPC boundary, so graph itself no longer
+/// needs to import `SyncProviderCtx` and can drop its `service-state`
+/// Cargo dep.
+#[allow(clippy::too_many_arguments)]
+pub async fn graph_initial_sync(
     client: &GraphClient,
-    ctx: &SyncProviderCtx<'_>,
+    account_id: &str,
+    db: &service_state::WriteDbState,
+    body_store: &service_state::BodyStoreWriteState,
+    inline_images: &service_state::InlineImageStoreWriteState,
+    search: &service_state::SearchWriteHandle,
+    progress: &dyn ProgressReporter,
+    cancellation_token: &CancellationToken,
     days_back: i64,
 ) -> Result<(), String> {
-    if ctx.cancellation_token.is_cancelled() {
+    if cancellation_token.is_cancelled() {
         return Err("sync cancelled".to_string());
     }
-    let read_db = ctx.db.to_read_state();
+    let read_db = db.to_read_state();
     let sctx = SyncCtx {
         client,
-        account_id: ctx.account_id,
+        account_id,
         db: &read_db,
-        body_store: ctx.body_store,
-        inline_images: ctx.inline_images,
-        search: ctx.search,
-        progress: ctx.progress,
-        cancellation_token: ctx.cancellation_token,
+        body_store,
+        inline_images,
+        search,
+        progress,
+        cancellation_token,
     };
 
     log::info!(
-        "[Graph] Starting initial sync for account {} (days_back={days_back})",
-        ctx.account_id
+        "[Graph] Starting initial sync for account {account_id} (days_back={days_back})"
     );
     // Phase 1: Sync folders → labels → build folder map
     emit_progress(&sctx, "folders", "", 0, 1, 0);
 
     let pctx = ProviderCtx {
-        account_id: ctx.account_id,
+        account_id,
         db: &read_db,
-        progress: ctx.progress,
+        progress,
     };
     let folder_map = sync_folders(client, &pctx).await?;
     client.set_folder_map(folder_map.clone()).await;
@@ -138,7 +151,7 @@ pub(crate) async fn graph_initial_sync(
     for (i, &(folder_id, _)) in folder_list.iter().enumerate() {
         match bootstrap_delta_token(client, &read_db, folder_id).await {
             Ok(delta_link) => {
-                save_delta_token(client, &read_db, ctx.account_id, folder_id, &delta_link).await?;
+                save_delta_token(client, &read_db, account_id, folder_id, &delta_link).await?;
             }
             Err(e) => {
                 log::warn!("Failed to bootstrap delta token for folder {folder_id}: {e}");
@@ -150,16 +163,13 @@ pub(crate) async fn graph_initial_sync(
         emit_progress(&sctx, "delta", "", current, total_folders, total_messages);
     }
 
-    let aid = ctx.account_id.to_string();
+    let aid = account_id.to_string();
     read_db
         .with_conn(move |conn| sync::pipeline::mark_initial_sync_completed(conn, &aid))
         .await?;
 
     log::info!(
-        "[Graph] Initial sync complete for account {}: {} folders, {} messages",
-        ctx.account_id,
-        total_folders,
-        total_messages
+        "[Graph] Initial sync complete for account {account_id}: {total_folders} folders, {total_messages} messages"
     );
     emit_progress(
         &sctx,
@@ -187,37 +197,46 @@ pub(crate) async fn graph_initial_sync(
 /// - Tier 2 (user folders): every 20th cycle
 ///
 /// Every 10th cycle, refreshes the folder tree and bootstraps new folders.
-pub(crate) async fn graph_delta_sync(
+///
+/// Phase 6d-B flattened the parameter list: callers pass the writer-half
+/// handles individually instead of a `SyncProviderCtx`. See
+/// `graph_initial_sync` for the rationale.
+#[allow(clippy::too_many_arguments)]
+pub async fn graph_delta_sync(
     client: &GraphClient,
-    ctx: &SyncProviderCtx<'_>,
+    account_id: &str,
+    db: &service_state::WriteDbState,
+    body_store: &service_state::BodyStoreWriteState,
+    inline_images: &service_state::InlineImageStoreWriteState,
+    search: &service_state::SearchWriteHandle,
+    progress: &dyn ProgressReporter,
+    cancellation_token: &CancellationToken,
 ) -> Result<SyncResult, String> {
-    if ctx.cancellation_token.is_cancelled() {
+    if cancellation_token.is_cancelled() {
         return Err("sync cancelled".to_string());
     }
-    let read_db = ctx.db.to_read_state();
+    let read_db = db.to_read_state();
     let sctx = SyncCtx {
         client,
-        account_id: ctx.account_id,
+        account_id,
         db: &read_db,
-        body_store: ctx.body_store,
-        inline_images: ctx.inline_images,
-        search: ctx.search,
-        progress: ctx.progress,
-        cancellation_token: ctx.cancellation_token,
+        body_store,
+        inline_images,
+        search,
+        progress,
+        cancellation_token,
     };
 
     let cycle = client.increment_sync_cycle();
     log::info!(
-        "[Graph] Starting delta sync for account {} (cycle={cycle})",
-        ctx.account_id
+        "[Graph] Starting delta sync for account {account_id} (cycle={cycle})"
     );
 
     // Load stored delta tokens
-    let mut tokens = load_delta_tokens(client, &read_db, ctx.account_id).await?;
+    let mut tokens = load_delta_tokens(client, &read_db, account_id).await?;
     if tokens.is_empty() {
         log::error!(
-            "[Graph] No delta tokens for account {} - run initial sync first",
-            ctx.account_id
+            "[Graph] No delta tokens for account {account_id} - run initial sync first"
         );
         return Err("GRAPH_NO_DELTA_STATE".to_string());
     }
@@ -225,9 +244,9 @@ pub(crate) async fn graph_delta_sync(
     // Every 10th cycle, refresh the folder tree to discover new/removed folders
     let folder_map = if cycle.is_multiple_of(10) {
         let pctx = ProviderCtx {
-            account_id: ctx.account_id,
+            account_id,
             db: &read_db,
-            progress: ctx.progress,
+            progress,
         };
         let map = sync_folders(client, &pctx).await?;
         client.set_folder_map(map.clone()).await;
@@ -242,7 +261,7 @@ pub(crate) async fn graph_delta_sync(
                 log::info!("Graph delta sync: bootstrapping new folder {folder_id}");
                 match bootstrap_delta_token_latest(client, &read_db, folder_id).await {
                     Ok(delta_link) => {
-                        save_delta_token(client, &read_db, ctx.account_id, folder_id, &delta_link)
+                        save_delta_token(client, &read_db, account_id, folder_id, &delta_link)
                             .await?;
                         tokens.insert(folder_id.to_string(), delta_link);
                     }
@@ -261,7 +280,7 @@ pub(crate) async fn graph_delta_sync(
             .collect();
         for stale_id in &stale_ids {
             log::info!("Graph delta sync: removing stale delta token for folder {stale_id}");
-            delete_delta_token(client, &read_db, ctx.account_id, stale_id).await?;
+            delete_delta_token(client, &read_db, account_id, stale_id).await?;
             tokens.remove(stale_id);
         }
 
@@ -270,9 +289,9 @@ pub(crate) async fn graph_delta_sync(
         map
     } else {
         let pctx = ProviderCtx {
-            account_id: ctx.account_id,
+            account_id,
             db: &read_db,
-            progress: ctx.progress,
+            progress,
         };
         let map = sync_folders(client, &pctx).await?;
         client.set_folder_map(map.clone()).await;
@@ -305,7 +324,7 @@ pub(crate) async fn graph_delta_sync(
     // so delta queries miss reaction changes entirely. To compensate, we periodically
     // re-fetch reaction extended properties for messages that already have reactions.
     if cycle.is_multiple_of(5) {
-        match persistence::refresh_reactions_for_recent_messages(client, &read_db, ctx.account_id)
+        match persistence::refresh_reactions_for_recent_messages(client, &read_db, account_id)
             .await
         {
             Ok(count) => {
@@ -321,15 +340,15 @@ pub(crate) async fn graph_delta_sync(
     // delta runs through `CalendarRuntime` (Phase 5), not from this path.
     if cycle.is_multiple_of(20) {
         if let Err(e) =
-            super::contact_sync::graph_contacts_delta_sync(client, ctx.account_id, &read_db).await
+            super::contact_sync::graph_contacts_delta_sync(client, account_id, &read_db).await
         {
             log::warn!("Contact delta sync failed (non-fatal): {e}");
         }
-        if let Err(e) = super::label_sync::graph_label_sync(client, ctx.account_id, &read_db).await
+        if let Err(e) = super::label_sync::graph_label_sync(client, account_id, &read_db).await
         {
             log::warn!("Label sync failed (non-fatal): {e}");
         }
-        match super::group_sync::sync_exchange_groups(client, &read_db, ctx.account_id).await {
+        match super::group_sync::sync_exchange_groups(client, &read_db, account_id).await {
             Ok(count) => {
                 if count > 0 {
                     log::info!("Exchange group delta sync: {count} groups");
@@ -340,8 +359,7 @@ pub(crate) async fn graph_delta_sync(
     }
 
     log::info!(
-        "[Graph] Delta sync complete for account {}: {} new inbox, {} threads affected",
-        ctx.account_id,
+        "[Graph] Delta sync complete for account {account_id}: {} new inbox, {} threads affected",
         new_inbox_ids.len(),
         affected_thread_ids.len()
     );

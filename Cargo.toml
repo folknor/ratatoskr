@@ -32,6 +32,7 @@ members = [
 "crates/process-lifetime",
 "crates/service-state",
 "crates/action-types",
+"crates/provider-sync",
 ]
 
 exclude = [

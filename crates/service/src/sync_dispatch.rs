@@ -11,8 +11,8 @@
 //! unified store states + read-half DB; Phase 3 reshapes it for
 //! writer halves + cancellation token.
 
-use common::types::SyncProviderCtx;
 use db::db::ReadDbState;
+use provider_sync::SyncProviderCtx;
 use service_state::{
     BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
 };

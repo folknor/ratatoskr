@@ -12,7 +12,7 @@ use common::ops::ProviderOps;
 use common::typed_ids::{FolderId, TagId};
 use common::types::{
     ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    ProviderProfile, ProviderTestResult, SyncProviderCtx, SyncResult,
+    ProviderProfile, ProviderTestResult,
 };
 use db::db::ReadDbState;
 
@@ -38,7 +38,10 @@ const PID_TAG_DEFERRED_SEND_TIME: &str = "SystemTime 0x3FEF";
 
 /// Graph implementation of the provider operations trait.
 pub struct GraphOps {
-    pub(crate) client: GraphClient,
+    /// `pub` so `provider-sync`'s orphan impl of `ProviderSyncOps`
+    /// can reach the client when constructing sync entry-point calls.
+    /// Phase 6d-B carved the sync trait out of `common::ProviderOps`.
+    pub client: GraphClient,
 }
 
 impl GraphOps {
@@ -52,25 +55,12 @@ impl GraphOps {
     }
 }
 
+// Phase 6d-B: `sync_initial` / `sync_delta` no longer live on
+// `ProviderOps`. The relocated `ProviderSyncOps` trait
+// (`provider-sync` crate) carries them; `provider-sync/src/graph_impl.rs`
+// holds the orphan-impl that delegates into `super::sync`.
 #[async_trait]
 impl ProviderOps for GraphOps {
-    async fn sync_initial(
-        &self,
-        ctx: &SyncProviderCtx<'_>,
-        days_back: i64,
-    ) -> Result<SyncResult, ProviderError> {
-        super::sync::graph_initial_sync(&self.client, ctx, days_back).await?;
-        Ok(SyncResult::default())
-    }
-
-    async fn sync_delta(
-        &self,
-        ctx: &SyncProviderCtx<'_>,
-        _days_back: Option<i64>,
-    ) -> Result<SyncResult, ProviderError> {
-        Ok(super::sync::graph_delta_sync(&self.client, ctx).await?)
-    }
-
     async fn archive(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let folder_map = require_folder_map(&self.client).await?;
         let archive_id = folder_map

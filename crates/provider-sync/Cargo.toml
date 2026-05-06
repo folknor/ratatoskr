@@ -1,0 +1,30 @@
+[package]
+name = "provider-sync"
+description = "Service-side sync trait + per-provider impls; carries the service-state dep that common no longer holds (Phase 6d-B)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = "0.1"
+log = "0.4"
+tokio-util = "0.7"
+
+# Extracted workspace crates
+db = { path = "../db" }
+common = { path = "../common" }
+service-state = { path = "../service-state" }
+
+# Provider crates: provider-sync owns the orphan-impls of
+# `ProviderSyncOps` for each provider's `Ops` type. The trait is
+# defined in this crate, so the orphan rule is satisfied even though
+# the impl-target type lives in the provider crate.
+gmail = { path = "../gmail" }
+jmap = { path = "../jmap" }
+graph = { path = "../graph" }
+imap = { path = "../imap" }

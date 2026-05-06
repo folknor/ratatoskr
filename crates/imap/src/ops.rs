@@ -10,7 +10,6 @@ use common::typed_ids::{FolderId, TagId};
 use common::types::{
     ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
     ProviderParsedAttachment, ProviderParsedMessage, ProviderProfile, ProviderTestResult,
-    SyncProviderCtx, SyncResult,
 };
 use smtp;
 
@@ -46,7 +45,11 @@ fn random_hex8() -> String {
 
 /// IMAP implementation of the provider operations trait.
 pub struct ImapOps {
-    pub(crate) encryption_key: [u8; 32],
+    /// `pub` so `provider-sync`'s orphan impl of `ProviderSyncOps`
+    /// can reach the key when delegating to `imap_initial` /
+    /// `imap_delta`. Phase 6d-B carved the sync trait out of
+    /// `common::ProviderOps`.
+    pub encryption_key: [u8; 32],
 }
 
 impl ImapOps {
@@ -55,7 +58,9 @@ impl ImapOps {
     }
 
     /// Shorthand for loading the IMAP config from the database.
-    async fn load_config(
+    /// `pub` so `provider-sync`'s orphan `ProviderSyncOps` impl can
+    /// reuse it.
+    pub async fn load_config(
         &self,
         db: &db::db::ReadDbState,
         account_id: &str,
@@ -354,70 +359,13 @@ async fn execute_folder_action(
 // ProviderOps implementation
 // ---------------------------------------------------------------------------
 
+// Phase 6d-B: `sync_initial` / `sync_delta` no longer live on
+// `ProviderOps`. The relocated `ProviderSyncOps` trait
+// (`provider-sync` crate) carries them; `provider-sync/src/imap_impl.rs`
+// holds the orphan-impl that delegates into `super::imap_initial` /
+// `super::imap_delta`.
 #[async_trait]
 impl ProviderOps for ImapOps {
-    // ── Sync (delegated to existing Rust IMAP sync engine) ──────────────
-
-    async fn sync_initial(
-        &self,
-        ctx: &SyncProviderCtx<'_>,
-        days_back: i64,
-    ) -> Result<SyncResult, ProviderError> {
-        // IMAP sync is handled by the dedicated sync module (sync_imap_initial).
-        // This trait method is not the primary entry point for IMAP sync, but we
-        // wire it through for consistency with the provider abstraction.
-        let account_id = ctx.account_id.to_string();
-        let read_db = ctx.db.to_read_state();
-        let imap_config = self.load_config(&read_db, ctx.account_id).await?;
-
-        let result = super::imap_initial::imap_initial_sync(
-            ctx.progress,
-            ctx.db,
-            ctx.body_store,
-            ctx.inline_images,
-            ctx.search,
-            ctx.cancellation_token,
-            &account_id,
-            &imap_config,
-            days_back,
-        )
-        .await?;
-
-        Ok(SyncResult {
-            new_inbox_message_ids: result.new_inbox_message_ids,
-            affected_thread_ids: result.affected_thread_ids,
-        })
-    }
-
-    async fn sync_delta(
-        &self,
-        ctx: &SyncProviderCtx<'_>,
-        days_back: Option<i64>,
-    ) -> Result<SyncResult, ProviderError> {
-        let account_id = ctx.account_id.to_string();
-        let read_db = ctx.db.to_read_state();
-        let imap_config = self.load_config(&read_db, ctx.account_id).await?;
-        let days_back = days_back.unwrap_or(365);
-
-        let result = super::imap_delta::imap_delta_sync(
-            ctx.progress,
-            ctx.db,
-            ctx.body_store,
-            ctx.inline_images,
-            ctx.search,
-            ctx.cancellation_token,
-            &account_id,
-            &imap_config,
-            days_back,
-        )
-        .await?;
-
-        Ok(SyncResult {
-            new_inbox_message_ids: result.new_inbox_message_ids,
-            affected_thread_ids: result.affected_thread_ids,
-        })
-    }
-
     // ── Actions ─────────────────────────────────────────────────────────
 
     async fn archive(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {

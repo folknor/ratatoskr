@@ -6,7 +6,7 @@
 //! all API paths use `client.api_path_prefix()` and delta token routing is
 //! handled by the wrapper functions in `sync.rs`.
 
-use common::types::{SyncProviderCtx, SyncResult};
+use common::types::SyncResult;
 use db::progress::ProgressReporter;
 use service_state::{
     BodyStoreWriteState, InlineImageStoreWriteState, SearchWriteHandle, WriteDbState,
@@ -39,16 +39,6 @@ pub async fn sync_shared_mailbox(
 ) -> Result<SyncResult, String> {
     let scoped_client = primary_client.for_shared_mailbox(mailbox_id.to_string());
 
-    let ctx = SyncProviderCtx {
-        account_id,
-        db,
-        body_store,
-        inline_images,
-        search,
-        progress,
-        cancellation_token,
-    };
-
     let read_db = db.to_read_state();
     // Check if we have any delta tokens for this mailbox - if not, run initial sync.
     let tokens =
@@ -58,7 +48,19 @@ pub async fn sync_shared_mailbox(
 
     if tokens.is_empty() {
         log::info!("Shared mailbox {mailbox_id}: no delta tokens found, running initial sync");
-        match graph_initial_sync(&scoped_client, &ctx, SHARED_MAILBOX_INITIAL_SYNC_DAYS).await {
+        match graph_initial_sync(
+            &scoped_client,
+            account_id,
+            db,
+            body_store,
+            inline_images,
+            search,
+            progress,
+            cancellation_token,
+            SHARED_MAILBOX_INITIAL_SYNC_DAYS,
+        )
+        .await
+        {
             Ok(()) => {
                 sync_state::update_shared_mailbox_sync_status(
                     &read_db, account_id, mailbox_id, now, None,
@@ -84,7 +86,18 @@ pub async fn sync_shared_mailbox(
             "Shared mailbox {mailbox_id}: {} delta tokens found, running delta sync",
             tokens.len()
         );
-        match graph_delta_sync(&scoped_client, &ctx).await {
+        match graph_delta_sync(
+            &scoped_client,
+            account_id,
+            db,
+            body_store,
+            inline_images,
+            search,
+            progress,
+            cancellation_token,
+        )
+        .await
+        {
             Ok(sync_result) => {
                 sync_state::update_shared_mailbox_sync_status(
                     &read_db, account_id, mailbox_id, now, None,

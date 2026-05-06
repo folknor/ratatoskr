@@ -4,29 +4,19 @@ use super::error::ProviderError;
 use super::typed_ids::{FolderId, TagId};
 use super::types::{
     ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    ProviderParsedMessage, ProviderProfile, ProviderTestResult, SyncProviderCtx, SyncResult,
+    ProviderParsedMessage, ProviderProfile, ProviderTestResult,
 };
 
 /// Common operations that every email provider must support.
 ///
-/// This trait covers the ~17 operations shared across Gmail, JMAP, and Graph.
-/// It does NOT unify state ownership, auth lifecycle, or provider-specific APIs.
-/// Each provider keeps its own `*State` as a Tauri managed state.
+/// This trait covers the action / send / draft / folder / profile /
+/// connection methods shared across the four providers. The sync trait
+/// (`provider_sync::ProviderSyncOps`) inherits this one, so any
+/// `&dyn ProviderSyncOps` is also usable via this trait's methods.
+/// Phase 6d-B carved the sync surface out of `common` so the crate no
+/// longer needs to depend on `service-state`.
 #[async_trait]
 pub trait ProviderOps: Send + Sync {
-    // ── Sync ────────────────────────────────────────────────────
-
-    async fn sync_initial(
-        &self,
-        ctx: &SyncProviderCtx<'_>,
-        days_back: i64,
-    ) -> Result<SyncResult, ProviderError>;
-    async fn sync_delta(
-        &self,
-        ctx: &SyncProviderCtx<'_>,
-        days_back: Option<i64>,
-    ) -> Result<SyncResult, ProviderError>;
-
     // ── Actions (thread-level) ──────────────────────────────────
 
     async fn archive(

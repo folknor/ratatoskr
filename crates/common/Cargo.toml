@@ -24,13 +24,15 @@ db = { path = "../db" }
 store = { path = "../stores" }
 search = { path = "../search" }
 seen = { path = "../seen" }
-service-state = { path = "../service-state" }
 types = { path = "../types" }
 crypto-key = { path = "../crypto-key" }
+# Phase 6d-B: `service-state` dep removed. The sync-trait surface and
+# `SyncProviderCtx` (the only types in `common` that referenced
+# writer-half handles) relocated to the new `provider-sync` crate so
+# `common` is now UI-safe at the dep-graph level.
 
 # Crate-specific deps
 tokio = { workspace = true, features = ["sync"] }
-tokio-util = "0.7"
 log = "0.4"
 async-trait = "0.1"
 unicode-segmentation = "1.12"

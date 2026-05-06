@@ -5,7 +5,7 @@ use common::ops::ProviderOps;
 use common::typed_ids::{FolderId, TagId};
 use common::types::{
     ActionProviderCtx, AttachmentData, ProviderCtx, ProviderFolderEntry, ProviderFolderMutation,
-    ProviderProfile, ProviderTestResult, SyncProviderCtx, SyncResult,
+    ProviderProfile, ProviderTestResult,
 };
 use db::db::ReadDbState;
 
@@ -13,7 +13,10 @@ use super::client::GmailClient;
 
 /// Gmail implementation of the provider operations trait.
 pub struct GmailOps {
-    pub(crate) client: GmailClient,
+    /// `pub` so `provider-sync`'s orphan impl of `ProviderSyncOps`
+    /// can reach the client when constructing sync entry-point calls.
+    /// Phase 6d-B carved the sync trait out of `common::ProviderOps`.
+    pub client: GmailClient,
 }
 
 impl GmailOps {
@@ -22,50 +25,12 @@ impl GmailOps {
     }
 }
 
+// Phase 6d-B: `sync_initial` / `sync_delta` no longer live on
+// `ProviderOps`. The relocated `ProviderSyncOps` trait
+// (`provider-sync` crate) carries them; `provider-sync/src/gmail_impl.rs`
+// holds the orphan-impl that delegates into `super::sync::gmail_*`.
 #[async_trait]
 impl ProviderOps for GmailOps {
-    async fn sync_initial(
-        &self,
-        ctx: &SyncProviderCtx<'_>,
-        days_back: i64,
-    ) -> Result<SyncResult, ProviderError> {
-        super::sync::gmail_initial_sync(
-            &self.client,
-            ctx.account_id,
-            days_back,
-            ctx.db,
-            ctx.body_store,
-            ctx.inline_images,
-            ctx.search,
-            ctx.progress,
-            ctx.cancellation_token,
-        )
-        .await?;
-        Ok(SyncResult::default())
-    }
-
-    async fn sync_delta(
-        &self,
-        ctx: &SyncProviderCtx<'_>,
-        _days_back: Option<i64>,
-    ) -> Result<SyncResult, ProviderError> {
-        let result = super::sync::gmail_delta_sync(
-            &self.client,
-            ctx.account_id,
-            ctx.db,
-            ctx.body_store,
-            ctx.inline_images,
-            ctx.search,
-            ctx.progress,
-            ctx.cancellation_token,
-        )
-        .await?;
-        Ok(SyncResult {
-            new_inbox_message_ids: result.new_inbox_message_ids,
-            affected_thread_ids: result.affected_thread_ids,
-        })
-    }
-
     async fn archive(&self, ctx: &ActionProviderCtx<'_>, thread_id: &str) -> Result<(), ProviderError> {
         let remove = vec!["INBOX".to_string()];
         self.client
