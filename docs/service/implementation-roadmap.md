@@ -390,61 +390,64 @@ The phase lands as one milestone but with a clean commit-level split: respawn ma
 
 **Goal.** Every remaining UI-side write path enumerated in the problem-statement inventory moves across the boundary. The type-level read/write split becomes globally compile-enforced: `WriteDbState` (and the write halves of all four state types) is unreachable from the `app` crate. `attachment.fetch` IPC + blob-store eviction/GC land here too, since the blob-store writer (relocated with sync in Phase 3) is already Service-side.
 
-The phase splits into 6a + 6b at commit level. 6a is the long tail of small, mechanical write surfaces; 6b is calendar, OAuth, and the attachment cache-miss path - the genuinely tricky surfaces.
+The phase splits into 6a + 6b + 6c at plan-doc level. 6a is the long tail of small, mechanical write surfaces (`docs/service/phase-6a-plan.md`). 6b is OAuth two-step + the attachment cache-miss path + eviction/GC + global write-half lockdown (`docs/service/phase-6b-plan.md`). 6c is calendar event mutations - the genuinely tricky one because series-vs-occurrence + RSVP semantics need their own wire-format design that does not fit the flat `MailOperation`-style list (carved out into its own future plan; not started until 6b lands).
 
 **Entry criteria.**
 - Phase 5 landed (all sync runs Service-side; the blob-store writer is already relocated as a sync dependency).
 - Attachments roadmap Phase 1a + 1b landed.
 - The `oauth.refresh_request` temporary IPC from Phase 4 is in place.
 
-**In scope - Phase 6a (small, mostly mechanical).**
+**Phase 6a - small mechanical write surfaces + encryption-key handle.** Plan: `docs/service/phase-6a-plan.md`.
 - Preferences (`prefs.set`).
-- Account create / update / delete + reorder (`account.upsert`, `account.delete`, `account.reorder`).
+- Account create / update / delete / reorder (non-OAuth path - `account.create` accepts already-encrypted credential bytes; OAuth two-step is 6b).
 - Signature CRUD + reorder.
-- Local draft auto-save (`draft.save`) - with explicit ordering against `iced::exit()` on window close (window-close emits `draft.save` synchronously and awaits ack before issuing `service.shutdown`; or Service holds an in-memory drafts-to-flush queue and UI sends best-effort pushes during shutdown - decide in 6a planning).
-- Pinned searches.
-- Contacts / GAL refresh writes.
-- Attachment collapse-state preferences.
-- **Encryption-key handle.** Phase 2 carry-forward. UI today re-reads `ratatoskr.key` from disk in `from_boot_ready` (`crates/app/src/app.rs:331`) even though the Service has already loaded and validated the same file at boot. The TOCTOU window the arch review flagged remains: a key file that changes between the two reads (permission race, hostile rewrite, FS glitch) lands the UI on a different key than the Service. Plumb `BootContext::encryption_key` through the IPC boundary so the UI consumes the Service's already-validated key. Two design options sketched in `phase-2-plan.md` § 19d: (a) handle-based - Service holds raw bytes; UI calls `internal.encrypt_for_storage { plaintext } -> ciphertext` per credential persist (extra round-trip per encrypt; security benefit is real); (b) trusted-bytes-once - Service exports the bytes via a one-shot IPC method, UI keeps in memory (no per-encrypt round-trip; weakens the "Service is sole holder" property). Default proposal: handle-based. Survey the credential-persistence call sites during 6a planning to confirm the IPC overhead is tolerable; fall back to (b) if measurement reveals a hot path.
+- Local draft auto-save (`draft.save`) - with explicit ordering against `iced::exit()` on window close: UI emits one synchronous `draft.save` per dirty editor before issuing `service.shutdown`, with a 500 ms per-draft ack ceiling.
+- Pinned searches (CRUD + Service-side `pinned_search.kick` for the expire-stale cadence).
+- Contacts / groups CRUD.
+- Attachment collapse-state preference.
+- Calendar visibility toggle (the flat-boolean half of `db/calendar.rs`; event mutations are 6c).
+- **Encryption-key handle.** Phase 2 carry-forward 19d. Default option: handle-based. Service holds raw bytes; UI calls `internal.encrypt_for_storage { plaintext } -> ciphertext` per credential persist. Survey of credential-persist call sites confirms no hot path - all run at human-paced cadence (account create, OAuth token persist becomes a no-op after 6b's relocation, password persist).
+- **`docs/architecture.md` rewrite** - the doc has not been touched since before Phase 4 and needs the Phase 5 + 6a deltas. Lands as the final commit of 6a.
 
-**In scope - Phase 6b (genuinely tricky).**
-- **Calendar mutations.** Series-vs-occurrence + RSVP semantics may not fit a flat `MailOperation`-style list. The wire format needs explicit structure for "modify this occurrence," "modify all occurrences from X forward," "respond to invite," etc. Plan in advance; do not assume the action pipeline shape applies.
-- **OAuth two-step coordination.** UI captures the redirect (it's the visible app); ships the auth code to Service via IPC (`oauth.exchange_code`); Service exchanges + persists the token. The temporary `oauth.refresh_request` from Phase 4 deletes itself; Service refreshes its own tokens. The auth code is a one-shot bearer credential and must wrap in the redacting type to avoid the log.
-- **`attachment.fetch` IPC** for cache-miss reads. Returns `{ content_hash, size }` not `Vec<u8>` (per backpressure policy); UI re-reads positionally from the pack file.
-- **Eviction policy + GC** from attachments roadmap Phase 6 lands here, since the blob-store writer is now Service-side.
-- **Cross-store invariant pass extends** to include blob-store reconciliation (Phase 6 portion of `problem-statement.md` § Cross-store crash consistency).
+**Phase 6b - OAuth two-step + `attachment.fetch` + eviction/GC + global lockdown.** Plan: `docs/service/phase-6b-plan.md`.
+- **OAuth two-step coordination.** UI captures the redirect (it's the visible app); ships the auth code to Service via `oauth.exchange_code` IPC; Service exchanges + persists in one transaction. The temporary `oauth.refresh_request` from Phase 4 deletes itself; Service refreshes its own tokens. The auth code is a one-shot bearer credential and wraps in the existing redacting type.
+- **`attachment.fetch` IPC** for cache-miss reads. Returns `{ content_hash, size, pack_path, offset, length }` not `Vec<u8>` (per backpressure policy); UI re-reads positionally from the pack file at the offset+length window.
+- **Eviction policy + GC.** `PackRuntime` mirrors `CalendarRuntime`'s shape (per-account map, panic supervisor, kick handler). LRU + 5 GB size cap default. GC drops blobs whose `messages` rows are gone. Two kicks: `pack.eviction_kick` (5-min cadence with 1 h staleness gate) + `pack.gc_kick` (5-min cadence with 24 h staleness gate).
+- **Cross-store invariant pass extends** to include pack-file orphan sweep + index reconciliation, plus marker-file recovery for half-finished account deletions.
+- **Global write-half lockdown.** `service-state` constructors become `pub(crate)`. `crates/app/Cargo.toml` drops the `service-state` dependency. CI script enforces the absence of the dependency. `WriteDbState`, `BodyStoreWriteState`, `InlineImageStoreWriteState`, `SearchWriteHandle` constructors unreachable from the `app` crate at compile time.
 
-**Global lockdown lands here.**
-- `WriteDbState` constructor unreachable from `app` crate (compile-enforced via `service-state` crate boundary established in Phase 2).
-- Write halves of `BodyStoreState`, `InlineImageStoreState`, `SearchState` likewise.
-- `git grep` for `with_write_conn` / `db.execute` / similar in `crates/app/` returns nothing.
+**Phase 6c - calendar event mutations.** Plan: `docs/service/phase-6c-plan.md` (best-effort first draft, revision pass scheduled after 6b lands). Three flat operations exist today (create / update / delete via `cal::actions::*`), no RSVP, no series-vs-occurrence semantics. 6c relocates the existing surface: typed `CalendarOperation` enum mirroring `MailOperation`, separate `cal_action.execute_plan` IPC (keeps each pipeline's exhaustive-match discipline clean), shared `pending_ops` journal with a `kind` discriminator. The `ActionContext::db` field flips from `&ReadDbState` to `&WriteDbState`; the lock-dance escape pattern goes away with the flip. RSVP and series-vs-occurrence semantics are explicitly out of scope and tracked as future-Phase-6d work; if either lands before 6c starts, the plan needs a revision pass first.
 
 **Out of scope.**
 - Settings UI changes for attachment caching policy (attachments Phase 4, lives UI-side; just makes IPC calls).
 - Calendar attachments (separate work).
+- Provider-specific OAuth quirks - the IPC is provider-neutral; per-provider handling stays in the provider crates' OAuth helpers.
 
 **Touchpoints.**
-- `crates/service-api/` - new methods per surface above (including `internal.encrypt_for_storage` for the key handle).
-- `crates/service/src/handlers/{attachment,prefs,account,signature,draft,pinned_search,calendar,oauth,contacts,internal}.rs` - new.
+- `crates/service-api/` - new typed-request modules: `prefs`, `account`, `signature`, `draft`, `pinned_search`, `contacts`, `internal` (6a) + `oauth`, `attachment`, `pack` (6b).
+- `crates/service/src/handlers/` - matching handler modules.
+- `crates/service/src/oauth/refresh.rs` (6b) - per-provider refresh helpers.
+- `crates/service/src/pack.rs` (6b) - `PackRuntime`.
 - `crates/app/src/handlers/...` - replace direct DB writes with service-client calls. Type system catches anything missed.
-- `crates/app/src/app.rs::from_boot_ready` - drop the `rtsk::load_encryption_key` call site; route credential encrypt/decrypt through the Service handle.
-- `crates/service/src/startup_invariants.rs` - extend with blob-store reconciliation pass.
+- `crates/app/src/app.rs::from_boot_ready` - drop the `rtsk::load_encryption_key` call (6a); credential encrypt/decrypt routes through `internal.encrypt_for_storage` / `internal.decrypt_for_storage`.
+- `crates/service/src/startup_invariants.rs` - extend with pack-file pass (6b).
+- `docs/architecture.md` - 6a rewrite + 6b delta.
 
-**Exit criteria.**
-- `git grep` for `with_write_conn` / similar in `crates/app/` returns nothing.
+**Exit criteria** (6a + 6b combined; 6c lands separately).
+- `git grep` for `with_write_conn` in `crates/app/src/` returns only the calendar event mutation sites (Phase 6c).
 - The `WriteDbState` constructor is unreachable from any UI call site (compile-enforced via crate boundary).
 - Write halves of body / inline-image / search states unreachable from UI.
 - Cache-miss Open / Save calls succeed via IPC.
-- Calendar series mutations work end-to-end through the IPC.
 - OAuth refresh runs Service-side; the temporary `oauth.refresh_request` is gone.
 - UI no longer re-reads `ratatoskr.key`; encryption-key access flows through the Service-owned handle (per Phase 2 carry-forward).
+- `docs/architecture.md` reflects the post-Phase-6b state.
 
 **Risks / open questions.**
 - Tombstone visibility across processes: Service tombstones a blob, UI tries to read it before the index commit propagates. Service holds the write lock; UI reads see the post-commit state via SQLite WAL - verify with a stress test.
 - Concurrent reads of the currently-being-written-to pack must never read past the last fsync'd offset. The pack store API enforces this; verify it survives the IPC boundary.
-- OAuth coordination introduces a UI-Service round-trip during the redirect window. OAuth servers expect the redirect-to-token-exchange roundtrip in seconds, not minutes. The IPC must not queue this behind heavy traffic; consider a higher-priority lane for `oauth.exchange_code` if measurements show contention.
-- Calendar wire format: do not assume `MailOperation` shape. Series/occurrence/RSVP needs its own type.
-- Local draft save vs `iced::exit()` race: today's sub-millisecond DB write becomes an IPC round-trip. If the Service is mid-shutdown when the user closes the window, the IPC can race. Decide ordering policy in 6a planning.
+- OAuth coordination introduces a UI-Service round-trip during the redirect window. OAuth servers expect the redirect-to-token-exchange roundtrip in seconds, not minutes. Phase 6b plan picks bounded request-queue depth + reject-with-`Busy` over a priority dispatch lane; if measurement shows OAuth contention, the priority-lane refactor lands as a follow-up.
+- Local draft save vs `iced::exit()` race (6a): UI emits synchronous `draft.save` per dirty editor before `service.shutdown`, 500 ms per-draft ack ceiling. Settled in `phase-6a-plan.md` § Scope.
+- Calendar wire format (6c): do not assume `MailOperation` shape. Series/occurrence/RSVP needs its own type. Plan-doc deferred to after 6b lands.
 
 ---
 
