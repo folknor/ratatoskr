@@ -21,3 +21,4 @@ tokio = { workspace = true, features = ["rt", "sync"] }
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }
+toml = "1.1"

@@ -398,6 +398,8 @@ The phase splits into 6a + 6b + 6c at plan-doc level. 6a is the long tail of sma
 - The `oauth.refresh_request` temporary IPC from Phase 4 is in place.
 
 **Phase 6a - small mechanical write surfaces + encryption-key handle.** Plan: `docs/service/phase-6a-plan.md`. **LANDED** (2026-05-06; see commits tagged `phase 6a` and `phase 6a-part-2`).
+
+**Phase 6b - OAuth two-step + `attachment.fetch` + global write-half lockdown.** Plan: `docs/service/phase-6b-plan.md`. **LANDED** (2026-05-06; see commits tagged `phase 6b`). Transitive `cargo metadata` lockdown check (the `app -> cal -> service-state` path) defers to Phase 6c when `cal::actions::*` relocates Service-side and `cal` drops out of `app/Cargo.toml`. Pack-aware revision pass (lease IDs, frame-orphan / repack handler) defers to Phase 1a when the pack store lands.
 - Preferences (`prefs.set`).
 - Account create / update / delete / reorder (non-OAuth path - `account.create` accepts already-encrypted credential bytes; OAuth two-step is 6b).
 - Signature CRUD + reorder.

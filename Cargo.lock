@@ -6379,6 +6379,7 @@ dependencies = [
  "store",
  "tempfile",
  "tokio",
+ "toml",
 ]
 
 [[package]]
