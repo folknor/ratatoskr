@@ -807,8 +807,8 @@ async fn run_boot_sequence_inner(
     let db_write = service_state::WriteDbState::from_arc(Arc::clone(&conn));
 
     // Phase 3 task 11: invariant pass. Skipped on clean shutdown.
+    boot_progress::emit(&out_tx, BootPhase::RunningInvariantPass, None);
     if !had_clean_shutdown {
-        boot_progress::emit(&out_tx, BootPhase::RunningInvariantPass, None);
         let dirty =
             crate::startup_invariants::discover_dirty_accounts(&app_data_dir).await;
         if dirty.is_empty() {
@@ -828,6 +828,16 @@ async fn run_boot_sequence_inner(
             .await;
         }
     }
+
+    // Phase 6b: attachment-cache reconciliation runs on every boot
+    // (clean or dirty) because orphans accumulate independent of
+    // dirty-marker state - per-account deletions, crashed eviction
+    // sweeps, and external file deletions all leave residue the
+    // reconciliation walks. The cost is bounded (one cache-dir walk
+    // + one row scan + O(stale-row-count) row updates) and runs in
+    // microseconds on small or empty caches.
+    let _attachment_stats =
+        crate::startup_invariants::reconcile_attachment_cache(&db_write, &app_data_dir).await;
 
     // Construct + install the SyncRuntime so the sync handlers
     // (`crates/service/src/handlers/sync.rs`) can reach it via
