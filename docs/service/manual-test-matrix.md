@@ -122,3 +122,24 @@ Verifies the `account.update_tokens` IPC writes new OAuth tokens onto the existi
 5. **Expected:** the Service log carries `account.update_tokens` dispatch; the next sync succeeds. `crates/app/src/ui/add_account/state.rs` and `oauth.rs` no longer touch the writable connection (verifiable via grep).
 
 If the re-auth flow completes in the browser but the next sync still fails: the token persist hit the IPC but landed in the wrong column (provider mismatch in the dynamic-update SET list), or the token-expires-at field was not propagated. Check the Service log for the `account.update_tokens` payload (RedactedString hides the token bytes; the `token_expires_at` and `account_id` are visible).
+
+### 10. Calendar event create / update / delete via cal_action.execute_plan
+
+Verifies the Phase 6c calendar action pipeline: UI builds a `CalendarActionPlan`, the Service journals as `kind = 'calendar_plan'`, the worker dispatches to `cal_actions::batch_execute`, and the UI awaits the per-plan `CalendarActionCompleted` via `pending_calendar_actions`.
+
+1. Configure at least one calendar account per provider you have credentials for: Google, Graph (Outlook), JMAP (Fastmail), CalDAV.
+2. For each provider:
+   - Open the calendar editor (double-click an empty slot).
+   - Fill title / start / end / location / description.
+   - Save.
+   - **Expected:** the event appears in the calendar grid within ~2 s (post-`CalendarChanged` debounce). Service log carries `cal_action.execute_plan` -> `cal_actions::batch_execute` -> `CalendarActionCompleted`.
+   - Click the event, edit a field, save again. Same expected flow.
+   - Delete the event from the popover. Same expected flow; the event disappears from the grid.
+3. Provider-failure case (Create only - LocalOnly path):
+   - Disconnect the network or revoke the OAuth grant before creating an event.
+   - Save a new event.
+   - **Expected:** the event appears locally (the UI's editor closes); a Service log line carries `LocalOnly { reason: ... }`. Future Phase: the UI surfaces a "not synced" indicator.
+
+If the event saves but does not appear: the `CalendarChanged` notification was dropped, or the worker's `service_generation` tag mismatched and the UI's per-incarnation drop logic discarded it. Check the Service log for `Notification::CalendarChanged` and `Notification::CalendarActionCompleted` emissions and confirm the awaiter's plan_id matches what the UI handler tracked.
+
+If the event saves locally but never reaches the provider: the dispatcher returned `LocalOnly` but the UI didn't surface it. That's the known gap from 6c-8 (`completion_to_result` collapses everything to `Ok(())` today); Phase 6d revisits.
