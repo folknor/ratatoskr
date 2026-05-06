@@ -36,7 +36,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use tokio::fs;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -88,49 +87,27 @@ fn now_unix_millis() -> i64 {
     i64::try_from(millis).unwrap_or(i64::MAX)
 }
 
-fn marker_dir(app_data_dir: &Path) -> PathBuf {
-    app_data_dir.join("sync_markers")
-}
+/// Sync markers route through the shared `MarkerFile<T>` helper at
+/// `crates/service/src/markers/`. Phase 6b folded the formerly-
+/// inline atomic-write / unlink logic into the shared helper so
+/// the account-delete marker (also Phase 6b) lands as a second
+/// consumer of the same pattern instead of growing a parallel
+/// implementation. The on-disk shape is unchanged:
+/// `<app_data>/sync_markers/<account_id>.json` carrying a
+/// `SyncMarker` payload.
+const SYNC_MARKERS: crate::markers::MarkerFile<SyncMarker> =
+    crate::markers::MarkerFile::new("sync_markers");
 
-fn marker_path(app_data_dir: &Path, account_id: &str) -> PathBuf {
-    marker_dir(app_data_dir).join(format!("{account_id}.json"))
-}
-
-/// Atomic temp-file-then-rename write. Survives a partial-write crash:
-/// the rename is atomic on POSIX, and on Windows the
-/// `ReplaceFileExW`-style semantics apply via `fs::rename`.
 async fn write_marker_atomic(
     app_data_dir: &Path,
     account_id: &str,
     marker: &SyncMarker,
 ) -> Result<(), String> {
-    let dir = marker_dir(app_data_dir);
-    fs::create_dir_all(&dir)
-        .await
-        .map_err(|e| format!("create sync_markers dir: {e}"))?;
-
-    let final_path = marker_path(app_data_dir, account_id);
-    let tmp_path = dir.join(format!("{account_id}.json.tmp"));
-
-    let bytes = serde_json::to_vec_pretty(marker)
-        .map_err(|e| format!("serialize sync marker: {e}"))?;
-
-    fs::write(&tmp_path, &bytes)
-        .await
-        .map_err(|e| format!("write sync marker tmp: {e}"))?;
-    fs::rename(&tmp_path, &final_path)
-        .await
-        .map_err(|e| format!("rename sync marker tmp: {e}"))?;
-    Ok(())
+    SYNC_MARKERS.write(app_data_dir, account_id, marker).await
 }
 
 async fn unlink_marker(app_data_dir: &Path, account_id: &str) -> Result<(), String> {
-    let path = marker_path(app_data_dir, account_id);
-    match fs::remove_file(&path).await {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(format!("unlink sync marker: {e}")),
-    }
+    SYNC_MARKERS.unlink(app_data_dir, account_id).await
 }
 
 /// Per-account map entry. The `JoinHandle` is the supervisor's handle;
@@ -489,11 +466,11 @@ async fn run_sync(
 
 async fn update_marker_status(app_data_dir: &Path, account_id: &str, status: MarkerStatus) {
     // Read existing marker to preserve `started_at` / `kind` / `run_id`.
-    let path = marker_path(app_data_dir, account_id);
-    let existing = match fs::read(&path).await {
-        Ok(bytes) => serde_json::from_slice::<SyncMarker>(&bytes).ok(),
-        Err(_) => None,
-    };
+    let existing = SYNC_MARKERS
+        .read(app_data_dir, account_id)
+        .await
+        .ok()
+        .flatten();
     let updated = match existing {
         Some(prev) => SyncMarker {
             run_id: prev.run_id,
@@ -553,10 +530,11 @@ mod tests {
         write_marker_atomic(dir.path(), "acc-1", &marker)
             .await
             .expect("write");
-        let bytes = fs::read(marker_path(dir.path(), "acc-1"))
+        let parsed = SYNC_MARKERS
+            .read(dir.path(), "acc-1")
             .await
-            .expect("read");
-        let parsed: SyncMarker = serde_json::from_slice(&bytes).expect("parse");
+            .expect("read")
+            .expect("present");
         assert_eq!(parsed.run_id, marker.run_id);
         assert_eq!(parsed.status, MarkerStatus::InProgress);
     }
@@ -581,10 +559,13 @@ mod tests {
             .await
             .expect("write");
         update_marker_status(dir.path(), "acc-2", MarkerStatus::Completed).await;
-        let path = marker_path(dir.path(), "acc-2");
+        let recovered = SYNC_MARKERS
+            .read(dir.path(), "acc-2")
+            .await
+            .expect("read");
         assert!(
-            !path.exists(),
-            "completed status should unlink marker; still exists at {path:?}"
+            recovered.is_none(),
+            "completed status should unlink marker; got {recovered:?}",
         );
     }
 
@@ -601,9 +582,11 @@ mod tests {
             .await
             .expect("write");
         update_marker_status(dir.path(), "acc-3", MarkerStatus::Failed).await;
-        let path = marker_path(dir.path(), "acc-3");
-        let bytes = fs::read(&path).await.expect("read");
-        let parsed: SyncMarker = serde_json::from_slice(&bytes).expect("parse");
+        let parsed = SYNC_MARKERS
+            .read(dir.path(), "acc-3")
+            .await
+            .expect("read")
+            .expect("present");
         assert_eq!(parsed.status, MarkerStatus::Failed);
     }
 }

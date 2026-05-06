@@ -3,6 +3,7 @@ mod boot;
 mod boot_progress;
 pub mod calendar;
 mod draft_wal;
+mod markers;
 pub mod progress;
 pub mod push;
 pub mod search_writer;

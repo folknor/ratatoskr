@@ -25,6 +25,15 @@ impl fmt::Debug for RedactedString {
     }
 }
 
+impl fmt::Display for RedactedString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Display redacts identically to Debug. Logging frameworks
+        // reach for `{}` when `{:?}` is "too noisy" so the type must
+        // refuse to leak under both formatters.
+        write!(f, "<redacted len={}>", self.0.len())
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct RedactedBytes(Vec<u8>);
@@ -44,6 +53,12 @@ impl RedactedBytes {
 }
 
 impl fmt::Debug for RedactedBytes {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<redacted len={}>", self.0.len())
+    }
+}
+
+impl fmt::Display for RedactedBytes {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "<redacted len={}>", self.0.len())
     }
@@ -83,6 +98,26 @@ mod tests {
     }
 
     #[test]
+    fn redacted_string_display_does_not_reveal_content() {
+        // Display matters because logging frameworks (and ad-hoc
+        // log lines) reach for `{}` when `{:?}` reads as too noisy.
+        // OAuth code-exchange ships secrets in Display-positioned
+        // wire fields; refusing to leak under both formatters is
+        // policy.
+        let secret = "OAUTH-AUTH-CODE-SHOULD-NOT-LEAK";
+        let value = RedactedString::new(secret);
+        let formatted = format!("{value}");
+        assert!(
+            !formatted.contains(secret),
+            "Display output leaked secret: {formatted:?}",
+        );
+        assert!(
+            formatted.starts_with("<redacted"),
+            "expected <redacted ...> prefix, got {formatted:?}",
+        );
+    }
+
+    #[test]
     fn redacted_bytes_debug_does_not_reveal_content() {
         let secret: Vec<u8> = b"BEARER-TOKEN-PAYLOAD".to_vec();
         let len = secret.len();
@@ -108,5 +143,17 @@ mod tests {
         let value = RedactedBytes::new(Vec::new());
         let formatted = format!("{value:?}");
         assert_eq!(formatted, "<redacted len=0>");
+    }
+
+    #[test]
+    fn redacted_bytes_display_does_not_reveal_content() {
+        let secret = b"BEARER-PAYLOAD".to_vec();
+        let value = RedactedBytes::new(secret.clone());
+        let formatted = format!("{value}");
+        let secret_utf8 = std::str::from_utf8(&secret).expect("ascii fixture");
+        assert!(
+            !formatted.contains(secret_utf8),
+            "Display output leaked bytes: {formatted:?}",
+        );
     }
 }
