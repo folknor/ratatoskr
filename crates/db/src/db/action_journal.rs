@@ -367,6 +367,39 @@ pub fn lease_next_ready_quiet_job(
 // Worker-side lease (Phase 2 task 9)
 // ---------------------------------------------------------------------------
 
+/// Per-`action_jobs.kind` discriminator. Phase 6c adds `CalendarPlan`
+/// alongside the existing `MailPlan` so the worker can dispatch
+/// to the right per-kind pipeline (mail's `service::actions::batch_execute`
+/// vs calendar's `service::cal_actions::batch_execute`) without a
+/// second SQL round-trip per leased op.
+///
+/// `kind = 'send'` and `kind = 'mark_chat_read'` rows do not flow
+/// through `lease_next_ready_op`; they have their own lease helpers
+/// (`lease_next_ready_quiet_job`). Variants here are limited to the
+/// kinds that share the per-op lease path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PerOpJobKind {
+    MailPlan,
+    CalendarPlan,
+}
+
+impl PerOpJobKind {
+    pub fn as_sql(self) -> &'static str {
+        match self {
+            Self::MailPlan => "mail_plan",
+            Self::CalendarPlan => "calendar_plan",
+        }
+    }
+
+    pub fn from_sql(value: &str) -> Result<Self, String> {
+        match value {
+            "mail_plan" => Ok(Self::MailPlan),
+            "calendar_plan" => Ok(Self::CalendarPlan),
+            other => Err(format!("unsupported per-op kind: {other}")),
+        }
+    }
+}
+
 /// A row leased by `lease_next_ready_op`, ready for execution.
 #[derive(Debug, Clone)]
 pub struct LeasedOp {
@@ -377,6 +410,15 @@ pub struct LeasedOp {
     pub operation_blob: Vec<u8>,
     pub account_id: String,
     pub quiet: bool,
+    /// Phase 6c: parent job's `kind` column, parsed into `PerOpJobKind`.
+    /// `None` means the parent row's kind did not match any known
+    /// variant (corrupt journal); the worker emits `JournalCorrupt`
+    /// in that case. The raw value is preserved in `raw_kind`.
+    pub kind: Option<PerOpJobKind>,
+    /// Raw SQL value of the parent job's `kind` column. Used in
+    /// diagnostics and the `JournalCorrupt` notification when `kind`
+    /// is `None`.
+    pub raw_kind: String,
 }
 
 /// Atomically pick the next ready op across all jobs and transition it
@@ -440,14 +482,21 @@ pub fn lease_next_ready_op(
         .as_slice()
         .try_into()
         .map_err(|_| "lease_next_ready_op: job_id is not 16 bytes".to_string())?;
-    // Pull account_id + quiet from the parent row. Cheap PK lookup.
-    let (account_id, quiet) = conn
+    // Pull account_id + quiet + kind from the parent row. Cheap PK lookup.
+    let (account_id, quiet, raw_kind) = conn
         .query_row(
-            "SELECT account_id, quiet FROM action_jobs WHERE job_id = ?1",
+            "SELECT account_id, quiet, kind FROM action_jobs WHERE job_id = ?1",
             params![plan_id.as_slice()],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)? != 0,
+                    row.get::<_, String>(2)?,
+                ))
+            },
         )
         .map_err(|e| format!("lease_next_ready_op parent lookup: {e}"))?;
+    let kind = PerOpJobKind::from_sql(&raw_kind).ok();
     Ok(Some(LeasedOp {
         plan_id,
         operation_id,
@@ -456,6 +505,8 @@ pub fn lease_next_ready_op(
         operation_blob,
         account_id,
         quiet,
+        kind,
+        raw_kind,
     }))
 }
 
@@ -562,12 +613,12 @@ pub fn count_ops_by_status(
     Ok(counts)
 }
 
-/// Return the `job_id`s of `kind = 'mail_plan'` jobs that are
-/// non-terminal but whose ops are all in terminal status (done /
-/// failed / conflict). The worker calls this at the top of every
-/// drain pass so that a crash between `mark_op_terminal` and
-/// `finalize_job` (which clear the lease and write the parent status
-/// in separate transactions) does not strand a job at
+/// Return the `(job_id, kind)` pairs of `mail_plan` / `calendar_plan`
+/// jobs that are non-terminal but whose ops are all in terminal
+/// status (done / failed / conflict). The worker calls this at the
+/// top of every drain pass so that a crash between `mark_op_terminal`
+/// and `finalize_job` (which clear the lease and write the parent
+/// status in separate transactions) does not strand a job at
 /// `status='queued'/'leased'/'executing'` forever.
 ///
 /// Recovery order: the worker calls this AFTER startup-time
@@ -576,11 +627,19 @@ pub fn count_ops_by_status(
 /// the "all ops terminal" predicate honest - we only finalize jobs
 /// that have genuinely no remaining work, not ones whose work is
 /// queued for a fresh lease.
-pub fn unfinalized_mail_plan_jobs(conn: &Connection) -> Result<Vec<[u8; 16]>, String> {
+///
+/// Phase 6c renamed from `unfinalized_mail_plan_jobs` and widened
+/// the kind filter to include `'calendar_plan'`. The kind is returned
+/// alongside the `job_id` so the worker can emit the right per-kind
+/// completion notification (`ActionCompleted` vs
+/// `CalendarActionCompleted`).
+pub fn unfinalized_per_op_plan_jobs(
+    conn: &Connection,
+) -> Result<Vec<([u8; 16], PerOpJobKind)>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT j.job_id FROM action_jobs j \
-             WHERE j.kind = 'mail_plan' \
+            "SELECT j.job_id, j.kind FROM action_jobs j \
+             WHERE j.kind IN ('mail_plan', 'calendar_plan') \
                AND j.status NOT IN ('completed', 'partial', 'failed') \
                AND NOT EXISTS ( \
                  SELECT 1 FROM action_job_ops o \
@@ -588,23 +647,27 @@ pub fn unfinalized_mail_plan_jobs(conn: &Connection) -> Result<Vec<[u8; 16]>, St
                    AND o.status IN ('pending', 'leased', 'executing') \
                )",
         )
-        .map_err(|e| format!("unfinalized_mail_plan_jobs prepare: {e}"))?;
+        .map_err(|e| format!("unfinalized_per_op_plan_jobs prepare: {e}"))?;
     let rows = stmt
-        .query_map([], |row| row.get::<_, Vec<u8>>(0))
-        .map_err(|e| format!("unfinalized_mail_plan_jobs query: {e}"))?;
+        .query_map([], |row| {
+            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| format!("unfinalized_per_op_plan_jobs query: {e}"))?;
     let mut out = Vec::new();
     for row in rows {
-        let bytes = row.map_err(|e| format!("unfinalized_mail_plan_jobs row: {e}"))?;
+        let (bytes, raw_kind) =
+            row.map_err(|e| format!("unfinalized_per_op_plan_jobs row: {e}"))?;
         let arr: [u8; 16] = bytes
             .as_slice()
             .try_into()
             .map_err(|_| {
                 format!(
-                    "unfinalized_mail_plan_jobs: job_id len {} != 16",
+                    "unfinalized_per_op_plan_jobs: job_id len {} != 16",
                     bytes.len()
                 )
             })?;
-        out.push(arr);
+        let kind = PerOpJobKind::from_sql(&raw_kind)?;
+        out.push((arr, kind));
     }
     Ok(out)
 }
@@ -662,6 +725,14 @@ pub struct ReplayableOp {
     pub status: OpTerminalStatus,
     pub outcome_blob: Vec<u8>,
     pub quiet: bool,
+    /// Phase 6c: parent job's `kind` parsed into a `PerOpJobKind`.
+    /// `None` for unknown/corrupt kinds. Distinguishes mail-side
+    /// `OperationResult` blobs from calendar-side
+    /// `CalendarOperationResult` blobs at replay time so the worker
+    /// emits the right notification variant.
+    pub kind: Option<PerOpJobKind>,
+    /// Raw SQL value of the parent job's `kind`. Diagnostic-only.
+    pub raw_kind: String,
 }
 
 /// Return all ops that have a terminal outcome (`outcome IS NOT NULL`)
@@ -675,7 +746,7 @@ pub struct ReplayableOp {
 pub fn unemitted_terminal_ops(conn: &Connection) -> Result<Vec<ReplayableOp>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT ops.job_id, ops.operation_id, ops.status, ops.outcome, jobs.quiet \
+            "SELECT ops.job_id, ops.operation_id, ops.status, ops.outcome, jobs.quiet, jobs.kind \
              FROM action_job_ops ops \
              JOIN action_jobs jobs USING (job_id) \
              WHERE ops.outcome IS NOT NULL \
@@ -691,12 +762,13 @@ pub fn unemitted_terminal_ops(conn: &Connection) -> Result<Vec<ReplayableOp>, St
                 row.get::<_, String>(2)?,
                 row.get::<_, Vec<u8>>(3)?,
                 row.get::<_, i64>(4)? != 0,
+                row.get::<_, String>(5)?,
             ))
         })
         .map_err(|e| format!("unemitted_terminal_ops query: {e}"))?;
     let mut out = Vec::new();
     for row in rows {
-        let (job_id_bytes, operation_id, status_str, outcome_blob, quiet) =
+        let (job_id_bytes, operation_id, status_str, outcome_blob, quiet, raw_kind) =
             row.map_err(|e| format!("unemitted_terminal_ops row: {e}"))?;
         let plan_id: [u8; 16] = job_id_bytes
             .as_slice()
@@ -708,12 +780,15 @@ pub fn unemitted_terminal_ops(conn: &Connection) -> Result<Vec<ReplayableOp>, St
             "conflict" => OpTerminalStatus::Conflict,
             other => return Err(format!("unemitted_terminal_ops unknown op status: {other}")),
         };
+        let kind = PerOpJobKind::from_sql(&raw_kind).ok();
         out.push(ReplayableOp {
             plan_id,
             operation_id,
             status,
             outcome_blob,
             quiet,
+            kind,
+            raw_kind,
         });
     }
     Ok(out)
@@ -802,6 +877,17 @@ mod tests {
             params![job_id.as_slice(), status],
         )
         .expect("insert send job");
+    }
+
+    fn insert_calendar_test_job(conn: &Connection, job_id: &[u8; 16], status: &str) {
+        conn.execute(
+            "INSERT INTO action_jobs (\
+                 job_id, kind, account_id, status, quiet, payload, \
+                 created_at, updated_at\
+             ) VALUES (?1, 'calendar_plan', 'acc-1', ?2, 0, X'', unixepoch(), unixepoch())",
+            params![job_id.as_slice(), status],
+        )
+        .expect("insert calendar action job");
     }
 
     #[test]
@@ -972,7 +1058,7 @@ mod tests {
     }
 
     #[test]
-    fn unfinalized_mail_plan_jobs_finds_orphans_after_partial_finalize() {
+    fn unfinalized_per_op_plan_jobs_finds_orphans_after_partial_finalize() {
         let conn = fresh_db();
         // Setup: one queued job whose ops are all terminal (the
         // crash-between-mark_op_terminal-and-finalize_job state). Two
@@ -996,9 +1082,10 @@ mod tests {
         insert_test_op(&conn, &already_done, 0, "done");
 
         let orphans: std::collections::HashSet<[u8; 16]> =
-            unfinalized_mail_plan_jobs(&conn)
+            unfinalized_per_op_plan_jobs(&conn)
                 .expect("query")
                 .into_iter()
+                .map(|(id, _kind)| id)
                 .collect();
 
         assert_eq!(orphans.len(), 1, "only stranded should be returned");
@@ -1008,21 +1095,39 @@ mod tests {
     }
 
     #[test]
-    fn unfinalized_mail_plan_jobs_skips_send_jobs() {
+    fn unfinalized_per_op_plan_jobs_skips_send_jobs() {
         let conn = fresh_db();
         // A `kind = 'send'` job in `queued` status with no child ops:
         // would naively match the predicate (no pending/leased/
         // executing ops) but must NOT be returned because the helper
-        // is mail-plan-specific (send jobs are quiet, finalized
-        // independently by the worker's send drain path).
+        // is restricted to mail_plan / calendar_plan kinds (send jobs
+        // are quiet, finalized independently by the worker's send
+        // drain path).
         let send_job = [0xB1; 16];
         insert_send_job(&conn, &send_job, "queued");
 
-        let orphans = unfinalized_mail_plan_jobs(&conn).expect("query");
+        let orphans = unfinalized_per_op_plan_jobs(&conn).expect("query");
         assert!(
             orphans.is_empty(),
-            "send jobs must not appear in unfinalized_mail_plan_jobs"
+            "send jobs must not appear in unfinalized_per_op_plan_jobs"
         );
+    }
+
+    #[test]
+    fn unfinalized_per_op_plan_jobs_finds_calendar_plans() {
+        let conn = fresh_db();
+        // Phase 6c: the helper must also pick up stranded
+        // calendar_plan kinds. A calendar plan whose op is terminal
+        // but whose parent row is still queued is exactly the
+        // post-crash recovery shape we need to handle.
+        let stranded_cal = [0xC2; 16];
+        insert_calendar_test_job(&conn, &stranded_cal, "queued");
+        insert_test_op(&conn, &stranded_cal, 0, "done");
+
+        let orphans = unfinalized_per_op_plan_jobs(&conn).expect("query");
+        assert_eq!(orphans.len(), 1, "calendar_plan stranded job picked up");
+        assert_eq!(orphans[0].0, stranded_cal);
+        assert_eq!(orphans[0].1, PerOpJobKind::CalendarPlan);
     }
 
     #[test]
@@ -1051,7 +1156,7 @@ mod tests {
     }
 
     #[test]
-    fn unfinalized_mail_plan_jobs_handles_leased_status() {
+    fn unfinalized_per_op_plan_jobs_handles_leased_status() {
         let conn = fresh_db();
         // After recover_stale_leases, parent status would be 'queued'
         // - but a job that crashed in 'leased' status with all-terminal
@@ -1062,7 +1167,12 @@ mod tests {
         insert_test_job(&conn, &leased, "leased");
         insert_test_op(&conn, &leased, 0, "done");
 
-        let orphans = unfinalized_mail_plan_jobs(&conn).expect("query");
+        let orphans: std::collections::HashSet<[u8; 16]> =
+            unfinalized_per_op_plan_jobs(&conn)
+                .expect("query")
+                .into_iter()
+                .map(|(id, _kind)| id)
+                .collect();
         assert_eq!(orphans.len(), 1, "leased+all-done job is unfinalized");
         assert!(orphans.contains(&leased));
     }
