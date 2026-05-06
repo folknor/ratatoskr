@@ -115,6 +115,9 @@ pub(crate) async fn dispatch(
         RequestParams::SmartFolderCreate { params } => {
             smart_folder::handle_create(&boot_state, params).await
         }
+        RequestParams::AccountDelete { params } => {
+            account::handle_delete(&boot_state, params).await
+        }
         RequestParams::ReadBootstrapSnapshots { params } => {
             internal::handle_read_bootstrap_snapshots(&boot_state, params).await
         }

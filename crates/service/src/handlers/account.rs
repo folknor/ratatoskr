@@ -18,8 +18,8 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use service_api::{
-    AccountCreateAck, AccountCreateParams, AccountReorderAck, AccountReorderParams,
-    AccountUpdateAck, AccountUpdateParams, ServiceError,
+    AccountCreateAck, AccountCreateParams, AccountDeleteAck, AccountDeleteParams, AccountReorderAck,
+    AccountReorderParams, AccountUpdateAck, AccountUpdateParams, ServiceError,
 };
 
 use crate::boot::BootSharedState;
@@ -115,4 +115,119 @@ pub(crate) async fn handle_create(
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(AccountCreateAck { id })
         .map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
+/// Phase 6a-part-2: orchestrated account deletion.
+///
+/// Folds three concerns into one IPC: cancel-and-await per-account
+/// runners (sync, push, calendar) so the runner-quiescence invariant
+/// closes Service-side; orchestrated DB delete via
+/// `delete_account_orchestrate`; external-store cleanup
+/// (body / inline / search / attachment cache).
+///
+/// Failure policy: each external-store cleanup logs and continues
+/// on error, mirroring the pre-relocation UI behaviour. The IPC
+/// ack reports the cleanup counts; per-cache-file errors come back
+/// as a flat `Vec<String>`. The cancel-and-await branches log + proceed
+/// even if the supervisor join surfaces an error - the cancellation
+/// token is already cancelled, so the runner will observe it on its
+/// next checkpoint, and the alternative (block the delete) is worse.
+pub(crate) async fn handle_delete(
+    boot_state: &Arc<BootSharedState>,
+    params: AccountDeleteParams,
+) -> Result<Value, ServiceError> {
+    let account_id = params.account_id;
+
+    if let Some(sync) = boot_state.sync_runtime()
+        && let Err(e) = sync.cancel_account_and_await(&account_id).await
+    {
+        log::warn!(
+            "account.delete: sync cancel-and-await({account_id}) returned error: {e}; proceeding",
+        );
+    }
+    if let Some(push) = boot_state.push_runtime() {
+        let _ = push.cancel_account(&account_id).await;
+    }
+    if let Some(cal) = boot_state.calendar_runtime()
+        && let Err(e) = cal.cancel_account_and_await(&account_id).await
+    {
+        log::warn!(
+            "account.delete: calendar cancel-and-await({account_id}) returned error: {e}; proceeding",
+        );
+    }
+
+    let write_db = boot_state.write_db_state()?;
+    let plan_account_id = account_id.clone();
+    let plan = write_db
+        .with_conn(move |conn| {
+            rtsk::account::delete::delete_account_orchestrate(conn, &plan_account_id)
+        })
+        .await
+        .map_err(ServiceError::Internal)?;
+
+    let mut ack = AccountDeleteAck::default();
+    let message_ids = plan.data.message_ids;
+    let cached_files = plan.data.cached_files;
+    let inline_hashes = plan.data.inline_hashes;
+    let shared_inline_hashes = plan.shared_inline_hashes;
+    let shared_cache_hashes = plan.shared_cache_hashes;
+
+    if let Some(sync) = boot_state.sync_runtime() {
+        let body_write = sync.body_write();
+        match body_write.delete(message_ids.clone()).await {
+            Ok(n) => ack.bodies_deleted = n,
+            Err(e) => log::error!("account.delete: body store cleanup: {e}"),
+        }
+
+        let to_delete: Vec<String> = inline_hashes
+            .into_iter()
+            .filter(|h| !shared_inline_hashes.contains(h))
+            .collect();
+        if !to_delete.is_empty() {
+            let inline_write = sync.inline_write();
+            match inline_write.delete_hashes(to_delete).await {
+                Ok(n) => ack.inline_images_deleted = n,
+                Err(e) => log::error!("account.delete: inline image cleanup: {e}"),
+            }
+        }
+
+        let search_write = sync.search_write();
+        match search_write.delete_messages_batch(message_ids).await {
+            Ok(()) => ack.search_cleaned = true,
+            Err(e) => log::error!("account.delete: search index cleanup: {e}"),
+        }
+    } else {
+        log::warn!(
+            "account.delete: sync runtime not installed; body / inline / search cleanup skipped \
+             (boot-time invariant pass on next start will reconcile)",
+        );
+    }
+
+    let app_data = boot_state.app_data_dir().to_path_buf();
+    for (path, hash) in cached_files {
+        if shared_cache_hashes.contains(&hash) {
+            continue;
+        }
+        match rtsk::attachment_cache::remove_cached_relative(&app_data, &path) {
+            Ok(()) => ack.cache_files_deleted += 1,
+            Err(e) => ack.cache_file_errors.push(format!("{path}: {e}")),
+        }
+    }
+
+    log::info!(
+        "account.delete({account_id}): {} bodies, {} inline images, {} cache files; \
+         search_cleaned={}",
+        ack.bodies_deleted,
+        ack.inline_images_deleted,
+        ack.cache_files_deleted,
+        ack.search_cleaned,
+    );
+    if !ack.cache_file_errors.is_empty() {
+        log::warn!(
+            "account.delete({account_id}): {} cache file errors",
+            ack.cache_file_errors.len(),
+        );
+    }
+
+    serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
 }

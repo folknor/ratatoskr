@@ -201,6 +201,40 @@ pub struct AccountCreateAck {
     pub id: String,
 }
 
+/// `account.delete` request body.
+///
+/// Phase 6a-part-2: the Service-side handler runs the full deletion
+/// sequence inside one IPC. The sequence is cancel-and-await for
+/// the per-account sync, push, and calendar runners; orchestrated
+/// DB delete via `delete_account_orchestrate`; and external-store
+/// cleanup. Folding all three closes the runner-quiescence
+/// invariant Service-side: a future caller cannot delete while
+/// runners hold writer references.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountDeleteParams {
+    pub account_id: String,
+}
+
+/// `account.delete` ack. Carries the cleanup report so the UI can
+/// surface a "deleted N attachments / N body rows" affordance if it
+/// wants. Today the UI only logs at info; the report's flat shape
+/// (single struct, no nested errors) reflects that read pattern.
+///
+/// `cache_file_errors` is the per-path error list returned by the
+/// attachment-cache cleanup. Each entry is `"<relative_path>:
+/// <error>"`. Today the UI only logs the count; future surface
+/// changes can render the list as a debug affordance without a
+/// wire-shape change.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountDeleteAck {
+    pub bodies_deleted: u64,
+    pub inline_images_deleted: u64,
+    pub cache_files_deleted: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cache_file_errors: Vec<String>,
+    pub search_cleaned: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,5 +406,42 @@ mod tests {
         let recovered: AccountCreateAck =
             serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn account_delete_params_round_trip() {
+        let original = AccountDeleteParams {
+            account_id: "acc-uuid-1".into(),
+        };
+        let json = serde_json::to_value(&original).expect("serialize");
+        let recovered: AccountDeleteParams =
+            serde_json::from_value(json).expect("deserialize");
+        assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn account_delete_ack_round_trip_full() {
+        let original = AccountDeleteAck {
+            bodies_deleted: 5,
+            inline_images_deleted: 3,
+            cache_files_deleted: 2,
+            cache_file_errors: vec!["a/b/c.png: permission denied".into()],
+            search_cleaned: true,
+        };
+        let json = serde_json::to_value(&original).expect("serialize");
+        let recovered: AccountDeleteAck =
+            serde_json::from_value(json).expect("deserialize");
+        assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn account_delete_ack_skips_empty_errors() {
+        let original = AccountDeleteAck::default();
+        let json = serde_json::to_value(&original).expect("serialize");
+        let object = json.as_object().expect("object");
+        assert!(
+            !object.contains_key("cache_file_errors"),
+            "empty cache_file_errors must be omitted: got {object:?}",
+        );
     }
 }

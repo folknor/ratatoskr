@@ -6,9 +6,10 @@ use service_api::{
     CalendarRunCompleted, CalendarRunId, CalendarSetVisibilityAck, CalendarSetVisibilityParams,
     CalendarStartAccountSyncParams, CalendarStartAck, CalendarSyncResult, HealthPingResponse,
     JsonRpcErrorObject, JsonRpcRequest, Notification, PROTOCOL_VERSION, ParsedServiceMessage,
-    AccountCreateAck, AccountCreateParams, AccountReorderAck, AccountReorderEntry,
-    AccountReorderParams, AccountUpdateAck, AccountUpdateParams, ContactGroupDeleteAck,
-    ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
+    AccountCreateAck, AccountCreateParams, AccountDeleteAck, AccountDeleteParams,
+    AccountReorderAck, AccountReorderEntry, AccountReorderParams, AccountUpdateAck,
+    AccountUpdateParams, ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck,
+    ContactGroupSaveParams,
     DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,
     PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAck,
     PinnedSearchDeleteAllAck, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,
@@ -1109,6 +1110,26 @@ impl ServiceClient {
             })
             .await?;
         Ok(ack.id)
+    }
+
+    /// Phase 6a-part-2: orchestrated account deletion via the
+    /// `account.delete` IPC. The Service-side handler runs
+    /// cancel-and-await per-account runners + DB delete +
+    /// external-store cleanup inside the single 60 s round-trip.
+    /// UI-side `cancel_and_await` orchestration is no longer
+    /// required - the runner-quiescence invariant closes
+    /// Service-side. Returns the cleanup report so UI can surface
+    /// counts.
+    pub async fn delete_account(
+        &self,
+        account_id: String,
+    ) -> Result<AccountDeleteAck, ClientError> {
+        let ack: AccountDeleteAck = self
+            .request(RequestParams::AccountDelete {
+                params: AccountDeleteParams { account_id },
+            })
+            .await?;
+        Ok(ack)
     }
 
     /// Phase 6a: batch-reassign sort_order for accounts via the

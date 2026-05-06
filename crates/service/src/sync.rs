@@ -317,6 +317,54 @@ impl SyncRuntime {
         }
     }
 
+    /// Clone the body-store write half. Used by the
+    /// `account.delete` handler so external-store cleanup can run
+    /// Service-side after the DB delete commits.
+    pub fn body_write(&self) -> service_state::BodyStoreWriteState {
+        self.inner.body_write.clone()
+    }
+
+    /// Clone the inline-image-store write half.
+    pub fn inline_write(&self) -> service_state::InlineImageStoreWriteState {
+        self.inner.inline_write.clone()
+    }
+
+    /// Clone the search write handle. Cheap (it's an mpsc Sender);
+    /// cloning does not duplicate the underlying writer task.
+    pub fn search_write(&self) -> service_state::SearchWriteHandle {
+        self.inner.search_write.clone()
+    }
+
+    /// Cancel the runner for `account_id` and await its supervisor
+    /// `JoinHandle`. Used by Phase 6a-part-2's `account.delete`
+    /// handler so the runner-quiescence invariant (no sync writer
+    /// holds a connection during the DB delete) closes Service-side.
+    /// Returns once the supervisor has exited - either because it
+    /// observed the cancellation token at a checkpoint, ran to
+    /// completion, or panicked (the supervisor body converts panics
+    /// into `SyncCompleted { Failed }`).
+    ///
+    /// `Ok(())` on success or "no runner registered." `Err` only if
+    /// joining the supervisor surfaces an error.
+    pub async fn cancel_account_and_await(&self, account_id: &str) -> Result<(), String> {
+        let supervisor = {
+            let mut map = self.inner.accounts.lock().await;
+            match map.get_mut(account_id) {
+                Some(entry) => {
+                    entry.cancellation_token.cancel();
+                    entry.supervisor.take()
+                }
+                None => None,
+            }
+        };
+        if let Some(sup) = supervisor {
+            sup.await.map_err(|e| format!("sync supervisor join: {e}"))?;
+        }
+        // Drop the entry so a re-insert after delete starts fresh.
+        self.inner.accounts.lock().await.remove(account_id);
+        Ok(())
+    }
+
     /// Drain step: cancel every runner + await all supervisor
     /// `JoinHandle`s. Phase 3 task 13 calls this from
     /// `lifecycle::run_drain` before the search-writer flush and the

@@ -36,8 +36,9 @@ pub use calendar::{
     CalendarStartAccountSyncParams, CalendarStartAck, CalendarSyncResult,
 };
 pub use account::{
-    AccountCreateAck, AccountCreateParams, AccountCredentials, AccountReorderAck,
-    AccountReorderEntry, AccountReorderParams, AccountUpdateAck, AccountUpdateParams,
+    AccountCreateAck, AccountCreateParams, AccountCredentials, AccountDeleteAck,
+    AccountDeleteParams, AccountReorderAck, AccountReorderEntry, AccountReorderParams,
+    AccountUpdateAck, AccountUpdateParams,
 };
 pub use contacts::{
     ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,

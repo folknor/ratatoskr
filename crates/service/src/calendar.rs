@@ -293,6 +293,42 @@ impl CalendarRuntime {
         }
     }
 
+    /// Cancel the runner for `account_id` and await its supervisor
+    /// `JoinHandle`. Used by Phase 6a-part-2's `account.delete`
+    /// handler so the runner-quiescence invariant closes
+    /// Service-side. Same shape as
+    /// `SyncRuntime::cancel_account_and_await` and
+    /// `PushRuntime::cancel_account` (push folds the await into the
+    /// cancel for free).
+    ///
+    /// `Ok(())` on success or "no runner registered." `Err` only if
+    /// joining the supervisor surfaces an error.
+    pub async fn cancel_account_and_await(&self, account_id: &str) -> Result<(), String> {
+        let supervisor = {
+            let mut map = self.inner.accounts.lock().await;
+            match map.get_mut(account_id) {
+                Some(entry) => {
+                    entry.cancel.cancel();
+                    entry.supervisor.take()
+                }
+                None => None,
+            }
+        };
+        if let Some(sup) = supervisor {
+            sup.await
+                .map_err(|e| format!("calendar supervisor join: {e}"))?;
+        }
+        // Drop the entry + last_completed so a re-create after delete
+        // starts fresh.
+        self.inner.accounts.lock().await.remove(account_id);
+        self.inner
+            .last_completed
+            .lock()
+            .await
+            .remove(account_id);
+        Ok(())
+    }
+
     /// Filter `account_ids` to those whose last completion was more
     /// than `staleness` ago (or that have no recorded completion).
     /// Used by `handle_calendar_kick` to gate the kick-driven path

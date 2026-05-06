@@ -6,7 +6,9 @@ use crate::action::{ActionWirePlan, PlanId, SendWireRequest};
 use crate::calendar::{
     CalendarCancelAccountSyncParams, CalendarSetVisibilityParams, CalendarStartAccountSyncParams,
 };
-use crate::account::{AccountCreateParams, AccountReorderParams, AccountUpdateParams};
+use crate::account::{
+    AccountCreateParams, AccountDeleteParams, AccountReorderParams, AccountUpdateParams,
+};
 use crate::contacts::{ContactGroupDeleteParams, ContactGroupSaveParams};
 use crate::internal::{
     DecryptForStorageParams, EncryptForStorageParams, ReadBootstrapSnapshotsParams,
@@ -214,6 +216,19 @@ pub enum RequestParams {
     ///
     /// 5 s timeout: handler is one bounded transaction.
     AccountCreate { params: Box<AccountCreateParams> },
+    /// Phase 6a-part-2: orchestrated account deletion. The handler
+    /// runs cancel-and-await for sync/push/calendar runners (so the
+    /// runner-quiescence invariant closes Service-side rather than
+    /// being trusted to the caller), then `delete_account_orchestrate`,
+    /// then external-store cleanup (body store + inline image store +
+    /// search index + attachment file cache), then returns
+    /// `AccountDeleteAck` with the cleanup report.
+    ///
+    /// 60 s timeout: external-store cleanup is the bulk of the work
+    /// and routinely runs longer than 5 s on a heavily-cached
+    /// account. The 5 s default would surface as spurious timeouts
+    /// while the Service is still cleaning up correctly.
+    AccountDelete { params: AccountDeleteParams },
     /// Phase 6a-part-2: query-keyed UPSERT into `pinned_searches` +
     /// replacement of the `pinned_search_threads` member rows. The UI
     /// fires this on `SearchPersistenceBehavior::CreatePinnedSnapshot`.
@@ -318,6 +333,7 @@ impl RequestParams {
             Self::AccountUpdate { .. } => "account.update",
             Self::AccountReorder { .. } => "account.reorder",
             Self::AccountCreate { .. } => "account.create",
+            Self::AccountDelete { .. } => "account.delete",
             Self::ReadBootstrapSnapshots { .. } => "internal.read_bootstrap_snapshots",
             Self::EncryptForStorage { .. } => "internal.encrypt_for_storage",
             Self::DecryptForStorage { .. } => "internal.decrypt_for_storage",
@@ -394,6 +410,11 @@ impl RequestParams {
             | Self::SmartFolderCreate { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
+            // External-store cleanup is the bulk of the work and
+            // routinely exceeds the 5 s default on a heavily-cached
+            // account. 60 s absorbs that without converting correct
+            // cleanup into a spurious timeout.
+            Self::AccountDelete { .. } => RequestTimeoutKind::Finite(Duration::from_secs(60)),
             // Cold-boot critical path; absorb cold-disk + key-stretch.
             Self::ReadBootstrapSnapshots { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(10))
@@ -468,6 +489,7 @@ impl RequestParams {
             Self::AccountUpdate { params } => serde_json::json!({ "params": params }),
             Self::AccountReorder { params } => serde_json::json!({ "params": params }),
             Self::AccountCreate { params } => serde_json::json!({ "params": params }),
+            Self::AccountDelete { params } => serde_json::json!({ "params": params }),
             Self::ReadBootstrapSnapshots { params } => serde_json::json!({ "params": params }),
             Self::EncryptForStorage { params } => serde_json::json!({ "params": params }),
             Self::DecryptForStorage { params } => serde_json::json!({ "params": params }),
@@ -681,6 +703,15 @@ impl RequestParams {
                 Ok(Self::AccountCreate {
                     params: Box::new(p.params),
                 })
+            }
+            "account.delete" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: AccountDeleteParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("account.delete params: {e}"))?;
+                Ok(Self::AccountDelete { params: p.params })
             }
             "pinned_search.create_or_update" => {
                 #[derive(Deserialize)]
@@ -1813,6 +1844,44 @@ mod tests {
     fn smart_folder_create_round_trips_from_method_params() {
         let original = RequestParams::SmartFolderCreate {
             params: sample_smart_folder_create(),
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn account_delete_method_name_is_dotted() {
+        let p = RequestParams::AccountDelete {
+            params: AccountDeleteParams {
+                account_id: "acc-1".into(),
+            },
+        };
+        assert_eq!(p.method_name(), "account.delete");
+    }
+
+    #[test]
+    fn account_delete_timeout_is_sixty_seconds() {
+        let p = RequestParams::AccountDelete {
+            params: AccountDeleteParams {
+                account_id: "acc-1".into(),
+            },
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(60)),
+        );
+    }
+
+    #[test]
+    fn account_delete_round_trips_from_method_params() {
+        let original = RequestParams::AccountDelete {
+            params: AccountDeleteParams {
+                account_id: "acc-1".into(),
+            },
         };
         let parsed = RequestParams::from_method_params(
             original.method_name(),

@@ -653,15 +653,15 @@ impl ReadyApp {
     }
 
     pub(crate) fn handle_delete_account(&mut self, account_id: String) -> Task<Message> {
-        // Phase 3 task 16: cancel any in-flight Service-side sync via
-        // `cancel_and_await` *inside* the deletion task below (it must
-        // happen before the DB delete fires so a sync mid-persist
-        // cannot write into the about-to-be-deleted account). The old
-        // `sync_handles.abort()` codepath is gone with the
-        // `sync_handles` field; the Service owns the cancellation
-        // token now and `cancel_and_await` blocks until the runner
-        // observes the token at its next checkpoint and emits
-        // `SyncCompleted { Cancelled }`.
+        // Phase 6a-part-2: account.delete is now a single Service-side
+        // IPC that folds cancel-and-await for sync/push/calendar
+        // runners + delete_account_orchestrate + external-store
+        // cleanup (body / inline / search / attachment cache). The
+        // UI no longer holds the cleanup orchestration - the
+        // runner-quiescence invariant closes Service-side, so a
+        // future caller cannot delete while runners hold writer
+        // references. The 60 s wire timeout absorbs cleanup on a
+        // heavily-cached account.
 
         // Close compose and message-view pop-outs belonging to the deleted account.
         let windows_to_close: Vec<iced::window::Id> = self
@@ -698,114 +698,33 @@ impl ReadyApp {
             self.sidebar.selected_scope = ViewScope::AllAccounts;
         }
 
-        let db = Arc::clone(&self.db);
-        let body_store = self.body_store.clone();
-        let inline_image_store = self.inline_image_store.clone();
-        let search = self.search_state.clone();
-        let app_data_dir = crate::APP_DATA_DIR.get().expect("APP_DATA_DIR not set").clone();
-        let service_client = self.service_client.clone();
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("account.delete: no ServiceClient yet; ignoring delete request");
+            return Task::batch(close_tasks);
+        };
 
         let delete_task = Task::perform(
             async move {
-                // Phase 3 task 16: cancel any in-flight Service-side
-                // sync first. Tolerates ServiceCrashed - a dead Service
-                // provably has no in-flight writers, so the delete
-                // proceeds. Other IPC errors are logged and the delete
-                // proceeds anyway (best-effort; the Service-side
-                // invariant pass on next boot reconciles).
-                if let Some(client) = service_client.as_ref() {
-                    match client.cancel_and_await(&account_id).await {
-                        Ok(_) => {}
-                        Err(crate::service_client::ClientError::ServiceCrashed) => {}
-                        Err(error) => {
+                client
+                    .delete_account(account_id)
+                    .await
+                    .map(|ack| {
+                        log::info!(
+                            "account.delete ack: {} bodies, {} inline images, {} cache files; \
+                             search_cleaned={}",
+                            ack.bodies_deleted,
+                            ack.inline_images_deleted,
+                            ack.cache_files_deleted,
+                            ack.search_cleaned,
+                        );
+                        if !ack.cache_file_errors.is_empty() {
                             log::warn!(
-                                "cancel_and_await({account_id}) before delete: {error}; proceeding",
+                                "account.delete: {} cache file errors",
+                                ack.cache_file_errors.len(),
                             );
                         }
-                    }
-                }
-
-                // Phase 1: gather cleanup data + ref-checks + delete account row
-                // (synchronous, inside one write-connection call so CASCADE hasn't
-                // fired yet when we query attachment rows)
-                let plan = db
-                    .with_write_conn(move |conn| {
-                        rtsk::account::delete::delete_account_orchestrate(conn, &account_id)
                     })
-                    .await?;
-
-                // Phase 2: best-effort cleanup of external stores
-                let mut report = rtsk::account::types::AccountDeletionCleanupReport::default();
-
-                // Body store
-                if let Some(ref bs) = body_store {
-                    match bs.delete(plan.data.message_ids.clone()).await {
-                        Ok(n) => report.bodies_deleted = n,
-                        Err(e) => log::error!("Account deletion: body store cleanup failed: {e}"),
-                    }
-                } else {
-                    log::warn!("Account deletion: body store unavailable, skipping cleanup");
-                }
-
-                // Inline image store - only delete hashes not shared with other accounts
-                if let Some(ref iis) = inline_image_store {
-                    let to_delete: Vec<String> = plan
-                        .data
-                        .inline_hashes
-                        .into_iter()
-                        .filter(|h| !plan.shared_inline_hashes.contains(h))
-                        .collect();
-                    if !to_delete.is_empty() {
-                        match iis.delete_hashes(to_delete).await {
-                            Ok(n) => report.inline_images_deleted = n,
-                            Err(e) => {
-                                log::error!("Account deletion: inline image cleanup failed: {e}");
-                            }
-                        }
-                    }
-                } else {
-                    log::warn!(
-                        "Account deletion: inline image store unavailable, skipping cleanup"
-                    );
-                }
-
-                // Attachment file cache - only delete files not shared with other accounts
-                for (path, hash) in &plan.data.cached_files {
-                    if plan.shared_cache_hashes.contains(hash) {
-                        continue;
-                    }
-                    match rtsk::attachment_cache::remove_cached_relative(&app_data_dir, path) {
-                        Ok(()) => report.cache_files_deleted += 1,
-                        Err(e) => report.cache_file_errors.push((path.clone(), e)),
-                    }
-                }
-
-                // Search index cleanup deferred. Phase 3 task 4 strips
-                // writer ownership from `SearchReadState`; the UI no
-                // longer has a `SearchWriteHandle` here. Phase 3 task 16
-                // routes account-deletion through `cancel_and_await`,
-                // which lets the Service do this cleanup before the
-                // delete returns. Until then, the boot-time invariant
-                // pass (Phase 3 task 11) drops orphans by account on
-                // dirty boot, and the next sync's reindex makes the
-                // search results consistent again.
-                let _ = (&search, &plan.data.message_ids);
-                report.search_cleaned = false;
-
-                log::info!(
-                    "Account deleted: {} bodies, {} inline images, {} cache files cleaned",
-                    report.bodies_deleted,
-                    report.inline_images_deleted,
-                    report.cache_files_deleted,
-                );
-                if !report.cache_file_errors.is_empty() {
-                    log::warn!(
-                        "Account deletion: {} cache files failed to delete",
-                        report.cache_file_errors.len()
-                    );
-                }
-
-                Ok(())
+                    .map_err(|e| e.to_string())
             },
             Message::AccountDeleted,
         );
