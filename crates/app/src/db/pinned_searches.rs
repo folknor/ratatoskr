@@ -1,8 +1,7 @@
 use rtsk::db::pinned_searches::{
     DbPinnedSearch, db_create_or_update_pinned_search, db_delete_all_pinned_searches,
-    db_delete_pinned_search, db_expire_stale_pinned_searches, db_get_pinned_search_thread_ids,
-    db_get_recent_search_queries, db_get_threads_by_ids, db_list_pinned_searches,
-    db_update_pinned_search,
+    db_delete_pinned_search, db_get_pinned_search_thread_ids, db_get_recent_search_queries,
+    db_get_threads_by_ids, db_list_pinned_searches, db_update_pinned_search,
 };
 use rtsk::db::queries_extra::db_insert_smart_folder;
 use rtsk::db::types::DbThread;
@@ -123,10 +122,5 @@ impl Db {
         let id = uuid::Uuid::new_v4().to_string();
         db_insert_smart_folder(&db, id, name, query, None, None, None).await?;
         Ok(0)
-    }
-
-    pub async fn expire_stale_pinned_searches(&self, max_age_secs: i64) -> Result<u64, String> {
-        let db = self.write_db_state();
-        db_expire_stale_pinned_searches(&db, max_age_secs).await
     }
 }

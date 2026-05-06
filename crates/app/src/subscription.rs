@@ -83,13 +83,13 @@ impl ReadyApp {
             );
         }
 
-        // Periodic pinned search expiry - check every hour
-        if !self.pinned_searches.is_empty() {
-            subs.push(
-                iced::time::every(std::time::Duration::from_secs(3600))
-                    .map(|_| Message::ExpiryTick),
-            );
-        }
+        // Phase 6a: the dedicated 1 h `Message::ExpiryTick`
+        // subscription is gone. Pinned-search expire-stale now rides
+        // on the 5 min `SyncTick` via
+        // `Message::SyncTick -> kick_pinned_search_expire`, with the
+        // 14 day staleness gate enforced Service-side. Same one-cadence
+        // shape as `gal.kick`/`calendar.kick` - one timer, one failure
+        // mode, survives Phase 9 tray-resident move unchanged.
 
         // Periodic sync - delta sync all accounts every 5 minutes
         if !self.sidebar.accounts.is_empty() {

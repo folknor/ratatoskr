@@ -120,7 +120,6 @@ pub struct ReadyApp {
     // Pinned searches
     pub(crate) pinned_searches: Vec<db::PinnedSearch>,
     pub(crate) editing_pinned_search: Option<i64>,
-    pub(crate) expiry_ran: bool,
 
     pub(crate) no_accounts: bool,
     pub(crate) add_account_wizard: Option<AddAccountWizard>,
@@ -416,7 +415,6 @@ impl ReadyApp {
             search_history: Vec::new(),
             pinned_searches: Vec::new(),
             editing_pinned_search: None,
-            expiry_ran: false,
             no_accounts: false,
             add_account_wizard: None,
             current_modifiers: iced::keyboard::Modifiers::empty(),
@@ -1006,7 +1004,6 @@ mod booting_update_tests {
         let cases: Vec<Message> = vec![
             Message::SyncTick,
             Message::SnoozeTick,
-            Message::ExpiryTick,
             Message::Compose,
             Message::FocusSearch,
             Message::ToggleSettings,

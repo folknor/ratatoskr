@@ -289,20 +289,129 @@ pub async fn db_delete_all_pinned_searches(db: &ReadDbState) -> Result<u64, Stri
     .await
 }
 
-pub async fn db_expire_stale_pinned_searches(
-    db: &ReadDbState,
+/// Delete pinned searches that were created more than `max_age_secs`
+/// ago and never refreshed (`updated_at == created_at`). The DELETE is
+/// idempotent; duplicate calls within the same staleness window are
+/// no-ops by construction.
+///
+/// Phase 6a: callable from the Service-side `pinned_search.kick`
+/// handler via `WriteDbState::with_conn`. The synchronous shape lets
+/// the handler hold the connection for the duration of the DELETE
+/// without needing an async wrapper.
+pub fn db_expire_stale_pinned_searches_sync(
+    conn: &rusqlite::Connection,
     max_age_secs: i64,
 ) -> Result<u64, String> {
-    db.with_conn(move |conn| {
-        let deleted = conn
-            .execute(
-                "DELETE FROM pinned_searches
-                 WHERE updated_at < unixepoch() - ?1
-                   AND updated_at = created_at",
-                params![max_age_secs],
-            )
-            .map_err(|e| e.to_string())?;
-        Ok(deleted as u64)
-    })
-    .await
+    let deleted = conn
+        .execute(
+            "DELETE FROM pinned_searches
+             WHERE updated_at < unixepoch() - ?1
+               AND updated_at = created_at",
+            params![max_age_secs],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(deleted as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::migrations;
+    use rusqlite::Connection;
+
+    fn setup_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("pragmas");
+        migrations::run_all(&conn).expect("migrations");
+        conn
+    }
+
+    /// Insert a pinned-search row with explicit `created_at`/`updated_at`
+    /// so the staleness window can be exercised deterministically.
+    fn insert_pinned_search(
+        conn: &Connection,
+        query: &str,
+        created_at: i64,
+        updated_at: i64,
+    ) -> i64 {
+        conn.execute(
+            "INSERT INTO pinned_searches (query, created_at, updated_at) \
+             VALUES (?1, ?2, ?3)",
+            params![query, created_at, updated_at],
+        )
+        .expect("seed pinned search");
+        conn.last_insert_rowid()
+    }
+
+    fn count_pinned_searches(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM pinned_searches", [], |row| row.get(0))
+            .expect("count")
+    }
+
+    #[test]
+    fn expire_stale_deletes_old_unrefreshed_rows() {
+        let conn = setup_db();
+        let now: i64 = conn
+            .query_row("SELECT unixepoch()", [], |row| row.get(0))
+            .expect("now");
+        // 14 days + 1 second old, never refreshed (updated_at == created_at).
+        let stale = now - 1_209_600 - 1;
+        insert_pinned_search(&conn, "stale", stale, stale);
+
+        let deleted =
+            db_expire_stale_pinned_searches_sync(&conn, 1_209_600).expect("expire");
+        assert_eq!(deleted, 1);
+        assert_eq!(count_pinned_searches(&conn), 0);
+    }
+
+    #[test]
+    fn expire_stale_keeps_fresh_rows() {
+        let conn = setup_db();
+        let now: i64 = conn
+            .query_row("SELECT unixepoch()", [], |row| row.get(0))
+            .expect("now");
+        // Created within the staleness window - must survive.
+        insert_pinned_search(&conn, "fresh", now - 60, now - 60);
+
+        let deleted =
+            db_expire_stale_pinned_searches_sync(&conn, 1_209_600).expect("expire");
+        assert_eq!(deleted, 0);
+        assert_eq!(count_pinned_searches(&conn), 1);
+    }
+
+    #[test]
+    fn expire_stale_keeps_old_but_refreshed_rows() {
+        let conn = setup_db();
+        let now: i64 = conn
+            .query_row("SELECT unixepoch()", [], |row| row.get(0))
+            .expect("now");
+        // Created long ago but refreshed recently
+        // (updated_at != created_at). Must survive.
+        let created = now - 1_209_600 - 100;
+        let updated = now - 60;
+        insert_pinned_search(&conn, "refreshed", created, updated);
+
+        let deleted =
+            db_expire_stale_pinned_searches_sync(&conn, 1_209_600).expect("expire");
+        assert_eq!(deleted, 0);
+        assert_eq!(count_pinned_searches(&conn), 1);
+    }
+
+    #[test]
+    fn expire_stale_is_idempotent() {
+        let conn = setup_db();
+        let now: i64 = conn
+            .query_row("SELECT unixepoch()", [], |row| row.get(0))
+            .expect("now");
+        let stale = now - 1_209_600 - 1;
+        insert_pinned_search(&conn, "stale", stale, stale);
+
+        let first =
+            db_expire_stale_pinned_searches_sync(&conn, 1_209_600).expect("first");
+        let second =
+            db_expire_stale_pinned_searches_sync(&conn, 1_209_600).expect("second");
+        assert_eq!(first, 1);
+        assert_eq!(second, 0);
+    }
 }

@@ -75,8 +75,8 @@
 // Pinned-search and snooze messages: dropped while Booting (the periodic
 // timers will fire again after Booting -> Ready):
 //   PinnedSearchesLoaded | SelectPinnedSearch | DismissPinnedSearch
-//   PinnedSearchDismissed | PinnedSearchPersisted | PinnedSearchesExpired
-//   RefreshPinnedSearch | ExpiryTick | ClearAllPinnedSearches
+//   PinnedSearchDismissed | PinnedSearchPersisted
+//   RefreshPinnedSearch | ClearAllPinnedSearches
 //   SnoozeTick | SnoozeResurfaceComplete
 //
 // Sync / account / push: dropped while Booting (Service hasn't reached
@@ -265,9 +265,7 @@ pub enum Message {
         crate::handlers::search::SearchCompletionBehavior,
         Result<i64, String>,
     ),
-    PinnedSearchesExpired(Result<u64, String>),
     RefreshPinnedSearch(i64),
-    ExpiryTick,
 
     // Search extras
     SearchHere(String),

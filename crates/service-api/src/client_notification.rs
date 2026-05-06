@@ -43,6 +43,14 @@ pub enum ClientNotification {
     /// age check. `Drop` class - same forgiveness as the other kicks.
     #[serde(rename = "gal.kick")]
     GalKick,
+    /// Phase 6a: "The UI's tick fired; please consider expiring stale
+    /// pinned searches." The Service handler runs a single global
+    /// DELETE keyed on the 14-day staleness window (matches today's
+    /// UI-side `expire_stale_pinned_searches(1_209_600)` call).
+    /// `Drop` class - missed kicks self-heal on the next `SyncTick`,
+    /// and the DELETE is idempotent so duplicate kicks are harmless.
+    #[serde(rename = "pinned_search.kick")]
+    PinnedSearchKick,
 }
 
 impl ClientNotification {
@@ -51,24 +59,31 @@ impl ClientNotification {
             Self::PendingOpsKick => "pending_ops.kick",
             Self::CalendarKick => "calendar.kick",
             Self::GalKick => "gal.kick",
+            Self::PinnedSearchKick => "pinned_search.kick",
         }
     }
 
     pub fn params_value(&self) -> Value {
         match self {
-            Self::PendingOpsKick | Self::CalendarKick | Self::GalKick => Value::Null,
+            Self::PendingOpsKick
+            | Self::CalendarKick
+            | Self::GalKick
+            | Self::PinnedSearchKick => Value::Null,
         }
     }
 
     /// Class controls Service-side dispatch behavior. Phase 2 only
     /// uses `Drop` (best-effort fire-and-forget): if the notification
     /// task pool is at capacity, drop the inbound rather than block
-    /// the dispatch loop. Phase 5's `calendar.kick` and `gal.kick`
-    /// follow the same shape - missed kicks self-heal on the next
-    /// `Message::SyncTick`.
+    /// the dispatch loop. Phase 5's `calendar.kick` and `gal.kick` and
+    /// Phase 6a's `pinned_search.kick` follow the same shape - missed
+    /// kicks self-heal on the next `Message::SyncTick`.
     pub fn class(&self) -> NotificationClass {
         match self {
-            Self::PendingOpsKick | Self::CalendarKick | Self::GalKick => NotificationClass::Drop,
+            Self::PendingOpsKick
+            | Self::CalendarKick
+            | Self::GalKick
+            | Self::PinnedSearchKick => NotificationClass::Drop,
         }
     }
 
@@ -85,6 +100,10 @@ impl ClientNotification {
             "gal.kick" => match params {
                 None | Some(Value::Null) => Ok(Self::GalKick),
                 Some(_) => Err("gal.kick must have no params".to_string()),
+            },
+            "pinned_search.kick" => match params {
+                None | Some(Value::Null) => Ok(Self::PinnedSearchKick),
+                Some(_) => Err("pinned_search.kick must have no params".to_string()),
             },
             _ => Err(format!("unknown client notification method: {method}")),
         }
@@ -246,5 +265,53 @@ mod tests {
         let n = ClientNotification::from_method_params("gal.kick", &Some(Value::Null))
             .expect("null ok");
         assert_eq!(n, ClientNotification::GalKick);
+    }
+
+    // -- Phase 6a catalog cases -------------------------------------------
+
+    #[test]
+    fn pinned_search_kick_round_trips_through_serde() {
+        let original = ClientNotification::PinnedSearchKick;
+        let json = serde_json::to_value(&original).expect("serialize");
+        let recovered: ClientNotification = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn pinned_search_kick_method_name_is_dotted() {
+        assert_eq!(
+            ClientNotification::PinnedSearchKick.method_name(),
+            "pinned_search.kick",
+        );
+    }
+
+    #[test]
+    fn pinned_search_kick_classifies_as_drop() {
+        assert!(matches!(
+            ClientNotification::PinnedSearchKick.class(),
+            NotificationClass::Drop,
+        ));
+    }
+
+    #[test]
+    fn pinned_search_kick_from_method_params_accepts_null_and_missing() {
+        let n = ClientNotification::from_method_params("pinned_search.kick", &None)
+            .expect("missing ok");
+        assert_eq!(n, ClientNotification::PinnedSearchKick);
+        let n = ClientNotification::from_method_params("pinned_search.kick", &Some(Value::Null))
+            .expect("null ok");
+        assert_eq!(n, ClientNotification::PinnedSearchKick);
+    }
+
+    #[test]
+    fn pinned_search_kick_from_method_params_rejects_non_null_params() {
+        let result = ClientNotification::from_method_params(
+            "pinned_search.kick",
+            &Some(serde_json::json!({"foo": "bar"})),
+        );
+        match result {
+            Err(message) => assert!(message.contains("no params")),
+            Ok(other) => panic!("expected Err, got Ok({other:?})"),
+        }
     }
 }

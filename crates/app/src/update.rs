@@ -369,17 +369,19 @@ impl ReadyApp {
                 Task::batch([self.sync_all_accounts(), self.calendar_sync_all_accounts()])
             }
             Message::SyncTick => {
-                // Phase 5 task 10: SyncTick collapses to three notifications +
-                // one request fan-out. Calendar and GAL both relocated
-                // Service-side; the UI's only role is to fire the cadence,
-                // and Service-side staleness gates (calendar: 1h per-account
-                // last_completed; GAL: 24h cache check) keep the actual
-                // provider load bounded.
+                // Phase 5 task 10 + Phase 6a: SyncTick collapses to four
+                // notifications + one request fan-out. Calendar, GAL, and
+                // pinned-search expiry all relocated Service-side; the
+                // UI's only role is to fire the cadence, and Service-side
+                // staleness gates (calendar: 1h per-account last_completed;
+                // GAL: 24h cache check; pinned-search: 14-day creation
+                // age) keep the actual work bounded.
                 let sync_task = self.sync_all_accounts();
                 let pending_task = self.process_pending_ops();
                 let gal_task = self.kick_gal_refresh();
                 let cal_task = self.kick_calendar_sync();
-                Task::batch([sync_task, pending_task, gal_task, cal_task])
+                let pinned_task = self.kick_pinned_search_expire();
+                Task::batch([sync_task, pending_task, gal_task, cal_task, pinned_task])
             }
             Message::SyncComplete(account_id, result) => {
                 // Phase 3 task 15: per-account "already-in-flight" gating
@@ -470,9 +472,7 @@ impl ReadyApp {
             Message::PinnedSearchPersisted(completion, result) => {
                 self.handle_pinned_search_persisted(completion, result)
             }
-            Message::PinnedSearchesExpired(result) => self.handle_pinned_searches_expired(result),
             Message::RefreshPinnedSearch(id) => self.handle_refresh_pinned_search(id),
-            Message::ExpiryTick => self.handle_expiry_tick(),
             Message::SearchHere(prefix) => self.handle_search_here(prefix),
             Message::SaveAsSmartFolder(name) => self.handle_save_as_smart_folder(name),
             Message::SmartFolderSaved(result) => self.handle_smart_folder_saved(result),

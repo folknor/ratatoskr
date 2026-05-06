@@ -7,6 +7,7 @@ mod calendar;
 mod gal;
 mod health;
 mod pending_ops_kick;
+mod pinned_search;
 mod settings;
 mod sync;
 mod thread_ui_state;
@@ -92,5 +93,6 @@ pub(crate) async fn dispatch_notification(
         ClientNotification::PendingOpsKick => pending_ops_kick::handle(&boot_state).await,
         ClientNotification::CalendarKick => calendar::handle_calendar_kick(&boot_state).await,
         ClientNotification::GalKick => gal::handle_gal_kick(&boot_state).await,
+        ClientNotification::PinnedSearchKick => pinned_search::handle_kick(&boot_state).await,
     }
 }

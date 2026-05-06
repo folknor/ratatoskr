@@ -134,6 +134,31 @@ impl ReadyApp {
         )
     }
 
+    /// Phase 6a: kick the Service-side pinned-search expire-stale
+    /// sweep.
+    ///
+    /// Replaces the deleted UI-side `expire_stale_pinned_searches`
+    /// call. The Service handler runs a single global DELETE keyed on
+    /// the 14-day staleness window. Notification class is `Drop` -
+    /// missed kicks self-heal on the next `SyncTick`, and the DELETE
+    /// is idempotent so duplicate kicks are harmless.
+    pub(crate) fn kick_pinned_search_expire(&self) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                if let Err(error) = client
+                    .send_notification(service_api::ClientNotification::PinnedSearchKick)
+                    .await
+                {
+                    log::debug!("pinned_search.kick send failed: {error}");
+                }
+            },
+            |()| Message::Noop,
+        )
+    }
+
     /// Phase 5 task 9b: dispatch an explicit calendar sync request for a
     /// specific account, bypassing the kick-handler staleness gate.
     /// Used after account creation, on the manual "sync now" path, and

@@ -692,23 +692,10 @@ impl ReadyApp {
                     .clone_from(&self.pinned_searches);
 
                 let db = Arc::clone(&self.db);
-                let history_task = Task::perform(
+                Task::perform(
                     async move { db.get_recent_search_queries(10).await },
                     Message::SearchHistoryLoaded,
-                );
-
-                if !self.expiry_ran {
-                    self.expiry_ran = true;
-                    let db2 = Arc::clone(&self.db);
-                    return Task::batch([
-                        history_task,
-                        Task::perform(
-                            async move { db2.expire_stale_pinned_searches(1_209_600).await },
-                            Message::PinnedSearchesExpired,
-                        ),
-                    ]);
-                }
-                history_task
+                )
             }
             Err(e) => {
                 self.status = format!("Pinned searches error: {e}");
@@ -773,29 +760,6 @@ impl ReadyApp {
             }
             Err(e) => {
                 self.status = format!("Save pinned search error: {e}");
-                Task::none()
-            }
-        }
-    }
-
-    pub(crate) fn handle_pinned_searches_expired(
-        &mut self,
-        result: Result<u64, String>,
-    ) -> Task<Message> {
-        match result {
-            Ok(count) => {
-                if count > 0 {
-                    let db = Arc::clone(&self.db);
-                    Task::perform(
-                        async move { db.list_pinned_searches().await },
-                        Message::PinnedSearchesLoaded,
-                    )
-                } else {
-                    Task::none()
-                }
-            }
-            Err(e) => {
-                self.status = format!("Expiry warning: {e}");
                 Task::none()
             }
         }
@@ -922,14 +886,6 @@ impl ReadyApp {
         let intent = SearchIntent::PinnedRefresh { id };
         let resolved = resolve_search_intent(intent, &self.current_ui_search_context());
         self.dispatch_resolved_search(resolved)
-    }
-
-    pub(crate) fn handle_expiry_tick(&mut self) -> Task<Message> {
-        let db = Arc::clone(&self.db);
-        Task::perform(
-            async move { db.expire_stale_pinned_searches(1_209_600).await },
-            Message::PinnedSearchesExpired,
-        )
     }
 
     pub(crate) fn handle_search_here(&mut self, query_prefix: String) -> Task<Message> {
