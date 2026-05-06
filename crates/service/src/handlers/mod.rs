@@ -56,6 +56,9 @@ pub(crate) async fn dispatch(
         RequestParams::CalendarCancelAccountSync { params } => {
             calendar::handle_cancel_account_sync(&boot_state, params).await
         }
+        RequestParams::CalendarSetVisibility { params } => {
+            calendar::handle_set_visibility(&boot_state, params).await
+        }
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPanic => test_helpers::panic_handle().await,
         #[cfg(feature = "test-helpers")]

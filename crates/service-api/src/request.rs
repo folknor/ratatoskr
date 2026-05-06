@@ -3,7 +3,9 @@ use serde_json::Value;
 use std::time::Duration;
 
 use crate::action::{ActionWirePlan, PlanId, SendWireRequest};
-use crate::calendar::{CalendarCancelAccountSyncParams, CalendarStartAccountSyncParams};
+use crate::calendar::{
+    CalendarCancelAccountSyncParams, CalendarSetVisibilityParams, CalendarStartAccountSyncParams,
+};
 use crate::sync::{SyncCancelAccountParams, SyncStartAccountParams};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +107,15 @@ pub enum RequestParams {
     CalendarCancelAccountSync {
         params: CalendarCancelAccountSyncParams,
     },
+    /// Phase 6a (`docs/service/phase-6a-plan.md`): set the
+    /// `is_visible` flag on a single `calendars` row. The flat-boolean
+    /// half of the calendar UI write surface; event mutations are
+    /// Phase 6c.
+    ///
+    /// 5 s timeout: handler is one bounded `with_conn` write.
+    CalendarSetVisibility {
+        params: CalendarSetVisibilityParams,
+    },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -136,6 +147,7 @@ impl RequestParams {
             Self::SyncCancelAccount { .. } => "sync.cancel_account",
             Self::CalendarStartAccountSync { .. } => "calendar.start_account_sync",
             Self::CalendarCancelAccountSync { .. } => "calendar.cancel_account_sync",
+            Self::CalendarSetVisibility { .. } => "calendar.set_visibility",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -190,6 +202,7 @@ impl RequestParams {
             Self::CalendarCancelAccountSync { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
+            Self::CalendarSetVisibility { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
@@ -240,6 +253,7 @@ impl RequestParams {
             Self::CalendarCancelAccountSync { params } => {
                 serde_json::json!({ "params": params })
             }
+            Self::CalendarSetVisibility { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -340,6 +354,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("calendar.cancel_account_sync params: {e}"))?;
                 Ok(Self::CalendarCancelAccountSync { params: p.params })
+            }
+            "calendar.set_visibility" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: CalendarSetVisibilityParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("calendar.set_visibility params: {e}"))?;
+                Ok(Self::CalendarSetVisibility { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {

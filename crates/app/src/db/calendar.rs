@@ -2,7 +2,7 @@ use rtsk::db::queries_extra::calendars::{
     LocalCalendarEventParams, create_calendar_event_sync, delete_calendar_event_sync,
     expand_view_events, get_calendar_event_sync, get_event_attendees_sync,
     get_event_reminders_sync, load_calendars_for_sidebar_sync, load_view_event_rows_sync,
-    set_calendar_visibility_sync, update_calendar_event_sync,
+    update_calendar_event_sync,
 };
 
 use super::connection::Db;
@@ -167,13 +167,4 @@ impl Db {
         .await
     }
 
-    /// Set calendar visibility.
-    pub async fn set_calendar_visibility(
-        &self,
-        calendar_id: String,
-        visible: bool,
-    ) -> Result<(), String> {
-        self.with_write_conn(move |conn| set_calendar_visibility_sync(conn, &calendar_id, visible))
-        .await
-    }
 }

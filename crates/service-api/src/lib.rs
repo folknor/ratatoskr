@@ -24,7 +24,8 @@ pub use boot::{
 };
 pub use calendar::{
     CalendarCancelAccountSyncParams, CalendarCancelAck, CalendarChanged, CalendarRunCompleted,
-    CalendarRunId, CalendarStartAccountSyncParams, CalendarStartAck, CalendarSyncResult,
+    CalendarRunId, CalendarSetVisibilityAck, CalendarSetVisibilityParams,
+    CalendarStartAccountSyncParams, CalendarStartAck, CalendarSyncResult,
 };
 pub use error::{JsonRpcErrorObject, ServiceError};
 pub use framing::{

@@ -17,8 +17,10 @@ use std::time::Duration;
 
 use serde_json::Value;
 use service_api::{
-    CalendarCancelAccountSyncParams, CalendarStartAccountSyncParams, ServiceError,
+    CalendarCancelAccountSyncParams, CalendarSetVisibilityAck, CalendarSetVisibilityParams,
+    CalendarStartAccountSyncParams, ServiceError,
 };
+use service_state::WriteDbState;
 
 use crate::boot::BootSharedState;
 
@@ -64,6 +66,36 @@ pub(crate) async fn handle_cancel_account_sync(
     })?;
     let ack = runtime.cancel_account(&params.account_id).await;
     serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
+/// `calendar.set_visibility` request handler (Phase 6a). Toggles the
+/// `is_visible` flag on a single `calendars` row. Thin wrapper around
+/// `set_calendar_visibility_sync`; calendar event mutations stay
+/// UI-side until Phase 6c.
+pub(crate) async fn handle_set_visibility(
+    boot_state: &Arc<BootSharedState>,
+    params: CalendarSetVisibilityParams,
+) -> Result<Value, ServiceError> {
+    let Some(conn) = boot_state.db_conn() else {
+        return Err(ServiceError::Internal(
+            "calendar.set_visibility received before db_conn available; \
+             UI must wait for boot.ready"
+                .into(),
+        ));
+    };
+    let write_db = WriteDbState::from_arc(conn);
+    write_db
+        .with_conn(move |conn| {
+            db::db::queries_extra::calendars::set_calendar_visibility_sync(
+                conn,
+                &params.calendar_id,
+                params.visible,
+            )
+        })
+        .await
+        .map_err(ServiceError::Internal)?;
+    serde_json::to_value(CalendarSetVisibilityAck)
+        .map_err(|e| ServiceError::Internal(e.to_string()))
 }
 
 /// `calendar.kick` notification handler. Enumerates accounts and starts

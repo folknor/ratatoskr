@@ -2,12 +2,12 @@ use crate::notification_queue::NotificationQueue;
 use dashmap::DashMap;
 use serde::de::DeserializeOwned;
 use service_api::{
-    BootClassification, BootExitCode, BootReadyResponse, BoundedLineReader, HealthPingResponse,
-    JsonRpcErrorObject, JsonRpcRequest, Notification, ParsedServiceMessage, PROTOCOL_VERSION,
+    BootClassification, BootExitCode, BootReadyResponse, BoundedLineReader,
+    CalendarRunCompleted, CalendarRunId, CalendarSetVisibilityAck, CalendarSetVisibilityParams,
+    CalendarStartAccountSyncParams, CalendarStartAck, CalendarSyncResult, HealthPingResponse,
+    JsonRpcErrorObject, JsonRpcRequest, Notification, PROTOCOL_VERSION, ParsedServiceMessage,
     RequestParams, RequestTimeoutKind, ServiceError, ServiceResponse, ShutdownResponse,
-    CalendarRunCompleted, CalendarRunId, CalendarStartAccountSyncParams, CalendarStartAck,
-    CalendarSyncResult, SyncCancelAccountParams, SyncCancelAck, SyncCompleted, SyncResult,
-    SyncRunId,
+    SyncCancelAccountParams, SyncCancelAck, SyncCompleted, SyncResult, SyncRunId,
     SyncStartAccountParams, SyncStartAck, encode_message, parse_service_message,
 };
 use std::collections::{HashMap, VecDeque, hash_map::Entry};
@@ -931,6 +931,25 @@ impl ServiceClient {
             })
             .await?;
         self.subscribe_or_consume_calendar(ack.run_id).await
+    }
+
+    /// Phase 6a: toggle calendar visibility via the
+    /// `calendar.set_visibility` IPC. Replaces the deleted
+    /// `Db::set_calendar_visibility` UI-side write surface.
+    pub async fn set_calendar_visibility(
+        &self,
+        calendar_id: String,
+        visible: bool,
+    ) -> Result<(), ClientError> {
+        let _ack: CalendarSetVisibilityAck = self
+            .request(RequestParams::CalendarSetVisibility {
+                params: CalendarSetVisibilityParams {
+                    calendar_id,
+                    visible,
+                },
+            })
+            .await?;
+        Ok(())
     }
 
     /// Phase 3 task 14: cancel any in-flight sync for `account_id` and

@@ -406,11 +406,19 @@ impl ReadyApp {
                 {
                     cal.is_visible = visible;
                 }
-                // Persist to DB and reload events.
-                let db = Arc::clone(&self.db);
+                // Phase 6a: persist via Service IPC instead of UI-side write.
+                let Some(client) = self.service_client.as_ref().cloned() else {
+                    log::debug!(
+                        "calendar.set_visibility: no ServiceClient yet; UI state updated locally"
+                    );
+                    return Task::none();
+                };
                 Task::perform(
-                    async move { db.set_calendar_visibility(calendar_id, visible).await },
-                    |_| Message::Calendar(Box::new(CalendarMessage::EventSaved(Ok(())))),
+                    async move { client.set_calendar_visibility(calendar_id, visible).await },
+                    |result| {
+                        let mapped = result.map_err(|e| e.to_string());
+                        Message::Calendar(Box::new(CalendarMessage::EventSaved(mapped)))
+                    },
                 )
             }
             CalendarMessage::CalendarsLoaded(load_generation, result) => {

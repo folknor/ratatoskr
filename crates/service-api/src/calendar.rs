@@ -93,6 +93,25 @@ pub struct CalendarCancelAck {
 }
 
 // ---------------------------------------------------------------------------
+// Request params (calendar.set_visibility)
+// ---------------------------------------------------------------------------
+
+/// `calendar.set_visibility` request body. Phase 6a (`docs/service/
+/// phase-6a-plan.md`) relocates the calendar visibility toggle - the
+/// flat-boolean half of `db/calendar.rs` - Service-side. Event
+/// mutations (create/update/delete) stay UI-side until Phase 6c.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CalendarSetVisibilityParams {
+    pub calendar_id: String,
+    pub visible: bool,
+}
+
+/// `calendar.set_visibility` ack. Empty struct; failure surfaces
+/// through `ServiceResponse::Error`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CalendarSetVisibilityAck;
+
+// ---------------------------------------------------------------------------
 // Notification payloads
 // ---------------------------------------------------------------------------
 
@@ -187,6 +206,26 @@ mod tests {
         let recovered: CalendarStartAccountSyncParams =
             serde_json::from_value(json).expect("deserialize");
         assert_eq!(params, recovered);
+    }
+
+    #[test]
+    fn calendar_set_visibility_params_round_trips_through_serde() {
+        let params = CalendarSetVisibilityParams {
+            calendar_id: "cal-1".into(),
+            visible: true,
+        };
+        let json = serde_json::to_value(&params).expect("serialize");
+        let recovered: CalendarSetVisibilityParams =
+            serde_json::from_value(json).expect("deserialize");
+        assert_eq!(params, recovered);
+    }
+
+    #[test]
+    fn calendar_set_visibility_ack_round_trips_through_serde() {
+        let ack = CalendarSetVisibilityAck;
+        let json = serde_json::to_value(&ack).expect("serialize");
+        let _recovered: CalendarSetVisibilityAck =
+            serde_json::from_value(json).expect("deserialize");
     }
 
     #[test]
