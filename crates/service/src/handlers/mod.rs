@@ -95,6 +95,9 @@ pub(crate) async fn dispatch(
         RequestParams::AccountReorder { params } => {
             account::handle_reorder(&boot_state, params).await
         }
+        RequestParams::AccountCreate { params } => {
+            account::handle_create(&boot_state, params).await
+        }
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPanic => test_helpers::panic_handle().await,
         #[cfg(feature = "test-helpers")]

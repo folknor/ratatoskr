@@ -53,6 +53,7 @@ impl ReadyApp {
         self.add_account_wizard = Some(AddAccountWizard::new_add_account(
             used_colors,
             Arc::clone(&self.db),
+            self.service_client.clone(),
         ));
         Task::none()
     }
@@ -60,7 +61,12 @@ impl ReadyApp {
     /// Open a re-auth wizard for an existing account.
     pub(crate) fn handle_open_reauth_wizard(&mut self, account_id: String) -> Task<Message> {
         let email = self.email_for_account(&account_id);
-        match AddAccountWizard::new_reauth(account_id, email.clone(), Arc::clone(&self.db)) {
+        match AddAccountWizard::new_reauth(
+            account_id,
+            email.clone(),
+            Arc::clone(&self.db),
+            self.service_client.clone(),
+        ) {
             Ok((wizard, task)) => {
                 self.dismiss_overlays();
                 self.add_account_wizard = Some(wizard);

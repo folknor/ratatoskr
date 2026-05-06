@@ -1027,7 +1027,10 @@ impl ReadyApp {
         if self.sidebar.accounts.is_empty() {
             self.no_accounts = true;
             self.add_account_wizard = Some(
-                crate::ui::add_account::AddAccountWizard::new_first_launch(Arc::clone(&self.db)),
+                crate::ui::add_account::AddAccountWizard::new_first_launch(
+                    Arc::clone(&self.db),
+                    self.service_client.clone(),
+                ),
             );
             self.status = "Welcome".to_string();
             return Task::none();

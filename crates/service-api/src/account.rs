@@ -66,6 +66,141 @@ pub struct AccountReorderParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountReorderAck;
 
+/// Credentials envelope for `account.create`.
+///
+/// Day-one wire shape so 6b's two-step OAuth flow can extend rather
+/// than redefine. Variants:
+///
+/// - `Plaintext`: caller passes raw secrets. The Service handler is
+///   the right place to encrypt before write - though today's
+///   behavior is "store verbatim" because the encryption-key handle
+///   relocation has not yet landed; once `internal.encrypt_for_storage`
+///   ships, this variant routes through it transparently.
+/// - `Encrypted`: caller passes already-encrypted blobs in
+///   `enc:base64iv:base64ct` form. Used by paths where the UI
+///   already holds the encrypted material (re-auth, recovery flows).
+///
+/// Phase 6b will add a third `Oauth { auth_code, redirect_uri,
+/// code_verifier }` variant for the fresh-OAuth-grant flow rather
+/// than redefine this shape - hence "two variants today, room for a
+/// third later" wording in the plan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AccountCredentials {
+    /// Caller passes raw secrets. Service handler is responsible for
+    /// encryption (today: pass-through; future: route through
+    /// `internal.encrypt_for_storage`).
+    Plaintext {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        access_token: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        refresh_token: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        imap_password: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        smtp_password: Option<String>,
+    },
+    /// Caller passes already-encrypted blobs. Service handler writes
+    /// them verbatim. Used by re-auth / recovery flows that already
+    /// hold cipher text.
+    Encrypted {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        access_token: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        refresh_token: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        imap_password: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        smtp_password: Option<String>,
+    },
+}
+
+impl AccountCredentials {
+    /// Pull the four secret fields out regardless of encryption
+    /// state. Today's Service handler treats both variants the same -
+    /// pass through to `create_account_sync` - because the underlying
+    /// DB column stores the value as-is. When
+    /// `internal.encrypt_for_storage` lands the handler can branch on
+    /// the variant before calling into this method.
+    pub fn into_fields(
+        self,
+    ) -> (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) {
+        match self {
+            Self::Plaintext {
+                access_token,
+                refresh_token,
+                imap_password,
+                smtp_password,
+            }
+            | Self::Encrypted {
+                access_token,
+                refresh_token,
+                imap_password,
+                smtp_password,
+            } => (access_token, refresh_token, imap_password, smtp_password),
+        }
+    }
+}
+
+/// `account.create` request body. Mirrors today's `CreateAccountParams`
+/// in `db::queries_extra::accounts_crud` field-for-field, with
+/// secrets pulled out into the typed `AccountCredentials` envelope so
+/// the wire can carry both plaintext and pre-encrypted forms without
+/// branching at every call site.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountCreateParams {
+    pub email: String,
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    pub account_name: String,
+    /// Required by the underlying DB schema (NOT NULL with no
+    /// default). The UI's color picker always supplies a value, so
+    /// keeping this required at the wire level lets the type system
+    /// enforce what the schema already does.
+    pub account_color: String,
+    pub auth_method: String,
+    pub credentials: AccountCredentials,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_expires_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_client_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imap_host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imap_port: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imap_security: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imap_username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smtp_host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smtp_port: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smtp_security: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smtp_username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jmap_url: Option<String>,
+    pub accept_invalid_certs: bool,
+}
+
+/// `account.create` ack. Carries the new account id so the UI can
+/// kick off post-create flows (initial sync, calendar sync) without
+/// re-listing first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountCreateAck {
+    pub id: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,6 +262,114 @@ mod tests {
         };
         let json = serde_json::to_value(&original).expect("serialize");
         let recovered: AccountReorderParams =
+            serde_json::from_value(json).expect("deserialize");
+        assert_eq!(original, recovered);
+    }
+
+    fn sample_create_plaintext() -> AccountCreateParams {
+        AccountCreateParams {
+            email: "atle@example.com".into(),
+            provider: "imap".into(),
+            display_name: Some("Atle".into()),
+            account_name: "Work".into(),
+            account_color: "#abcdef".into(),
+            auth_method: "password".into(),
+            credentials: AccountCredentials::Plaintext {
+                access_token: None,
+                refresh_token: None,
+                imap_password: Some("secret".into()),
+                smtp_password: None,
+            },
+            token_expires_at: None,
+            oauth_provider: None,
+            oauth_client_id: None,
+            imap_host: Some("imap.example.com".into()),
+            imap_port: Some(993),
+            imap_security: Some("ssl".into()),
+            imap_username: Some("atle".into()),
+            smtp_host: Some("smtp.example.com".into()),
+            smtp_port: Some(587),
+            smtp_security: Some("starttls".into()),
+            smtp_username: None,
+            jmap_url: None,
+            accept_invalid_certs: false,
+        }
+    }
+
+    #[test]
+    fn account_create_plaintext_round_trip() {
+        let original = sample_create_plaintext();
+        let json = serde_json::to_value(&original).expect("serialize");
+        let recovered: AccountCreateParams =
+            serde_json::from_value(json).expect("deserialize");
+        assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn account_create_encrypted_round_trip() {
+        let original = AccountCreateParams {
+            email: "atle@example.com".into(),
+            provider: "gmail_api".into(),
+            display_name: None,
+            account_name: "Personal".into(),
+            account_color: String::new(),
+            auth_method: "oauth".into(),
+            credentials: AccountCredentials::Encrypted {
+                access_token: Some("enc:aaa:bbb".into()),
+                refresh_token: Some("enc:ccc:ddd".into()),
+                imap_password: None,
+                smtp_password: None,
+            },
+            token_expires_at: Some(1_700_000_000),
+            oauth_provider: Some("google".into()),
+            oauth_client_id: Some("client-id-abc".into()),
+            imap_host: None,
+            imap_port: None,
+            imap_security: None,
+            imap_username: None,
+            smtp_host: None,
+            smtp_port: None,
+            smtp_security: None,
+            smtp_username: None,
+            jmap_url: None,
+            accept_invalid_certs: false,
+        };
+        let json = serde_json::to_value(&original).expect("serialize");
+        let recovered: AccountCreateParams =
+            serde_json::from_value(json).expect("deserialize");
+        assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn account_create_credentials_kind_tag_disambiguates() {
+        // Two structurally-identical Plaintext / Encrypted bodies must
+        // serialize to distinct JSON shapes via the `kind` tag.
+        let plain = AccountCredentials::Plaintext {
+            access_token: Some("t".into()),
+            refresh_token: None,
+            imap_password: None,
+            smtp_password: None,
+        };
+        let enc = AccountCredentials::Encrypted {
+            access_token: Some("t".into()),
+            refresh_token: None,
+            imap_password: None,
+            smtp_password: None,
+        };
+        let pj = serde_json::to_value(&plain).expect("p ser");
+        let ej = serde_json::to_value(&enc).expect("e ser");
+        assert_ne!(pj, ej);
+        assert_eq!(pj["kind"], serde_json::json!("plaintext"));
+        assert_eq!(ej["kind"], serde_json::json!("encrypted"));
+    }
+
+    #[test]
+    fn account_create_ack_round_trips() {
+        let original = AccountCreateAck {
+            id: "acc-uuid-1".into(),
+        };
+        let json = serde_json::to_value(&original).expect("serialize");
+        let recovered: AccountCreateAck =
             serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
     }

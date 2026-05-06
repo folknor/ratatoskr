@@ -307,20 +307,34 @@ pub struct AddAccountWizard {
     pub identity: AccountIdentity,
     /// Colors already assigned to existing accounts (hex strings).
     pub used_colors: Vec<String>,
-    /// DB handle for account creation (writable).
+    /// DB handle for account creation (writable). Phase 6a:
+    /// `account.create` flows through `service_client` instead;
+    /// `db` stays for read paths and the OAuth re-auth token write
+    /// (the latter relocates in Phase 6b).
     pub(super) db: Arc<Db>,
+    /// ServiceClient for the `account.create` IPC. Optional because
+    /// the wizard can outlive a Service respawn; if `None`, the
+    /// submit handler surfaces "Service not ready" to the user.
+    pub(super) service_client: Option<Arc<crate::service_client::ServiceClient>>,
     /// Re-auth mode: when set, the wizard skips email/discovery/identity
     /// and goes straight to the auth step for this existing account.
     pub(super) reauth_account_id: Option<String>,
 }
 
 impl AddAccountWizard {
-    pub fn new_first_launch(db: Arc<Db>) -> Self {
-        Self::new(true, Vec::new(), db)
+    pub fn new_first_launch(
+        db: Arc<Db>,
+        service_client: Option<Arc<crate::service_client::ServiceClient>>,
+    ) -> Self {
+        Self::new(true, Vec::new(), db, service_client)
     }
 
-    pub fn new_add_account(used_colors: Vec<String>, db: Arc<Db>) -> Self {
-        Self::new(false, used_colors, db)
+    pub fn new_add_account(
+        used_colors: Vec<String>,
+        db: Arc<Db>,
+        service_client: Option<Arc<crate::service_client::ServiceClient>>,
+    ) -> Self {
+        Self::new(false, used_colors, db, service_client)
     }
 
     /// Create a re-auth wizard for an existing account. Looks up the
@@ -330,10 +344,11 @@ impl AddAccountWizard {
         account_id: String,
         email: String,
         db: Arc<Db>,
+        service_client: Option<Arc<crate::service_client::ServiceClient>>,
     ) -> Result<(Self, Task<AddAccountMessage>), String> {
         let auth_info = db.get_account_auth_info(&account_id)?;
 
-        let mut wizard = Self::new(false, Vec::new(), db);
+        let mut wizard = Self::new(false, Vec::new(), db, service_client);
         wizard.email = email;
         wizard.reauth_account_id = Some(account_id);
         wizard.resolved_provider = auth_info.provider;
@@ -382,7 +397,12 @@ impl AddAccountWizard {
         Ok((wizard, task))
     }
 
-    fn new(is_first_launch: bool, used_colors: Vec<String>, db: Arc<Db>) -> Self {
+    fn new(
+        is_first_launch: bool,
+        used_colors: Vec<String>,
+        db: Arc<Db>,
+        service_client: Option<Arc<crate::service_client::ServiceClient>>,
+    ) -> Self {
         let presets = label_colors::preset_colors::all_presets();
         let first_unused = presets
             .iter()
@@ -410,6 +430,7 @@ impl AddAccountWizard {
             },
             used_colors,
             db,
+            service_client,
             reauth_account_id: None,
         }
     }

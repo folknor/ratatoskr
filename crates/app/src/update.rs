@@ -556,6 +556,7 @@ impl ReadyApp {
                 self.add_account_wizard = Some(AddAccountWizard::new_add_account(
                     used_colors,
                     Arc::clone(&self.db),
+                    self.service_client.clone(),
                 ));
                 Task::none()
             }

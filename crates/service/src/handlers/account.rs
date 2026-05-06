@@ -18,7 +18,8 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use service_api::{
-    AccountReorderAck, AccountReorderParams, AccountUpdateAck, AccountUpdateParams, ServiceError,
+    AccountCreateAck, AccountCreateParams, AccountReorderAck, AccountReorderParams,
+    AccountUpdateAck, AccountUpdateParams, ServiceError,
 };
 
 use crate::boot::BootSharedState;
@@ -64,5 +65,54 @@ pub(crate) async fn handle_reorder(
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(AccountReorderAck)
+        .map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
+pub(crate) async fn handle_create(
+    boot_state: &Arc<BootSharedState>,
+    params: Box<AccountCreateParams>,
+) -> Result<Value, ServiceError> {
+    let write_db = boot_state.write_db_state()?;
+    let id = write_db
+        .with_conn(move |conn| {
+            // Today's behavior: both Plaintext and Encrypted variants
+            // pass through to create_account_sync verbatim, because
+            // the underlying DB column does not require ciphertext.
+            // When `internal.encrypt_for_storage` lands the handler
+            // will branch here on the variant tag and run Plaintext
+            // through the cipher first.
+            let p = *params;
+            let (access_token, refresh_token, imap_password, smtp_password) =
+                p.credentials.into_fields();
+            let create = db::db::queries_extra::CreateAccountParams {
+                email: p.email,
+                provider: p.provider,
+                display_name: p.display_name,
+                account_name: p.account_name,
+                account_color: p.account_color,
+                auth_method: p.auth_method,
+                access_token,
+                refresh_token,
+                token_expires_at: p.token_expires_at,
+                oauth_provider: p.oauth_provider,
+                oauth_client_id: p.oauth_client_id,
+                imap_host: p.imap_host,
+                imap_port: p.imap_port,
+                imap_security: p.imap_security,
+                imap_username: p.imap_username,
+                imap_password,
+                smtp_host: p.smtp_host,
+                smtp_port: p.smtp_port,
+                smtp_security: p.smtp_security,
+                smtp_username: p.smtp_username,
+                smtp_password,
+                jmap_url: p.jmap_url,
+                accept_invalid_certs: p.accept_invalid_certs,
+            };
+            db::db::queries_extra::create_account_sync(conn, &create)
+        })
+        .await
+        .map_err(ServiceError::Internal)?;
+    serde_json::to_value(AccountCreateAck { id })
         .map_err(|e| ServiceError::Internal(e.to_string()))
 }

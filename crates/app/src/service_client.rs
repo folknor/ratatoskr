@@ -6,9 +6,9 @@ use service_api::{
     CalendarRunCompleted, CalendarRunId, CalendarSetVisibilityAck, CalendarSetVisibilityParams,
     CalendarStartAccountSyncParams, CalendarStartAck, CalendarSyncResult, HealthPingResponse,
     JsonRpcErrorObject, JsonRpcRequest, Notification, PROTOCOL_VERSION, ParsedServiceMessage,
-    AccountReorderAck, AccountReorderEntry, AccountReorderParams, AccountUpdateAck,
-    AccountUpdateParams, ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck,
-    ContactGroupSaveParams,
+    AccountCreateAck, AccountCreateParams, AccountReorderAck, AccountReorderEntry,
+    AccountReorderParams, AccountUpdateAck, AccountUpdateParams, ContactGroupDeleteAck,
+    ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
     RequestParams, RequestTimeoutKind, ServiceError, ServiceResponse, SettingValue, SettingsSetAck,
     SettingsSetParams, ShutdownResponse, SignatureCreateAck, SignatureCreateParams,
     SignatureDeleteAck, SignatureDeleteParams, SignatureReorderAck, SignatureReorderParams,
@@ -1087,6 +1087,22 @@ impl ServiceClient {
             .request(RequestParams::AccountUpdate { params })
             .await?;
         Ok(())
+    }
+
+    /// Phase 6a: insert a new account row via the `account.create`
+    /// IPC. Returns the new account id. Credentials carried in the
+    /// typed envelope on `params`; today both Plaintext and Encrypted
+    /// variants pass through to the DB verbatim.
+    pub async fn create_account(
+        &self,
+        params: AccountCreateParams,
+    ) -> Result<String, ClientError> {
+        let ack: AccountCreateAck = self
+            .request(RequestParams::AccountCreate {
+                params: Box::new(params),
+            })
+            .await?;
+        Ok(ack.id)
     }
 
     /// Phase 6a: batch-reassign sort_order for accounts via the

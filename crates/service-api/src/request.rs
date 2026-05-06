@@ -6,7 +6,7 @@ use crate::action::{ActionWirePlan, PlanId, SendWireRequest};
 use crate::calendar::{
     CalendarCancelAccountSyncParams, CalendarSetVisibilityParams, CalendarStartAccountSyncParams,
 };
-use crate::account::{AccountReorderParams, AccountUpdateParams};
+use crate::account::{AccountCreateParams, AccountReorderParams, AccountUpdateParams};
 use crate::contacts::{ContactGroupDeleteParams, ContactGroupSaveParams};
 use crate::settings::SettingsSetParams;
 use crate::signature::{
@@ -194,6 +194,18 @@ pub enum RequestParams {
     ///
     /// 5 s timeout: handler is one bounded transaction.
     AccountReorder { params: AccountReorderParams },
+    /// Phase 6a: insert a new account row + companion records.
+    /// Credentials carried in a typed `Plaintext | Encrypted` envelope
+    /// so 6b's two-step OAuth flow can extend the variant set without
+    /// redefining the wire shape. Returns the new account id in the
+    /// ack so the UI can kick off post-create flows.
+    ///
+    /// `Box`ed because `AccountCreateParams` carries ~20 fields and
+    /// would dominate the enum's stack size; clippy's
+    /// `large_enum_variant` flagged it.
+    ///
+    /// 5 s timeout: handler is one bounded transaction.
+    AccountCreate { params: Box<AccountCreateParams> },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -236,6 +248,7 @@ impl RequestParams {
             Self::ContactsGroupDelete { .. } => "contacts.group_delete",
             Self::AccountUpdate { .. } => "account.update",
             Self::AccountReorder { .. } => "account.reorder",
+            Self::AccountCreate { .. } => "account.create",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -300,7 +313,8 @@ impl RequestParams {
             | Self::ContactsGroupSave { .. }
             | Self::ContactsGroupDelete { .. }
             | Self::AccountUpdate { .. }
-            | Self::AccountReorder { .. } => {
+            | Self::AccountReorder { .. }
+            | Self::AccountCreate { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
             #[cfg(feature = "test-helpers")]
@@ -364,6 +378,7 @@ impl RequestParams {
             Self::ContactsGroupDelete { params } => serde_json::json!({ "params": params }),
             Self::AccountUpdate { params } => serde_json::json!({ "params": params }),
             Self::AccountReorder { params } => serde_json::json!({ "params": params }),
+            Self::AccountCreate { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -563,6 +578,17 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("account.reorder params: {e}"))?;
                 Ok(Self::AccountReorder { params: p.params })
+            }
+            "account.create" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: AccountCreateParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("account.create params: {e}"))?;
+                Ok(Self::AccountCreate {
+                    params: Box::new(p.params),
+                })
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {
@@ -1346,6 +1372,69 @@ mod tests {
             p.timeout(),
             RequestTimeoutKind::Finite(Duration::from_secs(5)),
         );
+    }
+
+    fn sample_create_for_envelope() -> AccountCreateParams {
+        use crate::account::AccountCredentials;
+        AccountCreateParams {
+            email: "atle@example.com".into(),
+            provider: "imap".into(),
+            display_name: None,
+            account_name: "Work".into(),
+            account_color: String::new(),
+            auth_method: "password".into(),
+            credentials: AccountCredentials::Plaintext {
+                access_token: None,
+                refresh_token: None,
+                imap_password: Some("secret".into()),
+                smtp_password: None,
+            },
+            token_expires_at: None,
+            oauth_provider: None,
+            oauth_client_id: None,
+            imap_host: Some("imap.example.com".into()),
+            imap_port: Some(993),
+            imap_security: Some("ssl".into()),
+            imap_username: Some("atle".into()),
+            smtp_host: None,
+            smtp_port: None,
+            smtp_security: None,
+            smtp_username: None,
+            jmap_url: None,
+            accept_invalid_certs: false,
+        }
+    }
+
+    #[test]
+    fn account_create_method_name_is_dotted() {
+        let p = RequestParams::AccountCreate {
+            params: Box::new(sample_create_for_envelope()),
+        };
+        assert_eq!(p.method_name(), "account.create");
+    }
+
+    #[test]
+    fn account_create_timeout_is_five_seconds() {
+        let p = RequestParams::AccountCreate {
+            params: Box::new(sample_create_for_envelope()),
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn account_create_round_trips_from_method_params() {
+        let original = RequestParams::AccountCreate {
+            params: Box::new(sample_create_for_envelope()),
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
     }
 
     #[test]
