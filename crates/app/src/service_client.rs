@@ -88,6 +88,29 @@ enum PendingCalendar {
 
 type PendingCalendars = Arc<Mutex<HashMap<CalendarRunId, PendingCalendar>>>;
 
+/// Phase 6c task 9: per-`PlanId` waiter slot for the calendar action
+/// pipeline. Mirror of `PendingCalendar` / `PendingSync`. Routes
+/// `Notification::CalendarActionCompleted` to UI handlers that
+/// dispatched a `cal_action.execute_plan` IPC and want to await the
+/// terminal frame (typically to surface "saved" / "save failed" toast
+/// and reload the calendar view).
+///
+/// The `Completed` variant latches a result that arrives *before* the
+/// UI handler subscribes (the fast-completion-races-late-subscriber
+/// race) so a fast `CalendarActionCompleted` is not dropped on the
+/// floor. Aged latched entries are GC'd opportunistically by
+/// `sweep_latched_calendar_action_completed`.
+enum PendingCalendarAction {
+    Pending(broadcast::Sender<service_api::CalendarActionCompleted>),
+    Completed {
+        result: service_api::CalendarActionCompleted,
+        latched_at: Instant,
+    },
+}
+
+type PendingCalendarActions =
+    Arc<Mutex<HashMap<service_api::PlanId, PendingCalendarAction>>>;
+
 /// Drain every entry: `Pending` senders are dropped (subscribers
 /// receive `RecvError::Closed` and surface as
 /// `Err(ClientError::ServiceCrashed)`); `Completed` entries are
@@ -132,6 +155,27 @@ fn sweep_latched_calendar_completed(map: &PendingCalendars) {
         }
         PendingCalendar::Pending(_) => true,
     });
+}
+
+/// Phase 6c task 9: drop expired latched entries from the calendar
+/// action map. Mirror of `sweep_latched_completed` / `sweep_latched_
+/// calendar_completed`.
+fn sweep_latched_calendar_action_completed(map: &PendingCalendarActions) {
+    let mut guard = map.lock().unwrap_or_else(PoisonError::into_inner);
+    let cutoff = Instant::now();
+    guard.retain(|_, entry| match entry {
+        PendingCalendarAction::Completed { latched_at, .. } => {
+            cutoff.duration_since(*latched_at) < LATCHED_COMPLETED_TTL
+        }
+        PendingCalendarAction::Pending(_) => true,
+    });
+}
+
+/// Phase 6c task 9: clear in-flight calendar action waiters on
+/// respawn. Mirror of `fail_pending_calendars`.
+fn fail_pending_calendar_actions(map: &PendingCalendarActions) {
+    let mut guard = map.lock().unwrap_or_else(PoisonError::into_inner);
+    guard.clear();
 }
 
 /// Mutable per-incarnation state. Replaced atomically on every respawn.
@@ -182,6 +226,12 @@ pub struct ServiceClient {
     /// `pending_syncs` exactly; routes `Notification::CalendarRunCompleted`
     /// to `start_calendar_sync` / `cancel_and_await` callers.
     pending_calendars: PendingCalendars,
+    /// Phase 6c task 9: per-`PlanId` waiter slots for the calendar
+    /// action pipeline. Routes `Notification::CalendarActionCompleted`
+    /// to UI handlers awaiting a calendar event create / update /
+    /// delete. Same `PendingCalendar` / `PendingSync` shape (Pending
+    /// broadcast | Completed latched).
+    pending_calendar_actions: PendingCalendarActions,
     next_id: Arc<AtomicU64>,
     notifications: ServiceNotificationReceiver,
     /// Latest generation; bumped before respawn. The dispatch-side drop
@@ -549,11 +599,14 @@ impl ServiceClient {
         // store(1) below is now idempotent rather than load-bearing.
         let pending_syncs: PendingSyncs = Arc::new(Mutex::new(HashMap::new()));
         let pending_calendars: PendingCalendars = Arc::new(Mutex::new(HashMap::new()));
+        let pending_calendar_actions: PendingCalendarActions =
+            Arc::new(Mutex::new(HashMap::new()));
         let client = Arc::new(Self {
             state: Mutex::new(None),
             pending: Arc::clone(&pending),
             pending_syncs: Arc::clone(&pending_syncs),
             pending_calendars: Arc::clone(&pending_calendars),
+            pending_calendar_actions: Arc::clone(&pending_calendar_actions),
             next_id: Arc::clone(&next_id),
             notifications: Arc::clone(&notifications),
             current_generation: AtomicU32::new(1),
@@ -785,6 +838,27 @@ impl ServiceClient {
         plan: service_api::ActionWirePlan,
     ) -> Result<service_api::ActionPlanAck, ClientError> {
         self.request(RequestParams::ActionExecutePlan { plan }).await
+    }
+
+    /// Phase 6c task 9: submit a resolved calendar action plan for
+    /// Service-side execution. Sibling of `execute_plan` for the
+    /// calendar pipeline. The Service handler validates the plan,
+    /// journals it as `kind = 'calendar_plan'` into
+    /// `action_jobs` / `action_job_ops`, and returns
+    /// `CalendarActionPlanAck { plan_id, journaled: true }`. Per-op
+    /// `CalendarOperationOutcome` notifications stream from the
+    /// worker; `CalendarActionCompleted` closes the stream.
+    ///
+    /// To await the terminal `CalendarActionCompleted`, call
+    /// `subscribe_or_consume_calendar_action(plan_id)` after the
+    /// dispatch returns. The latch pattern handles the fast-completion
+    /// race where the completion arrives before the UI has subscribed.
+    pub async fn execute_calendar_plan(
+        &self,
+        plan: service_api::CalendarActionPlan,
+    ) -> Result<service_api::CalendarActionPlanAck, ClientError> {
+        self.request(RequestParams::CalActionExecutePlan { plan })
+            .await
     }
 
     /// Look up the journaled status of a previously-submitted plan.
@@ -1549,6 +1623,97 @@ impl ServiceClient {
         }
     }
 
+    /// Phase 6c task 9: route an incoming `CalendarActionCompleted`
+    /// notification to its waiter set. Mirror of
+    /// `route_calendar_run_completed` for the calendar action
+    /// pipeline. Same swap-or-latch shape so the
+    /// fast-completion-races-late-subscriber race resolves into the
+    /// `Completed` slot rather than the floor.
+    pub(crate) fn route_calendar_action_completed(
+        &self,
+        completed: service_api::CalendarActionCompleted,
+    ) {
+        let mut guard = self
+            .pending_calendar_actions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let now = Instant::now();
+        guard.retain(|_, entry| match entry {
+            PendingCalendarAction::Completed { latched_at, .. } => {
+                now.duration_since(*latched_at) < LATCHED_COMPLETED_TTL
+            }
+            PendingCalendarAction::Pending(_) => true,
+        });
+        let plan_id = completed.plan_id;
+        match guard.entry(plan_id) {
+            Entry::Occupied(mut e) => match e.get_mut() {
+                PendingCalendarAction::Pending(tx) => {
+                    let _ = tx.send(completed);
+                    e.remove();
+                }
+                PendingCalendarAction::Completed { .. } => {
+                    log::warn!(
+                        "duplicate CalendarActionCompleted for plan_id {plan_id}; dropping",
+                    );
+                }
+            },
+            Entry::Vacant(v) => {
+                v.insert(PendingCalendarAction::Completed {
+                    result: completed,
+                    latched_at: now,
+                });
+            }
+        }
+    }
+
+    /// Phase 6c task 9: subscribe to (or consume a latched)
+    /// `CalendarActionCompleted` for the given plan id. Mirror of
+    /// `subscribe_or_consume_calendar`. Returns the awaited
+    /// `CalendarActionCompleted` or a `ClientError` if the Service
+    /// respawns while we're waiting.
+    pub async fn subscribe_or_consume_calendar_action(
+        &self,
+        plan_id: service_api::PlanId,
+    ) -> Result<service_api::CalendarActionCompleted, ClientError> {
+        // Drop expired latched entries before checking - stale results
+        // shouldn't satisfy a fresh awaiter if hours have passed since
+        // the completion arrived.
+        sweep_latched_calendar_action_completed(&self.pending_calendar_actions);
+        let mut rx = {
+            let mut guard = self
+                .pending_calendar_actions
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            match guard.entry(plan_id) {
+                Entry::Occupied(e) => {
+                    // Latched-completed slot: consume + return synchronously.
+                    if let PendingCalendarAction::Completed { .. } = e.get() {
+                        let entry = e.remove();
+                        let PendingCalendarAction::Completed { result, .. } = entry else {
+                            unreachable!("matched Completed above");
+                        };
+                        return Ok(result);
+                    }
+                    // Pending slot: subscribe to the existing broadcast.
+                    let PendingCalendarAction::Pending(tx) = e.get() else {
+                        unreachable!("Completed handled above");
+                    };
+                    tx.subscribe()
+                }
+                Entry::Vacant(v) => {
+                    let (tx, rx) = broadcast::channel(8);
+                    v.insert(PendingCalendarAction::Pending(tx));
+                    rx
+                }
+            }
+        };
+        // The broadcast channel is closed by `fail_pending_calendar_actions`
+        // on respawn (the Sender drops when the Pending entry is removed).
+        // Surface that as `ServiceCrashed` so the awaiting handler can
+        // surface a "service restarted" message.
+        rx.recv().await.map_err(|_| ClientError::ServiceCrashed)
+    }
+
     /// Live Service-incarnation counter. The reader task tags every
     /// notification with the generation it captured at spawn time;
     /// `notification_should_dispatch` compares the tag against this value
@@ -1786,6 +1951,8 @@ impl ServiceClient {
         fail_pending_syncs(&self.pending_syncs);
         // Phase 5 task 9b: same shape for calendar awaiters.
         fail_pending_calendars(&self.pending_calendars);
+        // Phase 6c task 9: drop calendar action awaiters on respawn.
+        fail_pending_calendar_actions(&self.pending_calendar_actions);
 
         let RunningState {
             mut child,
@@ -2440,6 +2607,7 @@ async fn reader_task<R>(
         if let Some(c) = w.upgrade() {
             fail_pending_syncs(&c.pending_syncs);
             fail_pending_calendars(&c.pending_calendars);
+            fail_pending_calendar_actions(&c.pending_calendar_actions);
         }
     };
     let mut lines = BoundedLineReader::new(stdout, service_api::MAX_FRAME_BYTES);
@@ -2512,6 +2680,22 @@ async fn reader_task<R>(
                             if let Notification::CalendarRunCompleted(c) = notification {
                                 if let Some(client) = upgraded {
                                     client.route_calendar_run_completed(c);
+                                }
+                                continue;
+                            }
+                            // Phase 6c task 9: same routing for the
+                            // calendar action pipeline. Per-plan_id
+                            // awaiters resolve via
+                            // `pending_calendar_actions`. The
+                            // accompanying CalendarOperationOutcome
+                            // notifications (per-op, before the
+                            // completion) still flow through the UI
+                            // dispatcher for log-and-drop today; Phase
+                            // 6d revisits if richer per-op handling is
+                            // needed.
+                            if let Notification::CalendarActionCompleted(c) = notification {
+                                if let Some(client) = upgraded {
+                                    client.route_calendar_action_completed(c);
                                 }
                                 continue;
                             }

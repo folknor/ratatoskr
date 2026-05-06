@@ -284,16 +284,25 @@ impl ReadyApp {
                         self.pending_calendar_reload = Some(std::time::Instant::now());
                         Task::none()
                     }
-                    service_api::Notification::CalendarOperationOutcome(_)
-                    | service_api::Notification::CalendarActionCompleted(_) => {
-                        // Phase 6c-9 lands the per-plan awaiter routing
-                        // (mirrors mail's `pending_action_plans`). Until
-                        // then, log and drop - the wire variants exist
-                        // for the upcoming work but no Service-side
-                        // emitter has been wired yet.
+                    service_api::Notification::CalendarOperationOutcome(_) => {
+                        // Phase 6c-9: per-op outcomes are advisory in
+                        // the 1:1-plan world. The completion frame
+                        // (CalendarActionCompleted) is what the UI
+                        // awaits via `pending_calendar_actions`.
+                        // Phase 6d may grow a per-op consumer if
+                        // N-op plans land.
+                        Task::none()
+                    }
+                    service_api::Notification::CalendarActionCompleted(_) => {
+                        // Phase 6c-9: consumed inside
+                        // `ServiceClient::route_calendar_action_completed`
+                        // before the reader task enqueues. Reaching this
+                        // arm means routing was bypassed (test path or a
+                        // stale notification past respawn) - drop with
+                        // a debug log.
                         log::debug!(
-                            "Calendar action notification ahead of UI routing: {}",
-                            notification.method_name(),
+                            "CalendarActionCompleted reached update arm; routing already \
+                             consumed it",
                         );
                         Task::none()
                     }
