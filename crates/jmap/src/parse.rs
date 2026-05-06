@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use jmap_client::email::{Email, Header, HeaderValue, Property};
+use bifrost_jmap::email::{Email, Header, HeaderValue, Property};
 
 use common::email_parsing::format_address_list;
 use common::parsed_message::ParsedMessageBase;
@@ -197,7 +197,7 @@ pub fn parse_jmap_email(
 }
 
 /// Format JMAP EmailAddress array to "Name <email>, ..." string.
-fn format_addresses(addrs: Option<&[jmap_client::email::EmailAddress]>) -> Option<String> {
+fn format_addresses(addrs: Option<&[bifrost_jmap::email::EmailAddress]>) -> Option<String> {
     let addrs = addrs?;
     format_address_list(
         addrs

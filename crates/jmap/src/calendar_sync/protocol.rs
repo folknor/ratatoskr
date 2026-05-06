@@ -1,6 +1,6 @@
-use jmap_client::Get;
-use jmap_client::calendar_event::{CalendarEvent, CalendarEventGet, CalendarEventSet};
-use jmap_client::core::set::SetObject;
+use bifrost_jmap::Get;
+use bifrost_jmap::calendar_event::{CalendarEvent, CalendarEventGet, CalendarEventSet};
+use bifrost_jmap::core::set::SetObject;
 
 use crate::client::JmapClient;
 

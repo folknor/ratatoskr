@@ -1,4 +1,4 @@
-use jmap_client::identity::IdentityGet;
+use bifrost_jmap::identity::IdentityGet;
 
 use super::client::JmapClient;
 use super::mailbox_mapper::label_id_to_mailbox_id;
@@ -7,9 +7,9 @@ pub async fn query_thread_email_ids(
     client: &JmapClient,
     thread_id: &str,
 ) -> Result<Vec<String>, String> {
-    use jmap_client::email;
+    use bifrost_jmap::email;
 
-    let filter: jmap_client::core::query::Filter<email::query::Filter> =
+    let filter: bifrost_jmap::core::query::Filter<email::query::Filter> =
         email::query::Filter::in_thread(thread_id).into();
     let inner = client.inner();
     let result = inner
@@ -35,7 +35,7 @@ pub async fn get_mailbox_list(
 pub(super) async fn fetch_mailbox_list_from_server(
     client: &JmapClient,
 ) -> Result<Vec<super::client::MailboxListEntry>, String> {
-    use jmap_client::mailbox::Role;
+    use bifrost_jmap::mailbox::Role;
 
     let mailboxes = super::sync::fetch_all_mailboxes(client).await?;
 
@@ -55,7 +55,7 @@ pub(super) async fn fetch_mailbox_list_from_server(
 }
 
 /// Get the first identity ID for email submission.
-pub async fn get_first_identity_id(client: &jmap_client::client::Client) -> Result<String, String> {
+pub async fn get_first_identity_id(client: &bifrost_jmap::client::Client) -> Result<String, String> {
     log::debug!("[JMAP] Fetching identity for email submission");
     let mut request = client.build();
     let account_id = request.default_account_id().to_string();

@@ -47,10 +47,10 @@ pub async fn list_sieve_scripts(client: &JmapClient) -> Result<Vec<SieveScript>,
     let query_response =
         inner
             .sieve_script_query(
-                None::<jmap_client::core::query::Filter<jmap_client::sieve::query::Filter>>,
+                None::<bifrost_jmap::core::query::Filter<bifrost_jmap::sieve::query::Filter>>,
                 None::<
                     Vec<
-                        jmap_client::core::query::Comparator<jmap_client::sieve::query::Comparator>,
+                        bifrost_jmap::core::query::Comparator<bifrost_jmap::sieve::query::Comparator>,
                     >,
                 >,
             )
@@ -65,12 +65,12 @@ pub async fn list_sieve_scripts(client: &JmapClient) -> Result<Vec<SieveScript>,
     // Batch-get metadata for all scripts.
     let mut request = inner.build();
     let account_id = request.default_account_id().to_string();
-    let mut get = jmap_client::sieve::SieveScriptGet::new(&account_id);
+    let mut get = bifrost_jmap::sieve::SieveScriptGet::new(&account_id);
     get.ids(ids);
     get.properties([
-        jmap_client::sieve::Property::Id,
-        jmap_client::sieve::Property::Name,
-        jmap_client::sieve::Property::IsActive,
+        bifrost_jmap::sieve::Property::Id,
+        bifrost_jmap::sieve::Property::Name,
+        bifrost_jmap::sieve::Property::IsActive,
     ]);
     let handle = request
         .call(get)
@@ -113,10 +113,10 @@ pub async fn get_sieve_script(client: &JmapClient, script_id: &str) -> Result<Si
         .sieve_script_get(
             script_id,
             Some([
-                jmap_client::sieve::Property::Id,
-                jmap_client::sieve::Property::Name,
-                jmap_client::sieve::Property::IsActive,
-                jmap_client::sieve::Property::BlobId,
+                bifrost_jmap::sieve::Property::Id,
+                bifrost_jmap::sieve::Property::Name,
+                bifrost_jmap::sieve::Property::IsActive,
+                bifrost_jmap::sieve::Property::BlobId,
             ]),
         )
         .await

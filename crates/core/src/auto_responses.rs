@@ -348,7 +348,7 @@ pub async fn fetch_jmap_auto_response(
     let inner = client.inner();
 
     let vr = inner
-        .vacation_response_get(None::<Vec<jmap_client::vacation_response::Property>>)
+        .vacation_response_get(None::<Vec<bifrost_jmap::vacation_response::Property>>)
         .await
         .map_err(|e| format!("VacationResponse/get: {e}"))?
         .ok_or_else(|| "VacationResponse/get: no singleton returned".to_string())?;
@@ -388,7 +388,7 @@ pub async fn push_jmap_auto_response(
     client: &jmap::client::JmapClient,
     config: &AutoResponseConfig,
 ) -> Result<(), String> {
-    use jmap_client::vacation_response::VacationResponseSet;
+    use bifrost_jmap::vacation_response::VacationResponseSet;
 
     client.ensure_valid_token().await?;
     let inner = client.inner();

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use jmap_client::Get;
-use jmap_client::calendar_event::CalendarEvent;
+use bifrost_jmap::Get;
+use bifrost_jmap::calendar_event::CalendarEvent;
 
 // ── JSCalendar property extraction ─────────────────────────
 
@@ -368,7 +368,7 @@ pub(super) struct ReminderRow {
 /// Extract reminder rows from a JMAP CalendarEvent's alerts.
 pub(super) fn extract_reminder_rows(event: &CalendarEvent<Get>) -> Vec<ReminderRow> {
     // alerts returns Field<&Map> - Omitted/Null = no alerts, Value = has alerts
-    let jmap_client::core::field::Field::Value(alerts) = event.alerts() else {
+    let bifrost_jmap::core::field::Field::Value(alerts) = event.alerts() else {
         return Vec::new();
     };
 

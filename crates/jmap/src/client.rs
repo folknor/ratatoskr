@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock as StdRwLock};
 
-use jmap_client::client::{Client, Credentials};
+use bifrost_jmap::client::{Client, Credentials};
 use tokio::sync::RwLock;
 
 use common::crypto::{decrypt_if_needed, encrypt_value};
@@ -18,7 +18,7 @@ pub type MailboxListEntry = (String, Option<String>, String);
 /// For OAuth/Bearer, the client is rebuilt when the access token is refreshed.
 #[derive(Clone)]
 pub struct JmapClient {
-    /// The underlying `jmap_client::Client`, swapped atomically on token refresh.
+    /// The underlying `bifrost_jmap::Client`, swapped atomically on token refresh.
     inner: Arc<StdRwLock<Arc<Client>>>,
 
     /// Cached mailbox list with timestamp for TTL-based invalidation.
@@ -212,7 +212,7 @@ async fn refresh_token_in_db_if_expired(
 }
 
 impl JmapClient {
-    /// Rebuild the inner `jmap_client::Client` with a new Bearer token.
+    /// Rebuild the inner `bifrost_jmap::Client` with a new Bearer token.
     async fn rebuild_client_with_token(&self, access_token: &str) -> Result<(), String> {
         let client = Client::new()
             .credentials(Credentials::bearer(access_token))

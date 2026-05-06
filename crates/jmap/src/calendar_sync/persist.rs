@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use jmap_client::Get;
-use jmap_client::calendar_event::CalendarEvent;
+use bifrost_jmap::Get;
+use bifrost_jmap::calendar_event::CalendarEvent;
 
 use db::db::ReadDbState;
 use db::db::queries_extra::{

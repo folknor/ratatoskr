@@ -39,7 +39,7 @@ imap = { path = "../imap" }
 # jmap-client for the JMAP-specific contact action handlers.
 futures = "0.3"
 uuid = { version = "1.23.1", features = ["v4"] }
-jmap-client = { path = "/home/folk/Programs/jmap-client", default-features = false, features = ["tls-native", "websockets", "mail", "calendars", "contacts"] }
+bifrost-jmap = { path = "/home/folk/Programs/jmap-client/crates/jmap", default-features = false, features = ["tls-native", "websockets", "mail", "calendars", "contacts"] }
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }

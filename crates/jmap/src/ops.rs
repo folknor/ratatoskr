@@ -1,11 +1,11 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use jmap_client::Set;
-use jmap_client::core::set::SetObject;
-use jmap_client::email::EmailSet;
-use jmap_client::email::import::EmailImportRequest;
-use jmap_client::email_submission::{Address as SubmissionAddress, EmailSubmissionSet, UndoStatus};
-use jmap_client::mailbox::Role;
+use bifrost_jmap::Set;
+use bifrost_jmap::core::set::SetObject;
+use bifrost_jmap::email::EmailSet;
+use bifrost_jmap::email::import::EmailImportRequest;
+use bifrost_jmap::email_submission::{Address as SubmissionAddress, EmailSubmissionSet, UndoStatus};
+use bifrost_jmap::mailbox::Role;
 
 use common::error::ProviderError;
 use common::ops::ProviderOps;
@@ -769,7 +769,7 @@ impl JmapOps {
             .map(String::from)
             .unwrap_or_else(|| request.default_account_id().to_string());
 
-        let mut set = jmap_client::mailbox::MailboxSet::new(&account_id);
+        let mut set = bifrost_jmap::mailbox::MailboxSet::new(&account_id);
         set.update(mailbox_id).is_subscribed(subscribed);
 
         let handle = request

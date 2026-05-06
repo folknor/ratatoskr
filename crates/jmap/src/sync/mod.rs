@@ -3,8 +3,8 @@ pub(crate) mod storage;
 
 use std::collections::{HashMap, HashSet};
 
-use jmap_client::core::query::QueryResponse;
-use jmap_client::email;
+use bifrost_jmap::core::query::QueryResponse;
+use bifrost_jmap::email;
 use serde::Serialize;
 
 use db::db::ReadDbState;
@@ -436,7 +436,7 @@ pub async fn jmap_delta_sync(
 pub(crate) async fn fetch_email_batch(
     client: &JmapClient,
     ids: &[&str],
-) -> Result<Vec<jmap_client::email::Email>, String> {
+) -> Result<Vec<bifrost_jmap::email::Email>, String> {
     fetch_email_batch_for(client, None, ids).await
 }
 
@@ -445,7 +445,7 @@ pub(crate) async fn fetch_email_batch_for(
     client: &JmapClient,
     jmap_account_id: Option<&str>,
     ids: &[&str],
-) -> Result<Vec<jmap_client::email::Email>, String> {
+) -> Result<Vec<bifrost_jmap::email::Email>, String> {
     let inner = client.inner();
     let mut request = inner.build();
     let account_id = jmap_account_id
@@ -473,7 +473,7 @@ pub(crate) async fn fetch_email_batch_for(
 
 /// Parse a batch of emails into our internal structs.
 fn parse_email_batch(
-    emails: &[jmap_client::email::Email],
+    emails: &[bifrost_jmap::email::Email],
     mailbox_map: &HashMap<String, MailboxInfo>,
 ) -> Result<Vec<ParsedJmapMessage>, String> {
     let mut results = Vec::with_capacity(emails.len());
@@ -732,7 +732,7 @@ pub(crate) async fn resolve_shared_account_identities(
                 // The capability value is PrincipalsOwnerCapabilities
                 // but we have it as a Capabilities enum. Extract principalId.
                 match cap {
-                    jmap_client::core::session::Capabilities::PrincipalsOwner(owner) => {
+                    bifrost_jmap::core::session::Capabilities::PrincipalsOwner(owner) => {
                         owner.principal_id().map(String::from)
                     }
                     _ => None,
@@ -799,11 +799,11 @@ async fn fetch_principal_email(
         .map(String::from)
         .unwrap_or_else(|| request.default_account_id().to_string());
 
-    let mut get = jmap_client::principal::PrincipalGet::new(&account_id);
+    let mut get = bifrost_jmap::principal::PrincipalGet::new(&account_id);
     get.ids([principal_id]);
     get.properties([
-        jmap_client::principal::Property::Email,
-        jmap_client::principal::Property::Name,
+        bifrost_jmap::principal::Property::Email,
+        bifrost_jmap::principal::Property::Name,
     ]);
 
     let handle = request
@@ -912,7 +912,7 @@ pub(crate) async fn poll_share_notifications(client: &JmapClient, account_id: &s
             match inner
                 .share_notification_get(
                     notif_id,
-                    None::<Vec<jmap_client::share_notification::Property>>,
+                    None::<Vec<bifrost_jmap::share_notification::Property>>,
                 )
                 .await
             {
@@ -975,7 +975,7 @@ async fn get_share_notification_state(client: &JmapClient) -> Result<String, Str
     let inner = client.inner();
     let mut request = inner.build();
     let account_id = request.default_account_id().to_string();
-    let get = jmap_client::share_notification::ShareNotificationGet::new(&account_id);
+    let get = bifrost_jmap::share_notification::ShareNotificationGet::new(&account_id);
     let handle = request
         .call(get)
         .map_err(|e| format!("ShareNotification state: {e}"))?;

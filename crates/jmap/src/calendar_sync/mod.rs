@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 
-use jmap_client::calendar::CalendarGet;
-use jmap_client::calendar_event::CalendarEventGet;
+use bifrost_jmap::calendar::CalendarGet;
+use bifrost_jmap::calendar_event::CalendarEventGet;
 
 use db::db::ReadDbState;
 

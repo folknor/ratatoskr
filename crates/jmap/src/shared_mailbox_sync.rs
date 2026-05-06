@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use jmap_client::mailbox::MailboxChanges;
+use bifrost_jmap::mailbox::MailboxChanges;
 
 use common::types::SyncResult;
 use db::progress::ProgressReporter;
@@ -292,7 +292,7 @@ async fn shared_delta_sync(ctx: &SyncCtx<'_>) -> Result<SyncResult, String> {
     loop {
         let inner = ctx.client.inner();
         let mut request = inner.build();
-        let mut changes = jmap_client::email::EmailChanges::new(jmap_id, &since_state);
+        let mut changes = bifrost_jmap::email::EmailChanges::new(jmap_id, &since_state);
         changes.max_changes(crate::JMAP_MAX_CHANGES);
         let handle = request
             .call(changes)
@@ -410,7 +410,7 @@ async fn shared_mailbox_changes(
 
 /// Parse a batch of emails into our internal structs.
 fn parse_email_batch(
-    emails: &[jmap_client::email::Email],
+    emails: &[bifrost_jmap::email::Email],
     mailbox_map: &HashMap<String, MailboxInfo>,
 ) -> Result<Vec<ParsedJmapMessage>, String> {
     let mut results = Vec::with_capacity(emails.len());

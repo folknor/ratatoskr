@@ -53,7 +53,7 @@ struct ExtractedContact {
 ///
 /// Returns `None` if the contact has no email address (we cannot create
 /// a meaningful contact row without one).
-fn extract_contact(card: &jmap_client::contact_card::ContactCard) -> Option<ExtractedContact> {
+fn extract_contact(card: &bifrost_jmap::contact_card::ContactCard) -> Option<ExtractedContact> {
     let server_id = card.id()?.to_string();
 
     // Extract emails - the `emails` property is a map of id → { address, ... }
@@ -101,7 +101,7 @@ fn extract_contact(card: &jmap_client::contact_card::ContactCard) -> Option<Extr
 /// 1. `name.full` (RFC 9553 `NameComponent` with `full` key)
 /// 2. Concatenation of `name.given` + `name.surname`
 /// 3. Fall back to `None`
-fn extract_display_name(card: &jmap_client::contact_card::ContactCard) -> Option<String> {
+fn extract_display_name(card: &bifrost_jmap::contact_card::ContactCard) -> Option<String> {
     let name_obj = card.name()?;
 
     // Try `full` first (a string or an array of components - check both)
@@ -137,7 +137,7 @@ fn extract_display_name(card: &jmap_client::contact_card::ContactCard) -> Option
 }
 
 /// Extract the first phone number from the `phones` map.
-fn extract_first_phone(card: &jmap_client::contact_card::ContactCard) -> Option<String> {
+fn extract_first_phone(card: &bifrost_jmap::contact_card::ContactCard) -> Option<String> {
     let phones = card.phones()?;
     for (_key, entry) in phones {
         if let Some(number) = entry.get("number").and_then(|v| v.as_str()) {
@@ -151,7 +151,7 @@ fn extract_first_phone(card: &jmap_client::contact_card::ContactCard) -> Option<
 }
 
 /// Extract the first organization name from the `organizations` map.
-fn extract_first_organization(card: &jmap_client::contact_card::ContactCard) -> Option<String> {
+fn extract_first_organization(card: &bifrost_jmap::contact_card::ContactCard) -> Option<String> {
     let orgs = card.organizations()?;
     for (_key, entry) in orgs {
         if let Some(name) = entry.get("name").and_then(|v| v.as_str()) {
@@ -165,7 +165,7 @@ fn extract_first_organization(card: &jmap_client::contact_card::ContactCard) -> 
 }
 
 /// Extract notes text from the `notes` map.
-fn extract_notes(card: &jmap_client::contact_card::ContactCard) -> Option<String> {
+fn extract_notes(card: &bifrost_jmap::contact_card::ContactCard) -> Option<String> {
     let notes_map = card.notes()?;
     let mut parts: Vec<&str> = Vec::new();
     for (_key, entry) in notes_map {
@@ -204,7 +204,7 @@ pub async fn jmap_contacts_initial_sync(
     let inner = client.inner();
     let mut request = inner.build();
     let req_account_id = request.default_account_id().to_string();
-    let get = jmap_client::contact_card::ContactCardGet::new(&req_account_id);
+    let get = bifrost_jmap::contact_card::ContactCardGet::new(&req_account_id);
     let handle = request
         .call(get)
         .map_err(|e| format!("ContactCard/get (initial): {e}"))?;
@@ -372,7 +372,7 @@ pub async fn jmap_contacts_push_update(
     let inner = client.inner();
     let mut request = inner.build();
     let req_account_id = request.default_account_id().to_string();
-    let mut set = jmap_client::contact_card::ContactCardSet::new(&req_account_id);
+    let mut set = bifrost_jmap::contact_card::ContactCardSet::new(&req_account_id);
     let update = set.update(server_id);
 
     // Build phone property
@@ -472,11 +472,11 @@ pub async fn get_jmap_contact_server_info(
 async fn fetch_contact_batch(
     client: &JmapClient,
     ids: &[&str],
-) -> Result<Vec<jmap_client::contact_card::ContactCard>, String> {
+) -> Result<Vec<bifrost_jmap::contact_card::ContactCard>, String> {
     let inner = client.inner();
     let mut request = inner.build();
     let req_account_id = request.default_account_id().to_string();
-    let mut get = jmap_client::contact_card::ContactCardGet::new(&req_account_id);
+    let mut get = bifrost_jmap::contact_card::ContactCardGet::new(&req_account_id);
     get.ids(ids.iter().copied());
     let handle = request
         .call(get)

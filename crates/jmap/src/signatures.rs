@@ -1,6 +1,6 @@
 use sha2::{Digest, Sha256};
 
-use jmap_client::identity::{IdentityGet, IdentitySet};
+use bifrost_jmap::identity::{IdentityGet, IdentitySet};
 
 use db::db::ReadDbState;
 
@@ -149,7 +149,7 @@ struct IdentityRow {
 /// Fetch all JMAP identities via `Identity/get` (no ID filter = all).
 async fn fetch_all_identities(
     client: &JmapClient,
-) -> Result<Vec<jmap_client::identity::Identity>, String> {
+) -> Result<Vec<bifrost_jmap::identity::Identity>, String> {
     let inner = client.inner();
     let mut request = inner.build();
     let account_id = request.default_account_id().to_string();

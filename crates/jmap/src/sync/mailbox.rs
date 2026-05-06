@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use db::db::queries_extra::{LabelWriteRow, upsert_labels};
-use jmap_client::email::EmailGet;
-use jmap_client::mailbox::{MailboxGet, MailboxRights, Role};
+use bifrost_jmap::email::EmailGet;
+use bifrost_jmap::mailbox::{MailboxGet, MailboxRights, Role};
 
 use super::super::client::JmapClient;
 use super::super::mailbox_mapper::{MailboxInfo, map_mailbox_to_label};
@@ -264,7 +264,7 @@ pub(crate) async fn get_email_state_for(
 /// Fetch all mailboxes using the builder pattern (no filter = all mailboxes).
 pub async fn fetch_all_mailboxes(
     client: &JmapClient,
-) -> Result<Vec<jmap_client::mailbox::Mailbox<jmap_client::Get>>, String> {
+) -> Result<Vec<bifrost_jmap::mailbox::Mailbox<bifrost_jmap::Get>>, String> {
     fetch_all_mailboxes_for(client, None).await
 }
 
@@ -272,7 +272,7 @@ pub async fn fetch_all_mailboxes(
 pub async fn fetch_all_mailboxes_for(
     client: &JmapClient,
     jmap_account_id: Option<&str>,
-) -> Result<Vec<jmap_client::mailbox::Mailbox<jmap_client::Get>>, String> {
+) -> Result<Vec<bifrost_jmap::mailbox::Mailbox<bifrost_jmap::Get>>, String> {
     let inner = client.inner();
     let mut request = inner.build();
     let account_id = jmap_account_id
@@ -291,8 +291,8 @@ pub async fn fetch_all_mailboxes_for(
         .map_err(|e| format!("Mailbox/get: {e}"))
 }
 
-pub(crate) fn role_to_str(role: &jmap_client::mailbox::Role) -> &'static str {
-    use jmap_client::mailbox::Role;
+pub(crate) fn role_to_str(role: &bifrost_jmap::mailbox::Role) -> &'static str {
+    use bifrost_jmap::mailbox::Role;
     match role {
         Role::Inbox => "inbox",
         Role::Archive => "archive",

@@ -396,7 +396,7 @@ async fn jmap_contact_delete(
     let inner = client.inner();
     let mut request = inner.build();
     let req_account_id = request.default_account_id().to_string();
-    let mut set = jmap_client::contact_card::ContactCardSet::new(&req_account_id);
+    let mut set = bifrost_jmap::contact_card::ContactCardSet::new(&req_account_id);
     set.destroy([server_id]);
     let handle = request
         .call(set)
