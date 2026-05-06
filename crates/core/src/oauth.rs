@@ -575,45 +575,14 @@ pub async fn oauth_exchange_token(
         .map_err(|e| format!("Failed to parse token response: {e}"))
 }
 
-/// Refresh an OAuth token.
-pub async fn oauth_refresh_token(
-    token_url: String,
-    refresh_token: String,
-    client_id: String,
-    client_secret: Option<String>,
-    scope: Option<String>,
-) -> Result<TokenExchangeResult, String> {
-    let mut params = vec![
-        ("refresh_token", refresh_token),
-        ("client_id", client_id),
-        ("grant_type", "refresh_token".to_string()),
-    ];
-    if let Some(secret) = client_secret
-        && !secret.is_empty()
-    {
-        params.push(("client_secret", secret));
-    }
-    if let Some(s) = scope {
-        params.push(("scope", s));
-    }
-
-    let response = shared_http_client()
-        .post(&token_url)
-        .form(&params)
-        .send()
-        .await
-        .map_err(|e| format!("Token refresh request failed: {e}"))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        return Err(format!("Token refresh failed (HTTP {status})"));
-    }
-
-    response
-        .json::<TokenExchangeResult>()
-        .await
-        .map_err(|e| format!("Failed to parse token response: {e}"))
-}
+// Phase 6b verification: `oauth_refresh_token` deleted. The
+// previously planned Phase 4 `oauth.refresh_request` IPC was never
+// shipped (`crates/service/src/push.rs:29` documents the removal
+// during Phase 4 close-out). Today's Service-side refresh flows
+// through per-provider `ensure_valid_token` helpers in
+// gmail/graph/jmap (each reads the token row, calls the provider
+// token endpoint, writes the new tokens back). The generic
+// helper this module used to expose had no callers.
 
 async fn fetch_google_userinfo(access_token: &str) -> Result<OAuthUserInfo, String> {
     let response = shared_http_client()
