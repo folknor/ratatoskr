@@ -100,3 +100,29 @@ impl Drop for FlightGuard {
         set.remove(&self.key);
     }
 }
+
+/// Phase 6c sibling of `ActionContext` for the calendar action
+/// pipeline. Sized to what `cal::actions::*` actually needs: the DB
+/// writer-half + the encryption key. Email-shaped fields
+/// (`body_store`, `inline_images`, `search`, `in_flight`,
+/// `suppress_pending_enqueue`) have no analogue in calendar
+/// dispatch and would be dead weight here.
+///
+/// Constructible only by code that already has access to
+/// `WriteDbState`. Phase 6b's Cargo-level lockdown forbids the app
+/// crate from depending on `service-state` directly; Phase 6c-11
+/// extends that to the transitive graph after `app -> cal` is
+/// removed in 6c-10. Together, those rules constrain
+/// `CalendarActionContext` construction to crates inside the
+/// Service's transitive cone (today: `service`).
+///
+/// Field visibility is `pub` on purpose: a `pub(crate)` constructor
+/// with `pub(crate)` fields would still let any crate inside
+/// `action-types` build one, while blocking `service` (the actual
+/// caller). The Cargo-graph lockdown does the gating; the type's
+/// shape is just data.
+#[derive(Clone)]
+pub struct CalendarActionContext {
+    pub db: service_state::WriteDbState,
+    pub encryption_key: [u8; 32],
+}

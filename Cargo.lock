@@ -25,6 +25,7 @@ dependencies = [
  "db",
  "log",
  "search",
+ "service-state",
  "store",
 ]
 

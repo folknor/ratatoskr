@@ -12,6 +12,13 @@ workspace = true
 
 [dependencies]
 db = { path = "../db" }
+# Phase 6c: CalendarActionContext carries a WriteDbState so the
+# Service-side calendar dispatcher can mutate the DB. The action-types
+# crate is below `service` and `cal` in the dep graph, but does NOT
+# appear in the app crate's dep graph - so adding service-state here
+# does NOT open an `app -> service-state` path. The Phase 6b lockdown
+# test (and the transitive variant in 6c-11) catches any regression.
+service-state = { path = "../service-state" }
 store = { path = "../stores" }
 search = { path = "../search" }
 log = "0.4"

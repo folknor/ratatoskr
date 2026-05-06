@@ -15,6 +15,6 @@ mod context;
 mod log;
 mod outcome;
 
-pub use context::{ActionContext, FlightGuard};
+pub use context::{ActionContext, CalendarActionContext, FlightGuard};
 pub use log::MutationLog;
 pub use outcome::{ActionError, ActionOutcome, RemoteFailureKind};
