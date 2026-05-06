@@ -12,6 +12,7 @@ mod response;
 mod account;
 mod contacts;
 mod internal;
+mod oauth;
 mod pinned_search;
 mod settings;
 mod signature;
@@ -48,6 +49,7 @@ pub use internal::{
     DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,
     ReadBootstrapSnapshotsAck, ReadBootstrapSnapshotsParams,
 };
+pub use oauth::{OauthExchangeCodeAck, OauthExchangeCodeParams};
 pub use pinned_search::{
     PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAck,
     PinnedSearchDeleteAllAck, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,

@@ -367,6 +367,19 @@ pub async fn authorize_with_provider<P: OAuthIdentityProvider>(
     open_url: &(dyn Fn(&str) -> Result<(), String> + Send + Sync),
 ) -> Result<OAuthAuthorizationBundle, String> {
     let auth = run_oauth_authorization_flow(provider.authorization_request(), open_url).await?;
+    exchange_code_with_provider(provider, auth).await
+}
+
+/// Run only the token-exchange + userinfo phase against a provider,
+/// given an already-captured auth code. Used Service-side by Phase
+/// 6b's `oauth.exchange_code` IPC: the UI does the bind / open /
+/// wait dance locally (the listener has to live in the visible app)
+/// and ships the captured auth code over IPC; the Service runs the
+/// HTTPS round-trips.
+pub async fn exchange_code_with_provider<P: OAuthIdentityProvider>(
+    provider: &P,
+    auth: OAuthAuthorizationFlow,
+) -> Result<OAuthAuthorizationBundle, String> {
     let token_request = provider.token_request();
     let tokens = oauth_exchange_token(
         token_request.token_url,

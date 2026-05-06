@@ -16,6 +16,7 @@ use crate::contacts::{
 use crate::internal::{
     DecryptForStorageParams, EncryptForStorageParams, ReadBootstrapSnapshotsParams,
 };
+use crate::oauth::OauthExchangeCodeParams;
 use crate::pinned_search::{
     PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,
     PinnedSearchUpdateParams,
@@ -305,6 +306,19 @@ pub enum RequestParams {
     ///
     /// 5 s timeout: handler is one in-memory AES decrypt.
     DecryptForStorage { params: DecryptForStorageParams },
+    /// Phase 6b: OAuth code-exchange + userinfo round-trips run
+    /// Service-side. UI binds the listener and captures the code
+    /// locally (the listener has to live in the visible app), then
+    /// ships the code via this IPC. When `reauth_account_id` is
+    /// `Some`, the handler persists the new tokens onto the named
+    /// account row and the ack omits token fields. When `None`, the
+    /// ack carries the tokens for the UI to feed into
+    /// `account.create` after the Identity step.
+    ///
+    /// Joins `bypasses_admission()` so the OAuth round-trip is not
+    /// queued behind heavy traffic. 30 s timeout: provider token
+    /// endpoints are slow under load.
+    OauthExchangeCode { params: Box<OauthExchangeCodeParams> },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -359,6 +373,7 @@ impl RequestParams {
             Self::ReadBootstrapSnapshots { .. } => "internal.read_bootstrap_snapshots",
             Self::EncryptForStorage { .. } => "internal.encrypt_for_storage",
             Self::DecryptForStorage { .. } => "internal.decrypt_for_storage",
+            Self::OauthExchangeCode { .. } => "oauth.exchange_code",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -446,6 +461,12 @@ impl RequestParams {
             Self::EncryptForStorage { .. } | Self::DecryptForStorage { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
+            // Provider token endpoints can be slow under load; the
+            // round-trip is two HTTPS calls (token + userinfo) plus
+            // optional re-auth DB write.
+            Self::OauthExchangeCode { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(30))
+            }
             #[cfg(feature = "test-helpers")]
             Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
@@ -469,7 +490,10 @@ impl RequestParams {
     /// role - the dispatch loop's `ADMISSION_CAP` gate also keys off this
     /// flag.
     pub fn bypasses_admission(&self) -> bool {
-        matches!(self, Self::HealthPing | Self::BootReady)
+        matches!(
+            self,
+            Self::HealthPing | Self::BootReady | Self::OauthExchangeCode { .. },
+        )
     }
 
     /// Serialize this request's params into the `params` field of the
@@ -519,6 +543,7 @@ impl RequestParams {
             Self::ReadBootstrapSnapshots { params } => serde_json::json!({ "params": params }),
             Self::EncryptForStorage { params } => serde_json::json!({ "params": params }),
             Self::DecryptForStorage { params } => serde_json::json!({ "params": params }),
+            Self::OauthExchangeCode { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -830,6 +855,17 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("internal.decrypt_for_storage params: {e}"))?;
                 Ok(Self::DecryptForStorage { params: p.params })
+            }
+            "oauth.exchange_code" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: OauthExchangeCodeParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("oauth.exchange_code params: {e}"))?;
+                Ok(Self::OauthExchangeCode {
+                    params: Box::new(p.params),
+                })
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {
@@ -2098,5 +2134,75 @@ mod tests {
         )
         .expect("parse");
         assert_eq!(parsed, original);
+    }
+
+    // -- Phase 6b: oauth.exchange_code wire envelope ----------------------
+
+    fn sample_oauth_exchange_params() -> OauthExchangeCodeParams {
+        OauthExchangeCodeParams {
+            provider_id: "google".into(),
+            token_url: "https://oauth2.googleapis.com/token".into(),
+            scopes: vec!["openid".into()],
+            user_info_url: None,
+            use_pkce: true,
+            client_id: "client".into(),
+            client_secret: None,
+            redirect_uri: "http://127.0.0.1:54321/callback".into(),
+            code: crate::redacted::RedactedString::new("authcode"),
+            code_verifier: Some("pkce".into()),
+            reauth_account_id: None,
+        }
+    }
+
+    #[test]
+    fn oauth_exchange_code_method_name_is_dotted() {
+        let p = RequestParams::OauthExchangeCode {
+            params: Box::new(sample_oauth_exchange_params()),
+        };
+        assert_eq!(p.method_name(), "oauth.exchange_code");
+    }
+
+    #[test]
+    fn oauth_exchange_code_timeout_is_thirty_seconds() {
+        let p = RequestParams::OauthExchangeCode {
+            params: Box::new(sample_oauth_exchange_params()),
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(30)),
+        );
+    }
+
+    #[test]
+    fn oauth_exchange_code_round_trips_from_method_params() {
+        let original = RequestParams::OauthExchangeCode {
+            params: Box::new(sample_oauth_exchange_params()),
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn oauth_exchange_code_bypasses_admission() {
+        // Locking the admission-bypass list. HealthPing and BootReady
+        // were the originals; OauthExchangeCode joined in Phase 6b
+        // because the OAuth round-trip cannot queue behind a 30 s
+        // ActionSend or a long attachment.fetch.
+        let p = RequestParams::OauthExchangeCode {
+            params: Box::new(sample_oauth_exchange_params()),
+        };
+        assert!(p.bypasses_admission());
+
+        // Sanity: a non-bypass variant doesn't.
+        let q = RequestParams::DecryptForStorage {
+            params: DecryptForStorageParams {
+                ciphertext: "x".into(),
+            },
+        };
+        assert!(!q.bypasses_admission());
     }
 }

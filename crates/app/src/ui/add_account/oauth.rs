@@ -62,6 +62,11 @@ impl AddAccountWizard {
         let provider_id_clone = provider_id.clone();
         let client_id_clone = client_id.clone();
 
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            self.error = Some("Service not ready".into());
+            return Task::none();
+        };
+        let reauth_account_id = self.reauth_account_id.clone();
         Task::perform(
             async move {
                 // Resolve endpoints: either from registry or OIDC discovery.
@@ -86,35 +91,39 @@ impl AddAccountWizard {
                     return Err("No OAuth configuration available".into());
                 };
 
-                let request = rtsk::oauth::OAuthProviderAuthorizationRequest {
-                    provider_id: provider_id_clone.clone(),
-                    auth_url,
-                    token_url,
-                    scopes,
-                    user_info_url: None,
-                    use_pkce,
-                    client_id: client_id_clone.clone(),
-                    client_secret: None,
-                };
-
-                let provider = rtsk::oauth::GenericOAuthProvider::from_request(request);
-                let open_url = |url: &str| -> Result<(), String> { open_browser_url(url) };
-                let result = rtsk::oauth::authorize_with_provider(&provider, &open_url).await;
-                let mapped = result.map(|bundle| {
-                    #[allow(clippy::cast_possible_wrap)]
-                    let expires_at =
-                        chrono::Utc::now().timestamp() + bundle.tokens.expires_in as i64;
+                let result = run_capture_then_exchange(
+                    &client,
+                    OauthCaptureConfig {
+                        provider_id: provider_id_clone.clone(),
+                        auth_url,
+                        token_url,
+                        scopes,
+                        user_info_url: None,
+                        use_pkce,
+                        client_id: client_id_clone.clone(),
+                        client_secret: None,
+                    },
+                    reauth_account_id,
+                )
+                .await
+                .map(|ack| {
+                    let access_token = ack
+                        .access_token
+                        .map(service_api::RedactedString::into_inner)
+                        .unwrap_or_default();
                     OAuthSuccess {
-                        access_token: bundle.tokens.access_token,
-                        refresh_token: bundle.tokens.refresh_token,
-                        token_expires_at: Some(expires_at),
-                        user_email: bundle.user_info.email,
-                        user_name: bundle.user_info.name,
+                        access_token,
+                        refresh_token: ack
+                            .refresh_token
+                            .map(service_api::RedactedString::into_inner),
+                        token_expires_at: ack.token_expires_at,
+                        user_email: ack.email,
+                        user_name: ack.display_name.unwrap_or_default(),
                         oauth_provider: provider_id_clone,
                         oauth_client_id: client_id_clone,
                     }
                 });
-                Ok(mapped)
+                Ok(result)
             },
             move |result: Result<Result<OAuthSuccess, String>, String>| match result {
                 Ok(inner) => AddAccountMessage::OAuthComplete(generation, inner),
@@ -127,36 +136,19 @@ impl AddAccountWizard {
         &mut self,
         success: OAuthSuccess,
     ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
-        // Re-auth mode: save tokens directly via
-        // `account.update_tokens` IPC, skip identity step.
-        if let Some(ref account_id) = self.reauth_account_id {
-            let Some(client) = self.service_client.as_ref().cloned() else {
-                self.error = Some("Service not ready".into());
-                return (Task::none(), None);
-            };
-            let params = service_api::AccountUpdateTokensParams {
-                account_id: account_id.clone(),
-                access_token: Some(service_api::RedactedString::new(success.access_token.clone())),
-                refresh_token: success
-                    .refresh_token
-                    .clone()
-                    .map(service_api::RedactedString::new),
-                token_expires_at: success.token_expires_at,
-                imap_password: None,
-                smtp_password: None,
-            };
+        // Phase 6b: re-auth tokens now persist Service-side inside
+        // `oauth.exchange_code` (when `reauth_account_id` is set).
+        // The IPC ack carries empty token fields in re-auth mode and
+        // run_capture_then_exchange surfaced this back as an
+        // OAuthSuccess with empty access_token. Drop the empty
+        // success and dispatch a synthetic ReauthTokensSaved.
+        if self.reauth_account_id.is_some() {
             let generation = self.generation.next();
-            let task = Task::perform(
-                async move {
-                    let result = client
-                        .update_account_tokens(params)
-                        .await
-                        .map_err(|e| e.to_string());
-                    (generation, result)
-                },
-                |(g, result)| AddAccountMessage::ReauthTokensSaved(g, result),
+            let _ = success;
+            return (
+                Task::done(AddAccountMessage::ReauthTokensSaved(generation, Ok(()))),
+                None,
             );
-            return (task, None);
         }
 
         self.oauth_success = Some(success);
@@ -257,6 +249,68 @@ pub(super) fn resolve_client_id(provider_id: &str) -> String {
         // If not available, the OAuth flow will use the discovery registry value.
         _ => String::new(),
     }
+}
+
+/// Phase 6b: provider config the UI ships with the captured auth
+/// code. Mirrors `OAuthProviderAuthorizationRequest` so today's
+/// userinfo dispatch (Microsoft hard-coded URL vs `user_info_url`)
+/// keys on `provider_id` exactly as it did pre-Phase-6b.
+#[derive(Debug, Clone)]
+pub(super) struct OauthCaptureConfig {
+    pub provider_id: String,
+    pub auth_url: String,
+    pub token_url: String,
+    pub scopes: Vec<String>,
+    pub user_info_url: Option<String>,
+    pub use_pkce: bool,
+    pub client_id: String,
+    pub client_secret: Option<String>,
+}
+
+/// Phase 6b: capture the OAuth auth code locally, then ship it
+/// Service-side via `oauth.exchange_code`. Two-IPCs-pragmatic shape
+/// (see `service/src/handlers/oauth.rs`): the Service runs the
+/// token-endpoint + userinfo round-trips and either returns the
+/// tokens (initial create; UI proceeds to Identity +
+/// `account.create`) or persists the tokens onto the existing row
+/// (re-auth, when `reauth_account_id` is set).
+pub(super) async fn run_capture_then_exchange(
+    client: &crate::service_client::ServiceClient,
+    config: OauthCaptureConfig,
+    reauth_account_id: Option<String>,
+) -> Result<service_api::OauthExchangeCodeAck, String> {
+    let request = rtsk::oauth::OAuthProviderAuthorizationRequest {
+        provider_id: config.provider_id.clone(),
+        auth_url: config.auth_url,
+        token_url: config.token_url.clone(),
+        scopes: config.scopes.clone(),
+        user_info_url: config.user_info_url.clone(),
+        use_pkce: config.use_pkce,
+        client_id: config.client_id.clone(),
+        client_secret: config.client_secret.clone(),
+    };
+    let provider = rtsk::oauth::GenericOAuthProvider::from_request(request);
+    let open_url = |url: &str| -> Result<(), String> { open_browser_url(url) };
+    let auth_request = <rtsk::oauth::GenericOAuthProvider as rtsk::oauth::OAuthIdentityProvider>::authorization_request(&provider);
+    let auth = rtsk::oauth::run_oauth_authorization_flow(auth_request, &open_url).await?;
+
+    let params = service_api::OauthExchangeCodeParams {
+        provider_id: config.provider_id,
+        token_url: config.token_url,
+        scopes: config.scopes,
+        user_info_url: config.user_info_url,
+        use_pkce: config.use_pkce,
+        client_id: config.client_id,
+        client_secret: config.client_secret.map(service_api::RedactedString::new),
+        redirect_uri: auth.redirect_uri,
+        code: service_api::RedactedString::new(auth.code),
+        code_verifier: auth.code_verifier,
+        reauth_account_id,
+    };
+    client
+        .exchange_oauth_code(params)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 pub(super) fn open_browser_url(url: &str) -> Result<(), String> {

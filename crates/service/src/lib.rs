@@ -1,3 +1,4 @@
+mod accounts;
 pub mod actions;
 mod boot;
 mod boot_progress;

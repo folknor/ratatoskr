@@ -627,43 +627,52 @@ impl AddAccountWizard {
                 self.error = None;
                 let generation = self.generation.next();
 
-                let request = rtsk::oauth::OAuthProviderAuthorizationRequest {
-                    provider_id: provider_id.clone(),
-                    auth_url: auth_url.clone(),
-                    token_url: token_url.clone(),
-                    scopes: scopes.clone(),
-                    user_info_url: None,
-                    use_pkce: *use_pkce,
-                    client_id: super::oauth::resolve_client_id(provider_id),
-                    client_secret: None,
-                };
-
                 let provider_id_clone = provider_id.clone();
                 let client_id_clone = super::oauth::resolve_client_id(provider_id);
+                let auth_url_clone = auth_url.clone();
+                let token_url_clone = token_url.clone();
+                let scopes_clone = scopes.clone();
+                let use_pkce_clone = *use_pkce;
+                let Some(client) = self.service_client.as_ref().cloned() else {
+                    self.error = Some("Service not ready".into());
+                    return (Task::none(), None);
+                };
 
                 let task = Task::perform(
                     async move {
-                        let provider = rtsk::oauth::GenericOAuthProvider::from_request(request);
-                        let open_url = |url: &str| -> Result<(), String> {
-                            super::oauth::open_browser_url(url)
-                        };
-                        let result =
-                            rtsk::oauth::authorize_with_provider(&provider, &open_url).await;
-                        let mapped = result.map(|bundle| {
-                            #[allow(clippy::cast_possible_wrap)]
-                            let expires_at =
-                                chrono::Utc::now().timestamp() + bundle.tokens.expires_in as i64;
+                        let result = super::oauth::run_capture_then_exchange(
+                            &client,
+                            super::oauth::OauthCaptureConfig {
+                                provider_id: provider_id_clone.clone(),
+                                auth_url: auth_url_clone,
+                                token_url: token_url_clone,
+                                scopes: scopes_clone,
+                                user_info_url: None,
+                                use_pkce: use_pkce_clone,
+                                client_id: client_id_clone.clone(),
+                                client_secret: None,
+                            },
+                            None,
+                        )
+                        .await
+                        .map(|ack| {
+                            let access_token = ack
+                                .access_token
+                                .map(service_api::RedactedString::into_inner)
+                                .unwrap_or_default();
                             OAuthSuccess {
-                                access_token: bundle.tokens.access_token,
-                                refresh_token: bundle.tokens.refresh_token,
-                                token_expires_at: Some(expires_at),
-                                user_email: bundle.user_info.email,
-                                user_name: bundle.user_info.name,
+                                access_token,
+                                refresh_token: ack
+                                    .refresh_token
+                                    .map(service_api::RedactedString::into_inner),
+                                token_expires_at: ack.token_expires_at,
+                                user_email: ack.email,
+                                user_name: ack.display_name.unwrap_or_default(),
                                 oauth_provider: provider_id_clone,
                                 oauth_client_id: client_id_clone,
                             }
                         });
-                        (generation, mapped)
+                        (generation, result)
                     },
                     |(g, result)| AddAccountMessage::OAuthComplete(g, result),
                 );

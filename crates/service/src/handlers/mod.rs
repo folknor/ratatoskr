@@ -10,6 +10,7 @@ mod pending_ops_kick;
 mod account;
 mod contacts;
 mod internal;
+mod oauth;
 mod pinned_search;
 mod settings;
 mod signature;
@@ -120,6 +121,9 @@ pub(crate) async fn dispatch(
         }
         RequestParams::AccountUpdateTokens { params } => {
             account::handle_update_tokens(&boot_state, params).await
+        }
+        RequestParams::OauthExchangeCode { params } => {
+            oauth::handle_exchange_code(&boot_state, params).await
         }
         RequestParams::AccountDelete { params } => {
             account::handle_delete(&boot_state, params).await

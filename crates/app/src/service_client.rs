@@ -10,7 +10,7 @@ use service_api::{
     AccountReorderAck, AccountReorderEntry, AccountReorderParams, AccountUpdateAck,
     AccountUpdateParams, AccountUpdateTokensAck, AccountUpdateTokensParams, ContactGroupDeleteAck,
     ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams, ContactSaveAck,
-    ContactSaveParams,
+    ContactSaveParams, OauthExchangeCodeAck, OauthExchangeCodeParams,
     DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,
     PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAck,
     PinnedSearchDeleteAllAck, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,
@@ -1123,6 +1123,27 @@ impl ServiceClient {
             })
             .await?;
         Ok(ack.id)
+    }
+
+    /// Phase 6b: ship a captured OAuth auth code Service-side for
+    /// the token-endpoint + userinfo round-trips. UI runs the
+    /// browser dance locally (binds the listener, builds the auth
+    /// URL, opens the browser, awaits the redirect), then hands
+    /// the captured code to this IPC. Service exchanges the code,
+    /// fetches userinfo, and either returns the tokens (initial
+    /// create; UI proceeds to Identity + `account.create`) or
+    /// persists the tokens onto the existing row (re-auth, when
+    /// `reauth_account_id` is set on the params).
+    pub async fn exchange_oauth_code(
+        &self,
+        params: OauthExchangeCodeParams,
+    ) -> Result<OauthExchangeCodeAck, ClientError> {
+        let ack: OauthExchangeCodeAck = self
+            .request(RequestParams::OauthExchangeCode {
+                params: Box::new(params),
+            })
+            .await?;
+        Ok(ack)
     }
 
     /// Phase 6a-part-2: re-authentication token persist via the
