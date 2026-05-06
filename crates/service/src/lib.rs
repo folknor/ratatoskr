@@ -2,6 +2,7 @@ mod accounts;
 pub mod actions;
 mod boot;
 mod boot_progress;
+pub mod cal_actions;
 pub mod calendar;
 mod draft_wal;
 mod markers;
