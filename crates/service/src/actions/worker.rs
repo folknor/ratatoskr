@@ -421,7 +421,16 @@ async fn build_send_request(
     .map_err(|e| format!("spawn_blocking build_send_request: {e}"))?
 }
 
-fn build_action_context(
+/// Build an `ActionContext` from the boot-shared inputs.
+///
+/// `pub(crate)` so the Phase 6d-A `contacts.contact_save_with_writeback`
+/// and `contacts.contact_delete` handlers can construct a context to
+/// drive `crate::actions::contacts::{save_contact, delete_contact}`
+/// directly from the IPC handler thread. Those flows reuse the
+/// existing action functions (local-DB UPSERT / DELETE + provider
+/// write-back + `MutationLog` emission) and are not journaled through
+/// the action worker.
+pub(crate) fn build_action_context(
     db_conn: Arc<Mutex<db::db::Connection>>,
     encryption_key: [u8; 32],
     app_data_dir: &std::path::Path,

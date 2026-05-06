@@ -49,8 +49,9 @@ pub use account::{
     AccountUpdateAck, AccountUpdateParams, AccountUpdateTokensAck, AccountUpdateTokensParams,
 };
 pub use contacts::{
-    ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
-    ContactSaveAck, ContactSaveParams,
+    ContactDeleteAck, ContactDeleteParams, ContactGroupDeleteAck, ContactGroupDeleteParams,
+    ContactGroupSaveAck, ContactGroupSaveParams, ContactSaveAck, ContactSaveParams,
+    ContactSaveWithWritebackAck, WritebackOutcome,
 };
 pub use internal::{
     DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,

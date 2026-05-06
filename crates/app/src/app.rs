@@ -138,9 +138,6 @@ pub struct ReadyApp {
     pub(crate) body_store: Option<rtsk::body_store::BodyStoreReadState>,
     /// Inline image store for CID image resolution.
     pub(crate) inline_image_store: Option<store::inline_image_store::InlineImageStoreReadState>,
-    /// Action service context - the authoritative write path for email mutations.
-    /// `None` if stores failed to initialize at boot (degraded mode).
-    pub(crate) action_ctx: Option<service::actions::ActionContext>,
 
     // Service process scaffold
     pub(crate) service_client: Option<Arc<ServiceClient>>,
@@ -310,48 +307,24 @@ impl ReadyApp {
                 }
             };
 
-        // Phase 6a-part-2: the bootstrap-snapshot decrypt path now flows
+        // Phase 6a-part-2: the bootstrap-snapshot decrypt path flows
         // through `internal.read_bootstrap_snapshots` (one IPC, both
         // snapshots returned already-decrypted). The N-decrypt-per-boot
         // anti-pattern (one IPC per secure setting under a generic
         // `decrypt_for_storage`) was rejected in plan revision; see
         // `docs/service/phase-6a-plan.md` § "Encryption-key handle".
         //
-        // The single remaining UI-side load is the `ActionContext` below:
-        // it carries `encryption_key` for SMTP credential decrypt during
-        // email/contact actions. Phase 6c removes the action_ctx (the
-        // `cal::actions` ActionContext is its only outstanding caller),
-        // and with it this last UI-side load. Until 6c, the load is
-        // scoped to action_ctx construction; the Service's already-
-        // validated key bytes flow through that single field. A load
-        // failure here means the key file changed between the Service's
-        // read and ours (permissions race, FS glitch); `expect()` is the
-        // correct response so the user can fix the underlying problem
-        // instead of writing data under a zero key.
-        let encryption_key = rtsk::load_encryption_key(data_dir)
-            .expect("encryption key must be loadable after Service validated it at boot");
+        // Phase 6d-A removed the last UI-side `load_encryption_key`
+        // call: the contacts pipeline now runs Service-side via
+        // `contacts.contact_save_with_writeback` / `contacts.contact_delete`,
+        // and the `action_ctx` field that carried the key is gone.
+        // The Service holds the validated key bytes for the lifetime
+        // of the process; the UI never touches `ratatoskr.key`.
 
-        // Initialize search state once - shared between the app and action service.
+        // Initialize search state once - the reading-pane and search
+        // surfaces read through this Arc.
         let search_state: Option<Arc<rtsk::search::SearchReadState>> =
             rtsk::search::SearchReadState::init(data_dir).map(Arc::new).ok();
-
-        let action_ctx = match (&body_store, &inline_image_store, &search_state) {
-            (Some(bs), Some(iis), Some(ss)) => Some(service::actions::ActionContext {
-                db: db.phase_6c_pending_write_state(),
-                body_store: bs.clone(),
-                inline_images: iis.clone(),
-                search: (**ss).clone(),
-                encryption_key,
-                suppress_pending_enqueue: false,
-                in_flight: std::sync::Arc::new(std::sync::Mutex::new(
-                    std::collections::HashSet::new(),
-                )),
-            }),
-            _ => {
-                log::error!("Action service unavailable: one or more stores failed to initialize");
-                None
-            }
-        };
 
         let session = pop_out::session::SessionState::load(data_dir);
 
@@ -426,7 +399,6 @@ impl ReadyApp {
             sync_reporter,
             body_store,
             inline_image_store,
-            action_ctx,
             service_client: Some(service_client),
             service_notifications,
             pending_action_plans: std::collections::HashMap::new(),

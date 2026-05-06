@@ -2,26 +2,20 @@
 #
 # check_app_write_surface.sh
 #
-# Phase 6a-part-2 lockdown gate. Fails if `crates/app/src/` references
-# any of the deleted/restricted writable-connection APIs. The single
-# allow-listed escape hatch is `Db::phase_6c_pending_write_state` -
-# its name is the symbol pattern that gates Phase 6c removal of the
-# `cal::actions` ActionContext.
+# Phase 6a/6c/6d lockdown gate. Fails if `crates/app/src/` references
+# any writable-connection symbol. After Phase 6d-A there is no
+# allow-listed escape hatch: every UI write surface routes through a
+# Service IPC. The previous `phase_6c_pending_write_state` accessor
+# (the contacts pipeline's last UI-side write site) was deleted
+# alongside the `app.action_ctx` field.
 #
 # What is forbidden in `crates/app/src/`:
-#   - `Db::with_write_conn`     (deleted)
-#   - `Db::with_write_conn_sync` (deleted)
-#   - `Db::write_db_state`      (deleted; superseded by the
-#                                allow-listed accessor)
+#   - `Db::with_write_conn`            (deleted in 6a-part-2)
+#   - `Db::with_write_conn_sync`       (deleted in 6a-part-2)
+#   - `Db::write_db_state`             (deleted in 6a-part-2)
+#   - `Db::phase_6c_pending_write_state` (deleted in 6d-A)
 #   - `service_state::WriteDbState`
 #   - `WriteDbState::from_arc`
-#
-# What is allowed:
-#   - The single `phase_6c_pending_write_state` accessor on `Db`.
-#     Its declaration in `crates/app/src/db/connection.rs` is the
-#     allow-listed write-surface site. Callers must reference the
-#     accessor by exact name; the script's grep gate rejects any
-#     literal use of the deleted symbols regardless of caller.
 #
 # Exit codes:
 #   0  No forbidden references in crates/app/src/.
@@ -47,9 +41,11 @@ FORBIDDEN_PATTERNS=(
     'Db::with_write_conn\b'
     'Db::with_write_conn_sync\b'
     'Db::write_db_state\b'
+    'Db::phase_6c_pending_write_state\b'
     '\.with_write_conn\('
     '\.with_write_conn_sync\('
     '\.write_db_state\('
+    '\.phase_6c_pending_write_state\('
     'service_state::WriteDbState\b'
     'WriteDbState::from_arc\b'
 )
@@ -80,13 +76,10 @@ done
 
 if [ "$failed" -ne 0 ]; then
     echo "" >&2
-    echo "Phase 6a-part-2 lockdown: writable-connection access from" >&2
-    echo "crates/app/src/ is restricted to" >&2
-    echo "  Db::phase_6c_pending_write_state()" >&2
-    echo "(the single allow-listed accessor for the cal::actions" >&2
-    echo "ActionContext, removed in Phase 6c). New write surfaces" >&2
-    echo "must route through a Service IPC; see" >&2
-    echo "docs/service/phase-6a-plan.md." >&2
+    echo "Phase 6d-A lockdown: writable-connection access from" >&2
+    echo "crates/app/src/ is forbidden. Every UI write surface must" >&2
+    echo "route through a Service IPC; see" >&2
+    echo "docs/service/phase-6d-plan.md and docs/service/phase-6a-plan.md." >&2
     exit 1
 fi
 

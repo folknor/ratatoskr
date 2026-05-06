@@ -98,8 +98,12 @@ impl ReadyApp {
             );
         }
 
-        // Snooze resurface - check every 60 seconds for due threads
-        if self.action_ctx.is_some() {
+        // Snooze resurface - check every 60 seconds for due threads.
+        // The handler fires a `pending_ops.kick` that wakes the
+        // Service-side worker; if the ServiceClient isn't attached
+        // yet the kick is a logged no-op. Phase 6d-A removed the
+        // `action_ctx` gate that previously fronted this subscription.
+        if !self.sidebar.accounts.is_empty() {
             subs.push(
                 iced::time::every(std::time::Duration::from_secs(60)).map(|_| Message::SnoozeTick),
             );

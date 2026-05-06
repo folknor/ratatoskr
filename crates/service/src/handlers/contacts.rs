@@ -1,36 +1,35 @@
-//! Contact-group write handlers (Phase 6a).
+//! Contact + contact-group write handlers.
 //!
-//! Two methods - `contacts.group_save` and `contacts.group_delete` -
-//! relocate the user-facing group editor's writes Service-side. Both
-//! delegate to the existing `*_sync` helpers in
-//! `db::queries_extra::contact_groups`; the helpers handle the
-//! transactional UPSERT + member replace and the cascading delete.
+//! Phase 6a (`group_save`, `group_delete`): user-facing group editor.
+//! Phase 6a-part-2 (`contact_save`): local-only contact UPSERT, used by
+//! the bulk-import path.
+//! Phase 6d-A (`contact_save_with_writeback`, `contact_delete`): full
+//! single-contact pipeline including provider write-back to JMAP /
+//! Google People / Graph for synced contacts. Replaces the pre-6d
+//! `service::actions::contacts::*` UI-side calls that ran through the
+//! `action_ctx` field.
 //!
-//! Second CRUD instance after `signature.*` - the shape is locked in
-//! by the per-surface checklist: thin handler, one
-//! `WriteDbState::with_conn`, named ack struct, no Message variant
-//! reuse on the UI side.
-//!
-//! `save_contact` (Phase 6a-part-2): UPSERT one contact row. Both
-//! the UI single-contact save handler and the bulk-import path
-//! issue this IPC, one call per contact. Provider write-back
-//! (Google / Graph / CardDAV) still routes through the action
-//! service - this surface only covers the local-DB UPSERT that the
-//! pre-relocation `Db::save_contact` was performing UI-side.
-//!
-//! `delete_contact` is out of scope for this handler: it routes
-//! through the action service for provider write-back and needs a
-//! different relocation pattern than the simple-write surfaces in 6a.
+//! The 6d-A handlers reuse `service::actions::contacts::save_contact`
+//! and `delete_contact` (which carry the local-DB write +
+//! `MutationLog` emission + provider dispatch). The handler builds an
+//! `ActionContext` from `BootSharedState` (same construction as
+//! `actions::worker::build_action_context`) and converts the resulting
+//! `ActionOutcome` into the wire `WritebackOutcome` at the IPC
+//! boundary - `ActionOutcome` lives in `action-types` and is not
+//! serde-derive, so it never crosses the wire.
 
 use std::sync::Arc;
 
 use serde_json::Value;
 use service_api::{
-    ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
-    ContactSaveAck, ContactSaveParams, ServiceError,
+    ContactDeleteAck, ContactDeleteParams, ContactGroupDeleteAck, ContactGroupDeleteParams,
+    ContactGroupSaveAck, ContactGroupSaveParams, ContactSaveAck, ContactSaveParams,
+    ContactSaveWithWritebackAck, ServiceError, WritebackOutcome,
 };
 
+use crate::actions::worker::build_action_context;
 use crate::boot::BootSharedState;
+use action_types::ActionOutcome;
 
 pub(crate) async fn handle_group_save(
     boot_state: &Arc<BootSharedState>,
@@ -93,4 +92,78 @@ pub(crate) async fn handle_contact_save(
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(ContactSaveAck).map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
+pub(crate) async fn handle_contact_save_with_writeback(
+    boot_state: &Arc<BootSharedState>,
+    params: ContactSaveParams,
+) -> Result<Value, ServiceError> {
+    let ctx = action_context(boot_state)?;
+    // `account_color` and `groups` are dropped at this boundary -
+    // matches the pre-6d UI-side path. Group membership is managed
+    // separately through `contacts.group_save`; account_color is a
+    // join-time read concern, not a column on `contacts`.
+    let input = crate::actions::contacts::ContactSaveInput {
+        id: params.id,
+        email: params.email,
+        display_name: params.display_name,
+        email2: params.email2,
+        phone: params.phone,
+        company: params.company,
+        notes: params.notes,
+        account_id: params.account_id,
+        source: params.source,
+        server_id: params.server_id,
+    };
+    let outcome = crate::actions::contacts::save_contact(&ctx, input).await;
+    let ack = ContactSaveWithWritebackAck {
+        writeback: outcome_to_writeback(outcome)?,
+    };
+    serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
+pub(crate) async fn handle_contact_delete(
+    boot_state: &Arc<BootSharedState>,
+    params: ContactDeleteParams,
+) -> Result<Value, ServiceError> {
+    let ctx = action_context(boot_state)?;
+    let outcome = crate::actions::contacts::delete_contact(&ctx, &params.id).await;
+    let ack = ContactDeleteAck {
+        writeback: outcome_to_writeback(outcome)?,
+    };
+    serde_json::to_value(ack).map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
+fn action_context(
+    boot_state: &Arc<BootSharedState>,
+) -> Result<action_types::ActionContext, ServiceError> {
+    let db_conn = boot_state.db_conn().ok_or_else(|| {
+        ServiceError::Internal(
+            "request received before db_conn available; UI must wait for boot.ready".into(),
+        )
+    })?;
+    let encryption_key = boot_state.encryption_key().ok_or_else(|| {
+        ServiceError::Internal(
+            "request received before encryption_key available; UI must wait for boot.ready".into(),
+        )
+    })?;
+    build_action_context(db_conn, encryption_key, boot_state.app_data_dir())
+        .map_err(ServiceError::Internal)
+}
+
+/// Map an `ActionOutcome` from `service::actions::contacts::*` to the
+/// wire-friendly `WritebackOutcome`. `Failed` becomes a `ServiceError`
+/// (the local DB write itself failed - the caller never sees a
+/// `WritebackOutcome::Failed`); `Success` and `LocalOnly` map 1:1.
+/// `NoOp` is unreachable from the contacts pipeline today but is
+/// folded into `Success` for forward-compatibility.
+fn outcome_to_writeback(outcome: ActionOutcome) -> Result<WritebackOutcome, ServiceError> {
+    match outcome {
+        ActionOutcome::Success | ActionOutcome::NoOp => Ok(WritebackOutcome::Success),
+        ActionOutcome::LocalOnly { reason, retryable } => Ok(WritebackOutcome::LocalOnly {
+            reason: reason.user_message(),
+            retryable,
+        }),
+        ActionOutcome::Failed { error } => Err(ServiceError::Internal(error.user_message())),
+    }
 }

@@ -12,7 +12,7 @@ use crate::account::{
     AccountUpdateTokensParams,
 };
 use crate::contacts::{
-    ContactGroupDeleteParams, ContactGroupSaveParams, ContactSaveParams,
+    ContactDeleteParams, ContactGroupDeleteParams, ContactGroupSaveParams, ContactSaveParams,
 };
 use crate::internal::{
     DecryptForStorageParams, EncryptForStorageParams, ReadBootstrapSnapshotsParams,
@@ -211,14 +211,40 @@ pub enum RequestParams {
     ///
     /// 5 s timeout: handler is one bounded transaction.
     ContactsGroupDelete { params: ContactGroupDeleteParams },
-    /// Phase 6a-part-2: UPSERT one contact row. Used by both the
-    /// settings single-contact save path and the bulk-import path
-    /// (the latter issues N calls). UI / import path always pre-
+    /// Phase 6a-part-2: UPSERT one contact row, local-only. Used by
+    /// the bulk-import path (N calls). UI / import path always pre-
     /// generates the id, so the underlying `save_contact_sync` is a
-    /// true UPSERT.
+    /// true UPSERT. **No provider write-back** - imports run at
+    /// volume and per-row HTTPS would dominate. The single-contact
+    /// settings path uses `ContactsContactSaveWithWriteback`.
     ///
     /// 5 s timeout: handler is one bounded transaction.
     ContactsContactSave { params: ContactSaveParams },
+    /// Phase 6d-A: full single-contact save pipeline including
+    /// provider write-back (JMAP / Google People / Graph) for synced
+    /// contacts. Local UPSERT runs first; on local-leg failure the
+    /// handler returns `ServiceError`. On provider-leg failure the
+    /// ack carries `WritebackOutcome::LocalOnly { reason }` - the
+    /// local row is kept, the user-visible state is degraded but not
+    /// lost. CardDAV remains a stub returning `LocalOnly`. Replaces
+    /// the pre-6d `service::actions::contacts::save_contact` UI-side
+    /// call routed through `action_ctx`.
+    ///
+    /// 30 s timeout: provider HTTPS round-trip dominates the wall
+    /// time on a slow link; the local leg is sub-millisecond.
+    ContactsContactSaveWithWriteback { params: ContactSaveParams },
+    /// Phase 6d-A: full single-contact delete pipeline. Provider-
+    /// first for synced JMAP / Google / Graph (matches the pre-6d
+    /// UI-side behavior). Provider failure short-circuits before the
+    /// local delete and surfaces as `ServiceError`; the local row
+    /// stays intact. CardDAV stub returns `LocalOnly`; local-only
+    /// contacts (`source = "user"`) delete locally and return
+    /// `Success`. Replaces the pre-6d
+    /// `service::actions::contacts::delete_contact` UI-side call.
+    ///
+    /// 30 s timeout: same shape as the writeback save; provider
+    /// HTTPS dominates.
+    ContactsContactDelete { params: ContactDeleteParams },
     /// Phase 6a: partial-update an account row's editable metadata
     /// fields. Each Option is "no change" if absent, else "set to
     /// value." Out of scope: provider tokens / mailbox passwords -
@@ -394,6 +420,10 @@ impl RequestParams {
             Self::ContactsGroupSave { .. } => "contacts.group_save",
             Self::ContactsGroupDelete { .. } => "contacts.group_delete",
             Self::ContactsContactSave { .. } => "contacts.contact_save",
+            Self::ContactsContactSaveWithWriteback { .. } => {
+                "contacts.contact_save_with_writeback"
+            }
+            Self::ContactsContactDelete { .. } => "contacts.contact_delete",
             Self::AccountUpdate { .. } => "account.update",
             Self::AccountReorder { .. } => "account.reorder",
             Self::AccountCreate { .. } => "account.create",
@@ -448,6 +478,13 @@ impl RequestParams {
             // realistic attachment sizes (gigabyte-class hashes in a
             // few seconds on commodity hardware).
             Self::ActionSend { .. } => RequestTimeoutKind::Finite(Duration::from_secs(30)),
+            // Phase 6d-A: provider HTTPS round-trip dominates. Same
+            // shape as ActionSend - the local DB leg is sub-ms; the
+            // upstream call is the slow part.
+            Self::ContactsContactSaveWithWriteback { .. }
+            | Self::ContactsContactDelete { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(30))
+            }
             // Handler-only budget: enqueue + spawn (or look up an
             // existing runner and return the ack). No network or DB
             // work in the handler path.
@@ -576,6 +613,10 @@ impl RequestParams {
             Self::ContactsGroupSave { params } => serde_json::json!({ "params": params }),
             Self::ContactsGroupDelete { params } => serde_json::json!({ "params": params }),
             Self::ContactsContactSave { params } => serde_json::json!({ "params": params }),
+            Self::ContactsContactSaveWithWriteback { params } => {
+                serde_json::json!({ "params": params })
+            }
+            Self::ContactsContactDelete { params } => serde_json::json!({ "params": params }),
             Self::AccountUpdate { params } => serde_json::json!({ "params": params }),
             Self::AccountReorder { params } => serde_json::json!({ "params": params }),
             Self::AccountCreate { params } => serde_json::json!({ "params": params }),
@@ -785,6 +826,24 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("contacts.contact_save params: {e}"))?;
                 Ok(Self::ContactsContactSave { params: p.params })
+            }
+            "contacts.contact_save_with_writeback" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: ContactSaveParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("contacts.contact_save_with_writeback params: {e}"))?;
+                Ok(Self::ContactsContactSaveWithWriteback { params: p.params })
+            }
+            "contacts.contact_delete" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: ContactDeleteParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("contacts.contact_delete params: {e}"))?;
+                Ok(Self::ContactsContactDelete { params: p.params })
             }
             "account.update" => {
                 #[derive(Deserialize)]
@@ -1685,6 +1744,97 @@ mod tests {
     fn contacts_group_delete_round_trips_from_method_params() {
         let original = RequestParams::ContactsGroupDelete {
             params: ContactGroupDeleteParams { id: "grp-9".into() },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    // -- Phase 6d-A: contact save / delete with provider write-back ----
+
+    fn sample_contact_save() -> ContactSaveParams {
+        ContactSaveParams {
+            id: "c-1".into(),
+            email: "alice@example.com".into(),
+            display_name: Some("Alice".into()),
+            email2: None,
+            phone: Some("+1-555-0100".into()),
+            company: Some("Acme".into()),
+            notes: None,
+            account_id: Some("acc-1".into()),
+            account_color: None,
+            groups: Vec::new(),
+            source: Some("google".into()),
+            server_id: Some("people/c123".into()),
+        }
+    }
+
+    #[test]
+    fn contacts_contact_save_with_writeback_method_name_is_dotted() {
+        let p = RequestParams::ContactsContactSaveWithWriteback {
+            params: sample_contact_save(),
+        };
+        assert_eq!(p.method_name(), "contacts.contact_save_with_writeback");
+    }
+
+    #[test]
+    fn contacts_contact_save_with_writeback_timeout_is_thirty_seconds() {
+        let p = RequestParams::ContactsContactSaveWithWriteback {
+            params: sample_contact_save(),
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(30)),
+        );
+    }
+
+    #[test]
+    fn contacts_contact_save_with_writeback_does_not_bypass_admission() {
+        let p = RequestParams::ContactsContactSaveWithWriteback {
+            params: sample_contact_save(),
+        };
+        assert!(!p.bypasses_admission());
+    }
+
+    #[test]
+    fn contacts_contact_save_with_writeback_round_trips_from_method_params() {
+        let original = RequestParams::ContactsContactSaveWithWriteback {
+            params: sample_contact_save(),
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn contacts_contact_delete_method_name_is_dotted() {
+        let p = RequestParams::ContactsContactDelete {
+            params: ContactDeleteParams { id: "c-9".into() },
+        };
+        assert_eq!(p.method_name(), "contacts.contact_delete");
+    }
+
+    #[test]
+    fn contacts_contact_delete_timeout_is_thirty_seconds() {
+        let p = RequestParams::ContactsContactDelete {
+            params: ContactDeleteParams { id: "c-9".into() },
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(30)),
+        );
+    }
+
+    #[test]
+    fn contacts_contact_delete_round_trips_from_method_params() {
+        let original = RequestParams::ContactsContactDelete {
+            params: ContactDeleteParams { id: "c-9".into() },
         };
         let parsed = RequestParams::from_method_params(
             original.method_name(),

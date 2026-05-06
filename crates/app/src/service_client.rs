@@ -9,9 +9,10 @@ use service_api::{
     AccountCreateAck, AccountCreateParams, AccountDeleteAck, AccountDeleteParams,
     AccountReorderAck, AccountReorderEntry, AccountReorderParams, AccountUpdateAck,
     AccountUpdateParams, AccountUpdateTokensAck, AccountUpdateTokensParams, AttachmentFetchAck,
-    AttachmentFetchParams, ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck,
-    ContactGroupSaveParams, ContactSaveAck, ContactSaveParams, OauthExchangeCodeAck,
-    OauthExchangeCodeParams,
+    AttachmentFetchParams, ContactDeleteAck, ContactDeleteParams, ContactGroupDeleteAck,
+    ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams, ContactSaveAck,
+    ContactSaveParams, ContactSaveWithWritebackAck, OauthExchangeCodeAck, OauthExchangeCodeParams,
+    WritebackOutcome,
     DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,
     PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAck,
     PinnedSearchDeleteAllAck, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,
@@ -1161,15 +1162,54 @@ impl ServiceClient {
     }
 
     /// Phase 6a-part-2: UPSERT one contact row via the
-    /// `contacts.contact_save` IPC. Used by both the UI single-
-    /// contact save handler and the bulk-import path; the import
-    /// path issues N calls and logs + continues on individual
-    /// failures.
-    pub async fn save_contact(&self, params: ContactSaveParams) -> Result<(), ClientError> {
+    /// `contacts.contact_save` IPC. **Local-only** - no provider
+    /// write-back. Used by the bulk-import path (N calls, log + continue
+    /// on individual failure) and any caller that does not want to issue
+    /// HTTPS per row. The settings-panel single-contact save uses
+    /// `save_contact_with_writeback` instead.
+    ///
+    /// Renamed from `save_contact` in Phase 6d-A so call sites
+    /// explicitly choose between the local-only and writeback paths.
+    pub async fn save_contact_local_only(
+        &self,
+        params: ContactSaveParams,
+    ) -> Result<(), ClientError> {
         let _ack: ContactSaveAck = self
             .request(RequestParams::ContactsContactSave { params })
             .await?;
         Ok(())
+    }
+
+    /// Phase 6d-A: full single-contact save pipeline including
+    /// provider write-back (JMAP / Google People / Graph) for synced
+    /// contacts. Replaces the pre-6d UI-side
+    /// `service::actions::contacts::save_contact` call routed through
+    /// `action_ctx`. Returns the `WritebackOutcome` so the caller can
+    /// distinguish a clean save (`Success`) from a degraded one
+    /// (`LocalOnly` - row committed locally, provider not notified).
+    /// A local-leg failure surfaces as `ClientError`.
+    pub async fn save_contact_with_writeback(
+        &self,
+        params: ContactSaveParams,
+    ) -> Result<WritebackOutcome, ClientError> {
+        let ack: ContactSaveWithWritebackAck = self
+            .request(RequestParams::ContactsContactSaveWithWriteback { params })
+            .await?;
+        Ok(ack.writeback)
+    }
+
+    /// Phase 6d-A: full single-contact delete pipeline. Provider-
+    /// first for synced JMAP / Google / Graph contacts; provider
+    /// failure surfaces as `ClientError` and the local row stays.
+    /// CardDAV stub returns `LocalOnly`. Local-only contacts delete
+    /// locally and return `Success`.
+    pub async fn delete_contact(&self, id: String) -> Result<WritebackOutcome, ClientError> {
+        let ack: ContactDeleteAck = self
+            .request(RequestParams::ContactsContactDelete {
+                params: ContactDeleteParams { id },
+            })
+            .await?;
+        Ok(ack.writeback)
     }
 
     /// Phase 6a: partial-update an account row's editable metadata

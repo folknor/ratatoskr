@@ -124,6 +124,12 @@ pub(crate) async fn dispatch(
         RequestParams::ContactsContactSave { params } => {
             contacts::handle_contact_save(&boot_state, params).await
         }
+        RequestParams::ContactsContactSaveWithWriteback { params } => {
+            contacts::handle_contact_save_with_writeback(&boot_state, params).await
+        }
+        RequestParams::ContactsContactDelete { params } => {
+            contacts::handle_contact_delete(&boot_state, params).await
+        }
         RequestParams::AccountUpdateTokens { params } => {
             account::handle_update_tokens(&boot_state, params).await
         }

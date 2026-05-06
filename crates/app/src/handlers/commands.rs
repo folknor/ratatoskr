@@ -90,12 +90,6 @@ impl ReadyApp {
         }
     }
 
-    /// Get a clone of the action context, or `None` if the action service
-    /// is not initialized (degraded mode - stores failed at boot).
-    pub(crate) fn action_ctx(&self) -> Option<service::actions::ActionContext> {
-        self.action_ctx.as_ref().cloned()
-    }
-
     pub(crate) fn handle_email_action(
         &mut self,
         intent: crate::action_resolve::MailActionIntent,

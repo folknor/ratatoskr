@@ -29,26 +29,6 @@ impl Db {
         self.inner.read()
     }
 
-    /// **Phase 6c-pending write-conn escape hatch.**
-    ///
-    /// The single writable-connection accessor that survives Phase
-    /// 6a's lockdown, and the only allow-listed write-surface call
-    /// site in the app crate (gated by the symbol pattern in
-    /// `scripts/check_app_write_surface.sh`). Used by the
-    /// `cal::actions` ActionContext construction in `app.rs`; Phase
-    /// 6c relocates calendar event mutations Service-side and
-    /// removes both this accessor and the `ActionContext` itself.
-    ///
-    /// `Db::with_write_conn`, `Db::with_write_conn_sync`, and the
-    /// old `Db::write_db_state` are deleted as of Phase 6a-part-2.
-    /// Adding a new caller of this method requires updating the
-    /// allow-list in the lockdown script and is a deliberate
-    /// regression of the Service-side-write invariant - prefer an
-    /// IPC.
-    pub fn phase_6c_pending_write_state(&self) -> ReadDbState {
-        self.inner.write()
-    }
-
     pub async fn with_conn<F, T>(&self, f: F) -> Result<T, String>
     where
         F: FnOnce(&Connection) -> Result<T, String> + Send + 'static,

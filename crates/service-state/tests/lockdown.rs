@@ -1,22 +1,23 @@
 //! Global write-half lockdown gate: app must not reach service-state.
 //!
-//! The app crate's `Db` has a single writable-connection accessor:
-//! `phase_6c_pending_write_state`, used by the `action_ctx` field for
-//! the contacts handlers' provider write-back path. That path uses
-//! `ReadDbState` (`db` crate), not `WriteDbState` (`service-state`
-//! crate); a future migration of contacts Service-side will close
-//! it. Phase 6b layers a Cargo dependency check on top: the app
-//! crate must not depend on `service-state` directly **or
-//! transitively**. Without any such path, `WriteDbState`,
+//! Every UI-side write surface in `crates/app/src/` routes through a
+//! Service IPC. Phase 6a/6b relocated the bulk of those surfaces;
+//! Phase 6c relocated calendar event mutations; Phase 6d-A
+//! relocated the contacts pipeline and deleted the last allow-listed
+//! writable-connection accessor (`Db::phase_6c_pending_write_state`)
+//! along with the `app.action_ctx` field that consumed it.
+//!
+//! Phase 6b's direct-dep check + Phase 6c-11's `app -> cal ->
+//! service-state` transitive check together close every UI-reachable
+//! path that the workspace shape allowed at the time. The strict
+//! transitive variant (`app -> ... -> service-state` via *any*
+//! path-dep chain except through `service`) is the Phase 6d-C goal:
+//! after the structural moves in Phase 6d-B (`SyncProviderCtx` out of
+//! `common`, `sync` split into pure-logic + persistence halves,
+//! provider sync impls relocated to a sibling crate), `WriteDbState`,
 //! `BodyStoreWriteState`, `InlineImageStoreWriteState`, and
 //! `SearchWriteHandle` are unreachable from `crates/app/src/`
 //! regardless of the constructors' Rust visibility.
-//!
-//! Phase 6b shipped the direct-dep check; the transitive variant
-//! (`app -> cal -> service-state`) was deferred until Phase 6c
-//! removed the `cal::actions` UI surface. Phase 6c-10 dropped the
-//! `cal` dep from `app/Cargo.toml`; Phase 6c-11 (this commit)
-//! enables the transitive check.
 //!
 //! Why a Cargo.toml lint instead of a Rust visibility flip: the
 //! service crate (also a separate crate from `service-state`)
@@ -24,8 +25,7 @@
 //! Flipping the constructors to `pub(crate)` would block service's
 //! boot path, and there is no Rust visibility token that says
 //! "visible to the service crate but not the app crate."
-//! Cargo-toml-level enforcement is the practical equivalent for
-//! the phase 6b/c invariant.
+//! Cargo-toml-level enforcement is the practical equivalent.
 
 use std::path::PathBuf;
 

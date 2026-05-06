@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use iced::Task;
+use service_api::WritebackOutcome;
 
 use crate::db::{ContactEntry, Db};
 use crate::pop_out::PopOutMessage;
@@ -36,57 +37,46 @@ impl ReadyApp {
     }
 
     pub(crate) fn handle_save_contact(&self, entry: ContactEntry) -> Task<Message> {
-        let Some(ctx) = self.action_ctx() else {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("contacts.contact_save_with_writeback: no ServiceClient yet; ignoring save");
             return Task::none();
         };
         let db = Arc::clone(&self.db);
         let filter = self.settings.contact_filter.clone();
-
-        let input = service::actions::contacts::ContactSaveInput {
-            id: entry.id,
-            email: entry.email,
-            display_name: entry.display_name,
-            email2: entry.email2,
-            phone: entry.phone,
-            company: entry.company,
-            notes: entry.notes,
-            account_id: entry.account_id,
-            source: entry.source,
-            server_id: entry.server_id,
-        };
+        let params = contact_entry_to_save_params(entry);
 
         Task::perform(
             async move {
-                let outcome = service::actions::contacts::save_contact(&ctx, input).await;
-                // Reload contacts regardless of outcome (local save succeeded
-                // for Success and LocalOnly, failed for Failed)
+                let result = client.save_contact_with_writeback(params).await;
+                // Reload contacts regardless of outcome - on Success
+                // and LocalOnly the local row landed; on a wire/local
+                // failure the list state is unchanged but reloading is
+                // harmless and keeps the panel in sync with the DB.
                 let contacts = db.get_contacts_for_settings(filter).await;
-                (outcome, contacts)
+                (result, contacts)
             },
-            |(outcome, contacts)| {
-                use service::actions::ActionOutcome;
-                match outcome {
-                    ActionOutcome::Failed { error } => {
-                        log::error!("Contact save failed: {error}");
-                        Message::Settings(SettingsMessage::ContactSaved(Err(error.user_message())))
-                    }
-                    ActionOutcome::LocalOnly { reason, .. } => {
-                        // Local save succeeded - reload list so the contact appears.
-                        // The degraded state (provider not notified) is logged.
-                        // When Settings UI gains a status area, surface reason.user_message().
-                        log::warn!("Contact save local-only: {reason}");
-                        Message::Settings(SettingsMessage::ContactsLoaded(contacts))
-                    }
-                    ActionOutcome::Success | ActionOutcome::NoOp => {
-                        Message::Settings(SettingsMessage::ContactsLoaded(contacts))
-                    }
+            |(result, contacts)| match result {
+                Ok(WritebackOutcome::Success) => {
+                    Message::Settings(SettingsMessage::ContactsLoaded(contacts))
+                }
+                Ok(WritebackOutcome::LocalOnly { reason, .. }) => {
+                    // Local save committed; provider not notified.
+                    // Logged here; surface in Settings status area when
+                    // it lands.
+                    log::warn!("Contact save local-only: {reason}");
+                    Message::Settings(SettingsMessage::ContactsLoaded(contacts))
+                }
+                Err(e) => {
+                    log::error!("Contact save failed: {e}");
+                    Message::Settings(SettingsMessage::ContactSaved(Err(e.to_string())))
                 }
             },
         )
     }
 
     pub(crate) fn handle_delete_contact(&self, id: String) -> Task<Message> {
-        let Some(ctx) = self.action_ctx() else {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("contacts.contact_delete: no ServiceClient yet; ignoring delete");
             return Task::none();
         };
         let db = Arc::clone(&self.db);
@@ -94,47 +84,34 @@ impl ReadyApp {
 
         Task::perform(
             async move {
-                let outcome = service::actions::contacts::delete_contact(&ctx, &id).await;
-                match outcome {
-                    service::actions::ActionOutcome::Failed { .. } => {
-                        // Provider-first delete failed (e.g. JMAP) - contact not
-                        // deleted locally. Don't reload (nothing changed).
-                        (outcome, None)
-                    }
-                    _ => {
-                        // Success or LocalOnly - contact deleted locally, reload list
-                        let contacts = db.get_contacts_for_settings(filter).await.ok();
-                        (outcome, contacts)
+                let result = client.delete_contact(id).await;
+                // Provider-first failures surface as Err here and the
+                // local row is untouched - skip the reload.
+                let contacts = match &result {
+                    Err(_) => None,
+                    Ok(_) => db.get_contacts_for_settings(filter).await.ok(),
+                };
+                (result, contacts)
+            },
+            |(result, contacts)| match result {
+                Ok(WritebackOutcome::Success) => {
+                    if let Some(list) = contacts {
+                        Message::Settings(SettingsMessage::ContactsLoaded(Ok(list)))
+                    } else {
+                        Message::Settings(SettingsMessage::ContactDeleted(Ok(())))
                     }
                 }
-            },
-            |(outcome, contacts)| {
-                use service::actions::ActionOutcome;
-                match outcome {
-                    ActionOutcome::Failed { error } => {
-                        log::error!("Contact delete failed: {error}");
-                        Message::Settings(SettingsMessage::ContactDeleted(
-                            Err(error.user_message()),
-                        ))
+                Ok(WritebackOutcome::LocalOnly { reason, .. }) => {
+                    log::warn!("Contact delete local-only: {reason}");
+                    if let Some(list) = contacts {
+                        Message::Settings(SettingsMessage::ContactsLoaded(Ok(list)))
+                    } else {
+                        Message::Settings(SettingsMessage::ContactDeleted(Ok(())))
                     }
-                    ActionOutcome::LocalOnly { reason, .. } => {
-                        // Local delete succeeded - reload list so the contact disappears.
-                        // The degraded state (provider not notified) is logged.
-                        // When Settings UI gains a status area, surface reason.user_message().
-                        log::warn!("Contact delete local-only: {reason}");
-                        if let Some(list) = contacts {
-                            Message::Settings(SettingsMessage::ContactsLoaded(Ok(list)))
-                        } else {
-                            Message::Settings(SettingsMessage::ContactDeleted(Ok(())))
-                        }
-                    }
-                    ActionOutcome::Success | ActionOutcome::NoOp => {
-                        if let Some(list) = contacts {
-                            Message::Settings(SettingsMessage::ContactsLoaded(Ok(list)))
-                        } else {
-                            Message::Settings(SettingsMessage::ContactDeleted(Ok(())))
-                        }
-                    }
+                }
+                Err(e) => {
+                    log::error!("Contact delete failed: {e}");
+                    Message::Settings(SettingsMessage::ContactDeleted(Err(e.to_string())))
                 }
             },
         )
@@ -268,9 +245,9 @@ async fn execute_contact_import(
             if update_existing {
                 let entry = build_contact_entry(existing_id, &email, contact, &account_id);
                 client
-                    .save_contact(contact_entry_to_save_params(entry))
+                    .save_contact_local_only(contact_entry_to_save_params(entry))
                     .await
-                    .map_err(|e| format!("save_contact: {e}"))?;
+                    .map_err(|e| format!("save_contact_local_only: {e}"))?;
                 updated += 1;
             } else {
                 skipped_duplicate += 1;
@@ -283,9 +260,9 @@ async fn execute_contact_import(
                 &account_id,
             );
             client
-                .save_contact(contact_entry_to_save_params(entry))
+                .save_contact_local_only(contact_entry_to_save_params(entry))
                 .await
-                .map_err(|e| format!("save_contact: {e}"))?;
+                .map_err(|e| format!("save_contact_local_only: {e}"))?;
             imported += 1;
         }
     }
