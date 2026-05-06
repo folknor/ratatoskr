@@ -218,11 +218,11 @@ pub async fn jmap_initial_sync(
         Err(e) => log::warn!("[JMAP] Contacts initial sync failed for account {account_id}: {e}"),
     }
 
-    // Phase 5: Calendar sync
-    match super::calendar_sync::sync_calendars(client, account_id, ctx.db).await {
-        Ok(()) => log::info!("[JMAP] Initial calendar sync complete for account {account_id}"),
-        Err(e) => log::warn!("[JMAP] Calendar initial sync failed for account {account_id}: {e}"),
-    }
+    // Phase 5: Calendar sync now flows through `CalendarRuntime` via the
+    // JMAP arm in `cal::sync::calendar_sync_account_impl`. The bypass
+    // call that used to live here has been removed; the post-account-add
+    // path in the UI fires `calendar.start_account_sync` so initial sync
+    // still happens at the same moment, just through the runtime.
 
     emit_progress(&ctx, "done", fetched, total_u64);
 
@@ -411,11 +411,10 @@ pub async fn jmap_delta_sync(
         Err(e) => log::warn!("[JMAP] Contacts delta sync failed for account {account_id}: {e}"),
     }
 
-    // 5. Calendar delta sync
-    match super::calendar_sync::sync_calendars(client, account_id, ctx.db).await {
-        Ok(()) => log::debug!("[JMAP] Calendar delta sync complete for account {account_id}"),
-        Err(e) => log::warn!("[JMAP] Calendar delta sync failed for account {account_id}: {e}"),
-    }
+    // 5. Calendar delta sync now flows through `CalendarRuntime` via
+    // the JMAP arm in `cal::sync::calendar_sync_account_impl`. The
+    // 5-min `Message::SyncTick` kick triggers `calendar.kick`, which
+    // staleness-gates and then dispatches per-account runners.
 
     log::info!(
         "[JMAP] Delta sync complete for account {account_id}: {} new inbox, {} threads affected",

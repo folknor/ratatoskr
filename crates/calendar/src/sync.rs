@@ -4,6 +4,7 @@ use tokio_util::sync::CancellationToken;
 
 use gmail::client::GmailState;
 use graph::client::GraphState;
+use jmap::client::JmapState;
 use rtsk::db::ReadDbState;
 use rtsk::db::queries_extra::{
     CalendarEventRow, delete_calendar_event_by_remote_id, get_calendar_id_by_remote_id,
@@ -34,6 +35,7 @@ pub async fn calendar_sync_account_impl(
     db: &WriteDbState,
     gmail: &GmailState,
     graph: &GraphState,
+    jmap: &JmapState,
     cancellation_token: &CancellationToken,
 ) -> CalendarSyncOutcome {
     if cancellation_token.is_cancelled() {
@@ -83,6 +85,8 @@ pub async fn calendar_sync_account_impl(
                         || (provider == "caldav" && has_caldav_url)
                     {
                         Some("caldav")
+                    } else if calendar_provider.as_deref() == Some("jmap") || provider == "jmap" {
+                        Some("jmap")
                     } else {
                         None
                     }
@@ -116,6 +120,16 @@ pub async fn calendar_sync_account_impl(
                 account_id,
                 db,
                 gmail.encryption_key(),
+                cancellation_token,
+                &mut mutated,
+            )
+            .await
+        }
+        Some("jmap") => {
+            super::jmap::sync_jmap_calendar_account(
+                account_id,
+                db,
+                jmap,
                 cancellation_token,
                 &mut mutated,
             )
@@ -314,6 +328,7 @@ async fn sync_google_calendar_account(
             calendar.sync_token,
             db,
             &client,
+            cancellation_token,
         )
         .await?;
         apply_calendar_sync_result_impl(db, account_id, &calendar.remote_id, sync_result).await?;
@@ -345,6 +360,7 @@ async fn sync_graph_calendar_account(
             calendar.sync_token,
             db,
             &client,
+            cancellation_token,
         )
         .await?;
         apply_calendar_sync_result_impl(db, account_id, &calendar.remote_id, sync_result).await?;

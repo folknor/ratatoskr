@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tokio_util::sync::CancellationToken;
 
 use db::db::ReadDbState;
 
@@ -313,6 +314,7 @@ pub async fn graph_sync_calendar_events(
     db: &ReadDbState,
     calendar_remote_id: &str,
     delta_link: Option<&str>,
+    cancellation_token: &CancellationToken,
 ) -> Result<GraphCalendarSyncResult, String> {
     let me = client.api_path_prefix();
     let enc_cal_id = urlencoding::encode(calendar_remote_id);
@@ -342,6 +344,12 @@ pub async fn graph_sync_calendar_events(
     let mut current_url = initial_url;
 
     loop {
+        // Per-page cancellation checkpoint. Each iteration is a network
+        // round-trip plus an in-memory event mapping pass; check
+        // between rather than mid-RPC.
+        if cancellation_token.is_cancelled() {
+            return Err("calendar sync cancelled".to_string());
+        }
         let page: ODataCollection<GraphEvent> = if current_url.starts_with("http") {
             client.get_absolute(&current_url, db).await?
         } else {

@@ -34,6 +34,7 @@ pub(crate) async fn sync_flags_on_session(
     folder_path: &str,
     account_id: &str,
     db: &ReadDbState,
+    cancellation_token: &CancellationToken,
 ) -> Result<u64, String> {
     // Throttle: only check every FLAG_SYNC_INTERVAL_SECS
     let now = chrono::Utc::now().timestamp();
@@ -51,6 +52,10 @@ pub(crate) async fn sync_flags_on_session(
         return Ok(0);
     }
 
+    if cancellation_token.is_cancelled() {
+        return Err("sync cancelled".to_string());
+    }
+
     // Get local flags
     let aid = account_id.to_string();
     let fp = folder_path.to_string();
@@ -66,6 +71,10 @@ pub(crate) async fn sync_flags_on_session(
         .into_iter()
         .map(|(uid, is_read, is_starred)| (uid, (is_read, is_starred)))
         .collect();
+
+    if cancellation_token.is_cancelled() {
+        return Err("sync cancelled".to_string());
+    }
 
     // Fetch current flags from server (SELECT + UID FETCH handled by callee)
     let server_flags = client::fetch_all_flags(session, folder_path).await?;
@@ -86,6 +95,10 @@ pub(crate) async fn sync_flags_on_session(
     if changes.is_empty() {
         log::debug!("[sync] Non-CONDSTORE flag sync for {folder_path}: no changes");
         return Ok(0);
+    }
+
+    if cancellation_token.is_cancelled() {
+        return Err("sync cancelled".to_string());
     }
 
     log::info!(
@@ -111,9 +124,11 @@ pub async fn sync_flags_without_condstore(
     folder_path: &str,
     account_id: &str,
     db: &ReadDbState,
+    cancellation_token: &CancellationToken,
 ) -> Result<u64, String> {
     let mut session = connect(config).await?;
-    let result = sync_flags_on_session(&mut session, folder_path, account_id, db).await;
+    let result =
+        sync_flags_on_session(&mut session, folder_path, account_id, db, cancellation_token).await;
     let _ = tokio::time::timeout(crate::connection::IMAP_LOGOUT_TIMEOUT, session.logout()).await;
     result
 }

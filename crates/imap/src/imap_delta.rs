@@ -243,6 +243,14 @@ pub async fn imap_delta_sync(
     )
     .await;
 
+    // `run_deletion_detection` returns an empty Vec on cancellation; an
+    // unchecked early return after it would lose the Cancelled signal
+    // (Service maps `Ok` with zero messages to `Completed`). Surface the
+    // cancellation here before the empty-thread early-return paths.
+    if cancellation_token.is_cancelled() {
+        return Err("sync cancelled".to_string());
+    }
+
     if all_threadable.is_empty() && !delta_errors.is_empty() {
         return Err(format!("All folders failed: {}", delta_errors[0]));
     }
@@ -817,7 +825,15 @@ async fn process_folder_delta(
             // Non-CONDSTORE fallback: server doesn't support CONDSTORE, so we
             // periodically fetch all flags and diff against local cache.
             // This covers Exchange IMAP, Courier, hMailServer, etc.
-            match sync_flags_without_condstore(config, &folder.raw_path, account_id, db).await {
+            match sync_flags_without_condstore(
+                config,
+                &folder.raw_path,
+                account_id,
+                db,
+                cancellation_token,
+            )
+            .await
+            {
                 Ok(updated) if updated > 0 => {
                     log::info!(
                         "[sync] Non-CONDSTORE flag sync for {}: {updated} flags updated",
@@ -872,7 +888,15 @@ async fn process_folder_delta(
     // since we can't rely on CHANGEDSINCE to detect changes.
     // Reuse the session that's already open from fetch_uids_on_session above.
     if delta.highest_modseq.is_none() {
-        match sync_flags_on_session(&mut session, &folder.raw_path, account_id, db).await {
+        match sync_flags_on_session(
+            &mut session,
+            &folder.raw_path,
+            account_id,
+            db,
+            cancellation_token,
+        )
+        .await
+        {
             Ok(updated) if updated > 0 => {
                 log::info!(
                     "[sync] Non-CONDSTORE flag sync for {} (with new UIDs): {updated} flags updated",

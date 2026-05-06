@@ -106,6 +106,48 @@ pub fn get_active_account_ids_sync(conn: &rusqlite::Connection) -> Result<Vec<St
         .map_err(|e| e.to_string())
 }
 
+/// Return every account id ordered by `sort_order`. Used by the GAL
+/// kick handler, which iterates all accounts and lets
+/// `refresh_gal_for_account` self-gate unsupported providers via
+/// `Ok(0)`.
+pub fn list_all_account_ids_sync(conn: &rusqlite::Connection) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id FROM accounts ORDER BY sort_order")
+        .map_err(|e| e.to_string())?;
+    stmt.query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+/// Return ids of accounts whose providers can run a calendar sync.
+/// Filters at enumeration time so the calendar kick handler does not
+/// repeatedly start runners for IMAP/JMAP-only accounts (which would
+/// fail through to `"No calendar provider configured for account ..."`
+/// every hour and stamp `last_completed`, producing nuisance log noise).
+///
+/// Mirrors the provider routing in `cal::sync::calendar_sync_account_impl`:
+/// google_api/gmail_api -> Google calendar, graph -> Microsoft, caldav
+/// (any of `calendar_provider`, `provider == 'caldav'` with a configured
+/// url, or an explicit `calendar_provider = 'caldav'`), jmap -> JMAP.
+pub fn list_calendar_capable_account_ids_sync(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id FROM accounts \
+             WHERE calendar_provider IN ('google_api', 'graph', 'caldav', 'jmap') \
+                OR provider IN ('gmail_api', 'graph', 'jmap') \
+                OR (provider = 'caldav' AND caldav_url IS NOT NULL AND caldav_url != '') \
+             ORDER BY sort_order",
+        )
+        .map_err(|e| e.to_string())?;
+    stmt.query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
 pub async fn db_delete_account(db: &ReadDbState, id: String) -> Result<(), String> {
     db.with_conn(move |conn| {
         conn.execute("DELETE FROM accounts WHERE id = ?1", params![id])

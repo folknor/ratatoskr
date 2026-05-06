@@ -8,16 +8,24 @@ use crate::{Message, ReadyApp, load_accounts};
 impl ReadyApp {
     pub(crate) fn handle_add_account_event(&mut self, event: AddAccountEvent) -> Task<Message> {
         match event {
-            AddAccountEvent::AccountAdded(ref _account_id) => {
+            AddAccountEvent::AccountAdded(ref account_id) => {
                 log::info!("Account added successfully");
                 self.add_account_wizard = None;
                 self.no_accounts = false;
                 let db = Arc::clone(&self.db);
                 let load_gen = self.nav_generation.next();
-                Task::perform(
+                // Phase 5 task 9b: kick a calendar sync for the new
+                // account explicitly. The kick-handler staleness gate
+                // would skip it on the first SyncTick (no
+                // last_completed entry yet -> stale), but a direct
+                // request gives us an awaited terminal completion if
+                // any caller wants to chain on it later.
+                let calendar_task = self.dispatch_calendar_sync(account_id.clone());
+                let load_task = Task::perform(
                     async move { (load_gen, load_accounts(db).await) },
                     |(g, result)| Message::AccountsLoaded(g, result),
-                )
+                );
+                Task::batch([load_task, calendar_task])
             }
             AddAccountEvent::ReauthComplete(account_id) => {
                 self.add_account_wizard = None;

@@ -4,6 +4,7 @@ use graph::calendar_sync::{
 };
 use graph::client::GraphClient;
 use rtsk::db::ReadDbState;
+use tokio_util::sync::CancellationToken;
 
 use super::types::{CalendarEventDto, CalendarInfoDto, CalendarSyncResultDto};
 
@@ -34,9 +35,16 @@ pub async fn graph_calendar_sync_events_impl(
     sync_token: Option<String>,
     db: &ReadDbState,
     client: &GraphClient,
+    cancellation_token: &CancellationToken,
 ) -> Result<CalendarSyncResultDto, String> {
-    let result =
-        graph_sync_calendar_events(client, db, calendar_remote_id, sync_token.as_deref()).await?;
+    let result = graph_sync_calendar_events(
+        client,
+        db,
+        calendar_remote_id,
+        sync_token.as_deref(),
+        cancellation_token,
+    )
+    .await?;
 
     let created: Result<Vec<CalendarEventDto>, String> =
         result.created.into_iter().map(graph_event_to_dto).collect();

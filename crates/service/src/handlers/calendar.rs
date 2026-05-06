@@ -79,7 +79,7 @@ pub(crate) async fn handle_calendar_kick(
         return Ok(());
     };
 
-    let account_ids = list_all_account_ids(boot_state).await?;
+    let account_ids = list_calendar_capable_account_ids(boot_state).await?;
     if account_ids.is_empty() {
         return Ok(());
     }
@@ -101,26 +101,19 @@ pub(crate) async fn handle_calendar_kick(
     Ok(())
 }
 
-/// Read all account ids from the DB. Inline because the existing
-/// `accounts_crud` module has many narrower lookups but no "list all
-/// account ids" helper; lifting one would touch read-side query
-/// surfaces unrelated to Phase 5.
-async fn list_all_account_ids(boot_state: &Arc<BootSharedState>) -> Result<Vec<String>, String> {
+/// Read calendar-capable account ids from the DB. Filtering at
+/// enumeration is what keeps the kick handler from re-failing
+/// IMAP/JMAP-only accounts every hour through the
+/// `"No calendar provider configured"` path. The shared helper lives in
+/// `db::queries_extra::list_calendar_capable_account_ids_sync`.
+async fn list_calendar_capable_account_ids(
+    boot_state: &Arc<BootSharedState>,
+) -> Result<Vec<String>, String> {
     let Some(conn) = boot_state.db_conn() else {
         return Err("calendar.kick: db connection not available".into());
     };
     let read_db = db::db::ReadDbState::from_arc(conn);
     read_db
-        .with_conn(|conn| {
-            let mut stmt = conn
-                .prepare("SELECT id FROM accounts ORDER BY sort_order")
-                .map_err(|e| e.to_string())?;
-            let rows = stmt
-                .query_map([], |row| row.get::<_, String>(0))
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?;
-            Ok(rows)
-        })
+        .with_conn(db::db::queries_extra::list_calendar_capable_account_ids_sync)
         .await
 }

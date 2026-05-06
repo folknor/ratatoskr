@@ -363,7 +363,11 @@ impl ReadyApp {
             Message::ToggleSidebar => Task::none(),
             Message::FocusSearch => self.update(Message::FocusSearchBar),
             Message::ShowHelp => Task::none(),
-            Message::SyncCurrentFolder => self.sync_all_accounts(),
+            Message::SyncCurrentFolder => {
+                // Manual "sync now" bypasses staleness gates: explicit
+                // request fan-out for both email and calendar.
+                Task::batch([self.sync_all_accounts(), self.calendar_sync_all_accounts()])
+            }
             Message::SyncTick => {
                 // Phase 5 task 10: SyncTick collapses to three notifications +
                 // one request fan-out. Calendar and GAL both relocated

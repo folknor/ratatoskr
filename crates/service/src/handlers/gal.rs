@@ -32,12 +32,13 @@
 //! ## Interaction with the notification-drain bound
 //!
 //! `refresh_gal_for_account` performs DB writes via
-//! `tokio::task::spawn_blocking` (`crates/core/src/contacts/gal.rs:212`).
-//! If the consolidated drain's notification-drain bound (Phase 5 task 7)
-//! aborts a wedged GAL handler, the *outer* async future is dropped but
-//! the blocking closure runs to completion regardless. Acceptable
-//! because GAL writes are bounded and idempotent. Any future
-//! abortable notification handler must satisfy the same contract.
+//! `tokio::task::spawn_blocking` (inside `ReadDbState::with_conn`,
+//! `crates/db/src/db/mod.rs`). If the consolidated drain's
+//! notification-drain bound (Phase 5 task 7) aborts a wedged GAL
+//! handler, the *outer* async future is dropped but the blocking
+//! closure runs to completion regardless. Acceptable because GAL
+//! writes are bounded and idempotent. Any future abortable
+//! notification handler must satisfy the same contract.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -67,7 +68,9 @@ pub(crate) async fn handle_gal_kick(boot_state: &Arc<BootSharedState>) -> Result
     };
     let read_db = db::db::ReadDbState::from_arc(conn);
 
-    let account_ids = list_all_account_ids(&read_db).await?;
+    let account_ids = read_db
+        .with_conn(db::db::queries_extra::list_all_account_ids_sync)
+        .await?;
     if account_ids.is_empty() {
         return Ok(());
     }
@@ -97,18 +100,3 @@ pub(crate) async fn handle_gal_kick(boot_state: &Arc<BootSharedState>) -> Result
     Ok(())
 }
 
-async fn list_all_account_ids(read_db: &db::db::ReadDbState) -> Result<Vec<String>, String> {
-    read_db
-        .with_conn(|conn| {
-            let mut stmt = conn
-                .prepare("SELECT id FROM accounts ORDER BY sort_order")
-                .map_err(|e| e.to_string())?;
-            let rows = stmt
-                .query_map([], |row| row.get::<_, String>(0))
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?;
-            Ok(rows)
-        })
-        .await
-}

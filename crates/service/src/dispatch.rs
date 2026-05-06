@@ -951,7 +951,7 @@ fn spawn_post_ready_calendar_startup(
         // contract documented on `Notification::service_generation()`.
         let calendar_runtime = Arc::new(crate::calendar::CalendarRuntime::new(
             db_state,
-            encryption_key,
+            &encryption_key,
             notification_tx,
             0,
         ));

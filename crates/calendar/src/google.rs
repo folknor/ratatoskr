@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use tokio_util::sync::CancellationToken;
 
 use gmail::client::GmailClient;
 use rtsk::db::ReadDbState;
@@ -126,6 +127,7 @@ pub async fn google_calendar_sync_events_impl(
     sync_token: Option<String>,
     db: &ReadDbState,
     client: &GmailClient,
+    cancellation_token: &CancellationToken,
 ) -> Result<CalendarSyncResultDto, String> {
     let _ = account_id;
     let http = shared_http_client();
@@ -137,6 +139,12 @@ pub async fn google_calendar_sync_events_impl(
     let mut next_sync_token: Option<String> = None;
 
     loop {
+        // Per-page cancellation checkpoint. Each iteration is a network
+        // round-trip plus an in-memory event mapping pass; check
+        // between rather than mid-RPC.
+        if cancellation_token.is_cancelled() {
+            return Err("calendar sync cancelled".to_string());
+        }
         let mut params = vec![("maxResults", "250".to_string())];
         if let Some(token) = sync_token.as_ref() {
             params.push(("syncToken", token.clone()));

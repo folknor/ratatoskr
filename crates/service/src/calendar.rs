@@ -70,6 +70,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crypto_key::SecretKey;
+use gmail::client::GmailState;
+use graph::client::GraphState;
+use jmap::client::JmapState;
 use service_api::{
     CalendarCancelAck, CalendarChanged, CalendarRunCompleted, CalendarRunId, CalendarStartAck,
     CalendarSyncResult, Notification,
@@ -106,7 +109,16 @@ pub(crate) struct CalendarRuntimeInner {
     /// would buy little; revisit if benchmarks surface a need.
     last_completed: Mutex<HashMap<String, Instant>>,
     pub(crate) db: WriteDbState,
-    pub(crate) encryption_key: SecretKey,
+    /// Per-runtime client registries for Gmail, Graph, and JMAP,
+    /// constructed once at runtime construction so that clients inserted
+    /// during one run can be reused on subsequent runs (the registries
+    /// are an `Arc<RwLock<HashMap<_, _>>>` shared across clones). The
+    /// `ProviderState` retains its own copy of the encryption key, so
+    /// the `SecretKey` passed to `CalendarRuntime::new` is consumed at
+    /// construction time rather than stored on `Inner`.
+    pub(crate) gmail: GmailState,
+    pub(crate) graph: GraphState,
+    pub(crate) jmap: JmapState,
     pub(crate) notification_tx: NotificationSender,
     pub(crate) service_generation: u32,
     /// Concurrency cap on simultaneous runners (see
@@ -126,16 +138,25 @@ pub struct CalendarRuntime {
 impl CalendarRuntime {
     pub fn new(
         db: WriteDbState,
-        encryption_key: SecretKey,
+        encryption_key: &SecretKey,
         notification_tx: NotificationSender,
         service_generation: u32,
     ) -> Self {
+        let key_bytes = *encryption_key.expose();
+        let gmail = gmail::client::new_gmail_state(key_bytes);
+        let graph = graph::client::new_graph_state(key_bytes);
+        let jmap = jmap::client::new_jmap_state(key_bytes);
+        // The bytes live on inside the ProviderState registries (same
+        // shape as every other OAuth-provider setup path); `SecretKey`
+        // ownership stays with the caller.
         Self {
             inner: Arc::new(CalendarRuntimeInner {
                 accounts: Mutex::new(HashMap::new()),
                 last_completed: Mutex::new(HashMap::new()),
                 db,
-                encryption_key,
+                gmail,
+                graph,
+                jmap,
                 notification_tx,
                 service_generation,
                 semaphore: Arc::new(Semaphore::new(DEFAULT_CONCURRENCY_CAP)),
@@ -170,15 +191,17 @@ impl CalendarRuntime {
             return Err("CalendarRuntime is shutting down".into());
         }
 
-        // Opportunistic cleanup of finished entries.
+        // Opportunistic cleanup of finished entries. The `closed`
+        // re-check above guarantees no entry observed here has had its
+        // supervisor taken (only `shutdown` does that, and it sets
+        // `closed` first), so `supervisor.as_ref()` is always `Some`.
         let stale_keys: Vec<String> = map
             .iter()
             .filter_map(|(k, entry)| {
                 let finished = entry
                     .supervisor
                     .as_ref()
-                    .map(JoinHandle::is_finished)
-                    .unwrap_or(true);
+                    .is_none_or(JoinHandle::is_finished);
                 if finished { Some(k.clone()) } else { None }
             })
             .collect();
@@ -395,16 +418,12 @@ async fn run_calendar(
         }
     };
 
-    let mut encryption_key_bytes = [0u8; 32];
-    encryption_key_bytes.copy_from_slice(inner.encryption_key.expose().as_slice());
-    let gmail = gmail::client::new_gmail_state(encryption_key_bytes);
-    let graph = graph::client::new_graph_state(encryption_key_bytes);
-
     let outcome = cal::sync::calendar_sync_account_impl(
         &account_id,
         &inner.db,
-        &gmail,
-        &graph,
+        &inner.gmail,
+        &inner.graph,
+        &inner.jmap,
         &cancellation_token,
     )
     .await;
@@ -492,7 +511,7 @@ mod tests {
         let key = SecretKey::from_bytes([0u8; 32]);
         let (tx, rx) = mpsc::channel::<Vec<u8>>(16);
         let notification_tx = NotificationSender::new(tx);
-        let runtime = CalendarRuntime::new(db, key, notification_tx, 1);
+        let runtime = CalendarRuntime::new(db, &key, notification_tx, 1);
         (runtime, rx)
     }
 

@@ -179,6 +179,28 @@ mod tests {
     }
 
     #[test]
+    fn calendar_start_account_sync_params_round_trips_through_serde() {
+        let params = CalendarStartAccountSyncParams {
+            account_id: "acc-7".into(),
+        };
+        let json = serde_json::to_value(&params).expect("serialize");
+        let recovered: CalendarStartAccountSyncParams =
+            serde_json::from_value(json).expect("deserialize");
+        assert_eq!(params, recovered);
+    }
+
+    #[test]
+    fn calendar_cancel_account_sync_params_round_trips_through_serde() {
+        let params = CalendarCancelAccountSyncParams {
+            account_id: "acc-8".into(),
+        };
+        let json = serde_json::to_value(&params).expect("serialize");
+        let recovered: CalendarCancelAccountSyncParams =
+            serde_json::from_value(json).expect("deserialize");
+        assert_eq!(params, recovered);
+    }
+
+    #[test]
     fn calendar_start_ack_round_trips_through_serde() {
         let ack = CalendarStartAck {
             account_id: "acc-1".into(),

@@ -134,4 +134,53 @@ impl ReadyApp {
         )
     }
 
+    /// Phase 5 task 9b: dispatch an explicit calendar sync request for a
+    /// specific account, bypassing the kick-handler staleness gate.
+    /// Used after account creation, on the manual "sync now" path, and
+    /// (when the action lands) after RSVPs.
+    ///
+    /// Failures - including "No calendar provider configured for
+    /// account ..." for IMAP/JMAP-only accounts that the kick-handler
+    /// already filters out - are logged at debug; the user-facing
+    /// surface stays quiet because the request is best-effort.
+    pub(crate) fn dispatch_calendar_sync(&self, account_id: String) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::debug!(
+                "dispatch_calendar_sync({account_id}): no ServiceClient yet; skipping",
+            );
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                match client.start_calendar_sync(account_id.clone()).await {
+                    Ok(service_api::CalendarSyncResult::Completed)
+                    | Ok(service_api::CalendarSyncResult::Cancelled) => {}
+                    Ok(service_api::CalendarSyncResult::Failed(e)) => {
+                        log::debug!("calendar sync failed for {account_id}: {e}");
+                    }
+                    Err(e) => {
+                        log::debug!("calendar sync request failed for {account_id}: {e}");
+                    }
+                }
+            },
+            |()| Message::Noop,
+        )
+    }
+
+    /// Dispatch an explicit calendar sync for every account in the
+    /// sidebar. The Service runner self-rejects accounts without a
+    /// calendar provider, so the UI does not need to filter the list.
+    pub(crate) fn calendar_sync_all_accounts(&self) -> Task<Message> {
+        let tasks: Vec<Task<Message>> = self
+            .sidebar
+            .accounts
+            .iter()
+            .map(|a| self.dispatch_calendar_sync(a.id.clone()))
+            .collect();
+        if tasks.is_empty() {
+            return Task::none();
+        }
+        Task::batch(tasks)
+    }
+
 }

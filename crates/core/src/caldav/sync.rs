@@ -95,8 +95,15 @@ pub async fn sync_caldav_calendars(
         }
 
         // Sync events for this calendar
-        let (upserted, deleted) =
-            sync_calendar_events(client, db, account_id, &calendar_id, &cal.href).await?;
+        let (upserted, deleted) = sync_calendar_events(
+            client,
+            db,
+            account_id,
+            &calendar_id,
+            &cal.href,
+            cancellation_token,
+        )
+        .await?;
 
         total_upserted += upserted;
         total_deleted += deleted;
@@ -131,6 +138,7 @@ async fn sync_calendar_events(
     account_id: &str,
     calendar_id: &str,
     calendar_href: &str,
+    cancellation_token: &CancellationToken,
 ) -> Result<(usize, usize), String> {
     // List all events on the server (URIs + ETags). The result also carries
     // failed_uris - hrefs the server explicitly reported as failing in the
@@ -233,6 +241,14 @@ async fn sync_calendar_events(
     // upsert out of the per-VEVENT loop and write it once. (Round 3 #28.)
     let mut upserted = 0;
     for (uri, ical_data) in &fetched_icals {
+        // Per-event-batch cancellation checkpoint. Each iteration runs
+        // multiple `with_conn` writes (event upserts, the resource map,
+        // an orphan-override sweep); a calendar with thousands of
+        // events would otherwise spin oblivious to a flipped token.
+        // Same shape as the per-calendar checkpoint one layer up.
+        if cancellation_token.is_cancelled() {
+            return Err("calendar sync cancelled".to_string());
+        }
         let etag = etag_map.get(uri.as_str()).unwrap_or(&"").to_string();
 
         match parse::parse_icalendar(ical_data) {
@@ -561,6 +577,7 @@ pub async fn full_resync_calendar(
     account_id: &str,
     calendar_id: &str,
     calendar_href: &str,
+    cancellation_token: &CancellationToken,
 ) -> Result<(usize, usize), String> {
     // Delete all existing events for this calendar
     db_delete_events_for_calendar(db, calendar_id.to_string()).await?;
@@ -573,7 +590,15 @@ pub async fn full_resync_calendar(
     .await?;
 
     // Now do a fresh sync
-    sync_calendar_events(client, db, account_id, calendar_id, calendar_href).await
+    sync_calendar_events(
+        client,
+        db,
+        account_id,
+        calendar_id,
+        calendar_href,
+        cancellation_token,
+    )
+    .await
 }
 
 #[cfg(test)]
