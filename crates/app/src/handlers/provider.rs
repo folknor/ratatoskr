@@ -159,6 +159,28 @@ impl ReadyApp {
         )
     }
 
+    /// Phase 6b: kick the Service-side attachment-cache eviction
+    /// sweep. Single global LRU sweep gated by an in-memory mutex
+    /// Service-side; orphan-first then cap-bounded LRU. `Drop`-class
+    /// notification - missed kicks self-heal on the next
+    /// `SyncTick`, and the sweep is idempotent.
+    pub(crate) fn kick_attachment_eviction(&self) -> Task<Message> {
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move {
+                if let Err(error) = client
+                    .send_notification(service_api::ClientNotification::AttachmentEvictionKick)
+                    .await
+                {
+                    log::debug!("attachment.eviction_kick send failed: {error}");
+                }
+            },
+            |()| Message::Noop,
+        )
+    }
+
     /// Phase 5 task 9b: dispatch an explicit calendar sync request for a
     /// specific account, bypassing the kick-handler staleness gate.
     /// Used after account creation, on the manual "sync now" path, and

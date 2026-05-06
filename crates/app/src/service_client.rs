@@ -8,9 +8,10 @@ use service_api::{
     JsonRpcErrorObject, JsonRpcRequest, Notification, PROTOCOL_VERSION, ParsedServiceMessage,
     AccountCreateAck, AccountCreateParams, AccountDeleteAck, AccountDeleteParams,
     AccountReorderAck, AccountReorderEntry, AccountReorderParams, AccountUpdateAck,
-    AccountUpdateParams, AccountUpdateTokensAck, AccountUpdateTokensParams, ContactGroupDeleteAck,
-    ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams, ContactSaveAck,
-    ContactSaveParams, OauthExchangeCodeAck, OauthExchangeCodeParams,
+    AccountUpdateParams, AccountUpdateTokensAck, AccountUpdateTokensParams, AttachmentFetchAck,
+    AttachmentFetchParams, ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck,
+    ContactGroupSaveParams, ContactSaveAck, ContactSaveParams, OauthExchangeCodeAck,
+    OauthExchangeCodeParams,
     DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,
     PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAck,
     PinnedSearchDeleteAllAck, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,
@@ -1123,6 +1124,31 @@ impl ServiceClient {
             })
             .await?;
         Ok(ack.id)
+    }
+
+    /// Phase 6b: ensure an attachment's bytes are local in the
+    /// flat cache. Returns the cache-relative path the UI can
+    /// re-open. Bytes never cross the IPC; the open fd is the pin
+    /// against eviction (Linux `unlink` is fd-safe). Cache-miss
+    /// fetches run the provider's `fetch_attachment`, which can be
+    /// slow on large attachments over slow links - the IPC's 60 s
+    /// timeout absorbs that.
+    pub async fn fetch_attachment(
+        &self,
+        account_id: String,
+        message_id: String,
+        attachment_id: String,
+    ) -> Result<AttachmentFetchAck, ClientError> {
+        let ack: AttachmentFetchAck = self
+            .request(RequestParams::AttachmentFetch {
+                params: AttachmentFetchParams {
+                    account_id,
+                    message_id,
+                    attachment_id,
+                },
+            })
+            .await?;
+        Ok(ack)
     }
 
     /// Phase 6b: ship a captured OAuth auth code Service-side for

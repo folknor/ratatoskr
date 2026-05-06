@@ -16,6 +16,7 @@ use crate::contacts::{
 use crate::internal::{
     DecryptForStorageParams, EncryptForStorageParams, ReadBootstrapSnapshotsParams,
 };
+use crate::attachment::AttachmentFetchParams;
 use crate::oauth::OauthExchangeCodeParams;
 use crate::pinned_search::{
     PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,
@@ -319,6 +320,18 @@ pub enum RequestParams {
     /// queued behind heavy traffic. 30 s timeout: provider token
     /// endpoints are slow under load.
     OauthExchangeCode { params: Box<OauthExchangeCodeParams> },
+    /// Phase 6b: cache-miss attachment fetch. Service ensures the
+    /// bytes are present in `attachment_cache/<content_hash>`
+    /// (cache hit -> immediate ack; cache miss -> provider fetch +
+    /// `write_cached` + cache-column update + ack), then returns
+    /// the cache-relative path. Bytes never cross the IPC. UI
+    /// re-opens the file by relative path; the open fd is the pin
+    /// against concurrent eviction (Linux `unlink` is fd-safe).
+    ///
+    /// 60 s timeout: cache-miss path runs the provider's
+    /// fetch_attachment which can be slow on large attachments
+    /// over slow links.
+    AttachmentFetch { params: AttachmentFetchParams },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -374,6 +387,7 @@ impl RequestParams {
             Self::EncryptForStorage { .. } => "internal.encrypt_for_storage",
             Self::DecryptForStorage { .. } => "internal.decrypt_for_storage",
             Self::OauthExchangeCode { .. } => "oauth.exchange_code",
+            Self::AttachmentFetch { .. } => "attachment.fetch",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -467,6 +481,11 @@ impl RequestParams {
             Self::OauthExchangeCode { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(30))
             }
+            // Cache miss runs the provider's fetch_attachment, which
+            // can be slow on large attachments over slow links.
+            Self::AttachmentFetch { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(60))
+            }
             #[cfg(feature = "test-helpers")]
             Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
@@ -544,6 +563,7 @@ impl RequestParams {
             Self::EncryptForStorage { params } => serde_json::json!({ "params": params }),
             Self::DecryptForStorage { params } => serde_json::json!({ "params": params }),
             Self::OauthExchangeCode { params } => serde_json::json!({ "params": params }),
+            Self::AttachmentFetch { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -866,6 +886,15 @@ impl RequestParams {
                 Ok(Self::OauthExchangeCode {
                     params: Box::new(p.params),
                 })
+            }
+            "attachment.fetch" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: AttachmentFetchParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("attachment.fetch params: {e}"))?;
+                Ok(Self::AttachmentFetch { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {
@@ -2127,6 +2156,48 @@ mod tests {
             params: DecryptForStorageParams {
                 ciphertext: "AAAA:BBBB".into(),
             },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    // -- Phase 6b: attachment.fetch wire envelope -------------------------
+
+    fn sample_attachment_fetch_params() -> AttachmentFetchParams {
+        AttachmentFetchParams {
+            account_id: "acct-1".into(),
+            message_id: "msg-1".into(),
+            attachment_id: "att-1".into(),
+        }
+    }
+
+    #[test]
+    fn attachment_fetch_method_name_is_dotted() {
+        let p = RequestParams::AttachmentFetch {
+            params: sample_attachment_fetch_params(),
+        };
+        assert_eq!(p.method_name(), "attachment.fetch");
+    }
+
+    #[test]
+    fn attachment_fetch_timeout_is_sixty_seconds() {
+        let p = RequestParams::AttachmentFetch {
+            params: sample_attachment_fetch_params(),
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(60)),
+        );
+    }
+
+    #[test]
+    fn attachment_fetch_round_trips_from_method_params() {
+        let original = RequestParams::AttachmentFetch {
+            params: sample_attachment_fetch_params(),
         };
         let parsed = RequestParams::from_method_params(
             original.method_name(),

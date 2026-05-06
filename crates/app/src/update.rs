@@ -369,19 +369,29 @@ impl ReadyApp {
                 Task::batch([self.sync_all_accounts(), self.calendar_sync_all_accounts()])
             }
             Message::SyncTick => {
-                // Phase 5 task 10 + Phase 6a: SyncTick collapses to four
-                // notifications + one request fan-out. Calendar, GAL, and
-                // pinned-search expiry all relocated Service-side; the
-                // UI's only role is to fire the cadence, and Service-side
-                // staleness gates (calendar: 1h per-account last_completed;
-                // GAL: 24h cache check; pinned-search: 14-day creation
-                // age) keep the actual work bounded.
+                // Phase 5 task 10 + Phase 6a + 6b: SyncTick collapses to
+                // five notifications + one request fan-out. Calendar,
+                // GAL, pinned-search expiry, and attachment-cache
+                // eviction all relocated Service-side; the UI's only
+                // role is to fire the cadence. Service-side staleness
+                // gates (calendar: 1h per-account last_completed; GAL:
+                // 24h cache check; pinned-search: 14-day creation age;
+                // attachment eviction: 200 MB per-kick reclaim cap)
+                // keep the actual work bounded.
                 let sync_task = self.sync_all_accounts();
                 let pending_task = self.process_pending_ops();
                 let gal_task = self.kick_gal_refresh();
                 let cal_task = self.kick_calendar_sync();
                 let pinned_task = self.kick_pinned_search_expire();
-                Task::batch([sync_task, pending_task, gal_task, cal_task, pinned_task])
+                let attachment_task = self.kick_attachment_eviction();
+                Task::batch([
+                    sync_task,
+                    pending_task,
+                    gal_task,
+                    cal_task,
+                    pinned_task,
+                    attachment_task,
+                ])
             }
             Message::SyncComplete(account_id, result) => {
                 // Phase 3 task 15: per-account "already-in-flight" gating

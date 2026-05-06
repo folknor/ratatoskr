@@ -51,6 +51,18 @@ pub enum ClientNotification {
     /// and the DELETE is idempotent so duplicate kicks are harmless.
     #[serde(rename = "pinned_search.kick")]
     PinnedSearchKick,
+    /// Phase 6b: "The UI's tick fired; please consider sweeping the
+    /// attachment cache." The Service handler runs a single global
+    /// LRU eviction sweep gated by an in-memory `Mutex` (so a slow
+    /// sweep on one tick is not re-entered when the next tick lands
+    /// within `NOTIFY_CAP=4` queued kicks). The sweep drops orphans
+    /// first regardless of age, then evicts in `last_accessed_at`
+    /// order until the cache is under cap, with a per-kick reclaim
+    /// budget so a 50 GB cache reduction does not stall one tick.
+    /// `Drop` class - missed kicks self-heal on the next
+    /// `SyncTick`.
+    #[serde(rename = "attachment.eviction_kick")]
+    AttachmentEvictionKick,
 }
 
 impl ClientNotification {
@@ -60,6 +72,7 @@ impl ClientNotification {
             Self::CalendarKick => "calendar.kick",
             Self::GalKick => "gal.kick",
             Self::PinnedSearchKick => "pinned_search.kick",
+            Self::AttachmentEvictionKick => "attachment.eviction_kick",
         }
     }
 
@@ -68,7 +81,8 @@ impl ClientNotification {
             Self::PendingOpsKick
             | Self::CalendarKick
             | Self::GalKick
-            | Self::PinnedSearchKick => Value::Null,
+            | Self::PinnedSearchKick
+            | Self::AttachmentEvictionKick => Value::Null,
         }
     }
 
@@ -83,7 +97,8 @@ impl ClientNotification {
             Self::PendingOpsKick
             | Self::CalendarKick
             | Self::GalKick
-            | Self::PinnedSearchKick => NotificationClass::Drop,
+            | Self::PinnedSearchKick
+            | Self::AttachmentEvictionKick => NotificationClass::Drop,
         }
     }
 
@@ -104,6 +119,10 @@ impl ClientNotification {
             "pinned_search.kick" => match params {
                 None | Some(Value::Null) => Ok(Self::PinnedSearchKick),
                 Some(_) => Err("pinned_search.kick must have no params".to_string()),
+            },
+            "attachment.eviction_kick" => match params {
+                None | Some(Value::Null) => Ok(Self::AttachmentEvictionKick),
+                Some(_) => Err("attachment.eviction_kick must have no params".to_string()),
             },
             _ => Err(format!("unknown client notification method: {method}")),
         }

@@ -92,7 +92,7 @@ pub fn remove_cached_relative(app_data_dir: &Path, relative_path: &str) -> Resul
 }
 
 /// Decode base64 (standard or URL-safe) to raw bytes.
-pub(crate) fn decode_base64(data: &str) -> Result<Vec<u8>, String> {
+pub fn decode_base64(data: &str) -> Result<Vec<u8>, String> {
     let normalized = data.replace('-', "+").replace('_', "/");
     STANDARD
         .decode(&normalized)

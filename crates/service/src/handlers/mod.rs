@@ -8,6 +8,7 @@ mod gal;
 mod health;
 mod pending_ops_kick;
 mod account;
+mod attachment;
 mod contacts;
 mod internal;
 mod oauth;
@@ -125,6 +126,9 @@ pub(crate) async fn dispatch(
         RequestParams::OauthExchangeCode { params } => {
             oauth::handle_exchange_code(&boot_state, params).await
         }
+        RequestParams::AttachmentFetch { params } => {
+            attachment::handle_fetch(&boot_state, params).await
+        }
         RequestParams::AccountDelete { params } => {
             account::handle_delete(&boot_state, params).await
         }
@@ -163,5 +167,8 @@ pub(crate) async fn dispatch_notification(
         ClientNotification::CalendarKick => calendar::handle_calendar_kick(&boot_state).await,
         ClientNotification::GalKick => gal::handle_gal_kick(&boot_state).await,
         ClientNotification::PinnedSearchKick => pinned_search::handle_kick(&boot_state).await,
+        ClientNotification::AttachmentEvictionKick => {
+            attachment::handle_eviction_kick(&boot_state).await
+        }
     }
 }

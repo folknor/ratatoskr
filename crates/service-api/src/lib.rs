@@ -10,6 +10,7 @@ mod redacted;
 mod request;
 mod response;
 mod account;
+mod attachment;
 mod contacts;
 mod internal;
 mod oauth;
@@ -49,6 +50,7 @@ pub use internal::{
     DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,
     ReadBootstrapSnapshotsAck, ReadBootstrapSnapshotsParams,
 };
+pub use attachment::{AttachmentFetchAck, AttachmentFetchParams};
 pub use oauth::{OauthExchangeCodeAck, OauthExchangeCodeParams};
 pub use pinned_search::{
     PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAck,
