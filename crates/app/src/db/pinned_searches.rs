@@ -1,9 +1,7 @@
 use rtsk::db::pinned_searches::{
-    DbPinnedSearch, db_create_or_update_pinned_search, db_delete_all_pinned_searches,
-    db_delete_pinned_search, db_get_pinned_search_thread_ids, db_get_recent_search_queries,
-    db_get_threads_by_ids, db_list_pinned_searches, db_update_pinned_search,
+    DbPinnedSearch, db_get_pinned_search_thread_ids, db_get_recent_search_queries,
+    db_get_threads_by_ids, db_list_pinned_searches,
 };
-use rtsk::db::queries_extra::db_insert_smart_folder;
 use rtsk::db::types::DbThread;
 
 use super::connection::Db;
@@ -52,32 +50,6 @@ fn db_thread_to_app_thread(t: DbThread) -> Thread {
 }
 
 impl Db {
-    pub async fn create_or_update_pinned_search(
-        &self,
-        query: String,
-        thread_ids: Vec<(String, String)>,
-        scope_account_id: Option<String>,
-    ) -> Result<i64, String> {
-        let db = self.write_db_state();
-        db_create_or_update_pinned_search(&db, query, thread_ids, scope_account_id).await
-    }
-
-    pub async fn update_pinned_search(
-        &self,
-        id: i64,
-        query: String,
-        thread_ids: Vec<(String, String)>,
-        scope_account_id: Option<String>,
-    ) -> Result<(), String> {
-        let db = self.write_db_state();
-        db_update_pinned_search(&db, id, query, thread_ids, scope_account_id).await
-    }
-
-    pub async fn delete_pinned_search(&self, id: i64) -> Result<(), String> {
-        let db = self.write_db_state();
-        db_delete_pinned_search(&db, id).await
-    }
-
     pub async fn list_pinned_searches(&self) -> Result<Vec<PinnedSearch>, String> {
         let db = self.read_db_state();
         Ok(db_list_pinned_searches(&db)
@@ -110,17 +82,5 @@ impl Db {
     pub async fn get_recent_search_queries(&self, limit: usize) -> Result<Vec<String>, String> {
         let db = self.read_db_state();
         db_get_recent_search_queries(&db, limit).await
-    }
-
-    pub async fn delete_all_pinned_searches(&self) -> Result<u64, String> {
-        let db = self.write_db_state();
-        db_delete_all_pinned_searches(&db).await
-    }
-
-    pub async fn create_smart_folder(&self, name: String, query: String) -> Result<i64, String> {
-        let db = self.write_db_state();
-        let id = uuid::Uuid::new_v4().to_string();
-        db_insert_smart_folder(&db, id, name, query, None, None, None).await?;
-        Ok(0)
     }
 }

@@ -11,8 +11,10 @@ mod request;
 mod response;
 mod account;
 mod contacts;
+mod pinned_search;
 mod settings;
 mod signature;
+mod smart_folder;
 mod sync;
 mod thread_ui_state;
 mod version;
@@ -39,11 +41,17 @@ pub use account::{
 pub use contacts::{
     ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
 };
+pub use pinned_search::{
+    PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAck,
+    PinnedSearchDeleteAllAck, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,
+    PinnedSearchUpdateAck, PinnedSearchUpdateParams, PinnedThreadRef,
+};
 pub use settings::{SettingValue, SettingsSetAck, SettingsSetParams};
 pub use signature::{
     SignatureCreateAck, SignatureCreateParams, SignatureDeleteAck, SignatureDeleteParams,
     SignatureReorderAck, SignatureReorderParams, SignatureUpdateAck, SignatureUpdateParams,
 };
+pub use smart_folder::{SmartFolderCreateAck, SmartFolderCreateParams};
 pub use thread_ui_state::{ThreadUiStateSetAck, ThreadUiStateSetParams};
 pub use error::{JsonRpcErrorObject, ServiceError};
 pub use framing::{

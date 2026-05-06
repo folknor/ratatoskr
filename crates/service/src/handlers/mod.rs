@@ -12,6 +12,7 @@ mod contacts;
 mod pinned_search;
 mod settings;
 mod signature;
+mod smart_folder;
 mod sync;
 mod thread_ui_state;
 #[cfg(feature = "test-helpers")]
@@ -97,6 +98,21 @@ pub(crate) async fn dispatch(
         }
         RequestParams::AccountCreate { params } => {
             account::handle_create(&boot_state, params).await
+        }
+        RequestParams::PinnedSearchCreateOrUpdate { params } => {
+            pinned_search::handle_create_or_update(&boot_state, params).await
+        }
+        RequestParams::PinnedSearchUpdate { params } => {
+            pinned_search::handle_update(&boot_state, params).await
+        }
+        RequestParams::PinnedSearchDelete { params } => {
+            pinned_search::handle_delete(&boot_state, params).await
+        }
+        RequestParams::PinnedSearchDeleteAll { params } => {
+            pinned_search::handle_delete_all(&boot_state, params).await
+        }
+        RequestParams::SmartFolderCreate { params } => {
+            smart_folder::handle_create(&boot_state, params).await
         }
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPanic => test_helpers::panic_handle().await,

@@ -138,32 +138,25 @@ pub async fn db_get_smart_folder_by_id(
     .await
 }
 
-pub async fn db_insert_smart_folder(
-    db: &ReadDbState,
-    id: String,
-    name: String,
-    query: String,
-    account_id: Option<String>,
-    icon: Option<String>,
-    color: Option<String>,
+/// Insert a `smart_folders` row. Sync helper called from the
+/// Service-side `smart_folder.create` handler via
+/// `WriteDbState::with_conn`.
+pub fn db_insert_smart_folder_sync(
+    conn: &rusqlite::Connection,
+    id: &str,
+    name: &str,
+    query: &str,
+    account_id: Option<&str>,
+    icon: Option<&str>,
+    color: Option<&str>,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        conn.execute(
-            "INSERT INTO smart_folders (id, account_id, name, query, icon, color)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                id,
-                account_id,
-                name,
-                query,
-                icon.unwrap_or_else(|| "search".to_owned()),
-                color
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
+    conn.execute(
+        "INSERT INTO smart_folders (id, account_id, name, query, icon, color)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![id, account_id, name, query, icon.unwrap_or("search"), color],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 pub async fn db_update_smart_folder(

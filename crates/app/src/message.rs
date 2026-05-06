@@ -70,12 +70,13 @@
 //   ExecuteParameterized | KeyEvent | Escape | Compose | FocusSearch
 //   FocusSearchBar | SearchBlur | SearchQueryChanged | SearchExecute
 //   SearchCompleted | SearchClear | SearchHistoryLoaded | SearchHere
-//   SaveAsSmartFolder | SmartFolderSaved | ShowHelp
+//   SaveAsSmartFolder | SmartFolderCreateAck | ShowHelp
 //
 // Pinned-search and snooze messages: dropped while Booting (the periodic
 // timers will fire again after Booting -> Ready):
 //   PinnedSearchesLoaded | SelectPinnedSearch | DismissPinnedSearch
-//   PinnedSearchDismissed | PinnedSearchPersisted
+//   PinnedSearchDeleteAck | PinnedSearchCreateOrUpdateAck
+//   PinnedSearchUpdateAck | PinnedSearchDeleteAllAck
 //   RefreshPinnedSearch | ClearAllPinnedSearches
 //   SnoozeTick | SnoozeResurfaceComplete
 //
@@ -260,17 +261,43 @@ pub enum Message {
     PinnedSearchesLoaded(Result<Vec<db::PinnedSearch>, String>),
     SelectPinnedSearch(i64),
     DismissPinnedSearch(i64),
-    PinnedSearchDismissed(i64, Result<(), String>),
-    PinnedSearchPersisted(
+    /// `pinned_search.delete` IPC ack. Phase 6a-part-2: dedicated
+    /// per-method ack variant (renamed from `PinnedSearchDismissed`)
+    /// matching the signature CRUD precedent of one ack per IPC.
+    PinnedSearchDeleteAck(i64, Result<(), String>),
+    /// `pinned_search.create_or_update` IPC ack. Phase 6a-part-2:
+    /// dedicated variant covering the create-snapshot and first-save
+    /// path. Routes into the same downstream
+    /// `handle_pinned_search_persisted` helper as
+    /// `PinnedSearchUpdateAck` so behavioural divergence remains
+    /// possible without duplicating dispatch logic.
+    PinnedSearchCreateOrUpdateAck(
         crate::handlers::search::SearchCompletionBehavior,
         Result<i64, String>,
     ),
+    /// `pinned_search.update` IPC ack. Phase 6a-part-2: dedicated
+    /// variant covering the id-keyed update path (refresh / re-pin).
+    PinnedSearchUpdateAck(
+        crate::handlers::search::SearchCompletionBehavior,
+        Result<i64, String>,
+    ),
+    /// `pinned_search.delete_all` IPC ack. Phase 6a-part-2: dedicated
+    /// variant replacing the prior funnel into `Message::Noop` so the
+    /// closing-6a CI lockdown script does not flag it as a missing
+    /// rollback path. UI clears local state pre-IPC; on Err we log and
+    /// rely on next reload to reconcile (staleness-tolerant per the
+    /// signature-reorder precedent).
+    PinnedSearchDeleteAllAck(Result<u64, String>),
     RefreshPinnedSearch(i64),
 
     // Search extras
     SearchHere(String),
     SaveAsSmartFolder(String),
-    SmartFolderSaved(Result<i64, String>),
+    /// `smart_folder.create` IPC ack. Phase 6a-part-2: dedicated
+    /// per-method ack variant (renamed from `SmartFolderSaved`).
+    /// Carries the minted UUID String returned by the Service-side
+    /// handler instead of the previous always-zero `i64`.
+    SmartFolderCreateAck(Result<String, String>),
 
     // Calendar
     Calendar(Box<CalendarMessage>),

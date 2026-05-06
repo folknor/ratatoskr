@@ -8,10 +8,15 @@ use crate::calendar::{
 };
 use crate::account::{AccountCreateParams, AccountReorderParams, AccountUpdateParams};
 use crate::contacts::{ContactGroupDeleteParams, ContactGroupSaveParams};
+use crate::pinned_search::{
+    PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,
+    PinnedSearchUpdateParams,
+};
 use crate::settings::SettingsSetParams;
 use crate::signature::{
     SignatureCreateParams, SignatureDeleteParams, SignatureReorderParams, SignatureUpdateParams,
 };
+use crate::smart_folder::SmartFolderCreateParams;
 use crate::thread_ui_state::ThreadUiStateSetParams;
 use crate::sync::{SyncCancelAccountParams, SyncStartAccountParams};
 
@@ -206,6 +211,37 @@ pub enum RequestParams {
     ///
     /// 5 s timeout: handler is one bounded transaction.
     AccountCreate { params: Box<AccountCreateParams> },
+    /// Phase 6a-part-2: query-keyed UPSERT into `pinned_searches` +
+    /// replacement of the `pinned_search_threads` member rows. The UI
+    /// fires this on `SearchPersistenceBehavior::CreatePinnedSnapshot`.
+    /// Returns the row id in the ack.
+    ///
+    /// 5 s timeout: handler is one bounded transaction.
+    PinnedSearchCreateOrUpdate { params: PinnedSearchCreateOrUpdateParams },
+    /// Phase 6a-part-2: id-keyed UPDATE into `pinned_searches` with a
+    /// query-conflict cleanup step. The UI fires this on
+    /// `SearchPersistenceBehavior::UpdatePinnedSnapshot` and
+    /// `RefreshPinnedSnapshot`.
+    ///
+    /// 5 s timeout: handler is one bounded transaction.
+    PinnedSearchUpdate { params: PinnedSearchUpdateParams },
+    /// Phase 6a-part-2: delete a pinned-search row + its member-thread
+    /// rows. Idempotent.
+    ///
+    /// 5 s timeout: handler is one bounded statement.
+    PinnedSearchDelete { params: PinnedSearchDeleteParams },
+    /// Phase 6a-part-2: clear all pinned searches. Used by the
+    /// settings-side "Clear all pinned searches" affordance.
+    /// Returns the row count in the ack.
+    ///
+    /// 5 s timeout: handler is one bounded statement.
+    PinnedSearchDeleteAll { params: PinnedSearchDeleteAllParams },
+    /// Phase 6a-part-2: insert a new `smart_folders` row. Service
+    /// mints the UUID; UI passes only `name` + `query`. Used by the
+    /// "Save as smart folder" affordance.
+    ///
+    /// 5 s timeout: handler is one bounded statement.
+    SmartFolderCreate { params: SmartFolderCreateParams },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -244,6 +280,11 @@ impl RequestParams {
             Self::SignatureUpdate { .. } => "signature.update",
             Self::SignatureDelete { .. } => "signature.delete",
             Self::SignatureReorder { .. } => "signature.reorder",
+            Self::PinnedSearchCreateOrUpdate { .. } => "pinned_search.create_or_update",
+            Self::PinnedSearchUpdate { .. } => "pinned_search.update",
+            Self::PinnedSearchDelete { .. } => "pinned_search.delete",
+            Self::PinnedSearchDeleteAll { .. } => "pinned_search.delete_all",
+            Self::SmartFolderCreate { .. } => "smart_folder.create",
             Self::ContactsGroupSave { .. } => "contacts.group_save",
             Self::ContactsGroupDelete { .. } => "contacts.group_delete",
             Self::AccountUpdate { .. } => "account.update",
@@ -314,7 +355,12 @@ impl RequestParams {
             | Self::ContactsGroupDelete { .. }
             | Self::AccountUpdate { .. }
             | Self::AccountReorder { .. }
-            | Self::AccountCreate { .. } => {
+            | Self::AccountCreate { .. }
+            | Self::PinnedSearchCreateOrUpdate { .. }
+            | Self::PinnedSearchUpdate { .. }
+            | Self::PinnedSearchDelete { .. }
+            | Self::PinnedSearchDeleteAll { .. }
+            | Self::SmartFolderCreate { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
             #[cfg(feature = "test-helpers")]
@@ -374,6 +420,11 @@ impl RequestParams {
             Self::SignatureUpdate { params } => serde_json::json!({ "params": params }),
             Self::SignatureDelete { params } => serde_json::json!({ "params": params }),
             Self::SignatureReorder { params } => serde_json::json!({ "params": params }),
+            Self::PinnedSearchCreateOrUpdate { params } => serde_json::json!({ "params": params }),
+            Self::PinnedSearchUpdate { params } => serde_json::json!({ "params": params }),
+            Self::PinnedSearchDelete { params } => serde_json::json!({ "params": params }),
+            Self::PinnedSearchDeleteAll { params } => serde_json::json!({ "params": params }),
+            Self::SmartFolderCreate { params } => serde_json::json!({ "params": params }),
             Self::ContactsGroupSave { params } => serde_json::json!({ "params": params }),
             Self::ContactsGroupDelete { params } => serde_json::json!({ "params": params }),
             Self::AccountUpdate { params } => serde_json::json!({ "params": params }),
@@ -589,6 +640,51 @@ impl RequestParams {
                 Ok(Self::AccountCreate {
                     params: Box::new(p.params),
                 })
+            }
+            "pinned_search.create_or_update" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: PinnedSearchCreateOrUpdateParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("pinned_search.create_or_update params: {e}"))?;
+                Ok(Self::PinnedSearchCreateOrUpdate { params: p.params })
+            }
+            "pinned_search.update" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: PinnedSearchUpdateParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("pinned_search.update params: {e}"))?;
+                Ok(Self::PinnedSearchUpdate { params: p.params })
+            }
+            "pinned_search.delete" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: PinnedSearchDeleteParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("pinned_search.delete params: {e}"))?;
+                Ok(Self::PinnedSearchDelete { params: p.params })
+            }
+            "pinned_search.delete_all" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: PinnedSearchDeleteAllParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("pinned_search.delete_all params: {e}"))?;
+                Ok(Self::PinnedSearchDeleteAll { params: p.params })
+            }
+            "smart_folder.create" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: SmartFolderCreateParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("smart_folder.create params: {e}"))?;
+                Ok(Self::SmartFolderCreate { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {
@@ -1453,6 +1549,202 @@ mod tests {
                     },
                 ],
             },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    // -- Phase 6a-part-2: pinned-search CRUD wire envelope -----------------
+
+    fn sample_create_or_update() -> PinnedSearchCreateOrUpdateParams {
+        use crate::pinned_search::PinnedThreadRef;
+        PinnedSearchCreateOrUpdateParams {
+            query: "from:atle".into(),
+            thread_ids: vec![PinnedThreadRef {
+                thread_id: "t1".into(),
+                account_id: "acc-1".into(),
+            }],
+            scope_account_id: Some("acc-1".into()),
+        }
+    }
+
+    #[test]
+    fn pinned_search_create_or_update_method_name_is_dotted() {
+        let p = RequestParams::PinnedSearchCreateOrUpdate {
+            params: sample_create_or_update(),
+        };
+        assert_eq!(p.method_name(), "pinned_search.create_or_update");
+    }
+
+    #[test]
+    fn pinned_search_create_or_update_timeout_is_five_seconds() {
+        let p = RequestParams::PinnedSearchCreateOrUpdate {
+            params: sample_create_or_update(),
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn pinned_search_create_or_update_round_trips_from_method_params() {
+        let original = RequestParams::PinnedSearchCreateOrUpdate {
+            params: sample_create_or_update(),
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    fn sample_update_pinned() -> PinnedSearchUpdateParams {
+        use crate::pinned_search::PinnedThreadRef;
+        PinnedSearchUpdateParams {
+            id: 7,
+            query: "in:inbox".into(),
+            thread_ids: vec![PinnedThreadRef {
+                thread_id: "t9".into(),
+                account_id: "acc-1".into(),
+            }],
+            scope_account_id: None,
+        }
+    }
+
+    #[test]
+    fn pinned_search_update_method_name_is_dotted() {
+        let p = RequestParams::PinnedSearchUpdate {
+            params: sample_update_pinned(),
+        };
+        assert_eq!(p.method_name(), "pinned_search.update");
+    }
+
+    #[test]
+    fn pinned_search_update_timeout_is_five_seconds() {
+        let p = RequestParams::PinnedSearchUpdate {
+            params: sample_update_pinned(),
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn pinned_search_update_round_trips_from_method_params() {
+        let original = RequestParams::PinnedSearchUpdate {
+            params: sample_update_pinned(),
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn pinned_search_delete_method_name_is_dotted() {
+        let p = RequestParams::PinnedSearchDelete {
+            params: PinnedSearchDeleteParams { id: 3 },
+        };
+        assert_eq!(p.method_name(), "pinned_search.delete");
+    }
+
+    #[test]
+    fn pinned_search_delete_timeout_is_five_seconds() {
+        let p = RequestParams::PinnedSearchDelete {
+            params: PinnedSearchDeleteParams { id: 3 },
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn pinned_search_delete_round_trips_from_method_params() {
+        let original = RequestParams::PinnedSearchDelete {
+            params: PinnedSearchDeleteParams { id: 11 },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn pinned_search_delete_all_method_name_is_dotted() {
+        let p = RequestParams::PinnedSearchDeleteAll {
+            params: PinnedSearchDeleteAllParams,
+        };
+        assert_eq!(p.method_name(), "pinned_search.delete_all");
+    }
+
+    #[test]
+    fn pinned_search_delete_all_timeout_is_five_seconds() {
+        let p = RequestParams::PinnedSearchDeleteAll {
+            params: PinnedSearchDeleteAllParams,
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn pinned_search_delete_all_round_trips_from_method_params() {
+        let original = RequestParams::PinnedSearchDeleteAll {
+            params: PinnedSearchDeleteAllParams,
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    // -- Phase 6a-part-2: smart-folder create wire envelope ----------------
+
+    fn sample_smart_folder_create() -> SmartFolderCreateParams {
+        SmartFolderCreateParams {
+            name: "Unread VIPs".into(),
+            query: "is:unread from:vip@example.com".into(),
+        }
+    }
+
+    #[test]
+    fn smart_folder_create_method_name_is_dotted() {
+        let p = RequestParams::SmartFolderCreate {
+            params: sample_smart_folder_create(),
+        };
+        assert_eq!(p.method_name(), "smart_folder.create");
+    }
+
+    #[test]
+    fn smart_folder_create_timeout_is_five_seconds() {
+        let p = RequestParams::SmartFolderCreate {
+            params: sample_smart_folder_create(),
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn smart_folder_create_round_trips_from_method_params() {
+        let original = RequestParams::SmartFolderCreate {
+            params: sample_smart_folder_create(),
         };
         let parsed = RequestParams::from_method_params(
             original.method_name(),

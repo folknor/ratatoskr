@@ -9,10 +9,14 @@ use service_api::{
     AccountCreateAck, AccountCreateParams, AccountReorderAck, AccountReorderEntry,
     AccountReorderParams, AccountUpdateAck, AccountUpdateParams, ContactGroupDeleteAck,
     ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
+    PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAck,
+    PinnedSearchDeleteAllAck, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,
+    PinnedSearchUpdateAck, PinnedSearchUpdateParams,
     RequestParams, RequestTimeoutKind, ServiceError, ServiceResponse, SettingValue, SettingsSetAck,
     SettingsSetParams, ShutdownResponse, SignatureCreateAck, SignatureCreateParams,
     SignatureDeleteAck, SignatureDeleteParams, SignatureReorderAck, SignatureReorderParams,
-    SignatureUpdateAck, SignatureUpdateParams, SyncCancelAccountParams, SyncCancelAck,
+    SignatureUpdateAck, SignatureUpdateParams, SmartFolderCreateAck, SmartFolderCreateParams,
+    SyncCancelAccountParams, SyncCancelAck,
     SyncCompleted, SyncResult, SyncRunId, SyncStartAccountParams, SyncStartAck,
     ThreadUiStateSetAck, ThreadUiStateSetParams, encode_message, parse_service_message,
 };
@@ -1126,6 +1130,69 @@ impl ServiceClient {
             })
             .await?;
         Ok(())
+    }
+
+    /// Phase 6a-part-2: query-keyed UPSERT into `pinned_searches` via
+    /// the `pinned_search.create_or_update` IPC. Returns the row id.
+    pub async fn create_or_update_pinned_search(
+        &self,
+        params: PinnedSearchCreateOrUpdateParams,
+    ) -> Result<i64, ClientError> {
+        let ack: PinnedSearchCreateOrUpdateAck = self
+            .request(RequestParams::PinnedSearchCreateOrUpdate { params })
+            .await?;
+        Ok(ack.id)
+    }
+
+    /// Phase 6a-part-2: id-keyed UPDATE into `pinned_searches` via
+    /// the `pinned_search.update` IPC. Service-side handler runs the
+    /// query-conflict cleanup before the update inside one transaction.
+    pub async fn update_pinned_search(
+        &self,
+        params: PinnedSearchUpdateParams,
+    ) -> Result<(), ClientError> {
+        let _ack: PinnedSearchUpdateAck = self
+            .request(RequestParams::PinnedSearchUpdate { params })
+            .await?;
+        Ok(())
+    }
+
+    /// Phase 6a-part-2: delete one pinned-search row via the
+    /// `pinned_search.delete` IPC. Idempotent.
+    pub async fn delete_pinned_search(&self, id: i64) -> Result<(), ClientError> {
+        let _ack: PinnedSearchDeleteAck = self
+            .request(RequestParams::PinnedSearchDelete {
+                params: PinnedSearchDeleteParams { id },
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Phase 6a-part-2: clear all pinned searches via the
+    /// `pinned_search.delete_all` IPC. Returns the deleted count.
+    pub async fn delete_all_pinned_searches(&self) -> Result<u64, ClientError> {
+        let ack: PinnedSearchDeleteAllAck = self
+            .request(RequestParams::PinnedSearchDeleteAll {
+                params: PinnedSearchDeleteAllParams,
+            })
+            .await?;
+        Ok(ack.deleted)
+    }
+
+    /// Phase 6a-part-2: insert a new smart folder via the
+    /// `smart_folder.create` IPC. Service mints the UUID; UI passes
+    /// only `name` + `query`. Returns the minted UUID.
+    pub async fn create_smart_folder(
+        &self,
+        name: String,
+        query: String,
+    ) -> Result<String, ClientError> {
+        let ack: SmartFolderCreateAck = self
+            .request(RequestParams::SmartFolderCreate {
+                params: SmartFolderCreateParams { name, query },
+            })
+            .await?;
+        Ok(ack.id)
     }
 
     /// Phase 3 task 14: cancel any in-flight sync for `account_id` and

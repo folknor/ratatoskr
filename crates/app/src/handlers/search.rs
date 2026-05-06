@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use iced::Task;
+use service_api::{PinnedSearchCreateOrUpdateParams, PinnedSearchUpdateParams, PinnedThreadRef};
 
 use crate::db::{self, Thread};
 use crate::ui::sidebar::truncate_query;
@@ -396,53 +397,130 @@ impl ReadyApp {
                         SearchPersistenceBehavior::CreatePinnedSnapshot { scope_account_id },
                         SearchExecution::Query { query, .. },
                     ) => {
-                        let db = Arc::clone(&self.db);
-                        let query = query.clone();
-                        let scope_account_id = scope_account_id.clone();
-                        let completion = result.resolved.completion.clone();
-                        Task::perform(
-                            async move {
-                                db.create_or_update_pinned_search(query, thread_ids, scope_account_id)
-                                    .await
-                            },
-                            move |save_result| Message::PinnedSearchPersisted(completion.clone(), save_result),
-                        )
+                        if let Some(client) = self.service_client.as_ref().cloned() {
+                            let query = query.clone();
+                            let scope_account_id = scope_account_id.clone();
+                            let completion = result.resolved.completion.clone();
+                            let params = PinnedSearchCreateOrUpdateParams {
+                                query,
+                                thread_ids: thread_ids
+                                    .into_iter()
+                                    .map(|(thread_id, account_id)| PinnedThreadRef {
+                                        thread_id,
+                                        account_id,
+                                    })
+                                    .collect(),
+                                scope_account_id,
+                            };
+                            Task::perform(
+                                async move {
+                                    client
+                                        .create_or_update_pinned_search(params)
+                                        .await
+                                        .map_err(|e| e.to_string())
+                                },
+                                move |save_result| {
+                                    Message::PinnedSearchCreateOrUpdateAck(
+                                        completion.clone(),
+                                        save_result,
+                                    )
+                                },
+                            )
+                        } else {
+                            log::warn!(
+                                "pinned_search.create_or_update: no ServiceClient yet; \
+                                 snapshot not persisted (next reload reconciles)"
+                            );
+                            Task::none()
+                        }
                     }
                     (
                         SearchPersistenceBehavior::UpdatePinnedSnapshot { id, scope_account_id },
                         SearchExecution::Query { query, .. },
                     ) => {
-                        let db = Arc::clone(&self.db);
-                        let query = query.clone();
-                        let scope_account_id = scope_account_id.clone();
-                        let id = *id;
-                        let completion = result.resolved.completion.clone();
-                        Task::perform(
-                            async move {
-                                db.update_pinned_search(id, query, thread_ids, scope_account_id)
-                                    .await
-                                    .map(|()| id)
-                            },
-                            move |save_result| Message::PinnedSearchPersisted(completion.clone(), save_result),
-                        )
+                        if let Some(client) = self.service_client.as_ref().cloned() {
+                            let query = query.clone();
+                            let scope_account_id = scope_account_id.clone();
+                            let id = *id;
+                            let completion = result.resolved.completion.clone();
+                            let params = PinnedSearchUpdateParams {
+                                id,
+                                query,
+                                thread_ids: thread_ids
+                                    .into_iter()
+                                    .map(|(thread_id, account_id)| PinnedThreadRef {
+                                        thread_id,
+                                        account_id,
+                                    })
+                                    .collect(),
+                                scope_account_id,
+                            };
+                            Task::perform(
+                                async move {
+                                    client
+                                        .update_pinned_search(params)
+                                        .await
+                                        .map_err(|e| e.to_string())
+                                        .map(|()| id)
+                                },
+                                move |save_result| {
+                                    Message::PinnedSearchUpdateAck(
+                                        completion.clone(),
+                                        save_result,
+                                    )
+                                },
+                            )
+                        } else {
+                            log::warn!(
+                                "pinned_search.update: no ServiceClient yet; \
+                                 snapshot not persisted (next reload reconciles)"
+                            );
+                            Task::none()
+                        }
                     }
                     (
                         SearchPersistenceBehavior::RefreshPinnedSnapshot { id, scope_account_id },
                         SearchExecution::Query { query, .. },
                     ) => {
-                        let db = Arc::clone(&self.db);
-                        let query = query.clone();
-                        let scope_account_id = scope_account_id.clone();
-                        let id = *id;
-                        let completion = result.resolved.completion.clone();
-                        Task::perform(
-                            async move {
-                                db.update_pinned_search(id, query, thread_ids, scope_account_id)
-                                    .await
-                                    .map(|()| id)
-                            },
-                            move |save_result| Message::PinnedSearchPersisted(completion.clone(), save_result),
-                        )
+                        if let Some(client) = self.service_client.as_ref().cloned() {
+                            let query = query.clone();
+                            let scope_account_id = scope_account_id.clone();
+                            let id = *id;
+                            let completion = result.resolved.completion.clone();
+                            let params = PinnedSearchUpdateParams {
+                                id,
+                                query,
+                                thread_ids: thread_ids
+                                    .into_iter()
+                                    .map(|(thread_id, account_id)| PinnedThreadRef {
+                                        thread_id,
+                                        account_id,
+                                    })
+                                    .collect(),
+                                scope_account_id,
+                            };
+                            Task::perform(
+                                async move {
+                                    client
+                                        .update_pinned_search(params)
+                                        .await
+                                        .map_err(|e| e.to_string())
+                                        .map(|()| id)
+                                },
+                                move |save_result| {
+                                    Message::PinnedSearchUpdateAck(
+                                        completion.clone(),
+                                        save_result,
+                                    )
+                                },
+                            )
+                        } else {
+                            log::warn!(
+                                "pinned_search.update (refresh): no ServiceClient yet; \
+                                 snapshot not persisted (next reload reconciles)"
+                            );
+                            Task::none()
+                        }
                     }
                     _ => Task::none(),
                 };
@@ -714,13 +792,19 @@ impl ReadyApp {
     }
 
     pub(crate) fn handle_dismiss_pinned_search(&self, id: i64) -> Task<Message> {
-        let db = Arc::clone(&self.db);
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!(
+                "pinned_search.delete: no ServiceClient yet; \
+                 dismiss not persisted (next reload reconciles)"
+            );
+            return Task::none();
+        };
         Task::perform(
             async move {
-                let result = db.delete_pinned_search(id).await;
+                let result = client.delete_pinned_search(id).await.map_err(|e| e.to_string());
                 (id, result)
             },
-            |(id, result)| Message::PinnedSearchDismissed(id, result),
+            |(id, result)| Message::PinnedSearchDeleteAck(id, result),
         )
     }
 
@@ -901,16 +985,22 @@ impl ReadyApp {
         if query.is_empty() {
             return Task::none();
         }
-        let db = Arc::clone(&self.db);
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!(
+                "smart_folder.create: no ServiceClient yet; \
+                 smart folder not saved (next reload reconciles)"
+            );
+            return Task::none();
+        };
         Task::perform(
-            async move { db.create_smart_folder(name, query).await },
-            Message::SmartFolderSaved,
+            async move { client.create_smart_folder(name, query).await.map_err(|e| e.to_string()) },
+            Message::SmartFolderCreateAck,
         )
     }
 
     pub(crate) fn handle_smart_folder_saved(
         &mut self,
-        result: Result<i64, String>,
+        result: Result<String, String>,
     ) -> Task<Message> {
         match result {
             Ok(_id) => {

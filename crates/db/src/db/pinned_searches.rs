@@ -16,134 +16,142 @@ pub struct DbPinnedSearch {
 }
 
 /// Create a pinned search or update the existing row for the same query.
-pub async fn db_create_or_update_pinned_search(
-    db: &ReadDbState,
-    query: String,
-    thread_ids: Vec<(String, String)>,
-    scope_account_id: Option<String>,
+///
+/// Sync helper called from the Service-side
+/// `pinned_search.create_or_update` handler via `WriteDbState::with_conn`.
+/// Inside one transaction: query-keyed UPSERT on `pinned_searches`,
+/// then full replacement of the row's `pinned_search_threads`.
+pub fn db_create_or_update_pinned_search_sync(
+    conn: &rusqlite::Connection,
+    query: &str,
+    thread_ids: &[(String, String)],
+    scope_account_id: Option<&str>,
 ) -> Result<i64, String> {
-    db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
 
-        let existing_id: Option<i64> = tx
-            .query_row(
-                "SELECT id FROM pinned_searches WHERE query = ?1",
-                params![query],
-                |row| row.get(0),
-            )
-            .ok();
+    let existing_id: Option<i64> = tx
+        .query_row(
+            "SELECT id FROM pinned_searches WHERE query = ?1",
+            params![query],
+            |row| row.get(0),
+        )
+        .ok();
 
-        let pinned_id = if let Some(id) = existing_id {
-            tx.execute(
-                "UPDATE pinned_searches
-                 SET updated_at = unixepoch(), scope_account_id = ?1
-                 WHERE id = ?2",
-                params![scope_account_id, id],
-            )
-            .map_err(|e| e.to_string())?;
-            id
-        } else {
-            tx.execute(
-                "INSERT INTO pinned_searches (query, created_at, updated_at, scope_account_id)
-                 VALUES (?1, unixepoch(), unixepoch(), ?2)",
-                params![query, scope_account_id],
-            )
-            .map_err(|e| e.to_string())?;
-            tx.last_insert_rowid()
-        };
-
+    let pinned_id = if let Some(id) = existing_id {
         tx.execute(
-            "DELETE FROM pinned_search_threads WHERE pinned_search_id = ?1",
-            params![pinned_id],
+            "UPDATE pinned_searches
+             SET updated_at = unixepoch(), scope_account_id = ?1
+             WHERE id = ?2",
+            params![scope_account_id, id],
         )
         .map_err(|e| e.to_string())?;
+        id
+    } else {
+        tx.execute(
+            "INSERT INTO pinned_searches (query, created_at, updated_at, scope_account_id)
+             VALUES (?1, unixepoch(), unixepoch(), ?2)",
+            params![query, scope_account_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.last_insert_rowid()
+    };
 
-        {
-            let mut stmt = tx
-                .prepare(
-                    "INSERT INTO pinned_search_threads
-                        (pinned_search_id, thread_id, account_id)
-                     VALUES (?1, ?2, ?3)",
-                )
+    tx.execute(
+        "DELETE FROM pinned_search_threads WHERE pinned_search_id = ?1",
+        params![pinned_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    {
+        let mut stmt = tx
+            .prepare(
+                "INSERT INTO pinned_search_threads
+                    (pinned_search_id, thread_id, account_id)
+                 VALUES (?1, ?2, ?3)",
+            )
+            .map_err(|e| e.to_string())?;
+
+        for (thread_id, account_id) in thread_ids {
+            stmt.execute(params![pinned_id, thread_id, account_id])
                 .map_err(|e| e.to_string())?;
-
-            for (thread_id, account_id) in &thread_ids {
-                stmt.execute(params![pinned_id, thread_id, account_id])
-                    .map_err(|e| e.to_string())?;
-            }
         }
+    }
 
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(pinned_id)
-    })
-    .await
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(pinned_id)
 }
 
 /// Update an existing pinned search and replace its thread snapshot.
-pub async fn db_update_pinned_search(
-    db: &ReadDbState,
+///
+/// Sync helper called from the Service-side `pinned_search.update`
+/// handler via `WriteDbState::with_conn`. Includes a query-conflict
+/// cleanup step that deletes any other row with the same target query
+/// before the update fires, preserving the UNIQUE on
+/// `pinned_searches.query`.
+pub fn db_update_pinned_search_sync(
+    conn: &rusqlite::Connection,
     id: i64,
-    query: String,
-    thread_ids: Vec<(String, String)>,
-    scope_account_id: Option<String>,
+    query: &str,
+    thread_ids: &[(String, String)],
+    scope_account_id: Option<&str>,
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
 
-        let conflict_id: Option<i64> = tx
-            .query_row(
-                "SELECT id FROM pinned_searches WHERE query = ?1 AND id != ?2",
-                params![query, id],
-                |row| row.get(0),
+    let conflict_id: Option<i64> = tx
+        .query_row(
+            "SELECT id FROM pinned_searches WHERE query = ?1 AND id != ?2",
+            params![query, id],
+            |row| row.get(0),
+        )
+        .ok();
+    if let Some(cid) = conflict_id {
+        tx.execute("DELETE FROM pinned_searches WHERE id = ?1", params![cid])
+            .map_err(|e| e.to_string())?;
+    }
+
+    tx.execute(
+        "UPDATE pinned_searches
+         SET query = ?1, updated_at = unixepoch(), scope_account_id = ?2
+         WHERE id = ?3",
+        params![query, scope_account_id, id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "DELETE FROM pinned_search_threads WHERE pinned_search_id = ?1",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    {
+        let mut stmt = tx
+            .prepare(
+                "INSERT INTO pinned_search_threads
+                    (pinned_search_id, thread_id, account_id)
+                 VALUES (?1, ?2, ?3)",
             )
-            .ok();
-        if let Some(cid) = conflict_id {
-            tx.execute("DELETE FROM pinned_searches WHERE id = ?1", params![cid])
+            .map_err(|e| e.to_string())?;
+
+        for (thread_id, account_id) in thread_ids {
+            stmt.execute(params![id, thread_id, account_id])
                 .map_err(|e| e.to_string())?;
         }
+    }
 
-        tx.execute(
-            "UPDATE pinned_searches
-             SET query = ?1, updated_at = unixepoch(), scope_account_id = ?2
-             WHERE id = ?3",
-            params![query, scope_account_id, id],
-        )
-        .map_err(|e| e.to_string())?;
-
-        tx.execute(
-            "DELETE FROM pinned_search_threads WHERE pinned_search_id = ?1",
-            params![id],
-        )
-        .map_err(|e| e.to_string())?;
-
-        {
-            let mut stmt = tx
-                .prepare(
-                    "INSERT INTO pinned_search_threads
-                        (pinned_search_id, thread_id, account_id)
-                     VALUES (?1, ?2, ?3)",
-                )
-                .map_err(|e| e.to_string())?;
-
-            for (thread_id, account_id) in &thread_ids {
-                stmt.execute(params![id, thread_id, account_id])
-                    .map_err(|e| e.to_string())?;
-            }
-        }
-
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
-pub async fn db_delete_pinned_search(db: &ReadDbState, id: i64) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        conn.execute("DELETE FROM pinned_searches WHERE id = ?1", params![id])
-            .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
+/// Delete one pinned-search row by id. Idempotent; delete-of-missing
+/// is `Ok`. Sync helper called from the Service-side
+/// `pinned_search.delete` handler.
+pub fn db_delete_pinned_search_sync(
+    conn: &rusqlite::Connection,
+    id: i64,
+) -> Result<(), String> {
+    conn.execute("DELETE FROM pinned_searches WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 pub async fn db_list_pinned_searches(db: &ReadDbState) -> Result<Vec<DbPinnedSearch>, String> {
@@ -279,14 +287,16 @@ pub async fn db_get_recent_search_queries(
     .await
 }
 
-pub async fn db_delete_all_pinned_searches(db: &ReadDbState) -> Result<u64, String> {
-    db.with_conn(|conn| {
-        let deleted = conn
-            .execute("DELETE FROM pinned_searches", [])
-            .map_err(|e| e.to_string())?;
-        Ok(deleted as u64)
-    })
-    .await
+/// Delete every row from `pinned_searches`. Returns the deleted count.
+/// Sync helper called from the Service-side `pinned_search.delete_all`
+/// handler.
+pub fn db_delete_all_pinned_searches_sync(
+    conn: &rusqlite::Connection,
+) -> Result<u64, String> {
+    let deleted = conn
+        .execute("DELETE FROM pinned_searches", [])
+        .map_err(|e| e.to_string())?;
+    Ok(deleted as u64)
 }
 
 /// Delete pinned searches that were created more than `max_age_secs`

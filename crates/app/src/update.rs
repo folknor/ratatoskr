@@ -466,16 +466,27 @@ impl ReadyApp {
             Message::PinnedSearchesLoaded(result) => self.handle_pinned_searches_loaded(result),
             Message::SelectPinnedSearch(id) => self.handle_select_pinned_search(id),
             Message::DismissPinnedSearch(id) => self.handle_dismiss_pinned_search(id),
-            Message::PinnedSearchDismissed(id, result) => {
+            Message::PinnedSearchDeleteAck(id, result) => {
                 self.handle_pinned_search_dismissed(id, result)
             }
-            Message::PinnedSearchPersisted(completion, result) => {
+            Message::PinnedSearchCreateOrUpdateAck(completion, result)
+            | Message::PinnedSearchUpdateAck(completion, result) => {
+                // Both IPCs share the post-persist UI behavior (reload
+                // sidebar, surface error in status). Wire-level
+                // distinction is preserved via the variant; behavioural
+                // divergence is a one-line edit if it ever lands.
                 self.handle_pinned_search_persisted(completion, result)
+            }
+            Message::PinnedSearchDeleteAllAck(result) => {
+                if let Err(e) = result {
+                    log::error!("Failed to clear pinned searches: {e}");
+                }
+                Task::none()
             }
             Message::RefreshPinnedSearch(id) => self.handle_refresh_pinned_search(id),
             Message::SearchHere(prefix) => self.handle_search_here(prefix),
             Message::SaveAsSmartFolder(name) => self.handle_save_as_smart_folder(name),
-            Message::SmartFolderSaved(result) => self.handle_smart_folder_saved(result),
+            Message::SmartFolderCreateAck(result) => self.handle_smart_folder_saved(result),
 
             // Calendar - delegated to handlers/calendar.rs
             Message::Calendar(cal_msg) => self.handle_calendar(*cal_msg),

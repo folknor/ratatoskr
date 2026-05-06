@@ -870,18 +870,25 @@ impl ReadyApp {
     }
 
     pub(crate) fn handle_clear_all_pinned_searches(&mut self) -> Task<Message> {
+        // Eager local clear before the IPC: the toggle feels instant
+        // and the staleness window is bounded by the next sidebar
+        // reload. No-rollback policy on Err - we log and accept that
+        // a Service-side failure leaves rows on disk that the next
+        // refresh path will surface again. Matches the documented
+        // signature-reorder precedent for staleness-tolerant ops.
         self.pinned_searches.clear();
         self.sidebar.active_pinned_search = None;
         self.sidebar.pinned_searches.clear();
-        let db = Arc::clone(&self.db);
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!(
+                "pinned_search.delete_all: no ServiceClient yet; \
+                 clear not persisted (next reload reconciles)"
+            );
+            return Task::none();
+        };
         Task::perform(
-            async move { db.delete_all_pinned_searches().await.map(|_| ()) },
-            |result| {
-                if let Err(e) = result {
-                    log::error!("Failed to clear pinned searches: {e}");
-                }
-                Message::Noop
-            },
+            async move { client.delete_all_pinned_searches().await.map_err(|e| e.to_string()) },
+            Message::PinnedSearchDeleteAllAck,
         )
     }
 
