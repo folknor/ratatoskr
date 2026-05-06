@@ -397,7 +397,7 @@ The phase splits into 6a + 6b + 6c at plan-doc level. 6a is the long tail of sma
 - Attachments roadmap Phase 1a + 1b landed.
 - The `oauth.refresh_request` temporary IPC from Phase 4 is in place.
 
-**Phase 6a - small mechanical write surfaces + encryption-key handle.** Plan: `docs/service/phase-6a-plan.md`.
+**Phase 6a - small mechanical write surfaces + encryption-key handle.** Plan: `docs/service/phase-6a-plan.md`. **LANDED** (2026-05-06; see commits tagged `phase 6a` and `phase 6a-part-2`).
 - Preferences (`prefs.set`).
 - Account create / update / delete / reorder (non-OAuth path - `account.create` accepts already-encrypted credential bytes; OAuth two-step is 6b).
 - Signature CRUD + reorder.

@@ -1,10 +1,23 @@
 # Brokkr + Ratatoskr Phase 8 scaffolding
 
-Status: **pre-planning problem statement.** This is not the Phase 8
-technical implementation plan. It exists so that, after Phase 7 lands,
-Ratatoskr developers can turn the Brokkr collaboration into a concrete
-Phase 8 plan without first reading Brokkr internals or the full set of
-Service planning docs.
+Status: **architectural commitment, pre-Phase 8.** This is not the
+Phase 8 technical implementation plan. It records the shape Brokkr
+and Ratatoskr have agreed on for the Service-test work, so when
+Phase 8 planning starts the structural choices are not relitigated.
+
+Replaces an earlier draft that framed Brokkr's role as "a smarter
+cargo test runner around the existing `#[tokio::test]` cohort."
+That framing was downgraded after review (see
+`~/Programs/brokkr/notes/ratatoskr-service-harness.md` for the
+detailed design): the existing tests in
+`crates/app/tests/service_subprocess.rs` are structurally racy by
+construction - wall-clock timeouts inside the test race against
+the implementation's own timeout ceilings - and re-running them
+under a soak loop averages the noise rather than eliminating it.
+The replacement architecture lifts the test shape into a
+deterministic predicate-or-backstop runtime hosted inside
+Ratatoskr's `app` crate, with Brokkr providing build / lockfile /
+artefact / history orchestration around it.
 
 ## Why this exists
 
@@ -30,9 +43,8 @@ needs an outer harness:
 - deterministic provider fixtures;
 - performance regression thresholds.
 
-Cargo/libtest remains the place for assertions. Brokkr should become the
-thing that repeatedly runs those assertions under controlled process,
-fixture, timeout, logging, and measurement conditions.
+Phase 8 is the right moment to switch gears and make Brokkr part of the
+Service quality story.
 
 ## Assumed Ratatoskr state
 
@@ -58,41 +70,89 @@ The intended architecture at that point:
 - Service-generation tags prevent stale notifications from a dying
   incarnation reaching live UI state.
 
-Phase 8 then becomes the right moment to switch gears and make Brokkr
-part of the Service quality story.
+## The Brokkr/Ratatoskr split
 
-## The two Brokkr tracks
+Two related but separable features. Track 1 lands first; Track 2
+re-uses the artefact / lockfile / history machinery but is otherwise
+independent.
 
-There are two related features. They share harness infrastructure, but
-they should be planned separately.
+The load-bearing rule across both tracks: **Brokkr does not depend on
+Ratatoskr at the source level, and Ratatoskr does not depend on
+Brokkr.** Both directions are off the table. Cross-process
+communication is by subprocess spawn + env vars only. This frees
+Brokkr from a tokio dependency it would otherwise need (the harness's
+async stdio + child-exit + timeout dance lives entirely inside
+Ratatoskr) and frees Ratatoskr from any churn in Brokkr's release
+cadence.
 
-### Track 1: Service subprocess harness
+### Track 1: Deterministic Service-subprocess harness
 
-Goal: make Ratatoskr's Service lifecycle behavior repeatable,
-diagnosable, and measurable.
+Goal: replace the structurally-racy `#[tokio::test]` shape with a
+deterministic runtime where every wait races a predicate against the
+child process exiting plus a named backstop. First transition to fire
+wins; the harness records which one fired in the test trace. Backstops
+remain wall-clock - the harness cannot escape physical time entirely -
+but they are explicit, named, generous, and only fire when a
+determinism bug elsewhere leaves the harness with nothing else to wait
+on. A backstop firing is a test-design bug, not a flake.
 
-The immediate target is the current real-subprocess test cohort,
-especially the ignored tests in `crates/app/tests/service_subprocess.rs`:
+The runtime lives inside Ratatoskr's `app` crate, exposed via a new
+CLI flag:
 
-- `service_subprocess_ping_and_shutdown`
-- `spawn_with_events_emits_terminal_on_missing_key`
+    app --test-harness <script.lua>
 
-Phase 8 already owns root-causing and re-enabling these. Brokkr should
-help by running them many times, killing hangs, collecting Service logs,
-and preserving enough artifacts that failures are inspectable.
+The harness module:
 
-Candidate future Brokkr commands:
+- embeds the `dellingr` Lua VM (pure Rust, currently 0.1.0 on
+  crates.io; no FFI, no system Lua dep);
+- registers `ServiceClient`, `SpawnEvent`, `ClientError`, and
+  `NotificationQueue` as Lua userdata, one method per Rust method,
+  with case-discriminating accessors on the enum types;
+- exposes process-tree primitives (`kill`, `pid_is_alive`,
+  `wait_for_sentinel`) and the `wait_for { predicate, child,
+  backstop }` combinator that races predicates against
+  `client:observe_child_exit()` internally;
+- writes per-run diagnostic artefacts (frame log, event log, step
+  trace, `/proc/<pid>/{wchan,status,syscall,stack}` snapshot,
+  data-dir copy) to a Brokkr-supplied artefact directory;
+- aborts runaway scripts via dellingr's instruction-cost ceiling.
 
-```text
-brokkr ratatoskr service-smoke
-brokkr ratatoskr service-soak service_subprocess_ping_and_shutdown -N 200
-brokkr ratatoskr service-soak spawn_with_events_emits_terminal_on_missing_key -N 200
-brokkr ratatoskr service-test --all-subprocess
-```
+Tests are `.lua` files in `crates/app/tests/service-harness/`. The
+first cohort:
 
-The exact CLI shape belongs in the Brokkr implementation plan. The
-Ratatoskr-side requirement is that the tests and hooks are stable enough
-for Brokkr to drive them.
+- the two currently-`#[ignore]`'d real-subprocess tests
+  (`service_subprocess_ping_and_shutdown`,
+  `spawn_with_events_emits_terminal_on_missing_key`), re-expressed as
+  Lua scripts. Re-enabling these stable is the wedge that proves the
+  architecture works.
+- the Phase-8-named additions
+  (`pre_ack_crash_rolls_back_subprocess`,
+  `journal_replays_after_respawn`, `compose_send_50mb_attachment`,
+  `bulk_archive_200_threads_under_budget`, the schema-fake e2e, the
+  T1 cohort, etc.).
+- manual matrix items 4 and 5 (heartbeat-detects-killed-Service,
+  SIGTERM-triggers-shutdown-drain), which today sit in manual-only
+  because they are "too noisy to assert reliably from automation" - a
+  deterministic harness pulls them in.
+
+Brokkr's commands (top-level, project-gated to `Project::Ratatoskr`):
+
+    brokkr service-test <SCRIPT>
+    brokkr service-test <SCRIPT> -N 200       # soak
+    brokkr service-suite [--filter X]
+    brokkr service-list
+
+Brokkr orchestrates: project gating, sweep-aware build of the `app`
+binary via `[ratatoskr.harness]` in `brokkr.toml`, lockfile, per-run
+artefact directory naming
+(`.brokkr/ratatoskr/<test>/run-N/`, preserve-on-failure,
+delete-on-success-unless-`--keep-artefacts`), history-DB recording,
+soak loops, suite filtering. Brokkr does not embed the Lua VM or
+`ServiceClient`; it never speaks JSON-RPC over the wire.
+
+Cargo / libtest remains the place for unit tests and for tests that
+do not need the real-subprocess shape. The new harness is specifically
+for tests where the subprocess lifecycle is the thing under test.
 
 ### Track 2: Deterministic provider mock servers
 
@@ -107,54 +167,110 @@ fixture and protocol model, not repeating a cargo test.
 Candidate future Brokkr commands:
 
 ```text
-brokkr ratatoskr mock-serve --imap --jmap --fixture small
-brokkr ratatoskr sync-smoke --fixture jmap-small
-brokkr ratatoskr sync-bench --fixture imap-100k
-brokkr ratatoskr sync-bench --fixture jmap-incremental --bench 10
+brokkr mock-serve --imap --jmap --fixture small
+brokkr sync-smoke --fixture jmap-small
+brokkr sync-bench --fixture imap-100k
+brokkr sync-bench --fixture jmap-incremental --bench 10
 ```
 
-Brokkr should orchestrate these servers. It should not itself become the
-IMAP or JMAP implementation.
+Brokkr orchestrates these servers. It does not itself become the IMAP
+or JMAP implementation. The mock-server design lives in a sibling
+note (`~/Programs/brokkr/notes/ratatoskr-mock-server.md`) and may
+move to its own repository.
 
-## What Brokkr would provide
+## What Brokkr provides
 
-Ratatoskr developers should think of Brokkr as the outer runner.
+For Service tests:
 
-For Service tests, Brokkr can provide:
+- `Project::Ratatoskr` gating + `[ratatoskr]` command tag in
+  `brokkr --help`.
+- Sweep-aware build of the `app` binary via `[ratatoskr.harness]` in
+  `brokkr.toml`. `sweep` references a `[[check]]` entry, `binary`
+  names the cargo package whose binary the harness spawns. Same
+  feature contract `brokkr check` enforces, so a script can never run
+  against a feature combination the rest of the toolchain has not
+  validated.
+- Per-run artefact directory lifecycle: collision-incrementing
+  `run-N`, preserve-on-failure, delete-on-success-unless-keep,
+  preserve-on-panic (Drop default). The directory path is exported to
+  the harness binary via `BROKKR_HARNESS_ARTEFACT_DIR`.
+- Process-tree primitives: signal, pid_is_alive, sentinel-watch with
+  named backstop, /proc snapshot tolerant of missing files
+  (`stack` often needs CAP_SYS_PTRACE).
+- Script discovery: walks `crates/app/tests/service-harness/*.lua`,
+  parses a top-of-file `-- key: value` frontmatter (`description`,
+  `expected = pass | ignored`), prints a sorted table.
+- Soak (`-N`) and suite (`--filter`) runners on top of the
+  single-script run path.
+- History-DB recording, optional sidecar `/proc` profiling, eventual
+  comparison against stored baselines.
 
-- build selection for the correct `app` binary;
-- repeated test execution with `--include-ignored`;
-- hard per-run and global timeouts;
-- process-tree cleanup on timeout;
-- failure artifact preservation;
-- pass/fail/hang summaries;
-- timing and resource measurements;
-- optional sidecar `/proc` profiling;
-- eventual comparison against a stored baseline.
-
-For provider sync workloads, Brokkr can provide:
+For provider sync workloads:
 
 - isolated app-data directories;
 - local port allocation;
 - mock-server process startup and teardown;
 - fixture selection;
-- passing endpoint credentials into Ratatoskr;
+- passing endpoint credentials into Ratatoskr via env vars;
 - sync workload execution;
 - result storage;
 - wall-time, RSS, I/O, request-count, and DB-size tracking;
 - threshold-based regression failures.
 
-Brokkr should not provide:
+Brokkr does NOT provide:
 
 - Ratatoskr correctness assertions;
-- direct knowledge of Ratatoskr's DB schema;
-- Service IPC semantics beyond stable public test/workload entrypoints;
+- direct knowledge of Ratatoskr's DB schema or Service IPC types;
+- the Lua VM (lives in `app` via `dellingr`);
+- a JSON-RPC protocol implementation (`ServiceClient` lives in
+  `app`);
+- a tokio dependency in Brokkr (sync subprocess spawn + wait
+  suffices for orchestration);
 - the provider mock implementation itself.
 
-## What Ratatoskr must provide
+## What Ratatoskr provides
 
 The Ratatoskr side of this collaboration is to expose stable, narrow
-surfaces that Brokkr can run.
+surfaces that Brokkr can run, plus the harness module itself.
+
+### Harness module in `app` crate
+
+Phase 8's largest single Ratatoskr-side build. The module:
+
+- depends on `dellingr` (pure Rust Lua VM, currently 0.1.0 on
+  crates.io);
+- adds an `app --test-harness <script.lua>` CLI flag, gated behind
+  the existing `test-helpers` feature so production builds never
+  carry the runtime;
+- registers `ServiceClient` and friends as Lua userdata via
+  `RustFunc` wrappers (`spawn_for_test`,
+  `spawn_with_events_for_test`, `request<R>`, `notifications`,
+  `current_generation`, `child_pid`, `shutdown`, explicit `drop`);
+- registers `SpawnEvent`, `ClientError`, `Notification` as Lua
+  userdata with case-discriminating accessors so scripts can
+  pattern-match the way the existing `#[tokio::test]` functions do;
+- registers process-tree primitives and the `wait_for { predicate,
+  child, backstop }` combinator that races against
+  `client:observe_child_exit()`;
+- writes per-run diagnostic artefacts to the directory pointed at by
+  `BROKKR_HARNESS_ARTEFACT_DIR`:
+  - `frames.jsonl` - every JSON-RPC frame, both directions,
+    timestamped from spawn;
+  - `events.jsonl` - every `SpawnEvent` observed, timestamped;
+  - `steps.jsonl` - the test's step trace: which step was active,
+    what condition was awaited, which transition fired;
+  - `proc-{wchan,status,syscall,stack}.txt` - `/proc/<pid>/`
+    snapshot at failure-declaration time;
+  - `service.stderr` - Service's stderr verbatim, per-run;
+  - `data-dir/` - copy of the test's app-data dir at failure time;
+  - `exit.txt` - exit code, signal, wait time, exit reason;
+  - `run.toml` - script path, env vars, brokkr version, git commit;
+- aborts runaway scripts via `dellingr`'s instruction-cost ceiling.
+
+Adding or changing a test means adding a `.lua` file in
+`crates/app/tests/service-harness/`. Changing the Lua API surface (the
+userdata methods exposed) is the only thing that requires recompiling
+the harness module.
 
 ### Stable Service entrypoints
 
@@ -170,15 +286,18 @@ examples include:
 - hang-on-stdin-EOF;
 - println/framing canary.
 
-More Phase 8 hooks may be needed, but they should remain explicitly
-test-scoped, ideally behind the existing `test-helpers` feature surface.
+More Phase 8 hooks may be needed (`--test-fake-schema=N`,
+fault-injection variants, counter probes); they should remain
+explicitly test-scoped, ideally behind the existing `test-helpers`
+feature surface, and should expose `RequestParams` variants the harness
+can pick up automatically (no harness recompile per new variant).
 
 ### Deterministic app-data fixtures
 
-Brokkr needs to create or ask Ratatoskr to create valid app-data
-directories for subprocess tests and sync workloads.
-
-Ratatoskr should provide a fixture setup path that can create:
+Brokkr does not create app-data directories itself - the Lua scripts
+do, via `RequestParams::TestSeedAccount` (or whatever the Phase-8 name
+ends up being). Ratatoskr should provide a fixture setup path that can
+create:
 
 - `ratatoskr.key`;
 - migrated main SQLite schema;
@@ -186,18 +305,18 @@ Ratatoskr should provide a fixture setup path that can create:
 - rows needed by FK-constrained action tests;
 - empty or seeded body/inline/blob/search stores as needed.
 
-This should not rely on the dev app's "wipe and seed on every launch"
-behavior. Some tests need to shut down and respawn against the same data
-directory.
-
-`crates/dev-seed/` may be a useful source of deterministic data
-generation patterns, but test fixtures should be a deliberate API, not
-an accidental dependency on dev startup behavior.
+This must not rely on the dev app's "wipe and seed on every launch"
+behavior. Some tests need to shut down and respawn against the same
+data directory. `crates/dev-seed/` may be a useful source of
+deterministic data generation patterns, but test fixtures should be a
+deliberate API, not an accidental dependency on dev startup behavior.
 
 ### Machine-readable lifecycle markers
 
-Brokkr can measure much more accurately if Ratatoskr emits stable phase
-markers or counters.
+Brokkr can measure much more accurately when Ratatoskr emits stable
+phase markers or counters. The sidecar already supports a marker FIFO
+(`BROKKR_MARKER_FIFO`); the harness module can either route through
+it or write its own log entries.
 
 Useful lifecycle spans:
 
@@ -216,15 +335,12 @@ SHUTDOWN_START
 SHUTDOWN_END
 ```
 
-These could be emitted through Brokkr's marker FIFO when present, while
-continuing to emit normal IPC notifications for the UI. The exact
-emission surface should be planned later. The important requirement is
-that timings do not require Brokkr to scrape human log lines.
+Timings should not require Brokkr to scrape human log lines.
 
 ### Artifact-friendly logging
 
-Service logs already belong under `<app_data>/logs/`. For Brokkr, those
-logs should reliably include:
+Service logs already belong under `<app_data>/logs/`. For Brokkr-driven
+runs, those logs should reliably include:
 
 - Service PID;
 - app-data dir;
@@ -243,16 +359,27 @@ bodies, or attachment contents.
 Provider benchmarks should not require rendering the iced UI.
 
 Ratatoskr should expose one stable way to trigger sync headlessly. The
-best surface is a future planning decision. Plausible options:
+plausible options:
 
 - a Service IPC method used only by tests/benchmarks;
 - a small headless benchmark binary;
-- a cargo integration test that Brokkr drives with fixture environment
-  variables.
+- a `.lua` script invoked through `app --test-harness` (the harness
+  binary from Track 1) that calls a test-helper `RequestParams`
+  variant on the Service.
+
+Brokkr's plan 3
+(`~/Programs/brokkr/notes/ratatoskr-sync-orchestration.md`) has
+converged on the third option - it reuses Track 1's harness binary,
+`ServiceClient` userdata, and artefact-dir machinery, so the only
+new ratatoskr-side surface needed is the sync-triggering /
+state-querying `RequestParams` variants themselves (e.g.
+`TestStartSync`, `TestQueryDbState`; final names are Phase-8 design
+work). Phase 8 can revisit if a need for the other two options
+surfaces.
 
 The requirement is that Brokkr can start local mock servers, point
-Ratatoskr accounts at them, trigger sync, wait for completion, and get a
-machine-readable summary.
+Ratatoskr accounts at them, trigger sync, wait for completion, and get
+a machine-readable summary.
 
 ### Correctness assertions stay in Ratatoskr
 
@@ -267,6 +394,11 @@ code should assert final state, such as:
 - read/star/archive/delete state;
 - pending-op state;
 - sync cursor state.
+
+Lua scripts in the harness drive these assertions through
+`ServiceClient` methods - they speak the same Rust-level API the
+existing `#[tokio::test]` bodies do, just from a script rather than a
+test function.
 
 For benchmark-style workloads, Ratatoskr should return a compact JSON
 summary that Brokkr can store alongside timing metrics.
@@ -307,9 +439,10 @@ Initial fixtures should favor coverage over perfect server realism:
 - slow/paged responses;
 - incremental new/change/delete/move sequence.
 
-Ratatoskr or a companion crate should own the mock server and fixture
-model. Brokkr should start it, choose fixtures, set ports, and collect
-results.
+The mock server and fixture model live in a separate repository (or a
+sibling crate, TBD); Brokkr starts it, chooses fixtures, sets ports,
+and collects results. See
+`~/Programs/brokkr/notes/ratatoskr-mock-server.md`.
 
 ## Metrics and regression gates
 
@@ -339,56 +472,112 @@ Future Brokkr gates could fail a run when:
 
 ## Suggested Phase 8 planning order
 
-When Phase 8 planning starts, do not begin with mock servers. Start with
-the Service harness because it is smaller and directly addresses current
-test debt.
+Do not begin with mock servers. Track 1 (the harness module) lands
+first because it has a wedge: re-enabling the two ignored subprocess
+tests proves the architecture works.
 
 Suggested order:
 
-1. Stabilize and re-enable the two ignored subprocess tests.
-2. Add or clean up the Ratatoskr test hooks Brokkr will need.
-3. Define the app-data fixture setup API.
-4. Define the artifact/log retention contract.
-5. Add lifecycle markers or JSON summaries where timing needs them.
-6. Let Brokkr implement `ratatoskr service-soak` against the existing
-   subprocess tests.
-7. Use Brokkr to repeat and prove the tests stable.
-8. Add the remaining Phase 8 subprocess/action-service integration
-   tests on top of the same harness.
-9. Only then design provider mock orchestration and sync benchmarks.
+1. Decide whether `ServiceClient` and friends move out of `app` into a
+   slim sub-crate before the harness module lands. Either layout works
+   for the Lua bindings; a slim crate is cleaner for compile-time
+   hygiene but is not on the critical path.
+2. Add the `harness` module in `app`: `dellingr` dep, `RustFunc`
+   wrappers for `ServiceClient`, the wait combinator, sentinel watch,
+   frame-log tap, /proc snapshot writer, artefact-dir writer.
+3. Wire `app --test-harness <script.lua>` behind `test-helpers`.
+4. Add an entry in Ratatoskr's `brokkr.toml`:
+
+   ```toml
+   [[check]]
+   name = "harness"
+   features = ["test-helpers"]
+   build_packages = ["app", "parent_death_helper"]
+
+   [ratatoskr.harness]
+   sweep = "harness"
+   binary = "app"
+   ```
+
+5. Re-express the two ignored tests as Lua scripts. Run them under
+   `brokkr service-test`. Confirm: when the Service deadlock fires,
+   the artefact dump explains it (`proc-wchan.txt` for the writer
+   task, `frames.jsonl` for whether the shutdown response was sent,
+   `events.jsonl` for what got past `BootReady`).
+6. Add the Phase 8 Ratatoskr-side hooks the cohort needs:
+   `--test-fake-schema=N`, `TestSeedAccount`, fault-injection /
+   counter-probe `RequestParams` variants. Each new variant is
+   automatically usable from Lua.
+7. Express the T1 cohort as Lua scripts.
+8. Add manual-matrix items 4 and 5 (heartbeat / SIGTERM drain).
+9. Add `brokkr service-suite` and soak loops once the single-script
+   path is solid.
+10. Only then design provider mock orchestration and sync benchmarks
+    (Track 2).
 
 ## Non-goals
 
 - Do not move Service correctness into Brokkr.
+- Do not introduce a Brokkr -> Ratatoskr or Ratatoskr -> Brokkr
+  source-level dependency. Brokkr orchestrates; Ratatoskr hosts the
+  harness module. Cross-process communication is by subprocess spawn +
+  env vars only.
+- Do not require Brokkr to host the Lua VM or embed `ServiceClient`;
+  either choice would force a tokio dependency in Brokkr and either a
+  heavy `app`-crate dep or a parallel JSON-RPC client implementation.
 - Do not require Brokkr to parse Ratatoskr SQLite tables.
 - Do not require the iced UI for first-generation sync benchmarks.
 - Do not make mock providers production code.
 - Do not generalize the entire Service IPC protocol for external users.
 - Do not block Phase 8 on comprehensive IMAP/JMAP mocks. The Service
   harness is useful on its own.
+- Do not migrate the existing tokio-tests. The new harness coexists.
+  Tests that work today as `#[tokio::test]` stay there. New tests in
+  the cohort start in the new harness; old tests migrate only if their
+  authors choose to.
 
 ## Open questions for the real Phase 8 plan
 
+- Should `ServiceClient` and friends carve into a slim sub-crate
+  (e.g. `crates/service-client`) before the harness module lands, or
+  stay in `app`? Both work for the Lua bindings; the slim crate is a
+  compile-time-hygiene call, not a correctness call.
+- Should `crates/app/tests/service-harness/` be the discovery root, or
+  should the location be configurable in `brokkr.toml` via an
+  optional `[ratatoskr.harness] script_dir` override?
+- Lua API surface naming and shape - the capabilities are pinned in
+  the brokkr-side note's cohort table; function names, argument
+  conventions, and return shapes are open.
 - Should fixture setup live in `crates/dev-seed`, a new test-fixtures
   crate, or `service` test helpers?
-- Should headless sync be an IPC method, a binary, or a cargo test?
-- Should Brokkr marker FIFO emission live in Service code directly, or
-  behind a small trait like `ProgressReporter`?
-- Which app-data directories should be preserved by default?
+- Headless sync surface: Brokkr's plan 3 has converged on a Lua
+  script via Track 1's `app --test-harness` (see "Headless sync
+  trigger" above). Phase 8 can ratify or revisit; the question is
+  not fully closed until the first sync script lands.
+- Should the harness module's marker emission go through the existing
+  `BROKKR_MARKER_FIFO` sidecar protocol, or write its own log entries
+  the harness reads back? The sidecar protocol exists and is stable;
+  using it is the conservative call.
+- Which app-data directories should be preserved by default vs cleaned
+  on script success?
 - Which subprocess tests must be serial because they involve process
   locks or fixed ports?
-- Which provider mock should come first: IMAP, JMAP, or a shared fixture
-  model before either protocol?
+- Which provider mock should come first: IMAP, JMAP, or a shared
+  fixture model before either protocol?
 - What is the smallest JSON summary that sync benchmarks should emit?
+- What is the cost-budget default for a Lua script before dellingr
+  aborts it as runaway?
 
 ## Exit criteria for this scaffold
 
-This scaffold has done its job when, after Phase 7, the Phase 8 planning
-session can answer these questions without additional document
-spelunking:
+This scaffold has done its job when, after Phase 7, the Phase 8
+planning session can answer these questions without additional
+document spelunking:
 
 - What does Brokkr provide beyond `cargo test`?
 - Why is Brokkr relevant to Ratatoskr's Service phase?
 - Which parts belong in Brokkr and which belong in Ratatoskr?
 - What must Ratatoskr expose before Brokkr can help?
+- Why does the harness module live in Ratatoskr's `app` crate rather
+  than in Brokkr?
 - Why should the Service harness land before provider mock servers?

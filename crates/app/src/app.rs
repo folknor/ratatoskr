@@ -337,7 +337,7 @@ impl ReadyApp {
 
         let action_ctx = match (&body_store, &inline_image_store, &search_state) {
             (Some(bs), Some(iis), Some(ss)) => Some(service::actions::ActionContext {
-                db: db.write_db_state(),
+                db: db.phase_6c_pending_write_state(),
                 body_store: bs.clone(),
                 inline_images: iis.clone(),
                 search: (**ss).clone(),

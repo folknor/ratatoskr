@@ -1,8 +1,6 @@
 use rtsk::db::queries_extra::calendars::{
-    LocalCalendarEventParams, create_calendar_event_sync, delete_calendar_event_sync,
     expand_view_events, get_calendar_event_sync, get_event_attendees_sync,
     get_event_reminders_sync, load_calendars_for_sidebar_sync, load_view_event_rows_sync,
-    update_calendar_event_sync,
 };
 
 use super::connection::Db;
@@ -36,27 +34,6 @@ impl Db {
             }))
         })
         .await
-    }
-
-    /// Create a new calendar event. Returns the new event's id.
-    #[allow(dead_code)] // Calendar CRUD wrappers; calendar UI calls core directly for now.
-    pub async fn create_calendar_event(
-        &self,
-        params: LocalCalendarEventParams,
-    ) -> Result<String, String> {
-        self.with_write_conn(move |conn| create_calendar_event_sync(conn, &params))
-            .await
-    }
-
-    /// Update an existing calendar event.
-    #[allow(dead_code)] // see create_calendar_event above
-    pub async fn update_calendar_event(
-        &self,
-        event_id: String,
-        params: LocalCalendarEventParams,
-    ) -> Result<(), String> {
-        self.with_write_conn(move |conn| update_calendar_event_sync(conn, &event_id, &params))
-            .await
     }
 
     /// Load calendar events for view rendering, clipped to a time window.
@@ -99,13 +76,6 @@ impl Db {
                 timezone: ev.timezone,
             })
             .collect())
-    }
-
-    /// Delete a calendar event by id.
-    #[allow(dead_code)] // see create_calendar_event above
-    pub async fn delete_calendar_event(&self, event_id: String) -> Result<(), String> {
-        self.with_write_conn(move |conn| delete_calendar_event_sync(conn, &event_id))
-            .await
     }
 
     /// Load attendees for a given event.
