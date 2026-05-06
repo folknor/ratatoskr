@@ -158,49 +158,58 @@ pub struct InsertSignatureParams {
     pub is_reply_default: bool,
 }
 
-pub async fn db_insert_signature(db: &ReadDbState, p: InsertSignatureParams) -> Result<String, String> {
+/// Insert one row into `signatures` and return the new id. Inside a
+/// single transaction the helper also clears `is_default` /
+/// `is_reply_default` on every other signature for the same account
+/// when the new row claims either flag, so the per-account "exactly
+/// one default" invariant is preserved without UI-side care.
+///
+/// Phase 6a: callable from the Service-side `signature.create`
+/// handler via `WriteDbState::with_conn` - the synchronous shape lets
+/// the handler hold the connection across the transaction without an
+/// async wrapper.
+pub fn db_insert_signature_sync(
+    conn: &rusqlite::Connection,
+    p: &InsertSignatureParams,
+) -> Result<String, String> {
     log::info!(
         "Inserting signature: account_id={}, name={}",
         p.account_id,
         p.name
     );
     let id = uuid::Uuid::new_v4().to_string();
-    let ret_id = id.clone();
-    db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-        if p.is_default {
-            tx.execute(
-                "UPDATE signatures SET is_default = 0 WHERE account_id = ?1",
-                params![p.account_id],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        if p.is_reply_default {
-            tx.execute(
-                "UPDATE signatures SET is_reply_default = 0 WHERE account_id = ?1",
-                params![p.account_id],
-            )
-            .map_err(|e| e.to_string())?;
-        }
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    if p.is_default {
         tx.execute(
-            "INSERT INTO signatures \
-             (id, account_id, name, body_html, body_text, is_default, is_reply_default) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                id,
-                p.account_id,
-                p.name,
-                p.body_html,
-                p.body_text,
-                i64::from(p.is_default),
-                i64::from(p.is_reply_default),
-            ],
+            "UPDATE signatures SET is_default = 0 WHERE account_id = ?1",
+            params![p.account_id],
         )
         .map_err(|e| e.to_string())?;
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(ret_id)
-    })
-    .await
+    }
+    if p.is_reply_default {
+        tx.execute(
+            "UPDATE signatures SET is_reply_default = 0 WHERE account_id = ?1",
+            params![p.account_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.execute(
+        "INSERT INTO signatures \
+         (id, account_id, name, body_html, body_text, is_default, is_reply_default) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            id,
+            p.account_id,
+            p.name,
+            p.body_html,
+            p.body_text,
+            i64::from(p.is_default),
+            i64::from(p.is_reply_default),
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(id)
 }
 
 /// Parameters for updating a signature.
@@ -213,83 +222,104 @@ pub struct UpdateSignatureParams {
     pub is_reply_default: Option<bool>,
 }
 
-pub async fn db_update_signature(db: &ReadDbState, p: UpdateSignatureParams) -> Result<(), String> {
+/// Partial-update a signature row by id. Each `Option` field on
+/// `UpdateSignatureParams` is "no change" if `None`, else "set to
+/// value." Setting `is_default` / `is_reply_default` to `Some(true)`
+/// also clears the same flag on every other signature for the same
+/// account inside the transaction.
+///
+/// Phase 6a: paired sync version of the prior async function so the
+/// `signature.update` handler can run inside `WriteDbState::with_conn`.
+pub fn db_update_signature_sync(
+    conn: &rusqlite::Connection,
+    p: UpdateSignatureParams,
+) -> Result<(), String> {
     log::info!("Updating signature: id={}", p.id);
-    db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-        let account_id = get_signature_account_id(&tx, &p.id)?;
-        if p.is_default == Some(true)
-            && let Some(ref aid) = account_id
-        {
-            tx.execute(
-                "UPDATE signatures SET is_default = 0 WHERE account_id = ?1",
-                params![aid],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        if p.is_reply_default == Some(true)
-            && let Some(ref aid) = account_id
-        {
-            tx.execute(
-                "UPDATE signatures SET is_reply_default = 0 WHERE account_id = ?1",
-                params![aid],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        let mut sets: Vec<(&str, Box<dyn rusqlite::types::ToSql>)> = Vec::new();
-        if let Some(v) = p.name {
-            sets.push(("name", Box::new(v)));
-        }
-        if let Some(v) = p.body_html {
-            sets.push(("body_html", Box::new(v)));
-        }
-        if let Some(v) = p.body_text {
-            sets.push(("body_text", Box::new(v)));
-        }
-        if let Some(v) = p.is_default {
-            sets.push(("is_default", Box::new(i64::from(v))));
-        }
-        if let Some(v) = p.is_reply_default {
-            sets.push(("is_reply_default", Box::new(i64::from(v))));
-        }
-        dynamic_update(&tx, "signatures", "id", &p.id, sets)?;
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let account_id = get_signature_account_id(&tx, &p.id)?;
+    if p.is_default == Some(true)
+        && let Some(ref aid) = account_id
+    {
+        tx.execute(
+            "UPDATE signatures SET is_default = 0 WHERE account_id = ?1",
+            params![aid],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    if p.is_reply_default == Some(true)
+        && let Some(ref aid) = account_id
+    {
+        tx.execute(
+            "UPDATE signatures SET is_reply_default = 0 WHERE account_id = ?1",
+            params![aid],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    let UpdateSignatureParams {
+        id,
+        name,
+        body_html,
+        body_text,
+        is_default,
+        is_reply_default,
+    } = p;
+    let mut sets: Vec<(&str, Box<dyn rusqlite::types::ToSql>)> = Vec::new();
+    if let Some(v) = name {
+        sets.push(("name", Box::new(v)));
+    }
+    if let Some(v) = body_html {
+        sets.push(("body_html", Box::new(v)));
+    }
+    if let Some(v) = body_text {
+        sets.push(("body_text", Box::new(v)));
+    }
+    if let Some(v) = is_default {
+        sets.push(("is_default", Box::new(i64::from(v))));
+    }
+    if let Some(v) = is_reply_default {
+        sets.push(("is_reply_default", Box::new(i64::from(v))));
+    }
+    dynamic_update(&tx, "signatures", "id", &id, sets)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
-pub async fn db_delete_signature(db: &ReadDbState, id: String) -> Result<(), String> {
+/// Delete a signature row by id. Idempotent: delete-of-missing
+/// returns `Ok` (rusqlite's `execute` reports rows-affected but does
+/// not error on zero matches), so callers do not need to pre-check.
+pub fn db_delete_signature_sync(
+    conn: &rusqlite::Connection,
+    id: &str,
+) -> Result<(), String> {
     log::info!("Deleting signature: id={id}");
-    db.with_conn(move |conn| {
-        conn.execute("DELETE FROM signatures WHERE id = ?1", params![id])
-            .map_err(|e| {
-                log::error!("Failed to delete signature {id}: {e}");
-                e.to_string()
-            })?;
-        Ok(())
-    })
-    .await
+    conn.execute("DELETE FROM signatures WHERE id = ?1", params![id])
+        .map_err(|e| {
+            log::error!("Failed to delete signature {id}: {e}");
+            e.to_string()
+        })?;
+    Ok(())
 }
 
-/// Reorder signatures for an account. `ordered_ids` lists signature IDs in
-/// the desired display order; each one receives `sort_order = index`.
-pub async fn db_reorder_signatures(db: &ReadDbState, ordered_ids: Vec<String>) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-        for (i, sig_id) in ordered_ids.iter().enumerate() {
-            #[allow(clippy::cast_possible_wrap)]
-            let order = i as i64;
-            tx.execute(
-                "UPDATE signatures SET sort_order = ?1 WHERE id = ?2",
-                params![order, sig_id],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
+/// Reorder signatures by assigning `sort_order = index_in_list` for
+/// each id in `ordered_ids`. Ids absent from the list keep their
+/// existing `sort_order`, so callers reordering a per-account subset
+/// only need to pass that account's ids.
+pub fn db_reorder_signatures_sync(
+    conn: &rusqlite::Connection,
+    ordered_ids: &[String],
+) -> Result<(), String> {
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    for (i, sig_id) in ordered_ids.iter().enumerate() {
+        #[allow(clippy::cast_possible_wrap)]
+        let order = i as i64;
+        tx.execute(
+            "UPDATE signatures SET sort_order = ?1 WHERE id = ?2",
+            params![order, sig_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Set the reply-default signature for an account (clears old reply-default
@@ -899,4 +929,358 @@ pub fn finalize_compose_plain_text(body_text: &str, signature_text: Option<&str>
         return body_text.to_string();
     }
     format!("{body_text}\n-- \n{sig}")
+}
+
+#[cfg(test)]
+mod sync_signature_tests {
+    use super::*;
+    use crate::db::migrations;
+    use rusqlite::Connection;
+
+    fn setup_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("pragmas");
+        migrations::run_all(&conn).expect("migrations");
+        // Two accounts so the cross-account "default" guard is
+        // exercised.
+        conn.execute(
+            "INSERT INTO accounts (id, email) VALUES \
+             ('acc-1', 'acc-1@example.com'), \
+             ('acc-2', 'acc-2@example.com')",
+            [],
+        )
+        .expect("seed accounts");
+        conn
+    }
+
+    fn count_default_for(conn: &Connection, account_id: &str, col: &str) -> i64 {
+        let sql = format!(
+            "SELECT COUNT(*) FROM signatures WHERE account_id = ?1 AND {col} = 1"
+        );
+        conn.query_row(&sql, params![account_id], |row| row.get(0))
+            .expect("count default")
+    }
+
+    fn get_sort_order(conn: &Connection, sig_id: &str) -> i64 {
+        conn.query_row(
+            "SELECT sort_order FROM signatures WHERE id = ?1",
+            params![sig_id],
+            |row| row.get(0),
+        )
+        .expect("sort_order")
+    }
+
+    fn get_text(conn: &Connection, sig_id: &str, col: &str) -> Option<String> {
+        let sql = format!("SELECT {col} FROM signatures WHERE id = ?1");
+        conn.query_row(&sql, params![sig_id], |row| row.get(0))
+            .expect("get text col")
+    }
+
+    #[test]
+    fn insert_returns_id_and_persists_row() {
+        let conn = setup_db();
+        let p = InsertSignatureParams {
+            account_id: "acc-1".into(),
+            name: "Work".into(),
+            body_html: "<p>Best</p>".into(),
+            body_text: Some("Best".into()),
+            is_default: false,
+            is_reply_default: false,
+        };
+        let id = db_insert_signature_sync(&conn, &p).expect("insert");
+        assert!(!id.is_empty(), "must return a uuid");
+        let name: String = conn
+            .query_row(
+                "SELECT name FROM signatures WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .expect("row exists");
+        assert_eq!(name, "Work");
+    }
+
+    #[test]
+    fn insert_with_is_default_clears_other_defaults_in_same_account() {
+        let conn = setup_db();
+        // First sig: default for acc-1.
+        let first = db_insert_signature_sync(
+            &conn,
+            &InsertSignatureParams {
+                account_id: "acc-1".into(),
+                name: "First".into(),
+                body_html: "<p>1</p>".into(),
+                body_text: None,
+                is_default: true,
+                is_reply_default: false,
+            },
+        )
+        .expect("insert first");
+        // Second sig: also default. Should flip first row.
+        let _second = db_insert_signature_sync(
+            &conn,
+            &InsertSignatureParams {
+                account_id: "acc-1".into(),
+                name: "Second".into(),
+                body_html: "<p>2</p>".into(),
+                body_text: None,
+                is_default: true,
+                is_reply_default: false,
+            },
+        )
+        .expect("insert second");
+        assert_eq!(
+            count_default_for(&conn, "acc-1", "is_default"),
+            1,
+            "exactly one default per account"
+        );
+        let first_default: i64 = conn
+            .query_row(
+                "SELECT is_default FROM signatures WHERE id = ?1",
+                params![first],
+                |row| row.get(0),
+            )
+            .expect("first row");
+        assert_eq!(first_default, 0, "first row was demoted to non-default");
+    }
+
+    #[test]
+    fn insert_does_not_clear_default_in_different_account() {
+        let conn = setup_db();
+        let acc1 = db_insert_signature_sync(
+            &conn,
+            &InsertSignatureParams {
+                account_id: "acc-1".into(),
+                name: "A1".into(),
+                body_html: "<p>1</p>".into(),
+                body_text: None,
+                is_default: true,
+                is_reply_default: false,
+            },
+        )
+        .expect("insert acc-1 default");
+        let _acc2 = db_insert_signature_sync(
+            &conn,
+            &InsertSignatureParams {
+                account_id: "acc-2".into(),
+                name: "A2".into(),
+                body_html: "<p>2</p>".into(),
+                body_text: None,
+                is_default: true,
+                is_reply_default: false,
+            },
+        )
+        .expect("insert acc-2 default");
+        let acc1_default: i64 = conn
+            .query_row(
+                "SELECT is_default FROM signatures WHERE id = ?1",
+                params![acc1],
+                |row| row.get(0),
+            )
+            .expect("acc-1 row");
+        assert_eq!(
+            acc1_default, 1,
+            "acc-1's default must survive a different account's default insert"
+        );
+    }
+
+    #[test]
+    fn update_partial_only_changes_named_fields() {
+        let conn = setup_db();
+        let id = db_insert_signature_sync(
+            &conn,
+            &InsertSignatureParams {
+                account_id: "acc-1".into(),
+                name: "Old".into(),
+                body_html: "<p>old</p>".into(),
+                body_text: Some("old".into()),
+                is_default: true,
+                is_reply_default: false,
+            },
+        )
+        .expect("insert");
+
+        // Update only the name.
+        db_update_signature_sync(
+            &conn,
+            UpdateSignatureParams {
+                id: id.clone(),
+                name: Some("New".into()),
+                body_html: None,
+                body_text: None,
+                is_default: None,
+                is_reply_default: None,
+            },
+        )
+        .expect("update");
+
+        assert_eq!(get_text(&conn, &id, "name"), Some("New".into()));
+        assert_eq!(get_text(&conn, &id, "body_html"), Some("<p>old</p>".into()));
+        assert_eq!(get_text(&conn, &id, "body_text"), Some("old".into()));
+        assert_eq!(
+            count_default_for(&conn, "acc-1", "is_default"),
+            1,
+            "is_default must survive a name-only update"
+        );
+    }
+
+    #[test]
+    fn update_promotes_to_default_clears_others() {
+        let conn = setup_db();
+        let _first = db_insert_signature_sync(
+            &conn,
+            &InsertSignatureParams {
+                account_id: "acc-1".into(),
+                name: "First".into(),
+                body_html: "<p>1</p>".into(),
+                body_text: None,
+                is_default: true,
+                is_reply_default: false,
+            },
+        )
+        .expect("first");
+        let second = db_insert_signature_sync(
+            &conn,
+            &InsertSignatureParams {
+                account_id: "acc-1".into(),
+                name: "Second".into(),
+                body_html: "<p>2</p>".into(),
+                body_text: None,
+                is_default: false,
+                is_reply_default: false,
+            },
+        )
+        .expect("second");
+
+        db_update_signature_sync(
+            &conn,
+            UpdateSignatureParams {
+                id: second.clone(),
+                name: None,
+                body_html: None,
+                body_text: None,
+                is_default: Some(true),
+                is_reply_default: None,
+            },
+        )
+        .expect("promote second");
+
+        assert_eq!(
+            count_default_for(&conn, "acc-1", "is_default"),
+            1,
+            "still exactly one default after promotion"
+        );
+        let second_default: i64 = conn
+            .query_row(
+                "SELECT is_default FROM signatures WHERE id = ?1",
+                params![second],
+                |row| row.get(0),
+            )
+            .expect("second row");
+        assert_eq!(second_default, 1, "second is now the default");
+    }
+
+    #[test]
+    fn delete_removes_row_and_is_idempotent() {
+        let conn = setup_db();
+        let id = db_insert_signature_sync(
+            &conn,
+            &InsertSignatureParams {
+                account_id: "acc-1".into(),
+                name: "X".into(),
+                body_html: "<p>x</p>".into(),
+                body_text: None,
+                is_default: false,
+                is_reply_default: false,
+            },
+        )
+        .expect("insert");
+
+        db_delete_signature_sync(&conn, &id).expect("delete");
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM signatures WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .expect("count");
+        assert_eq!(n, 0);
+
+        // Idempotent: delete-of-missing is Ok.
+        db_delete_signature_sync(&conn, &id).expect("idempotent delete");
+    }
+
+    #[test]
+    fn reorder_assigns_indices_in_order() {
+        let conn = setup_db();
+        let mut ids = Vec::new();
+        for name in ["A", "B", "C"] {
+            let id = db_insert_signature_sync(
+                &conn,
+                &InsertSignatureParams {
+                    account_id: "acc-1".into(),
+                    name: name.into(),
+                    body_html: "<p>x</p>".into(),
+                    body_text: None,
+                    is_default: false,
+                    is_reply_default: false,
+                },
+            )
+            .expect("insert");
+            ids.push(id);
+        }
+        // Reorder to C, A, B.
+        let new_order = vec![ids[2].clone(), ids[0].clone(), ids[1].clone()];
+        db_reorder_signatures_sync(&conn, &new_order).expect("reorder");
+
+        assert_eq!(get_sort_order(&conn, &ids[2]), 0);
+        assert_eq!(get_sort_order(&conn, &ids[0]), 1);
+        assert_eq!(get_sort_order(&conn, &ids[1]), 2);
+    }
+
+    #[test]
+    fn reorder_leaves_absent_ids_untouched() {
+        let conn = setup_db();
+        let acc1 = db_insert_signature_sync(
+            &conn,
+            &InsertSignatureParams {
+                account_id: "acc-1".into(),
+                name: "A1".into(),
+                body_html: "<p>x</p>".into(),
+                body_text: None,
+                is_default: false,
+                is_reply_default: false,
+            },
+        )
+        .expect("insert acc-1");
+        let acc2 = db_insert_signature_sync(
+            &conn,
+            &InsertSignatureParams {
+                account_id: "acc-2".into(),
+                name: "A2".into(),
+                body_html: "<p>y</p>".into(),
+                body_text: None,
+                is_default: false,
+                is_reply_default: false,
+            },
+        )
+        .expect("insert acc-2");
+
+        // Set acc-2's sort_order to a known sentinel; reorder only
+        // acc-1's id and assert acc-2 is untouched.
+        conn.execute(
+            "UPDATE signatures SET sort_order = 99 WHERE id = ?1",
+            params![acc2],
+        )
+        .expect("seed sort_order");
+
+        db_reorder_signatures_sync(&conn, std::slice::from_ref(&acc1)).expect("reorder");
+
+        assert_eq!(get_sort_order(&conn, &acc1), 0);
+        assert_eq!(
+            get_sort_order(&conn, &acc2),
+            99,
+            "absent ids keep their prior sort_order"
+        );
+    }
 }

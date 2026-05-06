@@ -7,6 +7,9 @@ use crate::calendar::{
     CalendarCancelAccountSyncParams, CalendarSetVisibilityParams, CalendarStartAccountSyncParams,
 };
 use crate::settings::SettingsSetParams;
+use crate::signature::{
+    SignatureCreateParams, SignatureDeleteParams, SignatureReorderParams, SignatureUpdateParams,
+};
 use crate::thread_ui_state::ThreadUiStateSetParams;
 use crate::sync::{SyncCancelAccountParams, SyncStartAccountParams};
 
@@ -135,6 +138,33 @@ pub enum RequestParams {
     ///
     /// 5 s timeout: handler is one bounded transaction.
     SettingsSet { params: SettingsSetParams },
+    /// Phase 6a: insert one row into `signatures`. Inside a single
+    /// transaction the handler also clears `is_default` /
+    /// `is_reply_default` on every other signature for the same
+    /// account when the new row claims either flag.
+    ///
+    /// 5 s timeout: handler is one bounded transaction.
+    SignatureCreate { params: SignatureCreateParams },
+    /// Phase 6a: partial-update one row in `signatures`. Each
+    /// `Option` field is "no change" if absent, else "set to value."
+    /// Setting `is_default` / `is_reply_default` to `true` clears the
+    /// same flag on every other signature for the same account in the
+    /// same transaction.
+    ///
+    /// 5 s timeout: handler is one bounded transaction.
+    SignatureUpdate { params: SignatureUpdateParams },
+    /// Phase 6a: delete one row from `signatures` by id. Idempotent;
+    /// delete-of-missing returns Ok.
+    ///
+    /// 5 s timeout: handler is one bounded statement.
+    SignatureDelete { params: SignatureDeleteParams },
+    /// Phase 6a: assign `sort_order` to a flat list of signature ids
+    /// in one transaction. Per-account ordering hazard documented on
+    /// the wire type - stale acks are tolerable today; a generation
+    /// token is the documented escape hatch.
+    ///
+    /// 5 s timeout: handler is one bounded transaction.
+    SignatureReorder { params: SignatureReorderParams },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -169,6 +199,10 @@ impl RequestParams {
             Self::CalendarSetVisibility { .. } => "calendar.set_visibility",
             Self::ThreadUiStateSet { .. } => "thread_ui_state.set",
             Self::SettingsSet { .. } => "settings.set",
+            Self::SignatureCreate { .. } => "signature.create",
+            Self::SignatureUpdate { .. } => "signature.update",
+            Self::SignatureDelete { .. } => "signature.delete",
+            Self::SignatureReorder { .. } => "signature.reorder",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -226,6 +260,10 @@ impl RequestParams {
             Self::CalendarSetVisibility { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             Self::ThreadUiStateSet { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             Self::SettingsSet { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            Self::SignatureCreate { .. }
+            | Self::SignatureUpdate { .. }
+            | Self::SignatureDelete { .. }
+            | Self::SignatureReorder { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
@@ -279,6 +317,10 @@ impl RequestParams {
             Self::CalendarSetVisibility { params } => serde_json::json!({ "params": params }),
             Self::ThreadUiStateSet { params } => serde_json::json!({ "params": params }),
             Self::SettingsSet { params } => serde_json::json!({ "params": params }),
+            Self::SignatureCreate { params } => serde_json::json!({ "params": params }),
+            Self::SignatureUpdate { params } => serde_json::json!({ "params": params }),
+            Self::SignatureDelete { params } => serde_json::json!({ "params": params }),
+            Self::SignatureReorder { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -406,6 +448,42 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("settings.set params: {e}"))?;
                 Ok(Self::SettingsSet { params: p.params })
+            }
+            "signature.create" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: SignatureCreateParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("signature.create params: {e}"))?;
+                Ok(Self::SignatureCreate { params: p.params })
+            }
+            "signature.update" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: SignatureUpdateParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("signature.update params: {e}"))?;
+                Ok(Self::SignatureUpdate { params: p.params })
+            }
+            "signature.delete" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: SignatureDeleteParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("signature.delete params: {e}"))?;
+                Ok(Self::SignatureDelete { params: p.params })
+            }
+            "signature.reorder" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: SignatureReorderParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("signature.reorder params: {e}"))?;
+                Ok(Self::SignatureReorder { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {
@@ -879,5 +957,173 @@ mod tests {
             RequestParams::from_method_params("boot.ready", Some(serde_json::json!({"x": 1})))
                 .is_err()
         );
+    }
+
+    // -- Phase 6a: signature CRUD wire envelope -----------------------------
+
+    fn sample_create_params() -> SignatureCreateParams {
+        SignatureCreateParams {
+            account_id: "acc-1".into(),
+            name: "Work".into(),
+            body_html: "<p>hi</p>".into(),
+            body_text: Some("hi".into()),
+            is_default: true,
+            is_reply_default: false,
+        }
+    }
+
+    #[test]
+    fn signature_create_method_name_is_dotted() {
+        let p = RequestParams::SignatureCreate {
+            params: sample_create_params(),
+        };
+        assert_eq!(p.method_name(), "signature.create");
+    }
+
+    #[test]
+    fn signature_create_timeout_is_five_seconds() {
+        let p = RequestParams::SignatureCreate {
+            params: sample_create_params(),
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn signature_create_round_trips_from_method_params() {
+        let original = RequestParams::SignatureCreate {
+            params: sample_create_params(),
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn signature_update_method_name_is_dotted() {
+        let p = RequestParams::SignatureUpdate {
+            params: SignatureUpdateParams {
+                id: "sig-1".into(),
+                name: Some("New".into()),
+                body_html: None,
+                body_text: None,
+                is_default: None,
+                is_reply_default: None,
+            },
+        };
+        assert_eq!(p.method_name(), "signature.update");
+    }
+
+    #[test]
+    fn signature_update_timeout_is_five_seconds() {
+        let p = RequestParams::SignatureUpdate {
+            params: SignatureUpdateParams {
+                id: "sig-1".into(),
+                name: None,
+                body_html: None,
+                body_text: None,
+                is_default: Some(true),
+                is_reply_default: None,
+            },
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn signature_update_round_trips_from_method_params() {
+        let original = RequestParams::SignatureUpdate {
+            params: SignatureUpdateParams {
+                id: "sig-1".into(),
+                name: Some("Renamed".into()),
+                body_html: Some("<p>x</p>".into()),
+                body_text: Some("x".into()),
+                is_default: Some(false),
+                is_reply_default: Some(true),
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn signature_delete_method_name_is_dotted() {
+        let p = RequestParams::SignatureDelete {
+            params: SignatureDeleteParams { id: "sig-1".into() },
+        };
+        assert_eq!(p.method_name(), "signature.delete");
+    }
+
+    #[test]
+    fn signature_delete_timeout_is_five_seconds() {
+        let p = RequestParams::SignatureDelete {
+            params: SignatureDeleteParams { id: "sig-1".into() },
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn signature_delete_round_trips_from_method_params() {
+        let original = RequestParams::SignatureDelete {
+            params: SignatureDeleteParams { id: "sig-9".into() },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn signature_reorder_method_name_is_dotted() {
+        let p = RequestParams::SignatureReorder {
+            params: SignatureReorderParams {
+                ordered_ids: vec!["a".into(), "b".into()],
+            },
+        };
+        assert_eq!(p.method_name(), "signature.reorder");
+    }
+
+    #[test]
+    fn signature_reorder_timeout_is_five_seconds() {
+        let p = RequestParams::SignatureReorder {
+            params: SignatureReorderParams {
+                ordered_ids: Vec::new(),
+            },
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn signature_reorder_round_trips_from_method_params() {
+        let original = RequestParams::SignatureReorder {
+            params: SignatureReorderParams {
+                ordered_ids: vec!["a".into(), "b".into(), "c".into()],
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
     }
 }

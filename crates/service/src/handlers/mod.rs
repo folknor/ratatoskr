@@ -9,6 +9,7 @@ mod health;
 mod pending_ops_kick;
 mod pinned_search;
 mod settings;
+mod signature;
 mod sync;
 mod thread_ui_state;
 #[cfg(feature = "test-helpers")]
@@ -67,6 +68,18 @@ pub(crate) async fn dispatch(
         }
         RequestParams::SettingsSet { params } => {
             settings::handle_set(&boot_state, params).await
+        }
+        RequestParams::SignatureCreate { params } => {
+            signature::handle_create(&boot_state, params).await
+        }
+        RequestParams::SignatureUpdate { params } => {
+            signature::handle_update(&boot_state, params).await
+        }
+        RequestParams::SignatureDelete { params } => {
+            signature::handle_delete(&boot_state, params).await
+        }
+        RequestParams::SignatureReorder { params } => {
+            signature::handle_reorder(&boot_state, params).await
         }
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPanic => test_helpers::panic_handle().await,

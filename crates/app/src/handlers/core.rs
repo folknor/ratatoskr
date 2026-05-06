@@ -569,15 +569,25 @@ impl ReadyApp {
                 self.handle_save_account_changes(account_id, params)
             }
             SettingsEvent::SaveSignature(req) => {
-                handlers::signatures::handle_save_signature(&self.db, req).map(Message::SignatureOp)
+                handlers::signatures::handle_save_signature(
+                    self.service_client.clone(),
+                    req,
+                )
+                .map(Message::SignatureOp)
             }
             SettingsEvent::DeleteSignature(id) => {
-                handlers::signatures::handle_delete_signature(&self.db, id)
-                    .map(Message::SignatureOp)
+                handlers::signatures::handle_delete_signature(
+                    self.service_client.clone(),
+                    id,
+                )
+                .map(Message::SignatureOp)
             }
             SettingsEvent::ReorderSignatures(ordered_ids) => {
-                handlers::signatures::handle_reorder_signatures(&self.db, ordered_ids)
-                    .map(Message::SignatureOp)
+                handlers::signatures::handle_reorder_signatures(
+                    self.service_client.clone(),
+                    ordered_ids,
+                )
+                .map(Message::SignatureOp)
             }
             SettingsEvent::LoadContacts(filter) => self.handle_load_contacts(filter),
             SettingsEvent::LoadGroups(filter) => self.handle_load_groups(filter),
@@ -617,6 +627,13 @@ impl ReadyApp {
         &mut self,
         result: handlers::SignatureResult,
     ) -> Task<Message> {
+        // Phase 6a: each IPC method has its own ack variant. The
+        // post-ack behavior is the same on the happy path
+        // (re-list so the settings UI reflects the canonical
+        // Service-committed state), but per-variant arms keep the
+        // door open for per-method handling later (e.g. surfacing a
+        // toast on create with the new id, or rolling back a
+        // failed reorder).
         match result {
             handlers::SignatureResult::Loaded(Ok(sigs)) => {
                 self.settings.signatures = sigs;
@@ -626,7 +643,10 @@ impl ReadyApp {
                 log::error!("Failed to load signatures: {e}");
                 Task::none()
             }
-            handlers::SignatureResult::Saved(_) | handlers::SignatureResult::Deleted(_) => {
+            handlers::SignatureResult::CreatedAck(_)
+            | handlers::SignatureResult::UpdatedAck(_)
+            | handlers::SignatureResult::DeletedAck(_)
+            | handlers::SignatureResult::ReorderedAck(_) => {
                 handlers::signatures::load_signatures_async(&self.db).map(Message::SignatureOp)
             }
         }

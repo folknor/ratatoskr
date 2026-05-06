@@ -1,75 +1,125 @@
-//! Signature CRUD handlers for the app crate.
+//! Signature CRUD UI handlers.
 //!
-//! These functions delegate to core CRUD functions in
-//! `rtsk::db::queries_extra::compose` rather than using raw SQL.
-//! The core functions handle transactional default-clearing properly.
+//! Phase 6a: relocated to the Service. This module now only fires
+//! IPC requests via `ServiceClient` and routes the typed acks back
+//! through dedicated `SignatureResult` variants - one per IPC method,
+//! per the per-surface checklist. The HTML-to-plain-text conversion
+//! that previously ran here moved Service-side too: the Service
+//! handler derives `body_text` from `body_html` when the wire's
+//! `body_text` is `None`, so the UI does not need a local copy of
+//! that helper.
+//!
+//! Read paths (`load_signatures_async`) stay UI-side - the Service
+//! is the write boundary, but reads continue to flow through `Db`.
 
 use std::sync::Arc;
 
 use iced::Task;
+use service_api::{SignatureCreateParams, SignatureUpdateParams};
 
 use crate::db::Db;
+use crate::service_client::ServiceClient;
 use crate::ui::settings::SignatureEntry;
 
-/// Save a signature (insert or update) via core CRUD functions.
+type ClientHandle = Option<Arc<ServiceClient>>;
+
+/// Save a signature (insert or update) via Service IPC.
 ///
-/// When `is_default` is true, the core functions clear `is_default` on all
-/// other signatures for the same account in a transaction. Same for
-/// `is_reply_default`. Auto-generates `body_text` from `body_html`.
+/// `req.id` set means update; unset means create. Failure is logged
+/// at error level and surfaces through the dedicated ack variant; the
+/// caller's `handle_signature_op` arm then triggers a re-list so the
+/// settings UI reflects the canonical Service-committed state.
 pub fn handle_save_signature(
-    db: &Arc<Db>,
+    client: ClientHandle,
     req: crate::ui::settings::SignatureSaveRequest,
 ) -> Task<super::SignatureResult> {
-    let db = Arc::clone(db);
-    Task::perform(
-        async move {
-            let body_text = html_to_plain_text(&req.body_html);
-            let core_db = db.write_db_state();
-
-            if let Some(ref id) = req.id {
-                // Update existing signature via core CRUD.
-                let params = rtsk::db::queries_extra::UpdateSignatureParams {
-                    id: id.clone(),
-                    name: Some(req.name),
-                    body_html: Some(req.body_html),
-                    body_text: Some(Some(body_text)),
-                    is_default: Some(req.is_default),
-                    is_reply_default: Some(req.is_reply_default),
-                };
-                rtsk::db::queries_extra::db_update_signature(&core_db, params).await
-            } else {
-                // Insert new signature via core CRUD.
-                let params = rtsk::db::queries_extra::InsertSignatureParams {
-                    account_id: req.account_id,
-                    name: req.name,
-                    body_html: req.body_html,
-                    body_text: Some(body_text),
-                    is_default: req.is_default,
-                    is_reply_default: req.is_reply_default,
-                };
-                rtsk::db::queries_extra::db_insert_signature(&core_db, params)
+    let Some(client) = client else {
+        log::warn!("signature.save: no ServiceClient yet; ignoring save");
+        // Map to the right ack variant so the dispatch arm still
+        // routes the failure to the same re-list / status path.
+        return if req.id.is_some() {
+            Task::done(super::SignatureResult::UpdatedAck(Err(
+                "Service not ready".to_string(),
+            )))
+        } else {
+            Task::done(super::SignatureResult::CreatedAck(Err(
+                "Service not ready".to_string(),
+            )))
+        };
+    };
+    if let Some(id) = req.id {
+        let params = SignatureUpdateParams {
+            id,
+            name: Some(req.name),
+            body_html: Some(req.body_html),
+            // body_text=None on the wire = "Service derives from
+            // body_html." UI doesn't need to run the strip-HTML
+            // conversion locally anymore.
+            body_text: None,
+            is_default: Some(req.is_default),
+            is_reply_default: Some(req.is_reply_default),
+        };
+        Task::perform(
+            async move {
+                client
+                    .update_signature(params)
                     .await
-                    .map(|_id| ())
-            }
-        },
-        |result| {
-            if let Err(ref e) = result {
-                log::error!("Failed to save signature: {e}");
-            } else {
-                log::info!("Signature saved");
-            }
-            super::SignatureResult::Saved(result)
-        },
-    )
+                    .map_err(|e| e.to_string())
+            },
+            |result| {
+                if let Err(ref e) = result {
+                    log::error!("Failed to update signature: {e}");
+                } else {
+                    log::info!("Signature updated");
+                }
+                super::SignatureResult::UpdatedAck(result)
+            },
+        )
+    } else {
+        let params = SignatureCreateParams {
+            account_id: req.account_id,
+            name: req.name,
+            body_html: req.body_html,
+            body_text: None,
+            is_default: req.is_default,
+            is_reply_default: req.is_reply_default,
+        };
+        Task::perform(
+            async move {
+                client
+                    .create_signature(params)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            |result| {
+                if let Err(ref e) = result {
+                    log::error!("Failed to create signature: {e}");
+                } else {
+                    log::info!("Signature created");
+                }
+                super::SignatureResult::CreatedAck(result)
+            },
+        )
+    }
 }
 
-/// Delete a signature by ID via core CRUD.
-pub fn handle_delete_signature(db: &Arc<Db>, sig_id: String) -> Task<super::SignatureResult> {
-    let db = Arc::clone(db);
+/// Delete a signature by id via Service IPC.
+pub fn handle_delete_signature(
+    client: ClientHandle,
+    sig_id: String,
+) -> Task<super::SignatureResult> {
+    let Some(client) = client else {
+        log::warn!("signature.delete: no ServiceClient yet; ignoring delete");
+        return Task::done(super::SignatureResult::DeletedAck(Err(
+            "Service not ready".to_string(),
+        )));
+    };
     Task::perform(
         async move {
-            let core_db = db.write_db_state();
-            rtsk::db::queries_extra::db_delete_signature(&core_db, sig_id).await
+            client
+                .delete_signature(sig_id)
+                .await
+                .map_err(|e| e.to_string())
         },
         |result| {
             if let Err(ref e) = result {
@@ -77,19 +127,21 @@ pub fn handle_delete_signature(db: &Arc<Db>, sig_id: String) -> Task<super::Sign
             } else {
                 log::info!("Signature deleted");
             }
-            super::SignatureResult::Deleted(result)
+            super::SignatureResult::DeletedAck(result)
         },
     )
 }
 
 /// Load all signatures from the DB asynchronously via core CRUD.
+///
+/// Read path stays UI-side: the Service is the write boundary, but
+/// the read still flows through `Db` -> `db_get_all_signatures`.
 pub fn load_signatures_async(db: &Arc<Db>) -> Task<super::SignatureResult> {
     let db = Arc::clone(db);
     Task::perform(
         async move {
             let core_db = db.read_db_state();
             let db_sigs = rtsk::db::queries_extra::db_get_all_signatures(&core_db).await?;
-            // Convert DbSignature to the app's SignatureEntry type.
             let entries: Vec<SignatureEntry> = db_sigs
                 .into_iter()
                 .map(|s| SignatureEntry {
@@ -113,33 +165,36 @@ pub fn load_signatures_async(db: &Arc<Db>) -> Task<super::SignatureResult> {
     )
 }
 
-/// Reorder signatures by updating sort_order via core CRUD.
+/// Reorder signatures via Service IPC.
+///
+/// Per-account ordering hazard: rapid drag-reorder clicks can land
+/// out of order at the Service if the blocking pool is not
+/// order-preserving. Today the staleness is tolerable because the
+/// next list reload picks up the canonical order; if a user-visible
+/// bug shows up, the documented escape hatch is a generation token
+/// on `SignatureReorderParams`.
 pub fn handle_reorder_signatures(
-    db: &Arc<Db>,
+    client: ClientHandle,
     ordered_ids: Vec<String>,
 ) -> Task<super::SignatureResult> {
-    let db = Arc::clone(db);
+    let Some(client) = client else {
+        log::warn!("signature.reorder: no ServiceClient yet; ignoring reorder");
+        return Task::done(super::SignatureResult::ReorderedAck(Err(
+            "Service not ready".to_string(),
+        )));
+    };
     Task::perform(
         async move {
-            let core_db = db.write_db_state();
-            rtsk::db::queries_extra::db_reorder_signatures(&core_db, ordered_ids).await
+            client
+                .reorder_signatures(ordered_ids)
+                .await
+                .map_err(|e| e.to_string())
         },
         |result| {
             if let Err(ref e) = result {
                 log::error!("Failed to reorder signatures: {e}");
             }
-            // Reload after reorder.
-            super::SignatureResult::Saved(result)
+            super::SignatureResult::ReorderedAck(result)
         },
     )
-}
-
-// ── HTML-to-plain-text ──────────────────────────────────
-
-/// Strip HTML tags to produce a plain-text fallback for the signature.
-///
-/// Block elements insert newlines; inline elements are dropped.
-fn html_to_plain_text(html: &str) -> String {
-    // Delegate to the core implementation.
-    rtsk::db::queries_extra::html_to_plain_text(html)
 }

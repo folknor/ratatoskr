@@ -10,6 +10,7 @@ mod redacted;
 mod request;
 mod response;
 mod settings;
+mod signature;
 mod sync;
 mod thread_ui_state;
 mod version;
@@ -30,6 +31,10 @@ pub use calendar::{
     CalendarStartAccountSyncParams, CalendarStartAck, CalendarSyncResult,
 };
 pub use settings::{SettingValue, SettingsSetAck, SettingsSetParams};
+pub use signature::{
+    SignatureCreateAck, SignatureCreateParams, SignatureDeleteAck, SignatureDeleteParams,
+    SignatureReorderAck, SignatureReorderParams, SignatureUpdateAck, SignatureUpdateParams,
+};
 pub use thread_ui_state::{ThreadUiStateSetAck, ThreadUiStateSetParams};
 pub use error::{JsonRpcErrorObject, ServiceError};
 pub use framing::{

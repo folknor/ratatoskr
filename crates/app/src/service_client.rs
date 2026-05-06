@@ -7,9 +7,11 @@ use service_api::{
     CalendarStartAccountSyncParams, CalendarStartAck, CalendarSyncResult, HealthPingResponse,
     JsonRpcErrorObject, JsonRpcRequest, Notification, PROTOCOL_VERSION, ParsedServiceMessage,
     RequestParams, RequestTimeoutKind, ServiceError, ServiceResponse, SettingValue, SettingsSetAck,
-    SettingsSetParams, ShutdownResponse, SyncCancelAccountParams, SyncCancelAck, SyncCompleted,
-    SyncResult, SyncRunId, SyncStartAccountParams, SyncStartAck, ThreadUiStateSetAck,
-    ThreadUiStateSetParams, encode_message, parse_service_message,
+    SettingsSetParams, ShutdownResponse, SignatureCreateAck, SignatureCreateParams,
+    SignatureDeleteAck, SignatureDeleteParams, SignatureReorderAck, SignatureReorderParams,
+    SignatureUpdateAck, SignatureUpdateParams, SyncCancelAccountParams, SyncCancelAck,
+    SyncCompleted, SyncResult, SyncRunId, SyncStartAccountParams, SyncStartAck,
+    ThreadUiStateSetAck, ThreadUiStateSetParams, encode_message, parse_service_message,
 };
 use std::collections::{HashMap, VecDeque, hash_map::Entry};
 use std::path::{Path, PathBuf};
@@ -986,6 +988,62 @@ impl ServiceClient {
         let _ack: SettingsSetAck = self
             .request(RequestParams::SettingsSet {
                 params: SettingsSetParams { values },
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Phase 6a: insert a signature via the `signature.create` IPC.
+    /// Returns the new signature id. The Service handler runs the
+    /// per-account `is_default` / `is_reply_default` clearing inside
+    /// the same DB transaction.
+    pub async fn create_signature(
+        &self,
+        params: SignatureCreateParams,
+    ) -> Result<String, ClientError> {
+        let ack: SignatureCreateAck = self
+            .request(RequestParams::SignatureCreate { params })
+            .await?;
+        Ok(ack.id)
+    }
+
+    /// Phase 6a: partial-update a signature via the `signature.update`
+    /// IPC. Each `Option` field is "no change" if `None`, else "set
+    /// to value." Setting `is_default` / `is_reply_default` to
+    /// `Some(true)` clears the same flag on every other signature for
+    /// the same account inside the transaction.
+    pub async fn update_signature(
+        &self,
+        params: SignatureUpdateParams,
+    ) -> Result<(), ClientError> {
+        let _ack: SignatureUpdateAck = self
+            .request(RequestParams::SignatureUpdate { params })
+            .await?;
+        Ok(())
+    }
+
+    /// Phase 6a: delete a signature row via the `signature.delete`
+    /// IPC. Idempotent.
+    pub async fn delete_signature(&self, id: String) -> Result<(), ClientError> {
+        let _ack: SignatureDeleteAck = self
+            .request(RequestParams::SignatureDelete {
+                params: SignatureDeleteParams { id },
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Phase 6a: reassign sort_order across a flat id list via the
+    /// `signature.reorder` IPC. Per-account ordering hazard for rapid
+    /// drag-reorder is documented on the wire type; today's caller
+    /// tolerates the staleness (next reload reconciles).
+    pub async fn reorder_signatures(
+        &self,
+        ordered_ids: Vec<String>,
+    ) -> Result<(), ClientError> {
+        let _ack: SignatureReorderAck = self
+            .request(RequestParams::SignatureReorder {
+                params: SignatureReorderParams { ordered_ids },
             })
             .await?;
         Ok(())
