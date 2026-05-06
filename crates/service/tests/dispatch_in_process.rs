@@ -594,6 +594,7 @@ async fn boot_progress_notifications_emitted_in_order() -> TestResult {
         BootPhaseKind::RecoveringPendingOps,
         BootPhaseKind::SweepingQueuedDrafts,
         BootPhaseKind::BackfillingThreadParticipants,
+        BootPhaseKind::DrainingDraftWal,
         BootPhaseKind::OpeningBodyAndInlineStores,
         BootPhaseKind::OpeningSearchIndex,
         BootPhaseKind::RunningInvariantPass,

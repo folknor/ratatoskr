@@ -614,6 +614,7 @@ impl SplashState {
             Some(service_api::BootPhase::BackfillingThreadParticipants) => {
                 "Backfilling thread participants..."
             }
+            Some(service_api::BootPhase::DrainingDraftWal) => "Draining draft WAL...",
             Some(service_api::BootPhase::OpeningBodyAndInlineStores) => {
                 "Opening body and inline stores..."
             }

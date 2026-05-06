@@ -754,6 +754,29 @@ async fn run_boot_sequence_inner(
         recovery_warnings.push("thread-participants backfill".to_string());
     }
 
+    // Phase 6a-part-2: drain `<data_dir>/drafts.wal`. The UI's
+    // compose auto-save and window-close paths append synchronously
+    // to that file because an async IPC cannot meet the
+    // sub-millisecond shutdown bound. Replay each entry into
+    // `local_drafts` here so the UI's editor restore reads the
+    // fully-replayed state after `boot.ready`. SQLite's UPSERT
+    // makes a duplicate replay a no-op; a partial drain is safe to
+    // re-run on the next boot.
+    boot_progress::emit(&out_tx, BootPhase::DrainingDraftWal, None);
+    let app_data_dir_for_drain = app_data_dir.clone();
+    if let Err(error) = run_boot_recovery(&conn, "drafts WAL drain", move |c| {
+        let count = crate::draft_wal::drain(c, &app_data_dir_for_drain)?;
+        if count > 0 {
+            log::info!("[drafts] Drained {count} entries from drafts.wal");
+        }
+        Ok(())
+    })
+    .await
+    {
+        log::warn!("drafts WAL drain failed: {error}");
+        recovery_warnings.push("drafts WAL drain".to_string());
+    }
+
     // Phase 3 task 12: writer halves + search writer task + sync runtime.
     // These phases land Service-side state that the relocated sync paths
     // depend on, and they run before `signal_ready` so any sync handler

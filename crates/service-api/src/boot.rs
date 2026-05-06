@@ -117,6 +117,7 @@ pub enum BootPhaseKind {
     RecoveringPendingOps,
     SweepingQueuedDrafts,
     BackfillingThreadParticipants,
+    DrainingDraftWal,
     OpeningBodyAndInlineStores,
     OpeningSearchIndex,
     RunningInvariantPass,
@@ -137,6 +138,14 @@ pub enum BootPhase {
     RecoveringPendingOps,
     SweepingQueuedDrafts,
     BackfillingThreadParticipants,
+    /// Phase 6a-part-2: drain `<data_dir>/drafts.wal` produced by
+    /// the UI's compose auto-save and window-close paths. Replays
+    /// each entry into `local_drafts` via `db_save_local_draft_sync`,
+    /// then renames the active WAL aside (idempotent on repeat
+    /// drains). The UI's editor restore reads `local_drafts` after
+    /// `boot.ready` so the WAL must be drained before the boot
+    /// handshake completes.
+    DrainingDraftWal,
     OpeningBodyAndInlineStores,
     OpeningSearchIndex,
     RunningInvariantPass,
@@ -154,6 +163,7 @@ impl BootPhase {
             Self::RecoveringPendingOps => BootPhaseKind::RecoveringPendingOps,
             Self::SweepingQueuedDrafts => BootPhaseKind::SweepingQueuedDrafts,
             Self::BackfillingThreadParticipants => BootPhaseKind::BackfillingThreadParticipants,
+            Self::DrainingDraftWal => BootPhaseKind::DrainingDraftWal,
             Self::OpeningBodyAndInlineStores => BootPhaseKind::OpeningBodyAndInlineStores,
             Self::OpeningSearchIndex => BootPhaseKind::OpeningSearchIndex,
             Self::RunningInvariantPass => BootPhaseKind::RunningInvariantPass,
@@ -331,6 +341,7 @@ mod tests {
                 BootPhase::BackfillingThreadParticipants,
                 BootPhaseKind::BackfillingThreadParticipants,
             ),
+            (BootPhase::DrainingDraftWal, BootPhaseKind::DrainingDraftWal),
         ];
         for (phase, expected) in cases {
             assert_eq!(phase.coalesce_discriminant(), expected);

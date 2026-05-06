@@ -541,7 +541,7 @@ pub async fn db_delete_alias(db: &ReadDbState, id: String) -> Result<(), String>
 /// Used by both the async `db_save_local_draft` and the sync
 /// `db_save_local_draft_sync`. Owned strings so the value can move into the
 /// `with_conn` closure on the async path.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SaveLocalDraftParams {
     pub id: String,
     pub account_id: String,

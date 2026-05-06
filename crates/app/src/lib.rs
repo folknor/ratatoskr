@@ -23,6 +23,7 @@ mod command_resolver;
 mod component;
 mod db;
 mod display;
+mod draft_wal;
 mod font;
 mod handlers;
 mod helpers;

@@ -1,13 +1,10 @@
-use std::sync::Arc;
-
 use iced::Task;
 
+use crate::draft_wal;
 use crate::pop_out::PopOutWindow;
 use crate::{Message, ReadyApp};
 
-use rtsk::db::queries_extra::{
-    SaveLocalDraftParams, db_save_local_draft, db_save_local_draft_sync,
-};
+use rtsk::db::queries_extra::SaveLocalDraftParams;
 
 /// Convert token input tokens into a comma-separated string of email addresses.
 fn tokens_to_csv(tokens: &[crate::ui::token_input::Token]) -> Option<String> {
@@ -76,8 +73,18 @@ impl ReadyApp {
             .any(|w| matches!(w, PopOutWindow::Compose(s) if s.draft_dirty))
     }
 
-    /// Save a single compose window's state as a local draft (async).
-    /// Used by the periodic auto-save timer and the manual Save button.
+    /// Save a single compose window's state by appending to the
+    /// UI-side draft WAL. Used by the periodic auto-save timer and
+    /// the manual Save button. The append is synchronous and
+    /// sub-millisecond (the file is local + we only flush+fsync one
+    /// short line); the Service drains the WAL on next boot via
+    /// `BootPhase::DrainingDraftWal`.
+    ///
+    /// Returns `Task::none()` because the WAL append is the
+    /// durability point - there is nothing async to await. Phase
+    /// 6a-part-2 deletes the synchronous SQLite write that used to
+    /// run from this path; the WAL is the only UI write that
+    /// survives the lockdown.
     pub(crate) fn save_compose_draft(&mut self, window_id: iced::window::Id) -> Task<Message> {
         let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id) else {
             return Task::none();
@@ -85,30 +92,32 @@ impl ReadyApp {
         if state.from_account.is_none() {
             return Task::none();
         }
-        state.draft_dirty = false;
         let params = draft_params_from_compose(state);
-        let db = Arc::clone(&self.db);
-
-        Task::perform(
-            async move {
-                let core_db = db.write_db_state();
-                db_save_local_draft(&core_db, params).await
-            },
-            move |result| {
-                if let Err(e) = result {
-                    log::error!("Failed to auto-save compose draft: {e}");
-                }
-                Message::Noop
-            },
-        )
+        let data_dir = match crate::APP_DATA_DIR.get() {
+            Some(d) => d,
+            None => {
+                log::error!("Failed to auto-save compose draft: APP_DATA_DIR not set");
+                return Task::none();
+            }
+        };
+        match draft_wal::append(data_dir, &params) {
+            Ok(()) => {
+                state.draft_dirty = false;
+            }
+            Err(e) => {
+                log::error!("Failed to append compose draft to WAL: {e}");
+            }
+        }
+        Task::none()
     }
 
-    /// Synchronously save a compose window's draft before the window is
-    /// destroyed. Used on window close where an async Task would race
-    /// against `iced::exit()`. A single-row INSERT is sub-millisecond.
+    /// Synchronously save a compose window's draft before the
+    /// window is destroyed. Same code path as the auto-save tick;
+    /// kept distinct so call sites can express intent.
     ///
-    /// Returns `true` if the draft was saved (or didn't need saving),
-    /// `false` if the write failed and the draft is still dirty.
+    /// Returns `true` if the draft was appended (or didn't need
+    /// saving), `false` if the WAL write failed and the draft is
+    /// still dirty.
     pub(crate) fn save_compose_draft_sync(&mut self, window_id: iced::window::Id) -> bool {
         let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id) else {
             return true;
@@ -117,21 +126,20 @@ impl ReadyApp {
             return true;
         }
         let params = draft_params_from_compose(state);
-
-        let result = self
-            .db
-            .write_db_state()
-            .with_conn_sync(|conn| db_save_local_draft_sync(conn, &params));
-        match result {
+        let data_dir = match crate::APP_DATA_DIR.get() {
+            Some(d) => d,
+            None => {
+                log::error!("Failed to save compose draft on close: APP_DATA_DIR not set");
+                return false;
+            }
+        };
+        match draft_wal::append(data_dir, &params) {
             Ok(()) => {
-                if let Some(PopOutWindow::Compose(state)) = self.pop_out_windows.get_mut(&window_id)
-                {
-                    state.draft_dirty = false;
-                }
+                state.draft_dirty = false;
                 true
             }
             Err(e) => {
-                log::error!("Failed to save compose draft on close: {e}");
+                log::error!("Failed to append compose draft to WAL on close: {e}");
                 false
             }
         }
