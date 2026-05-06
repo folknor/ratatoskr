@@ -1,20 +1,22 @@
-//! Phase 6b global write-half lockdown gate.
+//! Global write-half lockdown gate: app must not reach service-state.
 //!
-//! After Phase 6a-part-2 the app crate's only writable-connection
-//! accessor on `Db` is `phase_6c_pending_write_state` (used by the
-//! `cal::actions` ActionContext construction at `app.rs:336`,
-//! removed in Phase 6c). Phase 6b layers a Cargo dependency check
-//! on top: the app crate must not depend on `service-state`
-//! directly. Without that direct dep, `WriteDbState`,
+//! The app crate's `Db` has a single writable-connection accessor:
+//! `phase_6c_pending_write_state`, used by the `action_ctx` field for
+//! the contacts handlers' provider write-back path. That path uses
+//! `ReadDbState` (`db` crate), not `WriteDbState` (`service-state`
+//! crate); a future migration of contacts Service-side will close
+//! it. Phase 6b layers a Cargo dependency check on top: the app
+//! crate must not depend on `service-state` directly **or
+//! transitively**. Without any such path, `WriteDbState`,
 //! `BodyStoreWriteState`, `InlineImageStoreWriteState`, and
 //! `SearchWriteHandle` are unreachable from `crates/app/src/`
 //! regardless of the constructors' Rust visibility.
 //!
-//! The transitive variant of this check (`app -> cal -> service-state`)
-//! is deferred to Phase 6c per `phase-6b-plan.md`'s arch-review
-//! revision; that path closes when Phase 6c relocates
-//! `cal::actions` Service-side and drops `cal` from
-//! `app/Cargo.toml`.
+//! Phase 6b shipped the direct-dep check; the transitive variant
+//! (`app -> cal -> service-state`) was deferred until Phase 6c
+//! removed the `cal::actions` UI surface. Phase 6c-10 dropped the
+//! `cal` dep from `app/Cargo.toml`; Phase 6c-11 (this commit)
+//! enables the transitive check.
 //!
 //! Why a Cargo.toml lint instead of a Rust visibility flip: the
 //! service crate (also a separate crate from `service-state`)
@@ -23,7 +25,7 @@
 //! boot path, and there is no Rust visibility token that says
 //! "visible to the service crate but not the app crate."
 //! Cargo-toml-level enforcement is the practical equivalent for
-//! phase-6b's invariant.
+//! the phase 6b/c invariant.
 
 use std::path::PathBuf;
 
@@ -89,4 +91,124 @@ fn workspace_path(suffix: &str) -> PathBuf {
         .and_then(std::path::Path::parent)
         .unwrap_or_else(|| panic!("unexpected manifest dir: {}", manifest_dir.display()));
     workspace_root.join(suffix)
+}
+
+/// Phase 6c-11: cal-out-of-app lockdown (the 6b-deferred check, refocused).
+///
+/// The original phase-6c-plan envisioned a strict
+/// `app -> ... -> service-state` blackout. That goal is not
+/// achievable in the current workspace shape: `common` (used by
+/// `rtsk`, which `app` depends on) carries provider sync types
+/// parameterised over `&WriteDbState` / `&BodyStoreWriteState` / etc.,
+/// so `app -> rtsk -> common -> service-state` is a structural path
+/// that predates Phase 6 and would require its own multi-phase
+/// refactor (move provider sync types out of `common`, or
+/// separate-crate the sync entry-points). That refactor is tracked
+/// for Phase 6d/8.
+///
+/// What this test enforces *today* is the specific regression class
+/// Phase 6c closed: the `app -> cal -> service-state` path that 6b
+/// documented as the only meaningful UI-reachable writer-half
+/// escape. Phase 6c-10 dropped the `cal` dep from `app/Cargo.toml`;
+/// this test asserts it stays dropped. Re-introducing `cal` (or any
+/// crate that carries `cal`-style write actions) into app's path
+/// cone trips the assert at PR-review time.
+///
+/// Strategy is deliberately schema-light: parses each Cargo.toml,
+/// builds a path-dep adjacency map, and walks from `app` to check
+/// reachability of `cal`. No `cargo metadata` subprocess, no JSON
+/// schema dependence; failure names the chain that re-introduces
+/// the regression.
+#[test]
+fn app_crate_must_not_transitively_depend_on_cal() {
+    let crates_dir = workspace_path("crates");
+    let entries = std::fs::read_dir(&crates_dir)
+        .unwrap_or_else(|e| panic!("read {}: {e}", crates_dir.display()));
+
+    // Build name -> [dep_name, ...] adjacency from each Cargo.toml.
+    let mut graph: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for entry in entries {
+        let entry = entry.unwrap_or_else(|e| panic!("dir entry: {e}"));
+        let manifest = entry.path().join("Cargo.toml");
+        if !manifest.is_file() {
+            continue;
+        }
+        let raw = std::fs::read_to_string(&manifest)
+            .unwrap_or_else(|e| panic!("read {}: {e}", manifest.display()));
+        let parsed: toml::Value = toml::from_str(&raw)
+            .unwrap_or_else(|e| panic!("parse {}: {e}", manifest.display()));
+        let crate_name = parsed
+            .get("package")
+            .and_then(|p| p.get("name"))
+            .and_then(|n| n.as_str())
+            .unwrap_or_else(|| panic!("no [package].name in {}", manifest.display()))
+            .to_string();
+        let mut deps = Vec::new();
+        for table_key in &["dependencies", "dev-dependencies"] {
+            if let Some(table) = parsed.get(*table_key).and_then(|v| v.as_table()) {
+                for (name, value) in table {
+                    // Only consider path-deps (workspace-local).
+                    let is_path_dep = value
+                        .as_table()
+                        .map(|t| t.contains_key("path"))
+                        .unwrap_or(false);
+                    if is_path_dep {
+                        deps.push(name.clone());
+                    }
+                }
+            }
+        }
+        graph.insert(crate_name, deps);
+    }
+
+    // BFS from `app` looking for `cal`, blocking descent through
+    // `service` (cal -> service is a legitimate Service-side edge;
+    // the lockdown is about UI-side reachability).
+    let blessed: std::collections::HashSet<&str> = ["service"].iter().copied().collect();
+    let target = "cal";
+    let start = "app";
+    let mut parent: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let mut queue: std::collections::VecDeque<String> =
+        std::collections::VecDeque::new();
+    let mut visited: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    queue.push_back(start.to_string());
+    visited.insert(start.to_string());
+    while let Some(current) = queue.pop_front() {
+        if current == target {
+            // Walk parents back to `app` to build the chain.
+            let mut chain: Vec<String> = vec![current.clone()];
+            let mut cursor = current;
+            while let Some(p) = parent.get(&cursor).cloned() {
+                chain.push(p.clone());
+                cursor = p;
+            }
+            chain.reverse();
+            panic!(
+                "Phase 6c-11 transitive lockdown failed: app reaches cal via {}.\n\
+                 Phase 6c-10 closed the `app -> cal -> ...` path. Re-introducing it \
+                 risks `cal::actions::*` writing locally from UI source files - the \
+                 regression class Phase 6c relocated. Re-route through the \
+                 `cal_action.execute_plan` IPC instead.",
+                chain.join(" -> "),
+            );
+        }
+        if blessed.contains(current.as_str()) {
+            // Don't descend through `service` - it legitimately uses
+            // cal. The hazard is UI-reachability of cal, not the
+            // existence of the cal crate.
+            continue;
+        }
+        if let Some(deps) = graph.get(&current) {
+            for dep in deps {
+                if visited.insert(dep.clone()) {
+                    parent.insert(dep.clone(), current.clone());
+                    queue.push_back(dep.clone());
+                }
+            }
+        }
+    }
+    // No path found - lockdown holds.
 }
