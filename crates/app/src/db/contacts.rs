@@ -1,8 +1,6 @@
 use rtsk::contacts::search::{ContactSearchKind, search_contacts_unified};
 use rtsk::db::queries_extra::{
-    ContactSettingsEntry, GroupSettingsEntry, load_contacts_for_settings_sync,
-    load_group_member_emails_sync, load_groups_for_settings_sync, save_contact_sync,
-    save_group_sync,
+    load_contacts_for_settings_sync, load_group_member_emails_sync, load_groups_for_settings_sync,
 };
 
 use super::connection::Db;
@@ -182,52 +180,6 @@ impl Db {
     ) -> Result<Option<rtsk::db::queries_extra::MatchedGroup>, String> {
         let db = self.read_db_state();
         rtsk::db::queries_extra::db_find_group_matching_emails(&db, emails).await
-    }
-
-    /// Insert or update a contact.
-    pub async fn save_contact(&self, entry: ContactEntry) -> Result<(), String> {
-        self.with_write_conn(move |conn| {
-            save_contact_sync(
-                conn,
-                &ContactSettingsEntry {
-                    id: entry.id,
-                    email: entry.email,
-                    display_name: entry.display_name,
-                    email2: entry.email2,
-                    phone: entry.phone,
-                    company: entry.company,
-                    notes: entry.notes,
-                    account_id: entry.account_id,
-                    account_color: entry.account_color,
-                    groups: entry.groups,
-                    source: entry.source,
-                    server_id: entry.server_id,
-                },
-            )
-        })
-        .await
-    }
-
-    /// Insert or update a contact group.
-    pub async fn save_group(
-        &self,
-        group: GroupEntry,
-        member_emails: Vec<String>,
-    ) -> Result<(), String> {
-        self.with_write_conn(move |conn| {
-            save_group_sync(
-                conn,
-                &GroupSettingsEntry {
-                    id: group.id,
-                    name: group.name,
-                    member_count: group.member_count,
-                    created_at: group.created_at,
-                    updated_at: group.updated_at,
-                },
-                &member_emails,
-            )
-        })
-        .await
     }
 
 }

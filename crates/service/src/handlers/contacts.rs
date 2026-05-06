@@ -11,17 +11,23 @@
 //! `WriteDbState::with_conn`, named ack struct, no Message variant
 //! reuse on the UI side.
 //!
-//! `save_contact` / `delete_contact` are out of scope for this
-//! handler: they route through the action service for provider
-//! write-back to Google/Graph/CardDAV and need a different relocation
-//! pattern than the simple-write surfaces in 6a.
+//! `save_contact` (Phase 6a-part-2): UPSERT one contact row. Both
+//! the UI single-contact save handler and the bulk-import path
+//! issue this IPC, one call per contact. Provider write-back
+//! (Google / Graph / CardDAV) still routes through the action
+//! service - this surface only covers the local-DB UPSERT that the
+//! pre-relocation `Db::save_contact` was performing UI-side.
+//!
+//! `delete_contact` is out of scope for this handler: it routes
+//! through the action service for provider write-back and needs a
+//! different relocation pattern than the simple-write surfaces in 6a.
 
 use std::sync::Arc;
 
 use serde_json::Value;
 use service_api::{
     ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
-    ServiceError,
+    ContactSaveAck, ContactSaveParams, ServiceError,
 };
 
 use crate::boot::BootSharedState;
@@ -59,4 +65,32 @@ pub(crate) async fn handle_group_delete(
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(ContactGroupDeleteAck)
         .map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
+pub(crate) async fn handle_contact_save(
+    boot_state: &Arc<BootSharedState>,
+    params: ContactSaveParams,
+) -> Result<Value, ServiceError> {
+    let write_db = boot_state.write_db_state()?;
+    write_db
+        .with_conn(move |conn| {
+            let entry = db::db::queries_extra::ContactSettingsEntry {
+                id: params.id,
+                email: params.email,
+                display_name: params.display_name,
+                email2: params.email2,
+                phone: params.phone,
+                company: params.company,
+                notes: params.notes,
+                account_id: params.account_id,
+                account_color: params.account_color,
+                groups: params.groups,
+                source: params.source,
+                server_id: params.server_id,
+            };
+            db::db::queries_extra::save_contact_sync(conn, &entry)
+        })
+        .await
+        .map_err(ServiceError::Internal)?;
+    serde_json::to_value(ContactSaveAck).map_err(|e| ServiceError::Internal(e.to_string()))
 }

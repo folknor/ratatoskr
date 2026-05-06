@@ -446,14 +446,14 @@ async fn handle_line(
     boot_state: &Arc<boot::BootSharedState>,
 ) -> HandleOutcome {
     match parse_client_message(line) {
-        Ok(ParsedClientMessage::Request {
-            id,
-            params: RequestParams::Shutdown,
-        }) => {
+        Ok(ParsedClientMessage::Request { id, params })
+            if matches!(*params, RequestParams::Shutdown) =>
+        {
             log::info!("dispatch start method=shutdown id={id}");
             HandleOutcome::Shutdown(id)
         }
         Ok(ParsedClientMessage::Request { id, params }) => {
+            let params = *params;
             // Bypass the admission gate for heartbeat-class requests so a
             // flood of slow handlers can't starve the UI's health check.
             // Non-bypass requests must fit under ADMISSION_CAP - beyond that

@@ -215,8 +215,14 @@ impl ReadyApp {
         update_existing: bool,
     ) -> Task<Message> {
         let db = Arc::clone(&self.db);
+        let client = self.service_client.as_ref().cloned();
         Task::perform(
-            async move { execute_contact_import(&db, contacts, account_id, update_existing).await },
+            async move {
+                let Some(client) = client else {
+                    return Err("contacts import: ServiceClient not yet available".to_string());
+                };
+                execute_contact_import(&db, &client, contacts, account_id, update_existing).await
+            },
             |result| {
                 let mapped = result.map(|r| crate::ui::settings::ImportResult {
                     imported: r.0,
@@ -234,6 +240,7 @@ impl ReadyApp {
 /// Execute the contact import against the database.
 async fn execute_contact_import(
     db: &Arc<Db>,
+    client: &crate::service_client::ServiceClient,
     contacts: Vec<import::ImportedContact>,
     account_id: Option<String>,
     update_existing: bool,
@@ -260,7 +267,10 @@ async fn execute_contact_import(
         if let Some(existing_id) = exists {
             if update_existing {
                 let entry = build_contact_entry(existing_id, &email, contact, &account_id);
-                db.save_contact(entry).await?;
+                client
+                    .save_contact(contact_entry_to_save_params(entry))
+                    .await
+                    .map_err(|e| format!("save_contact: {e}"))?;
                 updated += 1;
             } else {
                 skipped_duplicate += 1;
@@ -272,7 +282,10 @@ async fn execute_contact_import(
                 contact,
                 &account_id,
             );
-            db.save_contact(entry).await?;
+            client
+                .save_contact(contact_entry_to_save_params(entry))
+                .await
+                .map_err(|e| format!("save_contact: {e}"))?;
             imported += 1;
         }
     }
@@ -319,15 +332,21 @@ async fn execute_contact_import(
             .as_secs();
 
         #[allow(clippy::cast_possible_wrap)]
-        let entry = crate::db::GroupEntry {
+        let member_count = member_list.len() as i64;
+        #[allow(clippy::cast_possible_wrap)]
+        let now_signed = now as i64;
+        let params = service_api::ContactGroupSaveParams {
             id: group_id,
             name: group_name.clone(),
-            member_count: member_list.len() as i64,
-            created_at: now as i64,
-            updated_at: now as i64,
+            member_count,
+            created_at: now_signed,
+            updated_at: now_signed,
+            member_emails: member_list,
         };
-
-        db.save_group(entry, member_list).await?;
+        client
+            .save_contact_group(params)
+            .await
+            .map_err(|e| format!("save_contact_group: {e}"))?;
     }
 
     Ok((
@@ -337,6 +356,23 @@ async fn execute_contact_import(
         updated,
         groups_created,
     ))
+}
+
+fn contact_entry_to_save_params(entry: crate::db::ContactEntry) -> service_api::ContactSaveParams {
+    service_api::ContactSaveParams {
+        id: entry.id,
+        email: entry.email,
+        display_name: entry.display_name,
+        email2: entry.email2,
+        phone: entry.phone,
+        company: entry.company,
+        notes: entry.notes,
+        account_id: entry.account_id,
+        account_color: entry.account_color,
+        groups: entry.groups,
+        source: entry.source,
+        server_id: entry.server_id,
+    }
 }
 
 fn build_contact_entry(

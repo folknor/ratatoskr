@@ -184,7 +184,10 @@ impl RequestParseError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParsedClientMessage {
-    Request { id: u64, params: RequestParams },
+    Request {
+        id: u64,
+        params: Box<RequestParams>,
+    },
     /// UI -> Service notification (Phase 2 plan scope item 11). Always
     /// `id`-less; routed off the JSON-RPC `id IS NULL` invariant.
     Notification(ClientNotification),
@@ -252,7 +255,10 @@ pub fn parse_client_message(line: &str) -> Result<ParsedClientMessage, RequestPa
             message,
         }
     })?;
-    Ok(ParsedClientMessage::Request { id, params })
+    Ok(ParsedClientMessage::Request {
+        id,
+        params: Box::new(params),
+    })
 }
 
 fn extract_u64(value: &Value) -> Option<u64> {

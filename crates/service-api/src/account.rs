@@ -16,6 +16,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::redacted::RedactedString;
+
 /// `account.update` request body. Each `Option` field is "no change"
 /// if `None`, else "set to value." Mirrors the existing
 /// `UpdateAccountParams` struct from `db::queries_extra::accounts_crud`,
@@ -200,6 +202,32 @@ pub struct AccountCreateParams {
 pub struct AccountCreateAck {
     pub id: String,
 }
+
+/// `account.update_tokens` request body.
+///
+/// Phase 6a-part-2: re-authentication path. The UI re-issues an
+/// OAuth flow (or a password prompt) and gets fresh tokens; this
+/// IPC writes them onto the existing account row without touching
+/// identity or provider columns. Token / password fields wrap as
+/// `RedactedString` so the wire-debug log surface cannot leak
+/// them. Password and OAuth callers populate disjoint subsets of
+/// the optional fields (the underlying DB helper builds the SET
+/// list dynamically); a caller passing both is technically valid
+/// but not a current code path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountUpdateTokensParams {
+    pub account_id: String,
+    pub access_token: Option<RedactedString>,
+    pub refresh_token: Option<RedactedString>,
+    pub token_expires_at: Option<i64>,
+    pub imap_password: Option<RedactedString>,
+    pub smtp_password: Option<RedactedString>,
+}
+
+/// `account.update_tokens` ack. Empty struct - same shape as
+/// `AccountUpdateAck`. Failure surfaces via `ServiceResponse::Error`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountUpdateTokensAck;
 
 /// `account.delete` request body.
 ///
@@ -406,6 +434,39 @@ mod tests {
         let recovered: AccountCreateAck =
             serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn account_update_tokens_params_round_trip() {
+        let original = AccountUpdateTokensParams {
+            account_id: "acc-1".into(),
+            access_token: Some(RedactedString::new("at")),
+            refresh_token: Some(RedactedString::new("rt")),
+            token_expires_at: Some(1234567890),
+            imap_password: None,
+            smtp_password: None,
+        };
+        let json = serde_json::to_value(&original).expect("serialize");
+        let recovered: AccountUpdateTokensParams =
+            serde_json::from_value(json).expect("deserialize");
+        assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn account_update_tokens_params_skips_none() {
+        let original = AccountUpdateTokensParams {
+            account_id: "acc-1".into(),
+            access_token: None,
+            refresh_token: None,
+            token_expires_at: None,
+            imap_password: Some(RedactedString::new("p")),
+            smtp_password: None,
+        };
+        let formatted = format!("{original:?}");
+        assert!(
+            !formatted.contains("\"p\""),
+            "Debug must not leak password: {formatted}",
+        );
     }
 
     #[test]

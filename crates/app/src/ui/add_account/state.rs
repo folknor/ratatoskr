@@ -5,9 +5,6 @@ use iced::{Element, Task};
 use crate::component::Component;
 use crate::db::Db;
 
-use rtsk::db::queries_extra::{
-    ReauthAccountParams, update_account_tokens_sync,
-};
 use rtsk::discovery::types::{
     AuthMethod, DiscoveredConfig, ProtocolOption, Security,
 };
@@ -492,29 +489,35 @@ impl Component for AddAccountWizard {
                 (Task::none(), None)
             }
             AddAccountMessage::ValidationComplete(_, Ok(())) => {
-                // Re-auth mode: save password credentials directly.
+                // Re-auth mode: save password credentials directly via
+                // the `account.update_tokens` IPC.
                 if let Some(ref account_id) = self.reauth_account_id {
-                    let reauth_params = ReauthAccountParams {
+                    let Some(client) = self.service_client.as_ref().cloned() else {
+                        self.error = Some("Service not ready".into());
+                        return (Task::none(), None);
+                    };
+                    let imap_password = self.auth_state.password.clone();
+                    let smtp_password = if self.auth_state.use_separate_smtp_credentials {
+                        Some(self.auth_state.smtp_password.clone())
+                    } else {
+                        None
+                    };
+                    let params = service_api::AccountUpdateTokensParams {
+                        account_id: account_id.clone(),
                         access_token: None,
                         refresh_token: None,
                         token_expires_at: None,
-                        imap_password: Some(self.auth_state.password.clone()),
-                        smtp_password: if self.auth_state.use_separate_smtp_credentials {
-                            Some(self.auth_state.smtp_password.clone())
-                        } else {
-                            None
-                        },
+                        imap_password: Some(service_api::RedactedString::new(imap_password)),
+                        smtp_password: smtp_password
+                            .map(service_api::RedactedString::new),
                     };
                     let generation = self.generation.next();
-                    let db = Arc::clone(&self.db);
-                    let aid = account_id.clone();
                     let task = Task::perform(
                         async move {
-                            let result = db
-                                .with_write_conn(move |conn| {
-                                    update_account_tokens_sync(conn, &aid, reauth_params)
-                                })
-                                .await;
+                            let result = client
+                                .update_account_tokens(params)
+                                .await
+                                .map_err(|e| e.to_string());
                             (generation, result)
                         },
                         |(g, result)| AddAccountMessage::ReauthTokensSaved(g, result),

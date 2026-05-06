@@ -115,6 +115,12 @@ pub(crate) async fn dispatch(
         RequestParams::SmartFolderCreate { params } => {
             smart_folder::handle_create(&boot_state, params).await
         }
+        RequestParams::ContactsContactSave { params } => {
+            contacts::handle_contact_save(&boot_state, params).await
+        }
+        RequestParams::AccountUpdateTokens { params } => {
+            account::handle_update_tokens(&boot_state, params).await
+        }
         RequestParams::AccountDelete { params } => {
             account::handle_delete(&boot_state, params).await
         }

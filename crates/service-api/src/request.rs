@@ -8,8 +8,11 @@ use crate::calendar::{
 };
 use crate::account::{
     AccountCreateParams, AccountDeleteParams, AccountReorderParams, AccountUpdateParams,
+    AccountUpdateTokensParams,
 };
-use crate::contacts::{ContactGroupDeleteParams, ContactGroupSaveParams};
+use crate::contacts::{
+    ContactGroupDeleteParams, ContactGroupSaveParams, ContactSaveParams,
+};
 use crate::internal::{
     DecryptForStorageParams, EncryptForStorageParams, ReadBootstrapSnapshotsParams,
 };
@@ -191,6 +194,14 @@ pub enum RequestParams {
     ///
     /// 5 s timeout: handler is one bounded transaction.
     ContactsGroupDelete { params: ContactGroupDeleteParams },
+    /// Phase 6a-part-2: UPSERT one contact row. Used by both the
+    /// settings single-contact save path and the bulk-import path
+    /// (the latter issues N calls). UI / import path always pre-
+    /// generates the id, so the underlying `save_contact_sync` is a
+    /// true UPSERT.
+    ///
+    /// 5 s timeout: handler is one bounded transaction.
+    ContactsContactSave { params: ContactSaveParams },
     /// Phase 6a: partial-update an account row's editable metadata
     /// fields. Each Option is "no change" if absent, else "set to
     /// value." Out of scope: provider tokens / mailbox passwords -
@@ -216,6 +227,15 @@ pub enum RequestParams {
     ///
     /// 5 s timeout: handler is one bounded transaction.
     AccountCreate { params: Box<AccountCreateParams> },
+    /// Phase 6a-part-2: re-authentication token persist. Re-issued
+    /// from the OAuth or password re-auth flow when an access /
+    /// refresh token / IMAP / SMTP password rotates. Service-side
+    /// handler runs the dynamic-update SQL that
+    /// `update_account_tokens_sync` produces; only the columns
+    /// whose `Option` is `Some` are touched.
+    ///
+    /// 5 s timeout: handler is one bounded UPDATE.
+    AccountUpdateTokens { params: Box<AccountUpdateTokensParams> },
     /// Phase 6a-part-2: orchestrated account deletion. The handler
     /// runs cancel-and-await for sync/push/calendar runners (so the
     /// runner-quiescence invariant closes Service-side rather than
@@ -330,9 +350,11 @@ impl RequestParams {
             Self::SmartFolderCreate { .. } => "smart_folder.create",
             Self::ContactsGroupSave { .. } => "contacts.group_save",
             Self::ContactsGroupDelete { .. } => "contacts.group_delete",
+            Self::ContactsContactSave { .. } => "contacts.contact_save",
             Self::AccountUpdate { .. } => "account.update",
             Self::AccountReorder { .. } => "account.reorder",
             Self::AccountCreate { .. } => "account.create",
+            Self::AccountUpdateTokens { .. } => "account.update_tokens",
             Self::AccountDelete { .. } => "account.delete",
             Self::ReadBootstrapSnapshots { .. } => "internal.read_bootstrap_snapshots",
             Self::EncryptForStorage { .. } => "internal.encrypt_for_storage",
@@ -400,7 +422,9 @@ impl RequestParams {
             | Self::SignatureReorder { .. }
             | Self::ContactsGroupSave { .. }
             | Self::ContactsGroupDelete { .. }
+            | Self::ContactsContactSave { .. }
             | Self::AccountUpdate { .. }
+            | Self::AccountUpdateTokens { .. }
             | Self::AccountReorder { .. }
             | Self::AccountCreate { .. }
             | Self::PinnedSearchCreateOrUpdate { .. }
@@ -486,9 +510,11 @@ impl RequestParams {
             Self::SmartFolderCreate { params } => serde_json::json!({ "params": params }),
             Self::ContactsGroupSave { params } => serde_json::json!({ "params": params }),
             Self::ContactsGroupDelete { params } => serde_json::json!({ "params": params }),
+            Self::ContactsContactSave { params } => serde_json::json!({ "params": params }),
             Self::AccountUpdate { params } => serde_json::json!({ "params": params }),
             Self::AccountReorder { params } => serde_json::json!({ "params": params }),
             Self::AccountCreate { params } => serde_json::json!({ "params": params }),
+            Self::AccountUpdateTokens { params } => serde_json::json!({ "params": params }),
             Self::AccountDelete { params } => serde_json::json!({ "params": params }),
             Self::ReadBootstrapSnapshots { params } => serde_json::json!({ "params": params }),
             Self::EncryptForStorage { params } => serde_json::json!({ "params": params }),
@@ -675,6 +701,15 @@ impl RequestParams {
                     .map_err(|e| format!("contacts.group_delete params: {e}"))?;
                 Ok(Self::ContactsGroupDelete { params: p.params })
             }
+            "contacts.contact_save" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: ContactSaveParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("contacts.contact_save params: {e}"))?;
+                Ok(Self::ContactsContactSave { params: p.params })
+            }
             "account.update" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -712,6 +747,17 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("account.delete params: {e}"))?;
                 Ok(Self::AccountDelete { params: p.params })
+            }
+            "account.update_tokens" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: AccountUpdateTokensParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("account.update_tokens params: {e}"))?;
+                Ok(Self::AccountUpdateTokens {
+                    params: Box::new(p.params),
+                })
             }
             "pinned_search.create_or_update" => {
                 #[derive(Deserialize)]
@@ -1844,6 +1890,59 @@ mod tests {
     fn smart_folder_create_round_trips_from_method_params() {
         let original = RequestParams::SmartFolderCreate {
             params: sample_smart_folder_create(),
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn account_update_tokens_method_name_is_dotted() {
+        let p = RequestParams::AccountUpdateTokens {
+            params: Box::new(AccountUpdateTokensParams {
+                account_id: "a".into(),
+                access_token: None,
+                refresh_token: None,
+                token_expires_at: None,
+                imap_password: None,
+                smtp_password: None,
+            }),
+        };
+        assert_eq!(p.method_name(), "account.update_tokens");
+    }
+
+    #[test]
+    fn account_update_tokens_timeout_is_five_seconds() {
+        let p = RequestParams::AccountUpdateTokens {
+            params: Box::new(AccountUpdateTokensParams {
+                account_id: "a".into(),
+                access_token: None,
+                refresh_token: None,
+                token_expires_at: None,
+                imap_password: None,
+                smtp_password: None,
+            }),
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn account_update_tokens_round_trips_from_method_params() {
+        let original = RequestParams::AccountUpdateTokens {
+            params: Box::new(AccountUpdateTokensParams {
+                account_id: "a".into(),
+                access_token: Some(crate::redacted::RedactedString::new("at")),
+                refresh_token: None,
+                token_expires_at: Some(42),
+                imap_password: None,
+                smtp_password: None,
+            }),
         };
         let parsed = RequestParams::from_method_params(
             original.method_name(),

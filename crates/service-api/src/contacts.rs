@@ -64,6 +64,37 @@ pub struct ContactGroupDeleteParams {
     pub id: String,
 }
 
+/// `contacts.contact_save` request body. UPSERT on `contacts` keyed
+/// on `id` - UI / import path always pre-generates the id, so the
+/// underlying sync helper (`save_contact_sync`) is a true UPSERT and
+/// the IPC is identical for create + update. Used by both the UI
+/// single-contact save handler and the bulk-import path; the wire
+/// shape is one row per call (the import path issues N calls). Per-
+/// row IPC keeps the wire envelope shape simple and lets the import
+/// loop log + continue on individual failures.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContactSaveParams {
+    pub id: String,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub email2: Option<String>,
+    pub phone: Option<String>,
+    pub company: Option<String>,
+    pub notes: Option<String>,
+    pub account_id: Option<String>,
+    pub account_color: Option<String>,
+    pub groups: Vec<String>,
+    pub source: Option<String>,
+    pub server_id: Option<String>,
+}
+
+/// `contacts.contact_save` ack. Empty struct - same rationale as
+/// `ContactGroupSaveAck`: today's UI re-lists contacts after every
+/// save, the ack-with-row pattern is reserved for surfaces that
+/// benefit (none current 6a).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContactSaveAck;
+
 /// `contacts.group_delete` ack. Empty struct; idempotent on the DB
 /// side (delete-of-missing returns `Ok`), so the only failure mode
 /// the UI sees is wire / DB transport failure.
@@ -126,5 +157,27 @@ mod tests {
             serde_json::from_value(json).expect("deserialize");
         assert_eq!(original, recovered);
         assert!(recovered.member_emails.is_empty());
+    }
+
+    #[test]
+    fn contact_save_params_round_trip() {
+        let original = ContactSaveParams {
+            id: "c-1".into(),
+            email: "alice@example.com".into(),
+            display_name: Some("Alice".into()),
+            email2: None,
+            phone: None,
+            company: Some("Acme".into()),
+            notes: None,
+            account_id: Some("a-1".into()),
+            account_color: None,
+            groups: vec!["G".into()],
+            source: Some("import".into()),
+            server_id: None,
+        };
+        let json = serde_json::to_value(&original).expect("serialize");
+        let recovered: ContactSaveParams =
+            serde_json::from_value(json).expect("deserialize");
+        assert_eq!(original, recovered);
     }
 }

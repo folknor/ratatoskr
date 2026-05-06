@@ -38,10 +38,11 @@ pub use calendar::{
 pub use account::{
     AccountCreateAck, AccountCreateParams, AccountCredentials, AccountDeleteAck,
     AccountDeleteParams, AccountReorderAck, AccountReorderEntry, AccountReorderParams,
-    AccountUpdateAck, AccountUpdateParams,
+    AccountUpdateAck, AccountUpdateParams, AccountUpdateTokensAck, AccountUpdateTokensParams,
 };
 pub use contacts::{
     ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
+    ContactSaveAck, ContactSaveParams,
 };
 pub use internal::{
     DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,

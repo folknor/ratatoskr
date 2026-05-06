@@ -1,12 +1,8 @@
-use std::sync::Arc;
-
 use iced::widget::{Space, column, text};
 use iced::{Alignment, Element, Length, Task};
 
 use crate::font;
 use crate::ui::layout::*;
-
-use rtsk::db::queries_extra::{ReauthAccountParams, update_account_tokens_sync};
 
 use super::state::{
     AddAccountEvent, AddAccountMessage, AddAccountStep, AddAccountWizard, OAuthSuccess,
@@ -131,25 +127,31 @@ impl AddAccountWizard {
         &mut self,
         success: OAuthSuccess,
     ) -> (Task<AddAccountMessage>, Option<AddAccountEvent>) {
-        // Re-auth mode: save tokens directly, skip identity step.
+        // Re-auth mode: save tokens directly via
+        // `account.update_tokens` IPC, skip identity step.
         if let Some(ref account_id) = self.reauth_account_id {
-            let reauth_params = ReauthAccountParams {
-                access_token: Some(success.access_token.clone()),
-                refresh_token: success.refresh_token.clone(),
+            let Some(client) = self.service_client.as_ref().cloned() else {
+                self.error = Some("Service not ready".into());
+                return (Task::none(), None);
+            };
+            let params = service_api::AccountUpdateTokensParams {
+                account_id: account_id.clone(),
+                access_token: Some(service_api::RedactedString::new(success.access_token.clone())),
+                refresh_token: success
+                    .refresh_token
+                    .clone()
+                    .map(service_api::RedactedString::new),
                 token_expires_at: success.token_expires_at,
                 imap_password: None,
                 smtp_password: None,
             };
             let generation = self.generation.next();
-            let db = Arc::clone(&self.db);
-            let aid = account_id.clone();
             let task = Task::perform(
                 async move {
-                    let result = db
-                        .with_write_conn(move |conn| {
-                            update_account_tokens_sync(conn, &aid, reauth_params)
-                        })
-                        .await;
+                    let result = client
+                        .update_account_tokens(params)
+                        .await
+                        .map_err(|e| e.to_string());
                     (generation, result)
                 },
                 |(g, result)| AddAccountMessage::ReauthTokensSaved(g, result),

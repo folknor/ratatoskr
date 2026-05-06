@@ -12,7 +12,7 @@ fn parses_health_ping_request_with_empty_object_params() -> Result<(), Box<dyn s
         parsed,
         ParsedClientMessage::Request {
             id: 42,
-            params: RequestParams::HealthPing
+            params: Box::new(RequestParams::HealthPing)
         }
     );
     Ok(())
@@ -26,7 +26,7 @@ fn parses_health_ping_request_with_null_params() -> Result<(), Box<dyn std::erro
         parsed,
         ParsedClientMessage::Request {
             id: 42,
-            params: RequestParams::HealthPing
+            params: Box::new(RequestParams::HealthPing)
         }
     );
     Ok(())

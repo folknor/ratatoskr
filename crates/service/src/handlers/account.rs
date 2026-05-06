@@ -19,7 +19,8 @@ use std::sync::Arc;
 use serde_json::Value;
 use service_api::{
     AccountCreateAck, AccountCreateParams, AccountDeleteAck, AccountDeleteParams, AccountReorderAck,
-    AccountReorderParams, AccountUpdateAck, AccountUpdateParams, ServiceError,
+    AccountReorderParams, AccountUpdateAck, AccountUpdateParams, AccountUpdateTokensAck,
+    AccountUpdateTokensParams, ServiceError,
 };
 
 use crate::boot::BootSharedState;
@@ -65,6 +66,28 @@ pub(crate) async fn handle_reorder(
         .await
         .map_err(ServiceError::Internal)?;
     serde_json::to_value(AccountReorderAck)
+        .map_err(|e| ServiceError::Internal(e.to_string()))
+}
+
+pub(crate) async fn handle_update_tokens(
+    boot_state: &Arc<BootSharedState>,
+    params: Box<AccountUpdateTokensParams>,
+) -> Result<Value, ServiceError> {
+    let write_db = boot_state.write_db_state()?;
+    let params = *params;
+    let id = params.account_id.clone();
+    let reauth = db::db::queries_extra::ReauthAccountParams {
+        access_token: params.access_token.map(service_api::RedactedString::into_inner),
+        refresh_token: params.refresh_token.map(service_api::RedactedString::into_inner),
+        token_expires_at: params.token_expires_at,
+        imap_password: params.imap_password.map(service_api::RedactedString::into_inner),
+        smtp_password: params.smtp_password.map(service_api::RedactedString::into_inner),
+    };
+    write_db
+        .with_conn(move |conn| db::db::queries_extra::update_account_tokens_sync(conn, &id, reauth))
+        .await
+        .map_err(ServiceError::Internal)?;
+    serde_json::to_value(AccountUpdateTokensAck)
         .map_err(|e| ServiceError::Internal(e.to_string()))
 }
 

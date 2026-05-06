@@ -8,8 +8,9 @@ use service_api::{
     JsonRpcErrorObject, JsonRpcRequest, Notification, PROTOCOL_VERSION, ParsedServiceMessage,
     AccountCreateAck, AccountCreateParams, AccountDeleteAck, AccountDeleteParams,
     AccountReorderAck, AccountReorderEntry, AccountReorderParams, AccountUpdateAck,
-    AccountUpdateParams, ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck,
-    ContactGroupSaveParams,
+    AccountUpdateParams, AccountUpdateTokensAck, AccountUpdateTokensParams, ContactGroupDeleteAck,
+    ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams, ContactSaveAck,
+    ContactSaveParams,
     DecryptForStorageAck, DecryptForStorageParams, EncryptForStorageAck, EncryptForStorageParams,
     PinnedSearchCreateOrUpdateAck, PinnedSearchCreateOrUpdateParams, PinnedSearchDeleteAck,
     PinnedSearchDeleteAllAck, PinnedSearchDeleteAllParams, PinnedSearchDeleteParams,
@@ -1084,6 +1085,18 @@ impl ServiceClient {
         Ok(())
     }
 
+    /// Phase 6a-part-2: UPSERT one contact row via the
+    /// `contacts.contact_save` IPC. Used by both the UI single-
+    /// contact save handler and the bulk-import path; the import
+    /// path issues N calls and logs + continues on individual
+    /// failures.
+    pub async fn save_contact(&self, params: ContactSaveParams) -> Result<(), ClientError> {
+        let _ack: ContactSaveAck = self
+            .request(RequestParams::ContactsContactSave { params })
+            .await?;
+        Ok(())
+    }
+
     /// Phase 6a: partial-update an account row's editable metadata
     /// via the `account.update` IPC.
     pub async fn update_account(
@@ -1110,6 +1123,24 @@ impl ServiceClient {
             })
             .await?;
         Ok(ack.id)
+    }
+
+    /// Phase 6a-part-2: re-authentication token persist via the
+    /// `account.update_tokens` IPC. Re-issued from the OAuth or
+    /// password re-auth flow when an access / refresh token / IMAP
+    /// / SMTP password rotates. Only the columns whose `Option` is
+    /// `Some` are touched; `RedactedString` keeps secrets out of
+    /// wire-debug logs.
+    pub async fn update_account_tokens(
+        &self,
+        params: AccountUpdateTokensParams,
+    ) -> Result<(), ClientError> {
+        let _ack: AccountUpdateTokensAck = self
+            .request(RequestParams::AccountUpdateTokens {
+                params: Box::new(params),
+            })
+            .await?;
+        Ok(())
     }
 
     /// Phase 6a-part-2: orchestrated account deletion via the
