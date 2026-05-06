@@ -1,5 +1,6 @@
 use crate::action::{ActionCompleted, OperationOutcome, SyncProgress};
 use crate::boot::{BootPhaseKind, BootProgress};
+use crate::cal_action::{CalendarActionCompleted, CalendarOperationOutcome};
 use crate::calendar::{CalendarChanged, CalendarRunCompleted};
 use crate::push::PushEvent;
 use crate::sync::{IndexCommitted, SyncCompleted};
@@ -153,6 +154,19 @@ pub enum Notification {
     /// a 250 ms trailing-edge debounce before triggering the reload.
     #[serde(rename = "calendar.changed")]
     CalendarChanged(CalendarChanged),
+    /// Phase 6c: per-op outcome from the calendar action dispatcher.
+    /// `MustDeliver`: the UI's per-plan `pending_calendar_action_plans`
+    /// awaiter desyncs if any outcome is dropped. Cross-respawn safety
+    /// via `service_generation`. Sibling of `OperationOutcome`.
+    #[serde(rename = "cal_action.operation_outcome")]
+    CalendarOperationOutcome(CalendarOperationOutcome),
+    /// Phase 6c: per-plan completion for the calendar pipeline.
+    /// `MustDeliver`: a dropped completion leaves the UI's
+    /// `pending_calendar_action_plans` awaiter hanging forever.
+    /// Cross-respawn safety via `service_generation`. Sibling of
+    /// `ActionCompleted`.
+    #[serde(rename = "cal_action.completed")]
+    CalendarActionCompleted(CalendarActionCompleted),
     /// Test-only variant. Lets the wire round-trip be exercised when no
     /// production payload happens to match a test's needs. Compiled out of
     /// release builds via `#[cfg(test)]`.
@@ -187,6 +201,12 @@ impl Notification {
             Self::CalendarChanged(changed) => NotificationClass::Coalesce {
                 key: CoalesceKey::CalendarChanged(changed.account_id.clone()),
             },
+            // Calendar action notifications mirror their mail-side
+            // siblings: dropping under pressure breaks the UI's
+            // `pending_calendar_action_plans` awaiter and the per-op
+            // result accumulation. MustDeliver.
+            Self::CalendarOperationOutcome(_) => NotificationClass::MustDeliver,
+            Self::CalendarActionCompleted(_) => NotificationClass::MustDeliver,
             #[cfg(test)]
             Self::TestEcho { .. } => NotificationClass::Coalesce {
                 key: CoalesceKey::test("test.echo"),
@@ -205,6 +225,8 @@ impl Notification {
             Self::PushEvent(_) => "push.event",
             Self::CalendarRunCompleted(_) => "calendar.run_completed",
             Self::CalendarChanged(_) => "calendar.changed",
+            Self::CalendarOperationOutcome(_) => "cal_action.operation_outcome",
+            Self::CalendarActionCompleted(_) => "cal_action.completed",
             #[cfg(test)]
             Self::TestEcho { .. } => "test.echo",
         }
@@ -248,6 +270,8 @@ impl Notification {
             Self::PushEvent(event) => Some(event.generation()),
             Self::CalendarRunCompleted(completed) => Some(completed.generation()),
             Self::CalendarChanged(changed) => Some(changed.generation()),
+            Self::CalendarOperationOutcome(outcome) => Some(outcome.generation()),
+            Self::CalendarActionCompleted(completed) => Some(completed.generation()),
             #[cfg(test)]
             Self::TestEcho { .. } => None,
         }
@@ -273,6 +297,8 @@ impl Notification {
             Self::PushEvent(event) => event.set_generation(generation),
             Self::CalendarRunCompleted(completed) => completed.set_generation(generation),
             Self::CalendarChanged(changed) => changed.set_generation(generation),
+            Self::CalendarOperationOutcome(outcome) => outcome.set_generation(generation),
+            Self::CalendarActionCompleted(completed) => completed.set_generation(generation),
             #[cfg(test)]
             Self::TestEcho { .. } => {}
         }

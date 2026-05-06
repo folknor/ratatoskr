@@ -47,6 +47,13 @@ pub(crate) async fn dispatch(
         )),
         RequestParams::BootReady => boot::handle(&boot_state).await,
         RequestParams::ActionExecutePlan { plan } => action::handle(&boot_state, plan).await,
+        // Phase 6c-2 lands the wire types; Phase 6c-4 fills the
+        // handler. Until then this returns a structured error so any
+        // accidental UI traffic during multi-commit landings surfaces
+        // immediately rather than appearing to journal.
+        RequestParams::CalActionExecutePlan { plan: _ } => Err(ServiceError::Internal(
+            "cal_action.execute_plan handler not yet wired (Phase 6c-4)".into(),
+        )),
         RequestParams::ActionJobStatus { plan_id } => {
             action_status::handle(&boot_state, plan_id).await
         }

@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::time::Duration;
 
 use crate::action::{ActionWirePlan, PlanId, SendWireRequest};
+use crate::cal_action::CalendarActionPlan;
 use crate::calendar::{
     CalendarCancelAccountSyncParams, CalendarSetVisibilityParams, CalendarStartAccountSyncParams,
 };
@@ -65,6 +66,20 @@ pub enum RequestParams {
     /// Read-only SELECT against the journal; the 5 s timeout is
     /// conservative. Doesn't bypass admission - it's just a fast query.
     ActionJobStatus { plan_id: PlanId },
+    /// Phase 6c: submit a resolved calendar-event mutation plan for
+    /// Service-side execution. The handler validates the plan,
+    /// journals it as `kind = 'calendar_plan'` in `action_jobs` +
+    /// `action_job_ops` (Phase 6c-1 widened the kind CHECK
+    /// constraint), signals the action worker, and returns
+    /// `CalendarActionPlanAck { plan_id, journaled }`. Per-op
+    /// `CalendarOperationOutcome` notifications stream from the
+    /// worker; a final `CalendarActionCompleted` closes the stream.
+    ///
+    /// 5 s timeout: handler is validate + journal + signal. The
+    /// dispatcher runs on the worker, with no IPC timeout - it runs
+    /// to completion or until respawn. Same shape as
+    /// `ActionExecutePlan` (mail's sibling).
+    CalActionExecutePlan { plan: CalendarActionPlan },
     /// Phase 2 plan scope item 18c: the chat read-on-view side effect
     /// relocates as a quiet journal job. Handler resolves affected
     /// threads, runs the local DB write, journals the affected list
@@ -356,6 +371,7 @@ impl RequestParams {
             Self::Shutdown => "shutdown",
             Self::BootReady => "boot.ready",
             Self::ActionExecutePlan { .. } => "action.execute_plan",
+            Self::CalActionExecutePlan { .. } => "cal_action.execute_plan",
             Self::ActionJobStatus { .. } => "action.job_status",
             Self::ActionMarkChatRead { .. } => "action.mark_chat_read",
             Self::ActionSend { .. } => "action.send",
@@ -417,6 +433,11 @@ impl RequestParams {
             // because the dispatch loop sends the response only after
             // the handler returns).
             Self::ActionExecutePlan { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            // Same handler-only budget as ActionExecutePlan (mail's
+            // sibling): validate + journal + signal worker.
+            Self::CalActionExecutePlan { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(5))
+            }
             Self::ActionJobStatus { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             // Handler-only budget: mark_chat_read_local + journal + ack.
             // Provider mark-read happens on the worker.
@@ -528,6 +549,7 @@ impl RequestParams {
             Self::Shutdown => Value::Null,
             Self::BootReady => Value::Null,
             Self::ActionExecutePlan { plan } => serde_json::json!({ "plan": plan }),
+            Self::CalActionExecutePlan { plan } => serde_json::json!({ "plan": plan }),
             Self::ActionJobStatus { plan_id } => serde_json::json!({ "plan_id": plan_id }),
             Self::ActionMarkChatRead { chat_email } => {
                 serde_json::json!({ "chat_email": chat_email })
@@ -597,6 +619,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("action.execute_plan params: {e}"))?;
                 Ok(Self::ActionExecutePlan { plan: p.plan })
+            }
+            "cal_action.execute_plan" => {
+                #[derive(Deserialize)]
+                struct P {
+                    plan: CalendarActionPlan,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("cal_action.execute_plan params: {e}"))?;
+                Ok(Self::CalActionExecutePlan { plan: p.plan })
             }
             "action.job_status" => {
                 #[derive(Deserialize)]
@@ -1043,6 +1074,54 @@ mod tests {
         )
         .expect("parse");
         assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn cal_action_execute_plan_round_trips_from_method_params() {
+        use crate::action::{OperationId, PlanId};
+        use crate::cal_action::{
+            CalendarActionPlan, CalendarActionWireOperation, WireCalendarEventInput,
+            WireCalendarOperation,
+        };
+
+        let plan = CalendarActionPlan {
+            plan_id: PlanId::new_v7(),
+            operations: vec![CalendarActionWireOperation {
+                operation_id: OperationId(0),
+                account_id: "acc-1".into(),
+                operation: WireCalendarOperation::CreateEvent {
+                    calendar_remote_id: "primary".into(),
+                    input: WireCalendarEventInput {
+                        title: "Standup".into(),
+                        description: String::new(),
+                        location: String::new(),
+                        start_time: 1_700_000_000,
+                        end_time: 1_700_003_600,
+                        is_all_day: false,
+                        timezone: Some("UTC".into()),
+                        recurrence_rule: None,
+                        availability: None,
+                        visibility: None,
+                    },
+                },
+            }],
+        };
+        let original = RequestParams::CalActionExecutePlan { plan };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+        assert_eq!(original.method_name(), "cal_action.execute_plan");
+        assert_eq!(
+            original.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+        assert!(
+            !original.bypasses_admission(),
+            "cal_action.execute_plan must not bypass admission",
+        );
     }
 
     #[test]

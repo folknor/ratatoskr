@@ -547,14 +547,16 @@ async fn boot_progress_notifications_emitted_in_order() -> TestResult {
                 | Notification::IndexCommitted(_)
                 | Notification::PushEvent(_)
                 | Notification::CalendarRunCompleted(_)
-                | Notification::CalendarChanged(_),
+                | Notification::CalendarChanged(_)
+                | Notification::CalendarOperationOutcome(_)
+                | Notification::CalendarActionCompleted(_),
             )) => {
                 // Action / sync / push / calendar notifications cannot fire
-                // during the boot sequence (no action.execute_plan is in
-                // flight, no sync runs, push and calendar both start
-                // post-ready per Phase 4 / Phase 5); if one ever does,
-                // that's a regression worth flagging loudly rather than
-                // silently ignoring.
+                // during the boot sequence (no action.execute_plan or
+                // cal_action.execute_plan is in flight, no sync runs,
+                // push and calendar both start post-ready per Phase 4 /
+                // Phase 5); if one ever does, that's a regression worth
+                // flagging loudly rather than silently ignoring.
                 panic!(
                     "unexpected action/sync/push/calendar notification during boot.ready: {line}",
                 );

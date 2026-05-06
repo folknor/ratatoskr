@@ -284,6 +284,19 @@ impl ReadyApp {
                         self.pending_calendar_reload = Some(std::time::Instant::now());
                         Task::none()
                     }
+                    service_api::Notification::CalendarOperationOutcome(_)
+                    | service_api::Notification::CalendarActionCompleted(_) => {
+                        // Phase 6c-9 lands the per-plan awaiter routing
+                        // (mirrors mail's `pending_action_plans`). Until
+                        // then, log and drop - the wire variants exist
+                        // for the upcoming work but no Service-side
+                        // emitter has been wired yet.
+                        log::debug!(
+                            "Calendar action notification ahead of UI routing: {}",
+                            notification.method_name(),
+                        );
+                        Task::none()
+                    }
                 }
             }
             Message::ActionDispatched { plan_id, outcome } => {
