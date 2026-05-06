@@ -8,6 +8,7 @@ mod gal;
 mod health;
 mod pending_ops_kick;
 mod sync;
+mod thread_ui_state;
 #[cfg(feature = "test-helpers")]
 mod test_helpers;
 
@@ -58,6 +59,9 @@ pub(crate) async fn dispatch(
         }
         RequestParams::CalendarSetVisibility { params } => {
             calendar::handle_set_visibility(&boot_state, params).await
+        }
+        RequestParams::ThreadUiStateSet { params } => {
+            thread_ui_state::handle_set(&boot_state, params).await
         }
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPanic => test_helpers::panic_handle().await,

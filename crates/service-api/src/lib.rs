@@ -10,6 +10,7 @@ mod redacted;
 mod request;
 mod response;
 mod sync;
+mod thread_ui_state;
 mod version;
 
 pub use action::{
@@ -27,6 +28,7 @@ pub use calendar::{
     CalendarRunId, CalendarSetVisibilityAck, CalendarSetVisibilityParams,
     CalendarStartAccountSyncParams, CalendarStartAck, CalendarSyncResult,
 };
+pub use thread_ui_state::{ThreadUiStateSetAck, ThreadUiStateSetParams};
 pub use error::{JsonRpcErrorObject, ServiceError};
 pub use framing::{
     BoundedLineReader, FrameError, JsonRpcErrorResponse, JsonRpcRequest, JsonRpcSuccessResponse,

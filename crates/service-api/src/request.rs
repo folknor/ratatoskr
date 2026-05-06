@@ -6,6 +6,7 @@ use crate::action::{ActionWirePlan, PlanId, SendWireRequest};
 use crate::calendar::{
     CalendarCancelAccountSyncParams, CalendarSetVisibilityParams, CalendarStartAccountSyncParams,
 };
+use crate::thread_ui_state::ThreadUiStateSetParams;
 use crate::sync::{SyncCancelAccountParams, SyncStartAccountParams};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,6 +117,13 @@ pub enum RequestParams {
     CalendarSetVisibility {
         params: CalendarSetVisibilityParams,
     },
+    /// Phase 6a: per-thread UI state writes (`thread_ui_state` table,
+    /// keyed on `(account_id, thread_id)`). Today's only field is
+    /// `attachments_collapsed`; the IPC carries the full row so future
+    /// thread-scoped UI flags can extend without a new method.
+    ///
+    /// 5 s timeout: handler is one bounded `with_conn` upsert.
+    ThreadUiStateSet { params: ThreadUiStateSetParams },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -148,6 +156,7 @@ impl RequestParams {
             Self::CalendarStartAccountSync { .. } => "calendar.start_account_sync",
             Self::CalendarCancelAccountSync { .. } => "calendar.cancel_account_sync",
             Self::CalendarSetVisibility { .. } => "calendar.set_visibility",
+            Self::ThreadUiStateSet { .. } => "thread_ui_state.set",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -203,6 +212,7 @@ impl RequestParams {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
             Self::CalendarSetVisibility { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            Self::ThreadUiStateSet { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
@@ -254,6 +264,7 @@ impl RequestParams {
                 serde_json::json!({ "params": params })
             }
             Self::CalendarSetVisibility { params } => serde_json::json!({ "params": params }),
+            Self::ThreadUiStateSet { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -363,6 +374,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("calendar.set_visibility params: {e}"))?;
                 Ok(Self::CalendarSetVisibility { params: p.params })
+            }
+            "thread_ui_state.set" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: ThreadUiStateSetParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("thread_ui_state.set params: {e}"))?;
+                Ok(Self::ThreadUiStateSet { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {
@@ -730,6 +750,50 @@ mod tests {
             params: CalendarSetVisibilityParams {
                 calendar_id: "cal-1".into(),
                 visible: false,
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn thread_ui_state_set_method_name_is_dotted() {
+        let p = RequestParams::ThreadUiStateSet {
+            params: ThreadUiStateSetParams {
+                account_id: "acc-1".into(),
+                thread_id: "thread-1".into(),
+                attachments_collapsed: Some(true),
+            },
+        };
+        assert_eq!(p.method_name(), "thread_ui_state.set");
+    }
+
+    #[test]
+    fn thread_ui_state_set_timeout_is_five_seconds() {
+        let p = RequestParams::ThreadUiStateSet {
+            params: ThreadUiStateSetParams {
+                account_id: "acc-1".into(),
+                thread_id: "thread-1".into(),
+                attachments_collapsed: Some(true),
+            },
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn thread_ui_state_set_round_trips_from_method_params() {
+        let original = RequestParams::ThreadUiStateSet {
+            params: ThreadUiStateSetParams {
+                account_id: "acc-1".into(),
+                thread_id: "thread-1".into(),
+                attachments_collapsed: Some(false),
             },
         };
         let parsed = RequestParams::from_method_params(

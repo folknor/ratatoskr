@@ -8,7 +8,8 @@ use service_api::{
     JsonRpcErrorObject, JsonRpcRequest, Notification, PROTOCOL_VERSION, ParsedServiceMessage,
     RequestParams, RequestTimeoutKind, ServiceError, ServiceResponse, ShutdownResponse,
     SyncCancelAccountParams, SyncCancelAck, SyncCompleted, SyncResult, SyncRunId,
-    SyncStartAccountParams, SyncStartAck, encode_message, parse_service_message,
+    SyncStartAccountParams, SyncStartAck, ThreadUiStateSetAck, ThreadUiStateSetParams,
+    encode_message, parse_service_message,
 };
 use std::collections::{HashMap, VecDeque, hash_map::Entry};
 use std::path::{Path, PathBuf};
@@ -946,6 +947,30 @@ impl ServiceClient {
                 params: CalendarSetVisibilityParams {
                     calendar_id,
                     visible,
+                },
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Phase 6a: write per-thread UI state via the
+    /// `thread_ui_state.set` IPC. Replaces the deleted
+    /// `db::threads::persist_attachments_collapsed` UI-side write
+    /// surface. Today's only field is `attachments_collapsed`; the
+    /// IPC carries the full row so future thread-scoped UI flags can
+    /// extend without a new method.
+    pub async fn set_thread_ui_state(
+        &self,
+        account_id: String,
+        thread_id: String,
+        attachments_collapsed: Option<bool>,
+    ) -> Result<(), ClientError> {
+        let _ack: ThreadUiStateSetAck = self
+            .request(RequestParams::ThreadUiStateSet {
+                params: ThreadUiStateSetParams {
+                    account_id,
+                    thread_id,
+                    attachments_collapsed,
                 },
             })
             .await?;

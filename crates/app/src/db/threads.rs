@@ -9,7 +9,6 @@ use std::collections::HashMap;
 
 use iced::widget::image;
 use rtsk::body_store::BodyStoreReadState;
-use rtsk::db::queries_extra::set_attachments_collapsed;
 use rtsk::db::queries_extra::thread_detail::{
     self, ThreadDetail, assemble_thread_detail, fetch_thread_bodies, query_inline_cid_hashes,
     query_thread_from_db,
@@ -174,16 +173,6 @@ pub async fn load_thread_detail(
     .map_err(|e| format!("spawn_blocking: {e}"))?
 }
 
-/// Persist attachment collapse state to core's thread_ui_state table.
-pub async fn persist_attachments_collapsed(
-    db: &Db,
-    account_id: String,
-    thread_id: String,
-    collapsed: bool,
-) -> Result<(), String> {
-    db.with_write_conn(move |conn| set_attachments_collapsed(conn, &account_id, &thread_id, collapsed))
-        .await
-}
 
 // ── Per-message queries - delegated to core ─────────────
 //
