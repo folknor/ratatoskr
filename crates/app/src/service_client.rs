@@ -6,6 +6,7 @@ use service_api::{
     CalendarRunCompleted, CalendarRunId, CalendarSetVisibilityAck, CalendarSetVisibilityParams,
     CalendarStartAccountSyncParams, CalendarStartAck, CalendarSyncResult, HealthPingResponse,
     JsonRpcErrorObject, JsonRpcRequest, Notification, PROTOCOL_VERSION, ParsedServiceMessage,
+    ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
     RequestParams, RequestTimeoutKind, ServiceError, ServiceResponse, SettingValue, SettingsSetAck,
     SettingsSetParams, ShutdownResponse, SignatureCreateAck, SignatureCreateParams,
     SignatureDeleteAck, SignatureDeleteParams, SignatureReorderAck, SignatureReorderParams,
@@ -1044,6 +1045,31 @@ impl ServiceClient {
         let _ack: SignatureReorderAck = self
             .request(RequestParams::SignatureReorder {
                 params: SignatureReorderParams { ordered_ids },
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Phase 6a: UPSERT a contact group + replace its member list
+    /// via the `contacts.group_save` IPC. The Service handler runs
+    /// the whole sequence inside one transaction so a partial commit
+    /// on Service crash mid-write is impossible.
+    pub async fn save_contact_group(
+        &self,
+        params: ContactGroupSaveParams,
+    ) -> Result<(), ClientError> {
+        let _ack: ContactGroupSaveAck = self
+            .request(RequestParams::ContactsGroupSave { params })
+            .await?;
+        Ok(())
+    }
+
+    /// Phase 6a: delete a contact group by id via the
+    /// `contacts.group_delete` IPC. Idempotent.
+    pub async fn delete_contact_group(&self, id: String) -> Result<(), ClientError> {
+        let _ack: ContactGroupDeleteAck = self
+            .request(RequestParams::ContactsGroupDelete {
+                params: ContactGroupDeleteParams { id },
             })
             .await?;
         Ok(())

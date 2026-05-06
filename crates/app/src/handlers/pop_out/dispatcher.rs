@@ -21,6 +21,12 @@ impl ReadyApp {
         pop_out_msg: PopOutMessage,
     ) -> Task<Message> {
         let db = Arc::clone(&self.db);
+        // Phase 6a: clone the service_client up front so the
+        // GroupSaveConfirm arm (which fires the contacts.group_save
+        // IPC) does not need to borrow `self` mid-match - the
+        // pop_out_windows.get_mut below already holds a mutable
+        // borrow of self.
+        let service_client = self.service_client.clone();
         let Some(window) = self.pop_out_windows.get_mut(&window_id) else {
             return Task::none();
         };
@@ -197,10 +203,34 @@ impl ReadyApp {
                     name,
                     member_count,
                 };
-                let db_clone = Arc::clone(&db);
+                // Phase 6a: contacts.group_save IPC.
+                let Some(client) = service_client else {
+                    log::warn!(
+                        "contacts.group_save: no ServiceClient yet; surfacing error"
+                    );
+                    return Task::done(Message::PopOut(
+                        window_id,
+                        PopOutMessage::Compose(ComposeMessage::GroupSaveResult(Err(
+                            "Service not ready".to_string(),
+                        ))),
+                    ));
+                };
                 let emails_for_save = emails.clone();
+                let params = service_api::ContactGroupSaveParams {
+                    id: entry.id,
+                    name: entry.name,
+                    member_emails: emails_for_save,
+                    created_at: entry.created_at,
+                    updated_at: entry.updated_at,
+                    member_count: entry.member_count,
+                };
                 Task::perform(
-                    async move { db_clone.save_group(entry, emails_for_save).await },
+                    async move {
+                        client
+                            .save_contact_group(params)
+                            .await
+                            .map_err(|e| e.to_string())
+                    },
                     move |result| {
                         let payload = result.map(|()| success.clone());
                         Message::PopOut(

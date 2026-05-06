@@ -368,13 +368,23 @@ pub fn load_group_member_emails_sync(
 }
 
 /// Save (upsert) a group and replace all members (synchronous).
+///
+/// The whole sequence (UPSERT contact_groups + DELETE members +
+/// INSERT N members) runs inside one `unchecked_transaction` so a
+/// crash mid-write cannot leave a half-populated member list. Phase
+/// 6a tightened this from the prior per-statement autocommit shape -
+/// the Service is the new write boundary, and the IPC ack must imply
+/// "all rows committed or none."
 pub fn save_group_sync(
     conn: &rusqlite::Connection,
     entry: &GroupSettingsEntry,
     member_emails: &[String],
 ) -> Result<(), String> {
     let now = chrono::Utc::now().timestamp();
-    conn.execute(
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("save_group begin tx: {e}"))?;
+    tx.execute(
         "INSERT INTO contact_groups (id, name, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?3)
          ON CONFLICT(id) DO UPDATE SET
@@ -385,24 +395,28 @@ pub fn save_group_sync(
     .map_err(|e| e.to_string())?;
 
     // Replace all members
-    conn.execute(
+    tx.execute(
         "DELETE FROM contact_group_members WHERE group_id = ?1",
         params![entry.id],
     )
     .map_err(|e| e.to_string())?;
 
-    let mut stmt = conn
-        .prepare(
-            "INSERT INTO contact_group_members
-             (group_id, member_type, member_value)
-             VALUES (?1, 'email', ?2)",
-        )
-        .map_err(|e| e.to_string())?;
-
-    for email in member_emails {
-        stmt.execute(params![entry.id, email])
+    {
+        let mut stmt = tx
+            .prepare(
+                "INSERT INTO contact_group_members
+                 (group_id, member_type, member_value)
+                 VALUES (?1, 'email', ?2)",
+            )
             .map_err(|e| e.to_string())?;
+
+        for email in member_emails {
+            stmt.execute(params![entry.id, email])
+                .map_err(|e| e.to_string())?;
+        }
     }
+    tx.commit()
+        .map_err(|e| format!("save_group commit: {e}"))?;
     Ok(())
 }
 
@@ -539,4 +553,188 @@ fn expand_recursive(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod sync_group_tests {
+    use super::*;
+    use crate::db::migrations;
+    use rusqlite::Connection;
+
+    fn setup_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("pragmas");
+        migrations::run_all(&conn).expect("migrations");
+        conn
+    }
+
+    fn group_count(conn: &Connection, group_id: &str) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM contact_groups WHERE id = ?1",
+            params![group_id],
+            |row| row.get(0),
+        )
+        .expect("group count")
+    }
+
+    fn member_emails(conn: &Connection, group_id: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT member_value FROM contact_group_members \
+                 WHERE group_id = ?1 AND member_type = 'email' \
+                 ORDER BY member_value",
+            )
+            .expect("prepare");
+        let rows: Vec<String> = stmt
+            .query_map([group_id], |row| row.get::<_, String>(0))
+            .expect("query")
+            .filter_map(Result::ok)
+            .collect();
+        rows
+    }
+
+    fn group_name(conn: &Connection, group_id: &str) -> String {
+        conn.query_row(
+            "SELECT name FROM contact_groups WHERE id = ?1",
+            params![group_id],
+            |row| row.get(0),
+        )
+        .expect("group name")
+    }
+
+    #[test]
+    fn save_group_inserts_new_row_and_members() {
+        let conn = setup_db();
+        let entry = GroupSettingsEntry {
+            id: "grp-1".into(),
+            name: "Friends".into(),
+            member_count: 2,
+            created_at: 0,
+            updated_at: 0,
+        };
+        save_group_sync(
+            &conn,
+            &entry,
+            &["alice@example.com".into(), "bob@example.com".into()],
+        )
+        .expect("save");
+        assert_eq!(group_count(&conn, "grp-1"), 1);
+        assert_eq!(
+            member_emails(&conn, "grp-1"),
+            vec!["alice@example.com", "bob@example.com"]
+        );
+    }
+
+    #[test]
+    fn save_group_updates_existing_name_and_replaces_members() {
+        let conn = setup_db();
+        let entry = GroupSettingsEntry {
+            id: "grp-1".into(),
+            name: "Friends".into(),
+            member_count: 1,
+            created_at: 0,
+            updated_at: 0,
+        };
+        save_group_sync(&conn, &entry, &["alice@example.com".into()]).expect("first save");
+
+        let entry2 = GroupSettingsEntry {
+            id: "grp-1".into(),
+            name: "Best Friends".into(),
+            member_count: 2,
+            created_at: 0,
+            updated_at: 0,
+        };
+        save_group_sync(
+            &conn,
+            &entry2,
+            &["bob@example.com".into(), "carol@example.com".into()],
+        )
+        .expect("second save");
+
+        assert_eq!(group_name(&conn, "grp-1"), "Best Friends");
+        // Old member (alice) is gone; new members are present.
+        assert_eq!(
+            member_emails(&conn, "grp-1"),
+            vec!["bob@example.com", "carol@example.com"]
+        );
+    }
+
+    #[test]
+    fn save_group_with_empty_member_list_clears_existing_members() {
+        let conn = setup_db();
+        let entry = GroupSettingsEntry {
+            id: "grp-1".into(),
+            name: "Friends".into(),
+            member_count: 1,
+            created_at: 0,
+            updated_at: 0,
+        };
+        save_group_sync(&conn, &entry, &["alice@example.com".into()]).expect("seed");
+
+        let entry2 = GroupSettingsEntry {
+            id: "grp-1".into(),
+            name: "Empty".into(),
+            member_count: 0,
+            created_at: 0,
+            updated_at: 0,
+        };
+        save_group_sync(&conn, &entry2, &[]).expect("clear");
+
+        assert!(member_emails(&conn, "grp-1").is_empty());
+        // Group row itself remains.
+        assert_eq!(group_count(&conn, "grp-1"), 1);
+    }
+
+    #[test]
+    fn delete_group_removes_row_and_members_and_inbound_refs() {
+        let conn = setup_db();
+        // Inner group with members.
+        let inner = GroupSettingsEntry {
+            id: "grp-inner".into(),
+            name: "Inner".into(),
+            member_count: 1,
+            created_at: 0,
+            updated_at: 0,
+        };
+        save_group_sync(&conn, &inner, &["alice@example.com".into()]).expect("inner");
+        // Outer group that references the inner one as a member.
+        let outer = GroupSettingsEntry {
+            id: "grp-outer".into(),
+            name: "Outer".into(),
+            member_count: 1,
+            created_at: 0,
+            updated_at: 0,
+        };
+        save_group_sync(&conn, &outer, &[]).expect("outer");
+        conn.execute(
+            "INSERT INTO contact_group_members \
+             (group_id, member_type, member_value) \
+             VALUES (?1, 'group', ?2)",
+            params!["grp-outer", "grp-inner"],
+        )
+        .expect("seed nested ref");
+
+        delete_group_sync(&conn, "grp-inner").expect("delete inner");
+
+        assert_eq!(group_count(&conn, "grp-inner"), 0, "group row gone");
+        let inbound: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM contact_group_members \
+                 WHERE member_type = 'group' AND member_value = ?1",
+                params!["grp-inner"],
+                |row| row.get(0),
+            )
+            .expect("inbound count");
+        assert_eq!(inbound, 0, "outer's nested ref to inner is cleaned up");
+    }
+
+    #[test]
+    fn delete_group_is_idempotent() {
+        let conn = setup_db();
+        // No group with this id exists; delete must succeed.
+        delete_group_sync(&conn, "grp-missing").expect("delete missing");
+        // Second call also succeeds.
+        delete_group_sync(&conn, "grp-missing").expect("delete again");
+    }
 }

@@ -145,11 +145,31 @@ impl ReadyApp {
         group: crate::db::GroupEntry,
         members: Vec<String>,
     ) -> Task<Message> {
+        // Phase 6a: contacts.group_save IPC. The handler reloads the
+        // groups list after the ack arrives so the settings panel
+        // reflects the canonical Service-committed state. If the
+        // Service is not yet attached, we surface a stale list rather
+        // than silent loss; the user can retry.
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("contacts.group_save: no ServiceClient yet; ignoring save");
+            return Task::none();
+        };
         let db = Arc::clone(&self.db);
         let filter = self.settings.group_filter.clone();
+        let params = service_api::ContactGroupSaveParams {
+            id: group.id,
+            name: group.name,
+            member_emails: members,
+            created_at: group.created_at,
+            updated_at: group.updated_at,
+            member_count: group.member_count,
+        };
         Task::perform(
             async move {
-                db.save_group(group, members).await?;
+                client
+                    .save_contact_group(params)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 db.get_groups_for_settings(filter).await
             },
             |result| Message::Settings(SettingsMessage::GroupsLoaded(result)),
@@ -157,11 +177,20 @@ impl ReadyApp {
     }
 
     pub(crate) fn handle_delete_group(&self, id: String) -> Task<Message> {
+        // Phase 6a: contacts.group_delete IPC. Same reload-on-ack
+        // pattern as group_save above.
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("contacts.group_delete: no ServiceClient yet; ignoring delete");
+            return Task::none();
+        };
         let db = Arc::clone(&self.db);
         let filter = self.settings.group_filter.clone();
         Task::perform(
             async move {
-                db.delete_group(id).await?;
+                client
+                    .delete_contact_group(id)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 db.get_groups_for_settings(filter).await
             },
             |result| Message::Settings(SettingsMessage::GroupsLoaded(result)),

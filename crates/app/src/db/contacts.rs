@@ -1,6 +1,6 @@
 use rtsk::contacts::search::{ContactSearchKind, search_contacts_unified};
 use rtsk::db::queries_extra::{
-    ContactSettingsEntry, GroupSettingsEntry, delete_group_sync, load_contacts_for_settings_sync,
+    ContactSettingsEntry, GroupSettingsEntry, load_contacts_for_settings_sync,
     load_group_member_emails_sync, load_groups_for_settings_sync, save_contact_sync,
     save_group_sync,
 };
@@ -230,9 +230,4 @@ impl Db {
         .await
     }
 
-    /// Delete a contact group by ID.
-    pub async fn delete_group(&self, group_id: String) -> Result<(), String> {
-        self.with_write_conn(move |conn| delete_group_sync(conn, &group_id))
-        .await
-    }
 }

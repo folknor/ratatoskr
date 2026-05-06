@@ -7,6 +7,7 @@ mod calendar;
 mod gal;
 mod health;
 mod pending_ops_kick;
+mod contacts;
 mod pinned_search;
 mod settings;
 mod signature;
@@ -80,6 +81,12 @@ pub(crate) async fn dispatch(
         }
         RequestParams::SignatureReorder { params } => {
             signature::handle_reorder(&boot_state, params).await
+        }
+        RequestParams::ContactsGroupSave { params } => {
+            contacts::handle_group_save(&boot_state, params).await
+        }
+        RequestParams::ContactsGroupDelete { params } => {
+            contacts::handle_group_delete(&boot_state, params).await
         }
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPanic => test_helpers::panic_handle().await,

@@ -9,6 +9,7 @@ mod push;
 mod redacted;
 mod request;
 mod response;
+mod contacts;
 mod settings;
 mod signature;
 mod sync;
@@ -29,6 +30,9 @@ pub use calendar::{
     CalendarCancelAccountSyncParams, CalendarCancelAck, CalendarChanged, CalendarRunCompleted,
     CalendarRunId, CalendarSetVisibilityAck, CalendarSetVisibilityParams,
     CalendarStartAccountSyncParams, CalendarStartAck, CalendarSyncResult,
+};
+pub use contacts::{
+    ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
 };
 pub use settings::{SettingValue, SettingsSetAck, SettingsSetParams};
 pub use signature::{

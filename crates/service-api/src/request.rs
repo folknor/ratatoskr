@@ -6,6 +6,7 @@ use crate::action::{ActionWirePlan, PlanId, SendWireRequest};
 use crate::calendar::{
     CalendarCancelAccountSyncParams, CalendarSetVisibilityParams, CalendarStartAccountSyncParams,
 };
+use crate::contacts::{ContactGroupDeleteParams, ContactGroupSaveParams};
 use crate::settings::SettingsSetParams;
 use crate::signature::{
     SignatureCreateParams, SignatureDeleteParams, SignatureReorderParams, SignatureUpdateParams,
@@ -165,6 +166,20 @@ pub enum RequestParams {
     ///
     /// 5 s timeout: handler is one bounded transaction.
     SignatureReorder { params: SignatureReorderParams },
+    /// Phase 6a: UPSERT a contact group + replace its member email
+    /// list. The plan's original split (group_create / group_update)
+    /// collapsed to one method because today's underlying DB function
+    /// is a true UPSERT and the UI always pre-generates ids - see the
+    /// `contacts.rs` module doc.
+    ///
+    /// 5 s timeout: handler is one bounded transaction.
+    ContactsGroupSave { params: ContactGroupSaveParams },
+    /// Phase 6a: delete a contact group by id. Idempotent;
+    /// member rows and inbound nested-group references are cleaned up
+    /// inside the same DB transaction.
+    ///
+    /// 5 s timeout: handler is one bounded transaction.
+    ContactsGroupDelete { params: ContactGroupDeleteParams },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -203,6 +218,8 @@ impl RequestParams {
             Self::SignatureUpdate { .. } => "signature.update",
             Self::SignatureDelete { .. } => "signature.delete",
             Self::SignatureReorder { .. } => "signature.reorder",
+            Self::ContactsGroupSave { .. } => "contacts.group_save",
+            Self::ContactsGroupDelete { .. } => "contacts.group_delete",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -263,7 +280,11 @@ impl RequestParams {
             Self::SignatureCreate { .. }
             | Self::SignatureUpdate { .. }
             | Self::SignatureDelete { .. }
-            | Self::SignatureReorder { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            | Self::SignatureReorder { .. }
+            | Self::ContactsGroupSave { .. }
+            | Self::ContactsGroupDelete { .. } => {
+                RequestTimeoutKind::Finite(Duration::from_secs(5))
+            }
             #[cfg(feature = "test-helpers")]
             Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
@@ -321,6 +342,8 @@ impl RequestParams {
             Self::SignatureUpdate { params } => serde_json::json!({ "params": params }),
             Self::SignatureDelete { params } => serde_json::json!({ "params": params }),
             Self::SignatureReorder { params } => serde_json::json!({ "params": params }),
+            Self::ContactsGroupSave { params } => serde_json::json!({ "params": params }),
+            Self::ContactsGroupDelete { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -484,6 +507,24 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("signature.reorder params: {e}"))?;
                 Ok(Self::SignatureReorder { params: p.params })
+            }
+            "contacts.group_save" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: ContactGroupSaveParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("contacts.group_save params: {e}"))?;
+                Ok(Self::ContactsGroupSave { params: p.params })
+            }
+            "contacts.group_delete" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: ContactGroupDeleteParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("contacts.group_delete params: {e}"))?;
+                Ok(Self::ContactsGroupDelete { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {
@@ -1118,6 +1159,83 @@ mod tests {
             params: SignatureReorderParams {
                 ordered_ids: vec!["a".into(), "b".into(), "c".into()],
             },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    // -- Phase 6a: contact group wire envelope ----------------------------
+
+    fn sample_group_save() -> ContactGroupSaveParams {
+        ContactGroupSaveParams {
+            id: "grp-1".into(),
+            name: "Friends".into(),
+            member_emails: vec!["a@example.com".into(), "b@example.com".into()],
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            member_count: 2,
+        }
+    }
+
+    #[test]
+    fn contacts_group_save_method_name_is_dotted() {
+        let p = RequestParams::ContactsGroupSave {
+            params: sample_group_save(),
+        };
+        assert_eq!(p.method_name(), "contacts.group_save");
+    }
+
+    #[test]
+    fn contacts_group_save_timeout_is_five_seconds() {
+        let p = RequestParams::ContactsGroupSave {
+            params: sample_group_save(),
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn contacts_group_save_round_trips_from_method_params() {
+        let original = RequestParams::ContactsGroupSave {
+            params: sample_group_save(),
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn contacts_group_delete_method_name_is_dotted() {
+        let p = RequestParams::ContactsGroupDelete {
+            params: ContactGroupDeleteParams { id: "grp-1".into() },
+        };
+        assert_eq!(p.method_name(), "contacts.group_delete");
+    }
+
+    #[test]
+    fn contacts_group_delete_timeout_is_five_seconds() {
+        let p = RequestParams::ContactsGroupDelete {
+            params: ContactGroupDeleteParams { id: "grp-1".into() },
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn contacts_group_delete_round_trips_from_method_params() {
+        let original = RequestParams::ContactsGroupDelete {
+            params: ContactGroupDeleteParams { id: "grp-9".into() },
         };
         let parsed = RequestParams::from_method_params(
             original.method_name(),
