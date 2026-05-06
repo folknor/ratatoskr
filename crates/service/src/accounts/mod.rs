@@ -7,5 +7,7 @@
 //! each entry point.
 
 pub(crate) mod create;
+pub(crate) mod delete;
 
 pub(crate) use create::create_account_inner;
+pub(crate) use delete::{delete_with_marker, drain_pending_deletions};

@@ -176,63 +176,42 @@ pub(crate) async fn handle_delete(
         );
     }
 
+    // Phase 6b: drive cleanup through the marker-backed path so a
+    // crash mid-cleanup resumes from the next un-completed step on
+    // boot. Runner-quiescence (above) doesn't need a marker because
+    // there's no DB state to lose if the cancel is interrupted; the
+    // markered work begins with the data-gather + cleanup steps and
+    // ends with the SQLite CASCADE.
     let write_db = boot_state.write_db_state()?;
-    let plan_account_id = account_id.clone();
-    let plan = write_db
-        .with_conn(move |conn| {
-            rtsk::account::delete::delete_account_orchestrate(conn, &plan_account_id)
-        })
-        .await
-        .map_err(ServiceError::Internal)?;
-
-    let mut ack = AccountDeleteAck::default();
-    let message_ids = plan.data.message_ids;
-    let cached_files = plan.data.cached_files;
-    let inline_hashes = plan.data.inline_hashes;
-    let shared_inline_hashes = plan.shared_inline_hashes;
-    let shared_cache_hashes = plan.shared_cache_hashes;
-
-    if let Some(sync) = boot_state.sync_runtime() {
-        let body_write = sync.body_write();
-        match body_write.delete(message_ids.clone()).await {
-            Ok(n) => ack.bodies_deleted = n,
-            Err(e) => log::error!("account.delete: body store cleanup: {e}"),
-        }
-
-        let to_delete: Vec<String> = inline_hashes
-            .into_iter()
-            .filter(|h| !shared_inline_hashes.contains(h))
-            .collect();
-        if !to_delete.is_empty() {
-            let inline_write = sync.inline_write();
-            match inline_write.delete_hashes(to_delete).await {
-                Ok(n) => ack.inline_images_deleted = n,
-                Err(e) => log::error!("account.delete: inline image cleanup: {e}"),
-            }
-        }
-
-        let search_write = sync.search_write();
-        match search_write.delete_messages_batch(message_ids).await {
-            Ok(()) => ack.search_cleaned = true,
-            Err(e) => log::error!("account.delete: search index cleanup: {e}"),
-        }
-    } else {
-        log::warn!(
-            "account.delete: sync runtime not installed; body / inline / search cleanup skipped \
-             (boot-time invariant pass on next start will reconcile)",
-        );
-    }
-
     let app_data = boot_state.app_data_dir().to_path_buf();
-    for (path, hash) in cached_files {
-        if shared_cache_hashes.contains(&hash) {
-            continue;
-        }
-        match rtsk::attachment_cache::remove_cached_relative(&app_data, &path) {
-            Ok(()) => ack.cache_files_deleted += 1,
-            Err(e) => ack.cache_file_errors.push(format!("{path}: {e}")),
-        }
-    }
+    let Some(sync) = boot_state.sync_runtime() else {
+        return Err(ServiceError::Internal(
+            "account.delete: sync runtime not installed; cannot run external-store cleanup"
+                .into(),
+        ));
+    };
+    let body_write = sync.body_write();
+    let inline_write = sync.inline_write();
+    let search_write = sync.search_write();
+
+    let report = crate::accounts::delete_with_marker(
+        &write_db,
+        &body_write,
+        &inline_write,
+        &search_write,
+        &app_data,
+        account_id.clone(),
+    )
+    .await
+    .map_err(ServiceError::Internal)?;
+
+    let ack = AccountDeleteAck {
+        bodies_deleted: report.bodies_deleted,
+        inline_images_deleted: report.inline_images_deleted,
+        cache_files_deleted: report.cache_files_deleted,
+        cache_file_errors: report.cache_file_errors,
+        search_cleaned: report.search_cleaned,
+    };
 
     log::info!(
         "account.delete({account_id}): {} bodies, {} inline images, {} cache files; \

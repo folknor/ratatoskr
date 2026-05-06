@@ -839,6 +839,21 @@ async fn run_boot_sequence_inner(
     let _attachment_stats =
         crate::startup_invariants::reconcile_attachment_cache(&db_write, &app_data_dir).await;
 
+    // Phase 6b: resume any in-flight account deletions. Each marker
+    // means a deletion that started but did not finish; the drain
+    // walks the canonical step list (bodies, inline images,
+    // attachment cache, search index, accounts row CASCADE) and
+    // completes the un-finished steps. Idempotent on each step;
+    // resilient to repeat boots if a step still fails.
+    crate::accounts::drain_pending_deletions(
+        &db_write,
+        &body_write,
+        &inline_write,
+        &search_write,
+        &app_data_dir,
+    )
+    .await;
+
     // Construct + install the SyncRuntime so the sync handlers
     // (`crates/service/src/handlers/sync.rs`) can reach it via
     // `BootSharedState::sync_runtime()` once boot.ready returns.
