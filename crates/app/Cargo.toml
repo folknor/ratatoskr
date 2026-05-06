@@ -32,7 +32,6 @@ smart-folder = { path = "../smart-folder" }
 label-colors = { path = "../label-colors" }
 iced-drop = { path = "../iced-drop" }
 rte = { path = "../rte" }
-cal = { path = "../calendar" }
 import = { path = "../import" }
 env_logger = "0.11"
 log = "0.4"
@@ -77,7 +76,6 @@ hotpath = [
     "label-colors/hotpath",
     "iced-drop/hotpath",
     "rte/hotpath",
-    "cal/hotpath",
     "import/hotpath",
     "store/hotpath",
     "dev-seed?/hotpath",
@@ -86,6 +84,7 @@ hotpath-alloc = [
     "hotpath",
     "hotpath/hotpath-alloc",
     "system-fonts/hotpath-alloc",
+
     "cmdk/hotpath-alloc",
     "rtsk/hotpath-alloc",
     "types/hotpath-alloc",
@@ -93,7 +92,6 @@ hotpath-alloc = [
     "label-colors/hotpath-alloc",
     "iced-drop/hotpath-alloc",
     "rte/hotpath-alloc",
-    "cal/hotpath-alloc",
     "import/hotpath-alloc",
     "store/hotpath-alloc",
     "dev-seed?/hotpath-alloc",
