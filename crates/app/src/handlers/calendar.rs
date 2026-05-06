@@ -297,8 +297,8 @@ impl ReadyApp {
                     log::warn!("DeleteEvent received outside ConfirmingDelete workflow");
                     return Task::none();
                 };
-                let _event_id = event_id.clone();
-                let _account_id = account_id.clone();
+                let event_id = event_id.clone();
+                let account_id = account_id.clone();
 
                 // Always close the confirmation modal first - the Delete click
                 // must produce immediate visual feedback regardless of whether
@@ -306,17 +306,36 @@ impl ReadyApp {
                 self.calendar.workflow = CalendarWorkflow::Idle;
                 self.calendar.sync_surfaces();
 
-                // Phase 6c-5 flipped cal::actions::* to take a
-                // `CalendarActionContext` (writer-half scoped to the
-                // Service crate); the UI no longer has a way to
-                // construct one. Phase 6c-8 routes this through the
-                // `cal_action.execute_plan` IPC. Until then we surface
-                // a clear status to the user rather than silently
-                // dropping the click.
-                Task::done(Message::Calendar(Box::new(CalendarMessage::EventDeleted(
-                    Err("Calendar delete is being relocated Service-side (Phase 6c-8)"
-                        .to_string()),
-                ))))
+                let Some(client) = self.service_client.as_ref().cloned() else {
+                    log::error!("DeleteEvent: service client unavailable");
+                    self.status_bar.show_confirmation(
+                        "Cannot delete: service not connected".to_string(),
+                    );
+                    return Task::none();
+                };
+
+                let plan = service_api::CalendarActionPlan {
+                    plan_id: service_api::PlanId::new_v7(),
+                    operations: vec![service_api::CalendarActionWireOperation {
+                        operation_id: service_api::OperationId(0),
+                        account_id,
+                        operation: service_api::WireCalendarOperation::DeleteEvent {
+                            event_id,
+                        },
+                    }],
+                };
+                let plan_id = plan.plan_id;
+                Task::perform(
+                    async move {
+                        client.execute_calendar_plan(plan).await.map_err(|e| e.to_string())?;
+                        let completed = client
+                            .subscribe_or_consume_calendar_action(plan_id)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        completion_to_result(&completed)
+                    },
+                    |r| Message::Calendar(Box::new(CalendarMessage::EventDeleted(r))),
+                )
             }
             CalendarMessage::DiscardChanges => {
                 self.calendar.workflow = CalendarWorkflow::Idle;
@@ -586,24 +605,72 @@ impl ReadyApp {
     }
 
     fn handle_save_event(&mut self) -> Task<Message> {
-        // Phase 6c-5 flipped cal::actions::* to take a
-        // `CalendarActionContext` (writer-half scoped to the Service
-        // crate); the UI no longer has a way to construct one. Phase
-        // 6c-8 routes this through the `cal_action.execute_plan` IPC.
-        // Until then we surface a clear status to the user rather than
-        // silently dropping the save click.
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            self.status = "Cannot save: service not connected".to_string();
+            return Task::none();
+        };
+
+        // Read create-vs-update, identity, and draft from workflow state.
+        // calendar_id comes from session.draft (the authoritative editable source).
+        let op: service_api::WireCalendarOperation;
+        let account_id: String;
         match &self.calendar.workflow {
-            CalendarWorkflow::EditingEvent { .. } | CalendarWorkflow::CreatingEvent { .. } => {
-                Task::done(Message::Calendar(Box::new(CalendarMessage::EventSaved(
-                    Err("Calendar save is being relocated Service-side (Phase 6c-8)"
-                        .to_string()),
-                ))))
+            CalendarWorkflow::EditingEvent {
+                event_id,
+                account_id: aid,
+                session,
+            } => {
+                let event_id = event_id.clone();
+                account_id = aid.clone();
+                op = service_api::WireCalendarOperation::UpdateEvent {
+                    event_id,
+                    input: build_wire_input(&session.draft),
+                };
+            }
+            CalendarWorkflow::CreatingEvent {
+                account_id: aid,
+                session,
+            } => {
+                let Some(aid) = aid else {
+                    self.status = "Select a calendar before saving".to_string();
+                    return Task::none();
+                };
+                let Some(calendar_id) = session.draft.calendar_id.as_ref() else {
+                    self.status = "Select a calendar before saving".to_string();
+                    return Task::none();
+                };
+                account_id = aid.clone();
+                op = service_api::WireCalendarOperation::CreateEvent {
+                    calendar_remote_id: calendar_id.clone(),
+                    input: build_wire_input(&session.draft),
+                };
             }
             _ => {
                 log::warn!("SaveEvent received outside editing/creating workflow");
-                Task::none()
+                return Task::none();
             }
         }
+
+        let plan = service_api::CalendarActionPlan {
+            plan_id: service_api::PlanId::new_v7(),
+            operations: vec![service_api::CalendarActionWireOperation {
+                operation_id: service_api::OperationId(0),
+                account_id,
+                operation: op,
+            }],
+        };
+        let plan_id = plan.plan_id;
+        Task::perform(
+            async move {
+                client.execute_calendar_plan(plan).await.map_err(|e| e.to_string())?;
+                let completed = client
+                    .subscribe_or_consume_calendar_action(plan_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                completion_to_result(&completed)
+            },
+            |r| Message::Calendar(Box::new(CalendarMessage::EventSaved(r))),
+        )
     }
 
     /// Pre-assign calendar (and account) ownership on a new event when
@@ -669,6 +736,59 @@ impl ReadyApp {
             ),
         ])
     }
+}
+
+/// Build a `WireCalendarEventInput` from the editor draft. Phase 6c-8
+/// reintroduces this helper as the wire-shape sibling of the pre-6c
+/// `cal::actions::CalendarEventInput` builder; the IPC route serialises
+/// the wire shape, and the Service-side `cal_actions::batch_execute`
+/// converts back to the in-process domain shape.
+fn build_wire_input(draft: &CalendarEventData) -> service_api::WireCalendarEventInput {
+    let start_ts = data_to_timestamp(
+        draft.start_date,
+        draft.start_hour_u32(),
+        draft.start_minute_u32(),
+    );
+    let end_ts = data_to_timestamp(
+        draft.start_date,
+        draft.end_hour_u32(),
+        draft.end_minute_u32(),
+    );
+    service_api::WireCalendarEventInput {
+        title: draft.title.clone(),
+        description: draft.description.clone(),
+        location: draft.location.clone(),
+        start_time: start_ts,
+        end_time: end_ts,
+        is_all_day: draft.all_day,
+        timezone: draft.timezone.clone(),
+        recurrence_rule: draft.recurrence_rule.clone(),
+        availability: draft.availability.clone(),
+        visibility: draft.visibility.clone(),
+    }
+}
+
+/// Convert date + hour + minute to a Unix timestamp (local time).
+fn data_to_timestamp(date: chrono::NaiveDate, hour: u32, minute: u32) -> i64 {
+    use chrono::TimeZone;
+    let naive_time = chrono::NaiveTime::from_hms_opt(hour, minute, 0)
+        .unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap_or_default());
+    let naive_dt = date.and_time(naive_time);
+    chrono::Local
+        .from_local_datetime(&naive_dt)
+        .single()
+        .map_or(0, |dt| dt.timestamp())
+}
+
+/// Map a `CalendarActionCompleted` to the `Result<(), String>` shape
+/// the UI handler expects. Today's calendar plans are 1:1 (one user
+/// intent = one operation) and the worker emits an empty `results`
+/// vector (Phase 6c-7); we treat every completion as success.
+/// Per-op `CalendarOperationResult::Failed` is reflected via the
+/// CalendarChanged-driven reload showing the un-changed state.
+/// Phase 6d will populate per-op results if richer feedback is needed.
+fn completion_to_result(_completed: &service_api::CalendarActionCompleted) -> Result<(), String> {
+    Ok(())
 }
 
 /// Convert a CalendarEvent from the DB to CalendarEventData for the UI.
