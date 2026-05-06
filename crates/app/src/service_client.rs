@@ -6,7 +6,9 @@ use service_api::{
     CalendarRunCompleted, CalendarRunId, CalendarSetVisibilityAck, CalendarSetVisibilityParams,
     CalendarStartAccountSyncParams, CalendarStartAck, CalendarSyncResult, HealthPingResponse,
     JsonRpcErrorObject, JsonRpcRequest, Notification, PROTOCOL_VERSION, ParsedServiceMessage,
-    ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck, ContactGroupSaveParams,
+    AccountReorderAck, AccountReorderEntry, AccountReorderParams, AccountUpdateAck,
+    AccountUpdateParams, ContactGroupDeleteAck, ContactGroupDeleteParams, ContactGroupSaveAck,
+    ContactGroupSaveParams,
     RequestParams, RequestTimeoutKind, ServiceError, ServiceResponse, SettingValue, SettingsSetAck,
     SettingsSetParams, ShutdownResponse, SignatureCreateAck, SignatureCreateParams,
     SignatureDeleteAck, SignatureDeleteParams, SignatureReorderAck, SignatureReorderParams,
@@ -1070,6 +1072,41 @@ impl ServiceClient {
         let _ack: ContactGroupDeleteAck = self
             .request(RequestParams::ContactsGroupDelete {
                 params: ContactGroupDeleteParams { id },
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Phase 6a: partial-update an account row's editable metadata
+    /// via the `account.update` IPC.
+    pub async fn update_account(
+        &self,
+        params: AccountUpdateParams,
+    ) -> Result<(), ClientError> {
+        let _ack: AccountUpdateAck = self
+            .request(RequestParams::AccountUpdate { params })
+            .await?;
+        Ok(())
+    }
+
+    /// Phase 6a: batch-reassign sort_order for accounts via the
+    /// `account.reorder` IPC. The flat `(id, sort_order)` list is
+    /// translated to the wire's `AccountReorderEntry` shape here so
+    /// callers can stay close to the underlying tuple form.
+    pub async fn reorder_accounts(
+        &self,
+        orders: Vec<(String, i64)>,
+    ) -> Result<(), ClientError> {
+        let entries: Vec<AccountReorderEntry> = orders
+            .into_iter()
+            .map(|(account_id, sort_order)| AccountReorderEntry {
+                account_id,
+                sort_order,
+            })
+            .collect();
+        let _ack: AccountReorderAck = self
+            .request(RequestParams::AccountReorder {
+                params: AccountReorderParams { orders: entries },
             })
             .await?;
         Ok(())

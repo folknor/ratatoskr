@@ -7,6 +7,7 @@ mod calendar;
 mod gal;
 mod health;
 mod pending_ops_kick;
+mod account;
 mod contacts;
 mod pinned_search;
 mod settings;
@@ -87,6 +88,12 @@ pub(crate) async fn dispatch(
         }
         RequestParams::ContactsGroupDelete { params } => {
             contacts::handle_group_delete(&boot_state, params).await
+        }
+        RequestParams::AccountUpdate { params } => {
+            account::handle_update(&boot_state, params).await
+        }
+        RequestParams::AccountReorder { params } => {
+            account::handle_reorder(&boot_state, params).await
         }
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPanic => test_helpers::panic_handle().await,

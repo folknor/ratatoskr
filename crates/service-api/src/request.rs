@@ -6,6 +6,7 @@ use crate::action::{ActionWirePlan, PlanId, SendWireRequest};
 use crate::calendar::{
     CalendarCancelAccountSyncParams, CalendarSetVisibilityParams, CalendarStartAccountSyncParams,
 };
+use crate::account::{AccountReorderParams, AccountUpdateParams};
 use crate::contacts::{ContactGroupDeleteParams, ContactGroupSaveParams};
 use crate::settings::SettingsSetParams;
 use crate::signature::{
@@ -180,6 +181,19 @@ pub enum RequestParams {
     ///
     /// 5 s timeout: handler is one bounded transaction.
     ContactsGroupDelete { params: ContactGroupDeleteParams },
+    /// Phase 6a: partial-update an account row's editable metadata
+    /// fields. Each Option is "no change" if absent, else "set to
+    /// value." Out of scope: provider tokens / mailbox passwords -
+    /// those mutate via account-create or the future
+    /// `internal.encrypt_for_storage` path.
+    ///
+    /// 5 s timeout: handler is one bounded `dynamic_update`.
+    AccountUpdate { params: AccountUpdateParams },
+    /// Phase 6a: batch-reassign `sort_order` for accounts. Account
+    /// ids absent from `orders` keep their existing `sort_order`.
+    ///
+    /// 5 s timeout: handler is one bounded transaction.
+    AccountReorder { params: AccountReorderParams },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -220,6 +234,8 @@ impl RequestParams {
             Self::SignatureReorder { .. } => "signature.reorder",
             Self::ContactsGroupSave { .. } => "contacts.group_save",
             Self::ContactsGroupDelete { .. } => "contacts.group_delete",
+            Self::AccountUpdate { .. } => "account.update",
+            Self::AccountReorder { .. } => "account.reorder",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -282,7 +298,9 @@ impl RequestParams {
             | Self::SignatureDelete { .. }
             | Self::SignatureReorder { .. }
             | Self::ContactsGroupSave { .. }
-            | Self::ContactsGroupDelete { .. } => {
+            | Self::ContactsGroupDelete { .. }
+            | Self::AccountUpdate { .. }
+            | Self::AccountReorder { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
             }
             #[cfg(feature = "test-helpers")]
@@ -344,6 +362,8 @@ impl RequestParams {
             Self::SignatureReorder { params } => serde_json::json!({ "params": params }),
             Self::ContactsGroupSave { params } => serde_json::json!({ "params": params }),
             Self::ContactsGroupDelete { params } => serde_json::json!({ "params": params }),
+            Self::AccountUpdate { params } => serde_json::json!({ "params": params }),
+            Self::AccountReorder { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -525,6 +545,24 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("contacts.group_delete params: {e}"))?;
                 Ok(Self::ContactsGroupDelete { params: p.params })
+            }
+            "account.update" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: AccountUpdateParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("account.update params: {e}"))?;
+                Ok(Self::AccountUpdate { params: p.params })
+            }
+            "account.reorder" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: AccountReorderParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("account.reorder params: {e}"))?;
+                Ok(Self::AccountReorder { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {
@@ -1236,6 +1274,96 @@ mod tests {
     fn contacts_group_delete_round_trips_from_method_params() {
         let original = RequestParams::ContactsGroupDelete {
             params: ContactGroupDeleteParams { id: "grp-9".into() },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    // -- Phase 6a: account update / reorder wire envelope -----------------
+
+    fn sample_update() -> AccountUpdateParams {
+        AccountUpdateParams {
+            id: "acc-1".into(),
+            account_name: Some("Work".into()),
+            display_name: None,
+            account_color: Some("#abcdef".into()),
+            caldav_url: None,
+            caldav_username: None,
+            caldav_password: None,
+        }
+    }
+
+    #[test]
+    fn account_update_method_name_is_dotted() {
+        let p = RequestParams::AccountUpdate {
+            params: sample_update(),
+        };
+        assert_eq!(p.method_name(), "account.update");
+    }
+
+    #[test]
+    fn account_update_timeout_is_five_seconds() {
+        let p = RequestParams::AccountUpdate {
+            params: sample_update(),
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn account_update_round_trips_from_method_params() {
+        let original = RequestParams::AccountUpdate {
+            params: sample_update(),
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn account_reorder_method_name_is_dotted() {
+        let p = RequestParams::AccountReorder {
+            params: AccountReorderParams { orders: Vec::new() },
+        };
+        assert_eq!(p.method_name(), "account.reorder");
+    }
+
+    #[test]
+    fn account_reorder_timeout_is_five_seconds() {
+        let p = RequestParams::AccountReorder {
+            params: AccountReorderParams { orders: Vec::new() },
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn account_reorder_round_trips_from_method_params() {
+        use crate::account::AccountReorderEntry;
+        let original = RequestParams::AccountReorder {
+            params: AccountReorderParams {
+                orders: vec![
+                    AccountReorderEntry {
+                        account_id: "a".into(),
+                        sort_order: 0,
+                    },
+                    AccountReorderEntry {
+                        account_id: "b".into(),
+                        sort_order: 1,
+                    },
+                ],
+            },
         };
         let parsed = RequestParams::from_method_params(
             original.method_name(),

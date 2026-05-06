@@ -819,13 +819,28 @@ impl ReadyApp {
         account_id: String,
         params: rtsk::db::queries_extra::UpdateAccountParams,
     ) -> Task<Message> {
-        let db = Arc::clone(&self.db);
+        // Phase 6a: account.update IPC. Convert the existing internal
+        // UpdateAccountParams (carries no id; takes the id from the
+        // function arg) into the wire shape (id-bearing).
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("account.update: no ServiceClient yet; ignoring update");
+            return Task::none();
+        };
+        let wire = service_api::AccountUpdateParams {
+            id: account_id,
+            account_name: params.account_name,
+            display_name: params.display_name,
+            account_color: params.account_color,
+            caldav_url: params.caldav_url,
+            caldav_username: params.caldav_username,
+            caldav_password: params.caldav_password,
+        };
         Task::perform(
             async move {
-                db.with_write_conn(move |conn| {
-                    rtsk::db::queries_extra::update_account_sync(conn, &account_id, params)
-                })
-                .await
+                client
+                    .update_account(wire)
+                    .await
+                    .map_err(|e| e.to_string())
             },
             Message::AccountUpdated,
         )
@@ -835,11 +850,20 @@ impl ReadyApp {
         &mut self,
         orders: Vec<(String, i64)>,
     ) -> Task<Message> {
-        let db = Arc::clone(&self.db);
+        // Phase 6a: account.reorder IPC. Same staleness tolerance as
+        // signature.reorder - rapid drag-reorder clicks may land out
+        // of order; next reload reconciles. Per-entity ordering token
+        // is the documented escape hatch if a real bug shows up.
+        let Some(client) = self.service_client.as_ref().cloned() else {
+            log::warn!("account.reorder: no ServiceClient yet; ignoring reorder");
+            return Task::none();
+        };
         Task::perform(
             async move {
-                let db_state = db.write_db_state();
-                rtsk::db::queries_extra::db_update_account_sort_order(&db_state, orders).await
+                client
+                    .reorder_accounts(orders)
+                    .await
+                    .map_err(|e| e.to_string())
             },
             Message::AccountUpdated,
         )

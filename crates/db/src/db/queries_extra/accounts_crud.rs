@@ -178,21 +178,10 @@ pub fn update_account_sync(
     dynamic_update(conn, "accounts", "id", id, sets)
 }
 
-/// Update an account's editable metadata fields. Only fields that are `Some`
-/// in `params` are changed.
-pub async fn db_update_account(
-    db: &ReadDbState,
-    id: String,
-    params: UpdateAccountParams,
-) -> Result<(), String> {
-    log::info!("Updating account: id={id}");
-    db.with_conn(move |conn| update_account_sync(conn, &id, params))
-        .await
-        .map_err(|e| {
-            log::error!("Failed to update account: {e}");
-            e
-        })
-}
+// db_update_account async wrapper removed in Phase 6a: the only
+// caller (`handle_save_account_changes`) is now an IPC dispatch via
+// `account.update`, which calls `update_account_sync` directly inside
+// `WriteDbState::with_conn`.
 
 /// Update only the account color.
 pub async fn db_update_account_color(
@@ -224,26 +213,31 @@ pub async fn db_update_account_name(db: &ReadDbState, id: String, name: String) 
     .await
 }
 
-/// Batch-update sort order for multiple accounts.
-pub async fn db_update_account_sort_order(
-    db: &ReadDbState,
-    updates: Vec<(String, i64)>,
+/// Batch-update sort order for multiple accounts inside one
+/// transaction. Account ids absent from `updates` keep their existing
+/// `sort_order`; this matches the signature reorder shape and lets
+/// callers reorder a sidebar subset without enumerating every row.
+///
+/// Phase 6a: paired sync helper for the `account.reorder` IPC handler.
+pub fn update_account_sort_order_sync(
+    conn: &Connection,
+    updates: &[(String, i64)],
 ) -> Result<(), String> {
-    db.with_conn(move |conn| {
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-        {
-            let mut stmt = tx
-                .prepare("UPDATE accounts SET sort_order = ?1 WHERE id = ?2")
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("account.reorder begin tx: {e}"))?;
+    {
+        let mut stmt = tx
+            .prepare("UPDATE accounts SET sort_order = ?1 WHERE id = ?2")
+            .map_err(|e| e.to_string())?;
+        for (id, order) in updates {
+            stmt.execute(params![order, id])
                 .map_err(|e| e.to_string())?;
-            for (id, order) in &updates {
-                stmt.execute(params![order, id])
-                    .map_err(|e| e.to_string())?;
-            }
         }
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(())
-    })
-    .await
+    }
+    tx.commit()
+        .map_err(|e| format!("account.reorder commit: {e}"))?;
+    Ok(())
 }
 
 /// Parameters for re-authentication - updating an existing account's
@@ -617,4 +611,129 @@ pub fn get_account_auth_info_sync(
 pub async fn db_account_exists_by_email(db: &ReadDbState, email: String) -> Result<bool, String> {
     db.with_conn(move |conn| account_exists_by_email_sync(conn, &email))
         .await
+}
+
+#[cfg(test)]
+mod sync_account_tests {
+    use super::*;
+    use crate::db::migrations;
+    use rusqlite::Connection;
+
+    fn setup_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("pragmas");
+        migrations::run_all(&conn).expect("migrations");
+        // Three accounts so reorder has something to permute.
+        for (id, sort_order) in [("acc-a", 0), ("acc-b", 1), ("acc-c", 2)] {
+            conn.execute(
+                "INSERT INTO accounts (id, email, sort_order) \
+                 VALUES (?1, ?2, ?3)",
+                params![id, format!("{id}@example.com"), sort_order],
+            )
+            .expect("seed account");
+        }
+        conn
+    }
+
+    fn get_sort_order(conn: &Connection, id: &str) -> i64 {
+        conn.query_row(
+            "SELECT sort_order FROM accounts WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .expect("sort_order")
+    }
+
+    fn get_text_col(conn: &Connection, id: &str, col: &str) -> Option<String> {
+        let sql = format!("SELECT {col} FROM accounts WHERE id = ?1");
+        conn.query_row(&sql, params![id], |row| row.get(0))
+            .expect("text col")
+    }
+
+    #[test]
+    fn update_account_sync_partial_only_changes_named_fields() {
+        let conn = setup_db();
+        // Seed initial values.
+        conn.execute(
+            "UPDATE accounts SET account_name = 'Old', display_name = 'Old D' \
+             WHERE id = 'acc-a'",
+            [],
+        )
+        .expect("seed");
+
+        update_account_sync(
+            &conn,
+            "acc-a",
+            UpdateAccountParams {
+                account_name: Some("New".into()),
+                display_name: None,
+                account_color: None,
+                caldav_url: None,
+                caldav_username: None,
+                caldav_password: None,
+            },
+        )
+        .expect("update");
+
+        assert_eq!(get_text_col(&conn, "acc-a", "account_name"), Some("New".into()));
+        assert_eq!(
+            get_text_col(&conn, "acc-a", "display_name"),
+            Some("Old D".into()),
+            "display_name must survive a single-field update"
+        );
+    }
+
+    #[test]
+    fn reorder_assigns_indices_in_order() {
+        let conn = setup_db();
+        // Reorder to c, a, b.
+        update_account_sort_order_sync(
+            &conn,
+            &[
+                ("acc-c".into(), 0),
+                ("acc-a".into(), 1),
+                ("acc-b".into(), 2),
+            ],
+        )
+        .expect("reorder");
+        assert_eq!(get_sort_order(&conn, "acc-c"), 0);
+        assert_eq!(get_sort_order(&conn, "acc-a"), 1);
+        assert_eq!(get_sort_order(&conn, "acc-b"), 2);
+    }
+
+    #[test]
+    fn reorder_leaves_absent_ids_untouched() {
+        let conn = setup_db();
+        // Set acc-c to a sentinel value; reorder only acc-a and
+        // acc-b; assert acc-c is unchanged.
+        conn.execute(
+            "UPDATE accounts SET sort_order = 99 WHERE id = 'acc-c'",
+            [],
+        )
+        .expect("seed sort_order");
+
+        update_account_sort_order_sync(
+            &conn,
+            &[("acc-b".into(), 0), ("acc-a".into(), 1)],
+        )
+        .expect("reorder");
+
+        assert_eq!(get_sort_order(&conn, "acc-b"), 0);
+        assert_eq!(get_sort_order(&conn, "acc-a"), 1);
+        assert_eq!(
+            get_sort_order(&conn, "acc-c"),
+            99,
+            "absent ids keep their prior sort_order"
+        );
+    }
+
+    #[test]
+    fn reorder_empty_list_is_noop() {
+        let conn = setup_db();
+        update_account_sort_order_sync(&conn, &[]).expect("noop");
+        assert_eq!(get_sort_order(&conn, "acc-a"), 0);
+        assert_eq!(get_sort_order(&conn, "acc-b"), 1);
+        assert_eq!(get_sort_order(&conn, "acc-c"), 2);
+    }
 }
