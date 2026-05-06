@@ -3,14 +3,24 @@
 //! These action functions live in the `calendar` crate (not `core::actions`)
 //! because the calendar provider write APIs use typed clients (`GmailClient`,
 //! `GraphClient`, `JmapClient`) that are not on the `ProviderOps` trait.
-//! The `calendar` crate already depends on `core` (for `ActionContext`,
-//! `ActionOutcome`, `ReadDbState`) and has access to all provider write functions.
+//! The `calendar` crate already depends on `service-state` (for
+//! `WriteDbState`) and `action-types` (for `CalendarActionContext`,
+//! `ActionOutcome`) and has access to all provider write functions.
 //! Adding `calendar` as a dependency of `core` would create a circular dep.
+//!
+//! Phase 6c relocates these mutations Service-side: the action
+//! functions now take `&CalendarActionContext` (a sibling of
+//! `ActionContext` carrying `WriteDbState` instead of `ReadDbState`).
+//! The Service-side `service::cal_actions::batch_execute` (Phase 6c-6)
+//! is the only caller; the UI dispatches via the
+//! `cal_action.execute_plan` IPC. `db.conn().lock()` patterns are
+//! replaced with `ctx.db.with_conn(...)` so writes go through the
+//! writer-half exclusively.
 
 use gmail::client::GmailClient;
 use graph::client::GraphClient;
 use jmap::client::JmapClient;
-use action_types::{ActionContext, ActionError, ActionOutcome, MutationLog};
+use action_types::{ActionError, ActionOutcome, CalendarActionContext, MutationLog};
 use rtsk::db::ReadDbState;
 use rtsk::db::queries_extra::{set_calendar_event_etag, set_calendar_event_remote_id_and_etag};
 
@@ -137,19 +147,20 @@ fn input_to_json(input: &CalendarEventInput) -> serde_json::Value {
 
 async fn dispatch_create(
     provider: &CalendarProvider,
-    ctx: &ActionContext,
+    ctx: &CalendarActionContext,
     calendar_remote_id: &str,
     input: &CalendarEventInput,
 ) -> Result<CalendarEventDto, ActionError> {
     let json = input_to_json(input);
+    let read_db = ctx.db.to_read_state();
     match provider {
         CalendarProvider::Google(client) => {
-            google_calendar_create_event_impl(client, &ctx.db, calendar_remote_id, json)
+            google_calendar_create_event_impl(client, &read_db, calendar_remote_id, json)
                 .await
                 .map_err(ActionError::remote)
         }
         CalendarProvider::Graph(client) => {
-            graph_calendar_create_event_impl(client, &ctx.db, calendar_remote_id, json)
+            graph_calendar_create_event_impl(client, &read_db, calendar_remote_id, json)
                 .await
                 .map_err(ActionError::remote)
         }
@@ -180,7 +191,7 @@ async fn dispatch_create(
             })
         }
         CalendarProvider::CalDav { account_id } => caldav_create_event_impl(
-            &ctx.db,
+            &read_db,
             &ctx.encryption_key,
             account_id,
             calendar_remote_id,
@@ -193,17 +204,18 @@ async fn dispatch_create(
 
 async fn dispatch_update(
     provider: &CalendarProvider,
-    ctx: &ActionContext,
+    ctx: &CalendarActionContext,
     calendar_remote_id: &str,
     remote_event_id: &str,
     input: &CalendarEventInput,
     etag: Option<&str>,
 ) -> Result<CalendarEventDto, ActionError> {
     let json = input_to_json(input);
+    let read_db = ctx.db.to_read_state();
     match provider {
         CalendarProvider::Google(client) => google_calendar_update_event_impl(
             client,
-            &ctx.db,
+            &read_db,
             calendar_remote_id,
             remote_event_id,
             json,
@@ -211,7 +223,7 @@ async fn dispatch_update(
         .await
         .map_err(ActionError::remote),
         CalendarProvider::Graph(client) => {
-            graph_calendar_update_event_impl(client, &ctx.db, remote_event_id, json)
+            graph_calendar_update_event_impl(client, &read_db, remote_event_id, json)
                 .await
                 .map_err(ActionError::remote)
         }
@@ -242,7 +254,7 @@ async fn dispatch_update(
             })
         }
         CalendarProvider::CalDav { account_id } => caldav_update_event_impl(
-            &ctx.db,
+            &read_db,
             &ctx.encryption_key,
             account_id,
             remote_event_id,
@@ -256,19 +268,25 @@ async fn dispatch_update(
 
 async fn dispatch_delete(
     provider: &CalendarProvider,
-    ctx: &ActionContext,
+    ctx: &CalendarActionContext,
     calendar_remote_id: &str,
     remote_event_id: &str,
     etag: Option<&str>,
 ) -> Result<(), ActionError> {
+    let read_db = ctx.db.to_read_state();
     match provider {
         CalendarProvider::Google(client) => {
-            google_calendar_delete_event_impl(client, &ctx.db, calendar_remote_id, remote_event_id)
-                .await
-                .map_err(ActionError::remote)
+            google_calendar_delete_event_impl(
+                client,
+                &read_db,
+                calendar_remote_id,
+                remote_event_id,
+            )
+            .await
+            .map_err(ActionError::remote)
         }
         CalendarProvider::Graph(client) => {
-            graph_calendar_delete_event_impl(client, &ctx.db, remote_event_id)
+            graph_calendar_delete_event_impl(client, &read_db, remote_event_id)
                 .await
                 .map_err(ActionError::remote)
         }
@@ -278,7 +296,7 @@ async fn dispatch_delete(
                 .map_err(ActionError::remote)
         }
         CalendarProvider::CalDav { account_id } => caldav_delete_event_impl(
-            &ctx.db,
+            &read_db,
             &ctx.encryption_key,
             account_id,
             remote_event_id,
@@ -351,7 +369,7 @@ fn lookup_event_meta(
 /// visible locally with `remote_event_id = NULL`, no automatic retry.
 /// Returns `Failed` if local insert failed.
 pub async fn create_calendar_event(
-    ctx: &ActionContext,
+    ctx: &CalendarActionContext,
     account_id: &str,
     calendar_id: &str,
     input: CalendarEventInput,
@@ -408,7 +426,8 @@ pub async fn create_calendar_event(
     };
 
     // 2. Provider dispatch (best-effort for create)
-    let provider = match create_calendar_provider(&ctx.db, account_id, ctx.encryption_key).await {
+    let read_db = ctx.db.to_read_state();
+    let provider = match create_calendar_provider(&read_db, account_id, ctx.encryption_key).await {
         Ok(p) => p,
         Err(e) => {
             let outcome = ActionOutcome::LocalOnly {
@@ -455,7 +474,7 @@ pub async fn create_calendar_event(
 /// `account_id` from the DB is authoritative for provider resolution, preventing
 /// wrong-account dispatch in multi-account setups.
 pub async fn update_calendar_event(
-    ctx: &ActionContext,
+    ctx: &CalendarActionContext,
     _account_id: &str,
     event_id: &str,
     input: CalendarEventInput,
@@ -536,8 +555,9 @@ pub async fn update_calendar_event(
     };
 
     // 3. Synced event - provider-first (use event's own account_id)
+    let read_db = ctx.db.to_read_state();
     let provider =
-        match create_calendar_provider(&ctx.db, &meta.account_id, ctx.encryption_key).await {
+        match create_calendar_provider(&read_db, &meta.account_id, ctx.encryption_key).await {
             Ok(p) => p,
             Err(e) => {
                 let outcome = ActionOutcome::Failed { error: e };
@@ -606,7 +626,7 @@ pub async fn update_calendar_event(
 
 /// Delete a calendar event. Provider-first for synced events, local-only for unsynced.
 pub async fn delete_calendar_event(
-    ctx: &ActionContext,
+    ctx: &CalendarActionContext,
     _account_id: &str,
     event_id: &str,
 ) -> ActionOutcome {
@@ -669,8 +689,9 @@ pub async fn delete_calendar_event(
     };
 
     // 3. Synced event - provider-first (use event's own account_id)
+    let read_db = ctx.db.to_read_state();
     let provider =
-        match create_calendar_provider(&ctx.db, &meta.account_id, ctx.encryption_key).await {
+        match create_calendar_provider(&read_db, &meta.account_id, ctx.encryption_key).await {
             Ok(p) => p,
             Err(e) => {
                 let outcome = ActionOutcome::Failed { error: e };

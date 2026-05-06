@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use chrono::{Datelike, NaiveDate, Timelike};
+use chrono::{Datelike, Timelike};
 use iced::Task;
 
 use crate::ui::calendar::{
@@ -297,8 +297,8 @@ impl ReadyApp {
                     log::warn!("DeleteEvent received outside ConfirmingDelete workflow");
                     return Task::none();
                 };
-                let event_id = event_id.clone();
-                let account_id = account_id.clone();
+                let _event_id = event_id.clone();
+                let _account_id = account_id.clone();
 
                 // Always close the confirmation modal first - the Delete click
                 // must produce immediate visual feedback regardless of whether
@@ -306,23 +306,17 @@ impl ReadyApp {
                 self.calendar.workflow = CalendarWorkflow::Idle;
                 self.calendar.sync_surfaces();
 
-                let Some(ctx) = self.action_ctx() else {
-                    log::error!("DeleteEvent: action service unavailable");
-                    self.status_bar.show_confirmation(
-                        "Cannot delete: action service unavailable".to_string(),
-                    );
-                    return Task::none();
-                };
-
-                Task::perform(
-                    async move {
-                        let outcome =
-                            cal::actions::delete_calendar_event(&ctx, &account_id, &event_id)
-                                .await;
-                        calendar_outcome_to_result(outcome)
-                    },
-                    |r| Message::Calendar(Box::new(CalendarMessage::EventDeleted(r))),
-                )
+                // Phase 6c-5 flipped cal::actions::* to take a
+                // `CalendarActionContext` (writer-half scoped to the
+                // Service crate); the UI no longer has a way to
+                // construct one. Phase 6c-8 routes this through the
+                // `cal_action.execute_plan` IPC. Until then we surface
+                // a clear status to the user rather than silently
+                // dropping the click.
+                Task::done(Message::Calendar(Box::new(CalendarMessage::EventDeleted(
+                    Err("Calendar delete is being relocated Service-side (Phase 6c-8)"
+                        .to_string()),
+                ))))
             }
             CalendarMessage::DiscardChanges => {
                 self.calendar.workflow = CalendarWorkflow::Idle;
@@ -592,89 +586,23 @@ impl ReadyApp {
     }
 
     fn handle_save_event(&mut self) -> Task<Message> {
-        let Some(ctx) = self.action_ctx() else {
-            return Task::none();
-        };
-
-        // Read create-vs-update, identity, and draft from workflow state.
-        // calendar_id comes from session.draft (the authoritative editable source).
+        // Phase 6c-5 flipped cal::actions::* to take a
+        // `CalendarActionContext` (writer-half scoped to the Service
+        // crate); the UI no longer has a way to construct one. Phase
+        // 6c-8 routes this through the `cal_action.execute_plan` IPC.
+        // Until then we surface a clear status to the user rather than
+        // silently dropping the save click.
         match &self.calendar.workflow {
-            CalendarWorkflow::EditingEvent {
-                event_id,
-                account_id,
-                session,
-            } => {
-                let event_id = event_id.clone();
-                let account_id = account_id.clone();
-                let input = Self::build_event_input(&session.draft);
-                Task::perform(
-                    async move {
-                        let outcome =
-                            cal::actions::update_calendar_event(&ctx, &account_id, &event_id, input)
-                                .await;
-                        calendar_outcome_to_result(outcome)
-                    },
-                    |r| Message::Calendar(Box::new(CalendarMessage::EventSaved(r))),
-                )
-            }
-            CalendarWorkflow::CreatingEvent {
-                account_id,
-                session,
-            } => {
-                let Some(account_id) = account_id else {
-                    self.status = "Select a calendar before saving".to_string();
-                    return Task::none();
-                };
-                let Some(calendar_id) = session.draft.calendar_id.as_ref() else {
-                    self.status = "Select a calendar before saving".to_string();
-                    return Task::none();
-                };
-                let account_id = account_id.clone();
-                let calendar_id = calendar_id.clone();
-                let input = Self::build_event_input(&session.draft);
-                Task::perform(
-                    async move {
-                        let outcome = cal::actions::create_calendar_event(
-                            &ctx,
-                            &account_id,
-                            &calendar_id,
-                            input,
-                        )
-                        .await;
-                        calendar_outcome_to_result(outcome)
-                    },
-                    |r| Message::Calendar(Box::new(CalendarMessage::EventSaved(r))),
-                )
+            CalendarWorkflow::EditingEvent { .. } | CalendarWorkflow::CreatingEvent { .. } => {
+                Task::done(Message::Calendar(Box::new(CalendarMessage::EventSaved(
+                    Err("Calendar save is being relocated Service-side (Phase 6c-8)"
+                        .to_string()),
+                ))))
             }
             _ => {
                 log::warn!("SaveEvent received outside editing/creating workflow");
                 Task::none()
             }
-        }
-    }
-
-    fn build_event_input(draft: &CalendarEventData) -> cal::actions::CalendarEventInput {
-        let start_ts = calendar_data_to_timestamp(
-            draft.start_date,
-            draft.start_hour_u32(),
-            draft.start_minute_u32(),
-        );
-        let end_ts = calendar_data_to_timestamp(
-            draft.start_date,
-            draft.end_hour_u32(),
-            draft.end_minute_u32(),
-        );
-        cal::actions::CalendarEventInput {
-            title: draft.title.clone(),
-            description: draft.description.clone(),
-            location: draft.location.clone(),
-            start_time: start_ts,
-            end_time: end_ts,
-            is_all_day: draft.all_day,
-            timezone: draft.timezone.clone(),
-            recurrence_rule: draft.recurrence_rule.clone(),
-            availability: draft.availability.clone(),
-            visibility: draft.visibility.clone(),
         }
     }
 
@@ -743,19 +671,6 @@ impl ReadyApp {
     }
 }
 
-/// Map ActionOutcome to the Result<(), String> that CalendarMessage expects.
-///
-/// LocalOnly maps to Ok(()) - the event is visible locally, the overlay closes.
-/// Phase 3 can add richer outcome reporting for the "saved locally, not synced" case.
-fn calendar_outcome_to_result(outcome: service::actions::ActionOutcome) -> Result<(), String> {
-    match outcome {
-        service::actions::ActionOutcome::Success
-        | service::actions::ActionOutcome::NoOp
-        | service::actions::ActionOutcome::LocalOnly { .. } => Ok(()),
-        service::actions::ActionOutcome::Failed { error } => Err(error.user_message()),
-    }
-}
-
 /// Convert a CalendarEvent from the DB to CalendarEventData for the UI.
 fn db_event_to_calendar_data(ev: &crate::db::CalendarEvent) -> CalendarEventData {
     use chrono::TimeZone;
@@ -798,14 +713,3 @@ fn db_event_to_calendar_data(ev: &crate::db::CalendarEvent) -> CalendarEventData
     }
 }
 
-/// Convert date + hour + minute to a Unix timestamp (local time).
-pub(crate) fn calendar_data_to_timestamp(date: NaiveDate, hour: u32, minute: u32) -> i64 {
-    use chrono::TimeZone;
-    let naive_time = chrono::NaiveTime::from_hms_opt(hour, minute, 0)
-        .unwrap_or_else(|| chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap_or_default());
-    let naive_dt = date.and_time(naive_time);
-    chrono::Local
-        .from_local_datetime(&naive_dt)
-        .single()
-        .map_or(0, |dt| dt.timestamp())
-}

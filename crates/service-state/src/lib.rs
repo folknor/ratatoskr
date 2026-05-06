@@ -67,6 +67,20 @@ impl WriteDbState {
         db::db::ReadDbState::from_arc(Arc::clone(&self.conn))
     }
 
+    /// Borrow a clone of the underlying connection `Arc` for callers
+    /// that drive their own `spawn_blocking + lock` shape. Mirrors
+    /// `db::ReadDbState::conn()`.
+    ///
+    /// Phase 6c task 5: `cal::actions::*` (Service-side post-Phase-6c)
+    /// uses this to keep the pre-existing spawn_blocking + lock
+    /// structure while routing through the writer-half. The `with_conn`
+    /// API would force every closure to return `Result<T, String>`
+    /// and lose the `ActionError::{Db, NotFound, Remote}` taxonomy
+    /// the calendar action helpers rely on.
+    pub fn conn(&self) -> Arc<Mutex<Connection>> {
+        Arc::clone(&self.conn)
+    }
+
     /// Run a closure with the database connection on the blocking
     /// thread pool. Mirrors `db::DbState::with_conn` so the action
     /// service can call this directly once relocation lands in task 9.
