@@ -209,6 +209,61 @@ pub fn insert_mail_plan(
     Ok(now)
 }
 
+/// Atomically insert a `calendar_plan` job + its ops in a single
+/// transaction. Returns the journal-side timestamp (UNIX seconds).
+///
+/// Sibling of `insert_mail_plan`. Calendar mutations share the same
+/// `action_jobs` / `action_job_ops` schema and the same worker
+/// recovery contract; the journal row's `kind = 'calendar_plan'` is
+/// the only thing that distinguishes them at the SQL layer. The
+/// `kind` CHECK constraint (see `schema/12_actions.sql`) accepts
+/// `'calendar_plan'` post-Phase-6c.
+///
+/// Per-`PlanOpInsert.thread_id` is overloaded to carry the calendar
+/// event id in this kind: calendar ops don't have threads, but
+/// `action_job_ops.thread_id` is `NOT NULL`, so we use the column for
+/// per-op correlation. This is documented at the
+/// `service-api::cal_action::CalendarOperation` site.
+pub fn insert_calendar_plan(
+    conn: &Connection,
+    plan_id: &[u8; 16],
+    account_id: &str,
+    ops: &[PlanOpInsert],
+) -> Result<i64, String> {
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("insert_calendar_plan begin: {e}"))?;
+    let now: i64 = tx
+        .query_row("SELECT unixepoch()", [], |row| row.get(0))
+        .map_err(|e| format!("insert_calendar_plan now: {e}"))?;
+    tx.execute(
+        "INSERT INTO action_jobs (\
+             job_id, kind, account_id, status, quiet, payload, \
+             created_at, updated_at\
+         ) VALUES (?1, 'calendar_plan', ?2, 'queued', 0, X'', ?3, ?3)",
+        params![plan_id.as_slice(), account_id, now],
+    )
+    .map_err(|e| format!("insert_calendar_plan jobs: {e}"))?;
+    for op in ops {
+        tx.execute(
+            "INSERT INTO action_job_ops (\
+                 job_id, operation_id, ordinal, thread_id, operation, status\
+             ) VALUES (?1, ?2, ?3, ?4, ?5, 'pending')",
+            params![
+                plan_id.as_slice(),
+                op.operation_id,
+                op.ordinal,
+                op.thread_id,
+                op.operation_blob.as_slice(),
+            ],
+        )
+        .map_err(|e| format!("insert_calendar_plan ops: {e}"))?;
+    }
+    tx.commit()
+        .map_err(|e| format!("insert_calendar_plan commit: {e}"))?;
+    Ok(now)
+}
+
 /// Insert a quiet single-row job with no `action_job_ops` rows.
 ///
 /// Used by Phase 2 task 15 (`mark_chat_read`) and similar
@@ -784,6 +839,45 @@ mod tests {
         let conn = fresh_db();
         let live = live_send_job_ids(&conn).expect("query");
         assert!(live.is_empty());
+    }
+
+    /// Phase 6c-1 widens the `action_jobs.kind` CHECK constraint to
+    /// accept `'calendar_plan'` alongside `'mail_plan'`, `'send'`, and
+    /// `'mark_chat_read'`. A regression in the schema (a stray rebuild
+    /// that drops the new variant) would surface here as a CHECK
+    /// failure on insert.
+    #[test]
+    fn kind_check_accepts_calendar_plan() {
+        let conn = fresh_db();
+        let job_id = [0xCAu8; 16];
+        let result = conn.execute(
+            "INSERT INTO action_jobs (\
+                 job_id, kind, account_id, status, quiet, payload, \
+                 created_at, updated_at\
+             ) VALUES (?1, 'calendar_plan', 'acc-1', 'queued', 0, X'', 0, 0)",
+            params![job_id.as_slice()],
+        );
+        assert!(
+            result.is_ok(),
+            "action_jobs.kind CHECK must accept 'calendar_plan' (Phase 6c): {result:?}",
+        );
+    }
+
+    #[test]
+    fn kind_check_rejects_unknown_kind() {
+        let conn = fresh_db();
+        let job_id = [0xCBu8; 16];
+        let result = conn.execute(
+            "INSERT INTO action_jobs (\
+                 job_id, kind, account_id, status, quiet, payload, \
+                 created_at, updated_at\
+             ) VALUES (?1, 'wat_plan', 'acc-1', 'queued', 0, X'', 0, 0)",
+            params![job_id.as_slice()],
+        );
+        assert!(
+            result.is_err(),
+            "action_jobs.kind CHECK must reject unknown kinds",
+        );
     }
 
     #[test]

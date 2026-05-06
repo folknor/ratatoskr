@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS action_jobs (
     -- can correlate `OperationOutcome` notifications back to the
     -- originating intent's UI metadata without a Service round-trip.
     job_id BLOB PRIMARY KEY,
-    kind TEXT NOT NULL CHECK (kind IN ('mail_plan', 'send', 'mark_chat_read')),
+    kind TEXT NOT NULL CHECK (kind IN ('mail_plan', 'send', 'mark_chat_read', 'calendar_plan')),
     account_id TEXT NOT NULL,
     status TEXT NOT NULL
         CHECK (status IN ('queued', 'leased', 'executing', 'completed', 'partial', 'failed')),
