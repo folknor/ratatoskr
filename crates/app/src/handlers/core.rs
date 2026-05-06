@@ -16,6 +16,7 @@ use crate::ui::thread_list::{ThreadListEvent, ThreadListMessage};
 use cmdk::CommandId;
 use iced::Task;
 use rtsk::scope::ViewScope;
+use service_api::SettingValue;
 use std::sync::Arc;
 
 impl ReadyApp {
@@ -521,46 +522,38 @@ impl ReadyApp {
                 Task::none()
             }
             SettingsEvent::PreferencesCommitted => {
+                // Phase 6a: persist via Service IPC instead of UI-side
+                // transaction. Atomicity is preserved Service-side - the
+                // handler writes all values in one `unchecked_transaction`
+                // so a partial commit on failure is impossible. Failure
+                // policy is log-only (the user already sees the new
+                // values reflected; if the persist fails, the next boot
+                // shows the old values and the user can re-commit).
                 let prefs = self.settings.committed_preferences.clone();
-                let result = self.db.write_db_state().with_conn_sync(|conn| {
-                    let tx = conn
-                        .unchecked_transaction()
-                        .map_err(|e| format!("begin prefs tx: {e}"))?;
-                    let bool_str = |v: bool| if v { "true" } else { "false" };
-                    rtsk::db::queries::set_setting(
-                        &tx,
-                        "show_sync_status",
-                        bool_str(prefs.sync_status_bar),
-                    )?;
-                    rtsk::db::queries::set_setting(
-                        &tx,
-                        "block_remote_images",
-                        bool_str(prefs.block_remote_images),
-                    )?;
-                    rtsk::db::queries::set_setting(
-                        &tx,
-                        "phishing_detection_enabled",
-                        bool_str(prefs.phishing_detection),
-                    )?;
-                    rtsk::db::queries::set_setting(
-                        &tx,
-                        "phishing_sensitivity",
-                        &prefs.phishing_sensitivity,
-                    )?;
-                    rtsk::db::queries::set_setting(&tx, "theme", &prefs.theme)?;
-                    rtsk::db::queries::set_setting(&tx, "font_size", &prefs.font_size)?;
-                    rtsk::db::queries::set_setting(
-                        &tx,
-                        "reading_pane_position",
-                        &prefs.reading_pane_position,
-                    )?;
-                    tx.commit().map_err(|e| format!("commit prefs tx: {e}"))?;
-                    Ok(())
-                });
-                if let Err(e) = result {
-                    log::error!("Failed to persist preferences: {e}");
-                }
-                Task::none()
+                let Some(client) = self.service_client.as_ref().cloned() else {
+                    log::warn!(
+                        "settings.set: no ServiceClient yet; preferences not persisted"
+                    );
+                    return Task::none();
+                };
+                let values = vec![
+                    SettingValue::ShowSyncStatus(prefs.sync_status_bar),
+                    SettingValue::BlockRemoteImages(prefs.block_remote_images),
+                    SettingValue::PhishingDetectionEnabled(prefs.phishing_detection),
+                    SettingValue::PhishingSensitivity(prefs.phishing_sensitivity.clone()),
+                    SettingValue::Theme(prefs.theme.clone()),
+                    SettingValue::FontSize(prefs.font_size.clone()),
+                    SettingValue::ReadingPanePosition(prefs.reading_pane_position.clone()),
+                ];
+                Task::perform(
+                    async move { client.set_settings(values).await },
+                    |result| {
+                        if let Err(e) = result {
+                            log::warn!("settings.set failed: {e}");
+                        }
+                        Message::Noop
+                    },
+                )
             }
             SettingsEvent::PreferencesDiscarded => {
                 // Live fields are already restored to committed state by Settings.

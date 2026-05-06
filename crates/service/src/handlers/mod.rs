@@ -7,6 +7,7 @@ mod calendar;
 mod gal;
 mod health;
 mod pending_ops_kick;
+mod settings;
 mod sync;
 mod thread_ui_state;
 #[cfg(feature = "test-helpers")]
@@ -62,6 +63,9 @@ pub(crate) async fn dispatch(
         }
         RequestParams::ThreadUiStateSet { params } => {
             thread_ui_state::handle_set(&boot_state, params).await
+        }
+        RequestParams::SettingsSet { params } => {
+            settings::handle_set(&boot_state, params).await
         }
         #[cfg(feature = "test-helpers")]
         RequestParams::TestPanic => test_helpers::panic_handle().await,

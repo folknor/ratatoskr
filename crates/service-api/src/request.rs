@@ -6,6 +6,7 @@ use crate::action::{ActionWirePlan, PlanId, SendWireRequest};
 use crate::calendar::{
     CalendarCancelAccountSyncParams, CalendarSetVisibilityParams, CalendarStartAccountSyncParams,
 };
+use crate::settings::SettingsSetParams;
 use crate::thread_ui_state::ThreadUiStateSetParams;
 use crate::sync::{SyncCancelAccountParams, SyncStartAccountParams};
 
@@ -124,6 +125,16 @@ pub enum RequestParams {
     ///
     /// 5 s timeout: handler is one bounded `with_conn` upsert.
     ThreadUiStateSet { params: ThreadUiStateSetParams },
+    /// Phase 6a: write one or more settings rows in a single atomic
+    /// transaction. The wire shape carries a typed `Vec<SettingValue>`
+    /// so the Service-side handler can match exhaustively per variant
+    /// (mirrors the project's `MailOperation` discipline). Atomicity
+    /// matters because today's caller commits seven preferences at
+    /// once - a partial commit would leave the user in an inconsistent
+    /// state.
+    ///
+    /// 5 s timeout: handler is one bounded transaction.
+    SettingsSet { params: SettingsSetParams },
     /// Always panics in the handler. Used to verify dispatch panic safety.
     #[cfg(feature = "test-helpers")]
     TestPanic,
@@ -157,6 +168,7 @@ impl RequestParams {
             Self::CalendarCancelAccountSync { .. } => "calendar.cancel_account_sync",
             Self::CalendarSetVisibility { .. } => "calendar.set_visibility",
             Self::ThreadUiStateSet { .. } => "thread_ui_state.set",
+            Self::SettingsSet { .. } => "settings.set",
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => "test.panic",
             #[cfg(feature = "test-helpers")]
@@ -213,6 +225,7 @@ impl RequestParams {
             }
             Self::CalendarSetVisibility { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             Self::ThreadUiStateSet { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
+            Self::SettingsSet { .. } => RequestTimeoutKind::Finite(Duration::from_secs(5)),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic | Self::TestVersion { .. } | Self::TestPrintln { .. } => {
                 RequestTimeoutKind::Finite(Duration::from_secs(5))
@@ -265,6 +278,7 @@ impl RequestParams {
             }
             Self::CalendarSetVisibility { params } => serde_json::json!({ "params": params }),
             Self::ThreadUiStateSet { params } => serde_json::json!({ "params": params }),
+            Self::SettingsSet { params } => serde_json::json!({ "params": params }),
             #[cfg(feature = "test-helpers")]
             Self::TestPanic => Value::Null,
             #[cfg(feature = "test-helpers")]
@@ -383,6 +397,15 @@ impl RequestParams {
                 let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
                     .map_err(|e| format!("thread_ui_state.set params: {e}"))?;
                 Ok(Self::ThreadUiStateSet { params: p.params })
+            }
+            "settings.set" => {
+                #[derive(Deserialize)]
+                struct P {
+                    params: SettingsSetParams,
+                }
+                let p: P = serde_json::from_value(params.unwrap_or(Value::Null))
+                    .map_err(|e| format!("settings.set params: {e}"))?;
+                Ok(Self::SettingsSet { params: p.params })
             }
             #[cfg(feature = "test-helpers")]
             "test.panic" => {
@@ -794,6 +817,47 @@ mod tests {
                 account_id: "acc-1".into(),
                 thread_id: "thread-1".into(),
                 attachments_collapsed: Some(false),
+            },
+        };
+        let parsed = RequestParams::from_method_params(
+            original.method_name(),
+            Some(original.params_value()),
+        )
+        .expect("parse");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn settings_set_method_name_is_dotted() {
+        let p = RequestParams::SettingsSet {
+            params: SettingsSetParams {
+                values: vec![crate::settings::SettingValue::ShowSyncStatus(true)],
+            },
+        };
+        assert_eq!(p.method_name(), "settings.set");
+    }
+
+    #[test]
+    fn settings_set_timeout_is_five_seconds() {
+        let p = RequestParams::SettingsSet {
+            params: SettingsSetParams {
+                values: vec![crate::settings::SettingValue::ShowSyncStatus(true)],
+            },
+        };
+        assert_eq!(
+            p.timeout(),
+            RequestTimeoutKind::Finite(Duration::from_secs(5)),
+        );
+    }
+
+    #[test]
+    fn settings_set_round_trips_from_method_params() {
+        let original = RequestParams::SettingsSet {
+            params: SettingsSetParams {
+                values: vec![
+                    crate::settings::SettingValue::ShowSyncStatus(true),
+                    crate::settings::SettingValue::Theme("dark".into()),
+                ],
             },
         };
         let parsed = RequestParams::from_method_params(

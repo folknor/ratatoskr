@@ -6,10 +6,10 @@ use service_api::{
     CalendarRunCompleted, CalendarRunId, CalendarSetVisibilityAck, CalendarSetVisibilityParams,
     CalendarStartAccountSyncParams, CalendarStartAck, CalendarSyncResult, HealthPingResponse,
     JsonRpcErrorObject, JsonRpcRequest, Notification, PROTOCOL_VERSION, ParsedServiceMessage,
-    RequestParams, RequestTimeoutKind, ServiceError, ServiceResponse, ShutdownResponse,
-    SyncCancelAccountParams, SyncCancelAck, SyncCompleted, SyncResult, SyncRunId,
-    SyncStartAccountParams, SyncStartAck, ThreadUiStateSetAck, ThreadUiStateSetParams,
-    encode_message, parse_service_message,
+    RequestParams, RequestTimeoutKind, ServiceError, ServiceResponse, SettingValue, SettingsSetAck,
+    SettingsSetParams, ShutdownResponse, SyncCancelAccountParams, SyncCancelAck, SyncCompleted,
+    SyncResult, SyncRunId, SyncStartAccountParams, SyncStartAck, ThreadUiStateSetAck,
+    ThreadUiStateSetParams, encode_message, parse_service_message,
 };
 use std::collections::{HashMap, VecDeque, hash_map::Entry};
 use std::path::{Path, PathBuf};
@@ -972,6 +972,20 @@ impl ServiceClient {
                     thread_id,
                     attachments_collapsed,
                 },
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Phase 6a: commit one or more settings rows via the
+    /// `settings.set` IPC. The Service writes them in a single
+    /// atomic transaction so a partial commit on failure is
+    /// impossible. Replaces the synchronous UI-side
+    /// `set_setting` transaction in `handle_settings_event`.
+    pub async fn set_settings(&self, values: Vec<SettingValue>) -> Result<(), ClientError> {
+        let _ack: SettingsSetAck = self
+            .request(RequestParams::SettingsSet {
+                params: SettingsSetParams { values },
             })
             .await?;
         Ok(())
