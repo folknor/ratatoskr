@@ -637,25 +637,24 @@ In-tree fixtures kept minimal: synthetic byte literals + zip-built docs in tests
 - Idempotency comes from three layers: the SELECT returns 0 rows after the backlog drains, the runtime's `in_flight_hashes` dedupe rejects duplicates while extraction is in progress, and the worker's status-aware skip handles already-extracted rows. Drop class - missed kicks self-heal on the next hour.
 - Handler integration tests deferred to 7-10's `extract_in_process.rs` cohort (same setup as the other planned end-to-end tests).
 
-### phase 7-7: re-index propagation (handler-side wiring complete)
+### phase 7-7: re-index propagation (LANDED `0552572d`)
 
-- Apply-time DB enrichment for `WriterCommand::Index` and `WriterCommand::ReindexByContentHash` lands in 7-3. Phase 7-7 wires up the actual fan-out trigger.
-- ExtractRuntime worker, on successful extraction, emits `WriterCommand::ReindexByContentHash { content_hash }` to its `SearchWriteHandle` clone.
-- Writer task already (via 7-3) handles the variant: SELECTs `message_id`s referencing the hash, dedupes, builds canonical docs from DB, runs `delete_term + add_doc`.
-- `ExtractProgress` notification fired per drained item; `ExtractCompleted` fired when queue empties (all `in_flight_hashes` clear).
-- Test: extracting one attachment of a message with three attachments produces a Tantivy doc whose `attachment_text` has only the indexed one's text segment and aligned `attachment_filename` / `attachment_mime` / `attachment_id` arrays; re-extracting another produces a doc with both attachments aligned in order.
+- ExtractRuntime worker, on successful extraction, emits `WriterCommand::Index` with full `attachments: Vec<AttachmentDocFragment>` populated from DB at extraction time. **Revised** from the original "emits `WriterCommand::ReindexByContentHash`" shape: the variant was dropped during 7-3a (see § "Writer-staleness guard" DROPPED note); sync's DB-write-before-Index ordering means the writer always sees canonical state at apply time, so a trigger-only command + writer-side DB enrichment is unnecessary. The existing `WriterCommand::Index` carries the full doc shape.
+- DB-side query infrastructure in `db::queries_extra::extract_reindex`: `find_message_ids_referencing_content_hash` (SELECT every `message_id` whose `attachments` row has the given `content_hash`), `select_messages_for_index_batch` (canonical-doc body fields), `select_attachment_fragments_batch` (per-message `Vec<AttachmentDocFragment>` joined against `attachment_extracted_text`).
+- `ExtractProgress` notification fired per drained item; `ExtractCompleted` fired when `in_flight_hashes` clears.
+- Test: extracting one attachment of a message with three attachments produces a Tantivy doc whose `attachment_text` has only the indexed one's text segment and aligned `attachment_filename` / `attachment_mime` / `attachment_id` arrays; re-extracting another produces a doc with both attachments aligned in order. Handler-level test deferred to 7-10's `extract_in_process.rs` cohort, in turn deferred to Phase 8.
 
-### phase 7-8: search-result disambiguation + per-attachment attribution
+### phase 7-8: search-result disambiguation + per-attachment attribution (LANDED `9c651d8f`)
 
 - `SearchReadState::search`: top-N results -> single batched DB SELECT for all results' attachments + extracted text -> per-result `match_kind` + `also_matched` computation.
 - Per-attachment `SnippetGenerator` runs against each attachment's segment; tiebreak by term frequency, then filename alphabetical.
 - `also_matched` populated with secondary fields/attachments above 50%-of-top-score threshold, score-descending.
-- UI search-result rendering surfaces `match_kind` + `also_matched`; attachment annotations are second-line italicized snippets with filename.
-- Tests: phrase-match in a fixture PDF returns `MatchKind::Attachment { filename: "<fixture>.pdf", ... }`; phrase that matches both body and attachment returns body as primary + attachment in `also_matched` (or vice versa, score-dependent); cross-attachment phrase fake-match (positions span boundary) does NOT match (position-gap working).
+- UI search-result rendering surfaces `match_kind` + `also_matched`; the attachment annotation is rendered in the thread-card snippet slot (`crates/app/src/ui/widgets/cards.rs`) as "matched in *<filename>*" plus the per-attachment snippet.
+- Cross-attachment phrase non-match + body+attachment co-match tests deferred to 7-10's `extract_in_process.rs` cohort, in turn deferred to Phase 8. The position-gap mechanism itself is verified end-to-end by `phase_7_3_attachment_boundary_blocks_cross_attachment_phrase` from 7-3a.
 
 ### phase 7-9: `index.rebuild` IPC + palette command + schema-version dispatch (Wipe-only; PreserveExisting deferred)
 
-**Sub-slices:**
+**Sub-slices:** (sub-slice IDs follow the actual commit tags - 9a, 9c, 9d. There is no 7-9b; the implementation collapsed the originally planned dual-writer scaffolding into 9a's tracked-task lifecycle, and the next semantic slice was the schema-version dispatcher under 9c.)
 
 - **7-9a LANDED**: handler skeleton + Wipe path + tracked-task lifecycle.
   - `handlers/extract.rs::handle_rebuild` mints a UUIDv4 rebuild_id, rejects concurrent rebuilds via `boot_state.rebuild_in_flight_id()` (or pre-empts when `force=true` by cancel + abort of the previous handle), resolves runtime deps (db_conn, search_write, body_read, notification_sender), spawns the task, installs `RebuildTaskState` (rebuild_id + JoinHandle + CancellationToken) on `BootSharedState`, and acks the IPC with the rebuild_id.
@@ -677,27 +676,16 @@ In-tree fixtures kept minimal: synthetic byte literals + zip-built docs in tests
 
 Tests: handler-level unit tests + integration tests deferred to 7-10's `extract_in_process.rs` cohort. The DB-side `select_all_message_ids_for_rebuild` and `reset_extracted_text_for_rebuild` lack dedicated tests; the existing extract_reindex test schema covers the relevant tables and the queries are short.
 
-### phase 7-10: integration tests, manual matrix, architecture doc
+### phase 7-10: integration tests, manual matrix, architecture doc (DOCS LANDED; integration tests deferred to Phase 8)
 
-- Integration tests in `crates/service/tests/extract_in_process.rs`:
-  - End-to-end: seed a message + a PDF attachment fixture; trigger fetch; await `ExtractCompleted`; query Tantivy for a phrase known to be in the PDF; assert `MatchKind::Attachment { ... }`.
-  - Eviction-during-extract: hold the read lock; trigger eviction-kick concurrently; assert serialization (no torn reads, no double-indexes).
-  - Schema-version mismatch dual-index: write fake `.version`; restart Service; assert legacy serves reads while `next/` populates; swap completes; UI reader rebinds.
-  - `extract.backfill_kick`: seed N unindexed cached attachments; fire kick; assert all enqueue and complete; second kick is no-op; evicted rows skipped.
-  - Status-aware idempotency: seed a `bytes_gone` row; re-enqueue same hash; assert worker re-extracts. Seed a `skipped:opaque` row; re-enqueue; assert worker skips.
-  - Cross-attachment phrase non-match: seed a message with two attachments where text "foo" ends one and "bar" begins the next; query "foo bar"; assert no match.
-  - Body+attachment co-match: seed; query; assert `match_kind` + `also_matched` populated correctly.
-  - Rebuild cancellation: trigger `Wipe` rebuild; mid-flight, drain Service; restart; assert backfill resumes.
-- Manual matrix entries (`docs/service/manual-test-matrix.md`):
-  - "Open a PDF whose contents include a known phrase. Wait for status bar to clear. Search the phrase. Verify result row carries 'matched in *<filename>*' annotation."
-  - "Trigger 'Rebuild search index' from palette. Verify confirmation modal warns about temporary unavailability. Verify status bar shows progress; verify search returns expected results post-rebuild."
-  - "Schema-mismatch path: simulate a schema-version bump. Verify search remains functional throughout rebuild (PreserveExisting); verify status bar shows progress; verify `IndexRebuildCompleted` arrives; verify reader rebinds."
-- `docs/architecture.md` updates:
-  - Add a "Text extraction pipeline" paragraph alongside the "Action service as mutation gate" + "Calendar action pipeline" paragraphs.
-  - Note the per-attachment `add_text` + position-gap shape and the apply-time DB enrichment as the v1 contract.
-  - Bump the "Service-side write surfaces" paragraph to mention `attachment_extracted_text` as a Service-only writer.
-  - Add the dual-index PreserveExisting pattern to the "Settled patterns" section.
-- `docs/service/implementation-roadmap.md` Phase 7 entry: change status from "future" to "LANDED" with a per-7-N retrospective bullet list (matches the Phase 5 / 6c / 6d post-landing structure).
+**Sub-split during implementation:**
+
+- **7-10 docs LANDED**: `docs/architecture.md`, `docs/service/manual-test-matrix.md`, `docs/service/implementation-roadmap.md`, this plan-doc all updated as the Phase 7 close-out.
+  - `docs/architecture.md`: new "Text extraction pipeline" subsection alongside "Action service as mutation gate" + "Calendar action pipeline". The "Service-side write surfaces" paragraph is bumped to mention `attachment_extracted_text` and the Tantivy-writer side as Service-only writers. **DROPPED** from the original plan: the "Settled patterns" entry for the dual-index PreserveExisting pattern - the Wipe-only path shipped instead, and a settled-pattern entry without a real reference implementation would be aspirational rather than descriptive.
+  - `docs/service/manual-test-matrix.md`: four Phase 7 entries (11-14) - cache-miss -> search match annotation, backfill-kick on boot.ready, palette "Rebuild Search Index" Wipe path, schema-version-mismatch Wipe rebuild. The original plan listed three entries; the matrix grew a fourth because boot.ready backfill catch-up is a distinct user-visible flow worth its own checklist. **REVISED** from the original plan: the rebuild entry does NOT mention a confirmation modal (none ships in v1; the palette gesture is the gate today), and the schema-mismatch entry covers the Wipe path that actually landed rather than the deferred PreserveExisting dual-index path.
+  - `docs/service/implementation-roadmap.md` Phase 7 entry flipped from "future" to "LANDED" with a per-7-N retrospective bullet list (matches the Phase 5 / 6c / 6d shape). Phase 8's in-scope list grew six Phase 7 carry-forwards: the integration test cohort, true PreserveExisting, status-bar visual + reader-rebind, `local_drafts` re-emit, real-world fixture corpus, and `attachment_extracted_text` orphan sweep (folds into the existing cross-store invariant pass optimization work).
+
+- **7-10 integration tests DEFERRED to Phase 8.** The plan called for `crates/service/tests/extract_in_process.rs` to cover end-to-end fetch -> extract -> re-index -> search annotation, status-aware idempotency, eviction-during-extract, cross-attachment phrase non-match, body+attachment co-match, backfill-kick semantics, and rebuild cancellation. The harness need (account seeding against the FK constraint, same-data-dir respawn, action-notification reading) is the same one Phase 8 already owns for the Phase 2 T1 cohort and the flaky `service_subprocess` re-enable; building the cohort against today's framework would mean rebuilding it once that work lands. Lifecycle unit tests for `ExtractRuntime` (enqueue-after-shutdown, concurrent-same-hash dedup) landed in 7-4c; manual-test-matrix entries 11-14 cover the user-visible flows in the meantime. The schema-version-mismatch dual-index test in the original list is moot because true PreserveExisting is itself a Phase 8 carry-forward.
 
 ## Critical files
 

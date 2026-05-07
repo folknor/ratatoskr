@@ -143,3 +143,64 @@ Verifies the Phase 6c calendar action pipeline: UI builds a `CalendarActionPlan`
 If the event saves but does not appear: the `CalendarChanged` notification was dropped, or the worker's `service_generation` tag mismatched and the UI's per-incarnation drop logic discarded it. Check the Service log for `Notification::CalendarChanged` and `Notification::CalendarActionCompleted` emissions and confirm the awaiter's plan_id matches what the UI handler tracked.
 
 If the event saves locally but never reaches the provider: the dispatcher returned `LocalOnly` but the UI didn't surface it. That's the known gap from 6c-8 (`completion_to_result` collapses everything to `Ok(())` today); Phase 6d revisits.
+
+## Phase 7 - Attachment text extraction + Tantivy indexing
+
+Phase 7 lands the text-extraction pipeline (PDF / OOXML / plain via `ExtractRuntime`), the per-attachment Tantivy doc shape with `match_kind` annotation, the post-boot.ready + hourly `extract.backfill_kick`, the palette command "Rebuild Search Index", and the schema-version-mismatch Wipe rebuild dispatcher. Integration tests for the end-to-end paths are deferred to Phase 8 alongside the rest of the `service_subprocess` flaky-test cohort. Until that lands, the items below cover the user-visible flows.
+
+### 11. Attachment text extraction round trip (cache-miss -> search match annotation)
+
+Verifies the cache-miss enqueue hook in `attachment.fetch`, the `ExtractRuntime` worker, the per-attachment `add_text` doc shape, and the `MatchKind::Attachment` rendering in the search result row.
+
+1. Run the seeded app. The dev-seed corpus must include at least one PDF attachment whose contents you know - if none exists, drop a small known-content PDF into a seeded message via the dev-seed inspector or add it to `dev-seed.toml`.
+2. Open the message. The Service log should carry `attachment.fetch` -> cache-miss -> `extract enqueue` for the PDF's `content_hash`.
+3. Wait a few seconds. The Service log should carry `extract completed: indexed=N, skipped=N, failed=N` (today the UI logs at `info`; no status-bar surface yet).
+4. Open the search bar. Search for a phrase you know is in that PDF (not in the message body or subject).
+5. **Expected:** the message appears in the result list. The result row carries a "matched in *<filename>*" annotation under the subject, with a snippet drawn from the extracted PDF text.
+
+If the search does not return the message: extraction failed silently (check the Service log for `extract worker: failed`); the writer never received the `Index` command (check for `WriterCommand::Index` log lines after extraction); or the per-attachment attribution scored body higher than the attachment (acceptable - the body becomes `match_kind` and the attachment lands in `also_matched` if its score crosses the 50% threshold).
+
+If the result appears but with no annotation: `match_kind` is rendering as `Body` (the per-attachment snippet generator scored 0 against the segment). Inspect `crates/app/src/ui/widgets/cards.rs` snippet rendering and `crates/search/src/lib.rs::SearchReadState::search` per-attachment scoring.
+
+### 12. Backfill kick on boot.ready (post-crash recovery)
+
+Verifies the one-shot `extract.backfill_kick` from `Message::ServiceBootReady` catches up after a Service crash mid-extraction.
+
+1. Run the seeded app. Open several PDFs in sequence so multiple `attachment_cache/<content_hash>` files exist with `text_indexed_at IS NULL` initially.
+2. Mid-extraction (within a second or two of the first cache-miss), forcibly kill the Service via `kill <service-pid>` (Linux) or "End task" (Windows).
+3. Wait for the UI's heartbeat to notice the missed beat (~30 s). The UI shows the Service-respawn cycle.
+4. After respawn completes (boot.ready fires), watch the Service log.
+5. **Expected:** within a second of `Message::ServiceBootReady` the UI fires `extract.backfill_kick`; the Service log carries `find_unindexed_cached_attachments returned N rows` and N `extract enqueue` lines. Wait for the queue to drain; search the same phrases as item 11. All cached PDFs are now indexed.
+
+If only some attachments backfill: the SELECT `idx_attachments_text_indexed_at` partial index is filtering out rows it shouldn't (verify `cached_at IS NOT NULL AND text_indexed_at IS NULL` matches what's on disk), or the worker's status-aware skip is treating retry-eligible rows as permanent skips.
+
+If nothing backfills: the runtime is not yet installed when the kick fires (race against `spawn_post_ready_extract_startup`); the handler falls through to the defensive no-op. The next hourly tick should catch up, but the boot.ready kick should not be racing.
+
+### 13. Palette "Rebuild Search Index" (Wipe path)
+
+Verifies `CommandId::AppRebuildSearchIndex` -> `client.rebuild_index(Wipe, force=false)` -> `service::rebuild::run_wipe_rebuild` -> `IndexRebuildProgress` / `IndexRebuildCompleted`.
+
+1. Run the seeded app. Confirm search works against a known-indexed phrase (round trip from item 11).
+2. Open the command palette (Ctrl+K / Cmd+K) and select "Rebuild Search Index". There is no confirmation modal in v1 - the rebuild starts immediately. (The plan calls a confirmation modal a follow-up; the palette gesture is the gate today.)
+3. **Expected:** the Service log carries `WriterCommand::Clear` -> `reset_extracted_text_for_rebuild` -> per-chunk `Index` commands -> `IndexRebuildCompleted`. While the rebuild runs (1-3 seconds on a seeded mailbox; minutes on a real one), search returns no results because the index was cleared. The UI's `Notification::IndexRebuildProgress` arms log progress at `info` level - no status-bar surface yet (Phase 8 carry-forward).
+4. After `IndexRebuildCompleted` arrives, **search remains unavailable until the next reader rebind**. v1 ships without the post-completion `SearchReadState::init` reload - the UI keeps the stale reader handle until the next app launch. (Phase 8 carry-forward.) Restart the app to verify the rebuild populated the new index correctly.
+5. After restart, search the same phrase from item 11. The result returns with the same "matched in *<filename>*" annotation - confirming the rebuild fired `extract.backfill_kick` at the end and re-extracted attachment text.
+
+If the rebuild never completes: drain step in `run_shutdown_drain` is not running (the rebuild task was orphaned across a Service crash); next boot will not auto-resume - the user has to re-fire the palette command. Acceptable v1 UX; flag for Phase 8 follow-up if it bites.
+
+If `IndexRebuildCompleted` arrives but search still returns 0 results after restart: `extract.backfill_kick` did not fire or the extraction queue did not drain before app exit. Check logs for `extract.backfill_kick` after `IndexRebuildCompleted`.
+
+### 14. Schema-version mismatch triggers Wipe rebuild
+
+Verifies `check_schema_version_and_dispatch` + `spawn_post_ready_schema_rebuild` fire on a `.version` mismatch.
+
+1. Quit the app cleanly. Locate `<app_data>/search_index/.version` (the file holds a single integer).
+2. Edit the file to a different value (e.g. `0`). Save.
+3. Relaunch the app.
+4. **Expected:** the Service log carries `schema_version_mismatch: persisted=0, current=2 -> dispatching Wipe rebuild` (or similar). The post-ready dispatcher fires `handle_rebuild` with `RebuildPolicy::Wipe`; the same chunk-by-chunk progress + completion arrives as item 13. Once `IndexRebuildCompleted` lands, the dispatcher writes the current `INDEX_SCHEMA_VERSION` value back to `.version`. Restart the app once more - boot is a clean no-op (no second rebuild).
+
+If the rebuild fires but `.version` stays at the old value: sentinel-write ordering is broken. The `.version` write must happen *after* `rebuild_in_flight_id` clears - inspect `spawn_post_ready_schema_rebuild`.
+
+If the rebuild does not fire: `check_schema_version_and_dispatch` is not setting `pending_schema_rebuild` on `BootSharedState`, or the post-ready dispatcher is not reading the flag. The user-visible symptom is silent search staleness against the new schema until a manual palette rebuild.
+
+The "search stays live throughout the rebuild" PreserveExisting dual-index path is a Phase 8 carry-forward; v1 shows search-briefly-unavailable instead.
