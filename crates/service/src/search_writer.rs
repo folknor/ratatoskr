@@ -49,10 +49,11 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use db::db::ReadDbState;
 use tantivy::{IndexWriter, Term};
 use tokio::sync::mpsc;
 
-use search::{Fields, build_search_doc, open_or_create_search_index};
+use search::{AttachmentDocFragment, Fields, build_search_doc, open_or_create_search_index};
 use service_api::{IndexCommitted, Notification};
 use service_state::search_write::{
     SearchWriteHandle, WriterCommand,
@@ -86,6 +87,7 @@ const WRITER_HEAP_BYTES: usize = 64 * 1024 * 1024;
 /// `Notification::IndexCommitted` after each commit.
 pub fn spawn(
     app_data_dir: &Path,
+    db_read: ReadDbState,
     notification_tx: NotificationSender,
     service_generation: u32,
 ) -> Result<(SearchWriteHandle, tokio::task::JoinHandle<()>), String> {
@@ -120,6 +122,7 @@ pub fn spawn(
         writer,
         fields,
         rx,
+        db_read,
         notification_tx,
         service_generation,
     ));
@@ -132,6 +135,7 @@ async fn run_writer_task(
     mut writer: IndexWriter,
     fields: Fields,
     mut rx: mpsc::Receiver<WriterCommand>,
+    db_read: ReadDbState,
     notification_tx: NotificationSender,
     service_generation: u32,
 ) {
@@ -156,6 +160,7 @@ async fn run_writer_task(
                         c,
                         &mut pending_docs,
                         &mut first_uncommitted,
+                        &db_read,
                         &notification_tx,
                         service_generation,
                     )
@@ -202,11 +207,27 @@ async fn apply_command(
     cmd: WriterCommand,
     pending_docs: &mut u64,
     first_uncommitted: &mut Option<Instant>,
+    db_read: &ReadDbState,
     notification_tx: &NotificationSender,
     service_generation: u32,
 ) {
     match cmd {
-        WriterCommand::Index { docs, ack } => {
+        WriterCommand::Index { mut docs, ack } => {
+            // Phase 7 (C2 fix): writer-side DB enrichment for thin
+            // docs. Provider sync emits `attachments: Vec::new()`; if
+            // we trusted that as authoritative, the sync re-emit of a
+            // message whose attachments were already extracted would
+            // wipe `attachment_text` from Tantivy (last-writer-wins on
+            // delete_term + add_document). Enrich at apply time so
+            // both producers (sync's thin doc + ExtractRuntime's
+            // populated doc) converge to the same canonical shape.
+            //
+            // Trigger: `has_attachment && attachments.is_empty()`. A
+            // populated `attachments` field is trusted (ExtractRuntime
+            // already joined the same DB tables to build it).
+            // `has_attachment == false` means the message has no
+            // attachment rows; no DB read needed.
+            enrich_thin_docs(&mut docs, db_read).await;
             let result = tokio::task::block_in_place(|| {
                 for doc in &docs {
                     let tantivy_doc = build_search_doc(fields, doc);
@@ -309,4 +330,51 @@ async fn commit_and_notify(
         }
     }
     commit_result.map(|_| ())
+}
+
+/// Populate `doc.attachments` from DB for any doc where
+/// `has_attachment && attachments.is_empty()` (sync's thin-doc shape).
+/// Docs that already carry attachments are trusted - ExtractRuntime's
+/// `fan_out_reindex` builds them from the same DB tables.
+async fn enrich_thin_docs(docs: &mut [search::SearchDocument], db_read: &ReadDbState) {
+    let pairs: Vec<(String, String)> = docs
+        .iter()
+        .filter(|d| d.has_attachment && d.attachments.is_empty())
+        .map(|d| (d.account_id.clone(), d.message_id.clone()))
+        .collect();
+    if pairs.is_empty() {
+        return;
+    }
+    let pairs_for_query = pairs.clone();
+    let result = db_read
+        .with_conn(move |conn| {
+            db::db::queries_extra::select_attachment_fragments_batch(conn, &pairs_for_query)
+        })
+        .await;
+    let mut fragments = match result {
+        Ok(f) => f,
+        Err(e) => {
+            log::warn!(
+                "search_writer enrich_thin_docs: select_attachment_fragments_batch failed: {e} \
+                 (proceeding with thin docs; attachment search will be stale until next emit)"
+            );
+            return;
+        }
+    };
+    for doc in docs.iter_mut() {
+        if !(doc.has_attachment && doc.attachments.is_empty()) {
+            continue;
+        }
+        let key = (doc.account_id.clone(), doc.message_id.clone());
+        let rows = fragments.remove(&key).unwrap_or_default();
+        doc.attachments = rows
+            .into_iter()
+            .map(|r| AttachmentDocFragment {
+                attachment_id:  r.attachment_id,
+                filename:       r.filename,
+                mime:           r.mime_type,
+                extracted_text: r.extracted_text,
+            })
+            .collect();
+    }
 }

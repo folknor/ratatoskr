@@ -4,21 +4,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Critical
 
-### C2. Sync's thin docs overwrite extract's enrichment
-
-**Files:** `crates/service/src/search_writer.rs:209` (delete_term + add_doc), provider sync emit sites: `crates/gmail/src/sync/storage.rs:325`, `crates/jmap/src/sync/storage.rs:484`, `crates/graph/src/sync/stores.rs:72`, `crates/imap/src/sync_pipeline.rs:367`. Background: `phase-7-plan.md` § "Writer-staleness guard DROPPED".
-
-Provider sync emits `SearchDocument { attachments: Vec::new() }`. The writer task does `delete_term(message_id) + add_document(doc)` per command, no DB enrichment, no merge. Last writer wins on `message_id`. Once ExtractRuntime has enriched a message's Tantivy doc, any subsequent sync touch (flag flip, label change, delta refresh) re-emits with empty attachments and erases the attachment fields. DB still says `text_indexed_at` is set, so backfill (`find_unindexed_cached_attachments`) returns 0 rows and never re-enriches. The damage persists for the lifetime of the index.
-
-The plan's DROP justification ("sync writes the attachments-table row to DB before sending the Index command, so any later read by ExtractRuntime sees canonical state... last-writer-wins is correct because the second write's body fields equal the first's") was incomplete: it covers sync→extract races on the same content_hash, but assumes ExtractRuntime is always the second writer. When ExtractRuntime is the *first* writer and a future sync touch re-emits the message, the second writer's attachments field is empty.
-
-**Agreement: 5/8** (claude security, claude bugs, codex bugs, codex perf, codex arch).
-
-**Fix surface options:**
-- (a) writer-task DB enrichment at apply time - the originally-planned-then-DROPPED 7-3b shape. Smallest delta to the contract.
-- (b) sync emits canonical attachment fragments by joining `attachment_extracted_text` in the storage layer.
-- (c) introduce a `WriterCommand::PartialUpdate` shape that only updates body fields and leaves attachment fields alone.
-
 ### C3. Permanent-skip pre-flight short-circuits without `fan_out_reindex` or `text_indexed_at` update
 
 **Files:** `crates/service/src/extract.rs:367-375` (pre-flight skip), `:497-512` (text_indexed_at UPDATE gated on Indexed only), `crates/service/src/handlers/attachment.rs:231-239` (`should_enqueue_extraction`), `crates/db/src/db/queries_extra/extract_reindex.rs:115-143`.

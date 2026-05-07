@@ -1044,8 +1044,14 @@ async fn run_boot_sequence_inner(
     }
 
     let notification_tx = boot_progress::NotificationSender::new(out_tx.clone());
+    let writer_db_read = db::db::ReadDbState::from_arc(Arc::clone(&conn));
     let (search_write, search_writer_handle) =
-        match crate::search_writer::spawn(&app_data_dir, notification_tx.clone(), 0) {
+        match crate::search_writer::spawn(
+            &app_data_dir,
+            writer_db_read,
+            notification_tx.clone(),
+            0,
+        ) {
             Ok(pair) => pair,
             Err(e) => {
                 log::error!("search writer spawn failed: {e}");
