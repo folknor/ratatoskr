@@ -8,19 +8,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Medium
 
-### M4. `MatchKind::Body` shown as default for non-text matches
-
-**Files:** `crates/search/src/lib.rs:541-548, 755-759, 802-803, 807-810, 886`.
-
-Two distinct cases:
-
-1. **Snippet-field-only matches.** Free-text parser includes the `snippet` field. A document matched solely on `snippet` reaches `enrich_match_kinds`, where `build_field_snippet_gen` is only invoked for `body_text / subject / from_name / attachment_text`. All four field scores come back zero, the `let-else` continues, and the result keeps default `MatchKind::Body`. UI renders "matched in body" for results with no body match.
-2. **Filter-only / no-text searches** (e.g. `is:starred`). When `free_text` is empty, `enrich_match_kinds` returns Ok(()) without rewriting `match_kind`. Default left as `Body`. Same UI lie.
-
-**Agreement: 2/8** (claude bugs, claude perf).
-
-**Fix:** include `snippet` in the per-field SnippetGenerator pool, drop `snippet` from the parser, or introduce `MatchKind::FilterOnly` / `Option<MatchKind>` for the no-text case. Most precise: introduce `Option<MatchKind>` so the UI can render no annotation when attribution couldn't determine one.
-
 ### M5. First-enqueue-wins on filename/mime poisons hash-shared attachments
 
 **Files:** `crates/service/src/extract.rs:382-409`, `crates/service/src/text_extract/mod.rs:194-220`.
