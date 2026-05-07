@@ -10,12 +10,6 @@ Findings from the 2026-05-07 multi-archetype review (claude + codex × security/
 
 ## Low
 
-### L8. `spawn_post_ready_schema_rebuild` polls every 500 ms instead of subscribing
-
-**Files:** `crates/service/src/dispatch.rs:1161-1167`.
-
-Polls `rebuild_in_flight_id().is_none()` every 500 ms. The rebuild task already produces a clean `IndexRebuildCompleted` notification; subscribing to that signal would be event-driven. Today the cost is one timer per schema rebuild, so cosmetic. Folds into the C4 fix.
-
 ### L10. Encoding fast paths and minor polish
 
 Folded together because they're individually trivial:
